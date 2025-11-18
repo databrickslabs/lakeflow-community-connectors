@@ -1,23 +1,26 @@
-# PROJECT NAME
-Standard Project Template for Databricks Labs Projects
+# Lakeflow Community Connectors
 
-## Project Description
-Short description of project's purpose
+Lakeflow community connectors are built on top of the [Spark Python Data Source API](https://spark.apache.org/docs/latest/api/python/tutorial/sql/python_data_source.html) and [Spark Declarative Pipeline (SDP)](https://www.databricks.com/product/data-engineering/spark-declarative-pipelines). These connectors enable users to ingest data from various source systems.
 
-## Project Support
-Please note that all projects in the /databrickslabs github account are provided for your exploration only, and are not formally supported by Databricks with Service Level Agreements (SLAs).  They are provided AS-IS and we do not make any guarantees of any kind.  Please do not submit a support ticket relating to any issues arising from the use of these projects.
+Each connector consists of two parts:
+1. Source-specific implementation
+2. Shared library and SDP definition
 
-Any issues discovered through the use of this project should be filed as GitHub Issues on the Repo.  They will be reviewed as time permits, but there are no formal SLAs for support.
+## Connectors
+
+Check the `sources/` directory for available source connectors, which contain the source-specific implementation of an interface defined in `sources/interface/lakeflow_connect.py`.
+
+The `libs/` and `pipeline/` directories include the shared source code across all source connectors.
+
+## Create New Connectors
+
+Users can follow the instructions in `prompts/vibe_coding_instruction.md` to create new connectors.
+
+## Tests
+
+This directory includes generic shared test suites to validate any connector source implementation.
 
 
-## Building the Project
-Instructions for how to build the project
-
-## Deploying / Installing the Project
-Instructions for how to deploy the project, or install it
-
-## Releasing the Project
-Instructions for how to release a version of the project
-
-## Using the Project
-Simple examples on how to use the project
+## TODO:
+1. Add dev guidelines
+2. Add general instruction on how to use community connector (e.g. update spec and create a SDP for ingestion)

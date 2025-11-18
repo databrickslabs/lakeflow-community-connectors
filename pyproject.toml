@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lakeflow-community-connectors"
+version = "0.1.0"
+description = "Lakeflow community connectors built on Spark Python Data Source API"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "pyspark>=3.5.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["libs*", "pipeline*", "sources*", "tests*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "sources"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v"
+
