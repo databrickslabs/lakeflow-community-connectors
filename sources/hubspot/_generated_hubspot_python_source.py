@@ -674,11 +674,6 @@ def register_lakeflow_source(spark):
             # Handle associations
             transformed_record.update(self._extract_associations(record, table_name))
 
-            # # Flatten properties with properties_ prefix
-            # properties = record.get("properties", {})
-            # for prop_name, prop_value in properties.items():
-            #     transformed_record[f"properties_{prop_name}"] = prop_value
-
             return transformed_record
 
         def _extract_associations(self, record: Dict, table_name: str) -> Dict:
