@@ -28,7 +28,7 @@ Create one file named `<source_name>_api_doc.md` under `sources/<source_name>/` 
 - Fill out every section of the documentation template. If any section cannot be completed, add a note to explain.
 - Focus on endpoints, authentication parameters, object schemas, Python API for reading data, and incremental read strategy.
 - Please include all fields in the schema. DO NOT hide any fields using links.
-- All information must be backed by official sources or verified or reliable implementations
+- All information must be backed by official sources or verified or reliable implementations.
 
 ### Research Log 
 Add a table:
