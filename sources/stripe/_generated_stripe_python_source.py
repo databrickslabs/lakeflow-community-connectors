@@ -6,7 +6,6 @@
 # ==============================================================================
 
 from datetime import datetime
-from decimal import Decimal
 from typing import (
     Any,
     Dict,
@@ -104,6 +103,8 @@ def register_lakeflow_source(spark):
                 return float(value)
             elif isinstance(field_type, DecimalType):
                 # New support for Decimal type
+                from decimal import Decimal
+
                 if isinstance(value, str) and value.strip():
                     return Decimal(value)
                 return Decimal(str(value))
@@ -300,6 +301,27 @@ def register_lakeflow_source(spark):
                 },
             }
 
+            # Reusable nested schema for Stripe address objects
+            self._address_schema = StructType(
+                [
+                    StructField("line1", StringType(), True),
+                    StructField("line2", StringType(), True),
+                    StructField("city", StringType(), True),
+                    StructField("state", StringType(), True),
+                    StructField("postal_code", StringType(), True),
+                    StructField("country", StringType(), True),
+                ]
+            )
+
+            # Reusable nested schema for shipping (includes address + name/phone)
+            self._shipping_schema = StructType(
+                [
+                    StructField("name", StringType(), True),
+                    StructField("phone", StringType(), True),
+                    StructField("address", self._address_schema, True),
+                ]
+            )
+
             # Centralized schema configuration
             self._schema_config = {
                 "customers": StructType(
@@ -307,26 +329,13 @@ def register_lakeflow_source(spark):
                         StructField("id", StringType(), False),
                         StructField("object", StringType(), True),
                         StructField("created", LongType(), True),
-                        StructField("updated", LongType(), True),
                         StructField("livemode", BooleanType(), True),
                         StructField("email", StringType(), True),
                         StructField("name", StringType(), True),
                         StructField("phone", StringType(), True),
                         StructField("description", StringType(), True),
-                        StructField("address_line1", StringType(), True),
-                        StructField("address_line2", StringType(), True),
-                        StructField("address_city", StringType(), True),
-                        StructField("address_state", StringType(), True),
-                        StructField("address_postal_code", StringType(), True),
-                        StructField("address_country", StringType(), True),
-                        StructField("shipping_name", StringType(), True),
-                        StructField("shipping_phone", StringType(), True),
-                        StructField("shipping_address_line1", StringType(), True),
-                        StructField("shipping_address_line2", StringType(), True),
-                        StructField("shipping_address_city", StringType(), True),
-                        StructField("shipping_address_state", StringType(), True),
-                        StructField("shipping_address_postal_code", StringType(), True),
-                        StructField("shipping_address_country", StringType(), True),
+                        StructField("address", self._address_schema, True),
+                        StructField("shipping", self._shipping_schema, True),
                         StructField("balance", LongType(), True),
                         StructField("currency", StringType(), True),
                         StructField("delinquent", BooleanType(), True),
@@ -338,6 +347,11 @@ def register_lakeflow_source(spark):
                         StructField("metadata", StringType(), True),
                         StructField("discount", StringType(), True),
                         StructField("deleted", BooleanType(), True),
+                        StructField("test_clock", StringType(), True),
+                        StructField("tax", StringType(), True),
+                        StructField("sources", StringType(), True),
+                        StructField("subscriptions", StringType(), True),
+                        StructField("next_invoice_sequence", LongType(), True),
                     ]
                 ),
                 "charges": StructType(
@@ -477,6 +491,9 @@ def register_lakeflow_source(spark):
                         StructField("tax_code", StringType(), True),
                         StructField("shippable", BooleanType(), True),
                         StructField("deleted", BooleanType(), True),
+                        StructField("default_price", StringType(), True),
+                        StructField("features", StringType(), True),
+                        StructField("package_dimensions", StringType(), True),
                     ]
                 ),
                 "prices": StructType(
@@ -566,7 +583,8 @@ def register_lakeflow_source(spark):
                         StructField("status", StringType(), True),
                         StructField("description", StringType(), True),
                         StructField("available_on", LongType(), True),
-                        StructField("exchange_rate", StringType(), True),
+                        StructField("exchange_rate", DoubleType(), True),
+                        StructField("reporting_category", StringType(), True),
                     ]
                 ),
                 "payouts": StructType(
@@ -605,10 +623,13 @@ def register_lakeflow_source(spark):
                         StructField("quantity", LongType(), True),
                         StructField("unit_amount", LongType(), True),
                         StructField("unit_amount_decimal", StringType(), True),
-                        StructField("period_start", LongType(), True),
-                        StructField("period_end", LongType(), True),
+                        StructField("period", StringType(), True),
                         StructField("discounts", StringType(), True),
                         StructField("metadata", StringType(), True),
+                        StructField("proration", BooleanType(), True),
+                        StructField("date", LongType(), True),
+                        StructField("discountable", BooleanType(), True),
+                        StructField("tax_rates", StringType(), True),
                     ]
                 ),
                 "plans": StructType(
@@ -654,7 +675,7 @@ def register_lakeflow_source(spark):
                         StructField("livemode", BooleanType(), True),
                         StructField("name", StringType(), True),
                         StructField("amount_off", LongType(), True),
-                        StructField("percent_off", StringType(), True),
+                        StructField("percent_off", DoubleType(), True),
                         StructField("currency", StringType(), True),
                         StructField("duration", StringType(), True),
                         StructField("duration_in_months", LongType(), True),
@@ -664,6 +685,7 @@ def register_lakeflow_source(spark):
                         StructField("valid", BooleanType(), True),
                         StructField("applies_to", StringType(), True),
                         StructField("metadata", StringType(), True),
+                        StructField("currency_options", StringType(), True),
                     ]
                 ),
             }
@@ -802,8 +824,8 @@ def register_lakeflow_source(spark):
                     break
 
                 # Transform records
-                transformed_records = self._transform_records(records, table_name)
-                all_records.extend(transformed_records)
+                # transformed_records = self._transform_records(records, table_name)
+                all_records.extend(records)
 
                 # Track the latest cursor value for checkpointing
                 for record in records:
@@ -876,8 +898,8 @@ def register_lakeflow_source(spark):
                     break
 
                 # Transform records
-                transformed_records = self._transform_records(records, table_name)
-                all_records.extend(transformed_records)
+                # transformed_records = self._transform_records(records, table_name)
+                all_records.extend(records)
 
                 # Track the latest cursor value
                 for record in records:
@@ -902,7 +924,11 @@ def register_lakeflow_source(spark):
 
         def _transform_records(self, records: List[Dict], table_name: str) -> List[Dict]:
             """
-            Transform Stripe API records to match schema.
+            Transform Stripe API records based on the table's schema.
+
+            This generic approach replaces individual per-table transform functions.
+            - Fields defined as StringType: nested objects (dicts/lists) are serialized to JSON
+            - Fields defined as StructType: nested objects are kept as dicts for Spark
 
             Args:
                 records: Raw records from Stripe API
@@ -911,548 +937,38 @@ def register_lakeflow_source(spark):
             Returns:
                 List of transformed records
             """
-            if table_name == "customers":
-                return [self._transform_customer_record(record) for record in records]
-            elif table_name == "charges":
-                return [self._transform_charge_record(record) for record in records]
-            elif table_name == "payment_intents":
-                return [self._transform_payment_intent_record(record) for record in records]
-            elif table_name == "subscriptions":
-                return [self._transform_subscription_record(record) for record in records]
-            elif table_name == "invoices":
-                return [self._transform_invoice_record(record) for record in records]
-            elif table_name == "products":
-                return [self._transform_product_record(record) for record in records]
-            elif table_name == "prices":
-                return [self._transform_price_record(record) for record in records]
-            elif table_name == "refunds":
-                return [self._transform_refund_record(record) for record in records]
-            elif table_name == "disputes":
-                return [self._transform_dispute_record(record) for record in records]
-            elif table_name == "payment_methods":
-                return [self._transform_payment_method_record(record) for record in records]
-            elif table_name == "balance_transactions":
-                return [
-                    self._transform_balance_transaction_record(record) for record in records
-                ]
-            elif table_name == "payouts":
-                return [self._transform_payout_record(record) for record in records]
-            elif table_name == "invoice_items":
-                return [self._transform_invoice_item_record(record) for record in records]
-            elif table_name == "plans":
-                return [self._transform_plan_record(record) for record in records]
-            elif table_name == "events":
-                return [self._transform_event_record(record) for record in records]
-            elif table_name == "coupons":
-                return [self._transform_coupon_record(record) for record in records]
-            else:
-                return records
+            schema = self._schema_config.get(table_name)
+            return [self._serialize_record(record, schema) for record in records]
 
-        def _transform_customer_record(self, record: Dict) -> Dict:
+        def _serialize_record(self, record: Dict, schema: StructType) -> Dict:
             """
-            Transform a Stripe Customer object to match our schema.
+            Serialize nested objects based on schema field types.
 
             Args:
-                record: Raw customer record from Stripe API
+                record: Raw record from Stripe API
+                schema: The StructType schema for this table
 
             Returns:
-                Transformed customer record
+                Record with appropriate serialization based on schema
             """
-            # Extract address fields
-            address = record.get("address") or {}
+            # Build a lookup of field name -> field type
+            field_types = {field.name: field.dataType for field in schema.fields}
 
-            # Extract shipping fields
-            shipping = record.get("shipping") or {}
-            shipping_address = shipping.get("address") or {}
-
-            # Extract invoice settings
-            invoice_settings = record.get("invoice_settings")
-            invoice_settings_json = (
-                json.dumps(invoice_settings) if invoice_settings else None
-            )
-
-            # Extract metadata
-            metadata = record.get("metadata")
-            metadata_json = json.dumps(metadata) if metadata else None
-
-            # Extract discount
-            discount = record.get("discount")
-            discount_json = json.dumps(discount) if discount else None
-
-            transformed = {
-                # Core fields
-                "id": record.get("id"),
-                "object": record.get("object"),
-                "created": record.get("created"),
-                "updated": record.get("updated"),  # May not exist for customers
-                "livemode": record.get("livemode"),
-                # Customer details
-                "email": record.get("email"),
-                "name": record.get("name"),
-                "phone": record.get("phone"),
-                "description": record.get("description"),
-                # Address (flattened)
-                "address_line1": address.get("line1"),
-                "address_line2": address.get("line2"),
-                "address_city": address.get("city"),
-                "address_state": address.get("state"),
-                "address_postal_code": address.get("postal_code"),
-                "address_country": address.get("country"),
-                # Shipping (flattened)
-                "shipping_name": shipping.get("name"),
-                "shipping_phone": shipping.get("phone"),
-                "shipping_address_line1": shipping_address.get("line1"),
-                "shipping_address_line2": shipping_address.get("line2"),
-                "shipping_address_city": shipping_address.get("city"),
-                "shipping_address_state": shipping_address.get("state"),
-                "shipping_address_postal_code": shipping_address.get("postal_code"),
-                "shipping_address_country": shipping_address.get("country"),
-                # Financial fields
-                "balance": record.get("balance"),
-                "currency": record.get("currency"),
-                "delinquent": record.get("delinquent"),
-                # Preferences
-                "preferred_locales": record.get("preferred_locales"),
-                # Complex fields as JSON strings
-                "invoice_settings": invoice_settings_json,
-                "metadata": metadata_json,
-                "discount": discount_json,
-                # Tax information
-                "tax_exempt": record.get("tax_exempt"),
-                # References
-                "default_source": record.get("default_source"),
-                "invoice_prefix": record.get("invoice_prefix"),
-                # Deletion tracking
-                "deleted": record.get("deleted", False),
-            }
-
-            return transformed
-
-        def _transform_charge_record(self, record: Dict) -> Dict:
-            """Transform a Stripe Charge object to match our schema."""
-            # Convert complex fields to JSON strings
-            billing_details = record.get("billing_details")
-            payment_method_details = record.get("payment_method_details")
-            outcome = record.get("outcome")
-            metadata = record.get("metadata")
-
-            return {
-                "id": record.get("id"),
-                "object": record.get("object"),
-                "created": record.get("created"),
-                "livemode": record.get("livemode"),
-                "amount": record.get("amount"),
-                "amount_captured": record.get("amount_captured"),
-                "amount_refunded": record.get("amount_refunded"),
-                "currency": record.get("currency"),
-                "status": record.get("status"),
-                "paid": record.get("paid"),
-                "refunded": record.get("refunded"),
-                "captured": record.get("captured"),
-                "disputed": record.get("disputed"),
-                "customer": record.get("customer"),
-                "invoice": record.get("invoice"),
-                "payment_intent": record.get("payment_intent"),
-                "payment_method": record.get("payment_method"),
-                "description": record.get("description"),
-                "receipt_email": record.get("receipt_email"),
-                "receipt_url": record.get("receipt_url"),
-                "statement_descriptor": record.get("statement_descriptor"),
-                "billing_details": json.dumps(billing_details) if billing_details else None,
-                "payment_method_details": json.dumps(payment_method_details)
-                if payment_method_details
-                else None,
-                "outcome": json.dumps(outcome) if outcome else None,
-                "metadata": json.dumps(metadata) if metadata else None,
-                "failure_code": record.get("failure_code"),
-                "failure_message": record.get("failure_message"),
-            }
-
-        def _transform_payment_intent_record(self, record: Dict) -> Dict:
-            """Transform a Stripe PaymentIntent object to match our schema."""
-            charges = record.get("charges")
-            payment_method_options = record.get("payment_method_options")
-            shipping = record.get("shipping")
-            metadata = record.get("metadata")
-
-            return {
-                "id": record.get("id"),
-                "object": record.get("object"),
-                "created": record.get("created"),
-                "livemode": record.get("livemode"),
-                "amount": record.get("amount"),
-                "amount_capturable": record.get("amount_capturable"),
-                "amount_received": record.get("amount_received"),
-                "currency": record.get("currency"),
-                "status": record.get("status"),
-                "canceled_at": record.get("canceled_at"),
-                "cancellation_reason": record.get("cancellation_reason"),
-                "customer": record.get("customer"),
-                "invoice": record.get("invoice"),
-                "payment_method": record.get("payment_method"),
-                "description": record.get("description"),
-                "receipt_email": record.get("receipt_email"),
-                "statement_descriptor": record.get("statement_descriptor"),
-                "capture_method": record.get("capture_method"),
-                "confirmation_method": record.get("confirmation_method"),
-                "charges": json.dumps(charges) if charges else None,
-                "payment_method_options": json.dumps(payment_method_options)
-                if payment_method_options
-                else None,
-                "shipping": json.dumps(shipping) if shipping else None,
-                "metadata": json.dumps(metadata) if metadata else None,
-                "latest_charge": record.get("latest_charge"),
-            }
-
-        def _transform_subscription_record(self, record: Dict) -> Dict:
-            """Transform a Stripe Subscription object to match our schema."""
-            items = record.get("items")
-            metadata = record.get("metadata")
-            discount = record.get("discount")
-
-            return {
-                "id": record.get("id"),
-                "object": record.get("object"),
-                "created": record.get("created"),
-                "livemode": record.get("livemode"),
-                "status": record.get("status"),
-                "current_period_start": record.get("current_period_start"),
-                "current_period_end": record.get("current_period_end"),
-                "cancel_at": record.get("cancel_at"),
-                "canceled_at": record.get("canceled_at"),
-                "ended_at": record.get("ended_at"),
-                "trial_start": record.get("trial_start"),
-                "trial_end": record.get("trial_end"),
-                "customer": record.get("customer"),
-                "default_payment_method": record.get("default_payment_method"),
-                "latest_invoice": record.get("latest_invoice"),
-                "billing_cycle_anchor": record.get("billing_cycle_anchor"),
-                "collection_method": record.get("collection_method"),
-                "days_until_due": record.get("days_until_due"),
-                "items": json.dumps(items) if items else None,
-                "metadata": json.dumps(metadata) if metadata else None,
-                "discount": json.dumps(discount) if discount else None,
-                "cancel_at_period_end": record.get("cancel_at_period_end"),
-            }
-
-        def _transform_invoice_record(self, record: Dict) -> Dict:
-            """Transform a Stripe Invoice object to match our schema."""
-            lines = record.get("lines")
-            metadata = record.get("metadata")
-
-            return {
-                "id": record.get("id"),
-                "object": record.get("object"),
-                "created": record.get("created"),
-                "livemode": record.get("livemode"),
-                "status": record.get("status"),
-                "paid": record.get("paid"),
-                "amount_due": record.get("amount_due"),
-                "amount_paid": record.get("amount_paid"),
-                "amount_remaining": record.get("amount_remaining"),
-                "total": record.get("total"),
-                "subtotal": record.get("subtotal"),
-                "tax": record.get("tax"),
-                "currency": record.get("currency"),
-                "customer": record.get("customer"),
-                "subscription": record.get("subscription"),
-                "charge": record.get("charge"),
-                "payment_intent": record.get("payment_intent"),
-                "billing_reason": record.get("billing_reason"),
-                "collection_method": record.get("collection_method"),
-                "customer_email": record.get("customer_email"),
-                "customer_name": record.get("customer_name"),
-                "due_date": record.get("due_date"),
-                "period_start": record.get("period_start"),
-                "period_end": record.get("period_end"),
-                "number": record.get("number"),
-                "hosted_invoice_url": record.get("hosted_invoice_url"),
-                "invoice_pdf": record.get("invoice_pdf"),
-                "lines": json.dumps(lines) if lines else None,
-                "metadata": json.dumps(metadata) if metadata else None,
-            }
-
-        def _transform_product_record(self, record: Dict) -> Dict:
-            """Transform a Stripe Product object to match our schema."""
-            metadata = record.get("metadata")
-
-            return {
-                "id": record.get("id"),
-                "object": record.get("object"),
-                "created": record.get("created"),
-                "updated": record.get("updated"),
-                "livemode": record.get("livemode"),
-                "name": record.get("name"),
-                "description": record.get("description"),
-                "active": record.get("active"),
-                "type": record.get("type"),
-                "unit_label": record.get("unit_label"),
-                "url": record.get("url"),
-                "images": record.get("images"),
-                "metadata": json.dumps(metadata) if metadata else None,
-                "statement_descriptor": record.get("statement_descriptor"),
-                "tax_code": record.get("tax_code"),
-                "shippable": record.get("shippable"),
-                "deleted": record.get("deleted", False),
-            }
-
-        def _transform_price_record(self, record: Dict) -> Dict:
-            """Transform a Stripe Price object to match our schema."""
-            recurring = record.get("recurring")
-            tiers = record.get("tiers")
-            metadata = record.get("metadata")
-
-            return {
-                "id": record.get("id"),
-                "object": record.get("object"),
-                "created": record.get("created"),
-                "livemode": record.get("livemode"),
-                "active": record.get("active"),
-                "currency": record.get("currency"),
-                "unit_amount": record.get("unit_amount"),
-                "unit_amount_decimal": record.get("unit_amount_decimal"),
-                "product": record.get("product"),
-                "billing_scheme": record.get("billing_scheme"),
-                "type": record.get("type"),
-                "recurring": json.dumps(recurring) if recurring else None,
-                "lookup_key": record.get("lookup_key"),
-                "nickname": record.get("nickname"),
-                "tax_behavior": record.get("tax_behavior"),
-                "tiers": json.dumps(tiers) if tiers else None,
-                "tiers_mode": record.get("tiers_mode"),
-                "metadata": json.dumps(metadata) if metadata else None,
-            }
-
-        def _transform_refund_record(self, record: Dict) -> Dict:
-            """Transform a Stripe Refund object to match our schema."""
-            metadata = record.get("metadata")
-
-            return {
-                "id": record.get("id"),
-                "object": record.get("object"),
-                "created": record.get("created"),
-                "livemode": record.get("livemode"),
-                "amount": record.get("amount"),
-                "currency": record.get("currency"),
-                "charge": record.get("charge"),
-                "payment_intent": record.get("payment_intent"),
-                "status": record.get("status"),
-                "reason": record.get("reason"),
-                "receipt_number": record.get("receipt_number"),
-                "metadata": json.dumps(metadata) if metadata else None,
-                "failure_reason": record.get("failure_reason"),
-            }
-
-        def _transform_dispute_record(self, record: Dict) -> Dict:
-            """Transform a Stripe Dispute object to match our schema."""
-            evidence = record.get("evidence")
-            evidence_details = record.get("evidence_details")
-            metadata = record.get("metadata")
-
-            return {
-                "id": record.get("id"),
-                "object": record.get("object"),
-                "created": record.get("created"),
-                "livemode": record.get("livemode"),
-                "amount": record.get("amount"),
-                "currency": record.get("currency"),
-                "charge": record.get("charge"),
-                "payment_intent": record.get("payment_intent"),
-                "status": record.get("status"),
-                "reason": record.get("reason"),
-                "evidence": json.dumps(evidence) if evidence else None,
-                "evidence_details": json.dumps(evidence_details)
-                if evidence_details
-                else None,
-                "is_charge_refundable": record.get("is_charge_refundable"),
-                "metadata": json.dumps(metadata) if metadata else None,
-            }
-
-        def _transform_payment_method_record(self, record: Dict) -> Dict:
-            """Transform a Stripe PaymentMethod object to match our schema."""
-            billing_details = record.get("billing_details")
-            card = record.get("card")
-            us_bank_account = record.get("us_bank_account")
-            metadata = record.get("metadata")
-
-            return {
-                "id": record.get("id"),
-                "object": record.get("object"),
-                "created": record.get("created"),
-                "livemode": record.get("livemode"),
-                "type": record.get("type"),
-                "customer": record.get("customer"),
-                "billing_details": json.dumps(billing_details) if billing_details else None,
-                "card": json.dumps(card) if card else None,
-                "us_bank_account": json.dumps(us_bank_account) if us_bank_account else None,
-                "metadata": json.dumps(metadata) if metadata else None,
-            }
-
-        def _transform_balance_transaction_record(self, record: Dict) -> Dict:
-            """Transform a Stripe BalanceTransaction object to match our schema."""
-            fee_details = record.get("fee_details")
-
-            return {
-                "id": record.get("id"),
-                "object": record.get("object"),
-                "created": record.get("created"),
-                "livemode": record.get("livemode"),
-                "amount": record.get("amount"),
-                "currency": record.get("currency"),
-                "net": record.get("net"),
-                "fee": record.get("fee"),
-                "fee_details": json.dumps(fee_details) if fee_details else None,
-                "type": record.get("type"),
-                "source": record.get("source"),
-                "status": record.get("status"),
-                "description": record.get("description"),
-                "available_on": record.get("available_on"),
-                "exchange_rate": str(record.get("exchange_rate"))
-                if record.get("exchange_rate")
-                else None,
-            }
-
-        def _transform_payout_record(self, record: Dict) -> Dict:
-            """Transform a Stripe Payout object to match our schema."""
-            metadata = record.get("metadata")
-
-            return {
-                "id": record.get("id"),
-                "object": record.get("object"),
-                "created": record.get("created"),
-                "livemode": record.get("livemode"),
-                "amount": record.get("amount"),
-                "currency": record.get("currency"),
-                "arrival_date": record.get("arrival_date"),
-                "status": record.get("status"),
-                "type": record.get("type"),
-                "method": record.get("method"),
-                "destination": record.get("destination"),
-                "description": record.get("description"),
-                "balance_transaction": record.get("balance_transaction"),
-                "failure_code": record.get("failure_code"),
-                "failure_message": record.get("failure_message"),
-                "metadata": json.dumps(metadata) if metadata else None,
-            }
-
-        def _transform_subscription_item_record(self, record: Dict) -> Dict:
-            """Transform a Stripe SubscriptionItem object to match our schema."""
-            billing_thresholds = record.get("billing_thresholds")
-            tax_rates = record.get("tax_rates")
-            metadata = record.get("metadata")
-
-            return {
-                "id": record.get("id"),
-                "object": record.get("object"),
-                "created": record.get("created"),
-                "subscription": record.get("subscription"),
-                "price": record.get("price"),
-                "quantity": record.get("quantity"),
-                "billing_thresholds": json.dumps(billing_thresholds)
-                if billing_thresholds
-                else None,
-                "tax_rates": json.dumps(tax_rates) if tax_rates else None,
-                "metadata": json.dumps(metadata) if metadata else None,
-            }
-
-        def _transform_invoice_item_record(self, record: Dict) -> Dict:
-            """Transform a Stripe InvoiceItem object to match our schema."""
-            discounts = record.get("discounts")
-            metadata = record.get("metadata")
-
-            return {
-                "id": record.get("id"),
-                "object": record.get("object"),
-                "created": record.get("created"),
-                "livemode": record.get("livemode"),
-                "amount": record.get("amount"),
-                "currency": record.get("currency"),
-                "customer": record.get("customer"),
-                "invoice": record.get("invoice"),
-                "subscription": record.get("subscription"),
-                "price": record.get("price"),
-                "description": record.get("description"),
-                "quantity": record.get("quantity"),
-                "unit_amount": record.get("unit_amount"),
-                "unit_amount_decimal": record.get("unit_amount_decimal"),
-                "period_start": record.get("period", {}).get("start")
-                if record.get("period")
-                else None,
-                "period_end": record.get("period", {}).get("end")
-                if record.get("period")
-                else None,
-                "discounts": json.dumps(discounts) if discounts else None,
-                "metadata": json.dumps(metadata) if metadata else None,
-            }
-
-        def _transform_plan_record(self, record: Dict) -> Dict:
-            """Transform a Stripe Plan object to match our schema."""
-            tiers = record.get("tiers")
-            metadata = record.get("metadata")
-
-            return {
-                "id": record.get("id"),
-                "object": record.get("object"),
-                "created": record.get("created"),
-                "livemode": record.get("livemode"),
-                "active": record.get("active"),
-                "amount": record.get("amount"),
-                "currency": record.get("currency"),
-                "interval": record.get("interval"),
-                "interval_count": record.get("interval_count"),
-                "product": record.get("product"),
-                "nickname": record.get("nickname"),
-                "usage_type": record.get("usage_type"),
-                "aggregate_usage": record.get("aggregate_usage"),
-                "trial_period_days": record.get("trial_period_days"),
-                "tiers": json.dumps(tiers) if tiers else None,
-                "tiers_mode": record.get("tiers_mode"),
-                "metadata": json.dumps(metadata) if metadata else None,
-                "deleted": record.get("deleted", False),
-            }
-
-        def _transform_event_record(self, record: Dict) -> Dict:
-            """Transform a Stripe Event object to match our schema."""
-            data = record.get("data")
-            request = record.get("request")
-
-            return {
-                "id": record.get("id"),
-                "object": record.get("object"),
-                "created": record.get("created"),
-                "livemode": record.get("livemode"),
-                "type": record.get("type"),
-                "data": json.dumps(data) if data else None,
-                "api_version": record.get("api_version"),
-                "request": json.dumps(request) if request else None,
-                "pending_webhooks": record.get("pending_webhooks"),
-            }
-
-        def _transform_coupon_record(self, record: Dict) -> Dict:
-            """Transform a Stripe Coupon object to match our schema."""
-            applies_to = record.get("applies_to")
-            metadata = record.get("metadata")
-
-            return {
-                "id": record.get("id"),
-                "object": record.get("object"),
-                "created": record.get("created"),
-                "livemode": record.get("livemode"),
-                "name": record.get("name"),
-                "amount_off": record.get("amount_off"),
-                "percent_off": str(record.get("percent_off"))
-                if record.get("percent_off")
-                else None,
-                "currency": record.get("currency"),
-                "duration": record.get("duration"),
-                "duration_in_months": record.get("duration_in_months"),
-                "max_redemptions": record.get("max_redemptions"),
-                "times_redeemed": record.get("times_redeemed"),
-                "redeem_by": record.get("redeem_by"),
-                "valid": record.get("valid"),
-                "applies_to": json.dumps(applies_to) if applies_to else None,
-                "metadata": json.dumps(metadata) if metadata else None,
-            }
+            serialized = {}
+            for key, value in record.items():
+                if value is None:
+                    serialized[key] = None
+                elif isinstance(value, (dict, list)):
+                    field_type = field_types.get(key)
+                    # Only serialize to JSON if the schema expects StringType
+                    if isinstance(field_type, StringType):
+                        serialized[key] = json.dumps(value)
+                    else:
+                        # Keep as dict/list for StructType or ArrayType fields
+                        serialized[key] = value
+                else:
+                    serialized[key] = value
+            return serialized
 
         def test_connection(self) -> dict:
             """
@@ -1508,7 +1024,7 @@ def register_lakeflow_source(spark):
 
         def read(self, start: dict) -> (Iterator[tuple], dict):
             records, offset = self.lakeflow_connect.read_table(
-                self.options["tableName"], start
+                self.options["tableName"], start, self.options
             )
             rows = map(lambda x: parse_value(x, self.schema), records)
             return rows, offset
@@ -1539,7 +1055,9 @@ def register_lakeflow_source(spark):
             if self.table_name == METADATA_TABLE:
                 all_records = self._read_table_metadata()
             else:
-                all_records, _ = self.lakeflow_connect.read_table(self.table_name, None)
+                all_records, _ = self.lakeflow_connect.read_table(
+                    self.table_name, None, self.options
+                )
 
             rows = map(lambda x: parse_value(x, self.schema), all_records)
             return iter(rows)
@@ -1549,7 +1067,7 @@ def register_lakeflow_source(spark):
             table_names = [o.strip() for o in table_name_list.split(",") if o.strip()]
             all_records = []
             for table in table_names:
-                metadata = self.lakeflow_connect.read_table_metadata(table)
+                metadata = self.lakeflow_connect.read_table_metadata(table, self.options)
                 all_records.append({"tableName": table, **metadata})
             return all_records
 
@@ -1576,7 +1094,7 @@ def register_lakeflow_source(spark):
                 )
             else:
                 # Assuming the LakeflowConnect interface uses get_table_schema, not get_table_details
-                return self.lakeflow_connect.get_table_schema(table)
+                return self.lakeflow_connect.get_table_schema(table, self.options)
 
         def reader(self, schema: StructType):
             return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)
