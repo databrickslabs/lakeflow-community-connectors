@@ -4,7 +4,7 @@ from pyspark.sql.types import *
 from datetime import datetime
 import time
 import random
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Iterator, Any
 
 
 class LakeflowConnect:
@@ -337,17 +337,18 @@ class LakeflowConnect:
         )
 
         if is_incremental:
-            return self._read_data(table_name, start_offset, incremental=True)
+            return self._read_data(table_name, start_offset, incremental=True, table_options=table_options)
         else:
-            return self._read_data(table_name, None, incremental=False)
+            return self._read_data(table_name, None, incremental=False, table_options=table_options)
 
     def _read_data(
-        self, table_name: str, start_offset: dict = None, incremental: bool = False
+        self, table_name: str, start_offset: dict = None, incremental: bool = False,
+        table_options: Dict[str, str] = None
     ):
         """Unified method to read data from HubSpot API"""
 
         # Get discovered properties and object configuration
-        metadata = self.read_table_metadata(table_name)
+        metadata = self.read_table_metadata(table_name, table_options)
         property_names = metadata.get("property_names", [])
         cursor_property_field = metadata.get("cursor_property_field")
         associations = metadata.get("associations", [])

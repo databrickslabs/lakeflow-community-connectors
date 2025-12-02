@@ -1,6 +1,3 @@
-# Stripe connector implementation
-
-
 import requests
 import json
 from pyspark.sql.types import (
@@ -355,6 +352,25 @@ class LakeflowConnect:
             ]
         )
 
+        # Nested schema for invoice payment settings
+        self._invoice_payment_settings_schema = StructType(
+            [
+                StructField("default_mandate", StringType(), True),
+                StructField("payment_method_options", StringType(), True),
+                StructField("payment_method_types", StringType(), True),
+            ]
+        )
+
+        # Nested schema for invoice status transitions
+        self._status_transitions_schema = StructType(
+            [
+                StructField("finalized_at", LongType(), True),
+                StructField("marked_uncollectible_at", LongType(), True),
+                StructField("paid_at", LongType(), True),
+                StructField("voided_at", LongType(), True),
+            ]
+        )
+
         # Nested schema for card payment method options
         self._card_payment_method_options_schema = StructType(
             [
@@ -610,11 +626,11 @@ class LakeflowConnect:
                     StructField("issuer", StringType(), True),
                     StructField("last_finalization_error", StringType(), True),
                     StructField("lines", self._invoice_lines_schema, True),
-                    StructField("payment_settings", StringType(), True),
+                    StructField("payment_settings", self._invoice_payment_settings_schema, True),
                     StructField("rendering", StringType(), True),
                     StructField("shipping_cost", StringType(), True),
                     StructField("shipping_details", StringType(), True),
-                    StructField("status_transitions", StringType(), True),
+                    StructField("status_transitions", self._status_transitions_schema, True),
                     StructField("subscription_details", StringType(), True),
                     StructField("threshold_reason", StringType(), True),
                     StructField("total_discount_amounts", StringType(), True),
