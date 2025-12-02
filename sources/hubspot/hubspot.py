@@ -25,7 +25,7 @@ class LakeflowConnect:
             "contacts": {
                 "primary_key": "id",
                 "cursor_field": "updatedAt",
-                "cursor_property_field": "lastmodifieddate",
+                "cursor_property_field": "hs_lastmodifieddate",
                 "associations": ["companies"],
             },
             "companies": {
@@ -257,7 +257,7 @@ class LakeflowConnect:
         for association in config["associations"]:
             base_fields.append(StructField(association, ArrayType(StringType()), True))
 
-        # Build dynamic properties schema based on API response
+        # Build nested properties schema based on API response
         properties_fields = []
 
         if isinstance(properties, list):
@@ -267,14 +267,15 @@ class LakeflowConnect:
 
                 # Map HubSpot property types to Spark types
                 spark_type = self._map_hubspot_type_to_spark(prop_type)
-                properties_fields.append(
-                    StructField(f"properties_{prop_name}", spark_type, True)
-                )
+                properties_fields.append(StructField(prop_name, spark_type, True))
 
-        # Combine base fields with flattened properties
-        all_fields = base_fields + properties_fields
+        # Create nested properties StructType
+        properties_struct = StructType(properties_fields) if properties_fields else StructType([])
 
-        schema = StructType(all_fields)
+        # Add properties as a nested field
+        base_fields.append(StructField("properties", properties_struct, True))
+
+        schema = StructType(base_fields)
 
         return schema
 
@@ -503,17 +504,17 @@ class LakeflowConnect:
         transformed_record = {}
 
         # Copy base fields
-        for field in ["id", "createdAt", "updatedAt", "archived"]:
+        for field in ["id", "createdAt", "updatedAt", "archived", "properties"]:
             if field in record:
                 transformed_record[field] = record[field]
 
         # Handle associations
         transformed_record.update(self._extract_associations(record, table_name))
 
-        # Flatten properties with properties_ prefix
-        properties = record.get("properties", {})
-        for prop_name, prop_value in properties.items():
-            transformed_record[f"properties_{prop_name}"] = prop_value
+        # # Flatten properties with properties_ prefix
+        # properties = record.get("properties", {})
+        # for prop_name, prop_value in properties.items():
+        #     transformed_record[f"properties_{prop_name}"] = prop_value
 
         return transformed_record
 
