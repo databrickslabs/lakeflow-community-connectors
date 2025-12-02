@@ -434,6 +434,134 @@ def register_lakeflow_source(spark):
                 ]
             )
 
+            # Nested schema for price recurring
+            self._recurring_schema = StructType(
+                [
+                    StructField("interval", StringType(), True),
+                    StructField("interval_count", LongType(), True),
+                    StructField("meter", StringType(), True),
+                    StructField("trial_period_days", LongType(), True),
+                    StructField("usage_type", StringType(), True),
+                    StructField("aggregate_usage", StringType(), True),
+                ]
+            )
+
+            # Nested schema for fee detail (used in balance_transactions.fee_details array)
+            self._fee_detail_schema = StructType(
+                [
+                    StructField("amount", LongType(), True),
+                    StructField("application", StringType(), True),
+                    StructField("currency", StringType(), True),
+                    StructField("description", StringType(), True),
+                    StructField("type", StringType(), True),
+                ]
+            )
+
+            # Nested schema for period (used in invoice line items, subscriptions, etc.)
+            self._period_schema = StructType(
+                [
+                    StructField("start", LongType(), True),
+                    StructField("end", LongType(), True),
+                ]
+            )
+
+            # Nested schema for invoice line item
+            self._invoice_line_item_schema = StructType(
+                [
+                    StructField("id", StringType(), True),
+                    StructField("object", StringType(), True),
+                    StructField("amount", LongType(), True),
+                    StructField("amount_excluding_tax", LongType(), True),
+                    StructField("currency", StringType(), True),
+                    StructField("description", StringType(), True),
+                    StructField("discountable", BooleanType(), True),
+                    StructField("discounts", StringType(), True),
+                    StructField("discount_amounts", StringType(), True),
+                    StructField("invoice", StringType(), True),
+                    StructField("invoice_item", StringType(), True),
+                    StructField("livemode", BooleanType(), True),
+                    StructField("metadata", StringType(), True),
+                    StructField("period", self._period_schema, True),
+                    StructField("plan", StringType(), True),
+                    StructField("price", StringType(), True),
+                    StructField("proration", BooleanType(), True),
+                    StructField("proration_details", StringType(), True),
+                    StructField("quantity", LongType(), True),
+                    StructField("subscription", StringType(), True),
+                    StructField("subscription_item", StringType(), True),
+                    StructField("tax_amounts", StringType(), True),
+                    StructField("tax_rates", StringType(), True),
+                    StructField("type", StringType(), True),
+                    StructField("unit_amount_excluding_tax", StringType(), True),
+                ]
+            )
+
+            # Nested schema for invoice lines (paginated list wrapper)
+            self._invoice_lines_schema = StructType(
+                [
+                    StructField("object", StringType(), True),
+                    StructField("data", ArrayType(self._invoice_line_item_schema), True),
+                    StructField("has_more", BooleanType(), True),
+                    StructField("total_count", LongType(), True),
+                    StructField("url", StringType(), True),
+                ]
+            )
+
+            # Nested schema for card payment method options
+            self._card_payment_method_options_schema = StructType(
+                [
+                    StructField("installments", StringType(), True),
+                    StructField("mandate_options", StringType(), True),
+                    StructField("network", StringType(), True),
+                    StructField("request_three_d_secure", StringType(), True),
+                    StructField("setup_future_usage", StringType(), True),
+                    StructField("capture_method", StringType(), True),
+                ]
+            )
+
+            # Nested schema for payment_method_options (polymorphic)
+            self._payment_method_options_schema = StructType(
+                [
+                    StructField("card", self._card_payment_method_options_schema, True),
+                    StructField("acss_debit", StringType(), True),
+                    StructField("affirm", StringType(), True),
+                    StructField("afterpay_clearpay", StringType(), True),
+                    StructField("alipay", StringType(), True),
+                    StructField("amazon_pay", StringType(), True),
+                    StructField("au_becs_debit", StringType(), True),
+                    StructField("bacs_debit", StringType(), True),
+                    StructField("bancontact", StringType(), True),
+                    StructField("blik", StringType(), True),
+                    StructField("boleto", StringType(), True),
+                    StructField("cashapp", StringType(), True),
+                    StructField("customer_balance", StringType(), True),
+                    StructField("eps", StringType(), True),
+                    StructField("fpx", StringType(), True),
+                    StructField("giropay", StringType(), True),
+                    StructField("grabpay", StringType(), True),
+                    StructField("ideal", StringType(), True),
+                    StructField("interac_present", StringType(), True),
+                    StructField("klarna", StringType(), True),
+                    StructField("konbini", StringType(), True),
+                    StructField("link", StringType(), True),
+                    StructField("mobilepay", StringType(), True),
+                    StructField("multibanco", StringType(), True),
+                    StructField("oxxo", StringType(), True),
+                    StructField("p24", StringType(), True),
+                    StructField("paynow", StringType(), True),
+                    StructField("paypal", StringType(), True),
+                    StructField("pix", StringType(), True),
+                    StructField("promptpay", StringType(), True),
+                    StructField("revolut_pay", StringType(), True),
+                    StructField("sepa_debit", StringType(), True),
+                    StructField("sofort", StringType(), True),
+                    StructField("swish", StringType(), True),
+                    StructField("us_bank_account", StringType(), True),
+                    StructField("wechat_pay", StringType(), True),
+                    StructField("zip", StringType(), True),
+                ]
+            )
+
             # Centralized schema configuration
             self._schema_config = {
                 "customers": StructType(
@@ -519,7 +647,7 @@ def register_lakeflow_source(spark):
                         StructField("capture_method", StringType(), True),
                         StructField("confirmation_method", StringType(), True),
                         StructField("charges", StringType(), True),
-                        StructField("payment_method_options", StringType(), True),
+                        StructField("payment_method_options", self._payment_method_options_schema, True),
                         StructField("shipping", StringType(), True),
                         StructField("metadata", StringType(), True),
                         StructField("latest_charge", StringType(), True),
@@ -553,35 +681,98 @@ def register_lakeflow_source(spark):
                 ),
                 "invoices": StructType(
                     [
+                        # Core identifiers
                         StructField("id", StringType(), False),
                         StructField("object", StringType(), True),
                         StructField("created", LongType(), True),
                         StructField("livemode", BooleanType(), True),
+                        # Status and payment info
                         StructField("status", StringType(), True),
                         StructField("paid", BooleanType(), True),
+                        StructField("paid_out_of_band", BooleanType(), True),
+                        StructField("attempted", BooleanType(), True),
+                        StructField("attempt_count", LongType(), True),
+                        StructField("auto_advance", BooleanType(), True),
+                        # Amounts
                         StructField("amount_due", LongType(), True),
                         StructField("amount_paid", LongType(), True),
                         StructField("amount_remaining", LongType(), True),
+                        StructField("amount_shipping", LongType(), True),
                         StructField("total", LongType(), True),
                         StructField("subtotal", LongType(), True),
+                        StructField("subtotal_excluding_tax", LongType(), True),
+                        StructField("total_excluding_tax", LongType(), True),
                         StructField("tax", LongType(), True),
+                        StructField("starting_balance", LongType(), True),
+                        StructField("ending_balance", LongType(), True),
+                        StructField("pre_payment_credit_notes_amount", LongType(), True),
+                        StructField("post_payment_credit_notes_amount", LongType(), True),
                         StructField("currency", StringType(), True),
+                        # Customer info
                         StructField("customer", StringType(), True),
+                        StructField("customer_email", StringType(), True),
+                        StructField("customer_name", StringType(), True),
+                        StructField("customer_phone", StringType(), True),
+                        StructField("customer_address", self._address_schema, True),
+                        StructField("customer_shipping", self._shipping_schema, True),
+                        StructField("customer_tax_exempt", StringType(), True),
+                        StructField("customer_tax_ids", StringType(), True),
+                        # References
                         StructField("subscription", StringType(), True),
                         StructField("charge", StringType(), True),
                         StructField("payment_intent", StringType(), True),
+                        StructField("default_payment_method", StringType(), True),
+                        StructField("default_source", StringType(), True),
+                        StructField("quote", StringType(), True),
+                        StructField("latest_revision", StringType(), True),
+                        StructField("from_invoice", StringType(), True),
+                        # Billing details
                         StructField("billing_reason", StringType(), True),
                         StructField("collection_method", StringType(), True),
-                        StructField("customer_email", StringType(), True),
-                        StructField("customer_name", StringType(), True),
+                        StructField("description", StringType(), True),
+                        StructField("footer", StringType(), True),
+                        StructField("statement_descriptor", StringType(), True),
+                        StructField("receipt_number", StringType(), True),
+                        # Dates
                         StructField("due_date", LongType(), True),
                         StructField("period_start", LongType(), True),
                         StructField("period_end", LongType(), True),
+                        StructField("next_payment_attempt", LongType(), True),
+                        StructField("webhooks_delivered_at", LongType(), True),
+                        StructField("effective_at", LongType(), True),
+                        # URLs
                         StructField("number", StringType(), True),
                         StructField("hosted_invoice_url", StringType(), True),
                         StructField("invoice_pdf", StringType(), True),
-                        StructField("lines", StringType(), True),
+                        # Account info
+                        StructField("account_country", StringType(), True),
+                        StructField("account_name", StringType(), True),
+                        StructField("account_tax_ids", StringType(), True),
+                        # Connect
+                        StructField("application", StringType(), True),
+                        StructField("application_fee_amount", LongType(), True),
+                        StructField("on_behalf_of", StringType(), True),
+                        StructField("transfer_data", StringType(), True),
+                        # Complex nested objects
+                        StructField("automatic_tax", StringType(), True),
+                        StructField("custom_fields", StringType(), True),
+                        StructField("default_tax_rates", StringType(), True),
+                        StructField("discount", StringType(), True),
+                        StructField("discounts", StringType(), True),
+                        StructField("issuer", StringType(), True),
+                        StructField("last_finalization_error", StringType(), True),
+                        StructField("lines", self._invoice_lines_schema, True),
+                        StructField("payment_settings", StringType(), True),
+                        StructField("rendering", StringType(), True),
+                        StructField("shipping_cost", StringType(), True),
+                        StructField("shipping_details", StringType(), True),
+                        StructField("status_transitions", StringType(), True),
+                        StructField("subscription_details", StringType(), True),
+                        StructField("threshold_reason", StringType(), True),
+                        StructField("total_discount_amounts", StringType(), True),
+                        StructField("total_tax_amounts", StringType(), True),
                         StructField("metadata", StringType(), True),
+                        StructField("test_clock", StringType(), True),
                     ]
                 ),
                 "products": StructType(
@@ -621,7 +812,7 @@ def register_lakeflow_source(spark):
                         StructField("product", StringType(), True),
                         StructField("billing_scheme", StringType(), True),
                         StructField("type", StringType(), True),
-                        StructField("recurring", StringType(), True),
+                        StructField("recurring", self._recurring_schema, True),
                         StructField("lookup_key", StringType(), True),
                         StructField("nickname", StringType(), True),
                         StructField("tax_behavior", StringType(), True),
@@ -689,7 +880,7 @@ def register_lakeflow_source(spark):
                         StructField("currency", StringType(), True),
                         StructField("net", LongType(), True),
                         StructField("fee", LongType(), True),
-                        StructField("fee_details", StringType(), True),
+                        StructField("fee_details", ArrayType(self._fee_detail_schema), True),
                         StructField("type", StringType(), True),
                         StructField("source", StringType(), True),
                         StructField("status", StringType(), True),
