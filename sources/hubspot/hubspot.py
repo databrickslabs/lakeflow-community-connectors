@@ -25,7 +25,7 @@ class LakeflowConnect:
             "contacts": {
                 "primary_key": "id",
                 "cursor_field": "updatedAt",
-                "cursor_property_field": "hs_lastmodifieddate",
+                "cursor_property_field": "lastmodifieddate",
                 "associations": ["companies"],
             },
             "companies": {
