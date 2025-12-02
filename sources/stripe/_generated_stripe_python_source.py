@@ -322,6 +322,118 @@ def register_lakeflow_source(spark):
                 ]
             )
 
+            # Reusable nested schema for billing details
+            self._billing_details_schema = StructType(
+                [
+                    StructField("address", self._address_schema, True),
+                    StructField("email", StringType(), True),
+                    StructField("name", StringType(), True),
+                    StructField("phone", StringType(), True),
+                    StructField("tax_id", StringType(), True),
+                ]
+            )
+
+            # Nested schema for card checks
+            self._card_checks_schema = StructType(
+                [
+                    StructField("address_line1_check", StringType(), True),
+                    StructField("address_postal_code_check", StringType(), True),
+                    StructField("cvc_check", StringType(), True),
+                ]
+            )
+
+            # Nested schema for card details in payment_method_details
+            self._card_details_schema = StructType(
+                [
+                    StructField("amount_authorized", LongType(), True),
+                    StructField("authorization_code", StringType(), True),
+                    StructField("brand", StringType(), True),
+                    StructField("checks", self._card_checks_schema, True),
+                    StructField("country", StringType(), True),
+                    StructField("exp_month", LongType(), True),
+                    StructField("exp_year", LongType(), True),
+                    StructField("fingerprint", StringType(), True),
+                    StructField("funding", StringType(), True),
+                    StructField("last4", StringType(), True),
+                    StructField("network", StringType(), True),
+                    StructField("network_transaction_id", StringType(), True),
+                    StructField("regulated_status", StringType(), True),
+                    StructField("installments", StringType(), True),
+                    StructField("mandate", StringType(), True),
+                    StructField("three_d_secure", StringType(), True),
+                    StructField("wallet", StringType(), True),
+                    StructField("extended_authorization", StringType(), True),
+                    StructField("incremental_authorization", StringType(), True),
+                    StructField("multicapture", StringType(), True),
+                    StructField("network_token", StringType(), True),
+                    StructField("overcapture", StringType(), True),
+                ]
+            )
+
+            # Nested schema for payment_method_details (polymorphic - card is most common)
+            self._payment_method_details_schema = StructType(
+                [
+                    StructField("type", StringType(), True),
+                    StructField("card", self._card_details_schema, True),
+                    # Other payment types stored as JSON strings for flexibility
+                    StructField("ach_credit_transfer", StringType(), True),
+                    StructField("ach_debit", StringType(), True),
+                    StructField("acss_debit", StringType(), True),
+                    StructField("affirm", StringType(), True),
+                    StructField("afterpay_clearpay", StringType(), True),
+                    StructField("alipay", StringType(), True),
+                    StructField("amazon_pay", StringType(), True),
+                    StructField("au_becs_debit", StringType(), True),
+                    StructField("bacs_debit", StringType(), True),
+                    StructField("bancontact", StringType(), True),
+                    StructField("blik", StringType(), True),
+                    StructField("boleto", StringType(), True),
+                    StructField("card_present", StringType(), True),
+                    StructField("cashapp", StringType(), True),
+                    StructField("customer_balance", StringType(), True),
+                    StructField("eps", StringType(), True),
+                    StructField("fpx", StringType(), True),
+                    StructField("giropay", StringType(), True),
+                    StructField("grabpay", StringType(), True),
+                    StructField("ideal", StringType(), True),
+                    StructField("interac_present", StringType(), True),
+                    StructField("klarna", StringType(), True),
+                    StructField("konbini", StringType(), True),
+                    StructField("link", StringType(), True),
+                    StructField("multibanco", StringType(), True),
+                    StructField("oxxo", StringType(), True),
+                    StructField("p24", StringType(), True),
+                    StructField("paynow", StringType(), True),
+                    StructField("paypal", StringType(), True),
+                    StructField("pix", StringType(), True),
+                    StructField("promptpay", StringType(), True),
+                    StructField("revolut_pay", StringType(), True),
+                    StructField("sepa_debit", StringType(), True),
+                    StructField("sofort", StringType(), True),
+                    StructField("stripe_account", StringType(), True),
+                    StructField("swish", StringType(), True),
+                    StructField("us_bank_account", StringType(), True),
+                    StructField("wechat", StringType(), True),
+                    StructField("wechat_pay", StringType(), True),
+                    StructField("zip", StringType(), True),
+                ]
+            )
+
+            # Nested schema for charge outcome
+            self._outcome_schema = StructType(
+                [
+                    StructField("type", StringType(), True),
+                    StructField("network_status", StringType(), True),
+                    StructField("reason", StringType(), True),
+                    StructField("risk_level", StringType(), True),
+                    StructField("risk_score", LongType(), True),
+                    StructField("seller_message", StringType(), True),
+                    StructField("advice_code", StringType(), True),
+                    StructField("network_advice_code", StringType(), True),
+                    StructField("network_decline_code", StringType(), True),
+                ]
+            )
+
             # Centralized schema configuration
             self._schema_config = {
                 "customers": StructType(
@@ -377,9 +489,9 @@ def register_lakeflow_source(spark):
                         StructField("receipt_email", StringType(), True),
                         StructField("receipt_url", StringType(), True),
                         StructField("statement_descriptor", StringType(), True),
-                        StructField("billing_details", StringType(), True),
-                        StructField("payment_method_details", StringType(), True),
-                        StructField("outcome", StringType(), True),
+                        StructField("billing_details", self._billing_details_schema, True),
+                        StructField("payment_method_details", self._payment_method_details_schema, True),
+                        StructField("outcome", self._outcome_schema, True),
                         StructField("metadata", StringType(), True),
                         StructField("failure_code", StringType(), True),
                         StructField("failure_message", StringType(), True),
@@ -561,7 +673,7 @@ def register_lakeflow_source(spark):
                         StructField("livemode", BooleanType(), True),
                         StructField("type", StringType(), True),
                         StructField("customer", StringType(), True),
-                        StructField("billing_details", StringType(), True),
+                        StructField("billing_details", self._billing_details_schema, True),
                         StructField("card", StringType(), True),
                         StructField("us_bank_account", StringType(), True),
                         StructField("metadata", StringType(), True),
@@ -823,8 +935,6 @@ def register_lakeflow_source(spark):
                 if not records:
                     break
 
-                # Transform records
-                # transformed_records = self._transform_records(records, table_name)
                 all_records.extend(records)
 
                 # Track the latest cursor value for checkpointing
@@ -897,8 +1007,6 @@ def register_lakeflow_source(spark):
                 if not records:
                     break
 
-                # Transform records
-                # transformed_records = self._transform_records(records, table_name)
                 all_records.extend(records)
 
                 # Track the latest cursor value
@@ -921,54 +1029,6 @@ def register_lakeflow_source(spark):
             # Return new offset for next sync
             offset = {cursor_field: latest_cursor_value}
             return all_records, offset
-
-        def _transform_records(self, records: List[Dict], table_name: str) -> List[Dict]:
-            """
-            Transform Stripe API records based on the table's schema.
-
-            This generic approach replaces individual per-table transform functions.
-            - Fields defined as StringType: nested objects (dicts/lists) are serialized to JSON
-            - Fields defined as StructType: nested objects are kept as dicts for Spark
-
-            Args:
-                records: Raw records from Stripe API
-                table_name: Name of the table
-
-            Returns:
-                List of transformed records
-            """
-            schema = self._schema_config.get(table_name)
-            return [self._serialize_record(record, schema) for record in records]
-
-        def _serialize_record(self, record: Dict, schema: StructType) -> Dict:
-            """
-            Serialize nested objects based on schema field types.
-
-            Args:
-                record: Raw record from Stripe API
-                schema: The StructType schema for this table
-
-            Returns:
-                Record with appropriate serialization based on schema
-            """
-            # Build a lookup of field name -> field type
-            field_types = {field.name: field.dataType for field in schema.fields}
-
-            serialized = {}
-            for key, value in record.items():
-                if value is None:
-                    serialized[key] = None
-                elif isinstance(value, (dict, list)):
-                    field_type = field_types.get(key)
-                    # Only serialize to JSON if the schema expects StringType
-                    if isinstance(field_type, StringType):
-                        serialized[key] = json.dumps(value)
-                    else:
-                        # Keep as dict/list for StructType or ArrayType fields
-                        serialized[key] = value
-                else:
-                    serialized[key] = value
-            return serialized
 
         def test_connection(self) -> dict:
             """
