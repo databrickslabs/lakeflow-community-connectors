@@ -121,6 +121,7 @@ def deduplicate_imports(import_lists: List[List[str]]) -> List[str]:
     skip_patterns = [
         "from libs.utils import",
         "from pipeline.lakeflow_python_source import",
+        "from pipeline.lakeflow_connect_enricher import",
         "from sources.",
     ]
 
@@ -300,6 +301,7 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     # Define file paths
     utils_path = project_root / "libs" / "utils.py"
     source_path = project_root / "sources" / source_name / f"{source_name}.py"
+    enricher_path = project_root / "pipeline" / "lakeflow_connect_enricher.py"
     lakeflow_source_path = project_root / "pipeline" / "lakeflow_python_source.py"
 
     # If no output path specified, use default location in source directory
@@ -315,12 +317,14 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     print(f"Merging files for source: {source_name}", file=sys.stderr)
     print(f"- utils.py: {utils_path}", file=sys.stderr)
     print(f"- {source_name}.py: {source_path}", file=sys.stderr)
+    print(f"- lakeflow_connect_enricher.py: {enricher_path}", file=sys.stderr)
     print(f"- lakeflow_python_source.py: {lakeflow_source_path}", file=sys.stderr)
 
     try:
         # Read all files
         utils_content = read_file_content(utils_path)
         source_content = read_file_content(source_path)
+        enricher_content = read_file_content(enricher_path)
         lakeflow_source_content = read_file_content(lakeflow_source_path)
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -329,10 +333,11 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     # Extract imports and code from each file
     utils_imports, utils_code = extract_imports_and_code(utils_content)
     source_imports, source_code = extract_imports_and_code(source_content)
+    enricher_imports, enricher_code = extract_imports_and_code(enricher_content)
     lakeflow_imports, lakeflow_code = extract_imports_and_code(lakeflow_source_content)
 
     # Deduplicate and organize all imports
-    all_imports = deduplicate_imports([utils_imports, source_imports, lakeflow_imports])
+    all_imports = deduplicate_imports([utils_imports, source_imports, enricher_imports, lakeflow_imports])
 
     # Build the merged content
     merged_lines = []
@@ -389,7 +394,20 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     merged_lines.append("")
     merged_lines.append("")
 
-    # Section 3: pipeline/lakeflow_python_source.py code
+    # Section 3: pipeline/lakeflow_connect_enricher.py code
+    merged_lines.append("    " + "#" * 56)
+    merged_lines.append("    # pipeline/lakeflow_connect_enricher.py")
+    merged_lines.append("    " + "#" * 56)
+    merged_lines.append("")
+    for line in enricher_code.strip().split("\n"):
+        if line.strip():
+            merged_lines.append("    " + line)
+        else:
+            merged_lines.append("")
+    merged_lines.append("")
+    merged_lines.append("")
+
+    # Section 4: pipeline/lakeflow_python_source.py code
     merged_lines.append("    " + "#" * 56)
     merged_lines.append("    # pipeline/lakeflow_python_source.py")
     merged_lines.append("    " + "#" * 56)

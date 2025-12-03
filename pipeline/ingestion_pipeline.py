@@ -11,6 +11,7 @@ def _create_cdc_table(
     cursor_field: str,
     view_name: str,
     table_config: dict[str, str],
+    has_deletion_tracking: bool = False,
 ) -> None:
     """Create CDC table using streaming and apply_changes"""
 
@@ -25,13 +26,21 @@ def _create_cdc_table(
         )
 
     sdp.create_streaming_table(name=table)
-    sdp.apply_changes(
-        target=table,
-        source=view_name,
-        keys=[primary_key] if isinstance(primary_key, str) else primary_key,
-        sequence_by=col(cursor_field),
-        stored_as_scd_type="1",
-    )
+    
+    # Build apply_changes arguments
+    apply_changes_kwargs = {
+        "target": table,
+        "source": view_name,
+        "keys": [primary_key] if isinstance(primary_key, str) else primary_key,
+        "sequence_by": col(cursor_field),
+        "stored_as_scd_type": "1",
+    }
+    
+    # Add apply_as_deletes if deletion tracking is enabled
+    if has_deletion_tracking:
+        apply_changes_kwargs["apply_as_deletes"] = expr("_is_deleted = true")
+    
+    sdp.apply_changes(**apply_changes_kwargs)
 
 
 def _create_snapshot_table(
@@ -100,6 +109,7 @@ def _get_table_metadata(spark, connection_name: str, table_list: list[str]) -> d
             "primary_key": row["primary_key"] or [],
             "cursor_field": row["cursor_field"] or [],
             "ingestion_type": row["ingestion_type"] or "cdc",
+            "has_deletion_tracking": row["has_deletion_tracking"] or False,
         }
     return metadata
 
@@ -119,6 +129,7 @@ def ingest(spark, pipeline_spec: dict) -> None:
         primary_key = metadata[table]["primary_key"]
         cursor_field = metadata[table]["cursor_field"]
         ingestion_type = metadata[table].get("ingestion_type", "cdc")
+        has_deletion_tracking = metadata[table].get("has_deletion_tracking", False)
         view_name = table + "_staging"
         table_config = spec.get_table_configuration(table)
 
@@ -131,6 +142,7 @@ def ingest(spark, pipeline_spec: dict) -> None:
                 cursor_field,
                 view_name,
                 table_config,
+                has_deletion_tracking,
             )
         elif ingestion_type == "snapshot":
             _create_snapshot_table(

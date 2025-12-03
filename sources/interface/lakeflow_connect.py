@@ -81,3 +81,34 @@ class LakeflowConnect:
             records: An iterator of records in JSON format.
             offset: An offset in dict.
         """
+
+    def is_marked_for_deletion(self, row: dict, table_name: str) -> bool:
+        """
+        OPTIONAL: Determine if a row is marked for deletion.
+        
+        This method is optional and only needs to be implemented if the source
+        supports soft deletes or has a deletion tracking mechanism.
+        
+        If implemented, the enricher will add an _is_deleted column to indicate
+        whether a record is marked for deletion.
+        
+        Args:
+            row: A single record from the table
+            table_name: The name of the table this row belongs to
+            
+        Returns:
+            True if the row is marked for deletion, False otherwise
+            
+        Example implementations:
+            # Simple field check
+            return row.get('deleted', False)
+            
+            # HubSpot archived field
+            return row.get('archived', False)
+            
+            # Status-based
+            return row.get('status') == 'deleted'
+            
+            # Multiple conditions
+            return row.get('is_deleted') or row.get('archived')
+        """
