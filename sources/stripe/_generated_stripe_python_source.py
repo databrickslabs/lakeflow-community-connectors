@@ -6,6 +6,7 @@
 # ==============================================================================
 
 from datetime import datetime
+from decimal import Decimal
 from typing import (
     Any,
     Dict,
@@ -103,7 +104,6 @@ def register_lakeflow_source(spark):
                 return float(value)
             elif isinstance(field_type, DecimalType):
                 # New support for Decimal type
-                from decimal import Decimal
 
                 if isinstance(value, str) and value.strip():
                     return Decimal(value)
