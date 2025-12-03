@@ -1,5 +1,6 @@
 from pyspark.sql import Row
 from pyspark.sql.types import *
+from decimal import Decimal
 from datetime import datetime
 from typing import Any
 
@@ -78,7 +79,6 @@ def parse_value(value: Any, field_type: DataType) -> Any:
             return float(value)
         elif isinstance(field_type, DecimalType):
             # New support for Decimal type
-            from decimal import Decimal
 
             if isinstance(value, str) and value.strip():
                 return Decimal(value)

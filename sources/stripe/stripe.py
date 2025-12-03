@@ -1,9 +1,14 @@
-# Stripe connector implementation
-
-
 import requests
 import json
-from pyspark.sql.types import *
+from pyspark.sql.types import (
+    StructType,
+    StructField,
+    StringType,
+    LongType,
+    BooleanType,
+    DoubleType,
+    ArrayType,
+)
 from datetime import datetime
 import time
 from typing import Dict, List, Tuple, Iterator, Any
@@ -141,6 +146,286 @@ class LakeflowConnect:
             },
         }
 
+        # Reusable nested schema for Stripe address objects
+        self._address_schema = StructType(
+            [
+                StructField("line1", StringType(), True),
+                StructField("line2", StringType(), True),
+                StructField("city", StringType(), True),
+                StructField("state", StringType(), True),
+                StructField("postal_code", StringType(), True),
+                StructField("country", StringType(), True),
+            ]
+        )
+
+        # Reusable nested schema for shipping (includes address + name/phone)
+        self._shipping_schema = StructType(
+            [
+                StructField("name", StringType(), True),
+                StructField("phone", StringType(), True),
+                StructField("address", self._address_schema, True),
+            ]
+        )
+
+        # Reusable nested schema for billing details
+        self._billing_details_schema = StructType(
+            [
+                StructField("address", self._address_schema, True),
+                StructField("email", StringType(), True),
+                StructField("name", StringType(), True),
+                StructField("phone", StringType(), True),
+                StructField("tax_id", StringType(), True),
+            ]
+        )
+
+        # Nested schema for card checks
+        self._card_checks_schema = StructType(
+            [
+                StructField("address_line1_check", StringType(), True),
+                StructField("address_postal_code_check", StringType(), True),
+                StructField("cvc_check", StringType(), True),
+            ]
+        )
+
+        # Nested schema for card details in payment_method_details
+        self._card_details_schema = StructType(
+            [
+                StructField("amount_authorized", LongType(), True),
+                StructField("authorization_code", StringType(), True),
+                StructField("brand", StringType(), True),
+                StructField("checks", self._card_checks_schema, True),
+                StructField("country", StringType(), True),
+                StructField("exp_month", LongType(), True),
+                StructField("exp_year", LongType(), True),
+                StructField("fingerprint", StringType(), True),
+                StructField("funding", StringType(), True),
+                StructField("last4", StringType(), True),
+                StructField("network", StringType(), True),
+                StructField("network_transaction_id", StringType(), True),
+                StructField("regulated_status", StringType(), True),
+                StructField("installments", StringType(), True),
+                StructField("mandate", StringType(), True),
+                StructField("three_d_secure", StringType(), True),
+                StructField("wallet", StringType(), True),
+                StructField("extended_authorization", StringType(), True),
+                StructField("incremental_authorization", StringType(), True),
+                StructField("multicapture", StringType(), True),
+                StructField("network_token", StringType(), True),
+                StructField("overcapture", StringType(), True),
+            ]
+        )
+
+        # Nested schema for payment_method_details (polymorphic - card is most common)
+        self._payment_method_details_schema = StructType(
+            [
+                StructField("type", StringType(), True),
+                StructField("card", self._card_details_schema, True),
+                # Other payment types stored as JSON strings for flexibility
+                StructField("ach_credit_transfer", StringType(), True),
+                StructField("ach_debit", StringType(), True),
+                StructField("acss_debit", StringType(), True),
+                StructField("affirm", StringType(), True),
+                StructField("afterpay_clearpay", StringType(), True),
+                StructField("alipay", StringType(), True),
+                StructField("amazon_pay", StringType(), True),
+                StructField("au_becs_debit", StringType(), True),
+                StructField("bacs_debit", StringType(), True),
+                StructField("bancontact", StringType(), True),
+                StructField("blik", StringType(), True),
+                StructField("boleto", StringType(), True),
+                StructField("card_present", StringType(), True),
+                StructField("cashapp", StringType(), True),
+                StructField("customer_balance", StringType(), True),
+                StructField("eps", StringType(), True),
+                StructField("fpx", StringType(), True),
+                StructField("giropay", StringType(), True),
+                StructField("grabpay", StringType(), True),
+                StructField("ideal", StringType(), True),
+                StructField("interac_present", StringType(), True),
+                StructField("klarna", StringType(), True),
+                StructField("konbini", StringType(), True),
+                StructField("link", StringType(), True),
+                StructField("multibanco", StringType(), True),
+                StructField("oxxo", StringType(), True),
+                StructField("p24", StringType(), True),
+                StructField("paynow", StringType(), True),
+                StructField("paypal", StringType(), True),
+                StructField("pix", StringType(), True),
+                StructField("promptpay", StringType(), True),
+                StructField("revolut_pay", StringType(), True),
+                StructField("sepa_debit", StringType(), True),
+                StructField("sofort", StringType(), True),
+                StructField("stripe_account", StringType(), True),
+                StructField("swish", StringType(), True),
+                StructField("us_bank_account", StringType(), True),
+                StructField("wechat", StringType(), True),
+                StructField("wechat_pay", StringType(), True),
+                StructField("zip", StringType(), True),
+            ]
+        )
+
+        # Nested schema for charge outcome
+        self._outcome_schema = StructType(
+            [
+                StructField("type", StringType(), True),
+                StructField("network_status", StringType(), True),
+                StructField("reason", StringType(), True),
+                StructField("risk_level", StringType(), True),
+                StructField("risk_score", LongType(), True),
+                StructField("seller_message", StringType(), True),
+                StructField("advice_code", StringType(), True),
+                StructField("network_advice_code", StringType(), True),
+                StructField("network_decline_code", StringType(), True),
+            ]
+        )
+
+        # Nested schema for price recurring
+        self._recurring_schema = StructType(
+            [
+                StructField("interval", StringType(), True),
+                StructField("interval_count", LongType(), True),
+                StructField("meter", StringType(), True),
+                StructField("trial_period_days", LongType(), True),
+                StructField("usage_type", StringType(), True),
+                StructField("aggregate_usage", StringType(), True),
+            ]
+        )
+
+        # Nested schema for fee detail (used in balance_transactions.fee_details array)
+        self._fee_detail_schema = StructType(
+            [
+                StructField("amount", LongType(), True),
+                StructField("application", StringType(), True),
+                StructField("currency", StringType(), True),
+                StructField("description", StringType(), True),
+                StructField("type", StringType(), True),
+            ]
+        )
+
+        # Nested schema for period (used in invoice line items, subscriptions, etc.)
+        self._period_schema = StructType(
+            [
+                StructField("start", LongType(), True),
+                StructField("end", LongType(), True),
+            ]
+        )
+
+        # Nested schema for invoice line item
+        self._invoice_line_item_schema = StructType(
+            [
+                StructField("id", StringType(), True),
+                StructField("object", StringType(), True),
+                StructField("amount", LongType(), True),
+                StructField("amount_excluding_tax", LongType(), True),
+                StructField("currency", StringType(), True),
+                StructField("description", StringType(), True),
+                StructField("discountable", BooleanType(), True),
+                StructField("discounts", StringType(), True),
+                StructField("discount_amounts", StringType(), True),
+                StructField("invoice", StringType(), True),
+                StructField("invoice_item", StringType(), True),
+                StructField("livemode", BooleanType(), True),
+                StructField("metadata", StringType(), True),
+                StructField("period", self._period_schema, True),
+                StructField("plan", StringType(), True),
+                StructField("price", StringType(), True),
+                StructField("proration", BooleanType(), True),
+                StructField("proration_details", StringType(), True),
+                StructField("quantity", LongType(), True),
+                StructField("subscription", StringType(), True),
+                StructField("subscription_item", StringType(), True),
+                StructField("tax_amounts", StringType(), True),
+                StructField("tax_rates", StringType(), True),
+                StructField("type", StringType(), True),
+                StructField("unit_amount_excluding_tax", StringType(), True),
+            ]
+        )
+
+        # Nested schema for invoice lines (paginated list wrapper)
+        self._invoice_lines_schema = StructType(
+            [
+                StructField("object", StringType(), True),
+                StructField("data", ArrayType(self._invoice_line_item_schema), True),
+                StructField("has_more", BooleanType(), True),
+                StructField("total_count", LongType(), True),
+                StructField("url", StringType(), True),
+            ]
+        )
+
+        # Nested schema for invoice payment settings
+        self._invoice_payment_settings_schema = StructType(
+            [
+                StructField("default_mandate", StringType(), True),
+                StructField("payment_method_options", StringType(), True),
+                StructField("payment_method_types", StringType(), True),
+            ]
+        )
+
+        # Nested schema for invoice status transitions
+        self._status_transitions_schema = StructType(
+            [
+                StructField("finalized_at", LongType(), True),
+                StructField("marked_uncollectible_at", LongType(), True),
+                StructField("paid_at", LongType(), True),
+                StructField("voided_at", LongType(), True),
+            ]
+        )
+
+        # Nested schema for card payment method options
+        self._card_payment_method_options_schema = StructType(
+            [
+                StructField("installments", StringType(), True),
+                StructField("mandate_options", StringType(), True),
+                StructField("network", StringType(), True),
+                StructField("request_three_d_secure", StringType(), True),
+                StructField("setup_future_usage", StringType(), True),
+                StructField("capture_method", StringType(), True),
+            ]
+        )
+
+        # Nested schema for payment_method_options (polymorphic)
+        self._payment_method_options_schema = StructType(
+            [
+                StructField("card", self._card_payment_method_options_schema, True),
+                StructField("acss_debit", StringType(), True),
+                StructField("affirm", StringType(), True),
+                StructField("afterpay_clearpay", StringType(), True),
+                StructField("alipay", StringType(), True),
+                StructField("amazon_pay", StringType(), True),
+                StructField("au_becs_debit", StringType(), True),
+                StructField("bacs_debit", StringType(), True),
+                StructField("bancontact", StringType(), True),
+                StructField("blik", StringType(), True),
+                StructField("boleto", StringType(), True),
+                StructField("cashapp", StringType(), True),
+                StructField("customer_balance", StringType(), True),
+                StructField("eps", StringType(), True),
+                StructField("fpx", StringType(), True),
+                StructField("giropay", StringType(), True),
+                StructField("grabpay", StringType(), True),
+                StructField("ideal", StringType(), True),
+                StructField("interac_present", StringType(), True),
+                StructField("klarna", StringType(), True),
+                StructField("konbini", StringType(), True),
+                StructField("link", StringType(), True),
+                StructField("mobilepay", StringType(), True),
+                StructField("multibanco", StringType(), True),
+                StructField("oxxo", StringType(), True),
+                StructField("p24", StringType(), True),
+                StructField("paynow", StringType(), True),
+                StructField("paypal", StringType(), True),
+                StructField("pix", StringType(), True),
+                StructField("promptpay", StringType(), True),
+                StructField("revolut_pay", StringType(), True),
+                StructField("sepa_debit", StringType(), True),
+                StructField("sofort", StringType(), True),
+                StructField("swish", StringType(), True),
+                StructField("us_bank_account", StringType(), True),
+                StructField("wechat_pay", StringType(), True),
+                StructField("zip", StringType(), True),
+            ]
+        )
+
         # Centralized schema configuration
         self._schema_config = {
             "customers": StructType(
@@ -148,26 +433,13 @@ class LakeflowConnect:
                     StructField("id", StringType(), False),
                     StructField("object", StringType(), True),
                     StructField("created", LongType(), True),
-                    StructField("updated", LongType(), True),
                     StructField("livemode", BooleanType(), True),
                     StructField("email", StringType(), True),
                     StructField("name", StringType(), True),
                     StructField("phone", StringType(), True),
                     StructField("description", StringType(), True),
-                    StructField("address_line1", StringType(), True),
-                    StructField("address_line2", StringType(), True),
-                    StructField("address_city", StringType(), True),
-                    StructField("address_state", StringType(), True),
-                    StructField("address_postal_code", StringType(), True),
-                    StructField("address_country", StringType(), True),
-                    StructField("shipping_name", StringType(), True),
-                    StructField("shipping_phone", StringType(), True),
-                    StructField("shipping_address_line1", StringType(), True),
-                    StructField("shipping_address_line2", StringType(), True),
-                    StructField("shipping_address_city", StringType(), True),
-                    StructField("shipping_address_state", StringType(), True),
-                    StructField("shipping_address_postal_code", StringType(), True),
-                    StructField("shipping_address_country", StringType(), True),
+                    StructField("address", self._address_schema, True),
+                    StructField("shipping", self._shipping_schema, True),
                     StructField("balance", LongType(), True),
                     StructField("currency", StringType(), True),
                     StructField("delinquent", BooleanType(), True),
@@ -179,6 +451,11 @@ class LakeflowConnect:
                     StructField("metadata", StringType(), True),
                     StructField("discount", StringType(), True),
                     StructField("deleted", BooleanType(), True),
+                    StructField("test_clock", StringType(), True),
+                    StructField("tax", StringType(), True),
+                    StructField("sources", StringType(), True),
+                    StructField("subscriptions", StringType(), True),
+                    StructField("next_invoice_sequence", LongType(), True),
                 ]
             ),
             "charges": StructType(
@@ -204,9 +481,9 @@ class LakeflowConnect:
                     StructField("receipt_email", StringType(), True),
                     StructField("receipt_url", StringType(), True),
                     StructField("statement_descriptor", StringType(), True),
-                    StructField("billing_details", StringType(), True),
-                    StructField("payment_method_details", StringType(), True),
-                    StructField("outcome", StringType(), True),
+                    StructField("billing_details", self._billing_details_schema, True),
+                    StructField("payment_method_details", self._payment_method_details_schema, True),
+                    StructField("outcome", self._outcome_schema, True),
                     StructField("metadata", StringType(), True),
                     StructField("failure_code", StringType(), True),
                     StructField("failure_message", StringType(), True),
@@ -234,7 +511,7 @@ class LakeflowConnect:
                     StructField("capture_method", StringType(), True),
                     StructField("confirmation_method", StringType(), True),
                     StructField("charges", StringType(), True),
-                    StructField("payment_method_options", StringType(), True),
+                    StructField("payment_method_options", self._payment_method_options_schema, True),
                     StructField("shipping", StringType(), True),
                     StructField("metadata", StringType(), True),
                     StructField("latest_charge", StringType(), True),
@@ -268,35 +545,98 @@ class LakeflowConnect:
             ),
             "invoices": StructType(
                 [
+                    # Core identifiers
                     StructField("id", StringType(), False),
                     StructField("object", StringType(), True),
                     StructField("created", LongType(), True),
                     StructField("livemode", BooleanType(), True),
+                    # Status and payment info
                     StructField("status", StringType(), True),
                     StructField("paid", BooleanType(), True),
+                    StructField("paid_out_of_band", BooleanType(), True),
+                    StructField("attempted", BooleanType(), True),
+                    StructField("attempt_count", LongType(), True),
+                    StructField("auto_advance", BooleanType(), True),
+                    # Amounts
                     StructField("amount_due", LongType(), True),
                     StructField("amount_paid", LongType(), True),
                     StructField("amount_remaining", LongType(), True),
+                    StructField("amount_shipping", LongType(), True),
                     StructField("total", LongType(), True),
                     StructField("subtotal", LongType(), True),
+                    StructField("subtotal_excluding_tax", LongType(), True),
+                    StructField("total_excluding_tax", LongType(), True),
                     StructField("tax", LongType(), True),
+                    StructField("starting_balance", LongType(), True),
+                    StructField("ending_balance", LongType(), True),
+                    StructField("pre_payment_credit_notes_amount", LongType(), True),
+                    StructField("post_payment_credit_notes_amount", LongType(), True),
                     StructField("currency", StringType(), True),
+                    # Customer info
                     StructField("customer", StringType(), True),
+                    StructField("customer_email", StringType(), True),
+                    StructField("customer_name", StringType(), True),
+                    StructField("customer_phone", StringType(), True),
+                    StructField("customer_address", self._address_schema, True),
+                    StructField("customer_shipping", self._shipping_schema, True),
+                    StructField("customer_tax_exempt", StringType(), True),
+                    StructField("customer_tax_ids", StringType(), True),
+                    # References
                     StructField("subscription", StringType(), True),
                     StructField("charge", StringType(), True),
                     StructField("payment_intent", StringType(), True),
+                    StructField("default_payment_method", StringType(), True),
+                    StructField("default_source", StringType(), True),
+                    StructField("quote", StringType(), True),
+                    StructField("latest_revision", StringType(), True),
+                    StructField("from_invoice", StringType(), True),
+                    # Billing details
                     StructField("billing_reason", StringType(), True),
                     StructField("collection_method", StringType(), True),
-                    StructField("customer_email", StringType(), True),
-                    StructField("customer_name", StringType(), True),
+                    StructField("description", StringType(), True),
+                    StructField("footer", StringType(), True),
+                    StructField("statement_descriptor", StringType(), True),
+                    StructField("receipt_number", StringType(), True),
+                    # Dates
                     StructField("due_date", LongType(), True),
                     StructField("period_start", LongType(), True),
                     StructField("period_end", LongType(), True),
+                    StructField("next_payment_attempt", LongType(), True),
+                    StructField("webhooks_delivered_at", LongType(), True),
+                    StructField("effective_at", LongType(), True),
+                    # URLs
                     StructField("number", StringType(), True),
                     StructField("hosted_invoice_url", StringType(), True),
                     StructField("invoice_pdf", StringType(), True),
-                    StructField("lines", StringType(), True),
+                    # Account info
+                    StructField("account_country", StringType(), True),
+                    StructField("account_name", StringType(), True),
+                    StructField("account_tax_ids", StringType(), True),
+                    # Connect
+                    StructField("application", StringType(), True),
+                    StructField("application_fee_amount", LongType(), True),
+                    StructField("on_behalf_of", StringType(), True),
+                    StructField("transfer_data", StringType(), True),
+                    # Complex nested objects
+                    StructField("automatic_tax", StringType(), True),
+                    StructField("custom_fields", StringType(), True),
+                    StructField("default_tax_rates", StringType(), True),
+                    StructField("discount", StringType(), True),
+                    StructField("discounts", StringType(), True),
+                    StructField("issuer", StringType(), True),
+                    StructField("last_finalization_error", StringType(), True),
+                    StructField("lines", self._invoice_lines_schema, True),
+                    StructField("payment_settings", self._invoice_payment_settings_schema, True),
+                    StructField("rendering", StringType(), True),
+                    StructField("shipping_cost", StringType(), True),
+                    StructField("shipping_details", StringType(), True),
+                    StructField("status_transitions", self._status_transitions_schema, True),
+                    StructField("subscription_details", StringType(), True),
+                    StructField("threshold_reason", StringType(), True),
+                    StructField("total_discount_amounts", StringType(), True),
+                    StructField("total_tax_amounts", StringType(), True),
                     StructField("metadata", StringType(), True),
+                    StructField("test_clock", StringType(), True),
                 ]
             ),
             "products": StructType(
@@ -318,6 +658,9 @@ class LakeflowConnect:
                     StructField("tax_code", StringType(), True),
                     StructField("shippable", BooleanType(), True),
                     StructField("deleted", BooleanType(), True),
+                    StructField("default_price", StringType(), True),
+                    StructField("features", StringType(), True),
+                    StructField("package_dimensions", StringType(), True),
                 ]
             ),
             "prices": StructType(
@@ -333,7 +676,7 @@ class LakeflowConnect:
                     StructField("product", StringType(), True),
                     StructField("billing_scheme", StringType(), True),
                     StructField("type", StringType(), True),
-                    StructField("recurring", StringType(), True),
+                    StructField("recurring", self._recurring_schema, True),
                     StructField("lookup_key", StringType(), True),
                     StructField("nickname", StringType(), True),
                     StructField("tax_behavior", StringType(), True),
@@ -385,7 +728,7 @@ class LakeflowConnect:
                     StructField("livemode", BooleanType(), True),
                     StructField("type", StringType(), True),
                     StructField("customer", StringType(), True),
-                    StructField("billing_details", StringType(), True),
+                    StructField("billing_details", self._billing_details_schema, True),
                     StructField("card", StringType(), True),
                     StructField("us_bank_account", StringType(), True),
                     StructField("metadata", StringType(), True),
@@ -401,13 +744,14 @@ class LakeflowConnect:
                     StructField("currency", StringType(), True),
                     StructField("net", LongType(), True),
                     StructField("fee", LongType(), True),
-                    StructField("fee_details", StringType(), True),
+                    StructField("fee_details", ArrayType(self._fee_detail_schema), True),
                     StructField("type", StringType(), True),
                     StructField("source", StringType(), True),
                     StructField("status", StringType(), True),
                     StructField("description", StringType(), True),
                     StructField("available_on", LongType(), True),
-                    StructField("exchange_rate", StringType(), True),
+                    StructField("exchange_rate", DoubleType(), True),
+                    StructField("reporting_category", StringType(), True),
                 ]
             ),
             "payouts": StructType(
@@ -446,10 +790,13 @@ class LakeflowConnect:
                     StructField("quantity", LongType(), True),
                     StructField("unit_amount", LongType(), True),
                     StructField("unit_amount_decimal", StringType(), True),
-                    StructField("period_start", LongType(), True),
-                    StructField("period_end", LongType(), True),
+                    StructField("period", StringType(), True),
                     StructField("discounts", StringType(), True),
                     StructField("metadata", StringType(), True),
+                    StructField("proration", BooleanType(), True),
+                    StructField("date", LongType(), True),
+                    StructField("discountable", BooleanType(), True),
+                    StructField("tax_rates", StringType(), True),
                 ]
             ),
             "plans": StructType(
@@ -495,7 +842,7 @@ class LakeflowConnect:
                     StructField("livemode", BooleanType(), True),
                     StructField("name", StringType(), True),
                     StructField("amount_off", LongType(), True),
-                    StructField("percent_off", StringType(), True),
+                    StructField("percent_off", DoubleType(), True),
                     StructField("currency", StringType(), True),
                     StructField("duration", StringType(), True),
                     StructField("duration_in_months", LongType(), True),
@@ -505,6 +852,7 @@ class LakeflowConnect:
                     StructField("valid", BooleanType(), True),
                     StructField("applies_to", StringType(), True),
                     StructField("metadata", StringType(), True),
+                    StructField("currency_options", StringType(), True),
                 ]
             ),
         }
@@ -642,9 +990,7 @@ class LakeflowConnect:
             if not records:
                 break
 
-            # Transform records
-            transformed_records = self._transform_records(records, table_name)
-            all_records.extend(transformed_records)
+            all_records.extend(records)
 
             # Track the latest cursor value for checkpointing
             for record in records:
@@ -716,9 +1062,7 @@ class LakeflowConnect:
             if not records:
                 break
 
-            # Transform records
-            transformed_records = self._transform_records(records, table_name)
-            all_records.extend(transformed_records)
+            all_records.extend(records)
 
             # Track the latest cursor value
             for record in records:
@@ -740,560 +1084,6 @@ class LakeflowConnect:
         # Return new offset for next sync
         offset = {cursor_field: latest_cursor_value}
         return all_records, offset
-
-    def _transform_records(self, records: List[Dict], table_name: str) -> List[Dict]:
-        """
-        Transform Stripe API records to match schema.
-
-        Args:
-            records: Raw records from Stripe API
-            table_name: Name of the table
-
-        Returns:
-            List of transformed records
-        """
-        if table_name == "customers":
-            return [self._transform_customer_record(record) for record in records]
-        elif table_name == "charges":
-            return [self._transform_charge_record(record) for record in records]
-        elif table_name == "payment_intents":
-            return [self._transform_payment_intent_record(record) for record in records]
-        elif table_name == "subscriptions":
-            return [self._transform_subscription_record(record) for record in records]
-        elif table_name == "invoices":
-            return [self._transform_invoice_record(record) for record in records]
-        elif table_name == "products":
-            return [self._transform_product_record(record) for record in records]
-        elif table_name == "prices":
-            return [self._transform_price_record(record) for record in records]
-        elif table_name == "refunds":
-            return [self._transform_refund_record(record) for record in records]
-        elif table_name == "disputes":
-            return [self._transform_dispute_record(record) for record in records]
-        elif table_name == "payment_methods":
-            return [self._transform_payment_method_record(record) for record in records]
-        elif table_name == "balance_transactions":
-            return [
-                self._transform_balance_transaction_record(record) for record in records
-            ]
-        elif table_name == "payouts":
-            return [self._transform_payout_record(record) for record in records]
-        elif table_name == "invoice_items":
-            return [self._transform_invoice_item_record(record) for record in records]
-        elif table_name == "plans":
-            return [self._transform_plan_record(record) for record in records]
-        elif table_name == "events":
-            return [self._transform_event_record(record) for record in records]
-        elif table_name == "coupons":
-            return [self._transform_coupon_record(record) for record in records]
-        else:
-            return records
-
-    def _transform_customer_record(self, record: Dict) -> Dict:
-        """
-        Transform a Stripe Customer object to match our schema.
-
-        Args:
-            record: Raw customer record from Stripe API
-
-        Returns:
-            Transformed customer record
-        """
-        # Extract address fields
-        address = record.get("address") or {}
-
-        # Extract shipping fields
-        shipping = record.get("shipping") or {}
-        shipping_address = shipping.get("address") or {}
-
-        # Extract invoice settings
-        invoice_settings = record.get("invoice_settings")
-        invoice_settings_json = (
-            json.dumps(invoice_settings) if invoice_settings else None
-        )
-
-        # Extract metadata
-        metadata = record.get("metadata")
-        metadata_json = json.dumps(metadata) if metadata else None
-
-        # Extract discount
-        discount = record.get("discount")
-        discount_json = json.dumps(discount) if discount else None
-
-        transformed = {
-            # Core fields
-            "id": record.get("id"),
-            "object": record.get("object"),
-            "created": record.get("created"),
-            "updated": record.get("updated"),  # May not exist for customers
-            "livemode": record.get("livemode"),
-            # Customer details
-            "email": record.get("email"),
-            "name": record.get("name"),
-            "phone": record.get("phone"),
-            "description": record.get("description"),
-            # Address (flattened)
-            "address_line1": address.get("line1"),
-            "address_line2": address.get("line2"),
-            "address_city": address.get("city"),
-            "address_state": address.get("state"),
-            "address_postal_code": address.get("postal_code"),
-            "address_country": address.get("country"),
-            # Shipping (flattened)
-            "shipping_name": shipping.get("name"),
-            "shipping_phone": shipping.get("phone"),
-            "shipping_address_line1": shipping_address.get("line1"),
-            "shipping_address_line2": shipping_address.get("line2"),
-            "shipping_address_city": shipping_address.get("city"),
-            "shipping_address_state": shipping_address.get("state"),
-            "shipping_address_postal_code": shipping_address.get("postal_code"),
-            "shipping_address_country": shipping_address.get("country"),
-            # Financial fields
-            "balance": record.get("balance"),
-            "currency": record.get("currency"),
-            "delinquent": record.get("delinquent"),
-            # Preferences
-            "preferred_locales": record.get("preferred_locales"),
-            # Complex fields as JSON strings
-            "invoice_settings": invoice_settings_json,
-            "metadata": metadata_json,
-            "discount": discount_json,
-            # Tax information
-            "tax_exempt": record.get("tax_exempt"),
-            # References
-            "default_source": record.get("default_source"),
-            "invoice_prefix": record.get("invoice_prefix"),
-            # Deletion tracking
-            "deleted": record.get("deleted", False),
-        }
-
-        return transformed
-
-    def _transform_charge_record(self, record: Dict) -> Dict:
-        """Transform a Stripe Charge object to match our schema."""
-        # Convert complex fields to JSON strings
-        billing_details = record.get("billing_details")
-        payment_method_details = record.get("payment_method_details")
-        outcome = record.get("outcome")
-        metadata = record.get("metadata")
-
-        return {
-            "id": record.get("id"),
-            "object": record.get("object"),
-            "created": record.get("created"),
-            "livemode": record.get("livemode"),
-            "amount": record.get("amount"),
-            "amount_captured": record.get("amount_captured"),
-            "amount_refunded": record.get("amount_refunded"),
-            "currency": record.get("currency"),
-            "status": record.get("status"),
-            "paid": record.get("paid"),
-            "refunded": record.get("refunded"),
-            "captured": record.get("captured"),
-            "disputed": record.get("disputed"),
-            "customer": record.get("customer"),
-            "invoice": record.get("invoice"),
-            "payment_intent": record.get("payment_intent"),
-            "payment_method": record.get("payment_method"),
-            "description": record.get("description"),
-            "receipt_email": record.get("receipt_email"),
-            "receipt_url": record.get("receipt_url"),
-            "statement_descriptor": record.get("statement_descriptor"),
-            "billing_details": json.dumps(billing_details) if billing_details else None,
-            "payment_method_details": json.dumps(payment_method_details)
-            if payment_method_details
-            else None,
-            "outcome": json.dumps(outcome) if outcome else None,
-            "metadata": json.dumps(metadata) if metadata else None,
-            "failure_code": record.get("failure_code"),
-            "failure_message": record.get("failure_message"),
-        }
-
-    def _transform_payment_intent_record(self, record: Dict) -> Dict:
-        """Transform a Stripe PaymentIntent object to match our schema."""
-        charges = record.get("charges")
-        payment_method_options = record.get("payment_method_options")
-        shipping = record.get("shipping")
-        metadata = record.get("metadata")
-
-        return {
-            "id": record.get("id"),
-            "object": record.get("object"),
-            "created": record.get("created"),
-            "livemode": record.get("livemode"),
-            "amount": record.get("amount"),
-            "amount_capturable": record.get("amount_capturable"),
-            "amount_received": record.get("amount_received"),
-            "currency": record.get("currency"),
-            "status": record.get("status"),
-            "canceled_at": record.get("canceled_at"),
-            "cancellation_reason": record.get("cancellation_reason"),
-            "customer": record.get("customer"),
-            "invoice": record.get("invoice"),
-            "payment_method": record.get("payment_method"),
-            "description": record.get("description"),
-            "receipt_email": record.get("receipt_email"),
-            "statement_descriptor": record.get("statement_descriptor"),
-            "capture_method": record.get("capture_method"),
-            "confirmation_method": record.get("confirmation_method"),
-            "charges": json.dumps(charges) if charges else None,
-            "payment_method_options": json.dumps(payment_method_options)
-            if payment_method_options
-            else None,
-            "shipping": json.dumps(shipping) if shipping else None,
-            "metadata": json.dumps(metadata) if metadata else None,
-            "latest_charge": record.get("latest_charge"),
-        }
-
-    def _transform_subscription_record(self, record: Dict) -> Dict:
-        """Transform a Stripe Subscription object to match our schema."""
-        items = record.get("items")
-        metadata = record.get("metadata")
-        discount = record.get("discount")
-
-        return {
-            "id": record.get("id"),
-            "object": record.get("object"),
-            "created": record.get("created"),
-            "livemode": record.get("livemode"),
-            "status": record.get("status"),
-            "current_period_start": record.get("current_period_start"),
-            "current_period_end": record.get("current_period_end"),
-            "cancel_at": record.get("cancel_at"),
-            "canceled_at": record.get("canceled_at"),
-            "ended_at": record.get("ended_at"),
-            "trial_start": record.get("trial_start"),
-            "trial_end": record.get("trial_end"),
-            "customer": record.get("customer"),
-            "default_payment_method": record.get("default_payment_method"),
-            "latest_invoice": record.get("latest_invoice"),
-            "billing_cycle_anchor": record.get("billing_cycle_anchor"),
-            "collection_method": record.get("collection_method"),
-            "days_until_due": record.get("days_until_due"),
-            "items": json.dumps(items) if items else None,
-            "metadata": json.dumps(metadata) if metadata else None,
-            "discount": json.dumps(discount) if discount else None,
-            "cancel_at_period_end": record.get("cancel_at_period_end"),
-        }
-
-    def _transform_invoice_record(self, record: Dict) -> Dict:
-        """Transform a Stripe Invoice object to match our schema."""
-        lines = record.get("lines")
-        metadata = record.get("metadata")
-
-        return {
-            "id": record.get("id"),
-            "object": record.get("object"),
-            "created": record.get("created"),
-            "livemode": record.get("livemode"),
-            "status": record.get("status"),
-            "paid": record.get("paid"),
-            "amount_due": record.get("amount_due"),
-            "amount_paid": record.get("amount_paid"),
-            "amount_remaining": record.get("amount_remaining"),
-            "total": record.get("total"),
-            "subtotal": record.get("subtotal"),
-            "tax": record.get("tax"),
-            "currency": record.get("currency"),
-            "customer": record.get("customer"),
-            "subscription": record.get("subscription"),
-            "charge": record.get("charge"),
-            "payment_intent": record.get("payment_intent"),
-            "billing_reason": record.get("billing_reason"),
-            "collection_method": record.get("collection_method"),
-            "customer_email": record.get("customer_email"),
-            "customer_name": record.get("customer_name"),
-            "due_date": record.get("due_date"),
-            "period_start": record.get("period_start"),
-            "period_end": record.get("period_end"),
-            "number": record.get("number"),
-            "hosted_invoice_url": record.get("hosted_invoice_url"),
-            "invoice_pdf": record.get("invoice_pdf"),
-            "lines": json.dumps(lines) if lines else None,
-            "metadata": json.dumps(metadata) if metadata else None,
-        }
-
-    def _transform_product_record(self, record: Dict) -> Dict:
-        """Transform a Stripe Product object to match our schema."""
-        metadata = record.get("metadata")
-
-        return {
-            "id": record.get("id"),
-            "object": record.get("object"),
-            "created": record.get("created"),
-            "updated": record.get("updated"),
-            "livemode": record.get("livemode"),
-            "name": record.get("name"),
-            "description": record.get("description"),
-            "active": record.get("active"),
-            "type": record.get("type"),
-            "unit_label": record.get("unit_label"),
-            "url": record.get("url"),
-            "images": record.get("images"),
-            "metadata": json.dumps(metadata) if metadata else None,
-            "statement_descriptor": record.get("statement_descriptor"),
-            "tax_code": record.get("tax_code"),
-            "shippable": record.get("shippable"),
-            "deleted": record.get("deleted", False),
-        }
-
-    def _transform_price_record(self, record: Dict) -> Dict:
-        """Transform a Stripe Price object to match our schema."""
-        recurring = record.get("recurring")
-        tiers = record.get("tiers")
-        metadata = record.get("metadata")
-
-        return {
-            "id": record.get("id"),
-            "object": record.get("object"),
-            "created": record.get("created"),
-            "livemode": record.get("livemode"),
-            "active": record.get("active"),
-            "currency": record.get("currency"),
-            "unit_amount": record.get("unit_amount"),
-            "unit_amount_decimal": record.get("unit_amount_decimal"),
-            "product": record.get("product"),
-            "billing_scheme": record.get("billing_scheme"),
-            "type": record.get("type"),
-            "recurring": json.dumps(recurring) if recurring else None,
-            "lookup_key": record.get("lookup_key"),
-            "nickname": record.get("nickname"),
-            "tax_behavior": record.get("tax_behavior"),
-            "tiers": json.dumps(tiers) if tiers else None,
-            "tiers_mode": record.get("tiers_mode"),
-            "metadata": json.dumps(metadata) if metadata else None,
-        }
-
-    def _transform_refund_record(self, record: Dict) -> Dict:
-        """Transform a Stripe Refund object to match our schema."""
-        metadata = record.get("metadata")
-
-        return {
-            "id": record.get("id"),
-            "object": record.get("object"),
-            "created": record.get("created"),
-            "livemode": record.get("livemode"),
-            "amount": record.get("amount"),
-            "currency": record.get("currency"),
-            "charge": record.get("charge"),
-            "payment_intent": record.get("payment_intent"),
-            "status": record.get("status"),
-            "reason": record.get("reason"),
-            "receipt_number": record.get("receipt_number"),
-            "metadata": json.dumps(metadata) if metadata else None,
-            "failure_reason": record.get("failure_reason"),
-        }
-
-    def _transform_dispute_record(self, record: Dict) -> Dict:
-        """Transform a Stripe Dispute object to match our schema."""
-        evidence = record.get("evidence")
-        evidence_details = record.get("evidence_details")
-        metadata = record.get("metadata")
-
-        return {
-            "id": record.get("id"),
-            "object": record.get("object"),
-            "created": record.get("created"),
-            "livemode": record.get("livemode"),
-            "amount": record.get("amount"),
-            "currency": record.get("currency"),
-            "charge": record.get("charge"),
-            "payment_intent": record.get("payment_intent"),
-            "status": record.get("status"),
-            "reason": record.get("reason"),
-            "evidence": json.dumps(evidence) if evidence else None,
-            "evidence_details": json.dumps(evidence_details)
-            if evidence_details
-            else None,
-            "is_charge_refundable": record.get("is_charge_refundable"),
-            "metadata": json.dumps(metadata) if metadata else None,
-        }
-
-    def _transform_payment_method_record(self, record: Dict) -> Dict:
-        """Transform a Stripe PaymentMethod object to match our schema."""
-        billing_details = record.get("billing_details")
-        card = record.get("card")
-        us_bank_account = record.get("us_bank_account")
-        metadata = record.get("metadata")
-
-        return {
-            "id": record.get("id"),
-            "object": record.get("object"),
-            "created": record.get("created"),
-            "livemode": record.get("livemode"),
-            "type": record.get("type"),
-            "customer": record.get("customer"),
-            "billing_details": json.dumps(billing_details) if billing_details else None,
-            "card": json.dumps(card) if card else None,
-            "us_bank_account": json.dumps(us_bank_account) if us_bank_account else None,
-            "metadata": json.dumps(metadata) if metadata else None,
-        }
-
-    def _transform_balance_transaction_record(self, record: Dict) -> Dict:
-        """Transform a Stripe BalanceTransaction object to match our schema."""
-        fee_details = record.get("fee_details")
-
-        return {
-            "id": record.get("id"),
-            "object": record.get("object"),
-            "created": record.get("created"),
-            "livemode": record.get("livemode"),
-            "amount": record.get("amount"),
-            "currency": record.get("currency"),
-            "net": record.get("net"),
-            "fee": record.get("fee"),
-            "fee_details": json.dumps(fee_details) if fee_details else None,
-            "type": record.get("type"),
-            "source": record.get("source"),
-            "status": record.get("status"),
-            "description": record.get("description"),
-            "available_on": record.get("available_on"),
-            "exchange_rate": str(record.get("exchange_rate"))
-            if record.get("exchange_rate")
-            else None,
-        }
-
-    def _transform_payout_record(self, record: Dict) -> Dict:
-        """Transform a Stripe Payout object to match our schema."""
-        metadata = record.get("metadata")
-
-        return {
-            "id": record.get("id"),
-            "object": record.get("object"),
-            "created": record.get("created"),
-            "livemode": record.get("livemode"),
-            "amount": record.get("amount"),
-            "currency": record.get("currency"),
-            "arrival_date": record.get("arrival_date"),
-            "status": record.get("status"),
-            "type": record.get("type"),
-            "method": record.get("method"),
-            "destination": record.get("destination"),
-            "description": record.get("description"),
-            "balance_transaction": record.get("balance_transaction"),
-            "failure_code": record.get("failure_code"),
-            "failure_message": record.get("failure_message"),
-            "metadata": json.dumps(metadata) if metadata else None,
-        }
-
-    def _transform_subscription_item_record(self, record: Dict) -> Dict:
-        """Transform a Stripe SubscriptionItem object to match our schema."""
-        billing_thresholds = record.get("billing_thresholds")
-        tax_rates = record.get("tax_rates")
-        metadata = record.get("metadata")
-
-        return {
-            "id": record.get("id"),
-            "object": record.get("object"),
-            "created": record.get("created"),
-            "subscription": record.get("subscription"),
-            "price": record.get("price"),
-            "quantity": record.get("quantity"),
-            "billing_thresholds": json.dumps(billing_thresholds)
-            if billing_thresholds
-            else None,
-            "tax_rates": json.dumps(tax_rates) if tax_rates else None,
-            "metadata": json.dumps(metadata) if metadata else None,
-        }
-
-    def _transform_invoice_item_record(self, record: Dict) -> Dict:
-        """Transform a Stripe InvoiceItem object to match our schema."""
-        discounts = record.get("discounts")
-        metadata = record.get("metadata")
-
-        return {
-            "id": record.get("id"),
-            "object": record.get("object"),
-            "created": record.get("created"),
-            "livemode": record.get("livemode"),
-            "amount": record.get("amount"),
-            "currency": record.get("currency"),
-            "customer": record.get("customer"),
-            "invoice": record.get("invoice"),
-            "subscription": record.get("subscription"),
-            "price": record.get("price"),
-            "description": record.get("description"),
-            "quantity": record.get("quantity"),
-            "unit_amount": record.get("unit_amount"),
-            "unit_amount_decimal": record.get("unit_amount_decimal"),
-            "period_start": record.get("period", {}).get("start")
-            if record.get("period")
-            else None,
-            "period_end": record.get("period", {}).get("end")
-            if record.get("period")
-            else None,
-            "discounts": json.dumps(discounts) if discounts else None,
-            "metadata": json.dumps(metadata) if metadata else None,
-        }
-
-    def _transform_plan_record(self, record: Dict) -> Dict:
-        """Transform a Stripe Plan object to match our schema."""
-        tiers = record.get("tiers")
-        metadata = record.get("metadata")
-
-        return {
-            "id": record.get("id"),
-            "object": record.get("object"),
-            "created": record.get("created"),
-            "livemode": record.get("livemode"),
-            "active": record.get("active"),
-            "amount": record.get("amount"),
-            "currency": record.get("currency"),
-            "interval": record.get("interval"),
-            "interval_count": record.get("interval_count"),
-            "product": record.get("product"),
-            "nickname": record.get("nickname"),
-            "usage_type": record.get("usage_type"),
-            "aggregate_usage": record.get("aggregate_usage"),
-            "trial_period_days": record.get("trial_period_days"),
-            "tiers": json.dumps(tiers) if tiers else None,
-            "tiers_mode": record.get("tiers_mode"),
-            "metadata": json.dumps(metadata) if metadata else None,
-            "deleted": record.get("deleted", False),
-        }
-
-    def _transform_event_record(self, record: Dict) -> Dict:
-        """Transform a Stripe Event object to match our schema."""
-        data = record.get("data")
-        request = record.get("request")
-
-        return {
-            "id": record.get("id"),
-            "object": record.get("object"),
-            "created": record.get("created"),
-            "livemode": record.get("livemode"),
-            "type": record.get("type"),
-            "data": json.dumps(data) if data else None,
-            "api_version": record.get("api_version"),
-            "request": json.dumps(request) if request else None,
-            "pending_webhooks": record.get("pending_webhooks"),
-        }
-
-    def _transform_coupon_record(self, record: Dict) -> Dict:
-        """Transform a Stripe Coupon object to match our schema."""
-        applies_to = record.get("applies_to")
-        metadata = record.get("metadata")
-
-        return {
-            "id": record.get("id"),
-            "object": record.get("object"),
-            "created": record.get("created"),
-            "livemode": record.get("livemode"),
-            "name": record.get("name"),
-            "amount_off": record.get("amount_off"),
-            "percent_off": str(record.get("percent_off"))
-            if record.get("percent_off")
-            else None,
-            "currency": record.get("currency"),
-            "duration": record.get("duration"),
-            "duration_in_months": record.get("duration_in_months"),
-            "max_redemptions": record.get("max_redemptions"),
-            "times_redeemed": record.get("times_redeemed"),
-            "redeem_by": record.get("redeem_by"),
-            "valid": record.get("valid"),
-            "applies_to": json.dumps(applies_to) if applies_to else None,
-            "metadata": json.dumps(metadata) if metadata else None,
-        }
 
     def test_connection(self) -> dict:
         """
