@@ -111,12 +111,18 @@ def _get_table_metadata(spark, connection_name: str, table_list: list[str]) -> d
     )
     metadata = {}
     for row in df.collect():
-        metadata[row["tableName"]] = {
-            "primary_key": row["primary_key"] or [],
-            "cursor_field": row["cursor_field"] or [],
-            "ingestion_type": row["ingestion_type"] or "cdc",
-            "has_deletion_tracking": row["has_deletion_tracking"] or False,
-        }
+        table_metadata = {}
+        if row["primary_keys"] is not None:
+            table_metadata["primary_keys"] = row["primary_keys"]
+        if row["cursor_field"] is not None:
+            table_metadata["cursor_field"] = row["cursor_field"]
+        if row["ingestion_type"] is not None:
+            table_metadata["ingestion_type"] = row["ingestion_type"]
+        if row["has_deletion_tracking"] is not None:
+            table_metadata["has_deletion_tracking"] = row["has_deletion_tracking"]
+        else:
+            table_metadata["has_deletion_tracking"] = False
+        metadata[row["tableName"]] = table_metadata
     return metadata
 
 
