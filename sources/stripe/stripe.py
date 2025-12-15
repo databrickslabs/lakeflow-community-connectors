@@ -33,112 +33,112 @@ class LakeflowConnect:
         # Centralized object metadata configuration
         self._object_config = {
             "customers": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "created",
                 "ingestion_type": "cdc",
                 "endpoint": "customers",
                 "supports_deleted": True,
             },
             "charges": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "created",
                 "ingestion_type": "cdc",
                 "endpoint": "charges",
                 "supports_deleted": False,
             },
             "payment_intents": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "created",
                 "ingestion_type": "cdc",
                 "endpoint": "payment_intents",
                 "supports_deleted": False,
             },
             "subscriptions": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "created",
                 "ingestion_type": "cdc",
                 "endpoint": "subscriptions",
                 "supports_deleted": False,
             },
             "invoices": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "created",
                 "ingestion_type": "cdc",
                 "endpoint": "invoices",
                 "supports_deleted": False,
             },
             "products": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "created",
                 "ingestion_type": "cdc",
                 "endpoint": "products",
                 "supports_deleted": True,
             },
             "prices": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "created",
                 "ingestion_type": "cdc",
                 "endpoint": "prices",
                 "supports_deleted": False,
             },
             "refunds": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "created",
                 "ingestion_type": "cdc",
                 "endpoint": "refunds",
                 "supports_deleted": False,
             },
             "disputes": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "created",
                 "ingestion_type": "cdc",
                 "endpoint": "disputes",
                 "supports_deleted": False,
             },
             "payment_methods": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "created",
                 "ingestion_type": "cdc",
                 "endpoint": "payment_methods",
                 "supports_deleted": False,
             },
             "balance_transactions": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "created",
                 "ingestion_type": "cdc",
                 "endpoint": "balance_transactions",
                 "supports_deleted": False,
             },
             "payouts": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "created",
                 "ingestion_type": "cdc",
                 "endpoint": "payouts",
                 "supports_deleted": False,
             },
             "invoice_items": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "created",
                 "ingestion_type": "cdc",
                 "endpoint": "invoiceitems",
                 "supports_deleted": False,
             },
             "plans": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "created",
                 "ingestion_type": "cdc",
                 "endpoint": "plans",
                 "supports_deleted": True,
             },
             "events": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "created",
                 "ingestion_type": "cdc",
                 "endpoint": "events",
                 "supports_deleted": False,
             },
             "coupons": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "created",
                 "ingestion_type": "cdc",
                 "endpoint": "coupons",
@@ -895,6 +895,10 @@ class LakeflowConnect:
         Returns:
             StructType representing the table schema
         """
+        if table_name not in self._schema_config:
+            raise ValueError(
+                f"Unsupported table: {table_name}. Supported tables are: {self.list_tables()}"
+            )
         schema = self._schema_config[table_name]
         return schema
 
@@ -908,11 +912,15 @@ class LakeflowConnect:
             table_name: Name of the table
 
         Returns:
-            Dictionary with primary_key, cursor_field, and ingestion_type
+            Dictionary with primary_keys, cursor_field, and ingestion_type
         """
+        if table_name not in self._object_config:
+            raise ValueError(
+                f"Unsupported table: {table_name}. Supported tables are: {self.list_tables()}"
+            )
         config = self._object_config[table_name]
         return {
-            "primary_key": config["primary_key"],
+            "primary_keys": config["primary_keys"],
             "cursor_field": config["cursor_field"],
             "ingestion_type": config["ingestion_type"],
         }

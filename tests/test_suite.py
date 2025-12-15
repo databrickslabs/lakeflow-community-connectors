@@ -356,9 +356,9 @@ class LakeflowConnectTester:
                     continue
 
                 expected_keys = []
-                # Only require primary_key if not an append table
+                # Only require primary_keys if not an append table
                 if self._should_validate_primary_key(metadata):
-                    expected_keys.append("primary_key")
+                    expected_keys.append("primary_keys")
                 # Only require cursor_field if not a snapshot table
                 if self._should_validate_cursor_field(metadata):
                     expected_keys.append("cursor_field")
@@ -375,19 +375,19 @@ class LakeflowConnectTester:
                     )
                     continue
 
-                # Validate primary_key and cursor_field exist in schema if required
+                # Validate primary_keys and cursor_field exist in schema if required
                 schema = self.connector.get_table_schema(
                     table_name, self._get_table_options(table_name)
                 )
 
                 if self._should_validate_primary_key(
                     metadata
-                ) and not self._validate_primary_key(metadata["primary_key"], schema):
+                ) and not self._validate_primary_keys(metadata["primary_keys"], schema):
                     failed_tables.append(
                         {
                             "table": table_name,
-                            "reason": f"Primary key field {metadata['primary_key']} not found in schema",
-                            "primary_key": metadata["primary_key"],
+                            "reason": f"Primary key columns {metadata['primary_keys']} not found in schema",
+                            "primary_keys": metadata["primary_keys"],
                         }
                     )
                 elif (
@@ -654,19 +654,12 @@ class LakeflowConnectTester:
                 )
             )
 
-    def _validate_primary_key(self, primary_key, schema) -> bool:
+    def _validate_primary_keys(self, primary_keys: list, schema) -> bool:
         """
-        Validate that primary key field(s) exist in the schema.
-        Handles both single keys (string) and composite keys (list).
+        Validate that all primary key columns exist in the schema.
         """
         schema_fields = schema.fieldNames()
-
-        if isinstance(primary_key, list):
-            # Composite primary key - check all fields exist
-            return all(field in schema_fields for field in primary_key)
-        else:
-            # Single primary key - check field exists
-            return primary_key in schema_fields
+        return all(field in schema_fields for field in primary_keys)
 
     def _should_validate_cursor_field(self, metadata: dict) -> bool:
         """
@@ -681,7 +674,7 @@ class LakeflowConnectTester:
 
     def _should_validate_primary_key(self, metadata: dict) -> bool:
         """
-        Determine if primary_key should be validated based on ingestion_type.
+        Determine if primary_keys should be validated based on ingestion_type.
         """
         ingestion_type = metadata.get("ingestion_type")
 

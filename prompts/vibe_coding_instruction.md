@@ -28,7 +28,7 @@ Create one file named `<source_name>_api_doc.md` under `sources/<source_name>/` 
 - Fill out every section of the documentation template. If any section cannot be completed, add a note to explain.
 - Focus on endpoints, authentication parameters, object schemas, Python API for reading data, and incremental read strategy.
 - Please include all fields in the schema. DO NOT hide any fields using links.
-- All information must be backed by official sources or verified or reliable implementations.
+- All information must be backed by official sources or verified or reliable implementations
 
 ### Research Log 
 Add a table:
@@ -83,10 +83,11 @@ Implement the Python connector for **{{source_name}}** that conforms exactly to 
 
 ### Implementation Requirements 
 - Implement all methods declared in the interface.
+- At the beginning of each function, check if the provided `table_name` exists in the list of supported tables. If it does not, raise an explicit exception to inform the user that the table is not supported.
 - When returning the schema in the `get_table_schema` function, prefer using StructType over MapType to enforce explicit typing of sub-columns.
 - Avoid flattening nested fields when parsing JSON data.
 - Prefer using `LongType` over `IntegerType`
-- If `ingestion_type` returned from `read_table_metadata` is `cdc`, then `primary_key` and `cursor_field` are both required.
+- If `ingestion_type` returned from `read_table_metadata` is `cdc`, then `primary_keys` and `cursor_field` are both required.
 - In logic of processing records, if a StructType field is absent in the response, assign None as the default value instead of an empty dictionary {}.
 - Avoid creating mock objects in the implementation.
 - Do not add an extra main function - only implement the defined functions within the LakeflowConnect class. 

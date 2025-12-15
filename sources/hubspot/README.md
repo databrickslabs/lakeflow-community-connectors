@@ -29,7 +29,7 @@ To configure the HubSpot connector, you'll need to provide the following paramet
 
 A Unity Catalog connection for this connector can be created in two ways via the UI:
 1. Follow the Lakeflow Community Connector UI flow from the "Add Data" page
-2. Navigate to the Unity Catalog UI and create a "Lakeflow Community Connector" connection
+2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
 
 The connection can also be created using the standard Unity Catalog API.
 
@@ -37,27 +37,44 @@ The connection can also be created using the standard Unity Catalog API.
 
 The HubSpot connector supports the following CRM objects with dynamic schema discovery and incremental synchronization:
 
+| Table Name | Primary Key | Cursor Field | Associations |
+|------------|-------------|--------------|--------------|
+| `contacts` | `id` | `updatedAt` | companies |
+| `companies` | `id` | `updatedAt` | contacts |
+| `deals` | `id` | `updatedAt` | contacts, companies, tickets |
+| `tickets` | `id` | `updatedAt` | contacts, companies, deals |
+| `calls` | `id` | `updatedAt` | contacts, companies, deals, tickets |
+| `emails` | `id` | `updatedAt` | contacts, companies, deals, tickets |
+| `meetings` | `id` | `updatedAt` | contacts, companies, deals, tickets |
+| `tasks` | `id` | `updatedAt` | contacts, companies, deals, tickets |
+| `notes` | `id` | `updatedAt` | contacts, companies, deals, tickets |
+| `deal_split` | `id` | `updatedAt` | — |
+
+> **Note**: Table names are case-sensitive. Use the exact names shown above (lowercase with underscores). Custom objects are also supported and will be discovered automatically.
+
+### Object Details
+
 ### Standard CRM Objects
 
-#### Contacts
+#### `contacts`
 - **Primary Key**: `id`
 - **Incremental Strategy**: Cursor-based on `updatedAt`
 - **Associations**: companies, deals, tickets
 - **Schema**: All contact properties (discovered dynamically) including standard fields like email, firstname, lastname, and all custom properties
 
-#### Companies
+#### `companies`
 - **Primary Key**: `id`
 - **Incremental Strategy**: Cursor-based on `updatedAt`
 - **Associations**: contacts, deals, tickets
 - **Schema**: All company properties (discovered dynamically) including standard fields like name, domain, and all custom properties
 
-#### Deals
+#### `deals`
 - **Primary Key**: `id`
 - **Incremental Strategy**: Cursor-based on `updatedAt`
 - **Associations**: contacts, companies, tickets
 - **Schema**: All deal properties (discovered dynamically) including standard fields like dealname, amount, stage, and all custom properties
 
-#### Tickets
+#### `tickets`
 - **Primary Key**: `id`
 - **Incremental Strategy**: Cursor-based on `updatedAt`
 - **Associations**: contacts, companies, deals
@@ -65,41 +82,41 @@ The HubSpot connector supports the following CRM objects with dynamic schema dis
 
 ### Engagement Objects
 
-#### Calls
+#### `calls`
 - **Primary Key**: `id`
 - **Incremental Strategy**: Cursor-based on `updatedAt`
 - **Associations**: contacts, companies, deals, tickets
 - **Schema**: All call properties (discovered dynamically) including standard fields like duration, outcome, recording details, and all custom properties
 
-#### Emails
+#### `emails`
 - **Primary Key**: `id`
 - **Incremental Strategy**: Cursor-based on `updatedAt`
 - **Associations**: contacts, companies, deals, tickets
 - **Schema**: All email properties (discovered dynamically) including standard fields like subject, body, sender, recipient, and all custom properties
 
-#### Meetings
+#### `meetings`
 - **Primary Key**: `id`
 - **Incremental Strategy**: Cursor-based on `updatedAt`
 - **Associations**: contacts, companies, deals, tickets
 - **Schema**: All meeting properties (discovered dynamically) including standard fields like title, start time, end time, location, and all custom properties
 
-#### Tasks
+#### `tasks`
 - **Primary Key**: `id`
 - **Incremental Strategy**: Cursor-based on `updatedAt`
 - **Associations**: contacts, companies, deals, tickets
 - **Schema**: All task properties (discovered dynamically) including standard fields like subject, due date, status, priority, and all custom properties
 
-#### Notes
+#### `notes`
 - **Primary Key**: `id`
 - **Incremental Strategy**: Cursor-based on `updatedAt`
 - **Associations**: contacts, companies, deals, tickets
 - **Schema**: All note properties (discovered dynamically) including standard fields like body, timestamp, and all custom properties
 
-#### Deal Splits
+#### `deal_split`
 - **Primary Key**: `id`
 - **Incremental Strategy**: Cursor-based on `updatedAt`
-- **Associations**: 
-- **Schema**: All note properties (discovered dynamically) including standard fields like body, timestamp, and all custom properties
+- **Associations**: None
+- **Schema**: All deal split properties (discovered dynamically)
 
 ### Custom Objects
 - **Dynamic Discovery**: The connector automatically discovers and supports any custom objects in your HubSpot instance

@@ -13,13 +13,17 @@ This documentation provides setup instructions and reference information for the
 
 To configure the connector, provide the following parameters in your connector options:
 <List the parameters with name, type, whether required, description, and example in a table>
+<If this connector supports any extra table-specific options (such as options that must be set per table when reading data), list every allowed option name here as a comma-separated string. 
+Document these in the `externalOptionsAllowList` connection option. 
+If there are such table-specific options, clearly state that `externalOptionsAllowList` is a required connection option, and provide the full, definitive list of all supported options — do not mark this option as optional or provide a sample value.
+If no extra table-specific options are supported, make it clear that `externalOptionsAllowList` does not need to be included as a connection parameter.>
 
 ### <Add a section describing how to obtain the required parameters>
 
 ### Create a Unity Catalog Connection 
 A Unity Catalog connection for this connector can be created in two ways via the UI:
 1. Follow the Lakeflow Community Connector UI flow from the "Add Data" page
-2. Navigate to the Unity Catalog UI and create a "Lakeflow Community Connector" connection
+2. Select any existing Lakeflow Community Connector connection for this source or create a new one. 
 3. <Identify any extra table-specific options that can be configured (especially any that are required). List these option names as a comma-separated string in the `externalOptionsAllowList`. Do this for the specific source.>
 
 The connection can also be created using the standard Unity Catalog API.
@@ -27,8 +31,9 @@ The connection can also be created using the standard Unity Catalog API.
 
 ## Supported Objects
 <Describe which objects are supported by this connector.>
+<When listing supported object names, specify them using the exact casing required by the implementation.>
 <If only a static list of objects is supported, list all of them. Otherwise, describe the supported objects by category or provide a general description>
-<Describe the primary key of each object, if available>
+<Describe the primary key columns of each object, if available>
 <Describe the incremental ingestion strategy and cursor field for objects that support incremental reads>
 <Describe the required and optional configurations needed for each object>
 <You don't need to describe the full schema, but highlight any special columns that require attention.>
