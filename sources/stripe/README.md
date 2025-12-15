@@ -27,7 +27,7 @@ To configure the Stripe connector, you'll need to provide the following paramete
 
 A Unity Catalog connection for this connector can be created in two ways via the UI:
 1. Follow the Lakeflow Community Connector UI flow from the "Add Data" page
-2. Navigate to the Unity Catalog UI and create a "Lakeflow Community Connector" connection
+2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
 
 The connection can also be created using the standard Unity Catalog API.
 
@@ -35,9 +35,32 @@ The connection can also be created using the standard Unity Catalog API.
 
 The Stripe connector supports the following tables/objects with incremental synchronization:
 
+| Table Name | Primary Key | Cursor Field | Supports Deletion |
+|------------|-------------|--------------|-------------------|
+| `customers` | `id` | `created` | Yes |
+| `charges` | `id` | `created` | No |
+| `payment_intents` | `id` | `created` | No |
+| `payment_methods` | `id` | `created` | No |
+| `refunds` | `id` | `created` | No |
+| `disputes` | `id` | `created` | No |
+| `subscriptions` | `id` | `created` | No |
+| `invoices` | `id` | `created` | No |
+| `invoice_items` | `id` | `created` | No |
+| `products` | `id` | `created` | Yes |
+| `prices` | `id` | `created` | No |
+| `plans` | `id` | `created` | Yes |
+| `coupons` | `id` | `created` | No |
+| `balance_transactions` | `id` | `created` | No |
+| `payouts` | `id` | `created` | No |
+| `events` | `id` | `created` | No |
+
+> **Note**: Table names are case-sensitive. Use the exact names shown above (lowercase with underscores).
+
+### Object Details
+
 ### Core Customer & Account Objects
 
-#### Customers
+#### `customers`
 - **Primary Key**: `id`
 - **Ingestion Type**: CDC (Change Data Capture)
 - **Cursor Field**: `created`
@@ -54,31 +77,31 @@ The Stripe connector supports the following tables/objects with incremental sync
 
 ### Payment Objects
 
-#### Charges
+#### `charges`
 - **Primary Key**: `id`
 - **Ingestion Type**: CDC
 - **Cursor Field**: `created`
 - **Schema**: Payment transaction details including amounts, status, customer reference, payment method details, billing details, and outcome information
 
-#### Payment Intents
+#### `payment_intents`
 - **Primary Key**: `id`
 - **Ingestion Type**: CDC
 - **Cursor Field**: `created`
 - **Schema**: Modern payment flow tracking including amount fields, status, customer reference, payment method, charges, cancellation details, and metadata
 
-#### Payment Methods
+#### `payment_methods`
 - **Primary Key**: `id`
 - **Ingestion Type**: CDC
 - **Cursor Field**: `created`
 - **Schema**: Stored payment methods including type (card, bank account), customer reference, billing details, and card/bank account details (stored as JSON)
 
-#### Refunds
+#### `refunds`
 - **Primary Key**: `id`
 - **Ingestion Type**: CDC
 - **Cursor Field**: `created`
 - **Schema**: Refund transactions including amount, currency, charge reference, status, reason, receipt number, and failure information
 
-#### Disputes
+#### `disputes`
 - **Primary Key**: `id`
 - **Ingestion Type**: CDC
 - **Cursor Field**: `created`
@@ -86,19 +109,19 @@ The Stripe connector supports the following tables/objects with incremental sync
 
 ### Billing & Subscription Objects
 
-#### Subscriptions
+#### `subscriptions`
 - **Primary Key**: `id`
 - **Ingestion Type**: CDC
 - **Cursor Field**: `created`
 - **Schema**: Recurring billing subscriptions including status, period dates, customer reference, payment method, billing details, trial information, items (JSON), and cancellation details
 
-#### Invoices
+#### `invoices`
 - **Primary Key**: `id`
 - **Ingestion Type**: CDC
 - **Cursor Field**: `created`
 - **Schema**: Billing invoices including status, amount fields, customer/subscription references, billing details, dates, invoice URLs, line items (JSON), and metadata
 
-#### Invoice Items
+#### `invoice_items`
 - **Primary Key**: `id`
 - **Ingestion Type**: CDC
 - **Cursor Field**: `created`
@@ -106,27 +129,27 @@ The Stripe connector supports the following tables/objects with incremental sync
 
 ### Product Catalog Objects
 
-#### Products
+#### `products`
 - **Primary Key**: `id`
 - **Ingestion Type**: CDC
 - **Cursor Field**: `created`
 - **Supports Deletion Tracking**: Yes
 - **Schema**: Product catalog items including name, description, active status, type, images, metadata, tax code, and shippable flag
 
-#### Prices
+#### `prices`
 - **Primary Key**: `id`
 - **Ingestion Type**: CDC
 - **Cursor Field**: `created`
 - **Schema**: Pricing information for products including currency, unit amount, billing scheme, type (one-time/recurring), recurring details (JSON), tiers (JSON), and metadata
 
-#### Plans (Legacy)
+#### `plans` (Legacy)
 - **Primary Key**: `id`
 - **Ingestion Type**: CDC
 - **Cursor Field**: `created`
 - **Supports Deletion Tracking**: Yes
 - **Schema**: Legacy pricing plans including amount, currency, interval, product reference, usage type, trial period, tiers (JSON), and metadata
 
-#### Coupons
+#### `coupons`
 - **Primary Key**: `id`
 - **Ingestion Type**: CDC
 - **Cursor Field**: `created`
@@ -134,13 +157,13 @@ The Stripe connector supports the following tables/objects with incremental sync
 
 ### Financial Objects
 
-#### Balance Transactions
+#### `balance_transactions`
 - **Primary Key**: `id`
 - **Ingestion Type**: CDC
 - **Cursor Field**: `created`
 - **Schema**: Financial transactions affecting your Stripe balance including amount, currency, net amount, fees, transaction type, source, status, and availability date
 
-#### Payouts
+#### `payouts`
 - **Primary Key**: `id`
 - **Ingestion Type**: CDC
 - **Cursor Field**: `created`
@@ -148,7 +171,7 @@ The Stripe connector supports the following tables/objects with incremental sync
 
 ### Event Objects
 
-#### Events
+#### `events`
 - **Primary Key**: `id`
 - **Ingestion Type**: CDC
 - **Cursor Field**: `created`

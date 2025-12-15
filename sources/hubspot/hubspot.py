@@ -23,61 +23,61 @@ class LakeflowConnect:
         # Centralized object metadata configuration
         self._object_config = {
             "contacts": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "lastmodifieddate",
                 "associations": ["companies"],
             },
             "companies": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": ["contacts"],
             },
             "deals": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": ["contacts", "companies", "tickets"],
             },
             "tickets": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": ["contacts", "companies", "deals"],
             },
             "calls": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": ["contacts", "companies", "deals", "tickets"],
             },
             "emails": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": ["contacts", "companies", "deals", "tickets"],
             },
             "meetings": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": ["contacts", "companies", "deals", "tickets"],
             },
             "tasks": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": ["contacts", "companies", "deals", "tickets"],
             },
             "notes": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": ["contacts", "companies", "deals", "tickets"],
             },
             "deal_split": {
-                "primary_key": "id",
+                "primary_keys": ["id"],
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": [],
@@ -86,7 +86,7 @@ class LakeflowConnect:
 
         # Default config for custom objects
         self._default_object_config = {
-            "primary_key": "id",
+            "primary_keys": ["id"],
             "cursor_field": "updatedAt",
             "cursor_property_field": "hs_lastmodifieddate",
             "associations": [],
@@ -162,6 +162,10 @@ class LakeflowConnect:
         Returns:
             A StructType object representing the schema of the table.
         """
+        supported_tables = self.list_tables()
+        if table_name not in supported_tables:
+            raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
+        
         # Check cache first
         if table_name in self._schema_cache:
             return self._schema_cache[table_name]
@@ -185,13 +189,17 @@ class LakeflowConnect:
 
         Returns:
             A dictionary containing the metadata of the table. It includes the following keys:
-                - primary_key: The name of the primary key of the table.
+                - primary_keys: The name of the primary key columns of the table.
                 - cursor_field: The name of the field to use as a cursor for incremental loading.
                 - ingestion_type: The type of ingestion to use for the table. It should be one of:
                     - "snapshot": For snapshot loading.
                     - "cdc": capture incremental changes
                     - "append": incremental append
         """
+        supported_tables = self.list_tables()
+        if table_name not in supported_tables:
+            raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
+        
         # Check cache first
         if table_name in self._metadata_cache:
             return self._metadata_cache[table_name]
@@ -228,7 +236,7 @@ class LakeflowConnect:
         property_names = [prop["name"] for prop in properties]
 
         return {
-            "primary_key": config["primary_key"],
+            "primary_keys": config["primary_keys"],
             "cursor_field": config["cursor_field"],
             "cursor_property_field": config["cursor_property_field"],
             "property_names": property_names,
@@ -332,6 +340,10 @@ class LakeflowConnect:
         Returns:
             Tuple of (records, new_offset)
         """
+        supported_tables = self.list_tables()
+        if table_name not in supported_tables:
+            raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
+        
         # Determine if this is an incremental read
         is_incremental = (
             start_offset is not None and start_offset.get("updatedAt") is not None

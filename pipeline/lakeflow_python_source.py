@@ -99,7 +99,7 @@ class LakeflowSource(DataSource):
             return StructType(
                 [
                     StructField("tableName", StringType(), False),
-                    StructField("primary_key", ArrayType(StringType()), True),
+                    StructField("primary_keys", ArrayType(StringType()), True),
                     StructField("cursor_field", StringType(), True),
                     StructField("ingestion_type", StringType(), True),
                 ]

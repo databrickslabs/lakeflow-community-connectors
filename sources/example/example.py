@@ -61,9 +61,9 @@ class LakeflowConnect:
         Fetch the metadata of a table.
         """
         if table_name == "my_table":
-            metadata = {"primary_key": "id", "ingestion_type": "append"}
+            metadata = {"primary_keys": ["id"], "ingestion_type": "append"}
         elif table_name == "your_table":
-            metadata = {"primary_key": "key", "ingestion_type": "append"}
+            metadata = {"primary_keys": ["key"], "ingestion_type": "append"}
         else:
             raise ValueError(f"Unknown table: {table_name}")
 

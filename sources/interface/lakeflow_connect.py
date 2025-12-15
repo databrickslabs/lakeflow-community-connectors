@@ -49,7 +49,7 @@ class LakeflowConnect:
                            # Do not include options like filters for row or column selection here; those features may be supported in the future.
         Returns:
             A dictionary containing the metadata of the table. It should include the following keys:
-                - primary_key: The name of the primary key of the table.
+                - primary_keys: List of string names of the primary key columns of the table.
                 - cursor_field: The name of the field to use as a cursor for incremental loading.
                 - ingestion_type: The type of ingestion to use for the table. It should be one of the following values:
                     - "snapshot": For snapshot loading.

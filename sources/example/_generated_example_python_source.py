@@ -102,6 +102,7 @@ def register_lakeflow_source(spark):
                 return float(value)
             elif isinstance(field_type, DecimalType):
                 # New support for Decimal type
+
                 if isinstance(value, str) and value.strip():
                     return Decimal(value)
                 return Decimal(str(value))
@@ -222,9 +223,9 @@ def register_lakeflow_source(spark):
             Fetch the metadata of a table.
             """
             if table_name == "my_table":
-                metadata = {"primary_key": "id", "ingestion_type": "append"}
+                metadata = {"primary_keys": ["id"], "ingestion_type": "append"}
             elif table_name == "your_table":
-                metadata = {"primary_key": "key", "ingestion_type": "append"}
+                metadata = {"primary_keys": ["key"], "ingestion_type": "append"}
             else:
                 raise ValueError(f"Unknown table: {table_name}")
 
@@ -315,7 +316,7 @@ def register_lakeflow_source(spark):
 
         def read(self, start: dict) -> (Iterator[tuple], dict):
             records, offset = self.lakeflow_connect.read_table(
-                self.options["tableName"], start
+                self.options["tableName"], start, self.options
             )
             rows = map(lambda x: parse_value(x, self.schema), records)
             return rows, offset
@@ -346,7 +347,9 @@ def register_lakeflow_source(spark):
             if self.table_name == METADATA_TABLE:
                 all_records = self._read_table_metadata()
             else:
-                all_records, _ = self.lakeflow_connect.read_table(self.table_name, None)
+                all_records, _ = self.lakeflow_connect.read_table(
+                    self.table_name, None, self.options
+                )
 
             rows = map(lambda x: parse_value(x, self.schema), all_records)
             return iter(rows)
@@ -356,7 +359,7 @@ def register_lakeflow_source(spark):
             table_names = [o.strip() for o in table_name_list.split(",") if o.strip()]
             all_records = []
             for table in table_names:
-                metadata = self.lakeflow_connect.read_table_metadata(table)
+                metadata = self.lakeflow_connect.read_table_metadata(table, self.options)
                 all_records.append({"tableName": table, **metadata})
             return all_records
 
@@ -376,14 +379,14 @@ def register_lakeflow_source(spark):
                 return StructType(
                     [
                         StructField("tableName", StringType(), False),
-                        StructField("primary_key", ArrayType(StringType()), True),
+                        StructField("primary_keys", ArrayType(StringType()), True),
                         StructField("cursor_field", StringType(), True),
                         StructField("ingestion_type", StringType(), True),
                     ]
                 )
             else:
                 # Assuming the LakeflowConnect interface uses get_table_schema, not get_table_details
-                return self.lakeflow_connect.get_table_schema(table)
+                return self.lakeflow_connect.get_table_schema(table, self.options)
 
         def reader(self, schema: StructType):
             return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)

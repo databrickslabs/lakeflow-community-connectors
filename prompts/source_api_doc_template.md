@@ -22,10 +22,10 @@
 - Include example API requests and responses to demonstrate this functionality.
 
 
-## **Get Object Primary Key**
-- Explain how to get the primary key for a specific object.
-- Provide details on how to get the primary key using the API.
-- If there is no API and the primary key of the source tables and objects is static, please include the static primary key.
+## **Get Object Primary Keys**
+- Explain how to get the primary key columns for a specific object.
+- Provide details on how to get the primary key columns using the API.
+- If there is no API and the primary key columns of the source tables and objects is static, please include the static primary key columns.
 - Include example API requests and responses to demonstrate this functionality.
 
 ## **Object's ingestion type**

@@ -1,4 +1,3 @@
-from locale import dcgettext
 import requests
 import base64
 from pyspark.sql.types import *
@@ -270,14 +269,14 @@ class LakeflowConnect:
         Fetch the metadata of a table.
         """
         metadata = {
-            "tickets": {"primary_key": "id", "cursor_field": "updated_at"},
-            "organizations": {"primary_key": "id", "cursor_field": "updated_at"},
-            "articles": {"primary_key": "id", "cursor_field": "updated_at"},
-            "brands": {"primary_key": "id", "cursor_field": "updated_at"},
-            "groups": {"primary_key": "id", "cursor_field": "updated_at"},
-            "ticket_comments": {"primary_key": "id", "cursor_field": "updated_at"},
-            "topics": {"primary_key": "id", "cursor_field": "updated_at"},
-            "users": {"primary_key": "id", "cursor_field": "updated_at"},
+            "tickets": {"primary_keys": ["id"], "cursor_field": "updated_at"},
+            "organizations": {"primary_keys": ["id"], "cursor_field": "updated_at"},
+            "articles": {"primary_keys": ["id"], "cursor_field": "updated_at"},
+            "brands": {"primary_keys": ["id"], "cursor_field": "updated_at"},
+            "groups": {"primary_keys": ["id"], "cursor_field": "updated_at"},
+            "ticket_comments": {"primary_keys": ["id"], "cursor_field": "updated_at"},
+            "topics": {"primary_keys": ["id"], "cursor_field": "updated_at"},
+            "users": {"primary_keys": ["id"], "cursor_field": "updated_at"},
         }
 
         if table_name not in metadata:
