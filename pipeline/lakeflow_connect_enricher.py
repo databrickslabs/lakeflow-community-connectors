@@ -93,8 +93,8 @@ class HashedPrimaryKeyEnrichment(Enrichment):
         if table_name == METADATA_TABLE:
             return False
         
-        pk = metadata.get("primary_key")
-        # Apply if primary_key is None, empty string, or empty list
+        pk = metadata.get("primary_keys")
+        # Apply if primary_keys is None, empty string, or empty list
         if pk is None:
             return True
         if isinstance(pk, str) and pk == "":
@@ -117,8 +117,8 @@ class HashedPrimaryKeyEnrichment(Enrichment):
         return [self._add_pk(record) for record in records]
 
     def enrich_metadata(self, metadata: dict, table_name: str) -> dict:
-        """Set primary_key to _pk in metadata."""
-        return {**metadata, "primary_key": self.PK_FIELD_NAME}
+        """Set primary_keys to _pk in metadata."""
+        return {**metadata, "primary_keys": self.PK_FIELD_NAME}
 
     def _add_pk(self, record: Dict) -> Dict:
         """Add hashed primary key to a record."""
