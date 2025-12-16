@@ -392,7 +392,7 @@ class LakeflowConnectTester:
                     )
                 elif (
                     self._should_validate_cursor_field(metadata)
-                    and metadata["cursor_field"] not in schema.fieldNames()
+                    and not self._field_exists_in_schema(metadata["cursor_field"], schema)
                 ):
                     failed_tables.append(
                         {
@@ -556,8 +556,10 @@ class LakeflowConnectTester:
                             break
                         record_count += 1
                         sample_records.append(record)
-                    else:
-                        # Iterator validation passed
+                    
+                    # Add to passed_tables if we didn't fail validation
+                    # (check if table is not in failed_tables)
+                    if not any(f["table"] == table_name for f in failed_tables):
                         passed_tables.append(
                             {
                                 "table": table_name,
@@ -654,12 +656,41 @@ class LakeflowConnectTester:
                 )
             )
 
+    def _field_exists_in_schema(self, field_path: str, schema) -> bool:
+        """
+        Check if a field path exists in the schema (supports nested paths).
+        Supports both top-level fields and nested fields (e.g., "properties.time").
+        """
+        # Handle simple field names without dots
+        if '.' not in field_path:
+            return field_path in schema.fieldNames()
+        
+        # Handle nested paths
+        parts = field_path.split('.', 1)
+        field_name = parts[0]
+        remaining_path = parts[1]
+        
+        if field_name not in schema.fieldNames():
+            return False
+        
+        # Get the field type
+        field = schema[field_name]
+        field_type = field.dataType
+        
+        # If it's a StructType, recursively check the remaining path
+        from pyspark.sql.types import StructType
+        if isinstance(field_type, StructType):
+            return self._field_exists_in_schema(remaining_path, field_type)
+        
+        # Field exists but can't traverse further (not a struct)
+        return False
+
     def _validate_primary_keys(self, primary_keys: list, schema) -> bool:
         """
         Validate that all primary key columns exist in the schema.
+        Supports both top-level fields and nested fields (e.g., "properties.time").
         """
-        schema_fields = schema.fieldNames()
-        return all(field in schema_fields for field in primary_keys)
+        return all(self._field_exists_in_schema(field, schema) for field in primary_keys)
 
     def _should_validate_cursor_field(self, metadata: dict) -> bool:
         """
