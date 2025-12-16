@@ -239,7 +239,7 @@ def register_lakeflow_source(spark):
 
         # Standard property keys for different Mixpanel object types
         _EVENT_STANDARD_KEYS = {
-            "time", "distinct_id", "$insert_id", "$browser", "$browser_version",
+            "time", "distinct_id", "$browser", "$browser_version",
             "$city", "$current_url", "$device_id", "$initial_referrer",
             "$initial_referring_domain", "$lib_version", "$mp_api_endpoint",
             "$mp_api_timestamp_ms", "$os", "$region", "$screen_height",
@@ -284,12 +284,17 @@ def register_lakeflow_source(spark):
             Process event to separate standard properties from custom properties.
             """
             properties = event.get("properties", {})
+
+            # Extract $insert_id to top level (not part of standard_props)
+            insert_id = properties.get("$insert_id")
+
             standard_props, custom_props = self._separate_standard_and_custom_properties(
                 properties, self._EVENT_STANDARD_KEYS
             )
 
             return {
                 "event": event.get("event"),
+                "$insert_id": insert_id,
                 "properties": {
                     **standard_props,
                     "custom_properties": custom_props
@@ -342,10 +347,10 @@ def register_lakeflow_source(spark):
             schemas = {
                 "events": StructType([
                     StructField("event", StringType()),
+                    StructField("$insert_id", StringType()),
                     StructField("properties", StructType([
                         StructField("time", LongType()),
                         StructField("distinct_id", StringType()),
-                        StructField("$insert_id", StringType()),
                         StructField("$browser", StringType()),
                         StructField("$browser_version", LongType()),
                         StructField("$city", StringType()),
@@ -431,7 +436,7 @@ def register_lakeflow_source(spark):
             """
             metadata = {
                 "events": {
-                    "primary_keys": ["properties.$insert_id"],
+                    "primary_keys": ["$insert_id"],
                     "cursor_field": "properties.time",
                     "ingestion_type": "cdc"
                 },

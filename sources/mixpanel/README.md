@@ -74,12 +74,12 @@ The connection can also be created using the standard Unity Catalog API.
 The Mixpanel connector supports the following objects with their respective schemas, primary keys, and incremental strategies:
 
 ### Events
-- **Primary Keys**: `["properties.$insert_id"]`
+- **Primary Keys**: `["$insert_id"]`
 - **Ingestion Type**: `cdc` (Change Data Capture)
 - **Incremental Cursor**: `properties.time`
-- **Schema**: Event data with nested `properties` structure. Standard Mixpanel properties are defined as typed fields within the properties struct, and all custom/application-specific event properties are captured in `properties.custom_properties` map
-- **Key Fields**: `event`, `properties.distinct_id`, `properties.time`, `properties.$insert_id`, `properties.$browser`, `properties.$city`, `properties.$os`, `properties.custom_properties`
-- **Description**: All events tracked in your Mixpanel project with their associated properties. Standard Mixpanel SDK properties are available as typed fields, while custom properties are preserved in the `properties.custom_properties` map to ensure no data loss
+- **Schema**: Event data with nested `properties` structure. The `$insert_id` field is at the top level for primary key purposes. Standard Mixpanel properties are defined as typed fields within the properties struct, and all custom/application-specific event properties are captured in `properties.custom_properties` map
+- **Key Fields**: `event`, `$insert_id`, `properties.distinct_id`, `properties.time`, `properties.$browser`, `properties.$city`, `properties.$os`, `properties.custom_properties`
+- **Description**: All events tracked in your Mixpanel project with their associated properties. The `$insert_id` is extracted to the top level to serve as the primary key. Standard Mixpanel SDK properties are available as typed fields, while custom properties are preserved in the `properties.custom_properties` map to ensure no data loss
 
 ### Cohorts
 - **Primary Keys**: `["id"]`
