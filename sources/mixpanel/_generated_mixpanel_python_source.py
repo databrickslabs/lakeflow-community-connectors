@@ -796,37 +796,6 @@ def register_lakeflow_source(spark):
             return iter(records), next_offset
 
 
-        def test_connection(self) -> bool:
-            """
-            Test the connection to Mixpanel API
-            """
-            try:
-                # Use the export endpoint with a minimal date range to test authentication
-                url = f"{self.base_url}/export"
-                params = {
-                    "from_date": "2024-01-01",
-                    "to_date": "2024-01-01"
-                }
-
-                # Only add project_id for service account authentication (username + secret)
-                # API secret authentication should NOT include project_id
-                if self.project_id and hasattr(self, 'username') and hasattr(self, 'secret'):
-                    params["project_id"] = self.project_id
-
-                response = requests.get(url, params=params, headers=self.auth_header, timeout=10)
-
-                # Log response details for debugging
-                print(f"Response status: {response.status_code}")
-                print(f"Response headers: {dict(response.headers)}")
-                if response.status_code != 200:
-                    print(f"Response text: {response.text[:200]}")
-
-                return response.status_code == 200
-            except Exception as e:
-                print(f"Connection test failed: {e}")
-                return False
-
-
     ########################################################
     # pipeline/lakeflow_python_source.py
     ########################################################

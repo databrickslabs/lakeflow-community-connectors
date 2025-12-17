@@ -15,7 +15,7 @@ The Lakeflow Mixpanel Connector allows you to extract analytics data from your M
 
 ### Required Connection Parameters
 
-To configure the connector, provide authentication credentials using one of two methods:
+Provide the following connection parameters when configuring the connector:
 
 **Option 1: Service Account Authentication (Recommended)**
 
@@ -24,6 +24,9 @@ To configure the connector, provide authentication credentials using one of two 
 | `username` | string | Yes | Mixpanel service account username | `your-service-account` |
 | `secret` | string | Yes | Mixpanel service account secret | `your-service-secret` |
 | `project_id` | integer | No | Mixpanel project ID (optional for service accounts) | `12345` |
+| `region` | string | No | Mixpanel data region (US or EU), defaults to `US` | `EU` |
+| `project_timezone` | string | No | Project timezone for date calculations, defaults to `US/Pacific` | `UTC` |
+| `historical_days` | integer | No | Days of historical data to fetch in initial snapshot, defaults to `10` | `30` |
 
 **Option 2: API Secret Authentication**
 
@@ -31,14 +34,11 @@ To configure the connector, provide authentication credentials using one of two 
 |-----------|------|----------|-------------|---------|
 | `api_secret` | string | Yes | Mixpanel project API secret | `your-api-secret-token` |
 | `project_id` | integer | No | Mixpanel project ID (optional) | `12345` |
+| `region` | string | No | Mixpanel data region (US or EU), defaults to `US` | `EU` |
+| `project_timezone` | string | No | Project timezone for date calculations, defaults to `US/Pacific` | `UTC` |
+| `historical_days` | integer | No | Days of historical data to fetch in initial snapshot, defaults to `10` | `30` |
 
-**Optional Configuration Parameters**
-
-| Parameter | Type | Default | Description | Example |
-|-----------|------|---------|-------------|---------|
-| `region` | string | `US` | Mixpanel data region (US or EU) | `EU` |
-| `project_timezone` | string | `US/Pacific` | Project timezone for date calculations | `UTC` |
-| `historical_days` | integer | `10` | Days of historical data to fetch in initial snapshot | `30` |
+> **Note**: All configuration for this connector is done via connection parameters. This connector does not support table-specific options (like `owner` or `repo` in GitHub). Therefore, `externalOptionsAllowList` does **not** need to be included as a connection parameter.
 
 ### Obtaining the Required Parameters
 
@@ -66,6 +66,8 @@ A Unity Catalog connection for this connector can be created in two ways via the
 
 1. Follow the **Lakeflow Community Connector** UI flow from the **Add Data** page
 2. Select any existing Lakeflow Community Connector connection for this source or create a new one
+
+> **Important**: This connector does not require table-specific options (like `owner` or `repo` in GitHub). All configuration is done at the connection level. Do **not** set `externalOptionsAllowList` when creating this connection.
 
 The connection can also be created using the standard Unity Catalog API.
 
@@ -96,8 +98,6 @@ The Mixpanel connector supports the following objects with their respective sche
 - **Schema**: Relationship table showing which users belong to which cohorts
 - **Key Fields**: `cohort_id`, `distinct_id`
 - **Description**: Many-to-many relationship between cohorts and users, enabling cohort membership analysis
-
-**Note**: The following objects are defined in the connector but are currently commented out in the `list_tables()` method. They can be enabled by uncommenting them in the connector code:
 
 ### Engage (User Profiles)
 - **Primary Keys**: `["$distinct_id"]`
@@ -130,9 +130,37 @@ Follow the **Lakeflow Community Connector** UI flow, which will guide you throug
 
 ### Step 2: Configure Your Pipeline
 
-1. Update the `pipeline_spec` in the main pipeline file (e.g., `ingest.py`)
-2. Specify which Mixpanel objects to ingest (e.g., `events`, `cohorts`)
-3. (Optional) Customize the source connector code if needed for special use cases
+1. Update the `pipeline_spec` in the main pipeline file (e.g., `ingest.py`).
+2. Specify which Mixpanel objects to ingest. Example configuration:
+
+```json
+{
+  "pipeline_spec": {
+      "connection_name": "my_mixpanel_connection",
+      "object": [
+        {
+            "table": {
+                "source_table": "events"
+            }
+        },
+        {
+            "table": {
+                "source_table": "cohorts"
+            }
+        },
+        {
+            "table": {
+                "source_table": "engage"
+            }
+        }
+      ]
+  }
+}
+```
+
+> **Note**: This connector does not support table-specific options. All tables use the connection-level configuration (e.g., `region`, `historical_days`) that was set when the connection was created.
+
+3. (Optional) Customize the source connector code if needed for special use cases.
 
 ### Step 3: Run and Schedule the Pipeline
 
