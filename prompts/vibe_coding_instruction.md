@@ -18,7 +18,8 @@ Create one file named `<source_name>_api_doc.md` under `sources/<source_name>/` 
 2. **Find official API docs** (WebSearch/WebFetch).
 3. **Locate reference implementations** (Airbyte OSS—highest non-official confidence; also Singer, dltHub, etc.).
 4. **Verify endpoints & schemas** by cross-referencing **at least two** sources (official > reference impl > reputable blogs).
-5. **Record everything** in `## Research Log` and list full URLs in `## Sources`.
+5. **Prefer current/stable APIs**: Always prefer the latest stable API version. Avoid deprecated endpoints even if they're still documented. Check for migration guides and API versioning.
+6. **Record everything** in `## Research Log` and list full URLs in `## Sources`.
 
 **Conflict resolution**
 - Precedence: **Official docs > Actively maintained OSS (Airbyte) > Other**.

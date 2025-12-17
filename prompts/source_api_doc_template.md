@@ -45,6 +45,7 @@
 - Include example API requests and responses for data retrieval.
 - Compare different API options for reading the same data (if applicable).
 - Include the extra parameters needed to read the table.
+- Highlight the rate limits of the API. Source shouldn't exceed this limit.
 
 
 ## **Field Type Mapping**
