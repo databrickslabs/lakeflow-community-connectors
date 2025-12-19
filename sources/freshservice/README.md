@@ -14,18 +14,32 @@ This documentation provides setup instructions and reference information for the
 
 ### Required Connection Parameters
 
-To configure the connector, provide the following parameters in your connector options:
+To configure the connector, you must set up connection parameters in your Unity Catalog connection and table-specific parameters in your pipeline specification.
+
+#### Unity Catalog Connection Parameters
+
+The following parameters must be configured in your Unity Catalog connection:
 
 | Name      | Type   | Required | Description                                                                                 | Example                            |
 |-----------|--------|----------|---------------------------------------------------------------------------------------------|------------------------------------|
 | `api_key` | string | yes      | Freshservice API Key for authentication.                                                    | `your_api_key_here`                |
 | `domain`  | string | yes      | Freshservice subdomain (without `.freshservice.com`).                                       | `yourcompany`                      |
-| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names that are allowed. This connector supports configurable pagination and incremental sync options, so this parameter must be set. | `per_page,max_pages_per_batch,lookback_seconds,start_date` |
+| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names that are allowed to be passed from the pipeline spec to the connector. **This must be added to your UC connection.** | `per_page,max_pages_per_batch,lookback_seconds,start_date` |
 
-The full list of supported table-specific options for `externalOptionsAllowList` is:
-`per_page,max_pages_per_batch,lookback_seconds,start_date`
+> **Important**: The `externalOptionsAllowList` parameter **must be set in your Unity Catalog connection** to allow table-specific options to be passed through from your pipeline specification.
 
-> **Note**: Table-specific options such as `per_page`, `start_date`, etc. are **not** connection parameters. They are provided per-table via table options in the pipeline specification. These option names must be included in `externalOptionsAllowList` for the connection to allow them.
+#### Pipeline-Level Table Configuration Parameters
+
+The following parameters control pagination and incremental sync behavior. These parameters are **NOT** connection parameters. They **must be configured in your pipeline specification** under `table_configuration` for each table you want to ingest:
+
+| Parameter | Type   | Required | Description                                                                                 | Example                            |
+|-----------|--------|----------|---------------------------------------------------------------------------------------------|------------------------------------|
+| `per_page` | integer | no | Number of records to fetch per API page. Default: `100`. Maximum: `100`. | `10` |
+| `max_pages_per_batch` | integer | no | Maximum number of pages to fetch in a single read operation. Default: `50`. | `50` |
+| `lookback_seconds` | integer | no | Lookback window in seconds for incremental tables to handle late-arriving updates. Default: `300` (5 minutes). | `300` |
+| `start_date` | string (ISO 8601) | no | Initial starting point for incremental sync when there is no stored offset yet. Format: `YYYY-MM-DDTHH:MM:SSZ`. | `2025-12-01T00:00:00Z` |
+
+> **Note**: These table-specific parameters should be specified in your `pipeline_spec` under each table's `table_configuration` section (see example below).
 
 ### Obtaining the Required Parameters
 
@@ -40,13 +54,15 @@ The full list of supported table-specific options for `externalOptionsAllowList`
 
 ### Create a Unity Catalog Connection
 
-A Unity Catalog connection for this connector can be created in two ways via the UI:
+A Unity Catalog connection for this connector can be created via the UI:
 
 1. Follow the **Lakeflow Community Connector** UI flow from the **Add Data** page.
-2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
-3. Set `externalOptionsAllowList` to `per_page,max_pages_per_batch,lookback_seconds,start_date` (required for this connector to pass table-specific options).
+2. Provide your `api_key` and `domain` as connection parameters.
+3. **Important**: Set `externalOptionsAllowList` to `per_page,max_pages_per_batch,lookback_seconds,start_date` in your Unity Catalog connection. This is **required** for the connector to accept table-specific configuration from your pipeline specification.
 
 The connection can also be created using the standard Unity Catalog API.
+
+> **Critical**: Without setting `externalOptionsAllowList` in your UC connection, table-specific options like `per_page`, `start_date`, etc., will be rejected by the connector.
 
 ## Supported Objects
 
@@ -54,17 +70,13 @@ The Freshservice connector exposes a **static list** of tables covering IT servi
 
 - `tickets` - Support tickets and service requests
 - `problems` - Problem records for root cause analysis
-- `changes` - Change requests and change management
 - `releases` - Release management records
-- `requesters` - End users who raise tickets
-- `agents` - Support agents who resolve tickets
 - `locations` - Physical or virtual locations
 - `products` - Product catalog items
 - `vendors` - Vendor information
 - `assets` - Hardware and software assets
 - `purchase_orders` - Purchase orders for assets
 - `software` - Software application records
-- `satisfaction_survey_responses` - Customer satisfaction feedback
 - `requested_items` - Service catalog requested items
 
 ### Object Summary, Primary Keys, and Ingestion Mode
@@ -75,17 +87,13 @@ The connector defines the ingestion mode and primary key for each table:
 |---------------------------------|--------------------------------------------------------------|----------------|-------------------|-----------------------------|
 | `tickets`                       | Support tickets and incidents                                | `cdc`          | `id`              | `updated_at`                |
 | `problems`                      | Problem records for root cause analysis                      | `cdc`          | `id`              | `updated_at`                |
-| `changes`                       | Change requests and change management                        | `cdc`          | `id`              | `updated_at`                |
 | `releases`                      | Release management records                                   | `cdc`          | `id`              | `updated_at`                |
-| `requesters`                    | End users who submit tickets                                 | `snapshot`     | `id`              | n/a                         |
-| `agents`                        | Support agents                                               | `snapshot`     | `id`              | n/a                         |
 | `locations`                     | Physical or virtual locations                                | `snapshot`     | `id`              | n/a                         |
 | `products`                      | Product catalog                                              | `snapshot`     | `id`              | n/a                         |
 | `vendors`                       | Vendor information                                           | `snapshot`     | `id`              | n/a                         |
 | `assets`                        | Hardware and software asset inventory                        | `snapshot`     | `id`              | n/a                         |
 | `purchase_orders`               | Purchase orders                                              | `snapshot`     | `id`              | n/a                         |
 | `software`                      | Software applications                                        | `snapshot`     | `id`              | n/a                         |
-| `satisfaction_survey_responses` | Customer satisfaction survey results                         | `snapshot`     | `id`              | n/a                         |
 | `requested_items`               | Service catalog items requested in service request tickets   | `snapshot`     | `id`, `ticket_id` | n/a                         |
 
 **Ingestion Type Definitions:**
@@ -94,14 +102,16 @@ The connector defines the ingestion mode and primary key for each table:
 
 ### Required and Optional Table Options
 
-Table-specific options are passed via the pipeline spec under `table` in `objects`. These options control pagination, incremental sync behavior, and other read characteristics.
+Table-specific options are passed via the **pipeline specification** under `table_configuration` for each table in `objects`. These options control pagination, incremental sync behavior, and other read characteristics.
+
+> **Important**: These options must be specified in your pipeline spec (see example below), NOT in your Unity Catalog connection. The UC connection only needs `externalOptionsAllowList` to allow these options to be passed through.
 
 **Common options for all tables:**
 - `per_page` (integer, optional): Number of records to fetch per page. Default: `100`. Maximum: `100`.
 - `max_pages_per_batch` (integer, optional): Maximum number of pages to fetch in a single read operation. Default: `50`. This helps control memory usage and runtime.
 
-**Additional options for incremental tables** (`tickets`, `problems`, `changes`, `releases`):
-- `start_date` (ISO 8601 string, optional): Initial starting point for incremental sync when there is no stored offset yet. Format: `YYYY-MM-DDTHH:MM:SSZ` (e.g., `2024-01-01T00:00:00Z`).
+**Additional options for incremental tables** (`tickets`, `problems`, `releases`):
+- `start_date` (ISO 8601 string, optional): Initial starting point for incremental sync when there is no stored offset yet. Format: `YYYY-MM-DDTHH:MM:SSZ` (e.g., `2025-12-01T00:00:00Z`).
 - `lookback_seconds` (integer, optional): Lookback window in seconds when computing the next cursor to handle late-arriving updates. Default: `300` (5 minutes).
 
 **Special notes:**
@@ -113,9 +123,7 @@ Full schemas are defined by the connector and align with the Freshservice API v2
 
 - **`tickets`**: Includes fields such as `subject`, `description`, `priority`, `status`, `requester_id`, `responder_id`, `created_at`, `updated_at`, and arrays like `cc_emails`, `tags`. Also includes nested `custom_fields` for instance-specific custom data.
 
-- **`problems`**, **`changes`**, **`releases`**: Similar structure with IT service management specific fields like `impact`, `risk`, `planned_start_date`, `planned_end_date`, and nested planning/analysis fields.
-
-- **`requesters`** and **`agents`**: Include personal information (`first_name`, `last_name`, `email`), organizational data (`department_ids`, `location_id`), and nested `custom_fields`.
+- **`problems`** and **`releases`**: Similar structure with IT service management specific fields like `impact`, `risk`, `planned_start_date`, `planned_end_date`, and nested planning/analysis fields.
 
 - **`locations`** and **`vendors`**: Include structured address information stored as nested objects with fields like `line1`, `line2`, `city`, `state`, `country`, `zipcode`.
 
@@ -156,64 +164,78 @@ Follow the Lakeflow Community Connector UI, which will guide you through setting
 
 ### Step 2: Configure Your Pipeline
 
-In your pipeline code (e.g., `ingestion_pipeline.py` or similar entrypoint), configure a `pipeline_spec` that references:
+In your pipeline code (e.g., `ingest.py` or similar entrypoint), configure a `pipeline_spec` that references:
 
-- A **Unity Catalog connection** configured with your Freshservice `api_key` and `domain`.
-- One or more **tables** to ingest, each with optional table-specific options.
+- A **Unity Catalog connection** configured with your Freshservice `api_key`, `domain`, and `externalOptionsAllowList`.
+- One or more **tables** to ingest, each with optional table-specific options in `table_configuration`.
 
-Example `pipeline_spec` for ingesting multiple Freshservice tables:
+> **Critical**: Table-specific parameters like `per_page`, `max_pages_per_batch`, `lookback_seconds`, and `start_date` must be specified in the `table_configuration` section of your pipeline spec, NOT in the Unity Catalog connection.
 
-```json
-{
-  "pipeline_spec": {
-    "connection_name": "freshservice_connection",
-    "object": [
-      {
-        "table": {
-          "source_table": "tickets",
-          "start_date": "2024-01-01T00:00:00Z",
-          "per_page": 100,
-          "max_pages_per_batch": 50,
-          "lookback_seconds": 300
+Example `pipeline_spec` for ingesting Freshservice tables:
+
+```python
+# Please update the spec below to configure your ingestion pipeline.
+
+pipeline_spec = {
+    "connection_name": "freshservice-new",
+    "objects": [
+        # Full config: customize destination and behavior
+        {
+            "table": {
+                "source_table": "tickets",
+                "destination_catalog": "fabio_goncalves",
+                "destination_schema": "lakeflow",
+                "destination_table": "freshservice_tickets",
+                "table_configuration": {
+                    "scd_type": "APPEND_ONLY",
+                    "start_date": "2025-12-01T00:00:00Z",
+                    "per_page": 10,
+                    "max_pages_per_batch": 50,
+                    "lookback_seconds": 300
+                },
+            }
+        },
+        # Minimal config: use defaults for everything
+        {
+            "table": {
+                "source_table": "problems",
+                "destination_catalog": "fabio_goncalves",
+                "destination_schema": "lakeflow",
+                "destination_table": "freshservice_problems",
+                "table_configuration": {
+                    "start_date": "2025-12-01T00:00:00Z"
+                },
+            }
+        },
+        # Snapshot table example
+        {
+            "table": {
+                "source_table": "assets",
+                "destination_catalog": "fabio_goncalves",
+                "destination_schema": "lakeflow",
+                "destination_table": "freshservice_assets",
+                "table_configuration": {
+                    "per_page": 100
+                },
+            }
         }
-      },
-      {
-        "table": {
-          "source_table": "problems",
-          "start_date": "2024-01-01T00:00:00Z"
-        }
-      },
-      {
-        "table": {
-          "source_table": "requesters",
-          "per_page": 100
-        }
-      },
-      {
-        "table": {
-          "source_table": "agents"
-        }
-      },
-      {
-        "table": {
-          "source_table": "assets"
-        }
-      }
-    ]
-  }
+    ],
 }
 ```
 
-- `connection_name` must point to the Unity Catalog connection configured with your Freshservice `api_key` and `domain`.
+**Key points:**
+- `connection_name` must point to the Unity Catalog connection configured with your Freshservice `api_key`, `domain`, and `externalOptionsAllowList`.
 - For each `table`:
   - `source_table` must be one of the supported table names listed above (exact casing required).
-  - Table options control pagination and incremental sync behavior.
+  - `table_configuration` contains the table-specific options like `per_page`, `start_date`, etc.
+  - For incremental tables (`tickets`, `problems`, `releases`), you can specify `start_date`, `lookback_seconds`, etc.
+  - For snapshot tables, you typically only need `per_page` and `max_pages_per_batch`.
 
 ### Step 3: Run and Schedule the Pipeline
 
 Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., a scheduled job or workflow).
 
-For incremental tables (`tickets`, `problems`, `changes`, `releases`):
+For incremental tables (`tickets`, `problems`, `releases`):
 - On the **first run**:
   - Omit `start_date` to backfill all historical data (may be heavy for large datasets), or
   - Set `start_date` to a recent cutoff to limit the initial history.
@@ -224,8 +246,8 @@ For snapshot tables:
 
 #### Best Practices
 
-- **Start Small**: Begin by syncing a subset of tables (e.g., `tickets` and `agents`) to validate your configuration and understand the data structure.
-- **Use Incremental Sync**: For tables that support it (`tickets`, `problems`, `changes`, `releases`), leverage incremental sync to reduce API calls and improve performance.
+- **Start Small**: Begin by syncing a subset of tables (e.g., `tickets` and `assets`) to validate your configuration and understand the data structure.
+- **Use Incremental Sync**: For tables that support it (`tickets`, `problems`, `releases`), leverage incremental sync to reduce API calls and improve performance.
 - **Configure Appropriate Page Sizes**: Use `per_page=100` (the maximum) for optimal performance. Adjust `max_pages_per_batch` based on your runtime requirements and memory constraints.
 - **Set Appropriate Schedules**: Balance data freshness requirements with API rate limits. For example, sync incremental tables every hour and snapshot tables daily or weekly.
 - **Monitor Rate Limits**: Freshservice enforces a rate limit of **1000 requests per hour per API key**. Monitor the `X-RateLimit-*` response headers to track usage. If you hit rate limits, consider:
@@ -280,10 +302,7 @@ For snapshot tables:
   - Developer Portal: https://developers.freshservice.com/
   - Tickets API: https://api.freshservice.com/#tickets
   - Problems API: https://api.freshservice.com/#problems
-  - Changes API: https://api.freshservice.com/#changes
   - Releases API: https://api.freshservice.com/#releases
-  - Requesters API: https://api.freshservice.com/#requesters
-  - Agents API: https://api.freshservice.com/#agents
   - Assets API: https://api.freshservice.com/#assets
   - Products API: https://api.freshservice.com/#products
   - Vendors API: https://api.freshservice.com/#vendors

@@ -32,33 +32,25 @@ The Freshservice API provides access to the following objects. The object list i
 
 1. **Tickets** - Support tickets and service requests (Incremental)
 2. **Problems** - Problem records for root cause analysis (Incremental)
-3. **Changes** - Change requests and change management (Incremental)
-4. **Releases** - Release management records (Incremental)
-5. **Requesters** - End users who raise tickets (Snapshot)
-6. **Agents** - Support agents who resolve tickets (Snapshot)
-7. **Locations** - Physical or virtual locations (Snapshot)
-8. **Products** - Product catalog items (Snapshot)
-9. **Vendors** - Vendor information (Snapshot)
-10. **Assets** - Hardware and software assets (Snapshot)
-11. **PurchaseOrders** - Purchase orders for assets (Snapshot)
-12. **Software** - Software application records (Snapshot)
-13. **Satisfaction Survey Responses** - Customer satisfaction feedback (Snapshot)
-14. **Requested Items** - Service catalog requested items (Snapshot)
+3. **Releases** - Release management records (Incremental)
+4. **Locations** - Physical or virtual locations (Snapshot)
+5. **Products** - Product catalog items (Snapshot)
+6. **Vendors** - Vendor information (Snapshot)
+7. **Assets** - Hardware and software assets (Snapshot)
+8. **PurchaseOrders** - Purchase orders for assets (Snapshot)
+9. **Software** - Software application records (Snapshot)
+10. **Requested Items** - Service catalog requested items (Snapshot)
 
 **API Endpoints:**
 - Tickets: `/api/v2/tickets`
 - Problems: `/api/v2/problems`
-- Changes: `/api/v2/changes`
 - Releases: `/api/v2/releases`
-- Requesters: `/api/v2/requesters`
-- Agents: `/api/v2/agents`
 - Locations: `/api/v2/locations`
 - Products: `/api/v2/products`
 - Vendors: `/api/v2/vendors`
 - Assets: `/api/v2/assets`
 - Purchase Orders: `/api/v2/purchase_orders`
 - Software: `/api/v2/applications`
-- Satisfaction Survey Responses: `/api/v2/surveys/satisfaction_responses`
 - Requested Items: Nested under service requests - `/api/v2/tickets/{ticket_id}/requested_items`
 
 ## **Object Schema**
@@ -142,43 +134,6 @@ The Freshservice API does not provide a dynamic schema discovery endpoint. Schem
 }
 ```
 
-### **Changes Schema**
-
-```json
-{
-  "id": 123,
-  "created_at": "2024-01-01T10:00:00Z",
-  "updated_at": "2024-01-02T15:30:00Z",
-  "agent_id": 789,
-  "description": "Upgrade server firmware",
-  "description_text": "Plain text description",
-  "requester_id": 456,
-  "subject": "Server firmware upgrade",
-  "group_id": 202,
-  "priority": 2,
-  "impact": 3,
-  "status": 1,
-  "risk": 2,
-  "change_type": 1,
-  "approval_status": 1,
-  "planned_start_date": "2024-01-10T08:00:00Z",
-  "planned_end_date": "2024-01-10T18:00:00Z",
-  "department_id": 101,
-  "category": "Software",
-  "sub_category": "Server",
-  "item_category": "Infrastructure",
-  "custom_fields": {},
-  "planning_fields": {
-    "maintenance_window": {},
-    "rollout_plan": {},
-    "backout_plan": {}
-  },
-  "tags": [],
-  "assets": [],
-  "workspace_id": 1
-}
-```
-
 ### **Releases Schema**
 
 ```json
@@ -209,77 +164,6 @@ The Freshservice API does not provide a dynamic schema discovery endpoint. Schem
   },
   "tags": [],
   "assets": [],
-  "workspace_id": 1
-}
-```
-
-### **Requesters Schema**
-
-```json
-{
-  "id": 456,
-  "created_at": "2024-01-01T10:00:00Z",
-  "updated_at": "2024-01-02T15:30:00Z",
-  "first_name": "John",
-  "last_name": "Doe",
-  "job_title": "Software Engineer",
-  "primary_email": "john.doe@example.com",
-  "secondary_emails": [],
-  "work_phone_number": "+1-555-1234",
-  "mobile_phone_number": "+1-555-5678",
-  "department_ids": [101],
-  "can_see_all_tickets_from_associated_departments": false,
-  "reporting_manager_id": null,
-  "address": "123 Main St",
-  "time_zone": "Pacific Time (US & Canada)",
-  "time_format": "12h",
-  "language": "en",
-  "location_id": 301,
-  "background_information": "",
-  "custom_fields": {},
-  "is_agent": false,
-  "has_logged_in": true,
-  "active": true,
-  "workspace_id": 1
-}
-```
-
-### **Agents Schema**
-
-```json
-{
-  "id": 789,
-  "created_at": "2024-01-01T10:00:00Z",
-  "updated_at": "2024-01-02T15:30:00Z",
-  "first_name": "Jane",
-  "last_name": "Smith",
-  "occasional": false,
-  "job_title": "Support Specialist",
-  "email": "jane.smith@example.com",
-  "work_phone_number": "+1-555-9999",
-  "mobile_phone_number": "+1-555-8888",
-  "department_ids": [101],
-  "can_see_all_tickets_from_associated_departments": true,
-  "reporting_manager_id": null,
-  "address": "456 Oak Ave",
-  "time_zone": "Pacific Time (US & Canada)",
-  "time_format": "12h",
-  "language": "en",
-  "location_id": 301,
-  "background_information": "",
-  "scoreboard_level_id": 1,
-  "member_of": [202],
-  "observer_of": [],
-  "roles": [
-    {
-      "role_id": 1,
-      "assignment_scope": "entire_helpdesk"
-    }
-  ],
-  "signature": "<p>Best regards,<br>Jane Smith</p>",
-  "custom_fields": {},
-  "active": true,
-  "has_logged_in": true,
   "workspace_id": 1
 }
 ```
@@ -446,30 +330,6 @@ The Freshservice API does not provide a dynamic schema discovery endpoint. Schem
 }
 ```
 
-### **Satisfaction Survey Responses Schema**
-
-```json
-{
-  "id": 1001,
-  "created_at": "2024-01-02T16:00:00Z",
-  "updated_at": "2024-01-02T16:00:00Z",
-  "ticket_id": 123,
-  "user_id": 456,
-  "ratings": {
-    "question_1": {
-      "question": "How satisfied are you with the resolution?",
-      "value": 5
-    },
-    "question_2": {
-      "question": "How satisfied are you with the agent?",
-      "value": 5
-    }
-  },
-  "feedback": "Great support, issue resolved quickly!",
-  "survey_type": "Ticket Resolution"
-}
-```
-
 ### **Requested Items Schema**
 
 Requested Items are nested under service requests (tickets with type "Service Request"). They represent catalog items requested by users.
@@ -502,17 +362,13 @@ Primary keys for Freshservice objects are **static** and defined as follows:
 |--------|-------------------|
 | Tickets | `id` |
 | Problems | `id` |
-| Changes | `id` |
 | Releases | `id` |
-| Requesters | `id` |
-| Agents | `id` |
 | Locations | `id` |
 | Products | `id` |
 | Vendors | `id` |
 | Assets | `id` |
 | PurchaseOrders | `id` |
 | Software | `id` |
-| Satisfaction Survey Responses | `id` |
 | Requested Items | `id` |
 
 All objects use `id` as the unique identifier (integer/long type).
@@ -525,17 +381,13 @@ The ingestion type for each object determines how data should be synchronized:
 |--------|---------------|--------------|-------------|
 | Tickets | `cdc` | `updated_at` | Supports incremental sync with updates and deletes |
 | Problems | `cdc` | `updated_at` | Supports incremental sync with updates and deletes |
-| Changes | `cdc` | `updated_at` | Supports incremental sync with updates and deletes |
 | Releases | `cdc` | `updated_at` | Supports incremental sync with updates and deletes |
-| Requesters | `snapshot` | N/A | Full snapshot only |
-| Agents | `snapshot` | N/A | Full snapshot only |
 | Locations | `snapshot` | N/A | Full snapshot only |
 | Products | `snapshot` | N/A | Full snapshot only |
 | Vendors | `snapshot` | N/A | Full snapshot only |
 | Assets | `snapshot` | N/A | Full snapshot only |
 | PurchaseOrders | `snapshot` | N/A | Full snapshot only |
 | Software | `snapshot` | N/A | Full snapshot only |
-| Satisfaction Survey Responses | `snapshot` | N/A | Full snapshot only |
 | Requested Items | `snapshot` | N/A | Full snapshot only |
 
 **Notes:**
@@ -661,15 +513,6 @@ GET https://YOUR_DOMAIN.freshservice.com/api/v2/problems
 GET https://YOUR_DOMAIN.freshservice.com/api/v2/problems?updated_since=2024-01-01T00:00:00Z&per_page=100
 ```
 
-#### **Changes**
-```bash
-# List all changes
-GET https://YOUR_DOMAIN.freshservice.com/api/v2/changes
-
-# List changes with incremental sync
-GET https://YOUR_DOMAIN.freshservice.com/api/v2/changes?updated_since=2024-01-01T00:00:00Z&per_page=100
-```
-
 #### **Releases**
 ```bash
 # List all releases
@@ -677,24 +520,6 @@ GET https://YOUR_DOMAIN.freshservice.com/api/v2/releases
 
 # List releases with incremental sync
 GET https://YOUR_DOMAIN.freshservice.com/api/v2/releases?updated_since=2024-01-01T00:00:00Z&per_page=100
-```
-
-#### **Requesters**
-```bash
-# List all requesters
-GET https://YOUR_DOMAIN.freshservice.com/api/v2/requesters?per_page=100
-
-# Get specific requester
-GET https://YOUR_DOMAIN.freshservice.com/api/v2/requesters/456
-```
-
-#### **Agents**
-```bash
-# List all agents
-GET https://YOUR_DOMAIN.freshservice.com/api/v2/agents?per_page=100
-
-# Get specific agent
-GET https://YOUR_DOMAIN.freshservice.com/api/v2/agents/789
 ```
 
 #### **Locations**
@@ -734,12 +559,6 @@ GET https://YOUR_DOMAIN.freshservice.com/api/v2/purchase_orders?per_page=100
 ```bash
 # List all software applications
 GET https://YOUR_DOMAIN.freshservice.com/api/v2/applications?per_page=100
-```
-
-#### **Satisfaction Survey Responses**
-```bash
-# List all survey responses
-GET https://YOUR_DOMAIN.freshservice.com/api/v2/surveys/satisfaction_responses?per_page=100
 ```
 
 #### **Requested Items**
@@ -941,20 +760,14 @@ curl -u YOUR_API_KEY:X \
 |--------|--------------|-------------|----------------|
 | Tickets | ✓ | ✓ | ✓ |
 | Problems | ✓ | ✓ | ✓ |
-| Changes | ✓ | ✓ | ✓ |
 | Releases | ✓ | ✓ | ✓ |
-| Requesters | ✓ | ✓ | ✓ |
-| Agents | ✓ | ✓ | ✓ |
 | Locations | ✓ | ✓ | ✓ |
 | Products | ✓ | ✓ | ✓ |
 | Vendors | ✓ | ✓ | ✓ |
 | Assets | ✓ | ✓ | ✓ |
 | PurchaseOrders | ✓ | ✓ | ✓ |
 | Software | ✓ | ✓ | ✓ |
-| Satisfaction Survey Responses | ✗ | ✗ | ✗ |
 | Requested Items | ✓ | ✓ | ✓ |
-
-**Note:** Satisfaction Survey Responses are read-only and cannot be created, updated, or deleted via API. They are created automatically when users submit surveys.
 
 ## **Research Log**
 
