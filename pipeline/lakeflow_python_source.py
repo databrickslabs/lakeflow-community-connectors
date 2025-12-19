@@ -9,7 +9,6 @@ from sources.interface.lakeflow_connect import LakeflowConnect
 from pipeline.lakeflow_connect_enricher import (
     LakeflowConnectEnricher,
     HashedPrimaryKeyEnrichment,
-    DeletionTrackingEnrichment,
 )
 
 
@@ -97,7 +96,6 @@ class LakeflowSource(DataSource):
         self.lakeflow_connect = (
             LakeflowConnectEnricher(raw_connect)
             .add(HashedPrimaryKeyEnrichment())
-            .add(DeletionTrackingEnrichment())
         )
 
     @classmethod
@@ -113,7 +111,6 @@ class LakeflowSource(DataSource):
                     StructField("primary_keys", ArrayType(StringType()), True),
                     StructField("cursor_field", StringType(), True),
                     StructField("ingestion_type", StringType(), True),
-                    StructField("has_deletion_tracking", BooleanType(), True),
                 ]
             )
         else:

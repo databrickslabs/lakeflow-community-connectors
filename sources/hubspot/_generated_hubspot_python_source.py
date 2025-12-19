@@ -715,10 +715,6 @@ def register_lakeflow_source(spark):
 
             return result
 
-        def is_marked_for_deletion(self, row: dict, table_name: str) -> bool:
-            """Check if a record is marked as archived (soft deleted)"""
-            return row.get("archived", False)
-
         def test_connection(self) -> dict:
             """Test the connection to HubSpot API"""
             try:
@@ -871,45 +867,6 @@ def register_lakeflow_source(spark):
             return hashlib.sha256(record_str.encode()).hexdigest()
 
 
-    class DeletionTrackingEnrichment(Enrichment):
-        """
-        Adds _is_deleted column to track soft-deleted records.
-
-        Only applies if the source implements the is_marked_for_deletion() method.
-        This allows sources to indicate which records are marked for deletion.
-        """
-
-        DELETION_FIELD_NAME = "_is_deleted"
-
-        def should_apply(self, table_name: str, metadata: dict) -> bool:
-            """Only apply if source implements is_marked_for_deletion method."""
-            if table_name == METADATA_TABLE:
-                return False
-            return hasattr(self.connect, 'is_marked_for_deletion')
-
-        def enrich_schema(
-            self, schema: StructType, table_name: str, metadata: dict
-        ) -> StructType:
-            """Add _is_deleted boolean field to the schema."""
-            deletion_field = StructField(self.DELETION_FIELD_NAME, BooleanType(), False)
-            return StructType(list[StructField](schema.fields) + [deletion_field])
-
-        def enrich_records(
-            self, records: List[Dict], table_name: str, metadata: dict
-        ) -> List[Dict]:
-            """Add _is_deleted field to each record."""
-            return [self._add_deletion_flag(record, table_name) for record in records]
-
-        def enrich_metadata(self, metadata: dict, table_name: str) -> dict:
-            """Mark that deletion tracking is enabled."""
-            return {**metadata, "has_deletion_tracking": True}
-
-        def _add_deletion_flag(self, record: Dict, table_name: str) -> Dict:
-            """Add deletion flag to a record."""
-            is_deleted = self.connect.is_marked_for_deletion(record, table_name)
-            return {**record, self.DELETION_FIELD_NAME: is_deleted}
-
-
     class LakeflowConnectEnricher:
         """
         Wraps a LakeflowConnect instance and applies enrichments.
@@ -991,10 +948,6 @@ def register_lakeflow_source(spark):
                 Enriched metadata
             """
             metadata = self.connect.read_table_metadata(table_name, table_options)
-
-            # If metadata doesn't have has_deletion_tracking, set it to False
-            if "has_deletion_tracking" not in metadata:
-                metadata["has_deletion_tracking"] = False
 
             for enrichment in self.enrichments:
                 if enrichment.should_apply(table_name, metadata):
@@ -1122,7 +1075,6 @@ def register_lakeflow_source(spark):
             self.lakeflow_connect = (
                 LakeflowConnectEnricher(raw_connect)
                 .add(HashedPrimaryKeyEnrichment())
-                .add(DeletionTrackingEnrichment())
             )
 
         @classmethod
@@ -1138,7 +1090,6 @@ def register_lakeflow_source(spark):
                         StructField("primary_keys", ArrayType(StringType()), True),
                         StructField("cursor_field", StringType(), True),
                         StructField("ingestion_type", StringType(), True),
-                        StructField("has_deletion_tracking", BooleanType(), True),
                     ]
                 )
             else:

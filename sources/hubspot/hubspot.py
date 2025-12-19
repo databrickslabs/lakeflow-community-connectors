@@ -550,10 +550,6 @@ class LakeflowConnect:
 
         return result
 
-    def is_marked_for_deletion(self, row: dict, table_name: str) -> bool:
-        """Check if a record is marked as archived (soft deleted)"""
-        return row.get("archived", False)
-
     def test_connection(self) -> dict:
         """Test the connection to HubSpot API"""
         try:
