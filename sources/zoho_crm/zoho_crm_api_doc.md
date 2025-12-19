@@ -11,12 +11,16 @@
   - Refresh tokens are long-lived and used to obtain new access tokens
 
 **OAuth 2.0 Flow Overview**:
-1. User obtains an authorization code through Zoho's OAuth consent screen (out-of-band process)
-2. Authorization code is exchanged for `access_token` and `refresh_token`
-3. Connector stores `client_id`, `client_secret`, and `refresh_token`
-4. At runtime, connector exchanges `refresh_token` for a new `access_token` before making API calls
+1. Register your application in the Zoho API Console (https://api-console.zoho.com/)
+2. Generate a **Grant Token** (authorization code) with appropriate scopes through Zoho's OAuth consent screen
+   - **Critical**: The grant token is only valid for a few minutes and must be exchanged quickly for a refresh token
+3. Exchange the grant token for `access_token` and `refresh_token` immediately
+4. Connector stores `client_id`, `client_secret`, and `refresh_token`
+5. At runtime, connector exchanges `refresh_token` for a new `access_token` before making API calls
 
-**Token endpoint**: `https://accounts.zoho.com/oauth/v2/token`
+**Token endpoints**:
+- **Authorization/Grant Token Generation**: `https://accounts.zoho.com/` (or region-specific: `.eu`, `.in`, `.com.au`, `.com.cn`, `.jp`)
+- **Token Exchange**: `https://accounts.zoho.com/oauth/v2/token` (POST)
 
 Example token refresh request:
 
@@ -49,8 +53,17 @@ curl -X GET \
 
 **Required OAuth Scopes**:
 - `ZohoCRM.modules.ALL` - Full access to all modules (read and write)
+- `ZohoCRM.settings.ALL` - Access to settings and metadata
+- `ZohoCRM.settings.modules.ALL` - Access to module metadata (required for dynamic schema discovery)
 - For read-only access: `ZohoCRM.modules.READ`
 - For specific modules: `ZohoCRM.modules.{module_name}.READ` or `ZohoCRM.modules.{module_name}.ALL`
+
+**Recommended scope configuration for connectors**:
+```
+ZohoCRM.modules.ALL, ZohoCRM.settings.ALL, ZohoCRM.settings.modules.ALL
+```
+
+**Important**: The scope must be specified when generating the grant token. Make sure the scope covers all modules and metadata endpoints needed for schema discovery and data sync. Some modules may not be available if the scope is insufficient or if your Zoho CRM edition doesn't support them.
 
 **Other supported methods (not used by this connector)**:
 - Zoho CRM also supports self-client OAuth for internal apps, but the connector will use the standard OAuth 2.0 flow with client credentials and refresh tokens only.
@@ -1061,11 +1074,17 @@ Zoho CRM field types map to standard data types as follows:
 | `multiselectlookup` | Multi-reference lookup | `array<struct>` | Array of objects | Array of lookup objects. |
 | `fileupload` | File attachment reference | `string` | String | File ID or URL. |
 | `imageupload` | Image attachment reference | `string` | String | Image ID or URL. |
-| `autonumber` | Auto-generated sequence | `string` | String | System-generated unique identifier (not the primary key). |
+| `autonumber` | Auto-generated sequence | `string` | String | System-generated unique identifier (not the primary key). Note: Airbyte treats as big_integer when no prefix/suffix. |
 | `formula` | Calculated field | varies | varies | Computed based on formula. Data type depends on formula result. |
 | `subform` | Nested records | `array<struct>` | Array of objects | Array of nested objects with their own fields. |
 | `consent_lookup` | GDPR consent reference | `struct` | Object | Reference to consent records. |
 | `profileimage` | Profile image URL | `string` | String | URL to profile image. |
+| `jsonarray` | JSON array | `array` | Array | Special JSON array type (e.g., Tags field). |
+| `jsonobject` | JSON object | `struct` | Object | Embedded JSON object structure. |
+| `multiselectlookup` | Multi-reference lookup | `array<struct>` | Array of objects | Array of lookup objects. |
+| `event_reminder` | Event reminder | `string` | String | Event reminder configuration. |
+| `RRULE` | Recurrence rule | `struct` | Object | iCalendar recurrence rule for recurring events. |
+| `ALARM` | Event alarm | `struct` | Object | Event alarm/notification configuration. |
 
 **Nested structures**:
 
@@ -1430,15 +1449,40 @@ Example response:
 
 ## **Known Quirks & Edge Cases**
 
-- **Token expiration**: Access tokens expire after 1 hour. The connector must handle token refresh transparently before making API calls. Monitor for HTTP 401 responses and refresh proactively based on `expires_in` value.
+- **Token expiration and grant token time limit**: 
+  - Access tokens expire after 1 hour. The connector must handle token refresh transparently before making API calls. Monitor for HTTP 401 responses and refresh proactively based on `expires_in` value.
+  - **Critical**: The initial grant token (authorization code) obtained from Zoho's OAuth console is only valid for a few minutes (typically 2-3 minutes). You must exchange it for a refresh token immediately. If the grant token expires, you'll need to generate a new one.
+  - Best practice: Automate the OAuth flow or have a process to quickly exchange the grant token for a refresh token as soon as it's generated.
 
-- **Data center-specific domains**: Zoho CRM uses different API domains based on the data center:
+- **Data center-specific domains**: Zoho CRM uses different API domains based on the data center and environment:
+
+**Production environments**:
   - US: `https://www.zohoapis.com`
   - EU: `https://www.zohoapis.eu`
   - IN: `https://www.zohoapis.in`
   - AU: `https://www.zohoapis.com.au`
   - CN: `https://www.zohoapis.com.cn`
+  - JP: `https://www.zohoapis.jp`
+
+**Sandbox environments**:
+  - US: `https://sandbox.zohoapis.com`
+  - EU: `https://sandbox.zohoapis.eu`
+  - IN: `https://sandbox.zohoapis.in`
+  - AU: `https://sandbox.zohoapis.com.au`
+  - CN: `https://sandbox.zohoapis.com.cn`
+  - JP: `https://sandbox.zohoapis.jp`
+
+**Developer environments**:
+  - US: `https://developer.zohoapis.com`
+  - EU: `https://developer.zohoapis.eu`
+  - IN: `https://developer.zohoapis.in`
+  - AU: `https://developer.zohoapis.com.au`
+  - CN: `https://developer.zohoapis.com.cn`
+  - JP: `https://developer.zohoapis.jp`
+
+**Important notes**:
   - The correct domain is returned in the OAuth token response (`api_domain` field)
+  - **Developer environment warning**: The Zoho Developer environment API is inconsistent with the production environment API. It contains approximately half of the modules supported in production. Use developer environment only for testing, not for production data sync.
 
 - **Field visibility and permissions**: Not all fields may be visible to all users. Field access depends on:
   - User role and profile permissions
@@ -1452,6 +1496,11 @@ Example response:
   - **Important**: When syncing custom modules, filter by `generated_type = "custom"` from the modules metadata API
   - Only custom modules with this flag should be treated as user-created data modules
   - Other `generated_type` values (like `web_tab` or `subform`) may require special handling
+  - **Dynamic schema discovery**: The connector should build schemas dynamically using:
+    - Modules API: `GET /crm/v8/settings/modules` - to discover available modules
+    - Modules Metadata API: Module-level metadata including fields list
+    - Fields Metadata API: `GET /crm/v8/settings/fields?module={module_name}` - detailed field schemas
+  - Schema discovery typically takes 10-30 seconds depending on the number of modules and fields
 
 - **Lookup field partial data**: Lookup fields in API responses may contain only `id` and `name`. Additional fields (like `email` for user lookups) may not always be present. Do not assume all lookup fields are fully populated.
 
@@ -1520,6 +1569,7 @@ Example response:
 | Official Docs | https://www.zoho.com/crm/developer/docs/api/v8/scopes.html | 2024-12-19 | High | OAuth scope definitions, module-level permissions |
 | Official Docs | https://www.zoho.com/crm/developer/docs/api/v8/data-centers.html | 2024-12-19 | High | Data center-specific API domains, regional endpoints |
 | Reference Implementation | https://fivetran.com/docs/connectors/applications/zoho-crm | 2024-12-19 | High | Fivetran connector: confirmed capture deletes for all modules, subform re-import strategy (weekly), custom module filtering (generated_type=custom), API credit exhaustion handling, 1-hour reschedule strategy for rate limits |
+| Reference Implementation | https://docs.airbyte.com/integrations/sources/zoho-crm | 2024-12-19 | High | Airbyte connector: confirmed dynamic schema discovery via Metadata APIs, sandbox/developer environment URLs, grant token expiration warning (few minutes), comprehensive scope requirements (modules.ALL + settings.ALL + settings.modules.ALL), data type mappings including jsonarray/jsonobject/RRULE/ALARM types, developer environment limitation (half the modules of production) |
 
 
 ## **Sources and References**
@@ -1546,5 +1596,10 @@ Example response:
   - Setup guide: https://fivetran.com/docs/connectors/applications/zoho-crm/setup-guide
   - Used to validate practical implementation patterns: custom module filtering, subform deletion tracking workarounds, API credit management, and error handling strategies
 
-All information in this document is primarily sourced from the official Zoho CRM API v8 documentation. Fivetran's connector documentation was used to validate real-world implementation patterns and identify edge cases. When conflicts or ambiguities arise, the official documentation at https://www.zoho.com/crm/developer/docs/api/v8/ is treated as the authoritative source.
+- **Airbyte Zoho CRM Connector Documentation** (high confidence - reference implementation)
+  - Main documentation: https://docs.airbyte.com/integrations/sources/zoho-crm
+  - GitHub implementation: https://github.com/airbytehq/airbyte/tree/master/airbyte-integrations/connectors/source-zoho-crm
+  - Used to validate: dynamic schema discovery approach, OAuth scope requirements, environment URLs (production/sandbox/developer), data type mappings, grant token expiration timing, developer environment limitations
+
+All information in this document is primarily sourced from the official Zoho CRM API v8 documentation. Fivetran's and Airbyte's connector documentation were used to validate real-world implementation patterns, identify edge cases, and confirm best practices. When conflicts or ambiguities arise, the official documentation at https://www.zoho.com/crm/developer/docs/api/v8/ is treated as the authoritative source.
 
