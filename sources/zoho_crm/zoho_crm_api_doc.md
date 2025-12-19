@@ -13,7 +13,7 @@
 **OAuth 2.0 Flow Overview**:
 1. Register your application in the Zoho API Console (https://api-console.zoho.com/)
 2. Generate a **Grant Token** (authorization code) with appropriate scopes through Zoho's OAuth consent screen
-   - **Critical**: The grant token is only valid for a few minutes and must be exchanged quickly for a refresh token
+   - **Critical**: The grant token is only valid for **2 minutes** (per https://www.zoho.com/accounts/protocol/oauth/web-apps/authorization.html) and must be exchanged quickly for a refresh token
 3. Exchange the grant token for `access_token` and `refresh_token` immediately
 4. Connector stores `client_id`, `client_secret`, and `refresh_token`
 5. At runtime, connector exchanges `refresh_token` for a new `access_token` before making API calls
@@ -1451,8 +1451,8 @@ Example response:
 
 - **Token expiration and grant token time limit**: 
   - Access tokens expire after 1 hour. The connector must handle token refresh transparently before making API calls. Monitor for HTTP 401 responses and refresh proactively based on `expires_in` value.
-  - **Critical**: The initial grant token (authorization code) obtained from Zoho's OAuth console is only valid for a few minutes (typically 2-3 minutes). You must exchange it for a refresh token immediately. If the grant token expires, you'll need to generate a new one.
-  - Best practice: Automate the OAuth flow or have a process to quickly exchange the grant token for a refresh token as soon as it's generated.
+  - **Critical**: The initial grant token (authorization code) obtained from Zoho's OAuth console is only valid for **2 minutes** (per https://www.zoho.com/accounts/protocol/oauth/web-apps/authorization.html). You must exchange it for a refresh token immediately. If the grant token expires, you'll need to generate a new one.
+  - Best practice: Have your token exchange command ready before generating the grant token to complete the exchange within the 2-minute window.
 
 - **Data center-specific domains**: Zoho CRM uses different API domains based on the data center and environment:
 
@@ -1569,7 +1569,7 @@ Example response:
 | Official Docs | https://www.zoho.com/crm/developer/docs/api/v8/scopes.html | 2024-12-19 | High | OAuth scope definitions, module-level permissions |
 | Official Docs | https://www.zoho.com/crm/developer/docs/api/v8/data-centers.html | 2024-12-19 | High | Data center-specific API domains, regional endpoints |
 | Reference Implementation | https://fivetran.com/docs/connectors/applications/zoho-crm | 2024-12-19 | High | Fivetran connector: confirmed capture deletes for all modules, subform re-import strategy (weekly), custom module filtering (generated_type=custom), API credit exhaustion handling, 1-hour reschedule strategy for rate limits |
-| Reference Implementation | https://docs.airbyte.com/integrations/sources/zoho-crm | 2024-12-19 | High | Airbyte connector: confirmed dynamic schema discovery via Metadata APIs, sandbox/developer environment URLs, grant token expiration warning (few minutes), comprehensive scope requirements (modules.ALL + settings.ALL + settings.modules.ALL), data type mappings including jsonarray/jsonobject/RRULE/ALARM types, developer environment limitation (half the modules of production) |
+| Reference Implementation | https://docs.airbyte.com/integrations/sources/zoho-crm | 2024-12-19 | High | Airbyte connector: confirmed dynamic schema discovery via Metadata APIs, sandbox/developer environment URLs, grant token expiration warning (2 minutes per official docs), comprehensive scope requirements (modules.ALL + settings.ALL + settings.modules.ALL), data type mappings including jsonarray/jsonobject/RRULE/ALARM types, developer environment limitation (half the modules of production) |
 
 
 ## **Sources and References**
