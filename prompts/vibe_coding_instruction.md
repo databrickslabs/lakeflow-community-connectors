@@ -31,6 +31,27 @@ Create one file named `<source_name>_api_doc.md` under `sources/<source_name>/` 
 - Please include all fields in the schema. DO NOT hide any fields using links.
 - All information must be backed by official sources or verified or reliable implementations
 
+### Optional Research Step: Write-Back Functionality
+
+**Ask the user:** Do you want to implement write-back to source test functionality for end-to-end validation?
+
+**Note to mention to user:** Write-back testing validates the complete write → read cycle and ensures incremental sync captures newly created records. However, it requires write permissions, a test/sandbox environment, and creates real data in the source system.gti Skip if the source is read-only, only production access is available, or write operations are too risky/expensive.
+
+If **YES**, research and document the following:
+1. **Write/Create APIs**: Document POST/PUT endpoints for creating records in the source system
+   - Required fields and payload structure for creating test data
+   - Authentication requirements for write operations
+   - Any required permissions or scopes beyond read access
+2. **Field Transformation**: Identify if field names differ between write and read operations
+   - Example: Writing `email` but reading back as `properties_email`
+   - Document any transformations in the API doc
+3. **Rate Limits & Constraints**: Note any write-specific rate limits, quotas, or restrictions
+4. **Test Environment**: Confirm availability of sandbox/test environment for safe write testing
+
+**Document in a new section** `## Write-Back APIs (Optional)` in your `<source_name>_api_doc.md` if implementing write testing.
+
+If **NO** or if write APIs are not available, skip this optional step.
+
 ### Research Log 
 Add a table:
 
@@ -129,9 +150,163 @@ TODO: UPDATE THIS.
 results, we need to make various adjustments
 - For external users, please remove the `dev_config.json` after this step.
 - Avoid mocking data in tests. Config files will be supplied to enable connections to an actual instance.
+
 ---
 
-## Step 5: Create a Public Connector Documentation
+## Step 5: Write-Back Testing (Optional)
+
+### Goal
+Validate end-to-end connector functionality by testing write operations followed by incremental reads. This ensures your connector can correctly ingest data that was just created in the source system.
+
+**⚠️ IMPORTANT: Only test against non-production environments. Write operations create real data in the source system.**
+
+### Should You Implement Write Testing?
+
+Ask yourself:
+- Does the source API support creating/inserting data (POST/PUT endpoints)?
+- Do you have write permissions and a test/sandbox environment?
+- Would validating the full write → read cycle add confidence to your connector?
+
+If **NO** to any of the above, **skip this step**. Write testing is completely optional.
+
+If **YES** and you want comprehensive end-to-end validation, proceed below.
+
+---
+
+### What Write Testing Validates
+
+Write testing creates a complete validation cycle:
+1. **Write**: Test utils generate and insert test data into the source system
+2. **Read**: Connector reads back the data using normal ingestion flow
+3. **Verify**: Test suite confirms the written data was correctly ingested
+
+This validates:
+- ✅ Incremental sync picks up newly created records
+- ✅ Schema correctly captures all written fields
+- ✅ Field mappings and transformations work correctly
+- ✅ End-to-end data integrity
+
+---
+
+### Implementation Steps
+
+**Step 1: Create Test Utils File**
+
+Create `sources/{source_name}/{source_name}_test_utils.py` implementing the interface defined in `tests/lakeflow_connect_test_utils.py`.
+
+**Key Methods to Implement:**
+- `get_source_name()`: Return the connector name
+- `list_insertable_tables()`: List tables that support write operations
+- `generate_rows_and_write()`: Generate test data and write to source system
+
+**Reference Implementation:** See `sources/hubspot/hubspot_test_utils.py` for a complete working example.
+
+**Implementation Tips:**
+- Initialize API client for write operations in `__init__`
+- Only include tables in `list_insertable_tables()` where you've implemented write logic
+- Generate unique test data with timestamps/UUIDs to avoid collisions
+- Use identifiable prefixes (e.g., `test_`, `generated_`) in test data
+- Return proper `column_mapping` if source transforms field names during write/read
+- Add delays after writes if source has eventual consistency (e.g., `time.sleep(5)`)
+
+---
+
+**Step 2: Update Test File**
+
+Modify `sources/{source_name}/test/test_{source_name}_lakeflow_connect.py` to import test utils:
+
+```python
+# Add this import
+from sources.{source_name}.{source_name}_test_utils import LakeflowConnectTestUtils
+
+def test_{source_name}_connector():
+    test_suite.LakeflowConnect = LakeflowConnect
+    test_suite.LakeflowConnectTestUtils = LakeflowConnectTestUtils  # Add this line
+    
+    # Rest remains the same...
+```
+
+**Reference Implementation:** See `sources/hubspot/test/test_hubspot_lakeflow_connect.py` for a example implementation.
+
+---
+
+**Step 3: Run Tests with Write Validation**
+
+```bash
+pytest sources/{source_name}/test/test_{source_name}_lakeflow_connect.py -v
+```
+
+**Additional Tests Now Executed:**
+- ✅ `test_list_insertable_tables`: Validates insertable tables list
+- ✅ `test_write_to_source`: Writes test data and validates success
+- ✅ `test_incremental_after_write`: Validates incremental sync picks up new data
+
+**Expected Output:**
+```
+test_list_insertable_tables PASSED - Found 2 insertable tables
+test_write_to_source PASSED - Successfully wrote to 2 tables
+test_incremental_after_write PASSED - Incremental sync captured new records
+```
+
+---
+
+### Common Issues & Debugging
+
+**Issue 1: Write Operation Fails (400/403)**
+- **Cause**: Insufficient permissions or missing required fields
+- **Fix**: 
+  - Verify API credentials have write permissions
+  - Check source API docs for required fields
+  - Validate generated data matches schema requirements
+
+**Issue 2: Incremental Sync Doesn't Pick Up New Data**
+- **Cause**: Cursor timestamp mismatch or eventual consistency delay
+- **Fix**:
+  - Add `time.sleep(5-60)` after write to allow commit
+  - Verify cursor field in new records is newer than existing data
+  - Check that cursor field is correctly set in generated data
+
+**Issue 3: Column Mapping Errors**
+- **Cause**: Source API transforms field names during write/read
+- **Fix**:
+  - Compare written field names vs. read field names
+  - Update `column_mapping` return value to reflect transformations
+  - Example: `{"email": "properties_email"}` if source adds prefix
+
+**Issue 4: Test Data Conflicts**
+- **Cause**: Duplicate IDs or unique constraint violations
+- **Fix**:
+  - Use timestamps or UUIDs in generated IDs
+  - Add random suffixes: `f"test_{time.time()}_{random.randint(1000,9999)}"`
+  - Prefix all test data fields with identifiable markers
+
+---
+
+### Best Practices
+
+1. **Use Test/Sandbox Environment**: Never run write tests against production
+2. **Unique Test Data**: Include timestamps/UUIDs to avoid collisions
+3. **Identifiable Prefixes**: Use `test_`, `generated_`, etc. in data for easy identification
+4. **Minimal Data**: Generate only required fields, keep test data simple
+5. **Cleanup Consideration**: Some sources may require manual cleanup of test data
+6. **Rate Limiting**: Add delays between writes if source API has rate limits
+
+---
+
+### When to Skip Write Testing
+
+**Skip write testing if:**
+- ❌ Source API is read-only (no create/insert endpoints)
+- ❌ Only production environment available (too risky)
+- ❌ Write permissions unavailable or expensive to obtain
+- ❌ Source API charges for write operations
+- ❌ Write operations have side effects (notifications, triggers, etc.)
+
+**Write testing is completely optional.** The standard read-only tests in Step 4 are sufficient for most connectors.
+
+---
+
+## Step 6: Create a Public Connector Documentation
 
 ### Goal
 Generate the **public-facing documentation** for the **{{source_name}}** connector, targeted at end users.
