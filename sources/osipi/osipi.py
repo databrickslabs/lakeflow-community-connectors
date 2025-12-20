@@ -98,6 +98,49 @@ def _isoformat_z(dt: datetime) -> str:
 def _parse_ts(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
+def _parse_pi_time(value: Optional[str], now: Optional[datetime] = None) -> datetime:
+    """
+    Parse PI Web API time expressions commonly used in query params.
+
+    Supports:
+    - "*" (now)
+    - "*-10m", "*-2h", "*-7d" (relative to now)
+    - ISO timestamps with or without Z suffix
+    """
+    now_dt = now or _utcnow()
+    if value is None or value == "" or value == "*":
+        return now_dt
+
+    v = str(value).strip()
+    if v.startswith("*-") and len(v) >= 4:
+        num = v[2:-1]
+        unit = v[-1]
+        try:
+            n = int(num)
+            if unit == "m":
+                return now_dt - timedelta(minutes=n)
+            if unit == "h":
+                return now_dt - timedelta(hours=n)
+            if unit == "d":
+                return now_dt - timedelta(days=n)
+        except Exception:
+            pass
+
+    try:
+        dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return now_dt
+
+
+def _chunks(items: List[str], n: int) -> List[List[str]]:
+    if n <= 0:
+        return [items]
+    return [items[i : i + n] for i in range(0, len(items), n)]
+
+
 
 def _as_bool(v: Any, default: bool = False) -> bool:
     if v is None:
@@ -155,6 +198,7 @@ def _batch_response_items(resp_json: dict) -> List[Tuple[str, dict]]:
 class LakeflowConnect:
     TABLE_DATASERVERS = "pi_dataservers"
     TABLE_POINTS = "pi_points"
+    TABLE_POINT_ATTRIBUTES = "pi_point_attributes"
     TABLE_TIMESERIES = "pi_timeseries"
     TABLE_AF_HIERARCHY = "pi_af_hierarchy"
     TABLE_EVENT_FRAMES = "pi_event_frames"
@@ -173,12 +217,14 @@ class LakeflowConnect:
 
         self.session = requests.Session()
         self.session.headers.update({"Accept": "application/json"})
+        self.verify_ssl = _as_bool(options.get("verify_ssl"), default=True)
         self._auth_resolved = False
 
     def list_tables(self) -> List[str]:
         return [
             self.TABLE_DATASERVERS,
             self.TABLE_POINTS,
+            self.TABLE_POINT_ATTRIBUTES,
             self.TABLE_TIMESERIES,
             self.TABLE_AF_HIERARCHY,
             self.TABLE_EVENT_FRAMES,
@@ -204,6 +250,15 @@ class LakeflowConnect:
                 StructField("engineering_units", StringType(), True),
                 StructField("path", StringType(), True),
                 StructField("dataserver_webid", StringType(), True),
+            ])
+
+        if table_name == self.TABLE_POINT_ATTRIBUTES:
+            return StructType([
+                StructField("point_webid", StringType(), False),
+                StructField("name", StringType(), True),
+                StructField("value", StringType(), True),
+                StructField("type", StringType(), True),
+                StructField("ingestion_timestamp", TimestampType(), False),
             ])
 
         if table_name in (self.TABLE_TIMESERIES, self.TABLE_STREAMSET_RECORDED):
@@ -308,6 +363,8 @@ class LakeflowConnect:
             return {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
         if table_name == self.TABLE_POINTS:
             return {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
+        if table_name == self.TABLE_POINT_ATTRIBUTES:
+            return {"primary_keys": ["point_webid", "name"], "cursor_field": None, "ingestion_type": "snapshot"}
         if table_name == self.TABLE_TIMESERIES:
             return {"primary_keys": ["tag_webid", "timestamp"], "cursor_field": "timestamp", "ingestion_type": "append"}
         if table_name == self.TABLE_STREAMSET_RECORDED:
@@ -333,6 +390,8 @@ class LakeflowConnect:
             return iter(self._read_dataservers()), {"offset": "done"}
         if table_name == self.TABLE_POINTS:
             return iter(self._read_points(table_options)), {"offset": "done"}
+        if table_name == self.TABLE_POINT_ATTRIBUTES:
+            return iter(self._read_point_attributes(table_options)), {"offset": "done"}
         if table_name == self.TABLE_TIMESERIES:
             return self._read_timeseries(start_offset, table_options)
         if table_name == self.TABLE_STREAMSET_RECORDED:
@@ -396,13 +455,13 @@ class LakeflowConnect:
 
     def _get_json(self, path: str, params: Optional[Any] = None) -> dict:
         url = f"{self.base_url}{path}"
-        r = self.session.get(url, params=params, timeout=60)
+        r = self.session.get(url, params=params, timeout=60, verify=self.verify_ssl)
         r.raise_for_status()
         return r.json()
 
     def _post_json(self, path: str, payload: Any) -> dict:
         url = f"{self.base_url}{path}"
-        r = self.session.post(url, json=payload, timeout=120)
+        r = self.session.post(url, json=payload, timeout=120, verify=self.verify_ssl)
         r.raise_for_status()
         return r.json()
 
@@ -460,34 +519,200 @@ class LakeflowConnect:
         pts = self._read_points(table_options)
         return [p["webid"] for p in pts[: int(table_options.get("default_tags", 50))]]
 
+    def _read_point_attributes(self, table_options: Dict[str, str]) -> List[dict]:
+        # Options:
+        # - point_webids: csv of point WebIds
+        # - default_points: sample size if point_webids not provided
+        point_webids_csv = (table_options.get("point_webids") or self.options.get("point_webids") or "").strip()
+        point_webids = [t.strip() for t in point_webids_csv.split(",") if t.strip()]
+        if not point_webids:
+            default_points = int(table_options.get("default_points", 10))
+            pts = self._read_points(table_options)
+            point_webids = [p["webid"] for p in pts[:default_points] if p.get("webid")]
+
+        params: Dict[str, str] = {}
+        selected_fields = table_options.get("selectedFields")
+        if selected_fields:
+            params["selectedFields"] = selected_fields
+
+        out: List[dict] = []
+        ingest_ts = _utcnow()
+
+        for wid in point_webids:
+            try:
+                data = self._get_json(f"/piwebapi/points/{wid}/attributes", params=params or None)
+                for item in (data.get("Items") or []):
+                    out.append({
+                        "point_webid": wid,
+                        "name": item.get("Name"),
+                        "value": None if item.get("Value") is None else str(item.get("Value")),
+                        "type": item.get("Type") or item.get("ValueType") or "",
+                        "ingestion_timestamp": ingest_ts,
+                    })
+            except Exception:
+                continue
+
+        return out
+
+
     def _read_timeseries(self, start_offset: dict, table_options: Dict[str, str]) -> Tuple[Iterator[dict], dict]:
         tag_webids = self._resolve_tag_webids(table_options)
         now = _utcnow()
 
-        start = None
+        # Time range controls
+        end_opt = table_options.get("endTime") or table_options.get("end_time") or "*"
+        end_dt = _parse_pi_time(end_opt, now=now)
+
+        start_dt: Optional[datetime] = None
         if start_offset and isinstance(start_offset, dict):
             off = start_offset.get("offset")
             if isinstance(off, str) and off:
                 try:
-                    start = _parse_ts(off)
+                    start_dt = _parse_ts(off)
                 except Exception:
-                    start = None
-        if start is None:
-            lookback_minutes = int(table_options.get("lookback_minutes", 60))
-            start = now - timedelta(minutes=lookback_minutes)
+                    start_dt = None
 
-        start_str = _isoformat_z(start)
-        end_str = _isoformat_z(now)
+        if start_dt is None:
+            start_opt = table_options.get("startTime") or table_options.get("start_time")
+            if start_opt:
+                start_dt = _parse_pi_time(str(start_opt), now=end_dt)
+            else:
+                lookback_minutes = int(table_options.get("lookback_minutes", 60))
+                start_dt = end_dt - timedelta(minutes=lookback_minutes)
+
+        window_seconds = int(table_options.get("window_seconds", 0) or 0)
+        end_window = min(end_dt, start_dt + timedelta(seconds=window_seconds)) if window_seconds > 0 else end_dt
+
+        start_str = _isoformat_z(start_dt)
+        end_str = _isoformat_z(end_window)
         max_count = int(table_options.get("maxCount", 1000))
         ingest_ts = _utcnow()
 
+        tags_per_request = int(table_options.get("tags_per_request", 0) or 0)
+        groups = _chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
+
         prefer_streamset = _as_bool(table_options.get("prefer_streamset", True), default=True)
+        selected_fields = table_options.get("selectedFields")
+
+        next_offset = {"offset": end_str}
 
         # Preferred: StreamSet GetRecordedAdHoc for multi-tag reads.
         if prefer_streamset and len(tag_webids) > 1:
             def iterator() -> Iterator[dict]:
-                params: List[Tuple[str, str]] = [("webId", w) for w in tag_webids]
+                for group in groups:
+                    if not group:
+                        continue
+                    params: List[Tuple[str, str]] = [("webId", w) for w in group]
+                    params += [("startTime", start_str), ("endTime", end_str), ("maxCount", str(max_count))]
+                    if selected_fields:
+                        params.append(("selectedFields", str(selected_fields)))
+                    data = self._get_json("/piwebapi/streamsets/recorded", params=params)
+                    for stream in data.get("Items", []) or []:
+                        webid = stream.get("WebId")
+                        if not webid:
+                            continue
+                        for item in stream.get("Items", []) or []:
+                            ts = item.get("Timestamp")
+                            if not ts:
+                                continue
+                            yield {
+                                "tag_webid": webid,
+                                "timestamp": _parse_ts(ts),
+                                "value": _try_float(item.get("Value")),
+                                "good": _as_bool(item.get("Good"), default=True),
+                                "questionable": _as_bool(item.get("Questionable"), default=False),
+                                "substituted": _as_bool(item.get("Substituted"), default=False),
+                                "annotated": _as_bool(item.get("Annotated"), default=False),
+                                "units": item.get("UnitsAbbreviation", ""),
+                                "ingestion_timestamp": ingest_ts,
+                            }
+
+            return iterator(), next_offset
+
+        # Fallback: Batch execute many Stream GetRecorded calls (chunked).
+        def iterator() -> Iterator[dict]:
+            for group in groups:
+                if not group:
+                    continue
+                reqs = [
+                    {
+                        "Method": "GET",
+                        "Resource": f"/piwebapi/streams/{webid}/recorded",
+                        "Parameters": {"startTime": start_str, "endTime": end_str, "maxCount": str(max_count)},
+                    }
+                    for webid in group
+                ]
+                responses = self._batch_execute(reqs)
+                for idx, (_rid, resp) in enumerate(responses):
+                    if resp.get("Status") != 200:
+                        continue
+                    webid = group[idx] if idx < len(group) else None
+                    if not webid:
+                        continue
+                    content = resp.get("Content", {}) or {}
+                    for item in content.get("Items", []) or []:
+                        ts = item.get("Timestamp")
+                        if not ts:
+                            continue
+                        yield {
+                            "tag_webid": webid,
+                            "timestamp": _parse_ts(ts),
+                            "value": _try_float(item.get("Value")),
+                            "good": _as_bool(item.get("Good"), default=True),
+                            "questionable": _as_bool(item.get("Questionable"), default=False),
+                            "substituted": _as_bool(item.get("Substituted"), default=False),
+                            "annotated": _as_bool(item.get("Annotated"), default=False),
+                            "units": item.get("UnitsAbbreviation", ""),
+                            "ingestion_timestamp": ingest_ts,
+                        }
+
+        return iterator(), next_offset
+
+    def _read_streamset_recorded(self, start_offset: dict, table_options: Dict[str, str]) -> Tuple[Iterator[dict], dict]:
+        # Explicit StreamSet recorded table (same output schema as pi_timeseries)
+        tag_webids = self._resolve_tag_webids(table_options)
+        now = _utcnow()
+
+        end_opt = table_options.get("endTime") or table_options.get("end_time") or "*"
+        end_dt = _parse_pi_time(end_opt, now=now)
+
+        start_dt: Optional[datetime] = None
+        if start_offset and isinstance(start_offset, dict):
+            off = start_offset.get("offset")
+            if isinstance(off, str) and off:
+                try:
+                    start_dt = _parse_ts(off)
+                except Exception:
+                    start_dt = None
+
+        if start_dt is None:
+            start_opt = table_options.get("startTime") or table_options.get("start_time")
+            if start_opt:
+                start_dt = _parse_pi_time(str(start_opt), now=end_dt)
+            else:
+                lookback_minutes = int(table_options.get("lookback_minutes", 60))
+                start_dt = end_dt - timedelta(minutes=lookback_minutes)
+
+        window_seconds = int(table_options.get("window_seconds", 0) or 0)
+        end_window = min(end_dt, start_dt + timedelta(seconds=window_seconds)) if window_seconds > 0 else end_dt
+
+        start_str = _isoformat_z(start_dt)
+        end_str = _isoformat_z(end_window)
+        max_count = int(table_options.get("maxCount", 1000))
+        ingest_ts = _utcnow()
+
+        tags_per_request = int(table_options.get("tags_per_request", 0) or 0)
+        groups = _chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
+        selected_fields = table_options.get("selectedFields")
+
+        def iterator() -> Iterator[dict]:
+            for group in groups:
+                if not group:
+                    continue
+                params: List[Tuple[str, str]] = [("webId", w) for w in group]
                 params += [("startTime", start_str), ("endTime", end_str), ("maxCount", str(max_count))]
+                if selected_fields:
+                    params.append(("selectedFields", str(selected_fields)))
                 data = self._get_json("/piwebapi/streamsets/recorded", params=params)
                 for stream in data.get("Items", []) or []:
                     webid = stream.get("WebId")
@@ -509,97 +734,12 @@ class LakeflowConnect:
                             "ingestion_timestamp": ingest_ts,
                         }
 
-            return iterator(), {"offset": end_str}
-
-        # Fallback: Batch execute many Stream GetRecorded calls.
-        reqs = [
-            {
-                "Method": "GET",
-                "Resource": f"/piwebapi/streams/{webid}/recorded",
-                "Parameters": {"startTime": start_str, "endTime": end_str, "maxCount": str(max_count)},
-            }
-            for webid in tag_webids
-        ]
-
-        responses = self._batch_execute(reqs)
-
-        # Preserve request order (1..N) to map back to tag_webids.
-        def iterator() -> Iterator[dict]:
-            for idx, (_rid, resp) in enumerate(responses):
-                if resp.get("Status") != 200:
-                    continue
-                webid = tag_webids[idx] if idx < len(tag_webids) else None
-                if not webid:
-                    continue
-                content = resp.get("Content", {}) or {}
-                for item in content.get("Items", []) or []:
-                    ts = item.get("Timestamp")
-                    if not ts:
-                        continue
-                    yield {
-                        "tag_webid": webid,
-                        "timestamp": _parse_ts(ts),
-                        "value": _try_float(item.get("Value")),
-                        "good": _as_bool(item.get("Good"), default=True),
-                        "questionable": _as_bool(item.get("Questionable"), default=False),
-                        "substituted": _as_bool(item.get("Substituted"), default=False),
-                        "annotated": _as_bool(item.get("Annotated"), default=False),
-                        "units": item.get("UnitsAbbreviation", ""),
-                        "ingestion_timestamp": ingest_ts,
-                    }
-
-        return iterator(), {"offset": end_str}
-
-    def _read_streamset_recorded(self, start_offset: dict, table_options: Dict[str, str]) -> Tuple[Iterator[dict], dict]:
-        # Explicit StreamSet recorded table (same output schema as pi_timeseries)
-        tag_webids = self._resolve_tag_webids(table_options)
-        now = _utcnow()
-
-        start = None
-        if start_offset and isinstance(start_offset, dict):
-            off = start_offset.get("offset")
-            if isinstance(off, str) and off:
-                try:
-                    start = _parse_ts(off)
-                except Exception:
-                    start = None
-        if start is None:
-            lookback_minutes = int(table_options.get("lookback_minutes", 60))
-            start = now - timedelta(minutes=lookback_minutes)
-
-        start_str = _isoformat_z(start)
-        end_str = _isoformat_z(now)
-        max_count = int(table_options.get("maxCount", 1000))
-        ingest_ts = _utcnow()
-
-        def iterator() -> Iterator[dict]:
-            params: List[Tuple[str, str]] = [("webId", w) for w in tag_webids]
-            params += [("startTime", start_str), ("endTime", end_str), ("maxCount", str(max_count))]
-            data = self._get_json("/piwebapi/streamsets/recorded", params=params)
-            for stream in data.get("Items", []) or []:
-                webid = stream.get("WebId")
-                if not webid:
-                    continue
-                for item in stream.get("Items", []) or []:
-                    ts = item.get("Timestamp")
-                    if not ts:
-                        continue
-                    yield {
-                        "tag_webid": webid,
-                        "timestamp": _parse_ts(ts),
-                        "value": _try_float(item.get("Value")),
-                        "good": _as_bool(item.get("Good"), default=True),
-                        "questionable": _as_bool(item.get("Questionable"), default=False),
-                        "substituted": _as_bool(item.get("Substituted"), default=False),
-                        "annotated": _as_bool(item.get("Annotated"), default=False),
-                        "units": item.get("UnitsAbbreviation", ""),
-                        "ingestion_timestamp": ingest_ts,
-                    }
-
         return iterator(), {"offset": end_str}
 
     def _read_current_value(self, table_options: Dict[str, str]) -> List[dict]:
         tag_webids = self._resolve_tag_webids(table_options)
+        tags_per_request = int(table_options.get("tags_per_request", 0) or 0)
+        tag_webid_groups = _chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
         time_param = table_options.get("time")
 
         reqs: List[dict] = []
@@ -609,29 +749,38 @@ class LakeflowConnect:
                 params["time"] = str(time_param)
             reqs.append({"Method": "GET", "Resource": f"/piwebapi/streams/{w}/value", "Parameters": params})
 
-        responses = self._batch_execute(reqs)
         ingest_ts = _utcnow()
         out: List[dict] = []
 
-        for idx, (_rid, resp) in enumerate(responses):
-            if resp.get("Status") != 200:
+        for group in tag_webid_groups:
+            if not group:
                 continue
-            webid = tag_webids[idx] if idx < len(tag_webids) else None
-            if not webid:
-                continue
-            v = resp.get("Content", {}) or {}
-            ts = v.get("Timestamp")
-            out.append({
-                "tag_webid": webid,
-                "timestamp": _parse_ts(ts) if ts else None,
-                "value": _try_float(v.get("Value")),
-                "good": _as_bool(v.get("Good"), default=True),
-                "questionable": _as_bool(v.get("Questionable"), default=False),
-                "substituted": _as_bool(v.get("Substituted"), default=False),
-                "annotated": _as_bool(v.get("Annotated"), default=False),
-                "units": v.get("UnitsAbbreviation", ""),
-                "ingestion_timestamp": ingest_ts,
-            })
+            group_reqs: List[dict] = []
+            for w in group:
+                params: Dict[str, str] = {}
+                if time_param:
+                    params["time"] = str(time_param)
+                group_reqs.append({"Method": "GET", "Resource": f"/piwebapi/streams/{w}/value", "Parameters": params})
+            responses = self._batch_execute(group_reqs)
+            for idx, (_rid, resp) in enumerate(responses):
+                if resp.get("Status") != 200:
+                    continue
+                webid = group[idx] if idx < len(group) else None
+                if not webid:
+                    continue
+                v = resp.get("Content", {}) or {}
+                ts = v.get("Timestamp")
+                out.append({
+                    "tag_webid": webid,
+                    "timestamp": _parse_ts(ts) if ts else None,
+                    "value": _try_float(v.get("Value")),
+                    "good": _as_bool(v.get("Good"), default=True),
+                    "questionable": _as_bool(v.get("Questionable"), default=False),
+                    "substituted": _as_bool(v.get("Substituted"), default=False),
+                    "annotated": _as_bool(v.get("Annotated"), default=False),
+                    "units": v.get("UnitsAbbreviation", ""),
+                    "ingestion_timestamp": ingest_ts,
+                })
 
         return out
 
@@ -639,6 +788,8 @@ class LakeflowConnect:
         # NOTE: The PI Web API supports multiple instances of summaryType.
         # We implement the API-correct approach (repeat summaryType in query params) and keep this table snapshot-like.
         tag_webids = self._resolve_tag_webids(table_options)
+        tags_per_request = int(table_options.get("tags_per_request", 0) or 0)
+        tag_webid_groups = _chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
         start_time = table_options.get("startTime")
         end_time = table_options.get("endTime")
         summary_types_csv = table_options.get("summaryType", "Total")

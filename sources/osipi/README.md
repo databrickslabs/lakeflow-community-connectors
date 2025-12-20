@@ -19,11 +19,11 @@ Provide these parameters in your connector options.
 |---|---|---:|---|---|
 | `pi_base_url` | string | yes | Base URL of the PI Web API host (no trailing slash). Requests are made under `${pi_base_url}/piwebapi/...`. | `https://my-pi-web-api.company.com` |
 | `access_token` | string | yes | OAuth/OIDC access token used as `Authorization: Bearer <token>`. | `eyJ...` |
-| `externalOptionsAllowList` | string | yes | Comma-separated allowlist of table-specific read options. | `dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode` |
+| `externalOptionsAllowList` | string | yes | Comma-separated allowlist of table-specific read options. | `dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,verify_ssl` |
 
 Supported table-specific options (**this is the full definitive list**):
 
-- `dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode`
+- `dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,verify_ssl`
 - `nameFilter`
 - `maxCount`
 - `tag_webids`
@@ -54,7 +54,7 @@ A Unity Catalog connection for this connector can be created in two ways via the
 2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
 3. Set `externalOptionsAllowList` to:
 
-`dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode`
+`dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,verify_ssl`
 
 The connection can also be created using the standard Unity Catalog API.
 
@@ -64,6 +64,7 @@ The connection can also be created using the standard Unity Catalog API.
 |---|---|---|---|---|
 | `pi_dataservers` | List PI Data Archives (DataServers) | `webid` | snapshot | Based on DataServer List API |
 | `pi_points` | List points (tags) on a DataServer | `webid` | snapshot | Supports `nameFilter`, pagination parameters exist in PI Web API docs |
+| `pi_point_attributes` | Point (tag) attributes | (`point_webid`, `name`) | snapshot | Reads point attributes for a set of point WebIds |
 | `pi_timeseries` | Recorded/compressed values for tags | (`tag_webid`, `timestamp`) | append | Uses Stream GetRecorded time windows |
 | `pi_af_hierarchy` | AF elements | `element_webid` | snapshot | Uses AssetServer/AssetDatabase element listing |
 | `pi_event_frames` | Event Frames in a time window | (`event_frame_webid`, `start_time`) | append | Uses AssetDatabase GetEventFrames |
