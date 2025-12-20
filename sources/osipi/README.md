@@ -89,6 +89,18 @@ The connection can also be created using the standard Unity Catalog API.
 
 Follow the Lakeflow Community Connector UI, which will guide you through setting up a pipeline using the selected source connector code.
 
+### Hackathon Demo (no PI Web API required)
+
+If you (the reviewer/judge) do not have access to a real PI Web API deployment, you can still run an end-to-end demo against a **Databricks App** mock PI Web API hosted by the submitter.
+
+- **Set `pi_base_url`** to the provided Databricks App URL (no trailing slash), for example:
+  - `https://<submitter-provided-app>.databricksapps.com`
+- **Auth (`access_token`)**:
+  - If the App requires auth, request a temporary access token from the submitter and set it as `access_token`.
+  - If the App is unauthenticated, `access_token` can be left blank.
+
+This connector will call PI Web API paths under that base URL, e.g. `${pi_base_url}/piwebapi/dataservers`, `${pi_base_url}/piwebapi/batch`.
+
 ### Step 2: Configure Your Pipeline
 
 Example pipeline spec showing how to select objects and pass table-specific options:
