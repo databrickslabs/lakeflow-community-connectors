@@ -95,11 +95,20 @@ If you (the reviewer/judge) do not have access to a real PI Web API deployment, 
 
 - **Set `pi_base_url`** to the provided Databricks App URL (no trailing slash), for example:
   - `https://<submitter-provided-app>.databricksapps.com`
+  - `https://osipi-webserver-1444828305810485.aws.databricksapps.com` (submitter demo App)
 - **Auth (`access_token`)**:
   - If the App requires auth, request a temporary access token from the submitter and set it as `access_token`.
   - If the App is unauthenticated, `access_token` can be left blank.
 
 This connector will call PI Web API paths under that base URL, e.g. `${pi_base_url}/piwebapi/dataservers`, `${pi_base_url}/piwebapi/batch`.
+
+#### Demo token minting (submitter workspace)
+
+For the demo App above, the submitter mints a short-lived Databricks OIDC access token (client-credentials) and passes it as `access_token` (`Authorization: Bearer <token>`).
+
+- Helper script: `sources/osipi/osipi_databricks_app_token_setup.py`
+- Service principal: `sp-osipi` (must have **Can Use** on the App)
+- Secrets (in submitter workspace): `sp-osipi/sp-client-id`, `sp-osipi/sp-client-secret`
 
 ### Step 2: Configure Your Pipeline
 
