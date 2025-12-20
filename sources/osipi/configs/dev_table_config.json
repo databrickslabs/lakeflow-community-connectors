@@ -1,0 +1,49 @@
+{
+  "pi_dataservers": {},
+  "pi_points": {
+    "nameFilter": "Sydney_*",
+    "maxCount": "1000",
+    "startIndex": "0"
+  },
+  "pi_timeseries": {
+    "nameFilter": "Sydney_*",
+    "default_tags": "3",
+    "lookback_minutes": "10",
+    "maxCount": "200",
+    "prefer_streamset": "true"
+  },
+  "pi_streamset_recorded": {
+    "nameFilter": "Sydney_*",
+    "default_tags": "3",
+    "lookback_minutes": "10",
+    "maxCount": "200"
+  },
+  "pi_current_value": {
+    "nameFilter": "Sydney_*",
+    "default_tags": "3"
+  },
+  "pi_summary": {
+    "nameFilter": "Sydney_*",
+    "default_tags": "2",
+    "startTime": "*-1d",
+    "endTime": "*",
+    "summaryType": "Total,Count"
+  },
+  "pi_af_hierarchy": {},
+  "pi_event_frames": {
+    "lookback_days": "1",
+    "maxCount": "25",
+    "searchMode": "Overlapped"
+  },
+  "pi_element_attributes": {
+    "default_elements": "2",
+    "maxCount": "200"
+  },
+  "pi_eventframe_attributes": {
+    "default_event_frames": "2",
+    "lookback_days": "1",
+    "maxCount": "200"
+  }
+}
+
+
