@@ -337,7 +337,7 @@ def register_lakeflow_source(spark):
                     StructField("description", StringType(), True),
                     StructField("path", StringType(), True),
                     StructField("parent_webid", StringType(), True),
-                    StructField("depth", IntegerType(), True),
+                    StructField("depth", LongType(), True),
                     StructField("category_names", ArrayType(StringType()), True),
                     StructField("ingestion_timestamp", TimestampType(), False),
                 ])
