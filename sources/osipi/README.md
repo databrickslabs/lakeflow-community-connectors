@@ -89,6 +89,13 @@ The connection can also be created using the standard Unity Catalog API.
 
 Follow the Lakeflow Community Connector UI, which will guide you through setting up a pipeline using the selected source connector code.
 
+### Sample output script (demo helper)
+
+For demos, you can print a small sample of what each connector table returns using:
+
+- `sources/osipi/test/print_osipi_samples.py`
+- Notes: `sources/osipi/test/README_PRINT_SAMPLES.md` (temporary; safe to delete later)
+
 ### Hackathon Demo (no PI Web API required)
 
 If you (the reviewer/judge) do not have access to a real PI Web API deployment, you can still run an end-to-end demo against a **Databricks App** mock PI Web API hosted by the submitter.
