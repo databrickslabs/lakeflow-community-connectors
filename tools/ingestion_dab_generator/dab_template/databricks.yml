@@ -1,0 +1,23 @@
+bundle:
+  name: lakeflow_connect_ingestion
+
+include:
+  - resources/*.yml
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://<YOUR_WORKSPACE_HOST>
+
+variables:
+  dest_catalog:
+    description: Destination UC catalog
+    default: main
+  dest_schema:
+    description: Destination schema
+    default: bronze
+  connection_name:
+    description: Unity Catalog connection name for the source connector
+    default: CHANGE_ME

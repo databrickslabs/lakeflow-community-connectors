@@ -1,0 +1,4 @@
+connection_name,source_table,destination_catalog,destination_schema,destination_table,pipeline_group,prefix,priority,schedule,table_options_json,weight
+my_connection,issues,main,bronze,github_issues_core,,core,01,*/15 * * * *,"{""owner"":""my-org"",""repo"":""core-repo"",""state"":""all""}",100
+my_connection,issues,main,bronze,github_issues_support,,support,02,*/30 * * * *,"{""owner"":""my-org"",""repo"":""support-repo"",""state"":""all""}",40
+my_connection,issues,main,bronze,github_issues_misc,,misc,03,0 */2 * * *,"{""owner"":""my-org"",""repo"":""misc-repo"",""state"":""all""}",10

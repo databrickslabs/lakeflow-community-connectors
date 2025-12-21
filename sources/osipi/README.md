@@ -19,11 +19,11 @@ Provide these parameters in your connector options.
 |---|---|---:|---|---|
 | `pi_base_url` | string | yes | Base URL of the PI Web API host (no trailing slash). Requests are made under `${pi_base_url}/piwebapi/...`. | `https://my-pi-web-api.company.com` |
 | `access_token` | string | yes | OAuth/OIDC access token used as `Authorization: Bearer <token>`. | `eyJ...` |
-| `externalOptionsAllowList` | string | yes | Comma-separated allowlist of table-specific read options. | `dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,verify_ssl` |
+| `externalOptionsAllowList` | string | yes | Comma-separated allowlist of table-specific read options. | `dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,interval,intervals,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,assetdatabase_webid,verify_ssl` |
 
 Supported table-specific options (**this is the full definitive list**):
 
-- `dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,verify_ssl`
+- `dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,interval,intervals,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,assetdatabase_webid,verify_ssl`
 - `nameFilter`
 - `maxCount`
 - `tag_webids`
@@ -54,7 +54,7 @@ A Unity Catalog connection for this connector can be created in two ways via the
 2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
 3. Set `externalOptionsAllowList` to:
 
-`dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,verify_ssl`
+`dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,interval,intervals,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,assetdatabase_webid,verify_ssl`
 
 The connection can also be created using the standard Unity Catalog API.
 
@@ -71,6 +71,13 @@ The connection can also be created using the standard Unity Catalog API.
 | `pi_current_value` | Current (snapshot) value per tag | `tag_webid` | snapshot | Uses Stream GetValue |
 | `pi_summary` | Summary stats per tag and summary type | (`tag_webid`, `summary_type`) | snapshot | Uses Stream GetSummary |
 | `pi_streamset_recorded` | Recorded values via StreamSet (multi-tag) | (`tag_webid`, `timestamp`) | append | Uses StreamSet GetRecordedAdHoc |
+| `pi_interpolated` | Interpolated values for tags | (`tag_webid`, `timestamp`) | append | Uses Stream/StreamSet GetInterpolated |
+| `pi_plot` | Plot (downsampled) values for tags | (`tag_webid`, `timestamp`) | append | Uses Stream GetPlot |
+| `pi_streamset_interpolated` | Interpolated values via StreamSet (multi-tag) | (`tag_webid`, `timestamp`) | append | Uses StreamSet GetInterpolatedAdHoc |
+| `pi_streamset_summary` | Summary stats via StreamSet (multi-tag) | (`tag_webid`, `summary_type`, `timestamp`) | append | Uses StreamSet GetSummaryAdHoc |
+| `pi_assetservers` | List AF servers | `webid` | snapshot | Uses AssetServer List |
+| `pi_assetdatabases` | List AF databases (per server) | `webid` | snapshot | Uses AssetServer GetAssetDatabases |
+| `pi_element_templates` | List AF element templates (per DB) | `webid` | snapshot | Uses AssetDatabase GetElementTemplates |
 | `pi_element_attributes` | AF element attributes | (`element_webid`, `attribute_webid`) | snapshot | Uses Element GetAttributes |
 | `pi_eventframe_attributes` | Event Frame attributes | (`event_frame_webid`, `attribute_webid`) | snapshot | Uses EventFrame GetAttributes |
 
@@ -90,33 +97,12 @@ The connection can also be created using the standard Unity Catalog API.
 
 Follow the Lakeflow Community Connector UI, which will guide you through setting up a pipeline using the selected source connector code.
 
-### Sample output script (demo helper)
+### Sample output script (example helper)
 
-For demos, you can print a small sample of what each connector table returns using:
+For examples, you can print a small sample of what each connector table returns using:
 
 - `sources/osipi/test/print_osipi_samples.py`
 - Notes: `sources/osipi/test/README_PRINT_SAMPLES.md` (temporary; safe to delete later)
-
-### Hackathon Demo (no PI Web API required)
-
-If you (the reviewer/judge) do not have access to a real PI Web API deployment, you can still run an end-to-end demo against a **Databricks App** mock PI Web API hosted by the submitter.
-
-- **Set `pi_base_url`** to the provided Databricks App URL (no trailing slash), for example:
-  - `https://<submitter-provided-app>.databricksapps.com`
-  - `https://osipi-webserver-1444828305810485.aws.databricksapps.com` (submitter demo App)
-- **Auth (`access_token`)**:
-  - If the App requires auth, request a temporary access token from the submitter and set it as `access_token`.
-  - If the App is unauthenticated, `access_token` can be left blank.
-
-This connector will call PI Web API paths under that base URL, e.g. `${pi_base_url}/piwebapi/dataservers`, `${pi_base_url}/piwebapi/batch`.
-
-#### Demo token minting (submitter workspace)
-
-For the demo App above, the submitter mints a short-lived Databricks OIDC access token (client-credentials) and passes it as `access_token` (`Authorization: Bearer <token>`).
-
-- Helper script: `sources/osipi/osipi_databricks_app_token_setup.py`
-- Service principal: `sp-osipi` (must have **Can Use** on the App)
-- Secrets (in submitter workspace): `sp-osipi/sp-client-id`, `sp-osipi/sp-client-secret`
 
 ### Step 2: Configure Your Pipeline
 
@@ -140,7 +126,7 @@ Example pipeline spec showing how to select objects and pass table-specific opti
 #### Best Practices
 
 - Start small: begin with `pi_dataservers` and a narrow `nameFilter` for `pi_points`.
-- For `pi_timeseries`, keep `lookback_minutes` modest for demos.
+- For `pi_timeseries`, keep `lookback_minutes` modest for examples.
 
 #### Troubleshooting
 

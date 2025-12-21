@@ -1,53 +1,91 @@
 {
-  "pi_dataservers": {},
-  "pi_points": {
-    "nameFilter": "Sydney_*",
-    "maxCount": "1000",
-    "startIndex": "0"
-  },
-  "pi_timeseries": {
-    "nameFilter": "Sydney_*",
-    "default_tags": "3",
-    "lookback_minutes": "10",
-    "maxCount": "200",
-    "prefer_streamset": "true",
-    "window_seconds": "0"
-  },
-  "pi_streamset_recorded": {
-    "nameFilter": "Sydney_*",
-    "default_tags": "3",
-    "lookback_minutes": "10",
-    "maxCount": "200",
-    "window_seconds": "0",
-    "tags_per_request": "0"
-  },
-  "pi_current_value": {
-    "nameFilter": "Sydney_*",
-    "default_tags": "3"
-  },
-  "pi_summary": {
-    "nameFilter": "Sydney_*",
-    "default_tags": "2",
-    "startTime": "*-1d",
-    "endTime": "*",
-    "summaryType": "Total,Count"
-  },
   "pi_af_hierarchy": {},
+  "pi_assetdatabases": {},
+  "pi_assetservers": {},
+  "pi_current_value": {
+    "default_tags": "3",
+    "nameFilter": "Sydney_*"
+  },
+  "pi_dataservers": {},
+  "pi_element_attributes": {
+    "default_elements": "2",
+    "maxCount": "200"
+  },
+  "pi_element_templates": {
+    "assetdatabase_webid": ""
+  },
   "pi_event_frames": {
     "lookback_days": "1",
     "maxCount": "25",
     "searchMode": "Overlapped"
-  },
-  "pi_element_attributes": {
-    "default_elements": "2",
-    "maxCount": "200"
   },
   "pi_eventframe_attributes": {
     "default_event_frames": "2",
     "lookback_days": "1",
     "maxCount": "200"
   },
+  "pi_interpolated": {
+    "default_tags": "3",
+    "interval": "1m",
+    "lookback_minutes": "10",
+    "maxCount": "200",
+    "nameFilter": "Sydney_*",
+    "selectedFields": "",
+    "tags_per_request": "0"
+  },
+  "pi_plot": {
+    "default_tags": "2",
+    "intervals": "120",
+    "lookback_minutes": "60",
+    "nameFilter": "Sydney_*"
+  },
   "pi_point_attributes": {
     "default_points": "2"
+  },
+  "pi_points": {
+    "maxCount": "1000",
+    "nameFilter": "Sydney_*",
+    "startIndex": "0"
+  },
+  "pi_streamset_interpolated": {
+    "default_tags": "3",
+    "interval": "1m",
+    "lookback_minutes": "10",
+    "maxCount": "200",
+    "nameFilter": "Sydney_*",
+    "tags_per_request": "0"
+  },
+  "pi_streamset_recorded": {
+    "default_tags": "3",
+    "lookback_minutes": "10",
+    "maxCount": "200",
+    "nameFilter": "Sydney_*",
+    "tags_per_request": "0",
+    "window_seconds": "0"
+  },
+  "pi_streamset_summary": {
+    "calculationBasis": "TimeWeighted",
+    "default_tags": "2",
+    "endTime": "*",
+    "nameFilter": "Sydney_*",
+    "startTime": "*-1d",
+    "summaryDuration": "1h",
+    "summaryType": "Total,Count",
+    "tags_per_request": "0"
+  },
+  "pi_summary": {
+    "default_tags": "2",
+    "endTime": "*",
+    "nameFilter": "Sydney_*",
+    "startTime": "*-1d",
+    "summaryType": "Total,Count"
+  },
+  "pi_timeseries": {
+    "default_tags": "3",
+    "lookback_minutes": "10",
+    "maxCount": "200",
+    "nameFilter": "Sydney_*",
+    "prefer_streamset": "true",
+    "window_seconds": "0"
   }
 }

@@ -1,0 +1,13 @@
+# Local/private files
+
+# Private (not committed)
+COMPLIANCE_CHECKLIST_PRIVATE.md
+
+# Python build artifacts / caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/

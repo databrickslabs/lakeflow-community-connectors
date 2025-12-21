@@ -1,0 +1,7 @@
+connection_name,source_table,destination_catalog,destination_schema,destination_table,pipeline_group,schedule,table_options_json,weight
+,pi_timeseries,main,bronze,pi_timeseries_sydney,,*/15 * * * *,"{""nameFilter"":""Sydney_*"",""lookback_minutes"":60,""maxCount"":1000}",1200
+,pi_timeseries,main,bronze,pi_timeseries_melbourne,,*/15 * * * *,"{""nameFilter"":""Melbourne_*"",""lookback_minutes"":60,""maxCount"":1000}",900
+,pi_timeseries,main,bronze,pi_timeseries_brisbane,,*/15 * * * *,"{""nameFilter"":""Brisbane_*"",""lookback_minutes"":60,""maxCount"":1000}",1100
+,pi_timeseries,main,bronze,pi_timeseries_perth,,*/15 * * * *,"{""nameFilter"":""Perth_*"",""lookback_minutes"":60,""maxCount"":1000}",800
+,pi_timeseries,main,bronze,pi_timeseries_adelaide,,*/15 * * * *,"{""nameFilter"":""Adelaide_*"",""lookback_minutes"":60,""maxCount"":1000}",700
+
