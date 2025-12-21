@@ -1,5 +1,11 @@
 {
   "pi_af_hierarchy": {},
+  "pi_af_table_rows": {
+    "assetdatabase_webid": "",
+    "default_tables": "1",
+    "maxCount": "50",
+    "startIndex": "0"
+  },
   "pi_af_tables": {
     "assetdatabase_webid": ""
   },

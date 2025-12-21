@@ -229,6 +229,7 @@ class LakeflowConnect:
     TABLE_ELEMENT_TEMPLATE_ATTRIBUTES = "pi_element_template_attributes"
     TABLE_EVENTFRAME_REFERENCED_ELEMENTS = "pi_eventframe_referenced_elements"
     TABLE_AF_TABLES = "pi_af_tables"
+    TABLE_AF_TABLE_ROWS = "pi_af_table_rows"
 
     def __init__(self, options: Dict[str, str]) -> None:
         self.options = options
@@ -275,6 +276,7 @@ class LakeflowConnect:
             self.TABLE_ELEMENT_TEMPLATE_ATTRIBUTES,
             self.TABLE_EVENTFRAME_REFERENCED_ELEMENTS,
             self.TABLE_AF_TABLES,
+            self.TABLE_AF_TABLE_ROWS,
         ]
 
     def get_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
@@ -595,6 +597,14 @@ class LakeflowConnect:
                 StructField("assetdatabase_webid", StringType(), True),
             ])
 
+        if table_name == self.TABLE_AF_TABLE_ROWS:
+            return StructType([
+                StructField("table_webid", StringType(), False),
+                StructField("row_index", LongType(), True),
+                StructField("columns", MapType(StringType(), StringType()), True),
+                StructField("ingestion_timestamp", TimestampType(), False),
+            ])
+
         raise ValueError(f"Unknown table: {table_name}")
 
     def read_table_metadata(self, table_name: str, table_options: Dict[str, str]) -> Dict:
@@ -655,6 +665,8 @@ class LakeflowConnect:
             return {"primary_keys": ["event_frame_webid", "element_webid"], "cursor_field": "start_time", "ingestion_type": "append"}
         if table_name == self.TABLE_AF_TABLES:
             return {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
+        if table_name == self.TABLE_AF_TABLE_ROWS:
+            return {"primary_keys": ["table_webid", "row_index"], "cursor_field": None, "ingestion_type": "snapshot"}
         raise ValueError(f"Unknown table: {table_name}")
 
     def read_table(self, table_name: str, start_offset: dict, table_options: Dict[str, str]) -> Tuple[Iterator[dict], dict]:
@@ -724,6 +736,8 @@ class LakeflowConnect:
             return self._read_eventframe_referenced_elements(start_offset, table_options)
         if table_name == self.TABLE_AF_TABLES:
             return iter(self._read_af_tables_table(table_options)), {"offset": "done"}
+        if table_name == self.TABLE_AF_TABLE_ROWS:
+            return iter(self._read_af_table_rows_table(table_options)), {"offset": "done"}
 
         raise ValueError(f"Unknown table: {table_name}")
 
@@ -1990,6 +2004,61 @@ class LakeflowConnect:
                         "description": it.get("Description", ""),
                         "path": it.get("Path", ""),
                         "assetdatabase_webid": db_wid,
+                    }
+                )
+        return out
+
+
+    def _read_af_table_rows_table(self, table_options: Dict[str, str]) -> List[dict]:
+        """Read rows from AF Tables (best-effort).
+
+        Options:
+        - assetdatabase_webid (optional) to scope table discovery
+        - table_webid (single) or table_webids (csv) to choose specific tables
+        - default_tables: number of tables to sample if none specified (default 1)
+        - startIndex/maxCount for row pagination (defaults 0/50)
+        """
+        start_index = int(table_options.get("startIndex", 0) or 0)
+        max_count = int(table_options.get("maxCount", 50) or 50)
+        default_tables = int(table_options.get("default_tables", 1) or 1)
+        ingest_ts = _utcnow()
+
+        table_webid = (table_options.get("table_webid") or "").strip()
+        table_webids_csv = (table_options.get("table_webids") or "").strip()
+        table_webids: List[str] = []
+        if table_webid:
+            table_webids = [table_webid]
+        elif table_webids_csv:
+            table_webids = [s.strip() for s in table_webids_csv.split(",") if s.strip()]
+        else:
+            tables = self._read_af_tables_table(table_options)
+            table_webids = [t.get("webid") for t in tables if t.get("webid")][: max(0, default_tables)]
+
+        out: List[dict] = []
+        for tw in table_webids:
+            try:
+                data = self._get_json(
+                    f"/piwebapi/tables/{tw}/rows",
+                    params={"startIndex": str(start_index), "maxCount": str(max_count)},
+                )
+            except requests.exceptions.HTTPError as e:
+                if getattr(e.response, "status_code", None) == 404:
+                    continue
+                raise
+            items = data.get("Items", []) or []
+            for i, row in enumerate(items):
+                cols = row.get("Columns") or row.get("columns") or {}
+                # Normalize to string->string map for schema stability.
+                cols_norm = {str(k): ("" if v is None else str(v)) for k, v in (cols or {}).items()}
+                ridx = row.get("Index")
+                if ridx is None:
+                    ridx = start_index + i
+                out.append(
+                    {
+                        "table_webid": tw,
+                        "row_index": int(ridx) if str(ridx).isdigit() else None,
+                        "columns": cols_norm,
+                        "ingestion_timestamp": ingest_ts,
                     }
                 )
         return out
