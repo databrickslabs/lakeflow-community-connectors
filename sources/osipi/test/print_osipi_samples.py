@@ -11,7 +11,7 @@ Typical usage (PI Web API endpoint):
     --probe \
     --max-records 5
 
-Typical usage (local mock server):
+Typical usage (development endpoint):
   python3 sources/osipi/test/print_osipi_samples.py \
     --pi-base-url http://127.0.0.1:8000 \
     --max-records 5 \

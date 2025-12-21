@@ -24,7 +24,6 @@ def test_osipi_connector():
 
     Notes:
     - This connector typically requires a real PI Web API endpoint + a valid Bearer token.
-    - For local development you can point `pi_base_url` at a mock server.
     - If `dev_config.json` is not configured, this test is skipped.
     """
 
@@ -41,8 +40,8 @@ def test_osipi_connector():
     if _is_blank(config.get("pi_base_url")):
         pytest.skip("Configure sources/osipi/configs/dev_config.json (pi_base_url) to run this test.")
 
-    # Token can be blank when testing against an unsecured local mock server.
-    # For real PI Web API with Bearer auth enabled, set access_token.
+    # Token can be blank when testing against an endpoint that does not enforce authentication.
+    # For PI Web API with Bearer auth enabled, set access_token.
 
     tester = LakeflowConnectTester(config, table_config)
     report = tester.run_all_tests()

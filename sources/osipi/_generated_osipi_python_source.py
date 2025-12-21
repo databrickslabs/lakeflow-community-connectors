@@ -2494,7 +2494,7 @@ def register_lakeflow_source(spark):
             for p in points:
                 desc = (p.get("descriptor") or "").strip()
                 eu = (p.get("engineering_units") or "").strip()
-                # heuristic: first word of descriptor (Temperature/Pressure/etc) in our mock, else "Unknown"
+                # heuristic: first word of descriptor (Temperature/Pressure/etc), else "Unknown"
                 pt = (desc.split(" ", 1)[0] if desc else "Unknown") or "Unknown"
                 key = (pt, eu)
                 counts[key] = counts.get(key, 0) + 1
