@@ -19,11 +19,11 @@ Provide these parameters in your connector options.
 |---|---|---:|---|---|
 | `pi_base_url` | string | yes | Base URL of the PI Web API host (no trailing slash). Requests are made under `${pi_base_url}/piwebapi/...`. | `https://my-pi-web-api.company.com` |
 | `access_token` | string | yes | OAuth/OIDC access token used as `Authorization: Bearer <token>`. | `eyJ...` |
-| `externalOptionsAllowList` | string | yes | Comma-separated allowlist of table-specific read options. | `dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,interval,intervals,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,assetdatabase_webid,verify_ssl` |
+| `externalOptionsAllowList` | string | yes | Comma-separated allowlist of table-specific read options. | `dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,interval,intervals,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,elementtemplate_webid,eventframe_template_webid,assetdatabase_webid,verify_ssl` |
 
 Supported table-specific options (**this is the full definitive list**):
 
-- `dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,interval,intervals,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,assetdatabase_webid,verify_ssl`
+- `dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,interval,intervals,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,elementtemplate_webid,eventframe_template_webid,assetdatabase_webid,verify_ssl`
 - `nameFilter`
 - `maxCount`
 - `tag_webids`
@@ -54,7 +54,7 @@ A Unity Catalog connection for this connector can be created in two ways via the
 2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
 3. Set `externalOptionsAllowList` to:
 
-`dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,interval,intervals,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,assetdatabase_webid,verify_ssl`
+`dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,interval,intervals,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,elementtemplate_webid,eventframe_template_webid,assetdatabase_webid,verify_ssl`
 
 The connection can also be created using the standard Unity Catalog API.
 
@@ -86,6 +86,12 @@ The connection can also be created using the standard Unity Catalog API.
 | `pi_value_at_time` | Value at a specific time per tag | (`tag_webid`, `timestamp`) | snapshot | Uses Stream GetValue with `time` |
 | `pi_streamset_plot` | Plot values via StreamSet (multi-tag) | (`tag_webid`, `timestamp`) | append | Uses StreamSet GetPlotAdHoc |
 | `pi_units_of_measure` | Units of measure reference | `webid` | snapshot | Uses UOM list |
+| `pi_analysis_templates` | AF analysis templates | `webid` | snapshot | Uses AssetDatabase GetAnalysisTemplates |
+| `pi_eventframe_template_attributes` | Event Frame template attribute templates | `webid` | snapshot | Uses EventFrameTemplate GetAttributeTemplates |
+| `pi_streamset_end` | Last archived values via StreamSet (multi-tag) | `tag_webid` | snapshot | Uses StreamSet GetEndAdHoc |
+| `pi_element_template_attributes` | AF element template attribute templates (richer) | `webid` | snapshot | Uses ElementTemplate GetAttributeTemplates |
+| `pi_eventframe_referenced_elements` | EventFrame ↔ referenced elements | (`event_frame_webid`, `element_webid`) | append | Uses EventFrame GetReferencedElements (or derived) |
+| `pi_af_tables` | AF Tables inventory | `webid` | snapshot | Uses AssetDatabase GetTables |
 | `pi_element_attributes` | AF element attributes | (`element_webid`, `attribute_webid`) | snapshot | Uses Element GetAttributes |
 | `pi_eventframe_attributes` | Event Frame attributes | (`event_frame_webid`, `attribute_webid`) | snapshot | Uses EventFrame GetAttributes |
 

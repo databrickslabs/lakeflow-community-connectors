@@ -1,6 +1,12 @@
 {
   "pi_af_hierarchy": {},
+  "pi_af_tables": {
+    "assetdatabase_webid": ""
+  },
   "pi_analyses": {
+    "assetdatabase_webid": ""
+  },
+  "pi_analysis_templates": {
     "assetdatabase_webid": ""
   },
   "pi_assetdatabases": {},
@@ -20,6 +26,10 @@
     "default_elements": "2",
     "maxCount": "200"
   },
+  "pi_element_template_attributes": {
+    "assetdatabase_webid": "",
+    "elementtemplate_webid": ""
+  },
   "pi_element_templates": {
     "assetdatabase_webid": ""
   },
@@ -36,6 +46,15 @@
     "default_event_frames": "2",
     "lookback_days": "1",
     "maxCount": "200"
+  },
+  "pi_eventframe_referenced_elements": {
+    "lookback_days": "1",
+    "maxCount": "25",
+    "searchMode": "Overlapped"
+  },
+  "pi_eventframe_template_attributes": {
+    "assetdatabase_webid": "",
+    "eventframe_template_webid": ""
   },
   "pi_eventframe_templates": {
     "assetdatabase_webid": ""
@@ -62,6 +81,11 @@
     "maxCount": "1000",
     "nameFilter": "Sydney_*",
     "startIndex": "0"
+  },
+  "pi_streamset_end": {
+    "default_tags": "3",
+    "nameFilter": "Sydney_*",
+    "tags_per_request": "0"
   },
   "pi_streamset_interpolated": {
     "default_tags": "3",
