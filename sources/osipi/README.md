@@ -19,11 +19,11 @@ Provide these parameters in your connector options.
 |---|---|---:|---|---|
 | `pi_base_url` | string | yes | Base URL of the PI Web API host (no trailing slash). Requests are made under `${pi_base_url}/piwebapi/...`. | `https://my-pi-web-api.company.com` |
 | `access_token` | string | yes | OAuth/OIDC access token used as `Authorization: Bearer <token>`. | `eyJ...` |
-| `externalOptionsAllowList` | string | yes | Comma-separated allowlist of table-specific read options. | `dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,interval,intervals,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,elementtemplate_webid,eventframe_template_webid,assetdatabase_webid,default_tables,table_webids,table_webid,verify_ssl` |
+| `externalOptionsAllowList` | string | yes | Comma-separated allowlist of table-specific read options. | `dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,interval,calculation_type,calculationType,intervals,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,elementtemplate_webid,eventframe_template_webid,assetdatabase_webid,default_tables,table_webids,table_webid,verify_ssl` |
 
 Supported table-specific options (**this is the full definitive list**):
 
-- `dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,interval,intervals,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,elementtemplate_webid,eventframe_template_webid,assetdatabase_webid,default_tables,table_webids,table_webid,verify_ssl`
+- `dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,interval,calculation_type,calculationType,intervals,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,elementtemplate_webid,eventframe_template_webid,assetdatabase_webid,default_tables,table_webids,table_webid,verify_ssl`
 - `nameFilter`
 - `maxCount`
 - `tag_webids`
@@ -54,7 +54,7 @@ A Unity Catalog connection for this connector can be created in two ways via the
 2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
 3. Set `externalOptionsAllowList` to:
 
-`dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,interval,intervals,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,elementtemplate_webid,eventframe_template_webid,assetdatabase_webid,default_tables,table_webids,table_webid,verify_ssl`
+`dataserver_webid,nameFilter,maxCount,startIndex,maxTotalCount,tag_webids,default_tags,lookback_minutes,lookback_days,prefer_streamset,time,startTime,endTime,summaryType,calculationBasis,timeType,summaryDuration,sampleType,sampleInterval,interval,calculation_type,calculationType,intervals,element_webids,default_elements,event_frame_webids,default_event_frames,searchMode,selectedFields,tags_per_request,window_seconds,point_webids,default_points,elementtemplate_webid,eventframe_template_webid,assetdatabase_webid,default_tables,table_webids,table_webid,verify_ssl`
 
 The connection can also be created using the standard Unity Catalog API.
 
@@ -93,6 +93,13 @@ The connection can also be created using the standard Unity Catalog API.
 | `pi_eventframe_referenced_elements` | EventFrame ↔ referenced elements | (`event_frame_webid`, `element_webid`) | append | Uses EventFrame GetReferencedElements (or derived) |
 | `pi_af_tables` | AF Tables inventory | `webid` | snapshot | Uses AssetDatabase GetTables |
 | `pi_af_table_rows` | AF table contents (rows) | (`table_webid`, `row_index`) | snapshot | Uses Table GetRows |
+| `pi_eventframe_acknowledgements` | Event Frame acknowledgements | (`event_frame_webid`, `ack_id`) | snapshot | Uses EventFrame GetAcknowledgements |
+| `pi_eventframe_annotations` | Event Frame annotations | (`event_frame_webid`, `annotation_id`) | snapshot | Uses EventFrame GetAnnotations |
+| `pi_recorded_at_time` | Recorded value at a specific time per tag | (`tag_webid`, `query_time`) | snapshot | Uses Stream GetRecordedAtTime |
+| `pi_calculated` | Calculated values over time per tag | (`tag_webid`, `timestamp`, `calculation_type`) | append | Uses Stream GetCalculated |
+| `pi_point_type_catalog` | Derived point-type catalog (grouped) | (`point_type`, `engineering_units`) | snapshot | Derived from pi_points |
+| `pi_links` | Links materialization (rel → href) | (`entity_type`, `webid`, `rel`) | snapshot | Derived from Links fields / generated links |
+| `pi_errors` | Connector diagnostics/errors captured during reads | (`table_name`, `endpoint`) | snapshot | In-memory best-effort diagnostics |
 | `pi_element_attributes` | AF element attributes | (`element_webid`, `attribute_webid`) | snapshot | Uses Element GetAttributes |
 | `pi_eventframe_attributes` | Event Frame attributes | (`event_frame_webid`, `attribute_webid`) | snapshot | Uses EventFrame GetAttributes |
 
