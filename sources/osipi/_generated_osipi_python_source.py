@@ -2378,7 +2378,7 @@ def register_lakeflow_source(spark):
                 try:
                     data = self._get_json(f"/piwebapi/streams/{wid}/recordedattime", params={"time": str(time_param)})
                 except requests.exceptions.HTTPError as e:
-                    # fallback to stream value (still useful for demo)
+                    # Fallback: use Stream GetValue if RecordedAtTime is unavailable on the source host.
                     if getattr(e.response, "status_code", None) == 404:
                         try:
                             data = self._get_json(f"/piwebapi/streams/{wid}/value", params={"time": str(time_param)})

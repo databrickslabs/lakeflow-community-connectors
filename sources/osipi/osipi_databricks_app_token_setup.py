@@ -1,20 +1,12 @@
 """
-Helper script for hackathon demos (not used by the connector itself).
+Helper script to mint a Databricks workspace OIDC access token (client credentials).
 
-Purpose:
-- Mint a short-lived Databricks OIDC access token (client-credentials) that can be used to call
-  a Databricks App protected by workspace OAuth.
+This script is not used by the connector itself. It is intended for operational validation
+when the target endpoint is protected by Databricks Apps authentication.
 
-How it is used in this connector demo:
-- Set `pi_base_url` to the Databricks App URL (e.g. https://<app>.databricksapps.com)
-- Set `access_token` to the minted token (passed as: Authorization: Bearer <token>)
-
-Credentials:
-- The submitter stores client credentials in Databricks Secrets:
-  - scope: sp-osipi
-  - keys: sp-client-id, sp-client-secret
-
-This script is intentionally lightweight and avoids committing any secrets.
+Credentials are typically sourced from Databricks Secrets:
+- scope: sp-osipi
+- keys: sp-client-id, sp-client-secret
 """
 
 from __future__ import annotations
@@ -82,7 +74,7 @@ def main() -> None:
     """
     Recommended usage (Databricks notebook):
     - Put `sp-client-id` and `sp-client-secret` in secrets scope `sp-osipi`
-    - Run this script (or copy/paste the minting call) to print a token for the demo
+    - Run this script to print a short-lived access token
     """
 
     # 1) Prefer Databricks secrets when available

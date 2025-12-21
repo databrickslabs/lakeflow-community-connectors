@@ -1,4 +1,4 @@
-# Lakeflow osipi Community Connector
+# Lakeflow OSIPI Community Connector
 
 This documentation provides setup instructions and reference information for the **OSI PI (PI Web API)** source connector.
 
@@ -60,6 +60,18 @@ The connection can also be created using the standard Unity Catalog API.
 
 ## Supported Objects
 
+### Table taxonomy (classification)
+
+| Category | Tables | Analytics usage |
+|---|---|---|
+| **Discovery & inventory** | `pi_dataservers`, `pi_points`, `pi_point_attributes`, `pi_point_type_catalog` | Build a governed tag catalog, standardize naming, derive coverage metrics, and drive downstream table selection. |
+| **Time-series (recorded / sampled / derived)** | `pi_timeseries`, `pi_streamset_recorded`, `pi_interpolated`, `pi_streamset_interpolated`, `pi_plot`, `pi_streamset_plot`, `pi_summary`, `pi_streamset_summary`, `pi_value_at_time`, `pi_recorded_at_time`, `pi_end`, `pi_streamset_end`, `pi_calculated` | Power time-series analytics (SPC, forecasting, anomaly detection), feature extraction, and KPI computation with scalable multi-tag ingestion using StreamSet. |
+| **Asset Framework (AF)** | `pi_assetservers`, `pi_assetdatabases`, `pi_af_hierarchy`, `pi_element_attributes`, `pi_categories`, `pi_element_templates`, `pi_attribute_templates`, `pi_element_template_attributes`, `pi_analyses`, `pi_analysis_templates` | Model- and template-driven analytics: join time-series to governed assets, enforce schema via templates, and support hierarchy-based rollups (site/unit/equipment). |
+| **Event Frames** | `pi_event_frames`, `pi_eventframe_templates`, `pi_eventframe_attributes`, `pi_eventframe_template_attributes`, `pi_eventframe_referenced_elements`, `pi_eventframe_acknowledgements`, `pi_eventframe_annotations` | Operational analytics (downtime, batch analysis, alarm review): join events to assets, apply template semantics, and enrich with annotations/ack metadata. |
+| **AF Tables (reference data)** | `pi_af_tables`, `pi_af_table_rows` | Enrich metrics with slowly changing business/operational reference data (shift calendars, product masters) maintained in AF. |
+| **Reference / lookup** | `pi_units_of_measure` | Normalize and validate units for consistent analytics and cross-tag comparisons. |
+| **Governance & diagnostics** | `pi_links`, `pi_errors` | Improve navigability and observability: materialize link relationships for exploration; capture connector-side failures as data for monitoring. |
+
 | Object (tableName) | Description | Primary keys | Ingestion type | Notes |
 |---|---|---|---|---|
 | `pi_dataservers` | List PI Data Archives (DataServers) | `webid` | snapshot | Based on DataServer List API |
@@ -119,12 +131,9 @@ The connection can also be created using the standard Unity Catalog API.
 
 Follow the Lakeflow Community Connector UI, which will guide you through setting up a pipeline using the selected source connector code.
 
-### Sample output script (example helper)
+### Sample output script (validation utility)
 
-For examples, you can print a small sample of what each connector table returns using:
-
-- `sources/osipi/test/print_osipi_samples.py`
-- Notes: `sources/osipi/test/README_PRINT_SAMPLES.md` (temporary; safe to delete later)
+`sources/osipi/test/print_osipi_samples.py` runs the connector directly (no Spark required) and prints a small sample for each table. Use it to validate connectivity, permissions, and expected payload shapes.
 
 ### Step 2: Configure Your Pipeline
 

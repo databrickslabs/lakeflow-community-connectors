@@ -1,26 +1,22 @@
-## OSIPI sample output script (temporary)
+## OSIPI sample output script
 
 This README describes how to use `print_osipi_samples.py` to show what the OSIPI connector can retrieve.
-
-You can delete this file later if you don’t want to ship it.
 
 ### What it does
 
 - Instantiates `LakeflowConnect` directly (no Spark required)
-- Optionally mints a Databricks OIDC Bearer token for the **Databricks App** demo endpoint
+- Optionally mints a Databricks OIDC Bearer token for a Databricks Apps-protected endpoint
 - Iterates tables and prints:
   - `table_options` used
   - `next_offset`
   - up to **N sample records** (default 5)
 - With `--verbose`, prints step-by-step telemetry (token minting, probe, per-table timing)
 
-### Recommended demo command (your Databricks App)
+### Example command
 
 ```bash
-cd /Users/pravin.varma/Documents/Demo/lakeflow-community-connectors
-
 python3 sources/osipi/test/print_osipi_samples.py \
-  --pi-base-url https://osipi-webserver-1444828305810485.aws.databricksapps.com \
+  --pi-base-url https://<pi-web-api-host> \
   --mint-databricks-app-token \
   --probe \
   --verbose \
@@ -29,7 +25,7 @@ python3 sources/osipi/test/print_osipi_samples.py \
 
 ### Parameters
 
-- `--pi-base-url`: base URL of PI Web API (or the Databricks App mock)
+- `--pi-base-url`: base URL of PI Web API
 - `--access-token`: provide a Bearer token directly (skips minting)
 - `--mint-databricks-app-token`: mint a token via Databricks workspace OIDC using secrets in scope `sp-osipi`
 - `--max-records`: records per table to print (default 5)

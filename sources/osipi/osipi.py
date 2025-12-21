@@ -2,24 +2,19 @@
 #
 # Implements the LakeflowConnect interface expected by the Lakeflow Community Connectors template.
 #
-# This source reads from an OSI PI Web API-compatible endpoint (including the Databricks App mock server)
+# This source reads from an OSI PI Web API-compatible endpoint
 # and exposes multiple logical tables via the `tableName` option.
 #
-# Authentication (Databricks Apps)
-# -------------------------------
-# Databricks Apps commonly require an OAuth access token minted via the workspace OIDC endpoint:
+# Authentication
+# -------------
+# Recommended: provide an OAuth/OIDC access token via `access_token` (Authorization: Bearer ...).
 #
-#   POST https://<workspace-host>/oidc/v1/token
-#     grant_type=client_credentials
-#     scope=all-apis
+# Alternative: Basic authentication via `username`/`password` when enabled on the PI Web API host.
 #
 # Options supported:
-# - pi_base_url / pi_web_api_url (required): base URL, e.g. https://osipi-webserver-...aws.databricksapps.com
-# - workspace_host: https://<workspace-host> (required for OIDC token mint)
-# - client_id: service principal applicationId
-# - client_secret: service principal secret
-# - access_token: (optional) pre-minted bearer token
-# - username/password: (optional) basic auth for non-App PI servers
+# - pi_base_url / pi_web_api_url (required): base URL, e.g. https://<piwebapi-host>
+# - access_token: (optional) bearer token
+# - username/password: (optional) basic auth (if enabled)
 #
 # Table options (passed via table_configuration / table_options):
 # - pi_points:
@@ -2295,7 +2290,7 @@ class LakeflowConnect:
             try:
                 data = self._get_json(f"/piwebapi/streams/{wid}/recordedattime", params={"time": str(time_param)})
             except requests.exceptions.HTTPError as e:
-                # fallback to stream value (still useful for demo)
+                # Fallback: use Stream GetValue if RecordedAtTime is unavailable on the source host.
                 if getattr(e.response, "status_code", None) == 404:
                     try:
                         data = self._get_json(f"/piwebapi/streams/{wid}/value", params={"time": str(time_param)})

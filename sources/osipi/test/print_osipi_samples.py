@@ -1,11 +1,11 @@
-"""Print sample rows for every OSIPI connector table.
+"""Print sample rows for OSIPI connector tables.
 
-This is a convenience script for demos/debugging. It uses the connector directly
+This is a validation and troubleshooting utility. It uses the connector directly
 (no Spark required) and prints N records per table in a readable format.
 
-Typical usage (live Databricks App mock PI server):
+Typical usage (PI Web API endpoint):
   python3 sources/osipi/test/print_osipi_samples.py \
-    --pi-base-url https://osipi-webserver-1444828305810485.aws.databricksapps.com \
+    --pi-base-url https://<pi-web-api-host> \
     --mint-databricks-app-token \
     --verbose \
     --probe \
@@ -21,7 +21,7 @@ Notes:
 - If you pass --mint-databricks-app-token, this script:
   1) Uses your ~/.databrickscfg DEFAULT profile PAT to call the Databricks Secrets API
   2) Reads secrets from scope `sp-osipi` keys `sp-client-id` and `sp-client-secret`
-  3) Base64-decodes them (this repo's demo stored them encoded)
+  3) Optionally base64-decodes them (depending on how secrets are stored)
   4) Calls https://<workspace-host>/oidc/v1/token (client_credentials) to mint a Bearer token
 - No secrets are printed.
 """
@@ -182,7 +182,7 @@ def main() -> None:
     parser.add_argument("--verbose", action="store_true", help="Print step-by-step telemetry logs")
     parser.add_argument("--probe", action="store_true", help="Probe connectivity before reading")
 
-    # Optional: mint token for Databricks App demo via workspace secrets
+    # Optional: mint token via workspace secrets (Databricks OIDC client_credentials)
     parser.add_argument("--mint-databricks-app-token", action="store_true")
     parser.add_argument("--databricks-profile", default="DEFAULT")
     parser.add_argument("--secrets-scope", default="sp-osipi")

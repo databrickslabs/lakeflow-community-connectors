@@ -1,4 +1,4 @@
-# **OSI PI Web API API Documentation**
+# OSI PI Web API Connector API Documentation
 
 ## **Authorization**
 
@@ -22,7 +22,21 @@ curl --location --request GET 'https://{piwebapifqdn}/piwebapi'   --header 'Auth
 
 ## **Object List**
 
-This connector exposes PI Web API resources as a small set of **tables** (objects). Object names are **static** and returned by the connector’s `list_tables()`.
+This connector exposes PI Web API resources as a set of **tables**. Object names are **static** and returned by the connector’s `list_tables()`.
+
+### Table catalog (classification + analytics usage)
+
+| Category | Tables | Analytics usage |
+|---|---|---|
+| **Discovery & inventory** | `pi_dataservers`, `pi_points`, `pi_point_attributes`, `pi_point_type_catalog` | Asset/tag cataloging, coverage checks, taxonomy standardization, driving selection of downstream ingestion scope. |
+| **Time-series** | `pi_timeseries`, `pi_streamset_recorded`, `pi_interpolated`, `pi_streamset_interpolated`, `pi_plot`, `pi_streamset_plot`, `pi_summary`, `pi_streamset_summary`, `pi_value_at_time`, `pi_recorded_at_time`, `pi_end`, `pi_streamset_end`, `pi_calculated` | Time-series analytics, KPI computation, anomaly detection, feature extraction. StreamSet tables provide scalable multi-tag ingestion. |
+| **Asset Framework (AF)** | `pi_assetservers`, `pi_assetdatabases`, `pi_af_hierarchy`, `pi_element_attributes`, `pi_categories`, `pi_element_templates`, `pi_attribute_templates`, `pi_element_template_attributes`, `pi_analyses`, `pi_analysis_templates` | Model- and template-driven analytics; hierarchy rollups (site/unit/equipment); governed joins of time-series to assets. |
+| **Event Frames** | `pi_event_frames`, `pi_eventframe_templates`, `pi_eventframe_attributes`, `pi_eventframe_template_attributes`, `pi_eventframe_referenced_elements`, `pi_eventframe_acknowledgements`, `pi_eventframe_annotations` | Batch/downtime/alarm analytics; joining events to referenced assets; review/ack workflows and operator notes as features. |
+| **AF Tables** | `pi_af_tables`, `pi_af_table_rows` | Reference-data enrichment (shift calendars, product masters, operating modes). |
+| **Reference / lookup** | `pi_units_of_measure` | Unit normalization/validation for consistent metrics. |
+| **Governance & diagnostics** | `pi_links`, `pi_errors` | Navigability/exploration (materialized relationships) and observability (connector-side failures as data). |
+
+### Endpoint mapping (selected)
 
 | Connector object (tableName) | Description | PI Web API controller/actions used |
 |---|---|---|
@@ -32,14 +46,17 @@ This connector exposes PI Web API resources as a small set of **tables** (object
 | `pi_timeseries` | Recorded/compressed values for one or more tags | Stream **GetRecorded** (`GET streams/{webId}/recorded`) ([Stream GetRecorded](https://docs.aveva.com/bundle/pi-web-api-reference-1.19.1/page/help/controllers/stream/actions/getrecorded.html)); optionally Batch **Execute** (`POST batch`) ([Batch Execute](https://docs.aveva.com/bundle/pi-web-api-reference-1.19.1/page/help/controllers/batch/actions/execute.html)) |
 | `pi_af_hierarchy` | AF elements (hierarchy) | AssetServer **List** (`GET assetservers`) ([AssetServer List](https://docs.aveva.com/bundle/pi-web-api-reference-1.19.1/page/help/controllers/assetserver/actions/list.html)); AssetServer **GetDatabases** (`GET assetservers/{webId}/assetdatabases`) ([AssetServer GetDatabases](https://docs.aveva.com/bundle/pi-web-api-reference-1.19.1/page/help/controllers/assetserver/actions/getdatabases.html)); AssetDatabase **GetElements** (`GET assetdatabases/{webId}/elements`) ([AssetDatabase GetElements](https://docs.aveva.com/bundle/pi-web-api-reference-1.19.1/page/help/controllers/assetdatabase/actions/getelements.html)) |
 | `pi_event_frames` | Event Frames in a time window | AssetDatabase **GetEventFrames** (`GET assetdatabases/{webId}/eventframes`) ([AssetDatabase GetEventFrames](https://docs.aveva.com/bundle/pi-web-api-reference-1.19.1/page/help/controllers/assetdatabase/actions/geteventframes.html)) |
-
-Notes:
-
 | `pi_current_value` | Current (snapshot) value per tag | Stream **GetValue** (`GET streams/{webId}/value`) ([Stream GetValue](https://docs.aveva.com/bundle/pi-web-api-reference-1.19.1/page/help/controllers/stream/actions/getvalue.html)) |
 | `pi_summary` | Summary stats per tag | Stream **GetSummary** (`GET streams/{webId}/summary`) ([Stream GetSummary](https://docs.aveva.com/bundle/pi-web-api-reference-1.19.1/page/help/controllers/stream/actions/getsummary.html)) |
 | `pi_streamset_recorded` | Recorded values via StreamSet (multi-tag) | StreamSet **GetRecordedAdHoc** (`GET streamsets/recorded`) ([StreamSet GetRecordedAdHoc](https://docs.aveva.com/bundle/pi-web-api-reference-1.19.1/page/help/controllers/streamset/actions/getrecordedadhoc.html)) |
 | `pi_element_attributes` | AF element attributes | Element **GetAttributes** (`GET elements/{webId}/attributes`) ([Element GetAttributes](https://docs.aveva.com/bundle/pi-web-api-reference-1.19.1/page/help/controllers/element/actions/getattributes.html)) |
 | `pi_eventframe_attributes` | Event Frame attributes | EventFrame **GetAttributes** (`GET eventframes/{webId}/attributes`) ([EventFrame GetAttributes](https://docs.aveva.com/bundle/pi-web-api-reference-1.19.1/page/help/controllers/eventframe/actions/getattributes.html)) |
+| `pi_recorded_at_time` | Recorded value at a specific time | Stream **GetRecordedAtTime** (`GET streams/{webId}/recordedattime`) (Stream controller) |
+| `pi_calculated` | Calculated values over time | Stream **GetCalculated** (`GET streams/{webId}/calculated`) (Stream controller) |
+| `pi_eventframe_acknowledgements` | Acknowledgements | EventFrame acknowledgement endpoint (`GET eventframes/{webId}/acknowledgements`) (EventFrame controller) |
+| `pi_eventframe_annotations` | Annotations | EventFrame annotation endpoint (`GET eventframes/{webId}/annotations`) (EventFrame controller) |
+| `pi_af_tables` | AF Tables inventory | AssetDatabase tables endpoint (`GET assetdatabases/{webId}/tables`) (AssetDatabase controller) |
+| `pi_af_table_rows` | AF Table rows | Table rows endpoint (`GET tables/{webId}/rows`) (Table controller) |
 
 - The PI Web API docs show request paths relative to the PI Web API root. In practice, requests are made under the server’s PI Web API base path, typically `https://{piwebapifqdn}/piwebapi/...` (see sample `Links.Self` values in action pages like [DataServer List](https://docs.aveva.com/bundle/pi-web-api-reference-1.19.1/page/help/controllers/dataserver/actions/list.html)).
 
