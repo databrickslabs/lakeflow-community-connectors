@@ -78,6 +78,14 @@ The connection can also be created using the standard Unity Catalog API.
 | `pi_assetservers` | List AF servers | `webid` | snapshot | Uses AssetServer List |
 | `pi_assetdatabases` | List AF databases (per server) | `webid` | snapshot | Uses AssetServer GetAssetDatabases |
 | `pi_element_templates` | List AF element templates (per DB) | `webid` | snapshot | Uses AssetDatabase GetElementTemplates |
+| `pi_categories` | AF categories | `webid` | snapshot | Uses AssetDatabase GetCategories |
+| `pi_attribute_templates` | AF attribute templates per element template | `webid` | snapshot | Uses ElementTemplate GetAttributeTemplates |
+| `pi_analyses` | AF analyses metadata | `webid` | snapshot | Uses AssetDatabase GetAnalyses |
+| `pi_eventframe_templates` | Event Frame templates | `webid` | snapshot | Uses AssetDatabase GetEventFrameTemplates |
+| `pi_end` | Last archived value per tag | `tag_webid` | snapshot | Uses Stream GetEnd |
+| `pi_value_at_time` | Value at a specific time per tag | (`tag_webid`, `timestamp`) | snapshot | Uses Stream GetValue with `time` |
+| `pi_streamset_plot` | Plot values via StreamSet (multi-tag) | (`tag_webid`, `timestamp`) | append | Uses StreamSet GetPlotAdHoc |
+| `pi_units_of_measure` | Units of measure reference | `webid` | snapshot | Uses UOM list |
 | `pi_element_attributes` | AF element attributes | (`element_webid`, `attribute_webid`) | snapshot | Uses Element GetAttributes |
 | `pi_eventframe_attributes` | Event Frame attributes | (`event_frame_webid`, `attribute_webid`) | snapshot | Uses EventFrame GetAttributes |
 
