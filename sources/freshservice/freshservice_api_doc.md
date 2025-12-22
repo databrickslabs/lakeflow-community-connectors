@@ -632,16 +632,18 @@ Mapping of Freshservice API field types to standard data types for use in data p
 | Integer (priority, status) | Integer | `IntegerType()` | Enumerated values |
 | Float/Decimal (cost) | Decimal | `DecimalType(10,2)` | Currency and decimal fields |
 | Array | Array | `ArrayType(StringType())` | Lists (tags, cc_emails, etc.) |
-| Object/JSON | Struct | `StructType([...])` | Nested objects (custom_fields, address, etc.) |
+| Object/JSON (well-defined) | Struct | `StructType([...])` | Well-defined nested objects (address) |
+| Object/JSON (dynamic) | JSON String | `StringType()` | Dynamic objects (custom_fields, planning_fields, type_fields, etc.) |
 
 **Special Field Notes:**
 
 1. **Timestamps:** All datetime fields are in ISO 8601 format with timezone (e.g., `2024-01-01T10:00:00Z`)
 2. **IDs:** All ID fields should be treated as Long (not Integer) to avoid overflow
-3. **Custom Fields:** The `custom_fields` object contains user-defined fields with dynamic schemas. Use `MapType(StringType(), StringType())` or parse as JSON string
+3. **Custom Fields:** The `custom_fields` object contains user-defined fields with dynamic schemas. **In the connector implementation, these are stored as JSON strings** (not structs) for compatibility with Spark/Databricks. Use Spark's `from_json()` or `get_json_object()` functions to parse them.
 4. **Enumerated Fields:** Fields like `status`, `priority`, `impact` use integer codes. Refer to API documentation for code meanings
-5. **Nested Objects:** Objects like `address`, `planning_fields`, `analysis_fields` should be mapped to StructType
-6. **Arrays:** Fields like `tags`, `cc_emails` are arrays of strings
+5. **Well-Defined Nested Objects:** Objects like `address` (in locations, vendors) have known schemas and are mapped to `StructType`
+6. **Dynamic Nested Objects:** Objects like `planning_fields`, `analysis_fields`, `type_fields`, `roles`, `ratings`, `purchase_items` have variable schemas and are stored as JSON strings in the connector implementation
+7. **Arrays:** Fields like `tags`, `cc_emails` are arrays of strings
 
 **Priority Values (Common across Tickets, Problems, Changes, Releases):**
 - 1: Low

@@ -121,19 +121,19 @@ Table-specific options are passed via the **pipeline specification** under `tabl
 
 Full schemas are defined by the connector and align with the Freshservice API v2 documentation:
 
-- **`tickets`**: Includes fields such as `subject`, `description`, `priority`, `status`, `requester_id`, `responder_id`, `created_at`, `updated_at`, and arrays like `cc_emails`, `tags`. Also includes nested `custom_fields` for instance-specific custom data.
+- **`tickets`**: Includes fields such as `subject`, `description`, `priority`, `status`, `requester_id`, `responder_id`, `created_at`, `updated_at`, and arrays like `cc_emails`, `tags`. Also includes `custom_fields` stored as a JSON string for instance-specific custom data.
 
-- **`problems`** and **`releases`**: Similar structure with IT service management specific fields like `impact`, `risk`, `planned_start_date`, `planned_end_date`, and nested planning/analysis fields.
+- **`problems`** and **`releases`**: Similar structure with IT service management specific fields like `impact`, `risk`, `planned_start_date`, `planned_end_date`, and planning/analysis fields stored as JSON strings.
 
 - **`locations`** and **`vendors`**: Include structured address information stored as nested objects with fields like `line1`, `line2`, `city`, `state`, `country`, `zipcode`.
 
-- **`assets`**: Include asset tracking information such as `asset_tag`, `asset_state`, `usage_type`, along with nested `type_fields` containing asset-type-specific attributes.
+- **`assets`**: Include asset tracking information such as `asset_tag`, `asset_state`, `usage_type`, along with `type_fields` stored as a JSON string containing asset-type-specific attributes.
 
-- **`purchase_orders`**: Include vendor details, billing/shipping addresses, line items in the `purchase_items` array, and financial fields with decimal precision.
+- **`purchase_orders`**: Include vendor details, billing/shipping addresses, line items in the `purchase_items` field (stored as JSON string), and financial fields with decimal precision.
 
 - **`requested_items`**: Include service catalog item details like `service_item_id`, `quantity`, `stage`, `cost_per_request`, and fulfillment information.
 
-You usually do not need to customize the schema; it is static and driven by the connector implementation. Nested objects are preserved as structured types rather than being flattened.
+You usually do not need to customize the schema; it is static and driven by the connector implementation. Well-defined nested objects (like `address`) are preserved as structured types, while dynamic/custom fields are stored as JSON strings to ensure compatibility with Spark/Databricks.
 
 ## Data Type Mapping
 
@@ -147,14 +147,45 @@ Freshservice API fields are mapped to logical types as follows:
 | ISO 8601 datetime (string)      | `created_at`, `updated_at`, `due_by`, `planned_start_date`  | string in schema               | Stored as UTC ISO 8601 strings; can be cast to timestamp downstream.                       |
 | decimal                         | `cost_per_request`, `conversion_rate`, `tax_percentage`     | decimal (`DecimalType(10,2)`)  | Used for currency and percentage fields with precise decimal representation.               |
 | array                           | `tags`, `cc_emails`, `secondary_emails`, `department_ids`   | array of primitive types       | Arrays are preserved as nested collections.                                                |
-| object/struct                   | `custom_fields`, `address`, `planning_fields`, `type_fields`| struct (`StructType`)          | Nested objects are preserved instead of flattened. Absent fields are represented as `null`.|
-| nullable fields                 | Most optional fields                                        | same as base type + `null`     | Missing values and absent nested objects are surfaced as `null`, not empty objects.        |
+| object/struct (well-defined)    | `address` (locations, vendors)                              | struct (`StructType`)          | Well-defined nested objects with known schemas are preserved as structs.                   |
+| object/struct (dynamic)         | `custom_fields`, `planning_fields`, `type_fields`, `roles`, `ratings`, `purchase_items` | JSON string (`StringType`) | Dynamic/custom fields are stored as JSON strings for Spark compatibility. Use `from_json()` or `get_json_object()` to parse. |
+| nullable fields                 | Most optional fields                                        | same as base type + `null`     | Missing values and absent nested objects are surfaced as `null`, not empty strings.        |
 
 The connector is designed to:
 
 - Use `LongType` for all identifier fields to prevent integer overflow.
-- Preserve nested JSON structures instead of flattening them into separate tables.
-- Treat absent nested fields as `null` to maintain data integrity and schema consistency.
+- Preserve well-defined nested structures (like `address`) as structs for type safety.
+- Store dynamic/custom fields as JSON strings to ensure compatibility with Spark/Databricks and avoid empty struct errors.
+- Treat absent fields as `null` to maintain data integrity and schema consistency.
+
+### Working with JSON String Fields
+
+Dynamic fields like `custom_fields`, `planning_fields`, `type_fields`, and others are stored as JSON strings. To work with these fields in your Spark queries, use Spark's JSON functions:
+
+```python
+from pyspark.sql.functions import from_json, get_json_object, schema_of_json
+
+# Extract a specific value from a JSON string field
+df = df.withColumn(
+    "priority_reason", 
+    get_json_object("custom_fields", "$.priority_reason")
+)
+
+# Parse the entire JSON string into a struct with a known schema
+custom_schema = "priority_reason STRING, escalation_notes STRING"
+df = df.withColumn(
+    "custom_fields_parsed", 
+    from_json("custom_fields", custom_schema)
+)
+
+# Automatically infer schema from sample data
+sample_json = df.select("custom_fields").filter("custom_fields IS NOT NULL").first()[0]
+inferred_schema = schema_of_json(sample_json)
+df = df.withColumn(
+    "custom_fields_parsed", 
+    from_json("custom_fields", inferred_schema)
+)
+```
 
 ## How to Run
 
@@ -280,18 +311,20 @@ For snapshot tables:
   - Verify that your Freshservice instance has service catalog items being requested.
 
 - **Schema mismatches downstream**:
-  - The connector preserves nested structures (`custom_fields`, `address`, etc.) as structs.
-  - Ensure downstream tables are defined to accept nested types, or explicitly flatten them in your transformations.
+  - The connector preserves well-defined nested structures (like `address`) as structs.
+  - Dynamic fields (`custom_fields`, `planning_fields`, etc.) are stored as JSON strings.
+  - Ensure downstream tables are defined to accept these types, or parse/flatten them in your transformations using Spark JSON functions.
 
 - **Slow performance on first sync**:
   - Initial syncs for large datasets (especially without `start_date`) can be slow.
   - Consider setting `start_date` to a recent date to limit the initial backfill.
   - Adjust `max_pages_per_batch` to control how much data is fetched per batch.
 
-- **Custom fields appear empty**:
-  - The `custom_fields` object contains instance-specific custom fields defined in your Freshservice account.
-  - If no custom fields are configured or populated, this will appear as an empty struct.
+- **Custom fields appear empty or null**:
+  - The `custom_fields` field contains instance-specific custom fields defined in your Freshservice account, stored as a JSON string.
+  - If no custom fields are configured or populated, this will be `null` or an empty JSON object (`{}`).
   - Custom field schemas are dynamic and cannot be statically defined by the connector.
+  - Use Spark's `from_json()` or `get_json_object()` functions to parse custom fields (see "Working with JSON String Fields" section above).
 
 ## References
 
