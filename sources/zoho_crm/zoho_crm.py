@@ -415,7 +415,8 @@ class LakeflowConnect:
         if cursor_time:
             cursor_dt = datetime.fromisoformat(cursor_time.replace("Z", "+00:00"))
             lookback_dt = cursor_dt - timedelta(minutes=5)
-            cursor_time = lookback_dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+            # Use ISO format WITHOUT timezone - Zoho API returns 400 with +00:00 format
+            cursor_time = lookback_dt.strftime("%Y-%m-%dT%H:%M:%S")
             print(f"[DEBUG] cursor_time after lookback adjustment: {cursor_time}")
 
         # Get metadata to determine ingestion type
