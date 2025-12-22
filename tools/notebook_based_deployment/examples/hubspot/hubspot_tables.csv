@@ -1,0 +1,3 @@
+source_table,destination_table,destination_catalog,destination_schema,pipeline_group,schedule,table_options_json,weight
+contacts,contacts,marketing,bronze,main,0 2 * * *,{"maxCount":"10000"},100
+companies,companies,marketing,bronze,main,0 2 * * *,,50

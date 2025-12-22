@@ -99,7 +99,7 @@ print_header "Step 1: Generate DLT Notebooks"
 NOTEBOOKS_DIR="dlt_notebooks/$CONNECTOR_NAME"
 mkdir -p "$NOTEBOOKS_DIR"
 
-python generate_dlt_notebooks_generic.py \
+python tools/notebook_based_deployment/generate_dlt_notebooks_generic.py \
     --connector-name "$CONNECTOR_NAME" \
     --input-csv "$CSV_FILE" \
     --output-dir "$NOTEBOOKS_DIR" \
@@ -143,7 +143,7 @@ if [ "$EMIT_JOBS" = "true" ]; then
     JOBS_FLAG="--emit-jobs"
 fi
 
-python generate_dab_yaml_notebooks.py \
+python tools/notebook_based_deployment/generate_dab_yaml_notebooks.py \
     --connector-name "$CONNECTOR_NAME" \
     --input-csv "$CSV_FILE" \
     --output-yaml "$YAML_OUTPUT" \
