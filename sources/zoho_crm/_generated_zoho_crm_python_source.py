@@ -8,6 +8,7 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Iterator, Optional
+import json
 import re
 import time
 
@@ -451,11 +452,11 @@ def register_lakeflow_source(spark):
                 # Default to StringType for unknown types
                 spark_type = StringType()
 
-            # Handle special JSON types
+            # Handle special JSON types - store as JSON strings for flexibility
             if json_type == "jsonarray":
-                spark_type = ArrayType(StringType(), True)
+                spark_type = StringType()  # Store as JSON string
             elif json_type == "jsonobject":
-                spark_type = StructType([])  # Empty struct for flexible objects
+                spark_type = StringType()  # Store as JSON string
 
             return StructField(api_name, spark_type, nullable)
 
@@ -589,11 +590,49 @@ def register_lakeflow_source(spark):
 
             return records_iter, next_offset
 
+        def _get_json_fields(self, module_name: str) -> set:
+            """
+            Get field names that should be serialized as JSON strings.
+            These are fields with json_type 'jsonobject' or 'jsonarray'.
+            """
+            cache_key = f"{module_name}_json_fields"
+            if cache_key in self._fields_cache:
+                return self._fields_cache[cache_key]
+
+            fields = self._get_fields(module_name)
+            json_fields = set()
+            for field in fields:
+                json_type = field.get("json_type")
+                if json_type in ("jsonobject", "jsonarray"):
+                    json_fields.add(field.get("api_name"))
+
+            self._fields_cache[cache_key] = json_fields
+            return json_fields
+
+        def _normalize_record(self, record: dict, json_fields: set) -> dict:
+            """
+            Normalize a record for Spark compatibility.
+            Only serializes fields that are declared as JSON strings in schema.
+            """
+            normalized = {}
+            for key, value in record.items():
+                if value is None:
+                    normalized[key] = None
+                elif key in json_fields and isinstance(value, (dict, list)):
+                    # Only serialize fields that are declared as StringType for JSON
+                    normalized[key] = json.dumps(value)
+                else:
+                    normalized[key] = value
+            return normalized
+
         def _read_records(self, module_name: str, cursor_time: Optional[str] = None) -> Iterator[dict]:
             """
             Read records from a module with pagination.
             """
             self._current_max_modified_time = cursor_time
+
+            # Get fields that need JSON serialization
+            json_fields = self._get_json_fields(module_name)
 
             page = 1
             per_page = 200  # Maximum allowed by Zoho CRM
@@ -628,7 +667,7 @@ def register_lakeflow_source(spark):
                         if not self._current_max_modified_time or modified_time > self._current_max_modified_time:
                             self._current_max_modified_time = modified_time
 
-                    yield record
+                    yield self._normalize_record(record, json_fields)
 
                 # Check if there are more pages
                 more_records = info.get("more_records", False)

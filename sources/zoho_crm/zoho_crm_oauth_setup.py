@@ -248,16 +248,71 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 4: Save Your Configuration
+# MAGIC ## Step 4: Verify Connection
 # MAGIC
-# MAGIC Here's your complete configuration for the Zoho CRM connector.
+# MAGIC Let's verify that your credentials work by testing the token refresh and making a simple API call.
+
+# COMMAND ----------
+
+# DBTITLE 1,Test Connection
+import requests
+
+print("🔄 Testing connection to Zoho CRM...")
+print()
+
+# Test 1: Refresh the token
+print("1️⃣ Testing token refresh...")
+token_url = f"{DATA_CENTER}/oauth/v2/token"
+
+refresh_response = requests.post(
+    token_url, data={"refresh_token": REFRESH_TOKEN, "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET, "grant_type": "refresh_token"}
+)
+
+if refresh_response.status_code != 200 or "access_token" not in refresh_response.json():
+    print(f"❌ Token refresh failed: {refresh_response.text}")
+    raise ValueError("Token refresh failed - please check your credentials and try again from Step 2")
+
+access_token = refresh_response.json()["access_token"]
+print("   ✅ Token refresh successful!")
+print()
+
+# Test 2: List modules from CRM API
+print("2️⃣ Testing CRM API access...")
+
+# Derive API URL from accounts URL
+api_domain = API_DOMAIN if "API_DOMAIN" in dir() else DATA_CENTER.replace("accounts.zoho", "www.zohoapis")
+
+modules_response = requests.get(f"{api_domain}/crm/v8/settings/modules", headers={"Authorization": f"Zoho-oauthtoken {access_token}"})
+
+if modules_response.status_code == 200:
+    modules = modules_response.json().get("modules", [])
+    print(f"   ✅ API access successful! Found {len(modules)} modules.")
+    print()
+    print("   Sample modules:")
+    for module in modules[:5]:
+        print(f"      - {module.get('api_name', 'Unknown')}")
+    if len(modules) > 5:
+        print(f"      ... and {len(modules) - 5} more")
+else:
+    print(f"❌ API call failed with status {modules_response.status_code}")
+    print(f"   Response: {modules_response.text[:200]}")
+    raise ValueError("API verification failed - please check your credentials")
+
+print()
+print("=" * 80)
+print("🎉 CONNECTION VERIFIED SUCCESSFULLY!")
+print("=" * 80)
+print()
+print("Proceed to Step 5 to save your configuration.")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Step 5: Save Your Configuration
 # MAGIC
-# MAGIC **Security Recommendation:** Store sensitive values in Databricks Secrets:
-# MAGIC ```python
-# MAGIC dbutils.secrets.put(scope="zoho-crm", key="client_id", string_value="...")
-# MAGIC dbutils.secrets.put(scope="zoho-crm", key="client_secret", string_value="...")
-# MAGIC dbutils.secrets.put(scope="zoho-crm", key="refresh_token", string_value="...")
-# MAGIC ```
+# MAGIC Now that your connection is verified, let's save the configuration.
+# MAGIC
+# MAGIC **Security Recommendation:** For production, store sensitive values in Databricks Secrets.
 
 # COMMAND ----------
 
@@ -269,7 +324,7 @@ import os
 config = {
     "client_id": CLIENT_ID,
     "client_secret": CLIENT_SECRET,
-    "refresh_token": REFRESH_TOKEN if "REFRESH_TOKEN" in dir() else "YOUR_REFRESH_TOKEN",
+    "refresh_token": REFRESH_TOKEN,
     "redirect_uri": REDIRECT_URI,
     "base_url": DATA_CENTER,  # e.g., https://accounts.zoho.eu
     "initial_load_start_date": "2024-01-01T00:00:00Z",  # Optional: omit to sync all historical data
@@ -286,14 +341,15 @@ except:
     config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "configs", "dev_config.json")
 
 print("=" * 80)
-print("📋 ZOHO CRM CONNECTOR CONFIGURATION")
+print("📋 SAVING ZOHO CRM CONNECTOR CONFIGURATION")
 print("=" * 80)
 print()
 
-# Display the configuration (with masked secret)
+# Display the configuration (with masked secrets)
 display_config = config.copy()
 display_config["client_secret"] = config["client_secret"][:10] + "..." if config["client_secret"] else ""
-print("Configuration to save:")
+display_config["refresh_token"] = config["refresh_token"][:20] + "..." if config["refresh_token"] else ""
+print("Configuration:")
 print()
 print(json.dumps(display_config, indent=2))
 print()
@@ -330,9 +386,26 @@ print('   refresh_token = dbutils.secrets.get(scope="zoho-crm", key="refresh_tok
 # MAGIC %md
 # MAGIC ## Done!
 # MAGIC
-# MAGIC Your Zoho CRM connector is now configured. The connector will automatically handle authentication using the refresh token.
+# MAGIC Your Zoho CRM connector is now configured and verified. The connector will automatically handle authentication using the refresh token.
 # MAGIC
 # MAGIC **Next Steps:**
 # MAGIC 1. ✅ (Optional) Store credentials in Databricks Secrets for production use
 # MAGIC 2. ✅ Configure your Lakeflow pipeline with the Zoho CRM connector
 # MAGIC 3. ✅ Start ingesting data!
+# MAGIC
+# MAGIC ### Example Usage
+# MAGIC ```python
+# MAGIC # Using the connector with Lakeflow
+# MAGIC from zoho_crm import LakeflowConnect
+# MAGIC
+# MAGIC connector = LakeflowConnect(options={
+# MAGIC     "client_id": dbutils.secrets.get("zoho-crm", "client_id"),
+# MAGIC     "client_secret": dbutils.secrets.get("zoho-crm", "client_secret"),
+# MAGIC     "refresh_token": dbutils.secrets.get("zoho-crm", "refresh_token"),
+# MAGIC     "base_url": "https://accounts.zoho.eu",  # Your data center
+# MAGIC })
+# MAGIC
+# MAGIC # List available tables
+# MAGIC tables = connector.list_tables()
+# MAGIC print(f"Available tables: {[t['name'] for t in tables]}")
+# MAGIC ```
