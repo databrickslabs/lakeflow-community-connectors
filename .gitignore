@@ -19,3 +19,5 @@ sources/osipi/configs/dev_config.local.json
 # OSIPI local/reference artifacts (not part of sources submission)
 sources/osipi/research/
 sources/osipi/osipi_databricks_app_token_setup.py
+# Generated ingestion pipeline specs (do not commit)
+tools/ingestion_dab_generator/dab_template/resources/*_ingestion_pipelines.yml

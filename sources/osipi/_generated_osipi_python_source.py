@@ -319,7 +319,63 @@ def register_lakeflow_source(spark):
         TABLE_CALCULATED = "pi_calculated"
         TABLE_POINT_TYPE_CATALOG = "pi_point_type_catalog"
         TABLE_LINKS = "pi_links"
-        TABLE_ERRORS = "pi_errors"
+
+        # ---------------------------------------------------------------------
+        # Table groups (readability)
+        # ---------------------------------------------------------------------
+        TABLES_DISCOVERY_INVENTORY = [
+            TABLE_DATASERVERS,
+            TABLE_POINTS,
+            TABLE_POINT_ATTRIBUTES,
+            TABLE_POINT_TYPE_CATALOG,
+        ]
+
+        TABLES_TIME_SERIES = [
+            TABLE_TIMESERIES,
+            TABLE_STREAMSET_RECORDED,
+            TABLE_INTERPOLATED,
+            TABLE_STREAMSET_INTERPOLATED,
+            TABLE_PLOT,
+            TABLE_STREAMSET_PLOT,
+            TABLE_SUMMARY,
+            TABLE_STREAMSET_SUMMARY,
+            TABLE_CURRENT_VALUE,
+            TABLE_VALUE_AT_TIME,
+            TABLE_RECORDED_AT_TIME,
+            TABLE_END,
+            TABLE_STREAMSET_END,
+            TABLE_CALCULATED,
+        ]
+
+        TABLES_ASSET_FRAMEWORK = [
+            TABLE_ASSET_SERVERS,
+            TABLE_ASSET_DATABASES,
+            TABLE_AF_HIERARCHY,
+            TABLE_ELEMENT_ATTRIBUTES,
+            TABLE_ELEMENT_TEMPLATES,
+            TABLE_ELEMENT_TEMPLATE_ATTRIBUTES,
+            TABLE_ATTRIBUTE_TEMPLATES,
+            TABLE_CATEGORIES,
+            TABLE_ANALYSES,
+            TABLE_ANALYSIS_TEMPLATES,
+            TABLE_AF_TABLES,
+            TABLE_AF_TABLE_ROWS,
+            TABLE_UNITS_OF_MEASURE,
+        ]
+
+        TABLES_EVENT_FRAMES = [
+            TABLE_EVENT_FRAMES,
+            TABLE_EVENTFRAME_ATTRIBUTES,
+            TABLE_EVENTFRAME_TEMPLATES,
+            TABLE_EVENTFRAME_TEMPLATE_ATTRIBUTES,
+            TABLE_EVENTFRAME_REFERENCED_ELEMENTS,
+            TABLE_EVENTFRAME_ACKS,
+            TABLE_EVENTFRAME_ANNOTATIONS,
+        ]
+
+        TABLES_GOVERNANCE_DIAGNOSTICS = [
+            TABLE_LINKS,
+        ]
 
         def __init__(self, options: Dict[str, str]) -> None:
             self.options = options
@@ -331,89 +387,85 @@ def register_lakeflow_source(spark):
             self.session.headers.update({"Accept": "application/json"})
             self.verify_ssl = _as_bool(options.get("verify_ssl"), default=True)
             self._auth_resolved = False
-            # In-memory diagnostics (best-effort). Exposed via table: pi_errors.
-            self._errors: List[dict] = []
 
         def list_tables(self) -> List[str]:
-            return [
-                self.TABLE_DATASERVERS,
-                self.TABLE_POINTS,
-                self.TABLE_POINT_ATTRIBUTES,
-                self.TABLE_TIMESERIES,
-                self.TABLE_INTERPOLATED,
-                self.TABLE_PLOT,
-                self.TABLE_AF_HIERARCHY,
-                self.TABLE_EVENT_FRAMES,
-                self.TABLE_CURRENT_VALUE,
-                self.TABLE_SUMMARY,
-                self.TABLE_STREAMSET_RECORDED,
-                self.TABLE_STREAMSET_INTERPOLATED,
-                self.TABLE_STREAMSET_SUMMARY,
-                self.TABLE_ELEMENT_ATTRIBUTES,
-                self.TABLE_EVENTFRAME_ATTRIBUTES,
-                self.TABLE_ASSET_SERVERS,
-                self.TABLE_ASSET_DATABASES,
-                self.TABLE_ELEMENT_TEMPLATES,
-                self.TABLE_CATEGORIES,
-                self.TABLE_ATTRIBUTE_TEMPLATES,
-                self.TABLE_ANALYSES,
-                self.TABLE_EVENTFRAME_TEMPLATES,
-                self.TABLE_END,
-                self.TABLE_VALUE_AT_TIME,
-                self.TABLE_STREAMSET_PLOT,
-                self.TABLE_UNITS_OF_MEASURE,
-                self.TABLE_ANALYSIS_TEMPLATES,
-                self.TABLE_EVENTFRAME_TEMPLATE_ATTRIBUTES,
-                self.TABLE_STREAMSET_END,
-                self.TABLE_ELEMENT_TEMPLATE_ATTRIBUTES,
-                self.TABLE_EVENTFRAME_REFERENCED_ELEMENTS,
-                self.TABLE_AF_TABLES,
-                self.TABLE_AF_TABLE_ROWS,
-                self.TABLE_EVENTFRAME_ACKS,
-                self.TABLE_EVENTFRAME_ANNOTATIONS,
-                self.TABLE_RECORDED_AT_TIME,
-                self.TABLE_CALCULATED,
-                self.TABLE_POINT_TYPE_CATALOG,
-                self.TABLE_LINKS,
-                self.TABLE_ERRORS,
-            ]
+            return (
+                list(self.TABLES_DISCOVERY_INVENTORY)
+                + list(self.TABLES_TIME_SERIES)
+                + list(self.TABLES_ASSET_FRAMEWORK)
+                + list(self.TABLES_EVENT_FRAMES)
+                + list(self.TABLES_GOVERNANCE_DIAGNOSTICS)
+            )
 
         def get_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
-            if table_name == self.TABLE_DATASERVERS:
-                return StructType([
+            # -----------------------------------------------------------------
+            # Schemas (grouped for readability)
+            # -----------------------------------------------------------------
+
+            # Common schema blocks
+            ts_value_schema = StructType(
+                [
+                    StructField("tag_webid", StringType(), False),
+                    StructField("timestamp", TimestampType(), False),
+                    StructField("value", DoubleType(), True),
+                    StructField("good", BooleanType(), True),
+                    StructField("questionable", BooleanType(), True),
+                    StructField("substituted", BooleanType(), True),
+                    StructField("annotated", BooleanType(), True),
+                    StructField("units", StringType(), True),
+                    StructField("ingestion_timestamp", TimestampType(), False),
+                ]
+            )
+
+            # Discovery & inventory
+            schemas: Dict[str, StructType] = {
+                self.TABLE_DATASERVERS: StructType(
+                    [
                     StructField("webid", StringType(), False),
                     StructField("name", StringType(), True),
-                ])
-
-            if table_name == self.TABLE_POINTS:
-                return StructType([
+                    ]
+                ),
+                self.TABLE_POINTS: StructType(
+                    [
                     StructField("webid", StringType(), False),
                     StructField("name", StringType(), True),
                     StructField("descriptor", StringType(), True),
                     StructField("engineering_units", StringType(), True),
                     StructField("path", StringType(), True),
                     StructField("dataserver_webid", StringType(), True),
-                ])
-
-            if table_name == self.TABLE_POINT_ATTRIBUTES:
-                return StructType([
+                    ]
+                ),
+                self.TABLE_POINT_ATTRIBUTES: StructType(
+                    [
                     StructField("point_webid", StringType(), False),
                     StructField("name", StringType(), True),
                     StructField("value", StringType(), True),
                     StructField("type", StringType(), True),
                     StructField("ingestion_timestamp", TimestampType(), False),
-                ])
+                    ]
+                ),
+                self.TABLE_POINT_TYPE_CATALOG: StructType(
+                    [
+                        StructField("point_type", StringType(), False),
+                        StructField("engineering_units", StringType(), True),
+                        StructField("count_points", LongType(), True),
+                    ]
+                ),
+            }
 
-            if table_name in (
-                self.TABLE_TIMESERIES,
-                self.TABLE_STREAMSET_RECORDED,
-                self.TABLE_INTERPOLATED,
-                self.TABLE_STREAMSET_INTERPOLATED,
-                self.TABLE_PLOT,
-            ):
-                return StructType([
+            # Time-series
+            schemas.update(
+                {
+                    self.TABLE_TIMESERIES: ts_value_schema,
+                    self.TABLE_STREAMSET_RECORDED: ts_value_schema,
+                    self.TABLE_INTERPOLATED: ts_value_schema,
+                    self.TABLE_STREAMSET_INTERPOLATED: ts_value_schema,
+                    self.TABLE_PLOT: ts_value_schema,
+                    self.TABLE_STREAMSET_PLOT: ts_value_schema,
+                    self.TABLE_END: StructType(
+                        [
                     StructField("tag_webid", StringType(), False),
-                    StructField("timestamp", TimestampType(), False),
+                            StructField("timestamp", TimestampType(), True),
                     StructField("value", DoubleType(), True),
                     StructField("good", BooleanType(), True),
                     StructField("questionable", BooleanType(), True),
@@ -421,10 +473,10 @@ def register_lakeflow_source(spark):
                     StructField("annotated", BooleanType(), True),
                     StructField("units", StringType(), True),
                     StructField("ingestion_timestamp", TimestampType(), False),
-                ])
-
-            if table_name == self.TABLE_CURRENT_VALUE:
-                return StructType([
+                        ]
+                    ),
+                    self.TABLE_STREAMSET_END: StructType(
+                        [
                     StructField("tag_webid", StringType(), False),
                     StructField("timestamp", TimestampType(), True),
                     StructField("value", DoubleType(), True),
@@ -434,10 +486,50 @@ def register_lakeflow_source(spark):
                     StructField("annotated", BooleanType(), True),
                     StructField("units", StringType(), True),
                     StructField("ingestion_timestamp", TimestampType(), False),
-                ])
-
-            if table_name == self.TABLE_SUMMARY:
-                return StructType([
+                        ]
+                    ),
+                    self.TABLE_CURRENT_VALUE: StructType(
+                        [
+                    StructField("tag_webid", StringType(), False),
+                    StructField("timestamp", TimestampType(), True),
+                    StructField("value", DoubleType(), True),
+                    StructField("good", BooleanType(), True),
+                    StructField("questionable", BooleanType(), True),
+                    StructField("substituted", BooleanType(), True),
+                    StructField("annotated", BooleanType(), True),
+                    StructField("units", StringType(), True),
+                    StructField("ingestion_timestamp", TimestampType(), False),
+                        ]
+                    ),
+                    self.TABLE_VALUE_AT_TIME: StructType(
+                        [
+                            StructField("tag_webid", StringType(), False),
+                            StructField("timestamp", TimestampType(), True),
+                            StructField("value", DoubleType(), True),
+                            StructField("good", BooleanType(), True),
+                            StructField("questionable", BooleanType(), True),
+                            StructField("substituted", BooleanType(), True),
+                            StructField("annotated", BooleanType(), True),
+                            StructField("units", StringType(), True),
+                            StructField("ingestion_timestamp", TimestampType(), False),
+                        ]
+                    ),
+                    self.TABLE_RECORDED_AT_TIME: StructType(
+                        [
+                            StructField("tag_webid", StringType(), False),
+                            StructField("query_time", TimestampType(), True),
+                            StructField("timestamp", TimestampType(), True),
+                            StructField("value", DoubleType(), True),
+                            StructField("good", BooleanType(), True),
+                            StructField("questionable", BooleanType(), True),
+                            StructField("substituted", BooleanType(), True),
+                            StructField("annotated", BooleanType(), True),
+                            StructField("units", StringType(), True),
+                            StructField("ingestion_timestamp", TimestampType(), False),
+                        ]
+                    ),
+                    self.TABLE_SUMMARY: StructType(
+                        [
                     StructField("tag_webid", StringType(), False),
                     StructField("summary_type", StringType(), False),
                     StructField("timestamp", TimestampType(), True),
@@ -448,10 +540,10 @@ def register_lakeflow_source(spark):
                     StructField("annotated", BooleanType(), True),
                     StructField("units", StringType(), True),
                     StructField("ingestion_timestamp", TimestampType(), False),
-                ])
-
-            if table_name == self.TABLE_STREAMSET_SUMMARY:
-                return StructType([
+                        ]
+                    ),
+                    self.TABLE_STREAMSET_SUMMARY: StructType(
+                        [
                     StructField("tag_webid", StringType(), False),
                     StructField("summary_type", StringType(), False),
                     StructField("timestamp", TimestampType(), False),
@@ -462,10 +554,41 @@ def register_lakeflow_source(spark):
                     StructField("annotated", BooleanType(), True),
                     StructField("units", StringType(), True),
                     StructField("ingestion_timestamp", TimestampType(), False),
-                ])
+                        ]
+                    ),
+                    self.TABLE_CALCULATED: StructType(
+                        [
+                            StructField("tag_webid", StringType(), False),
+                            StructField("timestamp", TimestampType(), False),
+                            StructField("value", DoubleType(), True),
+                            StructField("units", StringType(), True),
+                            StructField("calculation_type", StringType(), True),
+                            StructField("ingestion_timestamp", TimestampType(), False),
+                        ]
+                    ),
+                }
+            )
 
-            if table_name == self.TABLE_AF_HIERARCHY:
-                return StructType([
+            # Asset Framework (AF)
+            schemas.update(
+                {
+                    self.TABLE_ASSET_SERVERS: StructType(
+                        [
+                            StructField("webid", StringType(), False),
+                            StructField("name", StringType(), True),
+                            StructField("path", StringType(), True),
+                        ]
+                    ),
+                    self.TABLE_ASSET_DATABASES: StructType(
+                        [
+                            StructField("webid", StringType(), False),
+                            StructField("name", StringType(), True),
+                            StructField("path", StringType(), True),
+                            StructField("assetserver_webid", StringType(), True),
+                        ]
+                    ),
+                    self.TABLE_AF_HIERARCHY: StructType(
+                        [
                     StructField("element_webid", StringType(), False),
                     StructField("name", StringType(), True),
                     StructField("template_name", StringType(), True),
@@ -475,25 +598,133 @@ def register_lakeflow_source(spark):
                     StructField("depth", LongType(), True),
                     StructField("category_names", ArrayType(StringType()), True),
                     StructField("ingestion_timestamp", TimestampType(), False),
-                ])
-
-            if table_name == self.TABLE_EVENT_FRAMES:
-                return StructType([
-                    StructField("event_frame_webid", StringType(), False),
+                        ]
+                    ),
+                    self.TABLE_ELEMENT_ATTRIBUTES: StructType(
+                        [
+                            StructField("element_webid", StringType(), False),
+                            StructField("attribute_webid", StringType(), False),
                     StructField("name", StringType(), True),
-                    StructField("template_name", StringType(), True),
-                    StructField("start_time", TimestampType(), True),
-                    StructField("end_time", TimestampType(), True),
-                    StructField("primary_referenced_element_webid", StringType(), True),
                     StructField("description", StringType(), True),
-                    StructField("category_names", ArrayType(StringType()), True),
-                    StructField("attributes", MapType(StringType(), StringType()), True),
+                            StructField("path", StringType(), True),
+                            StructField("type", StringType(), True),
+                            StructField("default_units_name", StringType(), True),
+                            StructField("data_reference_plugin", StringType(), True),
+                            StructField("is_configuration_item", BooleanType(), True),
                     StructField("ingestion_timestamp", TimestampType(), False),
-                ])
+                        ]
+                    ),
+                    self.TABLE_ELEMENT_TEMPLATES: StructType(
+                        [
+                            StructField("webid", StringType(), False),
+                            StructField("name", StringType(), True),
+                            StructField("description", StringType(), True),
+                            StructField("path", StringType(), True),
+                            StructField("assetdatabase_webid", StringType(), True),
+                        ]
+                    ),
+                    self.TABLE_ELEMENT_TEMPLATE_ATTRIBUTES: StructType(
+                        [
+                            StructField("webid", StringType(), False),
+                    StructField("name", StringType(), True),
+                    StructField("description", StringType(), True),
+                    StructField("path", StringType(), True),
+                    StructField("type", StringType(), True),
+                    StructField("default_units_name", StringType(), True),
+                    StructField("data_reference_plugin", StringType(), True),
+                    StructField("is_configuration_item", BooleanType(), True),
+                            StructField("elementtemplate_webid", StringType(), True),
+                            StructField("assetdatabase_webid", StringType(), True),
+                        ]
+                    ),
+                    self.TABLE_CATEGORIES: StructType(
+                        [
+                            StructField("webid", StringType(), False),
+                            StructField("name", StringType(), True),
+                            StructField("description", StringType(), True),
+                            StructField("category_type", StringType(), True),
+                            StructField("assetdatabase_webid", StringType(), True),
+                        ]
+                    ),
+                    self.TABLE_ATTRIBUTE_TEMPLATES: StructType(
+                        [
+                            StructField("webid", StringType(), False),
+                            StructField("name", StringType(), True),
+                            StructField("description", StringType(), True),
+                            StructField("path", StringType(), True),
+                            StructField("type", StringType(), True),
+                            StructField("elementtemplate_webid", StringType(), True),
+                            StructField("assetdatabase_webid", StringType(), True),
+                        ]
+                    ),
+                    self.TABLE_ANALYSES: StructType(
+                        [
+                            StructField("webid", StringType(), False),
+                            StructField("name", StringType(), True),
+                            StructField("description", StringType(), True),
+                            StructField("path", StringType(), True),
+                            StructField("analysis_template_name", StringType(), True),
+                            StructField("target_element_webid", StringType(), True),
+                            StructField("assetdatabase_webid", StringType(), True),
+                        ]
+                    ),
+                    self.TABLE_ANALYSIS_TEMPLATES: StructType(
+                        [
+                            StructField("webid", StringType(), False),
+                            StructField("name", StringType(), True),
+                            StructField("description", StringType(), True),
+                            StructField("path", StringType(), True),
+                            StructField("assetdatabase_webid", StringType(), True),
+                        ]
+                    ),
+                    self.TABLE_AF_TABLES: StructType(
+                        [
+                            StructField("webid", StringType(), False),
+                            StructField("name", StringType(), True),
+                            StructField("description", StringType(), True),
+                            StructField("path", StringType(), True),
+                            StructField("assetdatabase_webid", StringType(), True),
+                        ]
+                    ),
+                    self.TABLE_AF_TABLE_ROWS: StructType(
+                        [
+                            StructField("table_webid", StringType(), False),
+                            StructField("row_index", LongType(), True),
+                            StructField("columns", MapType(StringType(), StringType()), True),
+                    StructField("ingestion_timestamp", TimestampType(), False),
+                        ]
+                    ),
+                    self.TABLE_UNITS_OF_MEASURE: StructType(
+                        [
+                            StructField("webid", StringType(), False),
+                            StructField("name", StringType(), True),
+                            StructField("abbreviation", StringType(), True),
+                            StructField("quantity_type", StringType(), True),
+                        ]
+                    ),
+                }
+            )
 
-            if table_name == self.TABLE_ELEMENT_ATTRIBUTES:
-                return StructType([
-                    StructField("element_webid", StringType(), False),
+            # Event Frames
+            schemas.update(
+                {
+                    self.TABLE_EVENT_FRAMES: StructType(
+                        [
+                            StructField("event_frame_webid", StringType(), False),
+                            StructField("name", StringType(), True),
+                            StructField("template_name", StringType(), True),
+                            StructField("start_time", TimestampType(), True),
+                            StructField("end_time", TimestampType(), True),
+                            StructField("primary_referenced_element_webid", StringType(), True),
+                            StructField("description", StringType(), True),
+                            StructField("category_names", ArrayType(StringType()), True),
+                            StructField("attributes", MapType(StringType(), StringType()), True),
+                            StructField("ingestion_timestamp", TimestampType(), False),
+                        ]
+                    ),
+                    self.TABLE_EVENTFRAME_ATTRIBUTES: StructType(
+                        [
+                    StructField("event_frame_webid", StringType(), False),
                     StructField("attribute_webid", StringType(), False),
                     StructField("name", StringType(), True),
                     StructField("description", StringType(), True),
@@ -503,438 +734,219 @@ def register_lakeflow_source(spark):
                     StructField("data_reference_plugin", StringType(), True),
                     StructField("is_configuration_item", BooleanType(), True),
                     StructField("ingestion_timestamp", TimestampType(), False),
-                ])
-
-            if table_name == self.TABLE_EVENTFRAME_ATTRIBUTES:
-                return StructType([
-                    StructField("event_frame_webid", StringType(), False),
-                    StructField("attribute_webid", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("description", StringType(), True),
-                    StructField("path", StringType(), True),
-                    StructField("type", StringType(), True),
-                    StructField("default_units_name", StringType(), True),
-                    StructField("data_reference_plugin", StringType(), True),
-                    StructField("is_configuration_item", BooleanType(), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                ])
-
-            if table_name == self.TABLE_ASSET_SERVERS:
-                return StructType([
+                        ]
+                    ),
+                    self.TABLE_EVENTFRAME_TEMPLATES: StructType(
+                        [
                     StructField("webid", StringType(), False),
                     StructField("name", StringType(), True),
+                            StructField("description", StringType(), True),
                     StructField("path", StringType(), True),
-                ])
-
-            if table_name == self.TABLE_ASSET_DATABASES:
-                return StructType([
-                    StructField("webid", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("path", StringType(), True),
-                    StructField("assetserver_webid", StringType(), True),
-                ])
-
-            if table_name == self.TABLE_ELEMENT_TEMPLATES:
-                return StructType([
+                            StructField("assetdatabase_webid", StringType(), True),
+                        ]
+                    ),
+                    self.TABLE_EVENTFRAME_TEMPLATE_ATTRIBUTES: StructType(
+                        [
                     StructField("webid", StringType(), False),
                     StructField("name", StringType(), True),
                     StructField("description", StringType(), True),
                     StructField("path", StringType(), True),
+                            StructField("type", StringType(), True),
+                            StructField("eventframe_template_webid", StringType(), True),
                     StructField("assetdatabase_webid", StringType(), True),
-                ])
+                        ]
+                    ),
+                    self.TABLE_EVENTFRAME_REFERENCED_ELEMENTS: StructType(
+                        [
+                            StructField("event_frame_webid", StringType(), False),
+                            StructField("element_webid", StringType(), False),
+                            StructField("relationship_type", StringType(), True),
+                            StructField("start_time", TimestampType(), True),
+                            StructField("end_time", TimestampType(), True),
+                            StructField("ingestion_timestamp", TimestampType(), False),
+                        ]
+                    ),
+                    self.TABLE_EVENTFRAME_ACKS: StructType(
+                        [
+                            StructField("event_frame_webid", StringType(), False),
+                            StructField("ack_id", StringType(), False),
+                            StructField("ack_timestamp", TimestampType(), True),
+                            StructField("ack_user", StringType(), True),
+                            StructField("comment", StringType(), True),
+                            StructField("ingestion_timestamp", TimestampType(), False),
+                        ]
+                    ),
+                    self.TABLE_EVENTFRAME_ANNOTATIONS: StructType(
+                        [
+                            StructField("event_frame_webid", StringType(), False),
+                            StructField("annotation_id", StringType(), False),
+                            StructField("annotation_timestamp", TimestampType(), True),
+                            StructField("annotation_user", StringType(), True),
+                            StructField("text", StringType(), True),
+                            StructField("ingestion_timestamp", TimestampType(), False),
+                        ]
+                    ),
+                }
+            )
 
-            if table_name == self.TABLE_CATEGORIES:
-                return StructType([
-                    StructField("webid", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("description", StringType(), True),
-                    StructField("category_type", StringType(), True),
-                    StructField("assetdatabase_webid", StringType(), True),
-                ])
+            # Governance & diagnostics
+            schemas.update(
+                {
+                    self.TABLE_LINKS: StructType(
+                        [
+                            StructField("entity_type", StringType(), False),
+                            StructField("webid", StringType(), False),
+                            StructField("rel", StringType(), False),
+                            StructField("href", StringType(), True),
+                        ]
+                    ),
+                }
+            )
 
-            if table_name == self.TABLE_ATTRIBUTE_TEMPLATES:
-                return StructType([
-                    StructField("webid", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("description", StringType(), True),
-                    StructField("path", StringType(), True),
-                    StructField("type", StringType(), True),
-                    StructField("elementtemplate_webid", StringType(), True),
-                    StructField("assetdatabase_webid", StringType(), True),
-                ])
-
-            if table_name == self.TABLE_ANALYSES:
-                return StructType([
-                    StructField("webid", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("description", StringType(), True),
-                    StructField("path", StringType(), True),
-                    StructField("analysis_template_name", StringType(), True),
-                    StructField("target_element_webid", StringType(), True),
-                    StructField("assetdatabase_webid", StringType(), True),
-                ])
-
-            if table_name == self.TABLE_EVENTFRAME_TEMPLATES:
-                return StructType([
-                    StructField("webid", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("description", StringType(), True),
-                    StructField("path", StringType(), True),
-                    StructField("assetdatabase_webid", StringType(), True),
-                ])
-
-            if table_name == self.TABLE_END:
-                return StructType([
-                    StructField("tag_webid", StringType(), False),
-                    StructField("timestamp", TimestampType(), True),
-                    StructField("value", DoubleType(), True),
-                    StructField("good", BooleanType(), True),
-                    StructField("questionable", BooleanType(), True),
-                    StructField("substituted", BooleanType(), True),
-                    StructField("annotated", BooleanType(), True),
-                    StructField("units", StringType(), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                ])
-
-            if table_name == self.TABLE_VALUE_AT_TIME:
-                return StructType([
-                    StructField("tag_webid", StringType(), False),
-                    StructField("timestamp", TimestampType(), True),
-                    StructField("value", DoubleType(), True),
-                    StructField("good", BooleanType(), True),
-                    StructField("questionable", BooleanType(), True),
-                    StructField("substituted", BooleanType(), True),
-                    StructField("annotated", BooleanType(), True),
-                    StructField("units", StringType(), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                ])
-
-            if table_name == self.TABLE_STREAMSET_PLOT:
-                return StructType([
-                    StructField("tag_webid", StringType(), False),
-                    StructField("timestamp", TimestampType(), False),
-                    StructField("value", DoubleType(), True),
-                    StructField("good", BooleanType(), True),
-                    StructField("questionable", BooleanType(), True),
-                    StructField("substituted", BooleanType(), True),
-                    StructField("annotated", BooleanType(), True),
-                    StructField("units", StringType(), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                ])
-
-            if table_name == self.TABLE_UNITS_OF_MEASURE:
-                return StructType([
-                    StructField("webid", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("abbreviation", StringType(), True),
-                    StructField("quantity_type", StringType(), True),
-                ])
-
-            if table_name == self.TABLE_ANALYSIS_TEMPLATES:
-                return StructType([
-                    StructField("webid", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("description", StringType(), True),
-                    StructField("path", StringType(), True),
-                    StructField("assetdatabase_webid", StringType(), True),
-                ])
-
-            if table_name == self.TABLE_EVENTFRAME_TEMPLATE_ATTRIBUTES:
-                return StructType([
-                    StructField("webid", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("description", StringType(), True),
-                    StructField("path", StringType(), True),
-                    StructField("type", StringType(), True),
-                    StructField("eventframe_template_webid", StringType(), True),
-                    StructField("assetdatabase_webid", StringType(), True),
-                ])
-
-            if table_name == self.TABLE_STREAMSET_END:
-                return StructType([
-                    StructField("tag_webid", StringType(), False),
-                    StructField("timestamp", TimestampType(), True),
-                    StructField("value", DoubleType(), True),
-                    StructField("good", BooleanType(), True),
-                    StructField("questionable", BooleanType(), True),
-                    StructField("substituted", BooleanType(), True),
-                    StructField("annotated", BooleanType(), True),
-                    StructField("units", StringType(), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                ])
-
-            if table_name == self.TABLE_ELEMENT_TEMPLATE_ATTRIBUTES:
-                return StructType([
-                    StructField("webid", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("description", StringType(), True),
-                    StructField("path", StringType(), True),
-                    StructField("type", StringType(), True),
-                    StructField("default_units_name", StringType(), True),
-                    StructField("data_reference_plugin", StringType(), True),
-                    StructField("is_configuration_item", BooleanType(), True),
-                    StructField("elementtemplate_webid", StringType(), True),
-                    StructField("assetdatabase_webid", StringType(), True),
-                ])
-
-            if table_name == self.TABLE_EVENTFRAME_REFERENCED_ELEMENTS:
-                return StructType([
-                    StructField("event_frame_webid", StringType(), False),
-                    StructField("element_webid", StringType(), False),
-                    StructField("relationship_type", StringType(), True),
-                    StructField("start_time", TimestampType(), True),
-                    StructField("end_time", TimestampType(), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                ])
-
-            if table_name == self.TABLE_AF_TABLES:
-                return StructType([
-                    StructField("webid", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("description", StringType(), True),
-                    StructField("path", StringType(), True),
-                    StructField("assetdatabase_webid", StringType(), True),
-                ])
-
-            if table_name == self.TABLE_AF_TABLE_ROWS:
-                return StructType([
-                    StructField("table_webid", StringType(), False),
-                    StructField("row_index", LongType(), True),
-                    StructField("columns", MapType(StringType(), StringType()), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                ])
-
-            if table_name == self.TABLE_EVENTFRAME_ACKS:
-                return StructType([
-                    StructField("event_frame_webid", StringType(), False),
-                    StructField("ack_id", StringType(), False),
-                    StructField("ack_timestamp", TimestampType(), True),
-                    StructField("ack_user", StringType(), True),
-                    StructField("comment", StringType(), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                ])
-
-            if table_name == self.TABLE_EVENTFRAME_ANNOTATIONS:
-                return StructType([
-                    StructField("event_frame_webid", StringType(), False),
-                    StructField("annotation_id", StringType(), False),
-                    StructField("annotation_timestamp", TimestampType(), True),
-                    StructField("annotation_user", StringType(), True),
-                    StructField("text", StringType(), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                ])
-
-            if table_name == self.TABLE_RECORDED_AT_TIME:
-                return StructType([
-                    StructField("tag_webid", StringType(), False),
-                    StructField("query_time", TimestampType(), True),
-                    StructField("timestamp", TimestampType(), True),
-                    StructField("value", DoubleType(), True),
-                    StructField("good", BooleanType(), True),
-                    StructField("questionable", BooleanType(), True),
-                    StructField("substituted", BooleanType(), True),
-                    StructField("annotated", BooleanType(), True),
-                    StructField("units", StringType(), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                ])
-
-            if table_name == self.TABLE_CALCULATED:
-                return StructType([
-                    StructField("tag_webid", StringType(), False),
-                    StructField("timestamp", TimestampType(), False),
-                    StructField("value", DoubleType(), True),
-                    StructField("units", StringType(), True),
-                    StructField("calculation_type", StringType(), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                ])
-
-            if table_name == self.TABLE_POINT_TYPE_CATALOG:
-                return StructType([
-                    StructField("point_type", StringType(), False),
-                    StructField("engineering_units", StringType(), True),
-                    StructField("count_points", LongType(), True),
-                ])
-
-            if table_name == self.TABLE_LINKS:
-                return StructType([
-                    StructField("entity_type", StringType(), False),
-                    StructField("webid", StringType(), False),
-                    StructField("rel", StringType(), False),
-                    StructField("href", StringType(), True),
-                ])
-
-            if table_name == self.TABLE_ERRORS:
-                return StructType([
-                    StructField("table_name", StringType(), False),
-                    StructField("endpoint", StringType(), True),
-                    StructField("status_code", LongType(), True),
-                    StructField("error", StringType(), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                ])
-
-            raise ValueError(f"Unknown table: {table_name}")
+            schema = schemas.get(table_name)
+            if schema is None:
+                raise ValueError(f"Unknown table: {table_name}")
+            return schema
 
         def read_table_metadata(self, table_name: str, table_options: Dict[str, str]) -> Dict:
-            if table_name == self.TABLE_DATASERVERS:
-                return {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_POINTS:
-                return {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_POINT_ATTRIBUTES:
-                return {"primary_keys": ["point_webid", "name"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name in (self.TABLE_TIMESERIES, self.TABLE_STREAMSET_RECORDED, self.TABLE_INTERPOLATED, self.TABLE_STREAMSET_INTERPOLATED, self.TABLE_PLOT):
-                return {"primary_keys": ["tag_webid", "timestamp"], "cursor_field": "timestamp", "ingestion_type": "append"}
-            if table_name == self.TABLE_CURRENT_VALUE:
-                return {"primary_keys": ["tag_webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_SUMMARY:
-                return {"primary_keys": ["tag_webid", "summary_type"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_AF_HIERARCHY:
-                return {"primary_keys": ["element_webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_EVENT_FRAMES:
-                return {"primary_keys": ["event_frame_webid", "start_time"], "cursor_field": "start_time", "ingestion_type": "append"}
-            if table_name == self.TABLE_ELEMENT_ATTRIBUTES:
-                return {"primary_keys": ["element_webid", "attribute_webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_EVENTFRAME_ATTRIBUTES:
-                return {"primary_keys": ["event_frame_webid", "attribute_webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_STREAMSET_SUMMARY:
-                return {"primary_keys": ["tag_webid", "summary_type", "timestamp"], "cursor_field": "timestamp", "ingestion_type": "append"}
-            if table_name == self.TABLE_ASSET_SERVERS:
-                return {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_ASSET_DATABASES:
-                return {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_ELEMENT_TEMPLATES:
-                return {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_CATEGORIES:
-                return {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_ATTRIBUTE_TEMPLATES:
-                return {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_ANALYSES:
-                return {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_EVENTFRAME_TEMPLATES:
-                return {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_END:
-                return {"primary_keys": ["tag_webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_VALUE_AT_TIME:
-                # snapshot at a requested time (optionally via table option `time`)
-                return {"primary_keys": ["tag_webid", "timestamp"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_STREAMSET_PLOT:
-                return {"primary_keys": ["tag_webid", "timestamp"], "cursor_field": "timestamp", "ingestion_type": "append"}
-            if table_name == self.TABLE_UNITS_OF_MEASURE:
-                return {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_ANALYSIS_TEMPLATES:
-                return {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_EVENTFRAME_TEMPLATE_ATTRIBUTES:
-                return {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_STREAMSET_END:
-                return {"primary_keys": ["tag_webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_ELEMENT_TEMPLATE_ATTRIBUTES:
-                return {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_EVENTFRAME_REFERENCED_ELEMENTS:
-                return {"primary_keys": ["event_frame_webid", "element_webid"], "cursor_field": "start_time", "ingestion_type": "append"}
-            if table_name == self.TABLE_AF_TABLES:
-                return {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_AF_TABLE_ROWS:
-                return {"primary_keys": ["table_webid", "row_index"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_EVENTFRAME_ACKS:
-                return {"primary_keys": ["event_frame_webid", "ack_id"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_EVENTFRAME_ANNOTATIONS:
-                return {"primary_keys": ["event_frame_webid", "annotation_id"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_RECORDED_AT_TIME:
-                return {"primary_keys": ["tag_webid", "query_time"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_CALCULATED:
-                return {"primary_keys": ["tag_webid", "timestamp", "calculation_type"], "cursor_field": "timestamp", "ingestion_type": "append"}
-            if table_name == self.TABLE_POINT_TYPE_CATALOG:
-                return {"primary_keys": ["point_type", "engineering_units"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_LINKS:
-                return {"primary_keys": ["entity_type", "webid", "rel"], "cursor_field": None, "ingestion_type": "snapshot"}
-            if table_name == self.TABLE_ERRORS:
-                return {"primary_keys": ["table_name", "endpoint"], "cursor_field": None, "ingestion_type": "snapshot"}
-            raise ValueError(f"Unknown table: {table_name}")
+            # -----------------------------------------------------------------
+            # Metadata (grouped for readability)
+            # -----------------------------------------------------------------
+            meta: Dict[str, Dict[str, Any]] = {}
+
+            # Discovery & inventory (snapshot)
+            meta[self.TABLE_DATASERVERS] = {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
+            meta[self.TABLE_POINTS] = {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
+            meta[self.TABLE_POINT_ATTRIBUTES] = {"primary_keys": ["point_webid", "name"], "cursor_field": None, "ingestion_type": "snapshot"}
+            meta[self.TABLE_POINT_TYPE_CATALOG] = {"primary_keys": ["point_type", "engineering_units"], "cursor_field": None, "ingestion_type": "snapshot"}
+
+            # Time-series
+            for t in (
+                self.TABLE_TIMESERIES,
+                self.TABLE_STREAMSET_RECORDED,
+                self.TABLE_INTERPOLATED,
+                self.TABLE_STREAMSET_INTERPOLATED,
+                self.TABLE_PLOT,
+                self.TABLE_STREAMSET_PLOT,
+            ):
+                meta[t] = {"primary_keys": ["tag_webid", "timestamp"], "cursor_field": "timestamp", "ingestion_type": "append"}
+            meta[self.TABLE_STREAMSET_SUMMARY] = {"primary_keys": ["tag_webid", "summary_type", "timestamp"], "cursor_field": "timestamp", "ingestion_type": "append"}
+            meta[self.TABLE_CURRENT_VALUE] = {"primary_keys": ["tag_webid"], "cursor_field": None, "ingestion_type": "snapshot"}
+            meta[self.TABLE_SUMMARY] = {"primary_keys": ["tag_webid", "summary_type"], "cursor_field": None, "ingestion_type": "snapshot"}
+            meta[self.TABLE_END] = {"primary_keys": ["tag_webid"], "cursor_field": None, "ingestion_type": "snapshot"}
+            meta[self.TABLE_STREAMSET_END] = {"primary_keys": ["tag_webid"], "cursor_field": None, "ingestion_type": "snapshot"}
+            meta[self.TABLE_VALUE_AT_TIME] = {"primary_keys": ["tag_webid", "timestamp"], "cursor_field": None, "ingestion_type": "snapshot"}
+            meta[self.TABLE_RECORDED_AT_TIME] = {"primary_keys": ["tag_webid", "query_time"], "cursor_field": None, "ingestion_type": "snapshot"}
+            meta[self.TABLE_CALCULATED] = {"primary_keys": ["tag_webid", "timestamp", "calculation_type"], "cursor_field": "timestamp", "ingestion_type": "append"}
+
+            # Asset Framework (AF) (snapshot)
+            for t, pk in (
+                (self.TABLE_ASSET_SERVERS, ["webid"]),
+                (self.TABLE_ASSET_DATABASES, ["webid"]),
+                (self.TABLE_AF_HIERARCHY, ["element_webid"]),
+                (self.TABLE_ELEMENT_ATTRIBUTES, ["element_webid", "attribute_webid"]),
+                (self.TABLE_UNITS_OF_MEASURE, ["webid"]),
+                (self.TABLE_ELEMENT_TEMPLATES, ["webid"]),
+                (self.TABLE_CATEGORIES, ["webid"]),
+                (self.TABLE_ATTRIBUTE_TEMPLATES, ["webid"]),
+                (self.TABLE_ANALYSES, ["webid"]),
+                (self.TABLE_ANALYSIS_TEMPLATES, ["webid"]),
+                (self.TABLE_AF_TABLES, ["webid"]),
+                (self.TABLE_AF_TABLE_ROWS, ["table_webid", "row_index"]),
+                (self.TABLE_ELEMENT_TEMPLATE_ATTRIBUTES, ["webid"]),
+            ):
+                meta[t] = {"primary_keys": pk, "cursor_field": None, "ingestion_type": "snapshot"}
+
+            # Event Frames
+            meta[self.TABLE_EVENT_FRAMES] = {"primary_keys": ["event_frame_webid", "start_time"], "cursor_field": "start_time", "ingestion_type": "append"}
+            meta[self.TABLE_EVENTFRAME_ATTRIBUTES] = {"primary_keys": ["event_frame_webid", "attribute_webid"], "cursor_field": None, "ingestion_type": "snapshot"}
+            meta[self.TABLE_EVENTFRAME_TEMPLATES] = {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
+            meta[self.TABLE_EVENTFRAME_TEMPLATE_ATTRIBUTES] = {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
+            meta[self.TABLE_EVENTFRAME_REFERENCED_ELEMENTS] = {"primary_keys": ["event_frame_webid", "element_webid"], "cursor_field": "start_time", "ingestion_type": "append"}
+            meta[self.TABLE_EVENTFRAME_ACKS] = {"primary_keys": ["event_frame_webid", "ack_id"], "cursor_field": None, "ingestion_type": "snapshot"}
+            meta[self.TABLE_EVENTFRAME_ANNOTATIONS] = {"primary_keys": ["event_frame_webid", "annotation_id"], "cursor_field": None, "ingestion_type": "snapshot"}
+
+            # Governance & diagnostics (snapshot)
+            meta[self.TABLE_LINKS] = {"primary_keys": ["entity_type", "webid", "rel"], "cursor_field": None, "ingestion_type": "snapshot"}
+
+            out = meta.get(table_name)
+            if out is None:
+                raise ValueError(f"Unknown table: {table_name}")
+            return out
 
         def read_table(self, table_name: str, start_offset: dict, table_options: Dict[str, str]) -> Tuple[Iterator[dict], dict]:
             self._ensure_auth()
 
-            if table_name == self.TABLE_DATASERVERS:
-                return iter(self._read_dataservers()), {"offset": "done"}
-            if table_name == self.TABLE_POINTS:
-                return iter(self._read_points(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_POINT_ATTRIBUTES:
-                return iter(self._read_point_attributes(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_TIMESERIES:
-                return self._read_timeseries(start_offset, table_options)
-            if table_name == self.TABLE_STREAMSET_RECORDED:
-                return self._read_streamset_recorded(start_offset, table_options)
-            if table_name == self.TABLE_INTERPOLATED:
-                return self._read_interpolated(start_offset, table_options)
-            if table_name == self.TABLE_STREAMSET_INTERPOLATED:
-                return self._read_streamset_interpolated(start_offset, table_options)
-            if table_name == self.TABLE_PLOT:
-                return self._read_plot(start_offset, table_options)
-            if table_name == self.TABLE_STREAMSET_SUMMARY:
-                return self._read_streamset_summary(start_offset, table_options)
-            if table_name == self.TABLE_CURRENT_VALUE:
-                return iter(self._read_current_value(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_SUMMARY:
-                return iter(self._read_summary(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_AF_HIERARCHY:
-                return iter(self._read_af_hierarchy()), {"offset": "done"}
-            if table_name == self.TABLE_EVENT_FRAMES:
-                return self._read_event_frames(start_offset, table_options)
-            if table_name == self.TABLE_ELEMENT_ATTRIBUTES:
-                return iter(self._read_element_attributes(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_EVENTFRAME_ATTRIBUTES:
-                return iter(self._read_eventframe_attributes(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_ASSET_SERVERS:
-                return iter(self._read_assetservers_table()), {"offset": "done"}
-            if table_name == self.TABLE_ASSET_DATABASES:
-                return iter(self._read_assetdatabases_table()), {"offset": "done"}
-            if table_name == self.TABLE_ELEMENT_TEMPLATES:
-                return iter(self._read_element_templates_table(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_CATEGORIES:
-                return iter(self._read_categories_table(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_ATTRIBUTE_TEMPLATES:
-                return iter(self._read_attribute_templates_table(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_ANALYSES:
-                return iter(self._read_analyses_table(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_EVENTFRAME_TEMPLATES:
-                return iter(self._read_eventframe_templates_table(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_END:
-                return iter(self._read_end(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_VALUE_AT_TIME:
-                return iter(self._read_value_at_time(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_STREAMSET_PLOT:
-                return self._read_streamset_plot(start_offset, table_options)
-            if table_name == self.TABLE_UNITS_OF_MEASURE:
-                return iter(self._read_units_of_measure_table()), {"offset": "done"}
-            if table_name == self.TABLE_ANALYSIS_TEMPLATES:
-                return iter(self._read_analysis_templates_table(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_EVENTFRAME_TEMPLATE_ATTRIBUTES:
-                return iter(self._read_eventframe_template_attributes_table(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_STREAMSET_END:
-                return iter(self._read_streamset_end(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_ELEMENT_TEMPLATE_ATTRIBUTES:
-                return iter(self._read_element_template_attributes_table(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_EVENTFRAME_REFERENCED_ELEMENTS:
-                return self._read_eventframe_referenced_elements(start_offset, table_options)
-            if table_name == self.TABLE_AF_TABLES:
-                return iter(self._read_af_tables_table(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_AF_TABLE_ROWS:
-                return iter(self._read_af_table_rows_table(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_EVENTFRAME_ACKS:
-                return iter(self._read_eventframe_acknowledgements_table(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_EVENTFRAME_ANNOTATIONS:
-                return iter(self._read_eventframe_annotations_table(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_RECORDED_AT_TIME:
-                return iter(self._read_recorded_at_time(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_CALCULATED:
-                return self._read_calculated(start_offset, table_options)
-            if table_name == self.TABLE_POINT_TYPE_CATALOG:
-                return iter(self._read_point_type_catalog(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_LINKS:
-                return iter(self._read_links(table_options)), {"offset": "done"}
-            if table_name == self.TABLE_ERRORS:
-                return iter(self._read_errors(table_options)), {"offset": "done"}
+            # Snapshot offset semantics:
+            # For snapshot tables, once we return an "end" offset, subsequent reads with the same offset
+            # must return no rows to avoid duplicates in streaming mode.
+            try:
+                meta = self.read_table_metadata(table_name, table_options)
+                if (
+                    meta.get("ingestion_type") == "snapshot"
+                    and isinstance(start_offset, dict)
+                    and start_offset.get("offset") == "done"
+                ):
+                    return iter(()), dict(start_offset)
+            except Exception:
+                # Never fail the read due to metadata lookup; fall back to existing behavior.
+                pass
 
-            raise ValueError(f"Unknown table: {table_name}")
+            dispatch = {
+                # Discovery & inventory
+                self.TABLE_DATASERVERS: lambda: (iter(self._read_dataservers()), {"offset": "done"}),
+                self.TABLE_POINTS: lambda: (iter(self._read_points(table_options)), {"offset": "done"}),
+                self.TABLE_POINT_ATTRIBUTES: lambda: (iter(self._read_point_attributes(table_options)), {"offset": "done"}),
+                self.TABLE_POINT_TYPE_CATALOG: lambda: (iter(self._read_point_type_catalog(table_options)), {"offset": "done"}),
+
+                # Time-series
+                self.TABLE_TIMESERIES: lambda: self._read_timeseries(start_offset, table_options),
+                self.TABLE_STREAMSET_RECORDED: lambda: self._read_streamset_recorded(start_offset, table_options),
+                self.TABLE_INTERPOLATED: lambda: self._read_interpolated(start_offset, table_options),
+                self.TABLE_STREAMSET_INTERPOLATED: lambda: self._read_streamset_interpolated(start_offset, table_options),
+                self.TABLE_PLOT: lambda: self._read_plot(start_offset, table_options),
+                self.TABLE_STREAMSET_PLOT: lambda: self._read_streamset_plot(start_offset, table_options),
+                self.TABLE_SUMMARY: lambda: (iter(self._read_summary(table_options)), {"offset": "done"}),
+                self.TABLE_STREAMSET_SUMMARY: lambda: self._read_streamset_summary(start_offset, table_options),
+                self.TABLE_CURRENT_VALUE: lambda: (iter(self._read_current_value(table_options)), {"offset": "done"}),
+                self.TABLE_VALUE_AT_TIME: lambda: (iter(self._read_value_at_time(table_options)), {"offset": "done"}),
+                self.TABLE_RECORDED_AT_TIME: lambda: (iter(self._read_recorded_at_time(table_options)), {"offset": "done"}),
+                self.TABLE_END: lambda: (iter(self._read_end(table_options)), {"offset": "done"}),
+                self.TABLE_STREAMSET_END: lambda: (iter(self._read_streamset_end(table_options)), {"offset": "done"}),
+                self.TABLE_CALCULATED: lambda: self._read_calculated(start_offset, table_options),
+
+                # Asset Framework (AF)
+                self.TABLE_ASSET_SERVERS: lambda: (iter(self._read_assetservers_table()), {"offset": "done"}),
+                self.TABLE_ASSET_DATABASES: lambda: (iter(self._read_assetdatabases_table()), {"offset": "done"}),
+                self.TABLE_AF_HIERARCHY: lambda: (iter(self._read_af_hierarchy()), {"offset": "done"}),
+                self.TABLE_ELEMENT_ATTRIBUTES: lambda: (iter(self._read_element_attributes(table_options)), {"offset": "done"}),
+                self.TABLE_ELEMENT_TEMPLATES: lambda: (iter(self._read_element_templates_table(table_options)), {"offset": "done"}),
+                self.TABLE_ELEMENT_TEMPLATE_ATTRIBUTES: lambda: (iter(self._read_element_template_attributes_table(table_options)), {"offset": "done"}),
+                self.TABLE_ATTRIBUTE_TEMPLATES: lambda: (iter(self._read_attribute_templates_table(table_options)), {"offset": "done"}),
+                self.TABLE_CATEGORIES: lambda: (iter(self._read_categories_table(table_options)), {"offset": "done"}),
+                self.TABLE_ANALYSES: lambda: (iter(self._read_analyses_table(table_options)), {"offset": "done"}),
+                self.TABLE_ANALYSIS_TEMPLATES: lambda: (iter(self._read_analysis_templates_table(table_options)), {"offset": "done"}),
+                self.TABLE_AF_TABLES: lambda: (iter(self._read_af_tables_table(table_options)), {"offset": "done"}),
+                self.TABLE_AF_TABLE_ROWS: lambda: (iter(self._read_af_table_rows_table(table_options)), {"offset": "done"}),
+                self.TABLE_UNITS_OF_MEASURE: lambda: (iter(self._read_units_of_measure_table()), {"offset": "done"}),
+
+                # Event Frames
+                self.TABLE_EVENT_FRAMES: lambda: self._read_event_frames(start_offset, table_options),
+                self.TABLE_EVENTFRAME_ATTRIBUTES: lambda: (iter(self._read_eventframe_attributes(table_options)), {"offset": "done"}),
+                self.TABLE_EVENTFRAME_TEMPLATES: lambda: (iter(self._read_eventframe_templates_table(table_options)), {"offset": "done"}),
+                self.TABLE_EVENTFRAME_TEMPLATE_ATTRIBUTES: lambda: (iter(self._read_eventframe_template_attributes_table(table_options)), {"offset": "done"}),
+                self.TABLE_EVENTFRAME_REFERENCED_ELEMENTS: lambda: self._read_eventframe_referenced_elements(start_offset, table_options),
+                self.TABLE_EVENTFRAME_ACKS: lambda: (iter(self._read_eventframe_acknowledgements_table(table_options)), {"offset": "done"}),
+                self.TABLE_EVENTFRAME_ANNOTATIONS: lambda: (iter(self._read_eventframe_annotations_table(table_options)), {"offset": "done"}),
+
+                # Governance & diagnostics
+                self.TABLE_LINKS: lambda: (iter(self._read_links(table_options)), {"offset": "done"}),
+            }
+
+            handler = dispatch.get(table_name)
+            if handler is None:
+                raise ValueError(f"Unknown table: {table_name}")
+            return handler()
 
         def _ensure_auth(self) -> None:
             if self._auth_resolved:
@@ -978,6 +990,75 @@ def register_lakeflow_source(spark):
 
             self._auth_resolved = True
 
+        # -----------------------------------------------------------------
+        # Common request / option patterns
+        # -----------------------------------------------------------------
+
+        def _start_dt_from_offset(self, start_offset: dict) -> Optional[datetime]:
+            if start_offset and isinstance(start_offset, dict):
+                off = start_offset.get("offset")
+                if isinstance(off, str) and off:
+                    try:
+                        return _parse_ts(off)
+                    except Exception:
+                        return None
+            return None
+
+        def _compute_time_range(
+            self,
+            start_offset: dict,
+            table_options: Dict[str, str],
+            *,
+            apply_window_seconds: bool = False,
+        ) -> Tuple[str, str]:
+            """
+            Standardize the repeated 'start/end time window' logic used by time-series reads.
+            Returns (start_str, end_str) formatted as PI Web API ISO-Z strings.
+            """
+            now = _utcnow()
+
+            end_opt = table_options.get("endTime") or table_options.get("end_time") or "*"
+            end_dt = _parse_pi_time(end_opt, now=now)
+
+            start_dt = self._start_dt_from_offset(start_offset)
+            if start_dt is None:
+                start_opt = table_options.get("startTime") or table_options.get("start_time")
+                if start_opt:
+                    start_dt = _parse_pi_time(str(start_opt), now=end_dt)
+                else:
+                    lookback_minutes = int(table_options.get("lookback_minutes", 60))
+                    start_dt = end_dt - timedelta(minutes=lookback_minutes)
+
+            if apply_window_seconds:
+                window_seconds = int(table_options.get("window_seconds", 0) or 0)
+                if window_seconds > 0:
+                    end_dt = min(end_dt, start_dt + timedelta(seconds=window_seconds))
+
+            return _isoformat_z(start_dt), _isoformat_z(end_dt)
+
+        def _build_streamset_params(
+            self,
+            webids: List[str],
+            *,
+            start_str: str,
+            end_str: str,
+            max_count: Optional[int] = None,
+            interval: Optional[str] = None,
+            intervals: Optional[int] = None,
+            selected_fields: Optional[str] = None,
+        ) -> List[Tuple[str, str]]:
+            params: List[Tuple[str, str]] = [("webId", w) for w in webids]
+            params += [("startTime", start_str), ("endTime", end_str)]
+            if interval:
+                params.append(("interval", str(interval)))
+            if intervals is not None:
+                params.append(("intervals", str(intervals)))
+            if max_count is not None:
+                params.append(("maxCount", str(max_count)))
+            if selected_fields:
+                params.append(("selectedFields", str(selected_fields)))
+            return params
+
         def _get_json(self, path: str, params: Optional[Any] = None) -> dict:
             url = f"{self.base_url}{path}"
             r = self.session.get(url, params=params, timeout=60, verify=self.verify_ssl)
@@ -989,27 +1070,6 @@ def register_lakeflow_source(spark):
             r = self.session.post(url, json=payload, timeout=120, verify=self.verify_ssl)
             r.raise_for_status()
             return r.json()
-
-        def _record_error(self, table_name: str, endpoint: str, error: Exception) -> None:
-            try:
-                status_code = None
-                if isinstance(error, requests.exceptions.HTTPError) and getattr(error, "response", None) is not None:
-                    status_code = getattr(error.response, "status_code", None)
-                self._errors.append(
-                    {
-                        "table_name": table_name,
-                        "endpoint": endpoint,
-                        "status_code": status_code,
-                        "error": str(error),
-                        "ingestion_timestamp": _utcnow(),
-                    }
-                )
-                # cap memory
-                if len(self._errors) > 200:
-                    self._errors = self._errors[-200:]
-            except Exception:
-                # never fail ingestion due to diagnostics bookkeeping
-                return
 
         def _batch_execute(self, requests_list: List[dict]) -> List[Tuple[str, dict]]:
             payload = _batch_request_dict(requests_list)
@@ -1103,34 +1163,7 @@ def register_lakeflow_source(spark):
 
         def _read_timeseries(self, start_offset: dict, table_options: Dict[str, str]) -> Tuple[Iterator[dict], dict]:
             tag_webids = self._resolve_tag_webids(table_options)
-            now = _utcnow()
-
-            # Time range controls
-            end_opt = table_options.get("endTime") or table_options.get("end_time") or "*"
-            end_dt = _parse_pi_time(end_opt, now=now)
-
-            start_dt: Optional[datetime] = None
-            if start_offset and isinstance(start_offset, dict):
-                off = start_offset.get("offset")
-                if isinstance(off, str) and off:
-                    try:
-                        start_dt = _parse_ts(off)
-                    except Exception:
-                        start_dt = None
-
-            if start_dt is None:
-                start_opt = table_options.get("startTime") or table_options.get("start_time")
-                if start_opt:
-                    start_dt = _parse_pi_time(str(start_opt), now=end_dt)
-                else:
-                    lookback_minutes = int(table_options.get("lookback_minutes", 60))
-                    start_dt = end_dt - timedelta(minutes=lookback_minutes)
-
-            window_seconds = int(table_options.get("window_seconds", 0) or 0)
-            end_window = min(end_dt, start_dt + timedelta(seconds=window_seconds)) if window_seconds > 0 else end_dt
-
-            start_str = _isoformat_z(start_dt)
-            end_str = _isoformat_z(end_window)
+            start_str, end_str = self._compute_time_range(start_offset, table_options, apply_window_seconds=True)
             max_count = int(table_options.get("maxCount", 1000))
             ingest_ts = _utcnow()
 
@@ -1148,10 +1181,13 @@ def register_lakeflow_source(spark):
                     for group in groups:
                         if not group:
                             continue
-                        params: List[Tuple[str, str]] = [("webId", w) for w in group]
-                        params += [("startTime", start_str), ("endTime", end_str), ("maxCount", str(max_count))]
-                        if selected_fields:
-                            params.append(("selectedFields", str(selected_fields)))
+                        params = self._build_streamset_params(
+                            group,
+                            start_str=start_str,
+                            end_str=end_str,
+                            max_count=max_count,
+                            selected_fields=selected_fields,
+                        )
                         data = self._get_json("/piwebapi/streamsets/recorded", params=params)
                         for stream in data.get("Items", []) or []:
                             webid = stream.get("WebId")
@@ -1217,33 +1253,7 @@ def register_lakeflow_source(spark):
         def _read_streamset_recorded(self, start_offset: dict, table_options: Dict[str, str]) -> Tuple[Iterator[dict], dict]:
             # Explicit StreamSet recorded table (same output schema as pi_timeseries)
             tag_webids = self._resolve_tag_webids(table_options)
-            now = _utcnow()
-
-            end_opt = table_options.get("endTime") or table_options.get("end_time") or "*"
-            end_dt = _parse_pi_time(end_opt, now=now)
-
-            start_dt: Optional[datetime] = None
-            if start_offset and isinstance(start_offset, dict):
-                off = start_offset.get("offset")
-                if isinstance(off, str) and off:
-                    try:
-                        start_dt = _parse_ts(off)
-                    except Exception:
-                        start_dt = None
-
-            if start_dt is None:
-                start_opt = table_options.get("startTime") or table_options.get("start_time")
-                if start_opt:
-                    start_dt = _parse_pi_time(str(start_opt), now=end_dt)
-                else:
-                    lookback_minutes = int(table_options.get("lookback_minutes", 60))
-                    start_dt = end_dt - timedelta(minutes=lookback_minutes)
-
-            window_seconds = int(table_options.get("window_seconds", 0) or 0)
-            end_window = min(end_dt, start_dt + timedelta(seconds=window_seconds)) if window_seconds > 0 else end_dt
-
-            start_str = _isoformat_z(start_dt)
-            end_str = _isoformat_z(end_window)
+            start_str, end_str = self._compute_time_range(start_offset, table_options, apply_window_seconds=True)
             max_count = int(table_options.get("maxCount", 1000))
             ingest_ts = _utcnow()
 
@@ -1255,10 +1265,13 @@ def register_lakeflow_source(spark):
                 for group in groups:
                     if not group:
                         continue
-                    params: List[Tuple[str, str]] = [("webId", w) for w in group]
-                    params += [("startTime", start_str), ("endTime", end_str), ("maxCount", str(max_count))]
-                    if selected_fields:
-                        params.append(("selectedFields", str(selected_fields)))
+                    params = self._build_streamset_params(
+                        group,
+                        start_str=start_str,
+                        end_str=end_str,
+                        max_count=max_count,
+                        selected_fields=selected_fields,
+                    )
                     data = self._get_json("/piwebapi/streamsets/recorded", params=params)
                     for stream in data.get("Items", []) or []:
                         webid = stream.get("WebId")
@@ -1290,30 +1303,7 @@ def register_lakeflow_source(spark):
             If interpolated endpoints are not available on the PI Web API host, this returns an empty iterator.
             """
             tag_webids = self._resolve_tag_webids(table_options)
-            now = _utcnow()
-
-            end_opt = table_options.get("endTime") or table_options.get("end_time") or "*"
-            end_dt = _parse_pi_time(end_opt, now=now)
-
-            start_dt: Optional[datetime] = None
-            if start_offset and isinstance(start_offset, dict):
-                off = start_offset.get("offset")
-                if isinstance(off, str) and off:
-                    try:
-                        start_dt = _parse_ts(off)
-                    except Exception:
-                        start_dt = None
-
-            if start_dt is None:
-                start_opt = table_options.get("startTime") or table_options.get("start_time")
-                if start_opt:
-                    start_dt = _parse_pi_time(str(start_opt), now=end_dt)
-                else:
-                    lookback_minutes = int(table_options.get("lookback_minutes", 60))
-                    start_dt = end_dt - timedelta(minutes=lookback_minutes)
-
-            start_str = _isoformat_z(start_dt)
-            end_str = _isoformat_z(end_dt)
+            start_str, end_str = self._compute_time_range(start_offset, table_options, apply_window_seconds=False)
 
             interval = (table_options.get("interval") or table_options.get("sampleInterval") or "1m").strip()
             max_count = int(table_options.get("maxCount", 1000))
@@ -1349,10 +1339,14 @@ def register_lakeflow_source(spark):
                         continue
                     # Prefer streamsets/interpolated when multiple tags
                     if len(group) > 1:
-                        params: List[Tuple[str, str]] = [("webId", w) for w in group]
-                        params += [("startTime", start_str), ("endTime", end_str), ("interval", interval), ("maxCount", str(max_count))]
-                        if selected_fields:
-                            params.append(("selectedFields", str(selected_fields)))
+                        params = self._build_streamset_params(
+                            group,
+                            start_str=start_str,
+                            end_str=end_str,
+                            interval=interval,
+                            max_count=max_count,
+                            selected_fields=selected_fields,
+                        )
                         try:
                             data = self._get_json("/piwebapi/streamsets/interpolated", params=params)
                         except requests.exceptions.HTTPError as e:
@@ -1409,30 +1403,7 @@ def register_lakeflow_source(spark):
             If plot endpoints are not available on the PI Web API host, this returns an empty iterator.
             """
             tag_webids = self._resolve_tag_webids(table_options)
-            now = _utcnow()
-
-            end_opt = table_options.get("endTime") or table_options.get("end_time") or "*"
-            end_dt = _parse_pi_time(end_opt, now=now)
-
-            start_dt: Optional[datetime] = None
-            if start_offset and isinstance(start_offset, dict):
-                off = start_offset.get("offset")
-                if isinstance(off, str) and off:
-                    try:
-                        start_dt = _parse_ts(off)
-                    except Exception:
-                        start_dt = None
-
-            if start_dt is None:
-                start_opt = table_options.get("startTime") or table_options.get("start_time")
-                if start_opt:
-                    start_dt = _parse_pi_time(str(start_opt), now=end_dt)
-                else:
-                    lookback_minutes = int(table_options.get("lookback_minutes", 60))
-                    start_dt = end_dt - timedelta(minutes=lookback_minutes)
-
-            start_str = _isoformat_z(start_dt)
-            end_str = _isoformat_z(end_dt)
+            start_str, end_str = self._compute_time_range(start_offset, table_options, apply_window_seconds=False)
             intervals = int(table_options.get("intervals", 300) or 300)
             ingest_ts = _utcnow()
 
@@ -1473,30 +1444,7 @@ def register_lakeflow_source(spark):
             If streamset summary endpoints are not available on the PI Web API host, this returns an empty iterator.
             """
             tag_webids = self._resolve_tag_webids(table_options)
-            now = _utcnow()
-
-            end_opt = table_options.get("endTime") or table_options.get("end_time") or "*"
-            end_dt = _parse_pi_time(end_opt, now=now)
-
-            start_dt: Optional[datetime] = None
-            if start_offset and isinstance(start_offset, dict):
-                off = start_offset.get("offset")
-                if isinstance(off, str) and off:
-                    try:
-                        start_dt = _parse_ts(off)
-                    except Exception:
-                        start_dt = None
-
-            if start_dt is None:
-                start_opt = table_options.get("startTime") or table_options.get("start_time")
-                if start_opt:
-                    start_dt = _parse_pi_time(str(start_opt), now=end_dt)
-                else:
-                    lookback_minutes = int(table_options.get("lookback_minutes", 60))
-                    start_dt = end_dt - timedelta(minutes=lookback_minutes)
-
-            start_str = _isoformat_z(start_dt)
-            end_str = _isoformat_z(end_dt)
+            start_str, end_str = self._compute_time_range(start_offset, table_options, apply_window_seconds=False)
 
             summary_type = (table_options.get("summaryType") or "Total").strip()
             calculation_basis = (table_options.get("calculationBasis") or "TimeWeighted").strip()
@@ -1512,16 +1460,17 @@ def register_lakeflow_source(spark):
                 for group in groups:
                     if not group:
                         continue
-                    params: List[Tuple[str, str]] = [("webId", w) for w in group]
+                    params = self._build_streamset_params(
+                        group,
+                        start_str=start_str,
+                        end_str=end_str,
+                        selected_fields=selected_fields,
+                    )
                     params += [
-                        ("startTime", start_str),
-                        ("endTime", end_str),
                         ("summaryType", summary_type),
                         ("calculationBasis", calculation_basis),
                         ("summaryDuration", summary_duration),
                     ]
-                    if selected_fields:
-                        params.append(("selectedFields", str(selected_fields)))
 
                     try:
                         data = self._get_json("/piwebapi/streamsets/summary", params=params)
@@ -2289,7 +2238,7 @@ def register_lakeflow_source(spark):
             try:
                 it, _ = self._read_event_frames({}, table_options)
             except Exception as e:
-                self._record_error(self.TABLE_EVENTFRAME_ACKS, "/piwebapi/assetdatabases/{db}/eventframes", e)
+                pass  # Error ignored
                 return []
 
             max_elems = int(table_options.get("default_event_frames", 25) or 25)
@@ -2304,7 +2253,7 @@ def register_lakeflow_source(spark):
                 except requests.exceptions.HTTPError as e:
                     if getattr(e.response, "status_code", None) == 404:
                         continue
-                    self._record_error(self.TABLE_EVENTFRAME_ACKS, f"/piwebapi/eventframes/{ef_wid}/acknowledgements", e)
+                    pass  # Error ignored
                     continue
                 for item in (data.get("Items") or []):
                     ack_id = item.get("Id") or item.get("WebId") or item.get("AckId")
@@ -2332,7 +2281,7 @@ def register_lakeflow_source(spark):
             try:
                 it, _ = self._read_event_frames({}, table_options)
             except Exception as e:
-                self._record_error(self.TABLE_EVENTFRAME_ANNOTATIONS, "/piwebapi/assetdatabases/{db}/eventframes", e)
+                pass  # Error ignored
                 return []
 
             max_elems = int(table_options.get("default_event_frames", 25) or 25)
@@ -2347,7 +2296,7 @@ def register_lakeflow_source(spark):
                 except requests.exceptions.HTTPError as e:
                     if getattr(e.response, "status_code", None) == 404:
                         continue
-                    self._record_error(self.TABLE_EVENTFRAME_ANNOTATIONS, f"/piwebapi/eventframes/{ef_wid}/annotations", e)
+                    pass  # Error ignored
                     continue
                 for item in (data.get("Items") or []):
                     ann_id = item.get("Id") or item.get("WebId") or item.get("AnnotationId")
@@ -2385,10 +2334,10 @@ def register_lakeflow_source(spark):
                         except requests.exceptions.HTTPError as e2:
                             if getattr(e2.response, "status_code", None) == 404:
                                 continue
-                            self._record_error(self.TABLE_RECORDED_AT_TIME, f"/piwebapi/streams/{wid}/value", e2)
+                            pass  # Error ignored
                             continue
                     else:
-                        self._record_error(self.TABLE_RECORDED_AT_TIME, f"/piwebapi/streams/{wid}/recordedattime", e)
+                        pass  # Error ignored
                         continue
 
                 ts = data.get("Timestamp")
@@ -2464,10 +2413,10 @@ def register_lakeflow_source(spark):
                             except requests.exceptions.HTTPError as e2:
                                 if getattr(e2.response, "status_code", None) == 404:
                                     continue
-                                self._record_error(self.TABLE_CALCULATED, f"/piwebapi/streams/{wid}/plot", e2)
+                                pass  # Error ignored
                                 continue
                         else:
-                            self._record_error(self.TABLE_CALCULATED, f"/piwebapi/streams/{wid}/calculated", e)
+                            pass  # Error ignored
                             continue
 
                     for item in (data.get("Items") or []):
@@ -2545,11 +2494,6 @@ def register_lakeflow_source(spark):
                 pass
 
             return out
-
-
-        def _read_errors(self, table_options: Dict[str, str]) -> List[dict]:
-            # Return the current buffered errors (best-effort).
-            return list(self._errors)
 
 
         def _read_current_value(self, table_options: Dict[str, str]) -> List[dict]:

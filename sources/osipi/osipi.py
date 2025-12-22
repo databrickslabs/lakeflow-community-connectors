@@ -231,7 +231,6 @@ class LakeflowConnect:
     TABLE_CALCULATED = "pi_calculated"
     TABLE_POINT_TYPE_CATALOG = "pi_point_type_catalog"
     TABLE_LINKS = "pi_links"
-    TABLE_ERRORS = "pi_errors"
 
     # ---------------------------------------------------------------------
     # Table groups (readability)
@@ -288,7 +287,6 @@ class LakeflowConnect:
 
     TABLES_GOVERNANCE_DIAGNOSTICS = [
         TABLE_LINKS,
-        TABLE_ERRORS,
     ]
 
     def __init__(self, options: Dict[str, str]) -> None:
@@ -301,8 +299,6 @@ class LakeflowConnect:
         self.session.headers.update({"Accept": "application/json"})
         self.verify_ssl = _as_bool(options.get("verify_ssl"), default=True)
         self._auth_resolved = False
-        # In-memory diagnostics (best-effort). Exposed via table: pi_errors.
-        self._errors: List[dict] = []
 
     def list_tables(self) -> List[str]:
         return (
@@ -716,15 +712,6 @@ class LakeflowConnect:
                         StructField("href", StringType(), True),
                     ]
                 ),
-                self.TABLE_ERRORS: StructType(
-                    [
-                        StructField("table_name", StringType(), False),
-                        StructField("endpoint", StringType(), True),
-                        StructField("status_code", LongType(), True),
-                        StructField("error", StringType(), True),
-                        StructField("ingestion_timestamp", TimestampType(), False),
-                    ]
-                ),
             }
         )
 
@@ -793,7 +780,6 @@ class LakeflowConnect:
 
         # Governance & diagnostics (snapshot)
         meta[self.TABLE_LINKS] = {"primary_keys": ["entity_type", "webid", "rel"], "cursor_field": None, "ingestion_type": "snapshot"}
-        meta[self.TABLE_ERRORS] = {"primary_keys": ["table_name", "endpoint"], "cursor_field": None, "ingestion_type": "snapshot"}
 
         out = meta.get(table_name)
         if out is None:
@@ -867,7 +853,6 @@ class LakeflowConnect:
 
             # Governance & diagnostics
             self.TABLE_LINKS: lambda: (iter(self._read_links(table_options)), {"offset": "done"}),
-            self.TABLE_ERRORS: lambda: (iter(self._read_errors(table_options)), {"offset": "done"}),
         }
 
         handler = dispatch.get(table_name)
@@ -997,27 +982,6 @@ class LakeflowConnect:
         r = self.session.post(url, json=payload, timeout=120, verify=self.verify_ssl)
         r.raise_for_status()
         return r.json()
-
-    def _record_error(self, table_name: str, endpoint: str, error: Exception) -> None:
-        try:
-            status_code = None
-            if isinstance(error, requests.exceptions.HTTPError) and getattr(error, "response", None) is not None:
-                status_code = getattr(error.response, "status_code", None)
-            self._errors.append(
-                {
-                    "table_name": table_name,
-                    "endpoint": endpoint,
-                    "status_code": status_code,
-                    "error": str(error),
-                    "ingestion_timestamp": _utcnow(),
-                }
-            )
-            # cap memory
-            if len(self._errors) > 200:
-                self._errors = self._errors[-200:]
-        except Exception:
-            # never fail ingestion due to diagnostics bookkeeping
-            return
 
     def _batch_execute(self, requests_list: List[dict]) -> List[Tuple[str, dict]]:
         payload = _batch_request_dict(requests_list)
@@ -2186,7 +2150,7 @@ class LakeflowConnect:
         try:
             it, _ = self._read_event_frames({}, table_options)
         except Exception as e:
-            self._record_error(self.TABLE_EVENTFRAME_ACKS, "/piwebapi/assetdatabases/{db}/eventframes", e)
+            pass  # Error ignored
             return []
 
         max_elems = int(table_options.get("default_event_frames", 25) or 25)
@@ -2201,7 +2165,7 @@ class LakeflowConnect:
             except requests.exceptions.HTTPError as e:
                 if getattr(e.response, "status_code", None) == 404:
                     continue
-                self._record_error(self.TABLE_EVENTFRAME_ACKS, f"/piwebapi/eventframes/{ef_wid}/acknowledgements", e)
+                pass  # Error ignored
                 continue
             for item in (data.get("Items") or []):
                 ack_id = item.get("Id") or item.get("WebId") or item.get("AckId")
@@ -2229,7 +2193,7 @@ class LakeflowConnect:
         try:
             it, _ = self._read_event_frames({}, table_options)
         except Exception as e:
-            self._record_error(self.TABLE_EVENTFRAME_ANNOTATIONS, "/piwebapi/assetdatabases/{db}/eventframes", e)
+            pass  # Error ignored
             return []
 
         max_elems = int(table_options.get("default_event_frames", 25) or 25)
@@ -2244,7 +2208,7 @@ class LakeflowConnect:
             except requests.exceptions.HTTPError as e:
                 if getattr(e.response, "status_code", None) == 404:
                     continue
-                self._record_error(self.TABLE_EVENTFRAME_ANNOTATIONS, f"/piwebapi/eventframes/{ef_wid}/annotations", e)
+                pass  # Error ignored
                 continue
             for item in (data.get("Items") or []):
                 ann_id = item.get("Id") or item.get("WebId") or item.get("AnnotationId")
@@ -2282,10 +2246,10 @@ class LakeflowConnect:
                     except requests.exceptions.HTTPError as e2:
                         if getattr(e2.response, "status_code", None) == 404:
                             continue
-                        self._record_error(self.TABLE_RECORDED_AT_TIME, f"/piwebapi/streams/{wid}/value", e2)
+                        pass  # Error ignored
                         continue
                 else:
-                    self._record_error(self.TABLE_RECORDED_AT_TIME, f"/piwebapi/streams/{wid}/recordedattime", e)
+                    pass  # Error ignored
                     continue
 
             ts = data.get("Timestamp")
@@ -2361,10 +2325,10 @@ class LakeflowConnect:
                         except requests.exceptions.HTTPError as e2:
                             if getattr(e2.response, "status_code", None) == 404:
                                 continue
-                            self._record_error(self.TABLE_CALCULATED, f"/piwebapi/streams/{wid}/plot", e2)
+                            pass  # Error ignored
                             continue
                     else:
-                        self._record_error(self.TABLE_CALCULATED, f"/piwebapi/streams/{wid}/calculated", e)
+                        pass  # Error ignored
                         continue
 
                 for item in (data.get("Items") or []):
@@ -2442,11 +2406,6 @@ class LakeflowConnect:
             pass
 
         return out
-
-
-    def _read_errors(self, table_options: Dict[str, str]) -> List[dict]:
-        # Return the current buffered errors (best-effort).
-        return list(self._errors)
 
 
     def _read_current_value(self, table_options: Dict[str, str]) -> List[dict]:

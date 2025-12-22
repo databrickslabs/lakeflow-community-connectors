@@ -8,8 +8,8 @@ targets:
   dev:
     mode: development
     default: true
-    workspace:
-      host: https://<YOUR_WORKSPACE_HOST>
+    # Workspace host is intentionally omitted so `databricks bundle ...` uses your
+    # configured CLI profile (e.g., ~/.databrickscfg profile DEFAULT).
 
 variables:
   dest_catalog:
