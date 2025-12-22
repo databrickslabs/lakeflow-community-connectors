@@ -335,8 +335,23 @@ def register_lakeflow_source(spark):
             response = self._make_request("GET", "/crm/v8/settings/modules")
             modules = response.get("modules", [])
 
-            # Filter for API-supported modules (default or custom types)
-            supported_modules = [m for m in modules if m.get("api_supported") and m.get("generated_type") in ["default", "custom"]]
+            # Modules to exclude - analytics modules, system modules, and modules without proper API support
+            excluded_modules = {
+                "Visits",  # No fields available
+                "Actions_Performed",  # No fields available
+                "Email_Sentiment",  # Analytics module with different API
+                "Email_Analytics",  # Analytics module with different API
+                "Email_Template_Analytics",  # Analytics module with different API
+                "Locking_Information__s",  # System module (403 forbidden)
+            }
+
+            # Filter for API-supported modules (default or custom types), excluding problematic ones
+            supported_modules = [
+                m for m in modules 
+                if m.get("api_supported") 
+                and m.get("generated_type") in ["default", "custom"]
+                and m.get("api_name") not in excluded_modules
+            ]
 
             self._modules_cache = supported_modules
             return supported_modules
@@ -562,8 +577,7 @@ def register_lakeflow_source(spark):
             if cursor_time:
                 cursor_dt = datetime.fromisoformat(cursor_time.replace("Z", "+00:00"))
                 lookback_dt = cursor_dt - timedelta(minutes=5)
-                # Use ISO format WITHOUT timezone - Zoho API returns 400 with +00:00 format
-                cursor_time = lookback_dt.strftime("%Y-%m-%dT%H:%M:%S")
+                cursor_time = lookback_dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
                 print(f"[DEBUG] cursor_time after lookback adjustment: {cursor_time}")
 
             # Get metadata to determine ingestion type
@@ -647,6 +661,11 @@ def register_lakeflow_source(spark):
             json_fields = self._get_json_fields(module_name)
             print(f"[DEBUG] JSON fields to serialize: {json_fields}")
 
+            # Get field names for this module (required by Zoho API)
+            fields = self._get_fields(module_name)
+            field_names = [f["api_name"] for f in fields] if fields else []
+            print(f"[DEBUG] Field names for {module_name}: {len(field_names)} fields")
+
             page = 1
             per_page = 200  # Maximum allowed by Zoho CRM
             total_records_yielded = 0
@@ -658,6 +677,10 @@ def register_lakeflow_source(spark):
                     "sort_order": "asc",
                     "sort_by": "Modified_Time",
                 }
+
+                # Add fields parameter (required by Zoho API despite docs saying optional)
+                if field_names:
+                    params["fields"] = ",".join(field_names)
 
                 # Add incremental filter if cursor_time is provided
                 if cursor_time:
