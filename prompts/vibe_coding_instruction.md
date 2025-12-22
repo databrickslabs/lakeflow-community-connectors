@@ -1,5 +1,32 @@
 # Connector Vibe-Coding Prompts
 
+## Workflow Overview
+
+### Core Connector Development (Required)
+These steps build a working read-only connector:
+1. **Document Source API** - Research and document READ operations only
+2. **Set Up Credentials** - Configure authentication for development
+3. **Generate Connector Code** - Implement the LakeflowConnect interface
+4. **Run Tests and Fix** - Validate read operations work correctly
+
+At this point, you have a **production-ready connector** that can ingest data.
+
+### Write-Back Testing (Optional)
+If you need comprehensive end-to-end validation:
+1. **Step 5: Document Write-Back APIs** - Research and document WRITE operations (separate from Step 1)
+2. **Step 6: Implement Write-Back Testing** - Create test utilities that write data and validate ingestion
+
+**Skip Steps 5-6 if:**
+- You want to ship quickly (read-only testing is sufficient)
+- Source is read-only
+- Only production access available
+- Write operations are expensive/risky
+
+### Final Step (Required)
+7. **Create Public Documentation** - Generate user-facing README
+
+---
+
 ## Step 1: Understanding & Document the Source API
 
 ### Goal
@@ -27,30 +54,10 @@ Create one file named `<source_name>_api_doc.md` under `sources/<source_name>/` 
 
 **Documentation Requirements:**
 - Fill out every section of the documentation template. If any section cannot be completed, add a note to explain.
-- Focus on endpoints, authentication parameters, object schemas, Python API for reading data, and incremental read strategy.
+- Focus on READ operations: endpoints, authentication parameters, object schemas, Python API for reading data, and incremental read strategy.
 - Please include all fields in the schema. DO NOT hide any fields using links.
 - All information must be backed by official sources or verified or reliable implementations
-
-### Optional Research Step: Write-Back Functionality
-
-**Ask the user:** Do you want to implement write-back to source test functionality for end-to-end validation?
-
-**Note to mention to user:** Write-back testing validates the complete write → read cycle and ensures incremental sync captures newly created records. However, it requires write permissions, a test/sandbox environment, and creates real data in the source system.gti Skip if the source is read-only, only production access is available, or write operations are too risky/expensive.
-
-If **YES**, research and document the following:
-1. **Write/Create APIs**: Document POST/PUT endpoints for creating records in the source system
-   - Required fields and payload structure for creating test data
-   - Authentication requirements for write operations
-   - Any required permissions or scopes beyond read access
-2. **Field Transformation**: Identify if field names differ between write and read operations
-   - Example: Writing `email` but reading back as `properties_email`
-   - Document any transformations in the API doc
-3. **Rate Limits & Constraints**: Note any write-specific rate limits, quotas, or restrictions
-4. **Test Environment**: Confirm availability of sandbox/test environment for safe write testing
-
-**Document in a new section** `## Write-Back APIs (Optional)` in your `<source_name>_api_doc.md` if implementing write testing.
-
-If **NO** or if write APIs are not available, skip this optional step.
+- **Do NOT document write/create APIs in this step** - those are optional and covered in Step 5 if needed
 
 ### Research Log 
 Add a table:
@@ -153,38 +160,136 @@ results, we need to make various adjustments
 
 ---
 
-## Step 5: Write-Back Testing (Optional)
+## Step 5: Document Write-Back APIs (Optional)
 
 ### Goal
-Validate end-to-end connector functionality by testing write operations followed by incremental reads. This ensures your connector can correctly ingest data that was just created in the source system.
+Research and document the write/create APIs for the source system to enable write-back testing. This step is **completely separate** from the core connector implementation and should only be done if comprehensive end-to-end validation is needed.
 
-**⚠️ IMPORTANT: Only test against non-production environments. Write operations create real data in the source system.**
+### When to Do This Step
 
-### Should You Implement Write Testing?
+**Skip this step if:**
+- ❌ Source API is read-only (no create/insert endpoints)
+- ❌ Only production environment available (too risky)
+- ❌ Write permissions unavailable or expensive to obtain
+- ❌ You want to ship the connector quickly (read-only validation is sufficient)
+- ❌ Write operations have side effects (notifications, triggers, etc.)
 
-Ask yourself:
-- Does the source API support creating/inserting data (POST/PUT endpoints)?
-- Do you have write permissions and a test/sandbox environment?
-- Would validating the full write → read cycle add confidence to your connector?
+**Do this step if:**
+- ✅ Source API supports write operations
+- ✅ You have write permissions and test/sandbox environment
+- ✅ You want end-to-end validation of write → read → incremental sync cycle
+- ✅ You have time for comprehensive testing
 
-If **NO** to any of the above, **skip this step**. Write testing is completely optional.
+### Input
+- The `<source_name>_api_doc.md` created in Step 1 (for reference)
+- Access to source API documentation
 
-If **YES** and you want comprehensive end-to-end validation, proceed below.
+### Output
+Add a new section `## Write-Back APIs (For Testing Only)` to your existing `sources/<source_name>/<source_name>_api_doc.md` file.
+
+### Documentation Template for Write-Back APIs
+
+Add this section to your API doc:
+
+```markdown
+## Write-Back APIs (For Testing Only)
+
+**⚠️ WARNING: These APIs are documented solely for test data generation. They are NOT part of the connector's read functionality.**
+
+### Purpose
+These write endpoints enable automated testing by:
+1. Creating test data in the source system
+2. Validating that incremental sync picks up newly created records
+3. Verifying field mappings and schema correctness end-to-end
+
+### Write Endpoints
+
+#### Create [Object Type]
+- **Method**: POST/PUT
+- **Endpoint**: `https://api.example.com/v1/objects`
+- **Authentication**: Same as read operations / Additional scopes needed
+- **Required Fields**: List all required fields for creating a minimal valid record
+- **Example Payload**:
+```json
+{
+  "field1": "value1",
+  "field2": "value2"
+}
+```
+- **Response**: Document what the API returns (ID, created timestamp, etc.)
+
+### Field Name Transformations
+
+Document any differences between write and read field names:
+
+| Write Field Name | Read Field Name | Notes |
+|------------------|-----------------|-------|
+| `email` | `properties_email` | API adds `properties_` prefix on read |
+| `createdAt` | `created_at` | Different casing convention |
+
+If no transformations exist, state: "Field names are consistent between write and read operations."
+
+### Write-Specific Constraints
+
+- **Rate Limits**: Document write-specific rate limits (if different from read)
+- **Eventual Consistency**: Note any delays between write and read visibility
+- **Required Delays**: Recommend wait time after writes (e.g., "Wait 5-10 seconds after write before reading")
+- **Unique Constraints**: Document fields that must be unique (to guide test data generation)
+- **Test Environment**: Confirm sandbox/test environment availability and how to access it
+
+### Research Log for Write APIs
+
+| Source Type | URL | Accessed (UTC) | Confidence | What it confirmed |
+|-------------|-----|----------------|------------|-------------------|
+| Official Docs | ... | YYYY-MM-DD | High | Write endpoints and payload structure |
+| Reference Impl | ... | YYYY-MM-DD | Med | Field transformations |
+```
+
+### Research Requirements
+
+Follow the same rigorous research process as Step 1:
+1. **Check official API documentation** for write/create endpoints
+2. **Find reference implementations** (Airbyte test utilities, Singer tap tests, etc.)
+3. **Cross-reference at least two sources** for payload structure and required fields
+4. **Test if possible**: If you have sandbox access, verify one write operation works
+5. **Document everything** in Research Log with full URLs
+
+### Validation Checklist
+
+- [ ] At least one write endpoint documented with complete payload structure
+- [ ] All required fields for write operations identified
+- [ ] Field name transformations (if any) documented in mapping table
+- [ ] Rate limits and constraints noted
+- [ ] Eventual consistency delays documented (if applicable)
+- [ ] Research log completed with sources
 
 ---
 
-### What Write Testing Validates
+## Step 6: Implement Write-Back Testing (Optional)
 
-Write testing creates a complete validation cycle:
+### Prerequisites
+**⚠️ You must complete Step 5 first!** This step requires the write-back API documentation created in Step 5.
+
+If you skipped Step 5, then this step can also be skipped.
+
+### Goal
+Implement test utilities that write test data to the source system, then validate your connector correctly reads and ingests that data. This creates a comprehensive end-to-end validation cycle.
+
+**⚠️ IMPORTANT: Only test against non-production environments. Write operations create real data in the source system.**
+
+### What This Step Validates
+
+This step creates a complete validation cycle:
 1. **Write**: Test utils generate and insert test data into the source system
 2. **Read**: Connector reads back the data using normal ingestion flow
 3. **Verify**: Test suite confirms the written data was correctly ingested
 
-This validates:
+This ensures:
 - ✅ Incremental sync picks up newly created records
 - ✅ Schema correctly captures all written fields
-- ✅ Field mappings and transformations work correctly
-- ✅ End-to-end data integrity
+- ✅ Field mappings and transformations work correctly (use the mapping from Step 5)
+- ✅ Cursor field updates and ordering work as expected
+- ✅ End-to-end data integrity from write → read → parse
 
 ---
 
@@ -194,20 +299,26 @@ This validates:
 
 Create `sources/{source_name}/{source_name}_test_utils.py` implementing the interface defined in `tests/lakeflow_connect_test_utils.py`.
 
+**Use Step 5 documentation as your implementation guide:**
+- Write endpoints and payload structure from the "Write-Back APIs" section
+- Field name transformations from the mapping table
+- Required delays from the "Write-Specific Constraints" section
+- Required fields from the endpoint documentation
+
 **Key Methods to Implement:**
 - `get_source_name()`: Return the connector name
-- `list_insertable_tables()`: List tables that support write operations
-- `generate_rows_and_write()`: Generate test data and write to source system
+- `list_insertable_tables()`: List tables that support write operations (only those documented in Step 5)
+- `generate_rows_and_write()`: Generate test data and write to source system using documented endpoints
 
 **Reference Implementation:** See `sources/hubspot/hubspot_test_utils.py` for a complete working example.
 
 **Implementation Tips:**
 - Initialize API client for write operations in `__init__`
-- Only include tables in `list_insertable_tables()` where you've implemented write logic
+- Use the write endpoints and payload structure from Step 5 documentation
+- Apply field name mappings from Step 5 when comparing written vs. read data
 - Generate unique test data with timestamps/UUIDs to avoid collisions
 - Use identifiable prefixes (e.g., `test_`, `generated_`) in test data
-- Return proper `column_mapping` if source transforms field names during write/read
-- Add delays after writes if source has eventual consistency (e.g., `time.sleep(5)`)
+- Add delays after writes based on Step 5 "Required Delays" (e.g., `time.sleep(5-10)`)
 
 ---
 
@@ -293,20 +404,18 @@ test_incremental_after_write PASSED - Incremental sync captured new records
 
 ---
 
-### When to Skip Write Testing
+### When to Skip This Step
 
-**Skip write testing if:**
-- ❌ Source API is read-only (no create/insert endpoints)
-- ❌ Only production environment available (too risky)
-- ❌ Write permissions unavailable or expensive to obtain
-- ❌ Source API charges for write operations
-- ❌ Write operations have side effects (notifications, triggers, etc.)
+If you skipped Step 5 (documenting write APIs), then skip this step as well. The standard read-only tests in Step 4 are sufficient for most connectors.
 
-**Write testing is completely optional.** The standard read-only tests in Step 4 are sufficient for most connectors.
+Write-back testing is **completely optional** and primarily useful for:
+- High-confidence validation before production deployment
+- Complex incremental sync logic that needs thorough testing
+- Sources where field transformations between write and read are common
 
 ---
 
-## Step 6: Create a Public Connector Documentation
+## Step 7: Create a Public Connector Documentation
 
 ### Goal
 Generate the **public-facing documentation** for the **{{source_name}}** connector, targeted at end users.
