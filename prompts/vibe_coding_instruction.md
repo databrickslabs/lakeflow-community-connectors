@@ -404,17 +404,6 @@ test_incremental_after_write PASSED - Incremental sync captured new records
 
 ---
 
-### When to Skip This Step
-
-If you skipped Step 5 (documenting write APIs), then skip this step as well. The standard read-only tests in Step 4 are sufficient for most connectors.
-
-Write-back testing is **completely optional** and primarily useful for:
-- High-confidence validation before production deployment
-- Complex incremental sync logic that needs thorough testing
-- Sources where field transformations between write and read are common
-
----
-
 ## Step 7: Create a Public Connector Documentation
 
 ### Goal
