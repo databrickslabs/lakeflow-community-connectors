@@ -51,24 +51,24 @@ class LakeflowConnect:
         Initialize the Zoho CRM connector with connection-level options.
 
         Expected options:
-            - client_id: OAuth Client ID from Zoho API Console
+            - client_value_tmp: OAuth Client ID from Zoho API Console
             - client_secret: OAuth Client Secret from Zoho API Console
-            - refresh_token: Long-lived refresh token obtained from OAuth flow
+            - refresh_value_tmp: Long-lived refresh token obtained from OAuth flow
             - base_url (optional): Zoho accounts URL for OAuth. Defaults to https://accounts.zoho.com
               Examples: https://accounts.zoho.com (US), https://accounts.zoho.eu (EU),
                         https://accounts.zoho.in (IN), https://accounts.zoho.com.au (AU)
             - initial_load_start_date (optional): Starting point for the first sync. If omitted, syncs all historical data.
 
-        Note: To obtain the refresh_token, follow the OAuth setup guide in
+        Note: To obtain the refresh_value_tmp, follow the OAuth setup guide in
         sources/zoho_crm/configs/README.md or visit:
         https://www.zoho.com/accounts/protocol/oauth/web-apps/authorization.html
         """
-        self.client_id = options.get("client_id")
+        self.client_value_tmp = options.get("client_value_tmp")
         self.client_secret = options.get("client_secret")
-        self.refresh_token = options.get("refresh_token")
+        self.refresh_value_tmp = options.get("refresh_value_tmp")
 
-        if not all([self.client_id, self.client_secret, self.refresh_token]):
-            raise ValueError("Zoho CRM connector requires 'client_id', 'client_secret', and 'refresh_token' in options")
+        if not all([self.client_value_tmp, self.client_secret, self.refresh_value_tmp]):
+            raise ValueError("Zoho CRM connector requires 'client_value_tmp', 'client_secret', and 'refresh_value_tmp' in options")
 
         # base_url is the accounts/OAuth URL (e.g., https://accounts.zoho.eu)
         self.accounts_url = options.get("base_url", "https://accounts.zoho.com").rstrip("/")
@@ -111,10 +111,10 @@ class LakeflowConnect:
         token_url = f"{self.accounts_url}/oauth/v2/token"
 
         data = {
-            "refresh_token": self.refresh_token,
-            "client_id": self.client_id,
+            "refresh_value_tmp": self.refresh_value_tmp,
+            "client_value_tmp": self.client_value_tmp,
             "client_secret": self.client_secret,
-            "grant_type": "refresh_token",
+            "grant_type": "refresh_value_tmp",
         }
 
         response = requests.post(token_url, data=data)
@@ -131,7 +131,7 @@ class LakeflowConnect:
             raise Exception(
                 f"Token refresh response missing 'access_token'. "
                 f"Response: {token_data}. "
-                f"Please check your client_id, client_secret, and refresh_token are valid."
+                f"Please check your client_value_tmp, client_secret, and refresh_value_tmp are valid."
             )
 
         self.access_token = token_data["access_token"]
