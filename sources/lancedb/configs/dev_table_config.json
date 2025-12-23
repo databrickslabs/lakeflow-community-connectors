@@ -1,0 +1,7 @@
+{
+  "table_name": "your_table_name",
+  "primary_keys": ["id"],
+  "cursor_field": "created_at",
+  "batch_size": 1000
+}
+
