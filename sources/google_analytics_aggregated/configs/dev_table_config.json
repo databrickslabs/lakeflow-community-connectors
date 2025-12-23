@@ -1,0 +1,9 @@
+{
+    "custom_report": {
+        "dimensions": "[\"date\", \"country\"]",
+        "metrics": "[\"activeUsers\", \"sessions\"]",
+        "start_date": "7daysAgo",
+        "lookback_days": "3"
+    }
+}
+
