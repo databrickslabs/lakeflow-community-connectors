@@ -32,7 +32,9 @@ Follow the instructions in [`prompts/vibe_coding_instruction.md`](prompts/vibe_c
 
 ### API to Implement
 Connectors are built on the [Python Data Source API](https://spark.apache.org/docs/latest/api/python/tutorial/sql/python_data_source.html), with an abstraction layer (`LakeflowConnect`) that simplifies development. 
-Developers can also choose to directly implement Python Data Source API (not recommended) as long as the implementation meets the API contracts of the community connectors. **Please see more details under [`sources/interface/README.md`](sources/interface/README.md)**.
+Developers can also choose to directly implement Python Data Source API (not recommended) as long as the implementation meets the API contracts of the community connectors.
+
+**Please see more details under** [`sources/interface/README.md`](sources/interface/README.md).
 
 ```python
 class LakeflowConnect:
@@ -62,7 +64,7 @@ Each connector must include tests that run the **generic test suite** against a 
 
 ## Using Community Connectors
 
-Each connector runs as a configurable SDP. Define a **pipeline spec** to specify which tables to ingest and where to store them.
+Each connector runs as a configurable SDP. Define a **pipeline spec** to specify which tables to ingest and where to store them. See more details in this [example](pipeline-spec/example_ingest.py).
 
 ```python
 from pipeline.ingestion_pipeline import ingest
@@ -85,9 +87,9 @@ ingest(spark, pipeline_spec)
 
 ### Pipeline Spec Reference
 
-- **`connection_name`** *(required)* — Unity Catalog connection name
-- **`objects`** *(required)* — List of tables to ingest, each containing:
-  - **`table`** — Table configuration object:
+- `connection_name` *(required)* — Unity Catalog connection name
+- `objects` *(required)* — List of tables to ingest, each containing:
+  - `table` — Table configuration object:
     - `source_table` *(required)* — Table name in the source system
     - `destination_catalog` — Target catalog (defaults to pipeline's default)
     - `destination_schema` — Target schema (defaults to pipeline's default)
