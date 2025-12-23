@@ -1,21 +1,21 @@
-"""
-LanceDB Connector for Lakeflow Community Connectors.
-
-This module provides a secure, thread-safe connector for LanceDB Cloud
-with all base functionality inlined for simplified deployment.
-
-Key Features:
-- Security: Input validation, SQL injection prevention, credential protection
-- HTTP: Session management, retry logic, exponential backoff, rate limiting
-- Performance: Iterator patterns, connection pooling, configurable batching
-- LanceDB-specific: Apache Arrow IPC format support, vector dimension detection
-- Thread Safety: Immutable configuration, safe session management
-
-API Endpoints:
-- List Tables: GET /v1/table/
-- Get Schema: POST /v1/table/{name}/describe/
-- Query Data: POST /v1/table/{name}/query/
-"""
+# ==============================================================================
+# LanceDB Connector for Lakeflow Community Connectors
+# ==============================================================================
+# This module provides a secure, thread-safe connector for LanceDB Cloud
+# with all base functionality inlined for simplified deployment.
+#
+# Key Features:
+# - Security: Input validation, SQL injection prevention, credential protection
+# - HTTP: Session management, retry logic, exponential backoff, rate limiting
+# - Performance: Iterator patterns, connection pooling, configurable batching
+# - LanceDB-specific: Apache Arrow IPC format support, vector dimension detection
+# - Thread Safety: Immutable configuration, safe session management
+#
+# API Endpoints:
+# - List Tables: GET /v1/table/
+# - Get Schema: POST /v1/table/{name}/describe/
+# - Query Data: POST /v1/table/{name}/query/
+# ==============================================================================
 
 import io
 import logging
