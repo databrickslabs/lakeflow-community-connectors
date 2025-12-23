@@ -145,13 +145,6 @@ Validate the generated connector for **{{source_name}}** by executing the provid
 - (Optional) Generate code to write to the source system based on the source API documentation.
 - Run more tests.
 
-**If using chatbot and need to run notebook**
-TODO: UPDATE THIS.
-- ~~Import `test/run_test_notebook.py` and update the second cell with the `connection_name` you created in step 2.~~
-- ~~Run the notebook.~~
-- ~~If you encounter any errors, you can provide them to the chatbot to help debug and fix the generated code.~~
-
-
 **Notes**
 - This step is more interactive. Based on testing 
 results, we need to make various adjustments
@@ -417,3 +410,7 @@ Produce a Markdown file based on the standard template `community_connector_doc_
 - Use the source API documentation to cover anything missing.
 - Always include a section about how to configure the parameters needed to connect to the source system.
 - AVOID mentioning internal implementation terms such as function or argument names from the `LakeflowConnect`.
+
+## Step 7.x (Temporary)
+As a temporary workaround for current compatibility issues with Python Data Source and SDP, please run `scripts/merge_python_source.py` on your newly developed source. This will combine the source implementation into a single file.
+
