@@ -159,8 +159,13 @@ class LakeflowConnect:
         List names of all tables supported by this connector.
 
         For Google Analytics Aggregated Data, we support user-defined custom reports.
+        The connector accepts ANY table name - each is treated as a custom report
+        configured via table_options (dimensions, metrics, etc.).
+        
+        This returns an empty list because tables are defined dynamically in the
+        pipeline spec rather than being pre-enumerated.
         """
-        return ["custom_report"]
+        return []
 
     def get_table_schema(
         self, table_name: str, table_options: dict[str, str]
@@ -168,15 +173,13 @@ class LakeflowConnect:
         """
         Fetch the schema of a table.
 
-        For Google Analytics, the schema is dynamic based on requested dimensions and metrics.
+        For Google Analytics, ANY table name is accepted and treated as a custom report.
+        The schema is dynamic based on requested dimensions and metrics.
         The table_options must contain:
             - dimensions: JSON array of dimension names (e.g., ["date", "country"])
             - metrics: JSON array of metric names (e.g., ["activeUsers", "sessions"])
         """
-        if table_name not in self.list_tables():
-            raise ValueError(
-                f"Table '{table_name}' is not supported. Supported tables: {self.list_tables()}"
-            )
+        # Accept any table name - all are treated as custom reports
 
         # Parse dimensions and metrics from table_options
         dimensions_json = table_options.get("dimensions", "[]")
@@ -225,12 +228,10 @@ class LakeflowConnect:
         """
         Fetch the metadata of a table.
 
+        For Google Analytics, ANY table name is accepted and treated as a custom report.
         Returns metadata including primary keys, cursor field, and ingestion type.
         """
-        if table_name not in self.list_tables():
-            raise ValueError(
-                f"Table '{table_name}' is not supported. Supported tables: {self.list_tables()}"
-            )
+        # Accept any table name - all are treated as custom reports
 
         # Parse dimensions from table_options to determine primary keys
         dimensions_json = table_options.get("dimensions", "[]")
@@ -274,6 +275,8 @@ class LakeflowConnect:
         """
         Read the records of a table and return an iterator of records and an offset.
 
+        For Google Analytics, ANY table name is accepted and treated as a custom report.
+
         Table options:
             - dimensions (required): JSON array of dimension names
             - metrics (required): JSON array of metric names
@@ -283,10 +286,7 @@ class LakeflowConnect:
             - metric_filter (optional): Filter expression for metrics (JSON object)
             - page_size (optional): Number of rows per page (default: 10000, max: 100000)
         """
-        if table_name not in self.list_tables():
-            raise ValueError(
-                f"Table '{table_name}' is not supported. Supported tables: {self.list_tables()}"
-            )
+        # Accept any table name - all are treated as custom reports
 
         # Parse required options
         dimensions_json = table_options.get("dimensions", "[]")

@@ -1,7 +1,8 @@
 {
-    "custom_report": {
+    "traffic_by_country": {
         "dimensions": "[\"date\", \"country\"]",
         "metrics": "[\"activeUsers\", \"sessions\"]",
+        "primary_keys": ["date", "country"],
         "start_date": "7daysAgo",
         "lookback_days": "3"
     }

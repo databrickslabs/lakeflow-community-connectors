@@ -128,41 +128,48 @@ The connection can also be created using the standard Unity Catalog API.
 
 ## Supported Objects
 
-The Google Analytics Aggregated Data connector exposes **user-defined custom reports** based on dimensions and metrics:
+The Google Analytics Aggregated Data connector supports **user-defined custom reports** with flexible naming:
 
-- `custom_report` - Aggregated data combining any available dimensions and metrics
+- **Any table name** - You define custom report names (e.g., `traffic_by_country`, `engagement_by_device`)
+- Each report is configured with specific dimensions and metrics via `table_configuration`
+- Multiple reports can be ingested in a single pipeline as long as each has a unique name
 
 ### Object summary, primary keys, and ingestion mode
 
 The connector defines the ingestion mode and primary key dynamically based on the requested dimensions:
 
-| Table           | Description                                           | Ingestion Type | Primary Key                                           | Incremental Cursor (if any) |
+| Configuration   | Description                                           | Ingestion Type | Primary Key                                           | Incremental Cursor (if any) |
 |-----------------|-------------------------------------------------------|----------------|-------------------------------------------------------|------------------------------|
-| `custom_report` | User-defined aggregated data report                   | `append` or `snapshot` | Composite of all dimensions                           | `date` dimension (if present) |
+| Any report name | User-defined aggregated data report with custom dimensions/metrics | `append` or `snapshot` | Composite of all dimensions                           | `date` dimension (if present) |
 
 **Ingestion Type Logic**:
 - **`append`**: Used when the `date` dimension is included. The connector tracks the maximum date and incrementally fetches new data with a lookback window.
 - **`snapshot`**: Used when no `date` dimension is present. The entire report is refreshed on each sync.
 
 **Primary Key Logic**:
-- The primary key is the **composite of all dimensions** requested in the report.
-- Example: If dimensions are `["date", "country"]`, the primary key is the combination of both fields.
+- The primary key **must be explicitly defined** in `table_configuration` as `primary_keys`.
+- It should be set to the **list of all dimensions** in your report (in the same order).
+- Example: If dimensions are `["date", "country"]`, set `"primary_keys": ["date", "country"]`.
 
 ### Required and optional table options
 
-Table-specific options are passed via the pipeline spec under `table` in `objects`. All options for the `custom_report` table:
+Table-specific options are passed via the pipeline spec under `table_configuration` in `objects`. All options for custom reports:
 
 | Option | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
-| `dimensions` | JSON array string | no | `"[]"` | List of dimension names to include (e.g., `"[\"date\", \"country\"]"`). Up to 9 dimensions. |
-| `metrics` | JSON array string | yes | N/A | List of metric names to include (e.g., `"[\"activeUsers\", \"sessions\"]"`). At least 1 metric required, up to 10 metrics. |
+| `dimensions` | string (JSON array) | yes | N/A | List of dimension names as a JSON string (e.g., `"[\"date\", \"country\"]"`). Up to 9 dimensions. |
+| `metrics` | string (JSON array) | yes | N/A | List of metric names as a JSON string (e.g., `"[\"activeUsers\", \"sessions\"]"`). At least 1 metric required, up to 10 metrics. |
+| `primary_keys` | array | yes | N/A | List of dimension names forming the composite key (e.g., `["date", "country"]`). **Must exactly match all dimensions** in your report. |
 | `start_date` | string | no | `"30daysAgo"` | Initial start date for first sync. Can be YYYY-MM-DD format or relative like `"30daysAgo"`, `"7daysAgo"`, `"yesterday"`. |
 | `lookback_days` | string | no | `"3"` | Number of days to look back for incremental syncs (accounts for data processing delays). |
-| `dimension_filter` | JSON object string | no | null | Filter expression for dimensions (see Google Analytics Data API documentation for filter syntax). |
-| `metric_filter` | JSON object string | no | null | Filter expression for metrics (see Google Analytics Data API documentation for filter syntax). |
+| `dimension_filter` | string (JSON object) | no | null | Filter expression for dimensions as a JSON string (see Google Analytics Data API documentation for filter syntax). |
+| `metric_filter` | string (JSON object) | no | null | Filter expression for metrics as a JSON string (see Google Analytics Data API documentation for filter syntax). |
 | `page_size` | string | no | `"10000"` | Number of rows per API request (max 100,000). |
 
-> **Important**: All table options must be provided as **strings**, including JSON arrays and objects. For example: `"dimensions": "[\"date\", \"country\"]"` (not `"dimensions": ["date", "country"]`).
+> **Important**: 
+> - `dimensions`, `metrics`, and filter options must be provided as **JSON strings** (e.g., `"[\"date\", \"country\"]"`)
+> - `primary_keys` is a **native array** (e.g., `["date", "country"]`)
+> - All other options are regular strings (e.g., `"30daysAgo"`, `"3"`)
 
 ### Common Dimensions and Metrics
 
@@ -229,35 +236,53 @@ Use the Lakeflow Community Connector UI to copy or reference the Google Analytic
 In your pipeline code, configure a `pipeline_spec` that references:
 
 - A **Unity Catalog connection** that uses this Google Analytics Aggregated connector.
-- One or more **tables** to ingest, each with table options specifying dimensions and metrics.
+- One or more **custom reports** to ingest, each with a unique name and `table_configuration` specifying dimensions and metrics.
 
-Example `pipeline_spec` snippet for a basic report:
+Example `pipeline_spec` for multiple reports:
 
 ```json
 {
-  "pipeline_spec": {
-    "connection_name": "google_analytics_connection",
-    "object": [
-      {
-        "table": {
-          "source_table": "custom_report",
-          "dimensions": "[\"date\", \"country\", \"deviceCategory\"]",
+  "connection_name": "google_analytics_connection",
+  "objects": [
+    {
+      "table": {
+        "source_table": "traffic_by_country",
+        "table_configuration": {
+          "dimensions": "[\"date\", \"country\"]",
           "metrics": "[\"activeUsers\", \"sessions\", \"screenPageViews\"]",
+          "primary_keys": ["date", "country"],
           "start_date": "30daysAgo",
           "lookback_days": "3"
         }
       }
-    ]
-  }
+    },
+    {
+      "table": {
+        "source_table": "engagement_by_device",
+        "table_configuration": {
+          "dimensions": "[\"date\", \"deviceCategory\"]",
+          "metrics": "[\"activeUsers\", \"engagementRate\"]",
+          "primary_keys": ["date", "deviceCategory"],
+          "start_date": "30daysAgo",
+          "lookback_days": "3"
+        }
+      }
+    }
+  ]
 }
 ```
 
 - `connection_name` must point to the UC connection configured with your GA4 `property_id` and `credentials_json`.
-- For each `table`:
-  - `source_table` must be `"custom_report"`.
-  - `dimensions` and `metrics` define what data to retrieve (as JSON array strings).
-  - `start_date` sets the initial backfill date (optional, defaults to "30daysAgo").
-  - `lookback_days` sets the incremental sync lookback window (optional, defaults to 3).
+- For each report:
+  - `source_table` - Give each report a **unique, descriptive name** (e.g., `traffic_by_country`, `engagement_by_device`)
+  - `table_configuration` contains:
+    - `dimensions` - JSON string array of dimension names (e.g., `"[\"date\", \"country\"]"`)
+    - `metrics` - JSON string array of metric names (e.g., `"[\"activeUsers\", \"sessions\"]"`)
+    - `primary_keys` - **Native array** that must exactly match all dimensions (e.g., `["date", "country"]`)
+    - `start_date` - Initial backfill date (optional, defaults to "30daysAgo")
+    - `lookback_days` - Incremental sync lookback window (optional, defaults to 3)
+  
+> **Note**: Each report must have a unique `source_table` name to avoid conflicts in the ingestion pipeline.
 
 ### Step 3: Run and Schedule the Pipeline
 
@@ -272,6 +297,8 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 
 ### Best Practices
 
+- **Use descriptive report names**: Give each report a unique, descriptive `source_table` name (e.g., `traffic_by_country`, `campaign_performance`) that clearly indicates what data it contains.
+- **Multiple reports in one pipeline**: You can configure multiple reports in a single pipeline spec - just ensure each has a unique `source_table` name.
 - **Start with common dimensions**: Begin with `date` and one or two other dimensions (e.g., `country`, `deviceCategory`) to validate the setup.
 - **Use incremental sync**: Always include the `date` dimension for time-series data to enable efficient incremental syncs.
 - **Set appropriate lookback**: Use `lookback_days` of 3-7 to account for Google Analytics data processing delays (data is typically finalized within 24-48 hours).
@@ -283,43 +310,64 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 **Example 1: Traffic by date and country**
 ```json
 {
-  "source_table": "custom_report",
-  "dimensions": "[\"date\", \"country\"]",
-  "metrics": "[\"activeUsers\", \"sessions\", \"screenPageViews\"]",
-  "start_date": "30daysAgo",
-  "lookback_days": "3"
+  "table": {
+    "source_table": "traffic_by_country",
+    "table_configuration": {
+      "dimensions": "[\"date\", \"country\"]",
+      "metrics": "[\"activeUsers\", \"sessions\", \"screenPageViews\"]",
+      "primary_keys": ["date", "country"],
+      "start_date": "30daysAgo",
+      "lookback_days": "3"
+    }
+  }
 }
 ```
 
 **Example 2: Device and browser breakdown**
 ```json
 {
-  "source_table": "custom_report",
-  "dimensions": "[\"date\", \"deviceCategory\", \"browser\"]",
-  "metrics": "[\"activeUsers\", \"sessions\", \"bounceRate\"]",
-  "start_date": "7daysAgo",
-  "lookback_days": "2"
+  "table": {
+    "source_table": "traffic_by_device_browser",
+    "table_configuration": {
+      "dimensions": "[\"date\", \"deviceCategory\", \"browser\"]",
+      "metrics": "[\"activeUsers\", \"sessions\", \"bounceRate\"]",
+      "primary_keys": ["date", "deviceCategory", "browser"],
+      "start_date": "7daysAgo",
+      "lookback_days": "2"
+    }
+  }
 }
 ```
 
 **Example 3: Campaign performance**
 ```json
 {
-  "source_table": "custom_report",
-  "dimensions": "[\"date\", \"sessionSource\", \"sessionMedium\", \"sessionCampaignName\"]",
-  "metrics": "[\"sessions\", \"conversions\", \"totalRevenue\"]",
-  "start_date": "90daysAgo",
-  "lookback_days": "7"
+  "table": {
+    "source_table": "campaign_performance",
+    "table_configuration": {
+      "dimensions": "[\"date\", \"sessionSource\", \"sessionMedium\", \"sessionCampaignName\"]",
+      "metrics": "[\"sessions\", \"conversions\", \"totalRevenue\"]",
+      "primary_keys": ["date", "sessionSource", "sessionMedium", "sessionCampaignName"],
+      "start_date": "90daysAgo",
+      "lookback_days": "7"
+    }
+  }
 }
 ```
 
 **Example 4: Page performance (snapshot)**
 ```json
 {
-  "source_table": "custom_report",
-  "dimensions": "[\"pagePath\", \"pageTitle\"]",
-  "metrics": "[\"screenPageViews\", \"averageSessionDuration\"]",
-  "start_date": "7daysAgo"
+  "table": {
+    "source_table": "page_performance_snapshot",
+    "table_configuration": {
+      "dimensions": "[\"pagePath\", \"pageTitle\"]",
+      "metrics": "[\"screenPageViews\", \"averageSessionDuration\"]",
+      "primary_keys": ["pagePath", "pageTitle"],
+      "start_date": "7daysAgo",
+      "scd_type": "SCD_TYPE_1"
+    }
+  }
 }
 ```
 
