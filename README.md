@@ -12,35 +12,12 @@ Developers only need to implement or modify the source connector logic, while co
 
 ## Project Structure
 
-### `sources/` — Source Connectors
-Each subfolder represents a connector for a specific data source (e.g., `github/`, `zendesk/`, `stripe/`):
-- `{name}.py` — Connector implementation following the `LakeflowConnect` interface
-- `_generated_{name}_python_source.py` — Auto-generated merged file for deployment (do not edit manually)
-- `configs/` — Development configuration files
-- `test/` — Connector-specific tests
-
-The `interface/` subfolder defines `LakeflowConnect`, the base interface all connectors must implement. This interface specifies methods for listing tables, fetching schemas/metadata, and reading table data.
-
-### `libs/` — Shared Libraries
-Utilities used across all connectors:
-- `utils.py` — Data type parsing and conversion (JSON → PySpark types)
-- `spec_parser.py` — Pipeline specification parser using Pydantic models
-- `source_loader.py` — Dynamic module loader for source connectors
-
-### `pipeline/` — Pipeline Orchestration
-Core pipeline logic for data ingestion:
-- `lakeflow_python_source.py` — PySpark Data Source implementation (batch and streaming readers)
-- `ingestion_pipeline.py` — SDP ingestion orchestration with support for CDC, snapshot, and append modes
-
-### `scripts/` — Build Tools
-- `merge_python_source.py` — Merges connector + libs + pipeline into a single deployable file (required due to SDP limitations with module imports)
-
-### `tests/` — Shared Test Utilities
-Generic test suites and utilities for validating connector implementations.
-Each connector can run tests by invoking the generic tester to execute the standard test suite.
-
-### `prompts/` — Development Templates
-Templates and instructions for creating new connectors via AI-assisted development.
+- `sources/` — Source connectors (e.g., `github/`, `zendesk/`, `stripe/`). The `interface/` subfolder defines the `LakeflowConnect` base interface.
+- `libs/` — Shared utilities for data type parsing, spec parsing, and module loading
+- `pipeline/` — Core ingestion logic: PySpark Data Source implementation and SDP orchestration
+- `scripts/` — Build tools for merging connectors into deployable files
+- `tests/` — Generic test suites for validating connector implementations
+- `prompts/` — Templates for AI-assisted connector development
 
 ## Developing New Connectors
 
