@@ -1,296 +1,518 @@
-# Lakeflow LanceDB Community Connector
+# LanceDB Connector
 
-This documentation provides setup instructions and reference information for the LanceDB source connector. This connector enables reading data from LanceDB Cloud instances into Databricks using the Lakeflow framework.
+## Overview
+
+The LanceDB connector enables you to read data from LanceDB Cloud vector databases. LanceDB is a vector database optimized for AI applications, providing fast similarity search over embeddings.
+
+**Supported Features:**
+- Table discovery and listing
+- Schema introspection
+- Vector similarity search
+- Full table scans
+- Batch data reading
+
+**Connector Type:** Vector Database  
+**API Type:** REST API with Apache Arrow format
+
+---
+
+## Why Offload LanceDB to a Lakehouse?
+
+### The Challenge
+
+While LanceDB excels at fast vector similarity search for AI applications, organizations often need to:
+- **Analyze vector data alongside traditional business data** (customer records, transactions, logs)
+- **Run complex SQL analytics** on embeddings and their associated metadata
+- **Maintain historical snapshots** of vector data for compliance and auditing
+- **Build comprehensive data pipelines** that combine vector and structured data
+- **Enable BI tools access** to embedding metadata and search results
+- **Reduce costs** by moving cold/historical vector data to cheaper storage
+
+### The Solution: Lakehouse Integration
+
+This connector enables seamless offload of LanceDB data to your lakehouse (Delta Lake, Iceberg, Hudi), providing:
+
+**🔄 Unified Analytics**
+- Combine vector embeddings with customer data, transactions, and events
+- Run SQL queries across all your data in one place
+- Join vector similarity results with business metrics
+
+**📊 Advanced Analytics & BI**
+- Query embedding metadata using standard SQL
+- Visualize vector data trends in your favorite BI tools (Tableau, PowerBI, Looker)
+- Build dashboards showing embedding quality metrics and usage patterns
+
+**🗄️ Cost Optimization**
+- Archive historical embeddings to low-cost object storage
+- Keep only "hot" vectors in LanceDB for real-time search
+- Maintain full history in lakehouse for analysis and compliance
+
+**🔒 Governance & Compliance**
+- Centralize data governance across all data sources
+- Maintain audit trails of embedding changes
+- Apply consistent security policies
+
+**🔧 Data Engineering**
+- Build end-to-end pipelines: data → embeddings → LanceDB → lakehouse → analytics
+- Schedule regular syncs to keep lakehouse updated
+- Enable incremental data loads for efficiency
+
+### Common Use Cases
+
+**1. AI Application Analytics**
+```
+Scenario: Track and analyze semantic search behavior
+Flow: User queries → Embeddings → LanceDB search → Results + metrics → Lakehouse → BI Dashboard
+Insight: Which queries perform best? What are common search patterns?
+```
+
+**2. Embedding Quality Monitoring**
+```
+Scenario: Monitor ML model performance over time
+Flow: Model updates → New embeddings → LanceDB → Lakehouse (versioned) → Quality metrics
+Insight: Has model drift occurred? Are embeddings improving?
+```
+
+**3. Customer 360 with AI Context**
+```
+Scenario: Enrich customer profiles with semantic understanding
+Flow: Customer data + Document embeddings → Lakehouse → Unified view
+Insight: What documents are most relevant to each customer segment?
+```
+
+**4. RAG (Retrieval Augmented Generation) Analytics**
+```
+Scenario: Optimize RAG system performance
+Flow: RAG queries + retrieved chunks → LanceDB → Lakehouse → Analysis
+Insight: Which documents are retrieved most? What's the average relevance score?
+```
+
+**5. Compliance & Auditing**
+```
+Scenario: Maintain complete history of vector data
+Flow: LanceDB (operational) → Lakehouse (historical archive)
+Benefit: Meet regulatory requirements while keeping LanceDB performant
+```
+
+### Architecture Pattern
+
+```
+┌─────────────┐
+│  AI Models  │ (Generate embeddings)
+└──────┬──────┘
+       │
+       ↓
+┌─────────────┐
+│  LanceDB    │ (Fast vector search)
+│   Cloud     │ ← Real-time queries
+└──────┬──────┘
+       │
+       ↓ (Lakeflow Community Connector)
+       │
+┌──────┴──────┐
+│  Lakehouse  │ (Delta/Iceberg/Hudi)
+│             │
+│  • Analytics│
+│  • BI Tools │
+│  • Archive  │
+│  • Audit    │
+└─────────────┘
+```
+
+### Benefits Summary
+
+| Benefit | Description |
+|---------|-------------|
+| **Unified Data Platform** | All your data (vectors + structured) in one place |
+| **Cost Efficiency** | Archive to cheap storage, keep hot data in LanceDB |
+| **Advanced Analytics** | SQL + BI tools on embedding metadata |
+| **Governance** | Centralized policies, audit trails, compliance |
+| **Scalability** | Lakehouse handles massive historical data |
+| **Flexibility** | Use best tool for each job (LanceDB for search, lakehouse for analytics) |
+
+---
 
 ## Prerequisites
 
-To use this connector, you need:
+Before using this connector, you need:
 
-1. **LanceDB Cloud Account**: An active LanceDB Cloud account with a project/database instance
-2. **API Key**: A valid API key with read permissions for your LanceDB project
-3. **Project Information**: Your project instance name and cloud region
-4. **Network Access**: Connectivity to LanceDB Cloud API endpoints (HTTPS)
+1. **LanceDB Cloud Account**: Sign up at [lancedb.com](https://lancedb.com)
+2. **API Key**: Generate an API key from your LanceDB Cloud dashboard
+3. **Project Details**: Your project name and region
 
-## Setup
+---
 
-### Required Connection Parameters
+## Configuration
 
-To configure the connector, provide the following parameters in your connector options:
+### Required Parameters
 
-| Parameter | Type | Required | Description | Example |
-|-----------|------|----------|-------------|---------|
-| `api_key` | string | Yes | LanceDB Cloud API key for authentication | `"sk-abc123..."` |
-| `project_name` | string | Yes | Your LanceDB project instance name | `"my-project-xyz"` |
-| `region` | string | Yes | Cloud region where your project is hosted | `"us-east-1"` |
-| `externalOptionsAllowList` | string | Yes | Comma-separated list of allowed table-specific options | `"primary_keys,cursor_field,batch_size,filter_expression,columns"` |
+| Parameter | Type | Description | Example |
+|-----------|------|-------------|---------|
+| `api_key` | string | Your LanceDB Cloud API key | `sk_abc123...` |
+| `project_name` | string | Your LanceDB project/database name | `my-project-xyz` |
+| `region` | string | Cloud region where your project is hosted | `us-east-1` |
 
-**Table-Specific Options** (configured per table via `externalOptionsAllowList`):
+### Configuration Example
 
-The `externalOptionsAllowList` connection option is **required** and must include the following complete list of supported table-specific options:
-
-- `primary_keys` - Comma-separated list of primary key column names (required for CDC mode)
-- `cursor_field` - Column name for incremental reads (required for append/CDC modes)
-- `batch_size` - Number of rows to fetch per API request (1-10000, default: 1000)
-- `filter_expression` - SQL-like filter expression for querying data
-- `columns` - Comma-separated list of specific columns to retrieve
-
-### Obtaining LanceDB Credentials
-
-1. **Sign up for LanceDB Cloud**:
-   - Visit [LanceDB Cloud](https://accounts.lancedb.com) and complete the onboarding process
-
-2. **Create a Project**:
-   - Create a new project in the LanceDB Cloud dashboard
-   - Note the project instance name (e.g., `embedding-yhs6bg`)
-   - Note the region (e.g., `us-east-1`)
-
-3. **Generate API Key**:
-   - In your project dashboard, navigate to API Settings
-   - Generate a new API key with read permissions
-   - **Important**: Save the API key securely - it won't be shown again
-
-### Create a Unity Catalog Connection
-
-A Unity Catalog connection for this connector can be created in two ways:
-
-#### Via UI:
-1. Navigate to the "Add Data" page in Databricks
-2. Follow the Lakeflow Community Connector UI flow
-3. Select "LanceDB" as the source
-4. Provide your `api_key`, `project_name`, and `region`
-5. **Required**: Set `externalOptionsAllowList` to: `primary_keys,cursor_field,batch_size,filter_expression,columns`
-
-#### Via API:
-The connection can also be created using the standard Unity Catalog API with the above parameters.
-
-## Supported Objects
-
-### Dynamic Table Discovery
-
-The LanceDB connector supports **all tables** present in your LanceDB Cloud project. Tables are discovered dynamically via the LanceDB API - you do not need to predefine which tables exist.
-
-### Table Configuration
-
-Each table can be configured with the following options:
-
-#### Primary Keys
-- **Purpose**: Define unique identifiers for records (required for CDC ingestion)
-- **Configuration**: Specify via the `primary_keys` table option
-- **Example**: `"primary_keys": ["id"]` or `"primary_keys": ["user_id", "timestamp"]`
-
-#### Ingestion Types
-
-The connector supports three ingestion strategies:
-
-1. **Snapshot** (default):
-   - Full table refresh on each sync
-   - No incremental tracking required
-   - Use when: Tables are small or full refresh is acceptable
-
-2. **Append**:
-   - Incremental append of new records only
-   - Requires: `cursor_field` (e.g., `created_at`, `timestamp`)
-   - Use when: Tables only grow (no updates/deletes)
-
-3. **CDC (Change Data Capture)**:
-   - Incremental upserts based on cursor and primary keys
-   - Requires: Both `primary_keys` and `cursor_field` (e.g., `updated_at`)
-   - Use when: Tables have updates that need to be captured
-   - **Note**: Deletes are not automatically tracked unless a soft-delete field exists
-
-#### Required Configuration by Ingestion Type
-
-| Ingestion Type | Required Options | Optional Options |
-|----------------|------------------|------------------|
-| Snapshot | None | `batch_size`, `filter_expression`, `columns` |
-| Append | `cursor_field` | `batch_size`, `filter_expression`, `columns` |
-| CDC | `primary_keys`, `cursor_field` | `batch_size`, `filter_expression`, `columns` |
-
-### Special Columns
-
-- **Vector Embeddings**: LanceDB commonly stores vectors as `fixed_size_list<float32>[N]`. These are mapped to Spark `ArrayType(FloatType())`
-- **Nested Structures**: Struct and list types are preserved without flattening
-- **Timestamps**: Timestamp fields are automatically converted to Spark `TimestampType`
-
-## Data Type Mapping
-
-The connector maps LanceDB (Apache Arrow) types to Spark types as follows:
-
-| LanceDB/Arrow Type | Spark Type | Notes |
-|-------------------|------------|-------|
-| `int8`, `int16`, `int32` | `IntegerType` | Small integers |
-| `int64` | `LongType` | 64-bit integers (recommended for IDs) |
-| `uint8`, `uint16`, `uint32`, `uint64` | `LongType` | Unsigned integers mapped to signed 64-bit |
-| `float32` | `FloatType` | 32-bit floating point |
-| `float64` | `DoubleType` | 64-bit floating point |
-| `utf8`, `large_utf8` | `StringType` | Variable-length strings |
-| `binary`, `large_binary` | `BinaryType` | Binary data |
-| `bool` | `BooleanType` | Boolean values |
-| `date32`, `date64` | `DateType` | Date values |
-| `timestamp[ms]`, `timestamp[us]`, `timestamp[ns]` | `TimestampType` | Timestamps with various precisions |
-| `struct<...>` | `StructType` | Nested structures (not flattened) |
-| `list<T>` | `ArrayType(T)` | Variable-length arrays |
-| `fixed_size_list<T>[N]` | `ArrayType(T)` | Fixed-length arrays (vectors/embeddings) |
-
-## How to Run
-
-### Step 1: Clone/Copy the Source Connector Code
-
-Follow the Lakeflow Community Connector UI, which will guide you through setting up a pipeline using the LanceDB connector code.
-
-### Step 2: Configure Your Pipeline
-
-1. Update the `pipeline_spec` in the main pipeline file (e.g., `ingest.py`).
-
-2. **Basic Configuration Example** (Snapshot mode):
-
-```python
+```json
 {
-  "pipeline_spec": {
-      "connection_name": "my_lancedb_connection",
-      "object": [
-        {
-            "table": {
-                "source_table": "documents",
-                "batch_size": "1000"
-            }
-        }
-      ]
-  }
+  "api_key": "sk_abc123def456...",
+  "project_name": "my-lancedb-project",
+  "region": "us-east-1"
 }
 ```
 
-3. **Append Mode Configuration** (Incremental reads):
+### Advanced Configuration (Optional)
 
-```python
+The connector supports configurable retry and timeout behavior for improved reliability:
+
+**Advanced Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `max_retries` | integer | 5 | Maximum number of retry attempts for failed requests |
+| `initial_retry_delay` | float | 1.0 | Initial delay between retries (doubles each attempt) |
+| `request_timeout` | integer | 30 | HTTP request timeout in seconds |
+
+**Note**: These advanced parameters are typically set during connector initialization and apply to all operations.
+
+### Obtaining Your Credentials
+
+1. **Log in to LanceDB Cloud**: Visit [cloud.lancedb.com](https://cloud.lancedb.com)
+2. **Create or Select Project**: Navigate to your project or create a new one
+3. **Generate API Key**: 
+   - Go to Settings → API Keys
+   - Click "Create New API Key"
+   - Copy the key immediately (it won't be shown again)
+4. **Note Your Details**:
+   - Project name is shown in your project dashboard
+   - Region is displayed next to your project name
+
+---
+
+## Supported Tables
+
+The connector automatically discovers all tables in your LanceDB project. Each table corresponds to a vector collection in your database.
+
+**Common Table Types:**
+- Document embeddings
+- Image vectors
+- User/product embeddings
+- Any custom vector collections
+
+---
+
+## Table-Specific Options
+
+When reading from a specific table, you can customize the behavior with these options:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `batch_size` | integer | 1000 | Number of records to fetch per batch (1-10,000) |
+| `use_full_scan` | boolean | true | Enable full table scan (generates dummy vector if needed) |
+| `query_vector` | array | null | Vector for similarity search (list of floats) |
+| `filter_expression` | string | null | SQL-like filter expression |
+| `columns` | array | null | Specific columns to retrieve |
+| `cursor_field` | string | null | Field to use for incremental reads |
+
+### Examples
+
+**Full Table Scan:**
+```json
 {
-  "pipeline_spec": {
-      "connection_name": "my_lancedb_connection",
-      "object": [
-        {
-            "table": {
-                "source_table": "events",
-                "cursor_field": "created_at",
-                "batch_size": "1000"
-            }
-        }
-      ]
-  }
+  "batch_size": "1000",
+  "use_full_scan": "true"
 }
 ```
 
-4. **CDC Mode Configuration** (Incremental with upserts):
-
-```python
+**Vector Similarity Search:**
+```json
 {
-  "pipeline_spec": {
-      "connection_name": "my_lancedb_connection",
-      "object": [
-        {
-            "table": {
-                "source_table": "users",
-                "primary_keys": "id",
-                "cursor_field": "updated_at",
-                "batch_size": "1000"
-            }
-        }
-      ]
-  }
+  "batch_size": "100",
+  "query_vector": [0.1, 0.2, 0.3, ..., 0.768]
 }
 ```
 
-5. **Advanced Configuration** (With filtering and column selection):
-
-```python
+**Filtered Read:**
+```json
 {
-  "pipeline_spec": {
-      "connection_name": "my_lancedb_connection",
-      "object": [
-        {
-            "table": {
-                "source_table": "logs",
-                "cursor_field": "timestamp",
-                "filter_expression": "severity = 'ERROR' AND timestamp > '2024-01-01'",
-                "columns": "timestamp,message,severity,user_id",
-                "batch_size": "500"
-            }
-        }
-      ]
-  }
+  "batch_size": "500",
+  "filter_expression": "price > 100",
+  "use_full_scan": "true"
 }
 ```
 
-### Step 3: Run and Schedule the Pipeline
+**Incremental Read:**
+```json
+{
+  "batch_size": "1000",
+  "cursor_field": "updated_at",
+  "use_full_scan": "true"
+}
+```
 
-#### Best Practices
+---
 
-- **Start Small**: Begin by syncing a subset of tables or use filtering to test your pipeline with limited data
-- **Use Incremental Sync**: Configure `cursor_field` for append or CDC mode to reduce API calls and improve performance
-- **Set Appropriate Batch Sizes**: 
-  - Default (1000) works well for most cases
-  - Increase to 5000-10000 for tables with small rows
-  - Decrease to 100-500 for tables with large nested structures or vectors
-- **Monitor API Usage**: LanceDB Cloud has rate limits based on your plan - implement appropriate scheduling
-- **Handle Large Embeddings**: Tables with large vector embeddings may require smaller batch sizes to avoid memory issues
-- **Use Column Selection**: For tables with many columns, use the `columns` option to retrieve only needed fields
-- **Filter Data**: Use `filter_expression` to reduce data transfer and processing time
+## Data Types
 
-#### Troubleshooting
+The connector maps LanceDB data types to standard types as follows:
 
-**Common Issues:**
+| LanceDB Type | Mapped Type | Notes |
+|--------------|-------------|-------|
+| `string`, `utf8` | String | Text data |
+| `int32`, `int` | Integer | 32-bit integers |
+| `int64`, `long` | Long | 64-bit integers |
+| `float32`, `float` | Float | Single precision |
+| `float64`, `double` | Double | Double precision |
+| `bool`, `boolean` | Boolean | True/false values |
+| `binary` | Binary | Binary data |
+| `fixed_size_list` | Array | Vector embeddings |
+| `list` | Array | Variable-length arrays |
+| `date` | Date | Date values |
+| `timestamp` | Timestamp | Date and time |
 
-1. **Authentication Errors**:
-   - Error: `401 Unauthorized` or `403 Forbidden`
-   - Solution: Verify your API key is correct and has read permissions
-   - Check: Ensure `project_name` and `region` match your LanceDB Cloud project
+---
 
-2. **Rate Limiting**:
-   - Error: `429 Too Many Requests`
-   - Solution: The connector implements automatic retry with exponential backoff
-   - Prevention: Reduce sync frequency or decrease batch sizes
-   - Check: Review your LanceDB Cloud plan limits
+## Features & Limitations
 
-3. **Table Not Found**:
-   - Error: `Table 'X' not found`
-   - Solution: Verify the table exists in your LanceDB project
-   - Use: `list_tables()` method to see available tables
+### Supported Features ✅
 
-4. **Schema Mismatch**:
-   - Error: Type conversion errors
-   - Solution: Check that your table schema is compatible with Spark types
-   - Note: Unsupported Arrow types will default to `StringType`
+- **Dynamic Table Discovery**: Automatically finds all tables
+- **Schema Introspection**: Retrieves complete table schemas
+- **Vector Search**: Supports similarity search with query vectors
+- **Full Scans**: Read entire tables without vectors
+- **Batch Processing**: Configurable batch sizes for efficient reads
+- **Incremental Reads**: Cursor-based incremental data sync
+- **Filtering**: SQL-like filter expressions
+- **Column Selection**: Read specific columns only
 
-5. **Connection Timeouts**:
-   - Error: Connection timeout or request timeout
-   - Solution: Check network connectivity to LanceDB Cloud
-   - Firewall: Ensure HTTPS access to `*.api.lancedb.com` is allowed
+### Limitations ⚠️
 
-6. **Memory Issues**:
-   - Error: Out of memory during data fetch
-   - Solution: Reduce `batch_size` parameter
-   - Note: Large vector embeddings consume significant memory
+- **Vector Requirements**: LanceDB is a vector database. For best performance, provide query vectors for similarity search
+- **API Format**: Data is returned in Apache Arrow format (handled automatically)
+- **Batch Size Limits**: Maximum 10,000 records per batch
+- **Rate Limits**: Subject to LanceDB Cloud rate limits
 
-7. **SQL Injection Validation Errors**:
-   - Error: `Invalid column name` or `Invalid identifier`
-   - Solution: The connector validates all identifiers to prevent injection attacks
-   - Check: Ensure table names, column names, and identifiers contain only alphanumeric, underscore, and dot characters
+---
 
-## Security Features
+## Performance Considerations
 
-The LanceDB connector implements enterprise-grade security:
+### Best Practices
 
-- **SQL Injection Prevention**: All user-provided identifiers and filter expressions are validated
-- **Secure Credential Handling**: API keys are never logged or exposed in error messages
-- **Input Validation**: All parameters are validated using Pydantic models with strict type checking
-- **Thread Safety**: Connector is safe for concurrent use with thread-safe HTTP session management
-- **Rate Limit Handling**: Automatic exponential backoff prevents account suspension
-- **Resource Cleanup**: Proper cleanup of connections and resources
+1. **Use Appropriate Batch Sizes**:
+   - Small datasets: 100-1,000 records
+   - Large datasets: 1,000-10,000 records
+   - Balance between memory and network efficiency
 
-## References
+2. **Leverage Vector Search**:
+   - Provide query vectors for faster, more relevant results
+   - Use filters to narrow down results
 
-- [LanceDB Official Documentation](https://docs.lancedb.com/)
-- [LanceDB Cloud REST API Reference](https://docs.lancedb.com/api-reference/rest/index)
-- [LanceDB Python SDK](https://lancedb.github.io/lancedb/python/python/)
-- [Apache Arrow Type System](https://arrow.apache.org/docs/python/api/datatypes.html)
-- [Lakeflow Community Connectors](https://github.com/dey-abhishek/lakeflow-community-connectors)
+3. **Incremental Reads**:
+   - Use `cursor_field` for large tables
+   - Reduces data transfer and processing time
 
+4. **Column Selection**:
+   - Specify only needed columns
+   - Reduces bandwidth and parsing time
+
+### Expected Performance
+
+- **Table Listing**: < 1 second
+- **Schema Retrieval**: < 1 second per table
+- **Data Reading**: Varies by table size and batch size
+  - Small tables (< 1,000 rows): < 2 seconds
+  - Medium tables (1,000-10,000 rows): 2-10 seconds
+  - Large tables (> 10,000 rows): Pagination recommended
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+#### 1. Authentication Errors
+
+**Error**: `Missing required parameter: api_key`
+
+**Solution**:
+- Verify your API key is correctly set in configuration
+- Ensure the key hasn't been revoked or expired
+- Check for extra spaces or characters in the key
+
+#### 2. Connection Failures
+
+**Error**: `400 Bad Request` or `401 Unauthorized`
+
+**Solution**:
+- Verify project name and region are correct
+- Check API key permissions
+- Ensure project exists and is accessible
+
+#### 3. Vector Dimension Mismatch
+
+**Error**: `No vector column found to match with the query vector dimension`
+
+**Solution**:
+- Ensure query vector dimension matches table's vector column
+- Use `use_full_scan: true` for non-vector queries
+- Check table schema to verify vector dimensions
+
+#### 4. Empty Results
+
+**Possible Causes**:
+- Table is empty
+- Filter expression too restrictive
+- Incorrect table name
+
+**Solution**:
+- Verify table has data using LanceDB Cloud UI
+- Check filter expression syntax
+- List all tables to confirm table name
+
+#### 5. Timeout Errors
+
+**Solution**:
+- Reduce batch size
+- Use pagination for large tables
+- Check network connectivity
+
+---
+
+## Security Notes
+
+- **Never commit credentials**: Keep `api_key` in secure configuration files
+- **Use environment variables**: Store sensitive data outside of code
+- **Rotate keys regularly**: Generate new API keys periodically
+- **Minimal permissions**: Use keys with least necessary privileges
+- **Monitor usage**: Track API key usage in LanceDB Cloud dashboard
+
+---
+
+## Example Usage
+
+### Basic Connection and Data Reading
+
+Once configured, the connector allows you to:
+1. **Discover available tables** in your LanceDB project
+2. **Inspect table schemas** to understand data structure
+3. **Read data** from tables with various options
+
+**Workflow Example:**
+
+```python
+# Step 1: Discover tables
+# The connector will list all available tables in your project
+# Example output: ['documents', 'embeddings', 'user_vectors']
+
+# Step 2: Understand table structure
+# Retrieve schema information for a specific table
+# Shows column names, data types, and vector dimensions
+
+# Step 3: Read data
+# Configure how you want to read the data:
+table_options = {
+    "batch_size": "100",      # Number of records per batch
+    "use_full_scan": "true"   # Enable full table scan
+}
+
+# The connector will fetch data in batches
+# Returns records as dictionaries with all columns
+```
+
+**Reading All Data:**
+
+```python
+# For small to medium tables, read all data at once
+table_options = {
+    "batch_size": "1000",
+    "use_full_scan": "true"
+}
+
+# Data is returned as a list of records (dictionaries)
+# Each record contains all columns defined in the schema
+```
+
+### Vector Similarity Search
+
+For AI/ML use cases, you can perform similarity searches using query vectors:
+
+```python
+# Prepare your query vector
+# This should come from your embedding model (e.g., OpenAI, HuggingFace)
+# Dimension must match the table's vector column
+query_embedding = [0.1, 0.2, 0.3, ...]  # Example: 768 dimensions
+
+# Configure similarity search
+table_options = {
+    "batch_size": "10",          # Return top 10 most similar results
+    "query_vector": query_embedding
+}
+
+# Results are automatically sorted by similarity
+# Most similar vectors appear first
+# Each result includes a '_distance' field indicating similarity score
+```
+
+**Use Cases:**
+- Semantic search over documents
+- Finding similar images
+- Product recommendations
+- Question answering systems
+
+### Incremental Sync
+
+For large datasets that update frequently, use incremental synchronization:
+
+```python
+# Configure incremental read using a timestamp or version field
+table_options = {
+    "cursor_field": "updated_at",    # Field that tracks updates
+    "batch_size": "1000",
+    "use_full_scan": "true"
+}
+
+# First sync: Read all existing data
+# The connector tracks the highest 'updated_at' value seen
+
+# Subsequent syncs: Only read new or updated records
+# Automatically uses the last known cursor value
+# Significantly reduces data transfer and processing time
+```
+
+**Benefits:**
+- Efficient synchronization of large tables
+- Automatic cursor management
+- Reduced bandwidth and processing
+- Keeps data up-to-date with minimal overhead
+
+**Best Practices:**
+- Choose a monotonically increasing field (timestamp, version number)
+- Ensure the cursor field is indexed in LanceDB
+- Run incremental syncs on a schedule (e.g., hourly, daily)
+
+---
+
+## Support & Resources
+
+- **LanceDB Documentation**: [docs.lancedb.com](https://docs.lancedb.com)
+- **LanceDB Cloud**: [cloud.lancedb.com](https://cloud.lancedb.com)
+- **API Reference**: [docs.lancedb.com/api-reference](https://docs.lancedb.com/api-reference)
+- **Community**: [Discord](https://discord.gg/lancedb)
+
+---
+
+## Version History
+
+- **v1.0** (Current): Initial production release
+  - Full table discovery and schema introspection
+  - Vector search and full scan support
+  - Apache Arrow format parsing
+  - Batch processing and pagination
+  - Incremental read support
+
+---
+
+## License
+
+This connector is part of the Lakeflow Community Connectors project.
