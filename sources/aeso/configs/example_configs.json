@@ -1,0 +1,36 @@
+{
+  "_description": "Example AESO connector configurations",
+  
+  "default": {
+    "api_key": "YOUR_API_KEY",
+    "_note": "Uses defaults: 30 days history, 24h lookback"
+  },
+  
+  "full_year": {
+    "api_key": "YOUR_API_KEY",
+    "start_date": "2024-01-01",
+    "lookback_hours": 24,
+    "_note": "Full 2024 data, hourly schedule"
+  },
+  
+  "multi_year": {
+    "api_key": "YOUR_API_KEY",
+    "start_date": "2022-01-01",
+    "lookback_hours": 72,
+    "_note": "3 years history, extended lookback"
+  },
+  
+  "real_time_15min": {
+    "api_key": "YOUR_API_KEY",
+    "start_date": "2024-11-01",
+    "lookback_hours": 6,
+    "_note": "For 15-minute schedule, shorter lookback"
+  },
+  
+  "_notes": {
+    "start_date": "YYYY-MM-DD format. Omit for 30 days ago default",
+    "lookback_hours": "Match to schedule: 6h for 15min, 24h for hourly, 72h for daily",
+    "end_date": "Automatic - always fetches to current date"
+  }
+}
+
