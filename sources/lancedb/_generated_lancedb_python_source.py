@@ -205,9 +205,7 @@ def register_lakeflow_source(spark):
     from abc import ABC, abstractmethod
     from typing import Dict, List, Iterator, Any, Optional, Callable
     from urllib.parse import quote, urljoin
-
     import pyarrow
-    import pyarrow.ipc  # noqa: F401
     import requests
     from pydantic import BaseModel, Field, ConfigDict, field_validator
     from pyspark.sql.types import (
