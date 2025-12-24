@@ -430,9 +430,14 @@ def register_lakeflow_source(spark):
             # Build schema fields
             schema_fields = []
 
-            # Add dimension fields (all dimensions are strings)
+            # Add dimension fields
+            # Date-related dimensions use DateType, others use StringType
+            date_dimensions = ["date", "firstSessionDate", "dateHour", "dateHourMinute"]
             for dim in dimensions:
-                schema_fields.append(StructField(dim, StringType(), True))
+                if dim in date_dimensions:
+                    schema_fields.append(StructField(dim, DateType(), True))
+                else:
+                    schema_fields.append(StructField(dim, StringType(), True))
 
             # Add metric fields with proper types based on metadata
             for metric in metrics:
@@ -653,15 +658,21 @@ def register_lakeflow_source(spark):
                             dimension_values[i]["value"] if i < len(dimension_values) else None
                         )
 
-                        # Parse date dimension from YYYYMMDD to YYYY-MM-DD for easier handling
-                        if dim_name == "date" and dim_value and len(dim_value) == 8:
+                        # Parse date dimensions from YYYYMMDD to date object
+                        if dim_name in ["date", "firstSessionDate"] and dim_value and len(dim_value) == 8:
                             try:
-                                parsed_date = f"{dim_value[0:4]}-{dim_value[4:6]}-{dim_value[6:8]}"
-                                record[dim_name] = parsed_date
+                                # Convert YYYYMMDD to datetime.date object
+                                year = int(dim_value[0:4])
+                                month = int(dim_value[4:6])
+                                day = int(dim_value[6:8])
+                                date_obj = datetime(year, month, day).date()
+                                record[dim_name] = date_obj
 
-                                # Track max date for cursor
-                                if max_date is None or parsed_date > max_date:
-                                    max_date = parsed_date
+                                # Track max date for cursor (as string for comparison)
+                                if dim_name == "date":
+                                    date_str = dim_value  # Keep original YYYYMMDD for comparison
+                                    if max_date is None or date_str > max_date:
+                                        max_date = f"{year:04d}-{month:02d}-{day:02d}"
                             except (ValueError, IndexError):
                                 record[dim_name] = dim_value
                         else:
