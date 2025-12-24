@@ -26,6 +26,11 @@ source_name = "google_analytics_aggregated"
 #             ├── metrics (required): JSON array of metric names, e.g., '["activeUsers", "sessions"]'
 #             └── primary_keys (required): List of dimension names that form the composite key
 #                                          Must match all dimensions in your report
+#                                          TODO: This is redundant (should be automatic from dimensions)
+#                                          but required due to architectural limitation in
+#                                          ingestion_pipeline.py where metadata is retrieved
+#                                          before table configs are available. See connector
+#                                          code for detailed fix requirements.
 #             ├── start_date (optional): Initial date range start (default: "30daysAgo")
 #             ├── lookback_days (optional): Days to look back on incremental reads (default: 3)
 #             ├── page_size (optional): Records per API request (default: 10000, max: 100000)

@@ -391,6 +391,32 @@ class LakeflowConnect:
         if not isinstance(dimensions, list):
             raise ValueError("'dimensions' must be a JSON array of strings")
 
+        # TODO: UX IMPROVEMENT - Remove need to explicitly specify primary_keys
+        #
+        # ARCHITECTURAL ISSUE: The ingestion pipeline calls _get_table_metadata() BEFORE
+        # table configurations are available (line 124 in ingestion_pipeline.py). The 
+        # metadata call only passes table names via tableNameList, not table_options.
+        #
+        # For Google Analytics Aggregated, primary_keys are derived FROM dimensions 
+        # (in table_options), so read_table_metadata() receives empty table_options 
+        # and returns empty primary_keys, causing "APPLY CHANGES query requires at 
+        # least one join key" errors.
+        #
+        # FIX REQUIRED in ingestion_pipeline.py:
+        # 1. Get table configurations before metadata retrieval (before line 124):
+        #      table_configs = {t: spec.get_table_configuration(t) for t in table_list}
+        # 2. Pass table_configs to _get_table_metadata():
+        #      metadata = _get_table_metadata(spark, connection_name, table_list, table_configs)
+        # 3. Modify _get_table_metadata() to call metadata per-table with .options(**table_config):
+        #      df = spark.read.format("lakeflow_connect")
+        #            .option("databricks.connection", connection_name)
+        #            .option("tableName", "_lakeflow_metadata")
+        #            .option("tableNameList", table_name)  # Single table
+        #            .options(**table_config)  # Include table-specific options!
+        #            .load()
+        #
+        # Until fixed, users MUST explicitly specify primary_keys in table_configuration.
+        #
         # Primary keys are all dimensions (composite key)
         primary_keys = dimensions if dimensions else []
 

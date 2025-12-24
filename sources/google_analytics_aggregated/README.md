@@ -150,6 +150,16 @@ The connector defines the ingestion mode and primary key dynamically based on th
 - **`snapshot`**: Used when no `date` dimension is present. The entire report is refreshed on each sync.
 
 **Primary Key Logic**:
+<!-- TODO: UX IMPROVEMENT - This requirement should be removed in future versions -->
+<!-- ARCHITECTURAL ISSUE: The ingestion pipeline calls _get_table_metadata() before -->
+<!-- table configurations are available (ingestion_pipeline.py line 124). Since GA4's -->
+<!-- primary_keys are derived FROM dimensions (in table_options), the connector receives -->
+<!-- empty table_options and returns empty primary_keys, causing "APPLY CHANGES query -->
+<!-- requires at least one join key" errors. -->
+<!-- -->
+<!-- FIX: Modify ingestion_pipeline.py to retrieve table configs before metadata and -->
+<!-- pass them to _get_table_metadata() with .options(**table_config). -->
+<!-- Until fixed, primary_keys MUST be explicitly specified. -->
 - The primary key **must be explicitly defined** in `table_configuration` as `primary_keys`.
 - It should be set to the **list of all dimensions** in your report (in the same order).
 - Example: If dimensions are `["date", "country"]`, set `"primary_keys": ["date", "country"]`.
@@ -162,7 +172,7 @@ Table-specific options are passed via the pipeline spec under `table_configurati
 |--------|------|----------|---------|-------------|
 | `dimensions` | string (JSON array) | yes | N/A | List of dimension names as a JSON string (e.g., `"[\"date\", \"country\"]"`). Up to 9 dimensions. |
 | `metrics` | string (JSON array) | yes | N/A | List of metric names as a JSON string (e.g., `"[\"activeUsers\", \"sessions\"]"`). At least 1 metric required, up to 10 metrics. |
-| `primary_keys` | array | yes | N/A | List of dimension names forming the composite key (e.g., `["date", "country"]`). **Must exactly match all dimensions** in your report. |
+| `primary_keys` | array | yes | N/A | List of dimension names forming the composite key (e.g., `["date", "country"]`). **Must exactly match all dimensions** in your report. <!-- TODO: Remove this redundant requirement --> |
 | `start_date` | string | no | `"30daysAgo"` | Initial start date for first sync. Can be YYYY-MM-DD format or relative like `"30daysAgo"`, `"7daysAgo"`, `"yesterday"`. |
 | `lookback_days` | string | no | `"3"` | Number of days to look back for incremental syncs (accounts for data processing delays). |
 | `dimension_filter` | string (JSON object) | no | null | Filter expression for dimensions as a JSON string (see Google Analytics Data API documentation for filter syntax). |
