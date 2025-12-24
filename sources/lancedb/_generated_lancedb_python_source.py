@@ -1271,6 +1271,15 @@ class LakeflowConnect(BaseVectorDBConnector):
             response = self._make_request(method, endpoint, json_data, params)
             records = self._parse_query_response(response)
 
+            # Filter columns if specified (LanceDB API doesn't support column selection)
+            if options.columns:
+                # Keep only specified columns
+                filtered_records = []
+                for record in records:
+                    filtered_record = {k: v for k, v in record.items() if k in options.columns}
+                    filtered_records.append(filtered_record)
+                records = filtered_records
+
             # Yield records
             for record in records:
                 # Track max cursor value
