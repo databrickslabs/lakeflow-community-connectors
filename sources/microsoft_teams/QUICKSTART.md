@@ -118,14 +118,21 @@ databricks connections create \
 1. Navigate to **Catalog** → **Connections**
 2. Click **Create connection**
 3. Select **Lakeflow Community Connector**
-4. Choose **Microsoft Teams** (or **Add Community Connector** if not listed)
-5. Configure connection options:
+4. On **Step 1: Connection basics**:
    - **Name**: `microsoft_teams_connection`
-   - **Source Name**: `microsoft_teams`
-   - **Tenant ID**: Your Azure AD tenant ID
-   - **Client ID**: Your application client ID
-   - **Client Secret**: Your client secret
-   - **External Options Allow List**: `team_id,channel_id,top,max_pages_per_batch,lookback_seconds,start_date`
+   - Click **Next**
+5. On **Step 2: Connection details**:
+   - **Source name**: `microsoft_teams`
+   - **Additional Options** - Add these key-value pairs:
+
+   | Key | Value |
+   |-----|-------|
+   | `tenant_id` | Your Azure AD tenant ID (e.g., `12345678-1234-1234-1234-123456789abc`) |
+   | `client_id` | Your application client ID (e.g., `87654321-4321-4321-4321-cba987654321`) |
+   | `client_secret` | Your client secret value (e.g., `abc123~DEF456_ghi789`) |
+   | `externalOptionsAllowList` | `team_id,channel_id,top,max_pages_per_batch,lookback_seconds,start_date` |
+
+6. Click **Create connection**
 
 **IMPORTANT:** The `externalOptionsAllowList` must include all table-specific options that will be used in pipeline specs.
 
