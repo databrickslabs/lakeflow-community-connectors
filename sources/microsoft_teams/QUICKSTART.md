@@ -136,131 +136,141 @@ databricks connections create \
 
 **IMPORTANT:** The `externalOptionsAllowList` must include all table-specific options that will be used in pipeline specs.
 
-**✅ Connection created!** Databricks will automatically create a pipeline for this connection.
+**✅ Connection created!**
 
 ---
 
-## Part 3: Configure Your Pipeline
+## Part 3: Create Ingestion Pipeline
 
-**Time: 5 minutes**
+**Time: 5-10 minutes**
 
-After creating the connection, Databricks will create a pipeline with a file called `ingest.py` that has template code. You need to edit this file to specify which tables to ingest.
+After creating the Unity Catalog connection, you need to create a pipeline to actually ingest data.
 
-### Step 1: Edit the Pipeline Configuration
+### Option A: Use Databricks Lakeflow UI (Recommended)
 
-1. **Open your pipeline** in Databricks (it should be named `microsoft_teams_connection_pipeline`)
-2. **Click on the `ingest.py` file** to edit it
-3. **Find the `pipeline_spec` section** (around line 40)
-4. **Replace the entire `pipeline_spec` dictionary** with this simple configuration:
+1. Navigate to **Catalog** → **Connections**
+2. Click on your `microsoft_teams_connection`
+3. Follow Databricks' UI to create an ingestion pipeline
+   - The exact UI flow depends on your Databricks workspace version
+   - You'll select which table(s) to ingest (start with `teams`)
+   - Databricks will generate the pipeline code for you
+
+### Option B: Create Pipeline Manually
+
+If you prefer to create the pipeline manually, use Delta Live Tables (DLT):
+
+**1. Create a new notebook or Python file called `microsoft_teams_ingestion.py`**
+
+**2. Add this code:**
 
 ```python
-pipeline_spec = {
-    "connection_name": "microsoft_teams_connection",
-    "objects": [
-        {
-            "table": {
-                "source_table": "teams"
-            }
-        }
-    ]
-}
+import dlt
+from pyspark.sql import DataFrame
+
+# Ingest teams table (no configuration needed)
+@dlt.table(
+    name="teams",
+    comment="Microsoft Teams - all teams in the organization"
+)
+def teams():
+    return dlt.read_stream(
+        connection="microsoft_teams_connection",
+        format="lakeflow",
+        table="teams"
+    )
 ```
 
-**Important:**
+**3. Create a DLT Pipeline:**
 
-- Remove ALL the template code with `<YOUR_TABLE_NAME>` and `...` (ellipsis)
-- Just use the simple config above
-- The connection credentials are already configured - this just tells it which table to ingest
-- Leave everything else in the file unchanged (the imports and the code at the bottom)
+1. Navigate to **Workflows** → **Delta Live Tables**
+2. Click **Create pipeline**
+3. Configure:
+   - **Pipeline name**: `microsoft_teams_pipeline`
+   - **Source code**: Select the file you just created
+   - **Target schema**: e.g., `main.teams_data`
+   - **Cluster mode**: Your preference
+4. Click **Create** and then **Start**
 
-1. **Save the file**
-2. **Click "Start" to run the pipeline**
-
-### Step 2: Verify the Data
+### Verify the Data
 
 After the pipeline runs successfully, query the ingested data:
 
 ```sql
 -- View your teams
 SELECT id, displayName, description
-FROM teams;
+FROM main.teams_data.teams;
 ```
 
 Copy a `team_id` from the results - you'll need it for the next steps.
 
-### Step 3: Ingest More Tables (Optional)
+---
 
-Once you have team IDs, you can ingest other tables. Edit `ingest.py` again and update the `pipeline_spec`:
+## Part 4: Ingest Additional Tables (Optional)
 
-**To ingest channels:**
+Once you have team IDs from the initial ingestion, you can add more tables to your pipeline.
+
+### Channels Table
+
+Add channels for a specific team:
 
 ```python
-pipeline_spec = {
-    "connection_name": "microsoft_teams_connection",
-    "objects": [
-        {
-            "table": {
-                "source_table": "channels",
-                "table_configuration": {
-                    "team_id": "paste-your-team-id-here"
-                }
-            }
+@dlt.table(
+    name="channels",
+    comment="Microsoft Teams - channels for a specific team"
+)
+def channels():
+    return dlt.read_stream(
+        connection="microsoft_teams_connection",
+        format="lakeflow",
+        table="channels",
+        options={
+            "team_id": "paste-your-team-id-here"
         }
-    ]
-}
+    )
 ```
 
-**To ingest messages:**
+### Messages Table
+
+Add messages for a specific channel:
 
 ```python
-pipeline_spec = {
-    "connection_name": "microsoft_teams_connection",
-    "objects": [
-        {
-            "table": {
-                "source_table": "messages",
-                "table_configuration": {
-                    "team_id": "paste-your-team-id-here",
-                    "channel_id": "paste-your-channel-id-here",
-                    "start_date": "2025-01-01T00:00:00Z"
-                }
-            }
+@dlt.table(
+    name="messages",
+    comment="Microsoft Teams - messages from a channel"
+)
+def messages():
+    return dlt.read_stream(
+        connection="microsoft_teams_connection",
+        format="lakeflow",
+        table="messages",
+        options={
+            "team_id": "paste-your-team-id-here",
+            "channel_id": "paste-your-channel-id-here",
+            "start_date": "2025-01-01T00:00:00Z"
         }
-    ]
-}
+    )
 ```
 
-**To ingest multiple tables at once:**
+### Chats Table
+
+Add all accessible chats:
 
 ```python
-pipeline_spec = {
-    "connection_name": "microsoft_teams_connection",
-    "objects": [
-        {
-            "table": {
-                "source_table": "teams"
-            }
-        },
-        {
-            "table": {
-                "source_table": "channels",
-                "table_configuration": {
-                    "team_id": "paste-your-team-id-here"
-                }
-            }
-        },
-        {
-            "table": {
-                "source_table": "chats"
-            }
-        }
-    ]
-}
+@dlt.table(
+    name="chats",
+    comment="Microsoft Teams - all accessible chats"
+)
+def chats():
+    return dlt.read_stream(
+        connection="microsoft_teams_connection",
+        format="lakeflow",
+        table="chats"
+    )
 ```
 
 ---
 
-## Part 4: Verify Your Data
+## Part 5: Query Your Data
 
 Query your ingested data:
 
