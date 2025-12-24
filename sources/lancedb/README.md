@@ -212,8 +212,24 @@ When reading from a specific table, you can customize the behavior with these op
 | `use_full_scan` | boolean | true | Enable full table scan (generates dummy vector if needed) |
 | `query_vector` | array | null | Vector for similarity search (list of floats) |
 | `filter_expression` | string | null | SQL-like filter expression |
-| `columns` | array | null | Specific columns to retrieve |
+| `include_columns` | array | null | **List of columns to include** (all others excluded) |
+| `exclude_columns` | array | null | **List of columns to exclude** (all others included) |
 | `cursor_field` | string | null | Field to use for incremental reads |
+
+### Column Selection (Special Fields)
+
+The `include_columns` and `exclude_columns` options are **special fields** processed by the connector **before** sending data to Spark. This means:
+
+✅ **Reduced network bandwidth** - Only selected columns transferred from LanceDB  
+✅ **Lower memory usage** - Less data loaded into driver memory  
+✅ **Faster processing** - Smaller datasets processed by Spark workers  
+✅ **Cost savings** - Less compute and storage overhead
+
+**Important Notes:**
+- Use `include_columns` OR `exclude_columns`, not both
+- If `include_columns` is specified, only those columns are returned
+- If `exclude_columns` is specified, all columns except those are returned
+- Column filtering is applied to both schema and data
 
 ### Examples
 
@@ -222,6 +238,24 @@ When reading from a specific table, you can customize the behavior with these op
 {
   "batch_size": "1000",
   "use_full_scan": "true"
+}
+```
+
+**Exclude Large Binary Columns (e.g., images):**
+```json
+{
+  "batch_size": "1000",
+  "use_full_scan": "true",
+  "exclude_columns": ["image_bytes", "thumbnail"]
+}
+```
+
+**Include Only Specific Columns:**
+```json
+{
+  "batch_size": "1000",
+  "use_full_scan": "true",
+  "include_columns": ["id", "name", "vector", "created_at"]
 }
 ```
 
