@@ -146,41 +146,59 @@ You should see:
 
 ---
 
-## Part 3: Create Your First Pipeline
+## Part 3: Configure Your Pipeline
 
 **Time: 5 minutes**
 
-### Step 1: Find Your Team IDs
+After creating the connection, Databricks will create a pipeline with a file called `ingest.py` that has template code. You need to edit this file to specify which tables to ingest.
 
-First, ingest the teams table to get team IDs:
+### Step 1: Edit the Pipeline Configuration
+
+1. **Open your pipeline** in Databricks (it should be named `microsoft_teams_connection_pipeline`)
+2. **Click on the `ingest.py` file** to edit it
+3. **Find the `pipeline_spec` section** (around line 40)
+4. **Replace the entire `pipeline_spec` dictionary** with this simple configuration:
 
 ```python
-# Create a pipeline to ingest teams
 pipeline_spec = {
     "connection_name": "microsoft_teams_connection",
     "objects": [
         {
             "table": {
-                "source_table": "teams",
-                "destination_catalog": "main",
-                "destination_schema": "teams_data",
-                "destination_table": "teams"
+                "source_table": "teams"
             }
         }
     ]
 }
 ```
 
-After running, query to find your team IDs:
+**Important:**
+
+- Remove ALL the template code with `<YOUR_TABLE_NAME>` and `...` (ellipsis)
+- Just use the simple config above
+- The connection credentials are already configured - this just tells it which table to ingest
+- Leave everything else in the file unchanged (the imports and the code at the bottom)
+
+1. **Save the file**
+2. **Click "Start" to run the pipeline**
+
+### Step 2: Verify the Data
+
+After the pipeline runs successfully, query the ingested data:
 
 ```sql
+-- View your teams
 SELECT id, displayName, description
-FROM main.teams_data.teams;
+FROM teams;
 ```
 
-### Step 2: Ingest Channels from a Team
+Copy a `team_id` from the results - you'll need it for the next steps.
 
-Using a team_id from step 1:
+### Step 3: Ingest More Tables (Optional)
+
+Once you have team IDs, you can ingest other tables. Edit `ingest.py` again and update the `pipeline_spec`:
+
+**To ingest channels:**
 
 ```python
 pipeline_spec = {
@@ -189,10 +207,8 @@ pipeline_spec = {
         {
             "table": {
                 "source_table": "channels",
-                "destination_catalog": "main",
-                "destination_schema": "teams_data",
                 "table_configuration": {
-                    "team_id": "YOUR_TEAM_ID_HERE"
+                    "team_id": "paste-your-team-id-here"
                 }
             }
         }
@@ -200,9 +216,7 @@ pipeline_spec = {
 }
 ```
 
-### Step 3: Ingest Messages (CDC Mode)
-
-Ingest messages from a specific channel with incremental loading:
+**To ingest messages:**
 
 ```python
 pipeline_spec = {
@@ -211,13 +225,39 @@ pipeline_spec = {
         {
             "table": {
                 "source_table": "messages",
-                "destination_catalog": "main",
-                "destination_schema": "teams_data",
                 "table_configuration": {
-                    "team_id": "YOUR_TEAM_ID",
-                    "channel_id": "YOUR_CHANNEL_ID",
+                    "team_id": "paste-your-team-id-here",
+                    "channel_id": "paste-your-channel-id-here",
                     "start_date": "2025-01-01T00:00:00Z"
                 }
+            }
+        }
+    ]
+}
+```
+
+**To ingest multiple tables at once:**
+
+```python
+pipeline_spec = {
+    "connection_name": "microsoft_teams_connection",
+    "objects": [
+        {
+            "table": {
+                "source_table": "teams"
+            }
+        },
+        {
+            "table": {
+                "source_table": "channels",
+                "table_configuration": {
+                    "team_id": "paste-your-team-id-here"
+                }
+            }
+        },
+        {
+            "table": {
+                "source_table": "chats"
             }
         }
     ]
