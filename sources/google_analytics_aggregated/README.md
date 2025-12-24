@@ -131,11 +131,75 @@ The connection can also be created using the standard Unity Catalog API.
 
 ## Supported Objects
 
-The Google Analytics Aggregated Data connector supports **user-defined custom reports** with flexible naming:
+The Google Analytics Aggregated Data connector supports **two ways to define reports**:
 
-- **Any table name** - You define custom report names (e.g., `traffic_by_country`, `engagement_by_device`)
+### 1. Prebuilt Reports (Recommended for Common Use Cases)
+
+The connector includes predefined report configurations for common analytics needs. These reports require minimal configuration—just specify the report name and optionally override defaults.
+
+**Available Prebuilt Reports:**
+
+| Report Name | Description | Dimensions | Metrics |
+|-------------|-------------|------------|---------|
+| `traffic_by_country` | Daily active users, sessions, and page views by country | `date`, `country` | `activeUsers`, `sessions`, `screenPageViews` |
+
+**Benefits:**
+- ✅ Quick setup with single parameter
+- ✅ Consistent report definitions
+- ✅ Easy to get started
+- ✅ Can override any setting (date ranges, filters, etc.)
+
+**Example using prebuilt report:**
+```json
+{
+  "table": {
+    "source_table": "my_traffic_report",
+    "table_configuration": {
+      "prebuilt_report": "traffic_by_country"
+    }
+  }
+}
+```
+
+**Example with overrides:**
+```json
+{
+  "table": {
+    "source_table": "last_7_days_traffic",
+    "table_configuration": {
+      "prebuilt_report": "traffic_by_country",
+      "start_date": "7daysAgo",
+      "lookback_days": "1"
+    }
+  }
+}
+```
+
+> **Note**: More prebuilt reports can be added to `prebuilt_reports.json` as needed. You can also request additional common reports to be included.
+
+### 2. Custom Reports (For Specific Needs)
+
+For reports not covered by prebuilt options, you can manually configure dimensions, metrics, and other settings:
+
+- **Any table name** - You define custom report names (e.g., `engagement_by_device`, `conversion_funnel`)
 - Each report is configured with specific dimensions and metrics via `table_configuration`
 - Multiple reports can be ingested in a single pipeline as long as each has a unique name
+
+**Example custom report:**
+```json
+{
+  "table": {
+    "source_table": "engagement_by_device",
+    "table_configuration": {
+      "dimensions": "[\"date\", \"deviceCategory\"]",
+      "metrics": "[\"activeUsers\", \"engagementRate\"]",
+      "primary_keys": ["date", "deviceCategory"],
+      "start_date": "30daysAgo",
+      "lookback_days": "3"
+    }
+  }
+}
+```
 
 ### Object summary, primary keys, and ingestion mode
 
@@ -166,7 +230,20 @@ The connector defines the ingestion mode and primary key dynamically based on th
 
 ### Required and optional table options
 
-Table-specific options are passed via the pipeline spec under `table_configuration` in `objects`. All options for custom reports:
+Table-specific options are passed via the pipeline spec under `table_configuration` in `objects`. 
+
+**For Prebuilt Reports:**
+
+| Option | Type | Required | Default | Description |
+|--------|------|----------|---------|-------------|
+| `prebuilt_report` | string | yes | N/A | Name of the prebuilt report to use (e.g., `"traffic_by_country"`). |
+| `start_date` | string | no | `"30daysAgo"` | Override the default start date for first sync. |
+| `lookback_days` | string | no | `"3"` | Override the default lookback window. |
+| `dimension_filter` | string (JSON object) | no | null | Add filter expression for dimensions. |
+| `metric_filter` | string (JSON object) | no | null | Add filter expression for metrics. |
+| `page_size` | string | no | `"10000"` | Override the default page size. |
+
+**For Custom Reports:**
 
 | Option | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
@@ -180,8 +257,9 @@ Table-specific options are passed via the pipeline spec under `table_configurati
 | `page_size` | string | no | `"10000"` | Number of rows per API request (max 100,000). |
 
 > **Important**: 
-> - `dimensions`, `metrics`, and filter options must be provided as **JSON strings** (e.g., `"[\"date\", \"country\"]"`)
-> - `primary_keys` is a **native array** (e.g., `["date", "country"]`)
+> - For **prebuilt reports**: Only specify `prebuilt_report` name, other settings are optional overrides
+> - For **custom reports**: `dimensions`, `metrics`, and filter options must be provided as **JSON strings** (e.g., `"[\"date\", \"country\"]"`)
+> - `primary_keys` is a **native array** (e.g., `["date", "country"]`) and only required for custom reports
 > - All other options are regular strings (e.g., `"30daysAgo"`, `"3"`)
 
 ### Common Dimensions and Metrics
@@ -270,9 +348,9 @@ Use the Lakeflow Community Connector UI to copy or reference the Google Analytic
 In your pipeline code, configure a `pipeline_spec` that references:
 
 - A **Unity Catalog connection** that uses this Google Analytics Aggregated connector.
-- One or more **custom reports** to ingest, each with a unique name and `table_configuration` specifying dimensions and metrics.
+- One or more **reports** to ingest (prebuilt or custom), each with a unique name and `table_configuration`.
 
-Example `pipeline_spec` for multiple reports:
+Example `pipeline_spec` mixing prebuilt and custom reports:
 
 ```json
 {
@@ -282,11 +360,7 @@ Example `pipeline_spec` for multiple reports:
       "table": {
         "source_table": "traffic_by_country",
         "table_configuration": {
-          "dimensions": "[\"date\", \"country\"]",
-          "metrics": "[\"activeUsers\", \"sessions\", \"screenPageViews\"]",
-          "primary_keys": ["date", "country"],
-          "start_date": "30daysAgo",
-          "lookback_days": "3"
+          "prebuilt_report": "traffic_by_country"
         }
       }
     },
@@ -308,13 +382,10 @@ Example `pipeline_spec` for multiple reports:
 
 - `connection_name` must point to the UC connection configured with your GA4 `property_id` and `credentials_json`.
 - For each report:
-  - `source_table` - Give each report a **unique, descriptive name** (e.g., `traffic_by_country`, `engagement_by_device`)
-  - `table_configuration` contains:
-    - `dimensions` - JSON string array of dimension names (e.g., `"[\"date\", \"country\"]"`)
-    - `metrics` - JSON string array of metric names (e.g., `"[\"activeUsers\", \"sessions\"]"`)
-    - `primary_keys` - **Native array** that must exactly match all dimensions (e.g., `["date", "country"]`)
-    - `start_date` - Initial backfill date (optional, defaults to "30daysAgo")
-    - `lookback_days` - Incremental sync lookback window (optional, defaults to 3)
+  - `source_table` - Give each report a **unique, descriptive name**
+  - `table_configuration` contains **either**:
+    - **Prebuilt**: Just `"prebuilt_report": "report_name"` with optional overrides
+    - **Custom**: `dimensions`, `metrics`, `primary_keys`, and other settings
   
 > **Note**: Each report must have a unique `source_table` name to avoid conflicts in the ingestion pipeline.
 
@@ -331,9 +402,10 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 
 ### Best Practices
 
+- **Start with prebuilt reports**: Use prebuilt reports for common use cases to reduce configuration complexity.
 - **Use descriptive report names**: Give each report a unique, descriptive `source_table` name (e.g., `traffic_by_country`, `campaign_performance`) that clearly indicates what data it contains.
 - **Multiple reports in one pipeline**: You can configure multiple reports in a single pipeline spec - just ensure each has a unique `source_table` name.
-- **Start with common dimensions**: Begin with `date` and one or two other dimensions (e.g., `country`, `deviceCategory`) to validate the setup.
+- **Start with common dimensions**: For custom reports, begin with `date` and one or two other dimensions (e.g., `country`, `deviceCategory`) to validate the setup.
 - **Use incremental sync**: Always include the `date` dimension for time-series data to enable efficient incremental syncs.
 - **Set appropriate lookback**: Use `lookback_days` of 3-7 to account for Google Analytics data processing delays (data is typically finalized within 24-48 hours).
 - **Monitor quotas**: Google Analytics enforces API quotas (25,000 tokens/day, 5,000 tokens/hour per property). Plan your sync frequency accordingly.
@@ -341,23 +413,33 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 
 ### Example Configurations
 
-**Example 1: Traffic by date and country**
+**Example 1: Prebuilt report (simplest)**
 ```json
 {
   "table": {
-    "source_table": "traffic_by_country",
+    "source_table": "my_traffic_report",
     "table_configuration": {
-      "dimensions": "[\"date\", \"country\"]",
-      "metrics": "[\"activeUsers\", \"sessions\", \"screenPageViews\"]",
-      "primary_keys": ["date", "country"],
-      "start_date": "30daysAgo",
-      "lookback_days": "3"
+      "prebuilt_report": "traffic_by_country"
     }
   }
 }
 ```
 
-**Example 2: Device and browser breakdown**
+**Example 2: Prebuilt report with overrides**
+```json
+{
+  "table": {
+    "source_table": "last_7_days_traffic",
+    "table_configuration": {
+      "prebuilt_report": "traffic_by_country",
+      "start_date": "7daysAgo",
+      "lookback_days": "1"
+    }
+  }
+}
+```
+
+**Example 3: Custom report - Device and browser breakdown**
 ```json
 {
   "table": {
@@ -373,7 +455,7 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 }
 ```
 
-**Example 3: Campaign performance**
+**Example 4: Custom report - Campaign performance**
 ```json
 {
   "table": {
@@ -389,7 +471,7 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 }
 ```
 
-**Example 4: Page performance (snapshot)**
+**Example 5: Custom report - Page performance (snapshot)**
 ```json
 {
   "table": {
