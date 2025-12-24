@@ -15,9 +15,9 @@ source_name = "google_analytics_aggregated"
 #
 # TWO WAYS TO DEFINE REPORTS:
 #
-# 1. PREBUILT REPORTS (Recommended - Simplest!)
+# 1. PREBUILT REPORTS (Simplest)
 #    - Use the prebuilt report name as the source_table
-#    - NO table_configuration needed!
+#    - No table_configuration needed
 #    - Dimensions, metrics, and primary_keys are automatically configured
 #    - Available reports: traffic_by_country
 #    - Can override any settings (start_date, lookback_days, filters, etc.)
@@ -65,11 +65,11 @@ source_name = "google_analytics_aggregated"
 
 # Define your reports (mix of prebuilt and custom)
 reports = [
-    # Example 1: Prebuilt report - Use report name as source_table (NO table_configuration needed!)
+    # Example 1: Prebuilt report - Use report name as source_table (No table_configuration needed)
     {
         "table": {
             "source_table": "traffic_by_country",  # Matches prebuilt report name
-            # No table_configuration needed - dimensions, metrics, and primary_keys are automatic!
+            # No table_configuration needed - dimensions, metrics, and primary_keys are automatic
             # Optionally override defaults like start_date, lookback_days, filters:
             # "table_configuration": {
             #     "start_date": "90daysAgo",
@@ -133,7 +133,7 @@ pipeline_spec = {
 # =============================================================================
 # - traffic_by_country: Daily active users, sessions, and page views by country
 #
-# To use a prebuilt report, just use its name as the source_table!
+# To use a prebuilt report, just use its name as the source_table
 # No need to specify dimensions, metrics, or primary_keys - it's all automatic.
 #
 # RESERVED NAMES: Prebuilt report names are "reserved" to enable zero-config usage.
