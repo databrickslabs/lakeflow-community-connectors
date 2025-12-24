@@ -151,6 +151,12 @@ Before using this connector, you need:
 | `api_key` | string | Your LanceDB Cloud API key | `sk_abc123...` |
 | `project_name` | string | Your LanceDB project/database name | `my-project-xyz` |
 | `region` | string | Cloud region where your project is hosted | `us-east-1` |
+| `externalOptionsAllowList` | string | Comma-separated list of table-specific options that can be passed through. **Required** for this connector. | `columns,use_full_scan,batch_size,query_vector,filter_expression,cursor_field` |
+
+The full list of supported table-specific options for `externalOptionsAllowList` is:
+`columns,use_full_scan,batch_size,query_vector,filter_expression,cursor_field`
+
+> **Note**: Table-specific options such as `columns`, `use_full_scan`, or `filter_expression` are **not** connection parameters. They are provided per-table via table options in the pipeline specification. These option names must be included in `externalOptionsAllowList` for the connection to allow them.
 
 ### Configuration Example
 
@@ -158,7 +164,8 @@ Before using this connector, you need:
 {
   "api_key": "sk_abc123def456...",
   "project_name": "my-lancedb-project",
-  "region": "us-east-1"
+  "region": "us-east-1",
+  "externalOptionsAllowList": "columns,use_full_scan,batch_size,query_vector,filter_expression,cursor_field"
 }
 ```
 
@@ -212,24 +219,8 @@ When reading from a specific table, you can customize the behavior with these op
 | `use_full_scan` | boolean | true | Enable full table scan (generates dummy vector if needed) |
 | `query_vector` | array | null | Vector for similarity search (list of floats) |
 | `filter_expression` | string | null | SQL-like filter expression |
-| `include_columns` | array | null | **List of columns to include** (all others excluded) |
-| `exclude_columns` | array | null | **List of columns to exclude** (all others included) |
+| `columns` | array | null | Specific columns to retrieve |
 | `cursor_field` | string | null | Field to use for incremental reads |
-
-### Column Selection (Special Fields)
-
-The `include_columns` and `exclude_columns` options are **special fields** processed by the connector **before** sending data to Spark. This means:
-
-✅ **Reduced network bandwidth** - Only selected columns transferred from LanceDB  
-✅ **Lower memory usage** - Less data loaded into driver memory  
-✅ **Faster processing** - Smaller datasets processed by Spark workers  
-✅ **Cost savings** - Less compute and storage overhead
-
-**Important Notes:**
-- Use `include_columns` OR `exclude_columns`, not both
-- If `include_columns` is specified, only those columns are returned
-- If `exclude_columns` is specified, all columns except those are returned
-- Column filtering is applied to both schema and data
 
 ### Examples
 
@@ -241,21 +232,12 @@ The `include_columns` and `exclude_columns` options are **special fields** proce
 }
 ```
 
-**Exclude Large Binary Columns (e.g., images):**
+**Select Specific Columns:**
 ```json
 {
   "batch_size": "1000",
   "use_full_scan": "true",
-  "exclude_columns": ["image_bytes", "thumbnail"]
-}
-```
-
-**Include Only Specific Columns:**
-```json
-{
-  "batch_size": "1000",
-  "use_full_scan": "true",
-  "include_columns": ["id", "name", "vector", "created_at"]
+  "columns": "[\"id\", \"name\", \"vector\", \"created_at\"]"
 }
 ```
 

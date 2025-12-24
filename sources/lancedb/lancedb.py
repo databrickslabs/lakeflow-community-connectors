@@ -65,9 +65,7 @@ class BaseTableOptions(BaseModel):
         cursor_field: Column name used for incremental reads
         batch_size: Number of rows to fetch per API request (1-10000)
         filter_expression: Optional filter expression (implementation-specific)
-    
-    Note: For column selection, use include_columns/exclude_columns in 
-    subclass implementations (e.g., LanceDBTableOptions).
+        columns: Optional list of specific columns to retrieve
     """
 
     model_config = ConfigDict(extra="allow")  # Allow DB-specific extensions
@@ -83,8 +81,10 @@ class BaseTableOptions(BaseModel):
         description="Rows per batch")
     filter_expression: Optional[str] = Field(
         default=None, description="Filter expression")
+    columns: Optional[List[str]] = Field(
+        default=None, description="Specific columns to retrieve")
 
-    @field_validator("primary_keys")
+    @field_validator("primary_keys", "columns")
     @classmethod
     def validate_column_names(cls,
                               v: Optional[List[str]]) -> Optional[List[str]]:
@@ -580,41 +580,17 @@ class BaseVectorDBConnector(ABC):
 
         Args:
             table_name: Name of the table
-            table_options: Table-specific options (include_columns, exclude_columns supported)
+            table_options: Table-specific options
 
         Returns:
-            Spark StructType representing the schema (filtered if requested)
+            Spark StructType representing the schema
         """
         table_name = self._sanitize_identifier(table_name)
         method, endpoint, json_data, params = self._build_schema_request(
             table_name, table_options
         )
         response = self._make_request(method, endpoint, json_data, params)
-        schema = self._parse_schema_response(response, table_name)
-        
-        # Apply column filtering to schema if include_columns or exclude_columns specified
-        options = LanceDBTableOptions(**table_options)
-        if options.include_columns or options.exclude_columns:
-            original_field_count = len(schema.fields)
-            filtered_fields = []
-            for field in schema.fields:
-                if options.include_columns:
-                    # Only include specified columns
-                    if field.name in options.include_columns:
-                        filtered_fields.append(field)
-                elif options.exclude_columns:
-                    # Exclude specified columns
-                    if field.name not in options.exclude_columns:
-                        filtered_fields.append(field)
-                else:
-                    filtered_fields.append(field)
-            schema = StructType(filtered_fields)
-            logger.info(
-                "Filtered schema for table '%s': %d fields (from %d)",
-                table_name, len(filtered_fields), original_field_count
-            )
-        
-        return schema
+        return self._parse_schema_response(response, table_name)
 
     def read_table_metadata(
         self, table_name: str, table_options: Dict[str, str]
@@ -672,13 +648,6 @@ class LanceDBTableOptions(BaseTableOptions):
     Adds vector database-specific parameters:
     - query_vector: For similarity search
     - use_full_scan: Enable full scans (generates dummy vector if needed)
-    
-    Special fields for column selection (processed by connector):
-    - include_columns: List of column names to include (all others excluded)
-    - exclude_columns: List of column names to exclude (all others included)
-    
-    Note: Column filtering is applied by the connector before returning data
-    to Spark, reducing network bandwidth, memory usage, and processing overhead.
     """
     query_vector: Optional[List[float]] = Field(
         default=None,
@@ -688,28 +657,6 @@ class LanceDBTableOptions(BaseTableOptions):
         default=True,
         description="Enable full scan mode (uses dummy vector if needed)"
     )
-    include_columns: Optional[List[str]] = Field(
-        default=None,
-        description="List of columns to include. If specified, only these columns are returned."
-    )
-    exclude_columns: Optional[List[str]] = Field(
-        default=None,
-        description="List of columns to exclude. If specified, these columns are filtered out."
-    )
-
-    @field_validator("include_columns", "exclude_columns")
-    @classmethod
-    def validate_column_lists(cls, v: Optional[List[str]]) -> Optional[List[str]]:
-        """Validate column names in include_columns and exclude_columns."""
-        if v is None:
-            return v
-        for col in v:
-            if not col.replace("_", "").replace(".", "").isalnum():
-                raise ValueError(
-                    f"Invalid column name '{col}': only alphanumeric, "
-                    "underscore, and dot characters allowed"
-                )
-        return v
 
 
 class LakeflowConnect(BaseVectorDBConnector):
@@ -1004,8 +951,8 @@ class LakeflowConnect(BaseVectorDBConnector):
 
         LanceDB requires a vector parameter for queries.
         
-        Note: The 'columns' parameter is kept for base class compatibility but unused.
-        Use include_columns/exclude_columns in table options instead (processed post-fetch).
+        Note: The 'columns' parameter is not used by LanceDB API.
+        Column filtering is applied post-fetch in read_table().
         """
         endpoint = f"/v1/table/{quote(table_name)}/query/"
 
@@ -1160,7 +1107,7 @@ class LakeflowConnect(BaseVectorDBConnector):
                 offset=current_offset,
                 batch_size=options.batch_size,
                 filter_expr=filter_expr,
-                columns=None,  # Not used - see include_columns/exclude_columns instead
+                columns=options.columns,
                 cursor_value=cursor_value,
                 cursor_field=options.cursor_field,
                 query_vector=options.query_vector,
@@ -1170,19 +1117,11 @@ class LakeflowConnect(BaseVectorDBConnector):
             response = self._make_request(method, endpoint, json_data, params)
             records = self._parse_query_response(response)
 
-            # Apply column filtering based on include_columns/exclude_columns
-            # This is done at the connector level to reduce network bandwidth and memory
-            if options.include_columns or options.exclude_columns:
+            # Filter columns if specified (LanceDB API doesn't support column selection)
+            if options.columns:
                 filtered_records = []
                 for record in records:
-                    if options.include_columns:
-                        # Only include specified columns
-                        filtered_record = {k: v for k, v in record.items() if k in options.include_columns}
-                    elif options.exclude_columns:
-                        # Exclude specified columns
-                        filtered_record = {k: v for k, v in record.items() if k not in options.exclude_columns}
-                    else:
-                        filtered_record = record
+                    filtered_record = {k: v for k, v in record.items() if k in options.columns}
                     filtered_records.append(filtered_record)
                 records = filtered_records
 

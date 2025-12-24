@@ -3,7 +3,7 @@
   "batch_size": "1000",
   "tables": {
     "people": {
-      "exclude_columns": ["image_bytes"]
+      "columns": ["id", "file_name", "gender", "age", "age_group", "race", "vector", "_vector_umap"]
     }
   }
 }
