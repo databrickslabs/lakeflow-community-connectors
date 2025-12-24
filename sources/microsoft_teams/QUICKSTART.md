@@ -114,9 +114,14 @@ After the pipeline is created, you need to edit the `ingest.py` file to configur
 
 1. Open your pipeline `microsoft_teams_ingestion_pipeline`
 2. Click on the `ingest.py` tab to edit it
-3. Replace the generated code with this configuration to ingest the teams table:
+3. Replace the generated code with this configuration:
 
    ```python
+   # Import and register the Microsoft Teams connector
+   from sources.microsoft_teams._generated_microsoft_teams_python_source import register_lakeflow_source
+   register_lakeflow_source(spark)
+
+   # Import the ingestion pipeline
    from pipeline.ingestion_pipeline import ingest
 
    # Pipeline specification - defines which tables to ingest

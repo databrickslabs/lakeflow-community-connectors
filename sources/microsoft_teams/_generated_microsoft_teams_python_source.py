@@ -174,21 +174,13 @@ def register_lakeflow_source(spark):
             """
             Initialize Microsoft Teams connector with OAuth 2.0 credentials.
 
-            Supports two authentication modes:
+            Required options:
+              - tenant_id: Azure AD tenant ID
+              - client_id: Application (client) ID
+              - client_secret: Client secret value
 
-            1. Application Permissions (Client Credentials Flow):
-               Required options:
-                 - tenant_id: Azure AD tenant ID
-                 - client_id: Application (client) ID
-                 - client_secret: Client secret value
-               Use when: Running as service/daemon, requires admin consent
-
-            2. Delegated Permissions (Authorization Code Flow):
-               Required options:
-                 - tenant_id: Azure AD tenant ID
-                 - client_id: Application (client) ID
-                 - refresh_token: User refresh token (from OAuth flow)
-               Use when: No admin consent available, running as specific user
+            Authentication uses the Client Credentials Flow with Application Permissions.
+            Requires admin consent for all permissions.
 
             Raises:
                 ValueError: If required options are missing
@@ -196,32 +188,16 @@ def register_lakeflow_source(spark):
             self.tenant_id = options.get("tenant_id")
             self.client_id = options.get("client_id")
             self.client_secret = options.get("client_secret")
-            self.refresh_token = options.get("refresh_token")
 
-            # Validate required options based on auth mode
-            if not self.tenant_id or not self.client_id:
-                raise ValueError("Missing required options: tenant_id and client_id are required")
-
-            # Determine auth mode
-            if self.client_secret:
-                self.auth_mode = "application"  # Client credentials flow
-                if self.refresh_token:
-                    raise ValueError(
-                        "Cannot specify both client_secret and refresh_token. "
-                        "Use client_secret for application permissions or refresh_token for delegated permissions."
-                    )
-            elif self.refresh_token:
-                self.auth_mode = "delegated"  # Authorization code flow with refresh token
-            else:
+            # Validate required options
+            if not self.tenant_id or not self.client_id or not self.client_secret:
                 raise ValueError(
-                    "Must provide either client_secret (application permissions) "
-                    "or refresh_token (delegated permissions)"
+                    "Missing required options: tenant_id, client_id, and client_secret are required"
                 )
 
             self.base_url = "https://graph.microsoft.com/v1.0"
             self._access_token = None
             self._token_expiry = None
-            self._refresh_token = self.refresh_token  # May be updated on refresh
 
             # Centralized object metadata configuration (following Stripe pattern)
             self._object_config = {
@@ -229,12 +205,14 @@ def register_lakeflow_source(spark):
                     "primary_keys": ["id"],
                     "ingestion_type": "snapshot",
                     "endpoint": "me/joinedTeams",
+                    # Required permission: Team.ReadBasic.All (Application)
                 },
                 "channels": {
                     "primary_keys": ["id"],
                     "ingestion_type": "snapshot",
                     "endpoint": "teams/{team_id}/channels",
                     "requires_parent": ["team_id"],
+                    # Required permission: Channel.ReadBasic.All (Application)
                 },
                 "messages": {
                     "primary_keys": ["id"],
@@ -242,18 +220,21 @@ def register_lakeflow_source(spark):
                     "ingestion_type": "cdc",
                     "endpoint": "teams/{team_id}/channels/{channel_id}/messages",
                     "requires_parent": ["team_id", "channel_id"],
+                    # Required permission: ChannelMessage.Read.All (Application)
                 },
                 "members": {
                     "primary_keys": ["id"],
                     "ingestion_type": "snapshot",
                     "endpoint": "teams/{team_id}/members",
                     "requires_parent": ["team_id"],
+                    # Required permission: TeamMember.Read.All (Application)
                 },
                 "chats": {
                     "primary_keys": ["id"],
                     "cursor_field": "lastUpdatedDateTime",
                     "ingestion_type": "cdc",
                     "endpoint": "me/chats",
+                    # Required permission: Chat.Read.All (Application)
                 },
             }
 
@@ -319,7 +300,7 @@ def register_lakeflow_source(spark):
 
         def _get_access_token(self) -> str:
             """
-            Acquire OAuth 2.0 access token using either client credentials or refresh token flow.
+            Acquire OAuth 2.0 access token using client credentials flow.
 
             The connector automatically refreshes tokens before expiry.
             Tokens are cached and reused until 5 minutes before expiration.
@@ -338,41 +319,27 @@ def register_lakeflow_source(spark):
             ):
                 return self._access_token
 
-            # Request new token based on auth mode
+            # Request new token using client credentials flow
             token_url = (
                 f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/token"
             )
 
-            if self.auth_mode == "application":
-                # Client credentials flow (application permissions)
-                data = {
-                    "client_id": self.client_id,
-                    "client_secret": self.client_secret,
-                    "scope": "https://graph.microsoft.com/.default",
-                    "grant_type": "client_credentials",
-                }
-            else:
-                # Refresh token flow (delegated permissions)
-                data = {
-                    "client_id": self.client_id,
-                    "refresh_token": self._refresh_token,
-                    "scope": "https://graph.microsoft.com/.default",
-                    "grant_type": "refresh_token",
-                }
+            data = {
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "scope": "https://graph.microsoft.com/.default",
+                "grant_type": "client_credentials",
+            }
 
             try:
                 response = requests.post(token_url, data=data, timeout=30)
                 if response.status_code != 200:
                     raise RuntimeError(
-                        f"Token acquisition failed ({self.auth_mode} mode): {response.status_code} {response.text}"
+                        f"Token acquisition failed: {response.status_code} {response.text}"
                     )
 
                 token_data = response.json()
                 self._access_token = token_data["access_token"]
-
-                # Update refresh token if provided (delegated mode)
-                if "refresh_token" in token_data:
-                    self._refresh_token = token_data["refresh_token"]
 
                 # Set expiry 5 minutes before actual expiry for safety
                 expires_in = token_data.get("expires_in", 3600)
