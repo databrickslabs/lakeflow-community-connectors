@@ -136,20 +136,7 @@ databricks connections create \
 
 **IMPORTANT:** The `externalOptionsAllowList` must include all table-specific options that will be used in pipeline specs.
 
-### Step 3: Test the Connection
-
-Test your connection by listing available tables:
-
-```sql
-SHOW TABLES IN microsoft_teams_connection;
-```
-
-You should see:
-- teams
-- channels
-- messages
-- members
-- chats
+**✅ Connection created!** Databricks will automatically create a pipeline for this connection.
 
 ---
 
