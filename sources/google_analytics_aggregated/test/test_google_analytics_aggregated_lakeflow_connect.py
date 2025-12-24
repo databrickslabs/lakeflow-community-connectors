@@ -170,3 +170,88 @@ def test_google_analytics_aggregated_connector():
     print("\n" + "="*50)
     print("ALL TESTS PASSED")
     print("="*50)
+
+    # Test 9: Prebuilt report loading
+    print("\n" + "="*50)
+    print("TEST: Prebuilt report loading")
+    print("="*50)
+    prebuilt_reports = connector._load_prebuilt_reports()
+    assert isinstance(prebuilt_reports, dict), "Prebuilt reports should be a dictionary"
+    assert len(prebuilt_reports) >= 1, "Should have at least one prebuilt report"
+    print(f"✅ PASSED: Loaded {len(prebuilt_reports)} prebuilt reports")
+    print(f"  Available reports: {', '.join(sorted(prebuilt_reports.keys()))}")
+
+    # Test 10: Using prebuilt report
+    print("\n" + "="*50)
+    print("TEST: Using prebuilt report (traffic_by_country)")
+    print("="*50)
+    
+    prebuilt_table_options = {
+        "prebuilt_report": "traffic_by_country"
+    }
+    
+    try:
+        schema = connector.get_table_schema("test_prebuilt", prebuilt_table_options)
+        assert schema is not None, "Schema should not be None"
+        assert len(schema.fields) > 0, "Schema should have fields"
+        print(f"✅ PASSED: Schema generated from prebuilt report")
+        print(f"  Fields ({len(schema.fields)}): {', '.join([f.name for f in schema.fields])}")
+    except Exception as e:
+        print(f"❌ FAILED: {str(e)}")
+        raise
+
+    # Test 11: Prebuilt report with overrides
+    print("\n" + "="*50)
+    print("TEST: Prebuilt report with overrides")
+    print("="*50)
+    
+    override_options = {
+        "prebuilt_report": "traffic_by_country",
+        "start_date": "7daysAgo",
+        "lookback_days": "1"
+    }
+    
+    resolved_options = connector._resolve_table_options(override_options)
+    assert "dimensions" in resolved_options, "Should have dimensions from prebuilt"
+    assert "metrics" in resolved_options, "Should have metrics from prebuilt"
+    assert resolved_options["start_date"] == "7daysAgo", "Should override start_date"
+    assert resolved_options["lookback_days"] == "1", "Should override lookback_days"
+    
+    print(f"✅ PASSED: Prebuilt report with overrides works correctly")
+    print(f"  Base dimensions: {resolved_options['dimensions']}")
+    print(f"  Overridden start_date: {resolved_options['start_date']}")
+
+    # Test 12: Invalid prebuilt report name
+    print("\n" + "="*50)
+    print("TEST: Invalid prebuilt report name")
+    print("="*50)
+    
+    invalid_prebuilt_options = {
+        "prebuilt_report": "nonexistent_report"
+    }
+    
+    try:
+        connector._resolve_table_options(invalid_prebuilt_options)
+        print(f"❌ FAILED: Should have raised ValueError for invalid report name")
+        assert False
+    except ValueError as e:
+        error_msg = str(e)
+        assert "not found" in error_msg, "Error should mention report not found"
+        assert "Available prebuilt reports:" in error_msg, "Error should list available reports"
+        print(f"✅ PASSED: Invalid report name raises clear error")
+        print(f"  Error message (truncated): {error_msg[:80]}...")
+
+    # Test 13: Prebuilt reports caching
+    print("\n" + "="*50)
+    print("TEST: Prebuilt reports caching")
+    print("="*50)
+    
+    reports1 = connector._load_prebuilt_reports()
+    reports2 = connector._load_prebuilt_reports()
+    assert reports1 is reports2, "Should return cached object"
+    print(f"✅ PASSED: Prebuilt reports are cached correctly")
+
+    print("\n" + "="*50)
+    print("ALL TESTS PASSED (INCLUDING PREBUILT REPORTS)")
+    print("="*50)
+
