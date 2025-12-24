@@ -163,6 +163,199 @@ def test_batch_size_validation():
         LanceDBTableOptions(batch_size=100000)
 
 
+def test_column_projection_api_support():
+    """
+    Test if LanceDB API actually supports column projection.
+    
+    This test verifies:
+    1. API honors the 'columns' parameter
+    2. Only requested columns are returned
+    3. LanceDB-added columns (like _distance) are handled correctly
+    
+    If this test fails, it means the fallback post-fetch filtering is NEEDED.
+    If this test passes, the fallback is just defensive programming.
+    """
+    import json
+    
+    # Load configuration
+    parent_dir = Path(__file__).parent.parent
+    config_path = parent_dir / "configs" / "dev_config.json"
+    
+    config = load_config(config_path)
+    connector = LakeflowConnect(config)
+    
+    # Get list of tables
+    tables = connector.list_tables()
+    
+    # Skip if no tables available
+    if not tables:
+        pytest.skip("No tables available for testing")
+    
+    # Use first available table
+    test_table = tables[0]
+    
+    # Get full schema to know available columns
+    full_schema = connector.get_table_schema(test_table, {})
+    all_columns = [field.name for field in full_schema.fields]
+    
+    # Select subset of columns (first 3 columns, or all if less than 3)
+    if len(all_columns) >= 3:
+        requested_columns = all_columns[:3]
+    else:
+        requested_columns = all_columns[:1]  # At least 1 column
+    
+    print(f"\n{'='*70}")
+    print(f"Testing API Column Projection Support")
+    print(f"{'='*70}")
+    print(f"Table: {test_table}")
+    print(f"Available columns: {all_columns}")
+    print(f"Requested columns: {requested_columns}")
+    
+    # Read data with column projection
+    table_options = {
+        "use_full_scan": "true",
+        "batch_size": "10",
+        "columns": json.dumps(requested_columns)
+    }
+    
+    records_iter, _ = connector.read_table(test_table, None, table_options)
+    
+    # Get first record
+    try:
+        first_record = next(records_iter)
+    except StopIteration:
+        pytest.skip(f"Table {test_table} has no data")
+    
+    returned_columns = set(first_record.keys())
+    requested_columns_set = set(requested_columns)
+    
+    print(f"Returned columns: {sorted(returned_columns)}")
+    
+    # LanceDB may add system columns like _distance
+    lancedb_system_columns = {'_distance', '_rowid'}
+    extra_columns = returned_columns - requested_columns_set - lancedb_system_columns
+    
+    # Check if API honored the column projection
+    if extra_columns:
+        print(f"\n{'❌'*35}")
+        print(f"RESULT: API did NOT honor column projection")
+        print(f"{'❌'*35}")
+        print(f"Unexpected columns returned: {extra_columns}")
+        print(f"CONCLUSION: Fallback filtering IS NEEDED")
+        print(f"{'='*70}\n")
+        assert False, (
+            f"LanceDB API returned unexpected columns: {extra_columns}. "
+            f"This means the fallback post-fetch filtering logic is REQUIRED."
+        )
+    else:
+        print(f"\n{'✅'*35}")
+        print(f"RESULT: API honored column projection!")
+        print(f"{'✅'*35}")
+        print(f"Only requested columns (+ system columns) were returned")
+        print(f"CONCLUSION: Fallback filtering is NOT needed")
+        print(f"           (but good to keep for defensive programming)")
+        print(f"{'='*70}\n")
+        
+        # Additional verification: ensure all requested columns are present
+        missing_columns = requested_columns_set - returned_columns
+        assert not missing_columns, (
+            f"LanceDB API didn't return all requested columns. "
+            f"Missing: {missing_columns}"
+        )
+
+
+def test_column_projection_performance():
+    """
+    Test that column projection actually reduces data transfer.
+    
+    Compares record sizes when:
+    1. Reading all columns
+    2. Reading subset of columns
+    
+    Expected: Subset should return fewer columns.
+    """
+    import json
+    
+    parent_dir = Path(__file__).parent.parent
+    config_path = parent_dir / "configs" / "dev_config.json"
+    
+    config = load_config(config_path)
+    connector = LakeflowConnect(config)
+    
+    tables = connector.list_tables()
+    if not tables:
+        pytest.skip("No tables available for testing")
+    
+    # Find a table with multiple columns
+    test_table = None
+    for table in tables:
+        schema = connector.get_table_schema(table, {})
+        if len(schema.fields) >= 3:
+            test_table = table
+            break
+    
+    if not test_table:
+        pytest.skip("No suitable table with enough columns for testing")
+    
+    full_schema = connector.get_table_schema(test_table, {})
+    all_columns = [field.name for field in full_schema.fields]
+    
+    # Select a small subset
+    small_columns = all_columns[:2]
+    
+    print(f"\n{'='*70}")
+    print(f"Testing Column Projection Performance Impact")
+    print(f"{'='*70}")
+    print(f"Table: {test_table}")
+    print(f"Total columns available: {len(all_columns)}")
+    print(f"Columns to request: {len(small_columns)} ({small_columns})")
+    
+    # Test 1: Read all columns
+    all_cols_options = {
+        "use_full_scan": "true",
+        "batch_size": "5"
+    }
+    records_iter, _ = connector.read_table(test_table, None, all_cols_options)
+    try:
+        full_record = next(records_iter)
+        full_record_size = len(full_record)
+    except StopIteration:
+        pytest.skip("Table has no data")
+    
+    # Test 2: Read subset of columns
+    subset_options = {
+        "use_full_scan": "true",
+        "batch_size": "5",
+        "columns": json.dumps(small_columns)
+    }
+    records_iter, _ = connector.read_table(test_table, None, subset_options)
+    subset_record = next(records_iter)
+    subset_record_size = len(subset_record)
+    
+    print(f"\nResults:")
+    print(f"  All columns:    {full_record_size} fields")
+    print(f"  Subset request: {subset_record_size} fields")
+    
+    # Account for system columns
+    lancedb_system_columns = {'_distance', '_rowid'}
+    max_expected = len(small_columns) + len(lancedb_system_columns)
+    
+    # Verify subset is smaller or equal to expected
+    if subset_record_size <= max_expected:
+        reduction = full_record_size - subset_record_size
+        print(f"\n✅ Column projection working!")
+        print(f"   Reduced by {reduction} columns ({reduction/full_record_size*100:.1f}%)")
+        print(f"{'='*70}\n")
+    else:
+        print(f"\n❌ Column projection NOT working!")
+        print(f"   Expected <= {max_expected} columns, got {subset_record_size}")
+        print(f"{'='*70}\n")
+        assert False, (
+            f"Column projection didn't reduce data: "
+            f"expected <= {max_expected}, got {subset_record_size}"
+        )
+
+
 if __name__ == "__main__":
     # Run tests with pytest
     pytest.main([__file__, "-v", "--tb=short"])
