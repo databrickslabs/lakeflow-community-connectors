@@ -13,6 +13,9 @@ This documentation describes how to configure and use the **Google Analytics Agg
   - The service account JSON key file.
 - **Network access**: The environment running the connector must be able to reach `https://analyticsdata.googleapis.com`.
 - **Lakeflow / Databricks environment**: A workspace where you can register a Lakeflow community connector and run ingestion pipelines.
+- **Runtime dependencies**: The connector requires the following Python packages (automatically installed in Databricks/Lakeflow environments):
+  - `requests` - For HTTP API calls
+  - `google-auth` - For service account authentication
 
 ## Setup
 
@@ -202,28 +205,49 @@ Table-specific options are passed via the pipeline spec under `table_configurati
 - `bounceRate` - Bounce rate
 - `sessionsPerUser` - Average sessions per user
 
-For a complete list of available dimensions and metrics, refer to the [Google Analytics Dimensions & Metrics Reference](https://developers.google.com/analytics/devguides/reporting/data/v1/api-schema).
+For a complete list of available dimensions and metrics, refer to the [Google Analytics Dimensions & Metrics Reference](https://developers.google.com/analytics/devguides/reporting/data/v1/api-schema) or query your property's metadata API.
+
+### Discovering Available Dimensions and Metrics
+
+To see all dimensions and metrics available for your specific property (including custom ones):
+
+```bash
+GET https://analyticsdata.googleapis.com/v1beta/properties/{YOUR_PROPERTY_ID}/metadata
+```
+
+This is useful for discovering custom dimensions/metrics defined in your GA4 property.
 
 ### Schema highlights
 
 - **Dynamic Schema**: The schema is generated dynamically based on the requested dimensions and metrics.
-- **Dimension Fields**: All dimensions are returned as `StringType` (as the API returns them).
-- **Metric Fields**: All metrics are returned as `StringType` (the API returns values as strings; parsing happens downstream).
-- **Date Format**: The `date` dimension is automatically converted from YYYYMMDD format to YYYY-MM-DD format for easier handling.
+- **Type Inference**: The connector automatically determines proper data types by querying the Google Analytics metadata API:
+  - **Date Dimensions** (`date`, `firstSessionDate`): `DateType` - Automatically parsed from YYYYMMDD format
+  - **String Dimensions** (all others): `StringType`
+  - **Integer Metrics** (`activeUsers`, `sessions`, etc.): `LongType` (64-bit integer)
+  - **Float Metrics** (`engagementRate`, `bounceRate`, etc.): `DoubleType` (64-bit float)
+- **Validation**: The connector validates that requested dimensions and metrics exist in your property, catching typos and non-existent fields before making data requests.
 
 ## Data Type Mapping
 
-Google Analytics Data API returns all values as strings. The connector preserves this format in the schema:
+The connector automatically infers proper data types using the Google Analytics metadata API:
 
-| GA4 API Type     | Example Fields                  | Connector Type | Notes |
-|------------------|---------------------------------|----------------|-------|
-| Dimension (any)  | country, city, deviceCategory   | StringType     | All dimension values are strings |
-| Date dimension   | date (YYYYMMDD format)          | StringType     | Converted to YYYY-MM-DD format in records |
-| TYPE_INTEGER     | activeUsers, sessions           | StringType     | Returned as string (e.g., "1234") |
-| TYPE_FLOAT       | engagementRate, bounceRate      | StringType     | Returned as string (e.g., "56.78") |
-| TYPE_CURRENCY    | totalRevenue                    | StringType     | Returned as string (e.g., "1234.56") |
+| GA4 API Type     | Example Fields                  | Connector Type | Example Values | Notes |
+|------------------|---------------------------------|----------------|----------------|-------|
+| Dimension (any)  | country, city, deviceCategory   | StringType     | "United States", "desktop" | All non-date dimensions are strings |
+| Date dimension   | date, firstSessionDate          | DateType       | 2025-12-24 | Parsed from YYYYMMDD format (e.g., "20251224" → date(2025, 12, 24)) |
+| TYPE_INTEGER     | activeUsers, sessions, newUsers | LongType       | 1234 | 64-bit integers, parsed from API string responses |
+| TYPE_FLOAT       | engagementRate, bounceRate      | DoubleType     | 56.78 | 64-bit floats, parsed from API string responses |
+| TYPE_CURRENCY    | totalRevenue                    | DoubleType     | 1234.56 | Currency values as floats |
+| TYPE_SECONDS, TYPE_MILLISECONDS | averageSessionDuration | LongType or DoubleType | Varies | Time durations parsed to numeric types |
 
-> **Note**: All metric values are returned as strings from the API. You can parse them to numeric types in your downstream transformations based on the metric type.
+### Type Inference Process
+
+1. **Initialization**: Connector calls the Google Analytics `getMetadata` API once to retrieve type information for all dimensions and metrics in your property
+2. **Caching**: Metadata is cached for the duration of the connector session (no repeated API calls)
+3. **Schema Generation**: When generating a table schema, the connector looks up each metric's type and maps it to the appropriate PySpark type
+4. **Data Parsing**: When reading data, string values from the API are parsed to their target types (integers, floats, dates)
+
+This ensures that your data arrives in Databricks with proper types, ready for analytics without additional transformation.
 
 ## How to Run
 
@@ -380,9 +404,25 @@ Common issues and how to address them:
   - Check that the `property_id` is correct and matches the property where access was granted.
   - Ensure the `credentials_json` is valid and complete.
 
+- **Invalid dimension or metric names**:
+  - **Error message**: `Invalid report configuration: Unknown dimensions: ['contry']`
+  - **Cause**: Typo in dimension or metric name, or the field doesn't exist in your property
+  - **Solution**: 
+    - Check spelling (e.g., `"contry"` should be `"country"`)
+    - Verify the field exists in your property by calling the metadata API:
+      ```
+      GET https://analyticsdata.googleapis.com/v1beta/properties/{YOUR_PROPERTY_ID}/metadata
+      ```
+    - Custom dimensions/metrics must exist in your GA4 property configuration
+  - The connector validates field names before making data requests, catching typos early
+
 - **Invalid dimension/metric combinations (`400 Bad Request`)**:
-  - Not all dimensions and metrics can be combined. Refer to the [Google Analytics compatibility matrix](https://developers.google.com/analytics/devguides/reporting/data/v1/api-schema).
-  - Test with a smaller set of dimensions/metrics first.
+  - Not all dimensions and metrics can be combined due to Google Analytics compatibility rules.
+  - **Example**: Some metrics are session-scoped while others are user-scoped and cannot be mixed
+  - **Solution**:
+    - Refer to the [Google Analytics compatibility matrix](https://developers.google.com/analytics/devguides/reporting/data/v1/api-schema)
+    - Test with a smaller set of dimensions/metrics first
+    - The API error message will indicate which fields are incompatible
 
 - **Rate limiting (`429 Too Many Requests`)**:
   - You've exceeded the API quota (25,000 tokens/day or 5,000 tokens/hour).
@@ -423,14 +463,46 @@ The connector automatically handles rate limiting with exponential backoff and r
 - **Cardinality**: High-cardinality dimensions may result in data aggregation into "(other)" rows.
 - **Read-Only**: This connector only supports reading aggregated data. There is no write functionality.
 
+## Technical Details
+
+### API Usage
+
+The connector uses the following Google Analytics Data API endpoints:
+
+1. **`getMetadata`** (called once during initialization):
+   - Retrieves all available dimensions and metrics for your property
+   - Provides type information for proper schema generation
+   - Enables validation of dimension/metric names
+
+2. **`runReport`** (called for each data sync):
+   - Fetches aggregated report data with specified dimensions and metrics
+   - Handles pagination for large result sets
+   - Supports incremental sync with date-based cursor tracking
+
+### Performance Characteristics
+
+- **Initialization**: ~0.3-0.5 seconds (includes metadata fetch and caching)
+- **Schema generation**: < 0.1 seconds (uses cached metadata)
+- **Data fetching**: Varies by report size (10,000 rows/page, automatic pagination)
+- **Validation**: Zero additional API calls (uses cached metadata)
+
+### Design Decisions
+
+- **Type Inference via `getMetadata`**: See `VALIDATION_RATIONALE.md` for why we use lightweight validation instead of `checkCompatibility` API
+- **Individual Reports vs. Batch**: See `BATCH_RATIONALE.md` for why we use individual `runReport` calls instead of `batchRunReports`
+
 ## References
 
 - Connector implementation: `sources/google_analytics_aggregated/google_analytics_aggregated.py`
 - Connector API documentation: `sources/google_analytics_aggregated/google_analytics_aggregated_api_doc.md`
+- Design decisions:
+  - `VALIDATION_RATIONALE.md` - Why lightweight validation is used
+  - `BATCH_RATIONALE.md` - Why individual reports are used
+  - `TEST_SUMMARY.md` - Comprehensive test results
 - Official Google Analytics Data API documentation:
   - [Google Analytics Data API Overview](https://developers.google.com/analytics/devguides/reporting/data/v1)
+  - [getMetadata Method Reference](https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/getMetadata)
   - [runReport Method Reference](https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runReport)
   - [Creating a Report Guide](https://developers.google.com/analytics/devguides/reporting/data/v1/basics)
   - [Dimensions & Metrics Reference](https://developers.google.com/analytics/devguides/reporting/data/v1/api-schema)
   - [Quotas and Limits](https://developers.google.com/analytics/devguides/reporting/data/v1/quotas)
-
