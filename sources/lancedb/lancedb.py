@@ -645,17 +645,103 @@ class LanceDBTableOptions(BaseTableOptions):
     """
     LanceDB-specific table options extending base options.
 
-    Adds vector database-specific parameters:
-    - query_vector: For similarity search
+    Supports LanceDB REST API query parameters:
+    https://docs.lancedb.com/api-reference/rest/table/query-a-table
+    
+    Vector Search:
+    - query_vector: Query vector for similarity search
     - use_full_scan: Enable full scans (generates dummy vector if needed)
+    - vector_column: Name of vector column to search (default: auto-detect)
+    - distance_type: Distance metric (e.g., "cosine", "l2", "dot")
+    
+    Search Optimization:
+    - nprobes: Number of probes for IVF index (higher = more accurate, slower)
+    - ef: Search effort parameter for HNSW index (higher = more accurate, slower)
+    - refine_factor: Refine factor for search quality
+    - fast_search: Use fast search mode
+    - bypass_vector_index: Skip vector index (full scan)
+    
+    Filtering:
+    - prefilter: Apply filter before vector search (default: true, recommended)
+    - lower_bound: Lower bound for distance filtering
+    - upper_bound: Upper bound for distance filtering
+    
+    Results:
+    - with_row_id: Include _rowid column in results
+    - offset: Skip first N results (for pagination)
+    - version: Query specific table version
     """
+    # Vector search parameters
     query_vector: Optional[List[float]] = Field(
         default=None,
         description="Query vector for similarity search"
     )
     use_full_scan: bool = Field(
         default=True,
-        description="Enable full scan mode (uses dummy vector if needed)"
+        description="Enable full scan mode (generates dummy vector if needed)"
+    )
+    vector_column: Optional[str] = Field(
+        default=None,
+        description="Name of the vector column to search"
+    )
+    distance_type: Optional[str] = Field(
+        default=None,
+        description="Distance metric: cosine, l2, dot"
+    )
+    
+    # Index optimization parameters
+    nprobes: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Number of probes for IVF index (higher = more accurate)"
+    )
+    ef: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Search effort for HNSW index (higher = more accurate)"
+    )
+    refine_factor: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Refine factor for search quality"
+    )
+    fast_search: Optional[bool] = Field(
+        default=None,
+        description="Use fast search mode"
+    )
+    bypass_vector_index: Optional[bool] = Field(
+        default=None,
+        description="Bypass vector index (full scan)"
+    )
+    
+    # Filtering parameters
+    prefilter: Optional[bool] = Field(
+        default=True,
+        description="Apply filter before vector search (recommended for large datasets)"
+    )
+    lower_bound: Optional[float] = Field(
+        default=None,
+        description="Lower bound for distance filtering"
+    )
+    upper_bound: Optional[float] = Field(
+        default=None,
+        description="Upper bound for distance filtering"
+    )
+    
+    # Result parameters
+    with_row_id: Optional[bool] = Field(
+        default=None,
+        description="Include _rowid column in results"
+    )
+    offset: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Number of results to skip (for pagination)"
+    )
+    version: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Table version to query"
     )
 
 
@@ -942,7 +1028,7 @@ class LakeflowConnect(BaseVectorDBConnector):
         offset: int,  # pylint: disable=unused-argument
         batch_size: int,
         filter_expr: Optional[str],
-        columns: Optional[List[str]],  # pylint: disable=unused-argument
+        columns: Optional[List[str]],
         cursor_value: Optional[Any],
         **kwargs
     ) -> tuple[str, str, Optional[dict], Optional[dict]]:
@@ -950,32 +1036,60 @@ class LakeflowConnect(BaseVectorDBConnector):
         Build request for querying table data.
 
         LanceDB requires a vector parameter for queries.
-        
-        Note: The 'columns' parameter is not used by LanceDB API.
-        Column filtering is applied post-fetch in read_table().
+        Supports full LanceDB REST API parameters:
+        https://docs.lancedb.com/api-reference/rest/table/query-a-table
         """
         endpoint = f"/v1/table/{quote(table_name)}/query/"
 
         # Build query payload
         query_payload = {}
 
-        # Get vector-specific options
+        # Get LanceDB-specific options from kwargs
         query_vector = kwargs.get("query_vector")
         use_full_scan = kwargs.get("use_full_scan", True)
+        vector_column = kwargs.get("vector_column")
+        distance_type = kwargs.get("distance_type")
+        nprobes = kwargs.get("nprobes")
+        ef = kwargs.get("ef")
+        refine_factor = kwargs.get("refine_factor")
+        fast_search = kwargs.get("fast_search")
+        bypass_vector_index = kwargs.get("bypass_vector_index")
+        prefilter = kwargs.get("prefilter")
+        lower_bound = kwargs.get("lower_bound")
+        upper_bound = kwargs.get("upper_bound")
+        with_row_id = kwargs.get("with_row_id")
+        result_offset = kwargs.get("result_offset")
+        version = kwargs.get("version")
 
         # Handle vector requirement
         if query_vector:
-            query_payload["vector"] = query_vector
+            query_payload["vector"] = {"single_vector": query_vector}
         elif use_full_scan:
             # Auto-detect vector dimension and create dummy vector
             vector_dim = self._get_vector_dimension(table_name)
             if vector_dim:
-                query_payload["vector"] = [0.0] * vector_dim
+                query_payload["vector"] = {"single_vector": [0.0] * vector_dim}
             else:
-                query_payload["vector"] = [0.0]  # Fallback
+                query_payload["vector"] = {"single_vector": [0.0]}  # Fallback
 
         # LanceDB uses 'k' for k-nearest neighbors
         query_payload["k"] = batch_size
+
+        # Add optional vector search parameters
+        if vector_column:
+            query_payload["vector_column"] = vector_column
+        if distance_type:
+            query_payload["distance_type"] = distance_type
+        if nprobes is not None:
+            query_payload["nprobes"] = nprobes
+        if ef is not None:
+            query_payload["ef"] = ef
+        if refine_factor is not None:
+            query_payload["refine_factor"] = refine_factor
+        if fast_search is not None:
+            query_payload["fast_search"] = fast_search
+        if bypass_vector_index is not None:
+            query_payload["bypass_vector_index"] = bypass_vector_index
 
         # Add filter if provided
         if filter_expr:
@@ -988,6 +1102,29 @@ class LakeflowConnect(BaseVectorDBConnector):
                 query_payload["filter"] += f" AND {cursor_filter}"
             else:
                 query_payload["filter"] = cursor_filter
+
+        # Add filtering parameters
+        if prefilter is not None:
+            query_payload["prefilter"] = prefilter
+        if lower_bound is not None:
+            query_payload["lower_bound"] = lower_bound
+        if upper_bound is not None:
+            query_payload["upper_bound"] = upper_bound
+
+        # Add result parameters
+        if with_row_id is not None:
+            query_payload["with_row_id"] = with_row_id
+        if result_offset is not None:
+            query_payload["offset"] = result_offset
+        if version is not None:
+            query_payload["version"] = version
+
+        # ✅ Add column projection for performance
+        # https://docs.lancedb.com/api-reference/rest/table/query-a-table
+        # columns object: {column_names: [...]} or {column_aliases: {...}}
+        if columns:
+            query_payload["columns"] = {"column_names": columns}
+            logger.debug("Requesting specific columns from LanceDB: %s", columns)
 
         return ("POST", endpoint, query_payload, None)
 
@@ -1110,20 +1247,44 @@ class LakeflowConnect(BaseVectorDBConnector):
                 columns=options.columns,
                 cursor_value=cursor_value,
                 cursor_field=options.cursor_field,
+                # Vector search parameters
                 query_vector=options.query_vector,
-                use_full_scan=options.use_full_scan
+                use_full_scan=options.use_full_scan,
+                vector_column=options.vector_column,
+                distance_type=options.distance_type,
+                # Index optimization parameters
+                nprobes=options.nprobes,
+                ef=options.ef,
+                refine_factor=options.refine_factor,
+                fast_search=options.fast_search,
+                bypass_vector_index=options.bypass_vector_index,
+                # Filtering parameters
+                prefilter=options.prefilter,
+                lower_bound=options.lower_bound,
+                upper_bound=options.upper_bound,
+                # Result parameters
+                with_row_id=options.with_row_id,
+                result_offset=options.offset,
+                version=options.version
             )
 
             response = self._make_request(method, endpoint, json_data, params)
             records = self._parse_query_response(response)
 
-            # Filter columns if specified (LanceDB API doesn't support column selection)
+            # Fallback: Filter columns post-fetch if API didn't honor the request
+            # This happens if LanceDB API doesn't support column projection yet
+            # Performance note: This downloads ALL columns, then filters in-memory
             if options.columns:
-                filtered_records = []
-                for record in records:
-                    filtered_record = {k: v for k, v in record.items() if k in options.columns}
-                    filtered_records.append(filtered_record)
-                records = filtered_records
+                # Check if filtering is needed (API may have already filtered)
+                if records and not all(k in options.columns for k in records[0].keys()):
+                    logger.debug("Applying post-fetch column filtering (API didn't support projection)")
+                    filtered_records = []
+                    for record in records:
+                        filtered_record = {k: v for k, v in record.items() if k in options.columns}
+                        filtered_records.append(filtered_record)
+                    records = filtered_records
+                else:
+                    logger.debug("API returned only requested columns (projection supported)")
 
             # Yield records
             for record in records:

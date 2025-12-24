@@ -151,10 +151,10 @@ Before using this connector, you need:
 | `api_key` | string | Your LanceDB Cloud API key | `sk_abc123...` |
 | `project_name` | string | Your LanceDB project/database name | `my-project-xyz` |
 | `region` | string | Cloud region where your project is hosted | `us-east-1` |
-| `externalOptionsAllowList` | string | Comma-separated list of table-specific options that can be passed through. **Required** for this connector. | `columns,use_full_scan,batch_size,query_vector,filter_expression,cursor_field` |
+| `externalOptionsAllowList` | string | Comma-separated list of table-specific options that can be passed through. **Required** for this connector. | `columns,use_full_scan,batch_size,query_vector,filter_expression,cursor_field,vector_column,distance_type,nprobes,ef,refine_factor,fast_search,bypass_vector_index,prefilter,lower_bound,upper_bound,with_row_id,offset,version` |
 
 The full list of supported table-specific options for `externalOptionsAllowList` is:
-`columns,use_full_scan,batch_size,query_vector,filter_expression,cursor_field`
+`columns,use_full_scan,batch_size,query_vector,filter_expression,cursor_field,vector_column,distance_type,nprobes,ef,refine_factor,fast_search,bypass_vector_index,prefilter,lower_bound,upper_bound,with_row_id,offset,version`
 
 > **Note**: Table-specific options such as `columns`, `use_full_scan`, or `filter_expression` are **not** connection parameters. They are provided per-table via table options in the pipeline specification. These option names must be included in `externalOptionsAllowList` for the connection to allow them.
 
@@ -165,7 +165,7 @@ The full list of supported table-specific options for `externalOptionsAllowList`
   "api_key": "sk_abc123def456...",
   "project_name": "my-lancedb-project",
   "region": "us-east-1",
-  "externalOptionsAllowList": "columns,use_full_scan,batch_size,query_vector,filter_expression,cursor_field"
+  "externalOptionsAllowList": "columns,use_full_scan,batch_size,query_vector,filter_expression,cursor_field,vector_column,distance_type,nprobes,ef,refine_factor,fast_search,bypass_vector_index,prefilter,lower_bound,upper_bound,with_row_id,offset,version"
 }
 ```
 
@@ -211,16 +211,53 @@ The connector automatically discovers all tables in your LanceDB project. Each t
 
 ## Table-Specific Options
 
-When reading from a specific table, you can customize the behavior with these options:
+When reading from a specific table, you can customize the behavior with these options.
+
+For full API documentation, see: https://docs.lancedb.com/api-reference/rest/table/query-a-table
+
+### Basic Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `batch_size` | integer | 1000 | Number of records to fetch per batch (1-10,000) |
 | `use_full_scan` | boolean | true | Enable full table scan (generates dummy vector if needed) |
-| `query_vector` | array | null | Vector for similarity search (list of floats) |
+| `columns` | array | null | Specific columns to retrieve (for performance) |
 | `filter_expression` | string | null | SQL-like filter expression |
-| `columns` | array | null | Specific columns to retrieve |
 | `cursor_field` | string | null | Field to use for incremental reads |
+
+### Vector Search Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `query_vector` | array | null | Vector for similarity search (list of floats) |
+| `vector_column` | string | null | Name of vector column to search (auto-detected if not specified) |
+| `distance_type` | string | null | Distance metric: `cosine`, `l2`, `dot` |
+
+### Index Optimization Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `nprobes` | integer | null | Number of probes for IVF index (higher = more accurate, slower) |
+| `ef` | integer | null | Search effort for HNSW index (higher = more accurate, slower) |
+| `refine_factor` | integer | null | Refine factor for search quality |
+| `fast_search` | boolean | null | Use fast search mode |
+| `bypass_vector_index` | boolean | null | Skip vector index (perform full scan) |
+
+### Filtering Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `prefilter` | boolean | true | Apply filter before vector search (recommended for large datasets) |
+| `lower_bound` | float | null | Lower bound for distance filtering |
+| `upper_bound` | float | null | Upper bound for distance filtering |
+
+### Result Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `with_row_id` | boolean | null | Include `_rowid` column in results |
+| `offset` | integer | null | Number of results to skip (for pagination) |
+| `version` | integer | null | Query specific table version |
 
 ### Examples
 
@@ -232,7 +269,7 @@ When reading from a specific table, you can customize the behavior with these op
 }
 ```
 
-**Select Specific Columns:**
+**Select Specific Columns (Performance Optimization):**
 ```json
 {
   "batch_size": "1000",
@@ -245,7 +282,29 @@ When reading from a specific table, you can customize the behavior with these op
 ```json
 {
   "batch_size": "100",
-  "query_vector": [0.1, 0.2, 0.3, ..., 0.768]
+  "query_vector": [0.1, 0.2, 0.3, ..., 0.768],
+  "distance_type": "cosine"
+}
+```
+
+**Optimized Vector Search with IVF Index:**
+```json
+{
+  "batch_size": "100",
+  "query_vector": [0.1, 0.2, 0.3, ..., 0.768],
+  "nprobes": "20",
+  "refine_factor": "10",
+  "distance_type": "cosine"
+}
+```
+
+**Pre-filtered Vector Search:**
+```json
+{
+  "batch_size": "100",
+  "query_vector": [0.1, 0.2, 0.3, ..., 0.768],
+  "filter_expression": "price > 100 AND category = 'electronics'",
+  "prefilter": "true"
 }
 ```
 
