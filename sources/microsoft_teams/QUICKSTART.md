@@ -68,62 +68,23 @@ Confirm you see all 5 permissions with green checkmarks under "Status: Granted"
 
 ## Part 2: Databricks Setup
 
-**Time: 10 minutes**
+**Time: 5-10 minutes**
 
-### Step 1: Upload Connector to Databricks
+### Create Connection and Pipeline via Custom Connector
 
-**Option A: Using Databricks CLI**
-```bash
-# Install Databricks CLI if needed
-pip install databricks-cli
+Databricks provides a streamlined "Custom Connector" flow that handles everything in one place.
 
-# Configure authentication
-databricks configure --token
+1. Navigate to **Jobs & Pipelines** → Click **Ingestion pipeline**
+2. Or go to **Data Ingestion** and click **Add data** → Scroll to **Community connectors** → Click **Custom Connector**
 
-# Upload connector source code
-databricks workspace import-dir \
-  sources/microsoft_teams \
-  /Workspace/Shared/connectors/microsoft_teams
-```
-
-**Option B: Using Databricks UI**
-1. Navigate to your Databricks workspace
-2. Go to **Workspace** → **Shared**
-3. Create folder: `connectors/microsoft_teams`
-4. Upload `microsoft_teams.py` to this folder
-
-### Step 2: Create Unity Catalog Connection
-
-Create a UC connection for the Microsoft Teams connector using Databricks CLI or UI.
-
-**Option A: Using Databricks CLI**
-
-```bash
-databricks connections create \
-  --json '{
-    "name": "microsoft_teams_connection",
-    "connection_type": "GENERIC_LAKEFLOW_CONNECT",
-    "options": {
-      "sourceName": "microsoft_teams",
-      "tenant_id": "your-tenant-id-guid",
-      "client_id": "your-client-id-guid",
-      "client_secret": "your-client-secret-value",
-      "externalOptionsAllowList": "team_id,channel_id,top,max_pages_per_batch,lookback_seconds,start_date"
-    }
-  }'
-```
-
-**Option B: Using Databricks UI**
-
-1. Navigate to **Catalog** → **Connections**
-2. Click **Create connection**
-3. Select **Lakeflow Community Connector**
-4. On **Step 1: Connection basics**:
-   - **Name**: `microsoft_teams_connection`
-   - Click **Next**
-5. On **Step 2: Connection details**:
+3. **Add custom connector** dialog:
    - **Source name**: `microsoft_teams`
-   - **Additional Options** - Add these key-value pairs:
+   - **Git Repository URL**: `https://github.com/eduardohl/lakeflow-community-connectors-teams`
+   - Click **Add Connector**
+
+4. **Step 1: Connection** (Provide credentials):
+   - Select or create a connection named: `microsoft_teams_connection`
+   - **Connection details** - Add these key-value pairs:
 
    | Key | Value |
    |-----|-------|
@@ -132,140 +93,155 @@ databricks connections create \
    | `client_secret` | Your client secret value (e.g., `abc123~DEF456_ghi789`) |
    | `externalOptionsAllowList` | `team_id,channel_id,top,max_pages_per_batch,lookback_seconds,start_date` |
 
-6. Click **Create connection**
+   - Click **Create connection** (if new) or **Next** (if existing)
 
-**IMPORTANT:** The `externalOptionsAllowList` must include all table-specific options that will be used in pipeline specs.
+5. **Step 2: Ingestion setup**:
+   - **Pipeline name**: `microsoft_teams_ingestion_pipeline`
+   - **Event log location**: Choose catalog and schema (e.g., `users` / `eduardo_lomonaco`)
+   - **Root path**: This will be auto-filled (e.g., `/Users/eduardo.lomonaco@databricks.com/connectors/microsoft_teams`)
+   - Click **Create**
 
-**✅ Connection created!**
+**✅ Connection and pipeline created!** Databricks automatically generates an `ingest.py` file for you.
 
 ---
 
-## Part 3: Create Ingestion Pipeline
+## Part 3: Configure Your Pipeline
 
-**Time: 5-10 minutes**
+After the pipeline is created, you need to edit the `ingest.py` file to configure which tables to ingest.
 
-After creating the Unity Catalog connection, you need to create a pipeline to actually ingest data.
+### Step 1: Edit the ingest.py File
 
-### Option A: Use Databricks Lakeflow UI (Recommended)
+1. Open your pipeline `microsoft_teams_ingestion_pipeline`
+2. Click on the `ingest.py` tab to edit it
+3. Replace the generated code with this configuration to ingest the teams table:
 
-1. Navigate to **Catalog** → **Connections**
-2. Click on your `microsoft_teams_connection`
-3. Follow Databricks' UI to create an ingestion pipeline
-   - The exact UI flow depends on your Databricks workspace version
-   - You'll select which table(s) to ingest (start with `teams`)
-   - Databricks will generate the pipeline code for you
+   ```python
+   from pipeline.ingestion_pipeline import ingest
 
-### Option B: Create Pipeline Manually
+   # Pipeline specification - defines which tables to ingest
+   pipeline_spec = {
+       "connection_name": "microsoft_teams_connection",
+       "objects": [
+           {
+               "table": {
+                   "source_table": "teams"
+               }
+           }
+       ]
+   }
 
-If you prefer to create the pipeline manually, use Delta Live Tables (DLT):
+   # Run the ingestion
+   ingest(spark, pipeline_spec)
+   ```
 
-**1. Create a new notebook or Python file called `microsoft_teams_ingestion.py`**
+4. Save the file (Cmd+S or click Save icon)
 
-**2. Add this code:**
+### Step 2: Run the Pipeline
 
-```python
-import dlt
-from pyspark.sql import DataFrame
+1. Go back to the pipeline view
+2. Click **Start** to run the pipeline
+3. Wait for the pipeline to complete (monitor the progress in the UI)
 
-# Ingest teams table (no configuration needed)
-@dlt.table(
-    name="teams",
-    comment="Microsoft Teams - all teams in the organization"
-)
-def teams():
-    return dlt.read_stream(
-        connection="microsoft_teams_connection",
-        format="lakeflow",
-        table="teams"
-    )
-```
-
-**3. Create a DLT Pipeline:**
-
-1. Navigate to **Workflows** → **Delta Live Tables**
-2. Click **Create pipeline**
-3. Configure:
-   - **Pipeline name**: `microsoft_teams_pipeline`
-   - **Source code**: Select the file you just created
-   - **Target schema**: e.g., `main.teams_data`
-   - **Cluster mode**: Your preference
-4. Click **Create** and then **Start**
-
-### Verify the Data
+### Step 3: Verify the Data
 
 After the pipeline runs successfully, query the ingested data:
 
 ```sql
 -- View your teams
 SELECT id, displayName, description
-FROM main.teams_data.teams;
+FROM main.users.teams;
 ```
 
-Copy a `team_id` from the results - you'll need it for the next steps.
+Copy a `team_id` from the results - you'll need it for ingesting additional tables.
 
 ---
 
 ## Part 4: Ingest Additional Tables (Optional)
 
-Once you have team IDs from the initial ingestion, you can add more tables to your pipeline.
+Once you have team IDs from the initial ingestion, you can add more tables to your pipeline by updating the `pipeline_spec`.
 
-### Channels Table
+### Add Channels Table
 
-Add channels for a specific team:
+Edit `ingest.py` to add channels for a specific team:
 
 ```python
-@dlt.table(
-    name="channels",
-    comment="Microsoft Teams - channels for a specific team"
-)
-def channels():
-    return dlt.read_stream(
-        connection="microsoft_teams_connection",
-        format="lakeflow",
-        table="channels",
-        options={
-            "team_id": "paste-your-team-id-here"
+from pipeline.ingestion_pipeline import ingest
+
+pipeline_spec = {
+    "connection_name": "microsoft_teams_connection",
+    "objects": [
+        {
+            "table": {
+                "source_table": "channels",
+                "table_configuration": {
+                    "team_id": "paste-your-team-id-here"
+                }
+            }
         }
-    )
+    ]
+}
+
+ingest(spark, pipeline_spec)
 ```
 
-### Messages Table
+### Add Messages Table
 
-Add messages for a specific channel:
+For messages from a specific channel:
 
 ```python
-@dlt.table(
-    name="messages",
-    comment="Microsoft Teams - messages from a channel"
-)
-def messages():
-    return dlt.read_stream(
-        connection="microsoft_teams_connection",
-        format="lakeflow",
-        table="messages",
-        options={
-            "team_id": "paste-your-team-id-here",
-            "channel_id": "paste-your-channel-id-here",
-            "start_date": "2025-01-01T00:00:00Z"
+from pipeline.ingestion_pipeline import ingest
+
+pipeline_spec = {
+    "connection_name": "microsoft_teams_connection",
+    "objects": [
+        {
+            "table": {
+                "source_table": "messages",
+                "table_configuration": {
+                    "team_id": "paste-your-team-id-here",
+                    "channel_id": "paste-your-channel-id-here",
+                    "start_date": "2025-01-01T00:00:00Z"
+                }
+            }
         }
-    )
+    ]
+}
+
+ingest(spark, pipeline_spec)
 ```
 
-### Chats Table
+### Add Multiple Tables at Once
 
-Add all accessible chats:
+Ingest multiple tables in a single pipeline:
 
 ```python
-@dlt.table(
-    name="chats",
-    comment="Microsoft Teams - all accessible chats"
-)
-def chats():
-    return dlt.read_stream(
-        connection="microsoft_teams_connection",
-        format="lakeflow",
-        table="chats"
-    )
+from pipeline.ingestion_pipeline import ingest
+
+pipeline_spec = {
+    "connection_name": "microsoft_teams_connection",
+    "objects": [
+        {
+            "table": {
+                "source_table": "teams"
+            }
+        },
+        {
+            "table": {
+                "source_table": "channels",
+                "table_configuration": {
+                    "team_id": "paste-your-team-id-here"
+                }
+            }
+        },
+        {
+            "table": {
+                "source_table": "chats"
+            }
+        }
+    ]
+}
+
+ingest(spark, pipeline_spec)
 ```
 
 ---
