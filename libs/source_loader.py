@@ -15,7 +15,7 @@ def get_register_function(source_name: str):
     - sources/{source_name}/_generated_{source_name}_python_source.py
 
     Args:
-        source_name: The name of the source (e.g., "lancedb", "zendesk")
+        source_name: The name of the source (e.g.,"zendesk")
 
     Returns:
         The register_lakeflow_source function from the specific source module
@@ -25,7 +25,7 @@ def get_register_function(source_name: str):
         ImportError: If the register_lakeflow_source function is not found
 
     Example:
-        >>> register_fn = get_register_function("lancedb")
+        >>> register_fn = get_register_function("zendesk")
         >>> register_fn(spark)
         
     Note:
