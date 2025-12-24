@@ -509,21 +509,21 @@ class LakeflowConnect:
                         dimension_values[i]["value"] if i < len(dimension_values) else None
                     )
 
-                    # Parse date dimensions from YYYYMMDD to date object
+                    # Parse date dimensions from YYYYMMDD to YYYY-MM-DD string format
+                    # PySpark will convert the string to DateType based on the schema
                     if dim_name in ["date", "firstSessionDate"] and dim_value and len(dim_value) == 8:
                         try:
-                            # Convert YYYYMMDD to datetime.date object
+                            # Convert YYYYMMDD to YYYY-MM-DD string
                             year = int(dim_value[0:4])
                             month = int(dim_value[4:6])
                             day = int(dim_value[6:8])
-                            date_obj = datetime(year, month, day).date()
-                            record[dim_name] = date_obj
+                            date_string = f"{year:04d}-{month:02d}-{day:02d}"
+                            record[dim_name] = date_string
 
-                            # Track max date for cursor (as string for comparison)
+                            # Track max date for cursor
                             if dim_name == "date":
-                                date_str = dim_value  # Keep original YYYYMMDD for comparison
-                                if max_date is None or date_str > max_date:
-                                    max_date = f"{year:04d}-{month:02d}-{day:02d}"
+                                if max_date is None or date_string > max_date:
+                                    max_date = date_string
                         except (ValueError, IndexError):
                             record[dim_name] = dim_value
                     else:
