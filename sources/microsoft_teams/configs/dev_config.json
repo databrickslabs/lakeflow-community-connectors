@@ -1,0 +1,16 @@
+{
+  "_comment": "Choose Application OR Delegated permissions - do not use both",
+
+  "tenant_id": "YOUR_TENANT_ID",
+  "client_id": "YOUR_CLIENT_ID",
+
+  "_comment_application": "For Application Permissions (requires admin consent):",
+  "client_secret": "YOUR_CLIENT_SECRET",
+
+  "_comment_delegated": "For Delegated Permissions (no admin needed - uncomment and remove client_secret):",
+  "_refresh_token": "YOUR_REFRESH_TOKEN",
+
+  "_comment_testing": "Optional: For testing specific teams/channels:",
+  "test_team_id": "TEAM_ID_FOR_TESTING",
+  "test_channel_id": "CHANNEL_ID_FOR_TESTING"
+}

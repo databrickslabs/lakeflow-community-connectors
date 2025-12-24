@@ -1,0 +1,31 @@
+# Example Pipeline Specification: Basic Teams and Channels Ingestion
+#
+# This example demonstrates:
+# - Ingesting all teams (snapshot mode)
+# - Ingesting channels from a specific team (snapshot mode)
+#
+# Usage:
+# 1. Replace TEAM_ID_HERE with your actual team ID
+# 2. Update connection_name if different
+# 3. Use this spec in your ingest.py file
+
+pipeline_spec:
+  connection_name: "microsoft_teams_connection"
+
+  objects:
+    # Ingest all teams
+    - table:
+        source_table: "teams"
+        destination_catalog: "main"
+        destination_schema: "teams_data"
+        destination_table: "teams"
+
+    # Ingest channels from a specific team
+    - table:
+        source_table: "channels"
+        destination_catalog: "main"
+        destination_schema: "teams_data"
+        destination_table: "channels"
+        table_configuration:
+          team_id: "TEAM_ID_HERE"  # Replace with actual team ID
+          top: "50"                # Page size (optional)

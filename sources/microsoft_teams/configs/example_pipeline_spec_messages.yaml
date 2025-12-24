@@ -1,0 +1,35 @@
+# Example Pipeline Specification: Incremental Message Ingestion (CDC)
+#
+# This example demonstrates:
+# - Ingesting messages from a specific channel with CDC (Change Data Capture)
+# - Using start_date to begin incremental sync from a specific date
+# - Configuring lookback window for late updates
+#
+# Usage:
+# 1. Replace TEAM_ID_HERE with your actual team ID
+# 2. Replace CHANNEL_ID_HERE with your actual channel ID
+# 3. Update start_date to your desired starting point
+# 4. Update connection_name if different
+
+pipeline_spec:
+  connection_name: "microsoft_teams_connection"
+
+  objects:
+    # Ingest messages with incremental sync
+    - table:
+        source_table: "messages"
+        destination_catalog: "main"
+        destination_schema: "teams_data"
+        destination_table: "channel_messages"
+        table_configuration:
+          team_id: "TEAM_ID_HERE"           # Required: Parent team ID
+          channel_id: "CHANNEL_ID_HERE"     # Required: Parent channel ID
+          start_date: "2025-01-01T00:00:00Z"  # Initial cursor (ISO 8601 format)
+          lookback_seconds: "300"           # Lookback window: 5 minutes (default)
+          top: "50"                         # Page size (max: 50 for messages)
+          max_pages_per_batch: "100"        # Safety limit per batch
+
+        # SCD Type 1: Keep only latest version of each message
+        # SCD Type 2: Keep full history of message changes
+        table_configuration:
+          scd_types: "SCD_TYPE_1"

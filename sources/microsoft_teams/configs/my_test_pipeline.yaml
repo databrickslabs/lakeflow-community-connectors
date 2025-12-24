@@ -1,0 +1,21 @@
+# Test Pipeline - Replace IDs with your actual values
+pipeline_spec:
+  connection_name: "microsoft_teams_connection"
+
+  objects:
+    # Start with teams - no configuration needed
+    - table:
+        source_table: "teams"
+        destination_catalog: "main"
+        destination_schema: "teams_test"
+        destination_table: "teams"
+
+    # Add channels - requires team_id
+    # Get team_id from the teams table first!
+    - table:
+        source_table: "channels"
+        destination_catalog: "main"
+        destination_schema: "teams_test"
+        destination_table: "channels"
+        table_configuration:
+          team_id: "PASTE_TEAM_ID_HERE"  # Get from teams table

@@ -1,0 +1,76 @@
+# Example Pipeline Specification: Complete Teams Data Ingestion
+#
+# This example demonstrates:
+# - Ingesting all 5 supported tables (teams, channels, members, messages, chats)
+# - Mix of snapshot and CDC ingestion modes
+# - Proper parent-child relationships
+#
+# Usage:
+# 1. Replace TEAM_ID_HERE with your actual team ID
+# 2. Replace CHANNEL_ID_HERE with your actual channel ID
+# 3. Update start_date values as needed
+# 4. Update connection_name if different
+
+pipeline_spec:
+  connection_name: "microsoft_teams_connection"
+
+  objects:
+    # ========================================
+    # Snapshot Tables (Full Refresh)
+    # ========================================
+
+    # 1. Teams - List all teams
+    - table:
+        source_table: "teams"
+        destination_catalog: "main"
+        destination_schema: "teams_analytics"
+        destination_table: "teams"
+        # No table_configuration needed (no parent, no special options)
+
+    # 2. Channels - List channels in a specific team
+    - table:
+        source_table: "channels"
+        destination_catalog: "main"
+        destination_schema: "teams_analytics"
+        destination_table: "channels"
+        table_configuration:
+          team_id: "TEAM_ID_HERE"  # Required: Parent team ID
+          top: "100"               # Optional: Page size
+
+    # 3. Members - List members of a specific team
+    - table:
+        source_table: "members"
+        destination_catalog: "main"
+        destination_schema: "teams_analytics"
+        destination_table: "team_members"
+        table_configuration:
+          team_id: "TEAM_ID_HERE"  # Required: Parent team ID
+
+    # ========================================
+    # CDC Tables (Incremental Loading)
+    # ========================================
+
+    # 4. Messages - Incremental sync of channel messages
+    - table:
+        source_table: "messages"
+        destination_catalog: "main"
+        destination_schema: "teams_analytics"
+        destination_table: "channel_messages"
+        table_configuration:
+          team_id: "TEAM_ID_HERE"              # Required: Parent team ID
+          channel_id: "CHANNEL_ID_HERE"        # Required: Parent channel ID
+          start_date: "2024-12-01T00:00:00Z"   # Start ingesting from Dec 1, 2024
+          lookback_seconds: "300"              # 5-minute lookback for late updates
+          top: "50"                            # Max page size for messages
+          max_pages_per_batch: "200"           # Process up to 200 pages per run
+
+    # 5. Chats - Incremental sync of 1:1 and group chats
+    - table:
+        source_table: "chats"
+        destination_catalog: "main"
+        destination_schema: "teams_analytics"
+        destination_table: "chats"
+        table_configuration:
+          start_date: "2024-12-01T00:00:00Z"  # Start ingesting from Dec 1, 2024
+          lookback_seconds: "300"             # 5-minute lookback
+          top: "100"                          # Page size
