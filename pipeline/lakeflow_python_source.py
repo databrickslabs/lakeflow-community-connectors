@@ -5,8 +5,9 @@ from pyspark.sql.datasource import (
     DataSourceReader,
 )
 from typing import Iterator
-from sources.interface.lakeflow_connect import LakeflowConnect
 
+# NOTE: LakeflowConnect is expected to be defined in the merged file
+# Do NOT import it here - the merge script combines this with the connector code
 
 METADATA_TABLE = "_lakeflow_metadata"
 TABLE_NAME = "tableName"
