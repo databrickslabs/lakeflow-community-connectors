@@ -98,7 +98,8 @@ Databricks provides a streamlined "Custom Connector" flow that handles everythin
 5. **Step 2: Ingestion setup**:
    - **Pipeline name**: `microsoft_teams_ingestion_pipeline`
    - **Event log location**: Choose catalog and schema (e.g., `users` / `eduardo_lomonaco`)
-   - **Root path**: This will be auto-filled (e.g., `/Users/eduardo.lomonaco@databricks.com/connectors/microsoft_teams`)
+   - **Root path**: Click the folder icon to create/select a path (e.g., `/Users/eduardo.lomonaco@databricks.com/connectors/microsoft_teams`)
+     - You may need to create the folder first in Workspace if it doesn't exist
    - Click **Create**
 
 **✅ Connection and pipeline created!** Databricks automatically generates an `ingest.py` file for you.
