@@ -7,8 +7,10 @@
 
 from datetime import datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Iterator
 import json
+import os
 import time
 
 from pyspark.sql import Row
@@ -174,6 +176,9 @@ def register_lakeflow_source(spark):
 
 
     class LakeflowConnect:
+        # Class-level cache for prebuilt reports (loaded once)
+        _prebuilt_reports_cache = None
+
         def __init__(self, options: dict[str, str]) -> None:
             """
             Initialize the Google Analytics Aggregated Data connector with connection-level options.
@@ -225,6 +230,77 @@ def register_lakeflow_source(spark):
 
             # Fetch and cache metadata for type information
             self._metadata_cache = None
+
+        @classmethod
+        def _load_prebuilt_reports(cls) -> dict:
+            """
+            Load prebuilt report configurations from prebuilt_reports.json.
+            Uses class-level caching to avoid repeated file reads.
+
+            Returns:
+                Dictionary mapping report names to their configurations
+            """
+            if cls._prebuilt_reports_cache is not None:
+                return cls._prebuilt_reports_cache
+
+            # Find the prebuilt_reports.json file relative to this module
+            current_file = Path(__file__).resolve()
+            prebuilt_reports_path = current_file.parent / "prebuilt_reports.json"
+
+            if not prebuilt_reports_path.exists():
+                # If file doesn't exist, return empty dict (all reports are custom)
+                cls._prebuilt_reports_cache = {}
+                return cls._prebuilt_reports_cache
+
+            try:
+                with open(prebuilt_reports_path, 'r') as f:
+                    cls._prebuilt_reports_cache = json.load(f)
+                return cls._prebuilt_reports_cache
+            except Exception as e:
+                raise ValueError(f"Failed to load prebuilt reports from {prebuilt_reports_path}: {e}")
+
+        def _resolve_table_options(self, table_options: dict[str, str]) -> dict[str, str]:
+            """
+            Resolve table options by merging prebuilt report configuration with user overrides.
+
+            If table_options contains 'prebuilt_report', loads that report's configuration
+            and merges it with any additional options provided by the user.
+
+            Args:
+                table_options: Raw table options from pipeline spec
+
+            Returns:
+                Resolved table options with prebuilt config merged in
+
+            Raises:
+                ValueError: If prebuilt_report is specified but not found
+            """
+            prebuilt_report_name = table_options.get("prebuilt_report")
+
+            if not prebuilt_report_name:
+                # No prebuilt report specified, return options as-is
+                return table_options
+
+            # Load prebuilt reports
+            prebuilt_reports = self._load_prebuilt_reports()
+
+            if prebuilt_report_name not in prebuilt_reports:
+                available_reports = ', '.join(sorted(prebuilt_reports.keys()))
+                raise ValueError(
+                    f"Prebuilt report '{prebuilt_report_name}' not found. "
+                    f"Available prebuilt reports: {available_reports}"
+                )
+
+            # Start with prebuilt config
+            prebuilt_config = prebuilt_reports[prebuilt_report_name].copy()
+
+            # Merge with user-provided options (user options take precedence)
+            resolved_options = prebuilt_config.copy()
+            for key, value in table_options.items():
+                if key != "prebuilt_report":  # Don't include the prebuilt_report key itself
+                    resolved_options[key] = value
+
+            return resolved_options
 
         def _get_access_token(self) -> str:
             """
@@ -455,11 +531,16 @@ def register_lakeflow_source(spark):
 
             For Google Analytics, ANY table name is accepted and treated as a custom report.
             The schema is dynamic based on requested dimensions and metrics.
-            The table_options must contain:
+            The table_options must contain either:
+                - prebuilt_report: Name of a prebuilt report (e.g., "traffic_by_country")
+                OR
                 - dimensions: JSON array of dimension names (e.g., ["date", "country"])
                 - metrics: JSON array of metric names (e.g., ["activeUsers", "sessions"])
             """
             # Accept any table name - all are treated as custom reports
+
+            # Resolve prebuilt report if specified
+            table_options = self._resolve_table_options(table_options)
 
             # Parse dimensions and metrics from table_options
             dimensions_json = table_options.get("dimensions", "[]")
@@ -528,6 +609,9 @@ def register_lakeflow_source(spark):
             """
             # Accept any table name - all are treated as custom reports
 
+            # Resolve prebuilt report if specified
+            table_options = self._resolve_table_options(table_options)
+
             # Parse dimensions from table_options to determine primary keys
             dimensions_json = table_options.get("dimensions", "[]")
             try:
@@ -540,6 +624,32 @@ def register_lakeflow_source(spark):
             if not isinstance(dimensions, list):
                 raise ValueError("'dimensions' must be a JSON array of strings")
 
+            # TODO: UX IMPROVEMENT - Remove need to explicitly specify primary_keys
+            #
+            # ARCHITECTURAL ISSUE: The ingestion pipeline calls _get_table_metadata() BEFORE
+            # table configurations are available (line 124 in ingestion_pipeline.py). The 
+            # metadata call only passes table names via tableNameList, not table_options.
+            #
+            # For Google Analytics Aggregated, primary_keys are derived FROM dimensions 
+            # (in table_options), so read_table_metadata() receives empty table_options 
+            # and returns empty primary_keys, causing "APPLY CHANGES query requires at 
+            # least one join key" errors.
+            #
+            # FIX REQUIRED in ingestion_pipeline.py:
+            # 1. Get table configurations before metadata retrieval (before line 124):
+            #      table_configs = {t: spec.get_table_configuration(t) for t in table_list}
+            # 2. Pass table_configs to _get_table_metadata():
+            #      metadata = _get_table_metadata(spark, connection_name, table_list, table_configs)
+            # 3. Modify _get_table_metadata() to call metadata per-table with .options(**table_config):
+            #      df = spark.read.format("lakeflow_connect")
+            #            .option("databricks.connection", connection_name)
+            #            .option("tableName", "_lakeflow_metadata")
+            #            .option("tableNameList", table_name)  # Single table
+            #            .options(**table_config)  # Include table-specific options!
+            #            .load()
+            #
+            # Until fixed, users MUST explicitly specify primary_keys in table_configuration.
+            #
             # Primary keys are all dimensions (composite key)
             primary_keys = dimensions if dimensions else []
 
@@ -609,8 +719,11 @@ def register_lakeflow_source(spark):
             For Google Analytics, ANY table name is accepted and treated as a custom report.
 
             Table options:
+                - prebuilt_report (optional): Name of a prebuilt report (e.g., "traffic_by_country")
+                OR
                 - dimensions (required): JSON array of dimension names
                 - metrics (required): JSON array of metric names
+                Plus optional:
                 - start_date (optional): Start date for first sync (YYYY-MM-DD or relative like "30daysAgo")
                 - lookback_days (optional): Number of days to look back for incremental syncs (default: 3)
                 - dimension_filter (optional): Filter expression for dimensions (JSON object)
@@ -618,6 +731,9 @@ def register_lakeflow_source(spark):
                 - page_size (optional): Number of rows per page (default: 10000, max: 100000)
             """
             # Accept any table name - all are treated as custom reports
+
+            # Resolve prebuilt report if specified
+            table_options = self._resolve_table_options(table_options)
 
             # Parse required options
             dimensions_json = table_options.get("dimensions", "[]")
