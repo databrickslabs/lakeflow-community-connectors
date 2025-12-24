@@ -15,7 +15,7 @@ def get_register_function(source_name: str):
     - sources/{source_name}/_generated_{source_name}_python_source.py
 
     Args:
-        source_name: The name of the source (e.g.,"zendesk")
+        source_name: The name of the source (e.g., "zendesk", "example")
 
     Returns:
         The register_lakeflow_source function from the specific source module
