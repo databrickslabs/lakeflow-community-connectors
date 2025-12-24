@@ -301,6 +301,14 @@ class LakeflowConnect:
 
         self.base_url = (options.get("pi_base_url") or options.get("pi_web_api_url") or "").rstrip("/")
         if not self.base_url:
+            # Best-effort debug: show which option keys the worker received.
+            # Do NOT print values to avoid leaking secrets.
+            try:
+                keys = sorted(list(options.keys()))
+                conn_name = options.get("databricks.connection")
+                print(f"❌ Missing pi_base_url/pi_web_api_url. databricks.connection={conn_name!r}. option_keys={keys}")
+            except Exception:
+                pass
             raise ValueError("Missing required option: pi_base_url (or pi_web_api_url)")
 
         self.session = requests.Session()

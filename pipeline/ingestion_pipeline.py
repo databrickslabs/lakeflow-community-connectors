@@ -109,13 +109,14 @@ def _create_append_table(
         )
 
 
-def _get_table_metadata(spark, connection_name: str, table_list: list[str]) -> dict:
+def _get_table_metadata(spark, connection_name: str, table_list: list[str], base_options: dict[str, str] | None = None) -> dict:
     """Get table metadata (primary_keys, cursor_field, ingestion_type etc.)"""
     df = (
         spark.read.format("lakeflow_connect")
         .option("databricks.connection", connection_name)
         .option("tableName", "_lakeflow_metadata")
         .option("tableNameList", ",".join(table_list))
+        .options(**(base_options or {}))
         .load()
     )
     metadata = {}
@@ -139,7 +140,18 @@ def ingest(spark, pipeline_spec: dict) -> None:
     connection_name = spec.connection_name()
     table_list = spec.get_table_list()
 
-    metadata = _get_table_metadata(spark, connection_name, table_list)
+    # Base options needed for the metadata read.
+    # Some environments do not inject arbitrary UC connection options into the worker options,
+    # so we forward pi_base_url/pi_web_api_url from the table_configuration (if provided).
+    base_options: dict[str, str] = {}
+    for t in table_list:
+        cfg = spec.get_table_configuration(t)
+        for k in ("pi_base_url", "pi_web_api_url"):
+            v = cfg.get(k) if isinstance(cfg, dict) else None
+            if v and k not in base_options:
+                base_options[k] = str(v)
+
+    metadata = _get_table_metadata(spark, connection_name, table_list, base_options=base_options)
 
     def _ingest_table(table: str) -> None:
         """Helper function to ingest a single table"""
