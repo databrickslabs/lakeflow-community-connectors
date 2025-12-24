@@ -135,45 +135,49 @@ The Google Analytics Aggregated Data connector supports **two ways to define rep
 
 ### 1. Prebuilt Reports (Recommended for Common Use Cases)
 
-The connector includes predefined report configurations for common analytics needs. These reports require minimal configuration—just specify the report name and optionally override defaults.
+The connector includes predefined report configurations for common analytics needs. **Simply use the report name as your `source_table`** - no additional configuration required.
 
 **Available Prebuilt Reports:**
 
-| Report Name | Description | Dimensions | Metrics |
-|-------------|-------------|------------|---------|
-| `traffic_by_country` | Daily active users, sessions, and page views by country | `date`, `country` | `activeUsers`, `sessions`, `screenPageViews` |
+| Report Name | Description | Dimensions | Metrics | Primary Keys |
+|-------------|-------------|------------|---------|--------------|
+| `traffic_by_country` | Daily active users, sessions, and page views by country | `date`, `country` | `activeUsers`, `sessions`, `screenPageViews` | `["date", "country"]` |
 
 **Benefits:**
-- ✅ Quick setup with single parameter
-- ✅ Consistent report definitions
-- ✅ Easy to get started
-- ✅ Can override any setting (date ranges, filters, etc.)
+- ✅ **Zero configuration** - just use the report name
+- ✅ Dimensions, metrics, and primary keys configured automatically
+- ✅ Quick setup with consistent definitions
+- ✅ Can optionally override any setting (date ranges, filters, etc.)
 
-**Example using prebuilt report:**
+**Example using prebuilt report (zero config):**
 ```json
 {
   "table": {
-    "source_table": "my_traffic_report",
-    "table_configuration": {
-      "prebuilt_report": "traffic_by_country"
-    }
+    "source_table": "traffic_by_country"
   }
 }
 ```
 
-**Example with overrides:**
+No `table_configuration` needed. The connector automatically knows:
+- Dimensions: `["date", "country"]`
+- Metrics: `["activeUsers", "sessions", "screenPageViews"]`
+- Primary Keys: `["date", "country"]`
+- Ingestion Type: `append` (with `date` as cursor)
+
+**Example with optional overrides:**
 ```json
 {
   "table": {
-    "source_table": "last_7_days_traffic",
+    "source_table": "traffic_by_country",
     "table_configuration": {
-      "prebuilt_report": "traffic_by_country",
       "start_date": "7daysAgo",
       "lookback_days": "1"
     }
   }
 }
 ```
+
+> **Reserved Names**: Prebuilt report names are reserved for automatic configuration. To use a custom report with a prebuilt name, explicitly provide `dimensions` in `table_configuration` (though a different name is recommended to avoid confusion).
 
 > **Note**: More prebuilt reports can be added to `prebuilt_reports.json` as needed. You can also request additional common reports to be included.
 
@@ -214,6 +218,12 @@ The connector defines the ingestion mode and primary key dynamically based on th
 - **`snapshot`**: Used when no `date` dimension is present. The entire report is refreshed on each sync.
 
 **Primary Key Logic**:
+
+**For Prebuilt Reports** (using report name as `source_table`):
+- ✅ Primary keys are **automatically configured** - no need to specify them
+- The connector retrieves primary keys from the prebuilt report definition
+
+**For Custom Reports**:
 <!-- TODO: UX IMPROVEMENT - This requirement should be removed in future versions -->
 <!-- ARCHITECTURAL ISSUE: The ingestion pipeline calls _get_table_metadata() before -->
 <!-- table configurations are available (ingestion_pipeline.py line 124). Since GA4's -->
@@ -223,25 +233,30 @@ The connector defines the ingestion mode and primary key dynamically based on th
 <!-- -->
 <!-- FIX: Modify ingestion_pipeline.py to retrieve table configs before metadata and -->
 <!-- pass them to _get_table_metadata() with .options(**table_config). -->
-<!-- Until fixed, primary_keys MUST be explicitly specified. -->
-- The primary key **must be explicitly defined** in `table_configuration` as `primary_keys`.
-- It should be set to the **list of all dimensions** in your report (in the same order).
-- Example: If dimensions are `["date", "country"]`, set `"primary_keys": ["date", "country"]`.
+<!-- Until fixed, primary_keys MUST be explicitly specified for custom reports. -->
+- The primary key **must be explicitly defined** in `table_configuration` as `primary_keys`
+- It should be set to the **list of all dimensions** in your report (in the same order)
+- Example: If dimensions are `["date", "country"]`, set `"primary_keys": ["date", "country"]`
 
 ### Required and optional table options
 
 Table-specific options are passed via the pipeline spec under `table_configuration` in `objects`. 
 
-**For Prebuilt Reports:**
+**For Prebuilt Reports (when using report name as `source_table`):**
+
+When using a prebuilt report name directly as the `source_table`, **no table configuration is required**. All settings (dimensions, metrics, primary keys) are configured automatically.
+
+Optional overrides:
 
 | Option | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
-| `prebuilt_report` | string | yes | N/A | Name of the prebuilt report to use (e.g., `"traffic_by_country"`). |
 | `start_date` | string | no | `"30daysAgo"` | Override the default start date for first sync. |
 | `lookback_days` | string | no | `"3"` | Override the default lookback window. |
 | `dimension_filter` | string (JSON object) | no | null | Add filter expression for dimensions. |
 | `metric_filter` | string (JSON object) | no | null | Add filter expression for metrics. |
 | `page_size` | string | no | `"10000"` | Override the default page size. |
+
+> **Important architectural limitation**: Due to how the ingestion pipeline retrieves metadata, `primary_keys` must be explicitly specified even for prebuilt reports, matching the prebuilt report's dimensions. This is redundant but currently required. See the TODO comments in the code for the architectural fix needed.
 
 **For Custom Reports:**
 
@@ -358,10 +373,7 @@ Example `pipeline_spec` mixing prebuilt and custom reports:
   "objects": [
     {
       "table": {
-        "source_table": "traffic_by_country",
-        "table_configuration": {
-          "prebuilt_report": "traffic_by_country"
-        }
+        "source_table": "traffic_by_country"
       }
     },
     {
@@ -383,8 +395,10 @@ Example `pipeline_spec` mixing prebuilt and custom reports:
 - `connection_name` must point to the UC connection configured with your GA4 `property_id` and `credentials_json`.
 - For each report:
   - `source_table` - Give each report a **unique, descriptive name**
-  - `table_configuration` contains **either**:
-    - **Prebuilt**: Just `"prebuilt_report": "report_name"` with optional overrides
+    - **For prebuilt reports**: Use the prebuilt report name (e.g., `"traffic_by_country"`)
+    - **For custom reports**: Use any unique name you choose
+  - `table_configuration` (optional for prebuilt, required for custom):
+    - **Prebuilt**: Omit entirely for zero-config, or include to override defaults (start_date, lookback_days, filters)
     - **Custom**: `dimensions`, `metrics`, `primary_keys`, and other settings
   
 > **Note**: Each report must have a unique `source_table` name to avoid conflicts in the ingestion pipeline.
@@ -417,21 +431,22 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 ```json
 {
   "table": {
-    "source_table": "my_traffic_report",
-    "table_configuration": {
-      "prebuilt_report": "traffic_by_country"
-    }
+    "source_table": "traffic_by_country"
   }
 }
 ```
+
+No configuration needed! The connector automatically knows:
+- Dimensions: `["date", "country"]`
+- Metrics: `["activeUsers", "sessions", "screenPageViews"]`
+- Primary Keys: `["date", "country"]`
 
 **Example 2: Prebuilt report with overrides**
 ```json
 {
   "table": {
-    "source_table": "last_7_days_traffic",
+    "source_table": "traffic_by_country",
     "table_configuration": {
-      "prebuilt_report": "traffic_by_country",
       "start_date": "7daysAgo",
       "lookback_days": "1"
     }
@@ -530,6 +545,12 @@ Common issues and how to address them:
   - Google Analytics data is typically processed within 24-48 hours.
   - Increase `lookback_days` to 7 if you need to capture late-arriving data.
   - Recent data may be incomplete or change as processing completes.
+
+- **Warning about shadowing prebuilt report names**:
+  - **Warning message**: `⚠️  WARNING: Using custom configuration for 'traffic_by_country' (shadowing prebuilt report)`
+  - **Cause**: You're using a prebuilt report name as `source_table` but providing custom `dimensions` in `table_configuration`
+  - **Effect**: The connector uses your custom dimensions (not the prebuilt ones)
+  - **Solution**: Choose a different `source_table` name for custom reports to avoid confusion (e.g., `my_traffic_by_country`)
 
 ## Rate Limits and Quotas
 

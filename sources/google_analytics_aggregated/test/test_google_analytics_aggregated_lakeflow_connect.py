@@ -187,7 +187,8 @@ def test_google_analytics_aggregated_connector():
     print("="*50)
     
     prebuilt_table_options = {
-        "prebuilt_report": "traffic_by_country"
+        "prebuilt_report": "traffic_by_country",
+        "primary_keys": ["date", "country"]
     }
     
     try:
@@ -207,6 +208,7 @@ def test_google_analytics_aggregated_connector():
     
     override_options = {
         "prebuilt_report": "traffic_by_country",
+        "primary_keys": ["date", "country"],
         "start_date": "7daysAgo",
         "lookback_days": "1"
     }
@@ -251,7 +253,83 @@ def test_google_analytics_aggregated_connector():
     assert reports1 is reports2, "Should return cached object"
     print(f"✅ PASSED: Prebuilt reports are cached correctly")
 
+    # Test 14: Using prebuilt report by table name (NEW APPROACH)
+    print("\n" + "="*50)
+    print("TEST: Using prebuilt report by table name")
+    print("="*50)
+    
+    # When source_table = "traffic_by_country", it should work without table_options!
+    empty_options = {}
+    
+    try:
+        # Test list_tables returns prebuilt report names
+        tables = connector.list_tables()
+        assert "traffic_by_country" in tables, "list_tables should return prebuilt report names"
+        print(f"✅ list_tables() returns prebuilt reports: {tables}")
+        
+        # Test get_table_schema works with just the table name
+        schema = connector.get_table_schema("traffic_by_country", empty_options)
+        assert schema is not None, "Schema should not be None"
+        field_names = [f.name for f in schema.fields]
+        assert "date" in field_names, "Should have date field"
+        assert "country" in field_names, "Should have country field"
+        print(f"✅ get_table_schema() works with just table name")
+        print(f"  Fields: {', '.join(field_names)}")
+        
+        # Test read_table_metadata works with just the table name
+        metadata = connector.read_table_metadata("traffic_by_country", empty_options)
+        assert metadata is not None, "Metadata should not be None"
+        assert "primary_keys" in metadata, "Should have primary_keys"
+        assert metadata["primary_keys"] == ["date", "country"], "Primary keys should match prebuilt config"
+        print(f"✅ read_table_metadata() works with just table name")
+        print(f"  Primary keys: {metadata['primary_keys']}")
+        print(f"  Ingestion type: {metadata.get('ingestion_type')}")
+        
+        # Test read_table works with just the table name
+        records, offset = connector.read_table("traffic_by_country", {}, empty_options)
+        records_list = list(records)
+        assert len(records_list) > 0, "Should return some records"
+        print(f"✅ read_table() works with just table name")
+        print(f"  Records returned: {len(records_list)}")
+        
+        print(f"\n✅ PASSED: Prebuilt reports work using just table name (no config needed!)")
+    except Exception as e:
+        print(f"❌ FAILED: {str(e)}")
+        raise
+
+    # Test 15: Shadowing prebuilt report name with custom config
+    print("\n" + "="*50)
+    print("TEST: Shadowing prebuilt report name with custom config")
+    print("="*50)
+    
+    # Use prebuilt name but provide custom dimensions (should override)
+    shadow_options = {
+        "dimensions": '["date", "city"]',  # Different from prebuilt!
+        "metrics": '["sessions"]',
+        "primary_keys": ["date", "city"]
+    }
+    
+    try:
+        # Should use custom config, not prebuilt
+        schema = connector.get_table_schema("traffic_by_country", shadow_options)
+        field_names = [f.name for f in schema.fields]
+        assert "city" in field_names, "Should use custom dimension (city)"
+        assert "country" not in field_names, "Should NOT use prebuilt dimension (country)"
+        print(f"✅ Custom dimensions override prebuilt report")
+        print(f"  Fields: {', '.join(field_names)}")
+        
+        # Metadata should also use custom config
+        metadata = connector.read_table_metadata("traffic_by_country", shadow_options)
+        assert metadata["primary_keys"] == ["date", "city"], "Should use custom primary_keys"
+        print(f"✅ Custom primary_keys override prebuilt report")
+        
+        print(f"\n✅ PASSED: Can shadow prebuilt report names with explicit dimensions")
+    except Exception as e:
+        print(f"❌ FAILED: {str(e)}")
+        raise
+
     print("\n" + "="*50)
     print("ALL TESTS PASSED (INCLUDING PREBUILT REPORTS)")
     print("="*50)
+
 

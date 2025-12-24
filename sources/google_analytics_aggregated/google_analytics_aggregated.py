@@ -365,14 +365,16 @@ class LakeflowConnect:
         """
         List names of all tables supported by this connector.
 
-        For Google Analytics Aggregated Data, we support user-defined custom reports.
-        The connector accepts ANY table name - each is treated as a custom report
-        configured via table_options (dimensions, metrics, etc.).
+        Returns the list of available prebuilt reports. Users can:
+        1. Use a prebuilt report name directly as the source_table (simplest)
+        2. Define custom reports with any name via table_options
         
-        This returns an empty list because tables are defined dynamically in the
-        pipeline spec rather than being pre-enumerated.
+        Prebuilt reports are automatically configured - users don't need to specify
+        dimensions, metrics, or primary_keys.
         """
-        return []
+        # Return prebuilt report names so they can be used directly
+        prebuilt_reports = self._load_prebuilt_reports()
+        return list(prebuilt_reports.keys())
 
     def get_table_schema(
         self, table_name: str, table_options: dict[str, str]
@@ -380,18 +382,29 @@ class LakeflowConnect:
         """
         Fetch the schema of a table.
 
-        For Google Analytics, ANY table name is accepted and treated as a custom report.
-        The schema is dynamic based on requested dimensions and metrics.
-        The table_options must contain either:
-            - prebuilt_report: Name of a prebuilt report (e.g., "traffic_by_country")
-            OR
-            - dimensions: JSON array of dimension names (e.g., ["date", "country"])
-            - metrics: JSON array of metric names (e.g., ["activeUsers", "sessions"])
-        """
-        # Accept any table name - all are treated as custom reports
+        For Google Analytics, supports two modes:
+        1. Prebuilt reports: table_name matches a prebuilt report name (no table_options needed)
+        2. Custom reports: configured via table_options (dimensions, metrics, or prebuilt_report)
         
-        # Resolve prebuilt report if specified
-        table_options = self._resolve_table_options(table_options)
+        If table_name matches a prebuilt report BUT explicit dimensions are provided in 
+        table_options, the custom dimensions take precedence (shadowing the prebuilt report).
+        """
+        # Check if this is a prebuilt report (identified by table name)
+        prebuilt_reports = self._load_prebuilt_reports()
+        
+        # Check for explicit override: if dimensions are provided, use custom config even if name matches prebuilt
+        if table_name in prebuilt_reports and "dimensions" not in table_options:
+            # Load configuration from prebuilt report (no override)
+            table_options = prebuilt_reports[table_name].copy()
+        elif table_name in prebuilt_reports and "dimensions" in table_options:
+            # User is shadowing a prebuilt report name with custom config - log warning
+            print(f"⚠️  WARNING: Using custom configuration for '{table_name}' (shadowing prebuilt report)")
+            print(f"    To avoid confusion, consider using a different source_table name.")
+            # Use custom config
+            table_options = self._resolve_table_options(table_options)
+        else:
+            # Resolve prebuilt report if specified in table_options
+            table_options = self._resolve_table_options(table_options)
 
         # Parse dimensions and metrics from table_options
         dimensions_json = table_options.get("dimensions", "[]")
@@ -455,12 +468,57 @@ class LakeflowConnect:
         """
         Fetch the metadata of a table.
 
-        For Google Analytics, ANY table name is accepted and treated as a custom report.
-        Returns metadata including primary keys, cursor field, and ingestion type.
-        """
-        # Accept any table name - all are treated as custom reports
+        For Google Analytics, supports two modes:
+        1. Prebuilt reports: table_name matches a prebuilt report name (e.g., "traffic_by_country")
+        2. Custom reports: table_name is user-defined, configured via table_options
         
-        # Resolve prebuilt report if specified
+        If table_name matches a prebuilt report BUT explicit dimensions are provided in 
+        table_options, the custom dimensions take precedence (shadowing the prebuilt report).
+        """
+        # Check if this is a prebuilt report (identified by table name)
+        prebuilt_reports = self._load_prebuilt_reports()
+        
+        # Check for explicit override: if dimensions are provided, use custom config even if name matches prebuilt
+        if table_name in prebuilt_reports and "dimensions" not in table_options:
+            # Load configuration from prebuilt report (no override)
+            report_config = prebuilt_reports[table_name]
+            
+            # Primary keys are defined in the prebuilt report
+            primary_keys = report_config.get("primary_keys", [])
+            
+            # Parse dimensions to determine cursor field
+            dimensions_json = report_config.get("dimensions", "[]")
+            try:
+                dimensions = json.loads(dimensions_json)
+            except json.JSONDecodeError:
+                dimensions = []
+            
+            # Determine cursor field and ingestion type
+            cursor_field = None
+            if "date" in dimensions:
+                cursor_field = "date"
+                ingestion_type = "append"
+            else:
+                ingestion_type = "snapshot"
+            
+            metadata = {
+                "primary_keys": primary_keys,
+                "ingestion_type": ingestion_type,
+            }
+            
+            if cursor_field:
+                metadata["cursor_field"] = cursor_field
+            
+            return metadata
+        
+        elif table_name in prebuilt_reports and "dimensions" in table_options:
+            # User is shadowing a prebuilt report name with custom config - log warning
+            print(f"⚠️  WARNING: Using custom configuration for '{table_name}' (shadowing prebuilt report)")
+            print(f"    To avoid confusion, consider using a different source_table name.")
+            # Fall through to custom report logic below
+        
+        # Not a prebuilt report (or explicitly overridden) - treat as custom report
+        # Resolve prebuilt report if specified in table_options
         table_options = self._resolve_table_options(table_options)
 
         # Parse dimensions from table_options to determine primary keys
@@ -486,7 +544,10 @@ class LakeflowConnect:
         # and returns empty primary_keys, causing "APPLY CHANGES query requires at 
         # least one join key" errors.
         #
-        # FIX REQUIRED in ingestion_pipeline.py:
+        # WORKAROUND: For prebuilt reports, use the report name as source_table directly.
+        # The connector can then look up primary_keys from prebuilt_reports.json by name.
+        #
+        # For custom reports, the fix still requires changes in ingestion_pipeline.py:
         # 1. Get table configurations before metadata retrieval (before line 124):
         #      table_configs = {t: spec.get_table_configuration(t) for t in table_list}
         # 2. Pass table_configs to _get_table_metadata():
@@ -499,7 +560,7 @@ class LakeflowConnect:
         #            .options(**table_config)  # Include table-specific options!
         #            .load()
         #
-        # Until fixed, users MUST explicitly specify primary_keys in table_configuration.
+        # Until fixed, users MUST explicitly specify primary_keys for custom reports.
         #
         # Primary keys are all dimensions (composite key)
         primary_keys = dimensions if dimensions else []
@@ -567,9 +628,14 @@ class LakeflowConnect:
         """
         Read the records of a table and return an iterator of records and an offset.
 
-        For Google Analytics, ANY table name is accepted and treated as a custom report.
+        For Google Analytics, supports two modes:
+        1. Prebuilt reports: table_name matches a prebuilt report name (no table_options needed)
+        2. Custom reports: configured via table_options
 
-        Table options:
+        If table_name matches a prebuilt report BUT explicit dimensions are provided in 
+        table_options, the custom dimensions take precedence (shadowing the prebuilt report).
+
+        Table options (for custom reports):
             - prebuilt_report (optional): Name of a prebuilt report (e.g., "traffic_by_country")
             OR
             - dimensions (required): JSON array of dimension names
@@ -581,10 +647,27 @@ class LakeflowConnect:
             - metric_filter (optional): Filter expression for metrics (JSON object)
             - page_size (optional): Number of rows per page (default: 10000, max: 100000)
         """
-        # Accept any table name - all are treated as custom reports
+        # Check if this is a prebuilt report (identified by table name)
+        prebuilt_reports = self._load_prebuilt_reports()
         
-        # Resolve prebuilt report if specified
-        table_options = self._resolve_table_options(table_options)
+        # Check for explicit override: if dimensions are provided, use custom config even if name matches prebuilt
+        if table_name in prebuilt_reports and "dimensions" not in table_options:
+            # Load configuration from prebuilt report (no override)
+            # User can still override settings like start_date via table_options
+            base_config = prebuilt_reports[table_name].copy()
+            # Merge user overrides
+            for key, value in table_options.items():
+                base_config[key] = value
+            table_options = base_config
+        elif table_name in prebuilt_reports and "dimensions" in table_options:
+            # User is shadowing a prebuilt report name with custom config - log warning
+            print(f"⚠️  WARNING: Using custom configuration for '{table_name}' (shadowing prebuilt report)")
+            print(f"    To avoid confusion, consider using a different source_table name.")
+            # Use custom config
+            table_options = self._resolve_table_options(table_options)
+        else:
+            # Resolve prebuilt report if specified in table_options
+            table_options = self._resolve_table_options(table_options)
 
         # Parse required options
         dimensions_json = table_options.get("dimensions", "[]")

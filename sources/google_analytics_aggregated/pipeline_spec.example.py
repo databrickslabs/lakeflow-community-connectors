@@ -15,14 +15,15 @@ source_name = "google_analytics_aggregated"
 #
 # TWO WAYS TO DEFINE REPORTS:
 #
-# 1. PREBUILT REPORTS (Recommended for common use cases)
-#    - Use predefined report configurations from prebuilt_reports.json
-#    - Simply specify: "prebuilt_report": "report_name"
-#    - Available reports: traffic_by_country, engagement_by_device, 
-#                         traffic_sources, page_performance, user_demographics
+# 1. PREBUILT REPORTS (Recommended - Simplest!)
+#    - Use the prebuilt report name as the source_table
+#    - NO table_configuration needed!
+#    - Dimensions, metrics, and primary_keys are automatically configured
+#    - Available reports: traffic_by_country
 #    - Can override any settings (start_date, lookback_days, filters, etc.)
 #
 # 2. CUSTOM REPORTS (For specific needs)
+#    - Use any source_table name you want
 #    - Manually specify dimensions, metrics, and primary_keys
 #    - Full control over report configuration
 #    - Required fields: dimensions, metrics, primary_keys
@@ -33,14 +34,14 @@ source_name = "google_analytics_aggregated"
 # ├── connection_name (required): The Unity Catalog connection name
 # └── objects[]: List of reports to ingest (prebuilt or custom)
 #     └── table
-#         ├── source_table (required): Unique name for this report
+#         ├── source_table (required): For prebuilt reports, use the report name
+#         │                            For custom reports, use any unique name
 #         ├── destination_catalog (optional): Target catalog
 #         ├── destination_schema (optional): Target schema
 #         ├── destination_table (optional): Target table name (defaults to source_table)
-#         └── table_configuration (required): Report definition
+#         └── table_configuration (optional for prebuilt, required for custom): Report settings
 #             
-#             FOR PREBUILT REPORTS:
-#             ├── prebuilt_report (required): Name of prebuilt report
+#             FOR PREBUILT REPORTS (Optional - only to override defaults):
 #             ├── start_date (optional): Override default "30daysAgo"
 #             ├── lookback_days (optional): Override default 3
 #             ├── dimension_filter (optional): Add filters
@@ -48,12 +49,12 @@ source_name = "google_analytics_aggregated"
 #             ├── page_size (optional): Override default 10000
 #             ├── scd_type (optional): Override default "SCD_TYPE_1"
 #             
-#             FOR CUSTOM REPORTS:
+#             FOR CUSTOM REPORTS (Required):
 #             ├── dimensions (required): JSON array e.g., '["date", "country"]'
 #             ├── metrics (required): JSON array e.g., '["activeUsers", "sessions"]'
 #             ├── primary_keys (required): List matching dimensions
-#                                          TODO: This is redundant but required due to
-#                                          architectural limitation. See connector code.
+#             │                            TODO: This is redundant but required due to
+#             │                            architectural limitation. See connector code.
 #             ├── start_date (optional): Initial date range start (default: "30daysAgo")
 #             ├── lookback_days (optional): Days to look back (default: 3)
 #             ├── page_size (optional): Records per request (default: 10000, max: 100000)
@@ -64,13 +65,15 @@ source_name = "google_analytics_aggregated"
 
 # Define your reports (mix of prebuilt and custom)
 reports = [
-    # Example 1: Prebuilt report (simplest approach)
+    # Example 1: Prebuilt report - Use report name as source_table (NO table_configuration needed!)
     {
         "table": {
-            "source_table": "traffic_by_country",
-            "table_configuration": {
-                "prebuilt_report": "traffic_by_country"
-            },
+            "source_table": "traffic_by_country",  # Matches prebuilt report name
+            # No table_configuration needed - dimensions, metrics, and primary_keys are automatic!
+            # Optionally override defaults like start_date, lookback_days, filters:
+            # "table_configuration": {
+            #     "start_date": "90daysAgo",
+            # }
         }
     },
     
@@ -130,8 +133,12 @@ pipeline_spec = {
 # =============================================================================
 # - traffic_by_country: Daily active users, sessions, and page views by country
 #
-# To use a prebuilt report, just specify: "prebuilt_report": "report_name"
-# You can override any defaults (start_date, lookback_days, filters, etc.)
+# To use a prebuilt report, just use its name as the source_table!
+# No need to specify dimensions, metrics, or primary_keys - it's all automatic.
+#
+# RESERVED NAMES: Prebuilt report names are "reserved" to enable zero-config usage.
+# If you need a custom report with a prebuilt name, provide explicit "dimensions"
+# in table_configuration to override (though a different name is recommended).
 #
 # More prebuilt reports can be added to prebuilt_reports.json as needed.
 # =============================================================================
