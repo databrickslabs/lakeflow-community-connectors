@@ -1044,6 +1044,24 @@ def register_lakeflow_source(spark):
                 self._auth_resolved = True
                 return
 
+            # Debug: show which auth-related keys the worker received (no values).
+            try:
+                keys = sorted(list(self.options.keys()))
+                def present(k: str) -> str:
+                    return 'PRESENT' if self.options.get(k) else 'MISSING'
+                summary = {
+                    'workspace_host': present('workspace_host'),
+                    'client_id': present('client_id'),
+                    'client_secret': present('client_secret'),
+                    'client_value_tmp': present('client_value_tmp'),
+                    'access_token': present('access_token'),
+                    'username': present('username'),
+                    'password': present('password'),
+                }
+                print(f'❌ AUTH OPTIONS SUMMARY: {summary}  option_keys={keys}')
+            except Exception:
+                pass
+
             raise RuntimeError(
                 "No valid authentication credentials found in options. "
                 "Expected one of: access_token, OR (workspace_host + client_id + client_secret/client_value_tmp), OR (username + password)."
