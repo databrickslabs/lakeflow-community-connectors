@@ -23,7 +23,6 @@ import time
 from abc import ABC, abstractmethod
 from typing import Dict, List, Iterator, Any, Optional, Callable
 from urllib.parse import quote, urljoin
-import pyarrow
 import requests
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 from pyspark.sql.types import (
@@ -84,28 +83,36 @@ class BaseTableOptions(BaseModel):
     columns: Optional[List[str]] = Field(
         default=None, description="Specific columns to retrieve")
 
-    @field_validator("primary_keys", "columns")
+    @field_validator("primary_keys", "columns", mode="before")
     @classmethod
-    def validate_column_names(cls,
-                              v: Optional[List[str]]) -> Optional[List[str]]:
+    def parse_and_validate_column_lists(cls, v):
         """
-        Validate column names to prevent SQL injection.
+        Parse and validate column names (handles JSON strings from Databricks).
 
-        Ensures column names contain only safe characters: alphanumeric, underscore, dot.
-        This prevents malicious SQL injection through column name manipulation.
-
-        Args:
-            v: List of column names to validate
-
-        Returns:
-            Validated list of column names
-
-        Raises:
-            ValueError: If any column name contains invalid characters
+        Databricks sends list options as JSON strings, so we need to parse them.
+        Also validates column names to prevent SQL injection.
         """
         if v is None:
             return v
+
+        # If it's a string, try to parse it as JSON
+        if isinstance(v, str):
+            import json
+            try:
+                v = json.loads(v)
+            except json.JSONDecodeError:
+                # If it's not JSON, treat as single column name
+                v = [v]
+
+        # Now validate each column name
+        if not isinstance(v, list):
+            raise ValueError(f"Expected list of column names, got {type(v)}")
+
         for col in v:
+            if not isinstance(col, str):
+                raise ValueError(
+                    f"Column name must be string, got {
+                        type(col)}")
             if not col.replace("_", "").replace(".", "").isalnum():
                 raise ValueError(
                     f"Invalid column name: {col}. "
@@ -236,7 +243,7 @@ class BaseVectorDBConnector(ABC):
         Raises:
             ValueError: If required options are missing or invalid
         """
-        pass  # Subclass implements
+        # Subclass implements validation
 
     def _sanitize_identifier(self, identifier: str) -> str:
         """
@@ -348,8 +355,8 @@ class BaseVectorDBConnector(ABC):
                 # Exponential backoff
                 delay = self.retry_delay * (2 ** (retry_count - 1))
                 logger.warning(
-                    f"Request failed, retrying in {delay} seconds... "
-                    f"(attempt {retry_count}/{self.max_retries})"
+                    "Request failed, retrying in %s seconds... (attempt %s/%s)",
+                    delay, retry_count, self.max_retries
                 )
                 time.sleep(delay)
 
@@ -647,25 +654,25 @@ class LanceDBTableOptions(BaseTableOptions):
 
     Supports LanceDB REST API query parameters:
     https://docs.lancedb.com/api-reference/rest/table/query-a-table
-    
+
     Vector Search:
     - query_vector: Query vector for similarity search
     - use_full_scan: Enable full scans (generates dummy vector if needed)
     - vector_column: Name of vector column to search (default: auto-detect)
     - distance_type: Distance metric (e.g., "cosine", "l2", "dot")
-    
+
     Search Optimization:
     - nprobes: Number of probes for IVF index (higher = more accurate, slower)
     - ef: Search effort parameter for HNSW index (higher = more accurate, slower)
     - refine_factor: Refine factor for search quality
     - fast_search: Use fast search mode
     - bypass_vector_index: Skip vector index (full scan)
-    
+
     Filtering:
     - prefilter: Apply filter before vector search (default: true, recommended)
     - lower_bound: Lower bound for distance filtering
     - upper_bound: Upper bound for distance filtering
-    
+
     Results:
     - with_row_id: Include _rowid column in results
     - offset: Skip first N results (for pagination)
@@ -688,7 +695,7 @@ class LanceDBTableOptions(BaseTableOptions):
         default=None,
         description="Distance metric: cosine, l2, dot"
     )
-    
+
     # Index optimization parameters
     nprobes: Optional[int] = Field(
         default=None,
@@ -713,7 +720,7 @@ class LanceDBTableOptions(BaseTableOptions):
         default=None,
         description="Bypass vector index (full scan)"
     )
-    
+
     # Filtering parameters
     prefilter: Optional[bool] = Field(
         default=True,
@@ -727,7 +734,7 @@ class LanceDBTableOptions(BaseTableOptions):
         default=None,
         description="Upper bound for distance filtering"
     )
-    
+
     # Result parameters
     with_row_id: Optional[bool] = Field(
         default=None,
@@ -1124,7 +1131,9 @@ class LakeflowConnect(BaseVectorDBConnector):
         # columns object: {column_names: [...]} or {column_aliases: {...}}
         if columns:
             query_payload["columns"] = {"column_names": columns}
-            logger.debug("Requesting specific columns from LanceDB: %s", columns)
+            logger.debug(
+                "Requesting specific columns from LanceDB: %s",
+                columns)
 
         return ("POST", endpoint, query_payload, None)
 
@@ -1273,18 +1282,23 @@ class LakeflowConnect(BaseVectorDBConnector):
 
             # Fallback: Filter columns post-fetch if API didn't honor the request
             # This happens if LanceDB API doesn't support column projection yet
-            # Performance note: This downloads ALL columns, then filters in-memory
+            # Performance note: This downloads ALL columns, then filters
+            # in-memory
             if options.columns:
                 # Check if filtering is needed (API may have already filtered)
-                if records and not all(k in options.columns for k in records[0].keys()):
-                    logger.debug("Applying post-fetch column filtering (API didn't support projection)")
+                if records and not all(
+                        k in options.columns for k in records[0].keys()):
+                    logger.debug(
+                        "Applying post-fetch column filtering (API didn't support projection)")
                     filtered_records = []
                     for record in records:
-                        filtered_record = {k: v for k, v in record.items() if k in options.columns}
+                        filtered_record = {
+                            k: v for k, v in record.items() if k in options.columns}
                         filtered_records.append(filtered_record)
                     records = filtered_records
                 else:
-                    logger.debug("API returned only requested columns (projection supported)")
+                    logger.debug(
+                        "API returned only requested columns (projection supported)")
 
             # Yield records
             for record in records:
