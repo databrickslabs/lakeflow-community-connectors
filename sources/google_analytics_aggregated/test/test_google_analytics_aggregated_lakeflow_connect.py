@@ -102,4 +102,3 @@ def test_google_analytics_aggregated_connector():
     print("\n" + "="*50)
     print("ALL TESTS PASSED")
     print("="*50)
-

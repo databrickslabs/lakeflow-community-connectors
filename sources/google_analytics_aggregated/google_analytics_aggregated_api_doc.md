@@ -421,6 +421,123 @@ Since Google Analytics may update data for recent dates:
 
 ## **Read API for Data Retrieval**
 
+### **Metadata Endpoint: getMetadata**
+
+The `getMetadata` endpoint returns metadata for dimensions and metrics available in reporting methods, including type information for metrics. This endpoint should be called during connector initialization to build accurate schemas with proper data types.
+
+- **HTTP method**: `GET`
+- **Endpoint**: `/properties/{property}/metadata`
+- **Base URL**: `https://analyticsdata.googleapis.com/v1beta`
+- **Full URL**: `https://analyticsdata.googleapis.com/v1beta/properties/{property}/metadata`
+
+**Path parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `property` | string | yes | Google Analytics property ID (numeric, e.g., "properties/123456789"). Set to "properties/0" for universal dimensions/metrics only (excludes custom ones). |
+
+**Request Body:**
+
+The request body must be empty.
+
+**Response Body:**
+
+If successful, the response contains metadata about available dimensions, metrics, and comparisons:
+
+```json
+{
+  "name": "properties/123456789/metadata",
+  "dimensions": [
+    {
+      "apiName": "date",
+      "uiName": "Date",
+      "description": "The date of the event, formatted as YYYYMMDD.",
+      "category": "TIME"
+    },
+    {
+      "apiName": "country",
+      "uiName": "Country",
+      "description": "User's country.",
+      "category": "GEOGRAPHY"
+    }
+  ],
+  "metrics": [
+    {
+      "apiName": "activeUsers",
+      "uiName": "Active Users",
+      "description": "The number of distinct users who visited your site or app.",
+      "type": "TYPE_INTEGER",
+      "category": "USER"
+    },
+    {
+      "apiName": "engagementRate",
+      "uiName": "Engagement rate",
+      "description": "The percentage of engaged sessions.",
+      "type": "TYPE_FLOAT",
+      "category": "ENGAGEMENT"
+    }
+  ],
+  "comparisons": [
+    {
+      "apiName": "comparison_name",
+      "uiName": "Comparison Name",
+      "description": "Comparison description"
+    }
+  ]
+}
+```
+
+**Response Schema:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Resource name of this metadata (e.g., "properties/123456789/metadata") |
+| `dimensions[]` | array\<DimensionMetadata\> | The dimension descriptions |
+| `metrics[]` | array\<MetricMetadata\> | The metric descriptions including type information |
+| `comparisons[]` | array\<ComparisonMetadata\> | The comparison descriptions |
+
+**DimensionMetadata structure:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `apiName` | string | API name of the dimension (e.g., "date", "country") |
+| `uiName` | string | Display name in Google Analytics UI |
+| `description` | string | Description of the dimension |
+| `category` | string | Category grouping (e.g., "TIME", "GEOGRAPHY", "USER") |
+
+**MetricMetadata structure:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `apiName` | string | API name of the metric (e.g., "activeUsers") |
+| `uiName` | string | Display name in Google Analytics UI |
+| `description` | string | Description of the metric |
+| `type` | string | **Metric type enum**: "TYPE_INTEGER", "TYPE_FLOAT", "TYPE_SECONDS", "TYPE_MILLISECONDS", "TYPE_MINUTES", "TYPE_HOURS", "TYPE_STANDARD", "TYPE_CURRENCY", "TYPE_FEET", "TYPE_MILES", "TYPE_METERS", "TYPE_KILOMETERS" |
+| `category` | string | Category grouping (e.g., "USER", "ENGAGEMENT", "REVENUE") |
+
+**Usage Pattern:**
+
+1. Call `getMetadata` once during connector initialization
+2. Cache the metadata (dimensions and metrics with their types)
+3. Use the type information from `metrics[].type` to build schemas with proper data types
+4. Look up metric types when parsing values from `runReport` responses
+
+**Example request:**
+
+```bash
+curl -X GET \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  "https://analyticsdata.googleapis.com/v1beta/properties/123456789/metadata"
+```
+
+**Authorization:**
+
+Requires one of the following OAuth scopes:
+- `https://www.googleapis.com/auth/analytics.readonly` (recommended)
+- `https://www.googleapis.com/auth/analytics`
+
+---
+
 ### **Primary Endpoint: runReport**
 
 - **HTTP method**: `POST`
@@ -966,7 +1083,7 @@ However, this is separate from the Data API and is not part of the connector's f
 | Web Search | OpenAI search results for "Google Analytics Data API pagination" | 2024-12-23 | High | Confirmed offset-based pagination strategy, default limit of 10,000, max 100,000 |
 | Web Search | OpenAI search results for "Google Analytics Data API dimensions metrics" | 2024-12-23 | High | Confirmed dimensions/metrics structure, up to 9 dimensions and 10 metrics per request |
 | Web Search | OpenAI search results for "Google Analytics Data API quota limits" | 2024-12-23 | High | Confirmed 25,000 tokens/day, 5,000 tokens/hour, 10 concurrent requests |
-| Official Docs | https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/getMetadata | 2024-12-23 | High | How to retrieve available dimensions and metrics for a property |
+| Official Docs | https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/getMetadata | 2024-12-23 | High | How to retrieve available dimensions and metrics for a property, including metric type information (TYPE_INTEGER, TYPE_FLOAT, etc.) |
 
 
 ## **Sources and References**

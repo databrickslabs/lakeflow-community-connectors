@@ -223,6 +223,9 @@ def register_lakeflow_source(spark):
             except Exception as e:
                 raise ValueError(f"Failed to create credentials from service account: {e}")
 
+            # Fetch and cache metadata for type information
+            self._metadata_cache = None
+
         def _get_access_token(self) -> str:
             """
             Obtain or refresh the OAuth access token using Google's official auth library.
@@ -234,6 +237,72 @@ def register_lakeflow_source(spark):
                 self._credentials.refresh(auth_request)
 
             return self._credentials.token
+
+        def _fetch_metadata(self) -> dict:
+            """
+            Fetch metadata for dimensions and metrics from the Google Analytics Data API.
+            Returns a dictionary mapping metric names to their types.
+
+            This is called once and cached to build schemas with proper data types.
+            """
+            if self._metadata_cache is not None:
+                return self._metadata_cache
+
+            url = f"{self.base_url}/properties/{self.property_id}/metadata"
+            headers = {
+                "Authorization": f"Bearer {self._get_access_token()}",
+                "Content-Type": "application/json",
+            }
+
+            try:
+                response = requests.get(url, headers=headers, timeout=60)
+                response.raise_for_status()
+                metadata = response.json()
+
+                # Build a lookup dictionary: metric_name -> type
+                metric_types = {}
+                for metric in metadata.get("metrics", []):
+                    api_name = metric.get("apiName")
+                    metric_type = metric.get("type")
+                    if api_name and metric_type:
+                        metric_types[api_name] = metric_type
+
+                self._metadata_cache = metric_types
+                return metric_types
+
+            except requests.exceptions.RequestException as e:
+                raise RuntimeError(f"Failed to fetch metadata from Google Analytics API: {e}")
+
+        def _get_pyspark_type_for_metric(self, metric_type: str):
+            """
+            Map Google Analytics metric type to PySpark data type.
+
+            Args:
+                metric_type: Type string from GA4 metadata (e.g., "TYPE_INTEGER", "TYPE_FLOAT")
+
+            Returns:
+                PySpark DataType (LongType, DoubleType, or StringType as fallback)
+            """
+            if metric_type == "TYPE_INTEGER":
+                return LongType()
+            elif metric_type == "TYPE_MILLISECONDS":
+                return LongType()
+            elif metric_type in [
+                "TYPE_FLOAT",
+                "TYPE_CURRENCY",
+                "TYPE_SECONDS",
+                "TYPE_MINUTES",
+                "TYPE_HOURS",
+                "TYPE_FEET",
+                "TYPE_MILES",
+                "TYPE_METERS",
+                "TYPE_KILOMETERS",
+                "TYPE_STANDARD",
+            ]:
+                return DoubleType()
+            else:
+                # Fallback to StringType for unknown types
+                return StringType()
 
         def _make_api_request(
             self, endpoint: str, body: dict, retry_count: int = 3
@@ -355,6 +424,9 @@ def register_lakeflow_source(spark):
                     "'metrics' must be a JSON array of strings with at least one metric"
                 )
 
+            # Fetch metadata to get proper types for metrics
+            metric_types = self._fetch_metadata()
+
             # Build schema fields
             schema_fields = []
 
@@ -362,13 +434,16 @@ def register_lakeflow_source(spark):
             for dim in dimensions:
                 schema_fields.append(StructField(dim, StringType(), True))
 
-            # Add metric fields (we'll use a placeholder schema since we don't know types upfront)
-            # In practice, metrics can be TYPE_INTEGER (LongType), TYPE_FLOAT (DoubleType), etc.
-            # We'll use DoubleType as default which can accommodate both integers and floats
+            # Add metric fields with proper types based on metadata
             for metric in metrics:
-                # Use StringType for metrics initially since API returns them as strings
-                # The actual type parsing happens in the connector logic
-                schema_fields.append(StructField(metric, StringType(), True))
+                metric_type = metric_types.get(metric)
+                if metric_type:
+                    # Use the type from metadata
+                    pyspark_type = self._get_pyspark_type_for_metric(metric_type)
+                    schema_fields.append(StructField(metric, pyspark_type, True))
+                else:
+                    # Fallback to StringType if metric type not found in metadata
+                    schema_fields.append(StructField(metric, StringType(), True))
 
             return StructType(schema_fields)
 
@@ -418,6 +493,42 @@ def register_lakeflow_source(spark):
                 metadata["cursor_field"] = cursor_field
 
             return metadata
+
+        def _parse_metric_value(self, value_str: str, metric_type: str):
+            """
+            Parse metric value string according to its type from the API.
+
+            Args:
+                value_str: String value from API response
+                metric_type: Type from metricHeader.type (e.g., "TYPE_INTEGER", "TYPE_FLOAT")
+
+            Returns:
+                Parsed value in appropriate Python type (int, float, or string)
+            """
+            try:
+                if metric_type == "TYPE_INTEGER":
+                    return int(value_str)
+                elif metric_type == "TYPE_MILLISECONDS":
+                    return int(value_str)
+                elif metric_type in [
+                    "TYPE_FLOAT",
+                    "TYPE_CURRENCY",
+                    "TYPE_SECONDS",
+                    "TYPE_MINUTES",
+                    "TYPE_HOURS",
+                    "TYPE_FEET",
+                    "TYPE_MILES",
+                    "TYPE_METERS",
+                    "TYPE_KILOMETERS",
+                    "TYPE_STANDARD",
+                ]:
+                    return float(value_str)
+                else:
+                    # Unknown type, keep as string
+                    return value_str
+            except (ValueError, TypeError):
+                # If parsing fails, return None
+                return None
 
         def read_table(
             self, table_name: str, start_offset: dict, table_options: dict[str, str]
@@ -556,14 +667,22 @@ def register_lakeflow_source(spark):
                         else:
                             record[dim_name] = dim_value
 
-                    # Parse metric values (keep as strings to match schema)
+                    # Parse metric values according to their types
                     metric_values = row.get("metricValues", [])
                     for i, metric_header in enumerate(metric_headers):
                         metric_name = metric_header["name"]
-                        metric_value = (
+                        metric_type = metric_header.get("type", "TYPE_STRING")
+                        metric_value_str = (
                             metric_values[i]["value"] if i < len(metric_values) else None
                         )
-                        record[metric_name] = metric_value
+
+                        # Parse the string value to the appropriate type
+                        if metric_value_str is None or metric_value_str == "":
+                            record[metric_name] = None
+                        else:
+                            record[metric_name] = self._parse_metric_value(
+                                metric_value_str, metric_type
+                            )
 
                     all_rows.append(record)
 
