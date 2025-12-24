@@ -99,6 +99,74 @@ def test_google_analytics_aggregated_connector():
             print(f"❌ FAILED: {str(e)}")
             raise
 
+    # Test 6: Validation - Invalid dimension (should fail)
+    print("\n" + "="*50)
+    print("TEST: Validation - Invalid dimension")
+    print("="*50)
+    try:
+        invalid_options = {
+            "dimensions": '["date", "contry"]',  # Typo: contry instead of country
+            "metrics": '["activeUsers"]'
+        }
+        schema = connector.get_table_schema("test_invalid", invalid_options)
+        print("❌ FAILED: Invalid dimension should have been rejected")
+        raise AssertionError("Invalid dimension was not caught by validation")
+    except ValueError as e:
+        error_msg = str(e)
+        assert "Unknown dimensions" in error_msg, "Error should mention unknown dimensions"
+        assert "contry" in error_msg, "Error should list the invalid dimension"
+        print("✅ PASSED: Invalid dimension caught")
+        print(f"  Error: {error_msg[:100]}...")
+    except Exception as e:
+        print(f"❌ FAILED: Unexpected error type: {type(e).__name__}")
+        raise
+
+    # Test 7: Validation - Invalid metric (should fail)
+    print("\n" + "="*50)
+    print("TEST: Validation - Invalid metric")
+    print("="*50)
+    try:
+        invalid_options = {
+            "dimensions": '["date"]',
+            "metrics": '["activUsers"]'  # Typo: activUsers instead of activeUsers
+        }
+        schema = connector.get_table_schema("test_invalid", invalid_options)
+        print("❌ FAILED: Invalid metric should have been rejected")
+        raise AssertionError("Invalid metric was not caught by validation")
+    except ValueError as e:
+        error_msg = str(e)
+        assert "Unknown metrics" in error_msg, "Error should mention unknown metrics"
+        assert "activUsers" in error_msg, "Error should list the invalid metric"
+        print("✅ PASSED: Invalid metric caught")
+        print(f"  Error: {error_msg[:100]}...")
+    except Exception as e:
+        print(f"❌ FAILED: Unexpected error type: {type(e).__name__}")
+        raise
+
+    # Test 8: Validation - Multiple invalid fields (should fail)
+    print("\n" + "="*50)
+    print("TEST: Validation - Multiple invalid fields")
+    print("="*50)
+    try:
+        invalid_options = {
+            "dimensions": '["date", "contry", "deivce"]',  # Multiple typos
+            "metrics": '["activUsers", "sesions"]'  # Multiple typos
+        }
+        schema = connector.get_table_schema("test_invalid", invalid_options)
+        print("❌ FAILED: Multiple invalid fields should have been rejected")
+        raise AssertionError("Multiple invalid fields were not caught by validation")
+    except ValueError as e:
+        error_msg = str(e)
+        assert "Unknown dimensions" in error_msg, "Error should mention unknown dimensions"
+        assert "Unknown metrics" in error_msg, "Error should mention unknown metrics"
+        assert "contry" in error_msg and "deivce" in error_msg, "Error should list all invalid dimensions"
+        assert "activUsers" in error_msg and "sesions" in error_msg, "Error should list all invalid metrics"
+        print("✅ PASSED: Multiple invalid fields caught")
+        print(f"  Error message includes both dimensions and metrics")
+    except Exception as e:
+        print(f"❌ FAILED: Unexpected error type: {type(e).__name__}")
+        raise
+
     print("\n" + "="*50)
     print("ALL TESTS PASSED")
     print("="*50)

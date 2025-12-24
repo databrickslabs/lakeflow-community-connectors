@@ -241,9 +241,12 @@ def register_lakeflow_source(spark):
         def _fetch_metadata(self) -> dict:
             """
             Fetch metadata for dimensions and metrics from the Google Analytics Data API.
-            Returns a dictionary mapping metric names to their types.
+            Returns a dictionary with:
+              - 'metric_types': mapping of metric names to their types
+              - 'available_dimensions': set of valid dimension names
+              - 'available_metrics': set of valid metric names
 
-            This is called once and cached to build schemas with proper data types.
+            This is called once and cached for type inference and validation.
             """
             if self._metadata_cache is not None:
                 return self._metadata_cache
@@ -259,16 +262,32 @@ def register_lakeflow_source(spark):
                 response.raise_for_status()
                 metadata = response.json()
 
-                # Build a lookup dictionary: metric_name -> type
+                # Build lookup structures
                 metric_types = {}
+                available_dimensions = set()
+                available_metrics = set()
+
+                # Extract dimension names
+                for dimension in metadata.get("dimensions", []):
+                    api_name = dimension.get("apiName")
+                    if api_name:
+                        available_dimensions.add(api_name)
+
+                # Extract metric names and types
                 for metric in metadata.get("metrics", []):
                     api_name = metric.get("apiName")
                     metric_type = metric.get("type")
-                    if api_name and metric_type:
-                        metric_types[api_name] = metric_type
+                    if api_name:
+                        available_metrics.add(api_name)
+                        if metric_type:
+                            metric_types[api_name] = metric_type
 
-                self._metadata_cache = metric_types
-                return metric_types
+                self._metadata_cache = {
+                    "metric_types": metric_types,
+                    "available_dimensions": available_dimensions,
+                    "available_metrics": available_metrics,
+                }
+                return self._metadata_cache
 
             except requests.exceptions.RequestException as e:
                 raise RuntimeError(f"Failed to fetch metadata from Google Analytics API: {e}")
@@ -303,6 +322,48 @@ def register_lakeflow_source(spark):
             else:
                 # Fallback to StringType for unknown types
                 return StringType()
+
+        def _validate_dimensions_and_metrics(self, dimensions: list, metrics: list):
+            """
+            Validate that requested dimensions and metrics exist in the property metadata.
+            This catches typos and non-existent fields without making extra API calls.
+
+            Note: This only validates existence, not semantic compatibility.
+            The runReport API will validate dimension/metric compatibility and return
+            clear errors for incompatible combinations.
+
+            Args:
+                dimensions: List of dimension names to validate
+                metrics: List of metric names to validate
+
+            Raises:
+                ValueError: If any dimensions or metrics are not found in metadata
+            """
+            metadata = self._fetch_metadata()
+            available_dimensions = metadata.get("available_dimensions", set())
+            available_metrics = metadata.get("available_metrics", set())
+
+            # Check for unknown dimensions
+            unknown_dimensions = [d for d in dimensions if d not in available_dimensions]
+
+            # Check for unknown metrics
+            unknown_metrics = [m for m in metrics if m not in available_metrics]
+
+            if unknown_dimensions or unknown_metrics:
+                error_parts = ["Invalid report configuration:"]
+
+                if unknown_dimensions:
+                    error_parts.append(f"\n  Unknown dimensions: {unknown_dimensions}")
+                    error_parts.append(f"\n  Available dimensions include: {sorted(list(available_dimensions))[:10]}...")
+
+                if unknown_metrics:
+                    error_parts.append(f"\n  Unknown metrics: {unknown_metrics}")
+                    error_parts.append(f"\n  Available metrics include: {sorted(list(available_metrics))[:10]}...")
+
+                error_parts.append("\n\nTo see all available dimensions and metrics for your property:")
+                error_parts.append(f"\n  GET https://analyticsdata.googleapis.com/v1beta/properties/{self.property_id}/metadata")
+
+                raise ValueError("".join(error_parts))
 
         def _make_api_request(
             self, endpoint: str, body: dict, retry_count: int = 3
@@ -424,8 +485,12 @@ def register_lakeflow_source(spark):
                     "'metrics' must be a JSON array of strings with at least one metric"
                 )
 
+            # Validate dimensions and metrics exist (catches typos and non-existent fields)
+            self._validate_dimensions_and_metrics(dimensions, metrics)
+
             # Fetch metadata to get proper types for metrics
-            metric_types = self._fetch_metadata()
+            metadata = self._fetch_metadata()
+            metric_types = metadata.get("metric_types", {})
 
             # Build schema fields
             schema_fields = []
