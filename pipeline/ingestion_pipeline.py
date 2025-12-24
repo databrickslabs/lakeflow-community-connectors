@@ -1,7 +1,22 @@
 from typing import List
 from pyspark import pipelines as sdp
+from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, expr
 from libs.spec_parser import SpecParser
+
+
+def _active_spark():
+    """
+    Get an active SparkSession without capturing SparkSession in serialized closures.
+
+    In Lakeflow/SDP pipelines, @sdp.view / @sdp.append_flow functions may be serialized.
+    Capturing `spark` from an outer scope can trigger:
+      [CONTEXT_ONLY_VALID_ON_DRIVER]
+    """
+    s = SparkSession.getActiveSession()
+    if s is not None:
+        return s
+    return SparkSession.builder.getOrCreate()
 
 
 def _create_cdc_table(
@@ -19,6 +34,7 @@ def _create_cdc_table(
 
     @sdp.view(name=view_name)
     def v():
+        spark = _active_spark()
         return (
             spark.readStream.format("lakeflow_connect")
             .option("databricks.connection", connection_name)
@@ -51,6 +67,7 @@ def _create_snapshot_table(
 
     @sdp.view(name=view_name)
     def snapshot_view():
+        spark = _active_spark()
         return (
             spark.read.format("lakeflow_connect")
             .option("databricks.connection", connection_name)
@@ -82,6 +99,7 @@ def _create_append_table(
 
     @sdp.append_flow(name=view_name, target=destination_table)
     def af():
+        spark = _active_spark()
         return (
             spark.readStream.format("lakeflow_connect")
             .option("databricks.connection", connection_name)
