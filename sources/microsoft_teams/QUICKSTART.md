@@ -84,15 +84,16 @@ Databricks provides a streamlined "Custom Connector" flow that handles everythin
 
 4. **Step 1: Connection** (Provide credentials):
    - Select or create a connection named: `microsoft_teams_connection`
-   - **Connection details** - Add these key-value pairs:
+   - **Connection details** - Add these key-value pairs (**IMPORTANT: These must be added to the connection, not just the pipeline**):
 
    | Key | Value |
    |-----|-------|
    | `tenant_id` | Your Azure AD tenant ID (e.g., `12345678-1234-1234-1234-123456789abc`) |
    | `client_id` | Your application client ID (e.g., `87654321-4321-4321-4321-cba987654321`) |
    | `client_secret` | Your client secret value (e.g., `abc123~DEF456_ghi789`) |
-   | `externalOptionsAllowList` | `team_id,channel_id,top,max_pages_per_batch,lookback_seconds,start_date` |
+   | `externalOptionsAllowList` | `tenant_id,client_id,client_secret,team_id,channel_id,top,max_pages_per_batch,lookback_seconds,start_date` |
 
+   - **CRITICAL**: The `externalOptionsAllowList` must include `tenant_id,client_id,client_secret` in addition to table-specific options
    - Click **Create connection** (if new) or **Next** (if existing)
 
 5. **Step 2: Ingestion setup**:
