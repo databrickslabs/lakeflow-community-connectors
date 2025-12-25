@@ -689,7 +689,8 @@ def register_lakeflow_source(spark):
                 max_pages = 100
 
             # Build initial request
-            url = f"{self.base_url}/me/joinedTeams"
+            endpoint = self._object_config["teams"]["endpoint"]
+            url = f"{self.base_url}/{endpoint}"
             params = {"$top": top}
 
             records: List[dict[str, Any]] = []
@@ -1029,7 +1030,8 @@ def register_lakeflow_source(spark):
             if not cursor:
                 cursor = table_options.get("start_date")
 
-            url = f"{self.base_url}/me/chats"
+            endpoint = self._object_config["chats"]["endpoint"]
+            url = f"{self.base_url}/{endpoint}"
             params = {"$top": top}
 
             records: List[dict[str, Any]] = []
