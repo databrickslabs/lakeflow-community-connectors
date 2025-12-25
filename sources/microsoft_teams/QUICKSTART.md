@@ -118,38 +118,51 @@ After the pipeline is created, you need to edit the `ingest.py` file to configur
 
 1. Open your pipeline `microsoft_teams_ingestion_pipeline`
 2. Click on the `ingest.py` tab to edit it
-3. Replace the generated code with this configuration:
+3. Replace the generated code with this **DLT (Delta Live Tables)** configuration:
 
    ```python
-   # Import and register the Microsoft Teams connector
+   import dlt
    from sources.microsoft_teams._generated_microsoft_teams_python_source import register_lakeflow_source
+
+   # Register the Microsoft Teams connector
    register_lakeflow_source(spark)
 
-   # Import the ingestion pipeline
-   from pipeline.ingestion_pipeline import ingest
+   # Connection and credentials
+   CONNECTION_NAME = "microsoft_teams_connection"
+   TENANT_ID = "YOUR_TENANT_ID"         # Replace with your Azure AD tenant ID
+   CLIENT_ID = "YOUR_CLIENT_ID"          # Replace with your application client ID
+   CLIENT_SECRET = "YOUR_CLIENT_SECRET"  # Replace with your client secret
 
-   # Pipeline specification - defines which tables to ingest
-   # NOTE: Credentials must be passed via table_configuration for each table
-   # because Databricks stores connection credentials in 'properties' field
-   # but connectors receive the 'options' field (which doesn't include properties)
-   pipeline_spec = {
-       "connection_name": "microsoft_teams_connection",
-       "objects": [
-           {
-               "table": {
-                   "source_table": "teams",
-                   "table_configuration": {
-                       "tenant_id": "YOUR_TENANT_ID",      # Replace with your Azure AD tenant ID
-                       "client_id": "YOUR_CLIENT_ID",       # Replace with your application client ID
-                       "client_secret": "YOUR_CLIENT_SECRET" # Replace with your client secret
-                   }
-               }
-           }
-       ]
-   }
+   # Define DLT table for Teams
+   @dlt.table(
+       name="teams",
+       comment="Microsoft Teams - all teams the app has access to"
+   )
+   def teams():
+       return spark.read.format("lakeflow_python_source") \
+           .option("sourceName", "microsoft_teams") \
+           .option("connectionName", CONNECTION_NAME) \
+           .option("sourceTable", "teams") \
+           .option("tenant_id", TENANT_ID) \
+           .option("client_id", CLIENT_ID) \
+           .option("client_secret", CLIENT_SECRET) \
+           .load()
 
-   # Run the ingestion
-   ingest(spark, pipeline_spec)
+   # Optional: Define additional tables
+   # @dlt.table(
+   #     name="channels",
+   #     comment="Microsoft Teams Channels"
+   # )
+   # def channels():
+   #     return spark.read.format("lakeflow_python_source") \
+   #         .option("sourceName", "microsoft_teams") \
+   #         .option("connectionName", CONNECTION_NAME) \
+   #         .option("sourceTable", "channels") \
+   #         .option("tenant_id", TENANT_ID) \
+   #         .option("client_id", CLIENT_ID) \
+   #         .option("client_secret", CLIENT_SECRET) \
+   #         .option("team_id", "YOUR_TEAM_ID") \
+   #         .load()
    ```
 
 4. **IMPORTANT**: Replace the placeholder credentials with your actual Azure AD credentials:
@@ -161,8 +174,9 @@ After the pipeline is created, you need to edit the `ingest.py` file to configur
 
 ### Important Notes
 
-- **Why credentials go in table_configuration**: Databricks stores connection credentials in the `properties` field, but PySpark DataSource connectors receive the `options` field. The `options` field does NOT include `properties`. By passing credentials via `table_configuration`, they get merged into the options that the connector receives.
-- **externalOptionsAllowList enables this**: The connection has `tenant_id`, `client_id`, and `client_secret` in its `externalOptionsAllowList`, which allows them to be passed via `table_configuration`
+- **DLT Format Required**: Delta Live Tables pipelines require `@dlt.table` decorators. Each table is defined as a function that returns a DataFrame.
+- **Credentials in Options**: Pass credentials directly as options to the DataSource reader. The connector validates them just-in-time when connecting to Microsoft Teams API.
+- **Available Tables**: `teams`, `channels`, `messages`, `members`, `chats` (see table schemas below)
 - **Security consideration**: Since credentials are in the pipeline code, ensure your Databricks workspace has appropriate access controls
 
 ### Step 2: Run the Pipeline
