@@ -145,7 +145,21 @@ databricks connections create \
 
 ## Supported Objects (Tables)
 
-The Microsoft Teams connector supports **5 core tables**:
+The Microsoft Teams connector supports **5 core tables** with two ingestion modes:
+
+**Ingestion Modes:**
+- **Snapshot (Full Refresh)**: Always fetches all data on every run. Recommended for small, infrequently changing datasets (teams, channels, members).
+- **CDC (Change Data Capture/Incremental)**: Only fetches new or modified records after the last cursor value. Recommended for large, frequently changing datasets (messages, chats).
+
+### Summary Table
+
+| Table | Ingestion Type | Cursor Field | Parent IDs Required |
+|-------|---------------|--------------|---------------------|
+| teams | Snapshot | - | None |
+| channels | Snapshot | - | `team_id` |
+| messages | **CDC** | `lastModifiedDateTime` | `team_id`, `channel_id` |
+| members | Snapshot | - | `team_id` |
+| chats | **CDC** | `lastUpdatedDateTime` | None |
 
 ### 1. teams (Snapshot)
 
@@ -164,9 +178,10 @@ List of Microsoft Teams accessible by the application.
 | messagingSettings | String | JSON string with messaging settings |
 | funSettings | String | JSON string with fun features config |
 
-**Ingestion Type:** Snapshot (full refresh)
+**Ingestion Type:** Snapshot (full refresh every run)
 **Primary Key:** `id`
 **Required Table Options:** None
+**Graph API Endpoint:** `GET /groups?$filter=resourceProvisioningOptions/Any(x:x eq 'Team')`
 
 ---
 
@@ -187,9 +202,10 @@ Channels within teams.
 | isFavoriteByDefault | Boolean | Auto-favorite for members |
 | isArchived | Boolean | Whether channel is archived |
 
-**Ingestion Type:** Snapshot (full refresh)
+**Ingestion Type:** Snapshot (full refresh every run)
 **Primary Key:** `id`
 **Required Table Options:** `team_id`
+**Graph API Endpoint:** `GET /teams/{team_id}/channels`
 
 ---
 
@@ -214,10 +230,11 @@ Messages within channels.
 | mentions | Array[Struct] | @mentions in message |
 | reactions | Array[Struct] | Emoji reactions |
 
-**Ingestion Type:** CDC (incremental with Change Data Capture)
+**Ingestion Type:** CDC (incremental - only fetches new/modified records after cursor)
 **Primary Key:** `id`
 **Cursor Field:** `lastModifiedDateTime`
 **Required Table Options:** `team_id`, `channel_id`
+**Graph API Endpoint:** `GET /teams/{team_id}/channels/{channel_id}/messages?$filter=lastModifiedDateTime gt {cursor}`
 
 ---
 
@@ -235,9 +252,10 @@ Members of teams.
 | email | String | Email address |
 | visibleHistoryStartDateTime | String | When member can start seeing history |
 
-**Ingestion Type:** Snapshot (full refresh)
+**Ingestion Type:** Snapshot (full refresh every run)
 **Primary Key:** `id`
 **Required Table Options:** `team_id`
+**Graph API Endpoint:** `GET /teams/{team_id}/members`
 
 ---
 
@@ -255,18 +273,48 @@ Members of teams.
 | webUrl | String | URL to chat in Teams client |
 | onlineMeetingInfo | String | JSON string with meeting details |
 
-**Ingestion Type:** CDC (incremental)
+**Ingestion Type:** CDC (incremental - only fetches new/modified records after cursor)
 **Primary Key:** `id`
 **Cursor Field:** `lastUpdatedDateTime`
 **Required Table Options:** None
+**Graph API Endpoint:** `GET /chats?$filter=lastUpdatedDateTime gt {cursor}`
 
 ---
 
 ## Configuration Examples
 
-### Example 1: Basic Teams and Channels (Snapshot)
+### Example 1: Dynamic Ingestion (Recommended)
 
-Ingest all teams and channels from a specific team:
+**Fully automated** ingestion that discovers all teams and channels without manual configuration.
+
+See the complete dynamic ingestion template in [`pipeline-spec/example_microsoft_teams_ingest.py`](../../pipeline-spec/example_microsoft_teams_ingest.py).
+
+This approach:
+- Ingests all teams and chats automatically
+- Discovers team IDs from ingested teams table
+- Ingests channels, members, and messages for each team dynamically
+- No manual team_id or channel_id configuration needed
+
+```python
+# Just configure credentials and options
+TENANT_ID = "your-tenant-id"
+CLIENT_ID = "your-client-id"
+CLIENT_SECRET = "your-client-secret"
+DESTINATION_CATALOG = "main"
+DESTINATION_SCHEMA = "teams_data"
+ENABLE_MESSAGES_INGESTION = True
+ENABLE_CHATS_INGESTION = True
+
+# The rest is automated - see full template for implementation
+```
+
+---
+
+### Example 2: Manual Configuration (Advanced)
+
+For specific teams/channels only, you can manually configure each table.
+
+**Basic Teams and Channels (Snapshot):**
 
 ```python
 pipeline_spec = {
@@ -274,24 +322,34 @@ pipeline_spec = {
     "objects": [
         {
             "table": {
-                "source_table": "teams"
+                "source_table": "teams",
+                "table_configuration": {
+                    "tenant_id": "your-tenant-id",
+                    "client_id": "your-client-id",
+                    "client_secret": "your-client-secret"
+                }
             }
         },
         {
             "table": {
                 "source_table": "channels",
                 "table_configuration": {
+                    "tenant_id": "your-tenant-id",
+                    "client_id": "your-client-id",
+                    "client_secret": "your-client-secret",
                     "team_id": "abc-123-team-id-guid"
                 }
             }
         }
     ]
 }
+
+ingest(spark, pipeline_spec)
 ```
 
-### Example 2: Incremental Message Ingestion (CDC)
+**Incremental Message Ingestion (CDC):**
 
-Ingest messages from a specific channel with incremental loading:
+For a specific channel with incremental loading:
 
 ```python
 pipeline_spec = {
@@ -302,8 +360,10 @@ pipeline_spec = {
                 "source_table": "messages",
                 "destination_catalog": "main",
                 "destination_schema": "teams_data",
-                "destination_table": "channel_messages",
                 "table_configuration": {
+                    "tenant_id": "your-tenant-id",
+                    "client_id": "your-client-id",
+                    "client_secret": "your-client-secret",
                     "team_id": "abc-123-team-id-guid",
                     "channel_id": "xyz-789-channel-id",
                     "start_date": "2025-01-01T00:00:00Z",
@@ -313,82 +373,8 @@ pipeline_spec = {
         }
     ]
 }
-```
 
-### Example 3: Multiple Tables with Custom Settings
-
-Ingest teams, channels, members, and messages:
-
-```python
-pipeline_spec = {
-    "connection_name": "microsoft_teams_connection",
-    "objects": [
-        {
-            "table": {
-                "source_table": "teams",
-                "destination_catalog": "main",
-                "destination_schema": "teams_data"
-            }
-        },
-        {
-            "table": {
-                "source_table": "channels",
-                "destination_catalog": "main",
-                "destination_schema": "teams_data",
-                "table_configuration": {
-                    "team_id": "abc-123-team-id-guid",
-                    "top": "50"
-                }
-            }
-        },
-        {
-            "table": {
-                "source_table": "members",
-                "destination_catalog": "main",
-                "destination_schema": "teams_data",
-                "table_configuration": {
-                    "team_id": "abc-123-team-id-guid"
-                }
-            }
-        },
-        {
-            "table": {
-                "source_table": "messages",
-                "destination_catalog": "main",
-                "destination_schema": "teams_data",
-                "table_configuration": {
-                    "team_id": "abc-123-team-id-guid",
-                    "channel_id": "xyz-789-channel-id",
-                    "start_date": "2024-12-01T00:00:00Z",
-                    "max_pages_per_batch": "100"
-                }
-            }
-        }
-    ]
-}
-```
-
-### Example 4: Chats Ingestion
-
-Ingest all chats accessible by the application:
-
-```python
-pipeline_spec = {
-    "connection_name": "microsoft_teams_connection",
-    "objects": [
-        {
-            "table": {
-                "source_table": "chats",
-                "destination_catalog": "main",
-                "destination_schema": "teams_data",
-                "table_configuration": {
-                    "start_date": "2025-01-01T00:00:00Z",
-                    "top": "50"
-                }
-            }
-        }
-    ]
-}
+ingest(spark, pipeline_spec)
 ```
 
 ---

@@ -110,74 +110,72 @@ Databricks provides a streamlined "Custom Connector" flow that handles everythin
 
 ---
 
-## Part 3: Configure Your Pipeline
+## Part 3: Configure Dynamic Ingestion Pipeline
 
-After the pipeline is created, you need to edit the `ingest.py` file to configure which tables to ingest.
+The Microsoft Teams connector supports **fully automated ingestion** that discovers all teams and channels without requiring manual configuration.
 
-### Step 1: Edit the ingest.py File
+### Step 1: Copy the Dynamic Ingestion Template
 
 1. Open your pipeline `microsoft_teams_ingestion_pipeline`
 2. Click on the `ingest.py` tab to edit it
-3. Replace the generated code with this **DLT (Delta Live Tables)** configuration:
+3. Copy the full code from [`pipeline-spec/example_microsoft_teams_ingest.py`](../../pipeline-spec/example_microsoft_teams_ingest.py) and paste it into `ingest.py`
 
-   ```python
-   import dlt
-   from sources.microsoft_teams._generated_microsoft_teams_python_source import register_lakeflow_source
+### Step 2: Update Configuration
 
-   # Register the Microsoft Teams connector
-   register_lakeflow_source(spark)
+Update only the top section with your credentials:
 
-   # Connection and credentials
-   CONNECTION_NAME = "microsoft_teams_connection"
-   TENANT_ID = "YOUR_TENANT_ID"         # Replace with your Azure AD tenant ID
-   CLIENT_ID = "YOUR_CLIENT_ID"          # Replace with your application client ID
-   CLIENT_SECRET = "YOUR_CLIENT_SECRET"  # Replace with your client secret
+```python
+# ==============================================================================
+# CONFIGURATION - Update these values
+# ==============================================================================
+source_name = "microsoft_teams"
+connection_name = "microsoft_teams_connection"
 
-   # Define DLT table for Teams
-   @dlt.table(
-       name="teams",
-       comment="Microsoft Teams - all teams the app has access to"
-   )
-   def teams():
-       return spark.read.format("lakeflow_python_source") \
-           .option("sourceName", "microsoft_teams") \
-           .option("connectionName", CONNECTION_NAME) \
-           .option("sourceTable", "teams") \
-           .option("tenant_id", TENANT_ID) \
-           .option("client_id", CLIENT_ID) \
-           .option("client_secret", CLIENT_SECRET) \
-           .load()
+# Azure AD credentials - REPLACE THESE
+TENANT_ID = "YOUR_TENANT_ID"  # e.g., "12345678-1234-1234-1234-123456789abc"
+CLIENT_ID = "YOUR_CLIENT_ID"  # e.g., "87654321-4321-4321-4321-cba987654321"
+CLIENT_SECRET = "YOUR_CLIENT_SECRET"  # e.g., "your-secret-value-here"
 
-   # Optional: Define additional tables
-   # @dlt.table(
-   #     name="channels",
-   #     comment="Microsoft Teams Channels"
-   # )
-   # def channels():
-   #     return spark.read.format("lakeflow_python_source") \
-   #         .option("sourceName", "microsoft_teams") \
-   #         .option("connectionName", CONNECTION_NAME) \
-   #         .option("sourceTable", "channels") \
-   #         .option("tenant_id", TENANT_ID) \
-   #         .option("client_id", CLIENT_ID) \
-   #         .option("client_secret", CLIENT_SECRET) \
-   #         .option("team_id", "YOUR_TEAM_ID") \
-   #         .load()
-   ```
+# Destination configuration
+DESTINATION_CATALOG = "main"
+DESTINATION_SCHEMA = "teams_data"
 
-4. **IMPORTANT**: Replace the placeholder credentials with your actual Azure AD credentials:
-   - `YOUR_TENANT_ID`: Your Azure AD Directory (tenant) ID
-   - `YOUR_CLIENT_ID`: Your Application (client) ID
-   - `YOUR_CLIENT_SECRET`: Your client secret value
+# Ingestion options
+ENABLE_MESSAGES_INGESTION = True  # Set False to skip messages (large dataset)
+ENABLE_CHATS_INGESTION = True     # Set False to skip chats
+TOP = "50"
+MAX_PAGES_PER_BATCH = "10"
+```
 
-5. Save the file (Cmd+S or click Save icon)
+Replace `TENANT_ID`, `CLIENT_ID`, and `CLIENT_SECRET` with your actual Azure AD credentials.
+
+### How Dynamic Ingestion Works
+
+The pipeline automatically:
+
+1. **Ingests all teams** your app has access to
+2. **Ingests all chats** (if enabled)
+3. **For each team discovered**:
+   - Ingests all channels in that team
+   - Ingests all members of that team
+   - **For each channel**: Ingests all messages (if enabled)
+
+**No manual team IDs or channel IDs needed!** The pipeline queries ingested data to discover IDs dynamically.
+
+### Configuration Options
+
+- **ENABLE_MESSAGES_INGESTION**: Set to `False` to skip messages (can be a large dataset)
+- **ENABLE_CHATS_INGESTION**: Set to `False` to skip chats
+- **DESTINATION_CATALOG / DESTINATION_SCHEMA**: Where to store the data
+- **TOP**: Page size for API requests (default: 50)
+- **MAX_PAGES_PER_BATCH**: Max pages per batch for CDC tables (default: 10)
 
 ### Important Notes
 
-- **DLT Format Required**: Delta Live Tables pipelines require `@dlt.table` decorators. Each table is defined as a function that returns a DataFrame.
-- **Credentials in Options**: Pass credentials directly as options to the DataSource reader. The connector validates them just-in-time when connecting to Microsoft Teams API.
-- **Available Tables**: `teams`, `channels`, `messages`, `members`, `chats` (see table schemas below)
-- **Security consideration**: Since credentials are in the pipeline code, ensure your Databricks workspace has appropriate access controls
+- **Fully automated**: No manual team_id or channel_id configuration required
+- **Incremental CDC**: Messages and chats use Change Data Capture - only new/modified records on subsequent runs
+- **Configurable**: Use flags to skip large datasets if needed
+- **Credentials required**: Must pass credentials via table_configuration for each table
 
 ### Step 2: Run the Pipeline
 
@@ -185,111 +183,42 @@ After the pipeline is created, you need to edit the `ingest.py` file to configur
 2. Click **Start** to run the pipeline
 3. Wait for the pipeline to complete (monitor the progress in the UI)
 
-### Step 3: Verify the Data
+### Step 3: Monitor Pipeline Execution
 
-After the pipeline runs successfully, query the ingested data:
+The pipeline will display progress as it runs:
 
-```sql
--- View your teams
-SELECT id, displayName, description
-FROM main.users.teams;
 ```
+================================================================================
+STEP 1: Ingesting all teams
+================================================================================
+✓ Teams ingested
 
-Copy a `team_id` from the results - you'll need it for ingesting additional tables.
+================================================================================
+STEP 2: Ingesting all chats
+================================================================================
+✓ Chats ingested
 
----
+================================================================================
+STEP 3: Discovering teams and ingesting related data
+================================================================================
+Found 3 team(s)
 
-## Part 4: Ingest Additional Tables (Optional)
+[1/3] Processing team: Sales Team
+  → Ingesting channels...
+  → Ingesting members...
+  → Found 5 channel(s)
+    • Ingesting messages from: General
+    • Ingesting messages from: Customer Updates
+    ...
 
-Once you have team IDs from the initial ingestion, you can add more tables to your pipeline by updating the `pipeline_spec`.
-
-### Add Channels Table
-
-Edit `ingest.py` to add channels for a specific team:
-
-```python
-from pipeline.ingestion_pipeline import ingest
-
-pipeline_spec = {
-    "connection_name": "microsoft_teams_connection",
-    "objects": [
-        {
-            "table": {
-                "source_table": "channels",
-                "table_configuration": {
-                    "team_id": "paste-your-team-id-here"
-                }
-            }
-        }
-    ]
-}
-
-ingest(spark, pipeline_spec)
-```
-
-### Add Messages Table
-
-For messages from a specific channel:
-
-```python
-from pipeline.ingestion_pipeline import ingest
-
-pipeline_spec = {
-    "connection_name": "microsoft_teams_connection",
-    "objects": [
-        {
-            "table": {
-                "source_table": "messages",
-                "table_configuration": {
-                    "team_id": "paste-your-team-id-here",
-                    "channel_id": "paste-your-channel-id-here",
-                    "start_date": "2025-01-01T00:00:00Z"
-                }
-            }
-        }
-    ]
-}
-
-ingest(spark, pipeline_spec)
-```
-
-### Add Multiple Tables at Once
-
-Ingest multiple tables in a single pipeline:
-
-```python
-from pipeline.ingestion_pipeline import ingest
-
-pipeline_spec = {
-    "connection_name": "microsoft_teams_connection",
-    "objects": [
-        {
-            "table": {
-                "source_table": "teams"
-            }
-        },
-        {
-            "table": {
-                "source_table": "channels",
-                "table_configuration": {
-                    "team_id": "paste-your-team-id-here"
-                }
-            }
-        },
-        {
-            "table": {
-                "source_table": "chats"
-            }
-        }
-    ]
-}
-
-ingest(spark, pipeline_spec)
+================================================================================
+✓ INGESTION COMPLETE!
+================================================================================
 ```
 
 ---
 
-## Part 5: Query Your Data
+## Part 4: Query Your Data
 
 Query your ingested data:
 
