@@ -67,7 +67,7 @@ def generate_dab_yaml(
             if not source_table:
                 continue
             
-            group = row.get('pipeline_group', '').strip() or 'default'
+            group = (row.get('pipeline_group') or row.get('category') or '').strip() or 'default'
             groups[group].append(row)
             
             # Save schedule for this group (first non-empty)

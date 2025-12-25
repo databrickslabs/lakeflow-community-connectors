@@ -238,6 +238,16 @@ print(f"✓ {{CONNECTOR_NAME}} connector registered")
 
 '''
 
+    # Order tables within the notebook by optional priority (or weight), then name.
+    def _priority(row: Dict[str, Any]) -> int:
+        raw = str(row.get("priority") or row.get("weight") or "").strip()
+        try:
+            return int(raw)
+        except Exception:
+            return 1000
+
+    tables = sorted(tables, key=lambda r: (_priority(r), r.get("source_table", "")))
+
     # Generate @dlt.table for each table
     for i, table_row in enumerate(tables, 1):
         source_table = table_row['source_table']
@@ -424,7 +434,7 @@ Connector Config JSON Format:
         # Generate one notebook per unique pipeline_group
         groups = {}
         for table in all_tables:
-            group = table.get('pipeline_group', '').strip() or 'default'
+            group = (table.get('pipeline_group') or table.get('category') or '').strip() or 'default'
             if group not in groups:
                 groups[group] = []
             groups[group].append(table)
@@ -449,7 +459,7 @@ Connector Config JSON Format:
     elif args.pipeline_group:
         # Generate for specific group
         tables = [t for t in all_tables 
-                 if t.get('pipeline_group', '').strip() == args.pipeline_group]
+                 if (t.get('pipeline_group') or t.get('category') or '').strip() == args.pipeline_group]
         
         if not tables:
             raise ValueError(f"No tables found for group: {args.pipeline_group}")
