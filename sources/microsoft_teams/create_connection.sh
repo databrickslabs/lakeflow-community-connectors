@@ -9,7 +9,7 @@
 
 # First, delete the old connection if it exists
 echo "Deleting old connection (if exists)..."
-databricks connections delete microsoft_teams_connection 2>/dev/null || true
+databricks connections delete --name microsoft_teams_connection 2>/dev/null || true
 
 echo "Creating new connection..."
 databricks connections create \
