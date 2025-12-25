@@ -52,8 +52,9 @@ class LakeflowConnect:
             "teams": {
                 "primary_keys": ["id"],
                 "ingestion_type": "snapshot",
-                "endpoint": "me/joinedTeams",
+                "endpoint": "groups?$filter=resourceProvisioningOptions/Any(x:x eq 'Team')",
                 # Required permission: Team.ReadBasic.All (Application)
+                # Note: Using /groups with filter for Application Permissions (not /me/joinedTeams)
             },
             "channels": {
                 "primary_keys": ["id"],
@@ -81,8 +82,9 @@ class LakeflowConnect:
                 "primary_keys": ["id"],
                 "cursor_field": "lastUpdatedDateTime",
                 "ingestion_type": "cdc",
-                "endpoint": "me/chats",
+                "endpoint": "chats",
                 # Required permission: Chat.Read.All (Application)
+                # Note: Using /chats directly for Application Permissions (not /me/chats)
             },
         }
 
