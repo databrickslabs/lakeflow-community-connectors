@@ -146,6 +146,12 @@ After the pipeline is created, you need to edit the `ingest.py` file to configur
 
 4. Save the file (Cmd+S or click Save icon)
 
+### Important Notes
+
+- **Connection credentials are passed automatically**: When you use `"connection_name": "microsoft_teams_connection"`, Databricks automatically injects `tenant_id`, `client_id`, and `client_secret` from the connection into the connector's options
+- **externalOptionsAllowList controls security**: Only the parameters listed in `externalOptionsAllowList` can be passed via `table_configuration` in the pipeline spec
+- **Credentials never go in table_configuration**: The security model prevents credentials from being in the allowlist or table configs
+
 ### Step 2: Run the Pipeline
 
 1. Go back to the pipeline view
@@ -289,25 +295,93 @@ LIMIT 10;
 
 ## Troubleshooting
 
+### Missing Credentials Error: "tenant_id and client_id are required"
+
+This error means the connector isn't receiving credentials from the connection. Common causes:
+
+**1. Connection not created properly via UI**
+   - The Databricks UI may have issues saving connection options
+   - **Solution**: Use the CLI script instead:
+   ```bash
+   cd sources/microsoft_teams
+   chmod +x create_connection.sh
+   ./create_connection.sh
+   ```
+   - Verify the connection was created:
+   ```bash
+   databricks connections get --name microsoft_teams_connection
+   ```
+
+**2. Wrong connection name in pipeline spec**
+   - Ensure `pipeline_spec` has exact connection name:
+   ```python
+   pipeline_spec = {
+       "connection_name": "microsoft_teams_connection",  # Must match exactly
+       ...
+   }
+   ```
+
+**3. Credentials in wrong place**
+   - ❌ WRONG: Don't put credentials in `table_configuration`
+   - ✅ RIGHT: Credentials go in the connection options only
+   - The connection automatically passes credentials to the connector
+
+**4. Debug: Print what the connector receives**
+   - Temporarily add debug logging to see what options are passed:
+   ```python
+   # In microsoft_teams.py __init__ method, add after line 32:
+   print(f"DEBUG: Received options keys: {list(options.keys())}")
+   print(f"DEBUG: Has tenant_id: {'tenant_id' in options}")
+   ```
+   - Regenerate: `python scripts/merge_python_source.py microsoft_teams`
+   - Run pipeline and check logs
+
 ### Authentication Failed (401)
 - Verify your `tenant_id`, `client_id`, and `client_secret` are correct
-- Check if the client secret has expired
+- Check if the client secret has expired (check Azure Portal)
 - Ensure the app exists in the correct tenant
+- Test authentication manually:
+  ```bash
+  curl -X POST "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token" \
+    -d "client_id={client_id}" \
+    -d "client_secret={client_secret}" \
+    -d "scope=https://graph.microsoft.com/.default" \
+    -d "grant_type=client_credentials"
+  ```
 
 ### Permission Denied (403)
 - Verify admin consent was granted for all 5 permissions
 - Check that permissions are type "Application" not "Delegated"
 - Wait 5-10 minutes for permission changes to propagate
+- Verify in Azure Portal: App registrations → Your app → API permissions → Status column shows "Granted"
 
 ### Resource Not Found (404)
 - Verify the `team_id` and `channel_id` are correct
 - Ensure the app has access to the team
 - Check if the team or channel has been deleted
+- Test the API directly:
+  ```bash
+  # Get access token first, then:
+  curl -H "Authorization: Bearer {token}" \
+    "https://graph.microsoft.com/v1.0/teams/{team_id}"
+  ```
 
 ### No Data Returned
 - Verify the team/channel exists and has data
 - Check `start_date` is in the past (for CDC tables)
 - Ensure the app has the required permissions
+- Run a test query to see what teams are accessible:
+  ```sql
+  SELECT id, displayName FROM main.your_schema.teams;
+  ```
+
+### Connection UI Shows Empty Fields
+- This is a known UI issue where connection options may not display after saving
+- The connection may still be correctly created - verify with CLI:
+  ```bash
+  databricks connections get --name microsoft_teams_connection
+  ```
+- If truly empty, recreate using the CLI script instead of the UI
 
 ---
 
