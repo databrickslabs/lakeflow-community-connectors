@@ -30,7 +30,7 @@ While LanceDB excels at fast vector similarity search for AI applications, organ
 
 ### The Solution: Lakehouse Integration
 
-This connector enables seamless offload of LanceDB data to your lakehouse (Delta Lake, Iceberg, Hudi), providing:
+This connector enables seamless offload of LanceDB data to your lakehouse (Delta Lake, Iceberg), providing:
 
 **🔄 Unified Analytics**
 - Combine vector embeddings with customer data, transactions, and events
@@ -39,7 +39,7 @@ This connector enables seamless offload of LanceDB data to your lakehouse (Delta
 
 **📊 Advanced Analytics & BI**
 - Query embedding metadata using standard SQL
-- Visualize vector data trends in your favorite BI tools (Tableau, PowerBI, Looker)
+- Visualize vector data trends in your favorite BI tools (Tableau, Power BI, AI/BI)
 - Build dashboards showing embedding quality metrics and usage patterns
 
 **🗄️ Cost Optimization**
@@ -110,7 +110,7 @@ Benefit: Meet regulatory requirements while keeping LanceDB performant
        ↓ (Lakeflow Community Connector)
        │
 ┌──────┴──────┐
-│  Lakehouse  │ (Delta/Iceberg/Hudi)
+│  Lakehouse  │ (Delta/Iceberg)
 │             │
 │  • Analytics│
 │  • BI Tools │
