@@ -174,16 +174,16 @@ def register_lakeflow_source(spark):
             """
             Initialize Microsoft Teams connector with OAuth 2.0 credentials.
 
-            Required options:
+            Required options (pass via table_configuration):
               - tenant_id: Azure AD tenant ID
               - client_id: Application (client) ID
               - client_secret: Client secret value
 
+            Note: Credentials should be passed via table_configuration in the pipeline spec,
+            not in the connection properties (which aren't accessible to the connector).
+
             Authentication uses the Client Credentials Flow with Application Permissions.
             Requires admin consent for all permissions.
-
-            Raises:
-                ValueError: If required options are missing
             """
             # DEBUG: Print what options we receive
             print(f"DEBUG: All options received by connector: {list(options.keys())}")
@@ -193,11 +193,10 @@ def register_lakeflow_source(spark):
             self.client_id = options.get("client_id")
             self.client_secret = options.get("client_secret")
 
-            # Validate required options
-            if not self.tenant_id or not self.client_id or not self.client_secret:
-                raise ValueError(
-                    "Missing required options: tenant_id, client_id, and client_secret are required"
-                )
+            # NOTE: We do NOT validate credentials here anymore.
+            # This allows the connector to initialize for metadata discovery (_lakeflow_metadata)
+            # where credentials might not be passed yet.
+            # Strict validation happens in _get_access_token() when we actually need to connect to Teams API.
 
             self.base_url = "https://graph.microsoft.com/v1.0"
             self._access_token = None
@@ -313,8 +312,16 @@ def register_lakeflow_source(spark):
                 str: Access token for Microsoft Graph API
 
             Raises:
+                ValueError: If required credentials are missing
                 RuntimeError: If token acquisition fails
             """
+            # Validate credentials just-in-time before we need them
+            if not self.tenant_id or not self.client_id or not self.client_secret:
+                raise ValueError(
+                    "Missing required options: tenant_id, client_id, and client_secret are required. "
+                    "Pass them in the connection properties or in table_configuration for each table."
+                )
+
             # Return cached token if still valid
             if (
                 self._access_token

@@ -129,12 +129,20 @@ After the pipeline is created, you need to edit the `ingest.py` file to configur
    from pipeline.ingestion_pipeline import ingest
 
    # Pipeline specification - defines which tables to ingest
+   # NOTE: Credentials must be passed via table_configuration for each table
+   # because Databricks stores connection credentials in 'properties' field
+   # but connectors receive the 'options' field (which doesn't include properties)
    pipeline_spec = {
        "connection_name": "microsoft_teams_connection",
        "objects": [
            {
                "table": {
-                   "source_table": "teams"
+                   "source_table": "teams",
+                   "table_configuration": {
+                       "tenant_id": "YOUR_TENANT_ID",      # Replace with your Azure AD tenant ID
+                       "client_id": "YOUR_CLIENT_ID",       # Replace with your application client ID
+                       "client_secret": "YOUR_CLIENT_SECRET" # Replace with your client secret
+                   }
                }
            }
        ]
@@ -144,13 +152,18 @@ After the pipeline is created, you need to edit the `ingest.py` file to configur
    ingest(spark, pipeline_spec)
    ```
 
-4. Save the file (Cmd+S or click Save icon)
+4. **IMPORTANT**: Replace the placeholder credentials with your actual Azure AD credentials:
+   - `YOUR_TENANT_ID`: Your Azure AD Directory (tenant) ID
+   - `YOUR_CLIENT_ID`: Your Application (client) ID
+   - `YOUR_CLIENT_SECRET`: Your client secret value
+
+5. Save the file (Cmd+S or click Save icon)
 
 ### Important Notes
 
-- **Connection credentials are passed automatically**: When you use `"connection_name": "microsoft_teams_connection"`, Databricks automatically injects `tenant_id`, `client_id`, and `client_secret` from the connection into the connector's options
-- **externalOptionsAllowList controls security**: Only the parameters listed in `externalOptionsAllowList` can be passed via `table_configuration` in the pipeline spec
-- **Credentials never go in table_configuration**: The security model prevents credentials from being in the allowlist or table configs
+- **Why credentials go in table_configuration**: Databricks stores connection credentials in the `properties` field, but PySpark DataSource connectors receive the `options` field. The `options` field does NOT include `properties`. By passing credentials via `table_configuration`, they get merged into the options that the connector receives.
+- **externalOptionsAllowList enables this**: The connection has `tenant_id`, `client_id`, and `client_secret` in its `externalOptionsAllowList`, which allows them to be passed via `table_configuration`
+- **Security consideration**: Since credentials are in the pipeline code, ensure your Databricks workspace has appropriate access controls
 
 ### Step 2: Run the Pipeline
 
