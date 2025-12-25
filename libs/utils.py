@@ -127,11 +127,12 @@ def parse_value(value: Any, field_type: DataType) -> Any:
             elif isinstance(value, datetime):
                 return value
             raise ValueError(f"Cannot convert {value} to timestamp")
+        elif isinstance(field_type, NullType):
+            # If schema says NullType, the only safe value is None.
+            return None
         else:
-            # Check for custom UDT handling
-            if hasattr(field_type, "fromJson"):
-                # Support for User Defined Types that implement fromJson
-                return field_type.fromJson(value)
+            # NOTE: Do NOT call `field_type.fromJson(value)` here.
+            # PySpark's `fromJson` is for parsing *type definitions* from JSON, not decoding row values.
             raise TypeError(f"Unsupported field type: {field_type}")
     except (ValueError, TypeError) as e:
         # Add context to the error
