@@ -9,7 +9,7 @@
 
 # First, delete the old connection if it exists
 echo "Deleting old connection (if exists)..."
-databricks connections delete --name microsoft_teams_connection 2>/dev/null || true
+databricks connections delete microsoft_teams_connection 2>/dev/null || true
 
 echo "Creating new connection..."
 databricks connections create \
@@ -29,4 +29,4 @@ echo ""
 echo "✅ Connection created successfully!"
 echo ""
 echo "Verify with:"
-echo "  databricks connections get --name microsoft_teams_connection"
+echo "  databricks connections get microsoft_teams_connection"

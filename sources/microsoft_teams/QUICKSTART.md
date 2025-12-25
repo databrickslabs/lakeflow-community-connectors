@@ -309,7 +309,7 @@ This error means the connector isn't receiving credentials from the connection. 
    ```
    - Verify the connection was created:
    ```bash
-   databricks connections get --name microsoft_teams_connection
+   databricks connections get microsoft_teams_connection
    ```
 
 **2. Wrong connection name in pipeline spec**
@@ -379,7 +379,7 @@ This error means the connector isn't receiving credentials from the connection. 
 - This is a known UI issue where connection options may not display after saving
 - The connection may still be correctly created - verify with CLI:
   ```bash
-  databricks connections get --name microsoft_teams_connection
+  databricks connections get microsoft_teams_connection
   ```
 - If truly empty, recreate using the CLI script instead of the UI
 
