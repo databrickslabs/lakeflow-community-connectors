@@ -356,6 +356,94 @@ def test_column_projection_performance():
         )
 
 
+def test_schema_matches_data():
+    """
+    Test that schema filtering works correctly to match actual data.
+
+    When columns are specified, the schema should only include those columns
+    to prevent NULL values in Spark for excluded columns.
+    """
+    import json
+
+    parent_dir = Path(__file__).parent.parent
+    config_path = parent_dir / "configs" / "dev_config.json"
+    config = load_config(config_path)
+    connector = LakeflowConnect(config)
+
+    tables = connector.list_tables()
+    if not tables:
+        pytest.skip("No tables available for testing")
+
+    test_table = tables[0]
+
+    print(f"\n{'='*70}")
+    print(f"Testing Schema Matches Data")
+    print(f"{'='*70}")
+    print(f"Table: {test_table}")
+
+    # Get full schema
+    full_schema = connector.get_table_schema(test_table, {})
+    all_columns = [field.name for field in full_schema.fields]
+    print(f"Full schema: {len(all_columns)} columns - {all_columns}")
+
+    # Select subset of columns (first 2)
+    if len(all_columns) >= 2:
+        requested_columns = all_columns[:2]
+    else:
+        pytest.skip("Not enough columns to test schema filtering")
+
+    print(f"Requesting: {requested_columns}")
+
+    # Get filtered schema
+    filtered_options = {
+        "columns": json.dumps(requested_columns)
+    }
+    filtered_schema = connector.get_table_schema(test_table, filtered_options)
+    schema_columns = [field.name for field in filtered_schema.fields]
+    print(f"Filtered schema: {len(schema_columns)} columns - {schema_columns}")
+
+    # Verify schema is filtered
+    assert len(schema_columns) == len(requested_columns), (
+        f"Schema not filtered correctly: expected {len(requested_columns)} columns, "
+        f"got {len(schema_columns)}"
+    )
+
+    for col in requested_columns:
+        assert col in schema_columns, f"Requested column '{col}' not in schema"
+
+    # Now verify data matches schema
+    data_options = {
+        "use_full_scan": "true",
+        "batch_size": "1",
+        "columns": json.dumps(requested_columns)
+    }
+    records_iter, _ = connector.read_table(test_table, None, data_options)
+    records = list(records_iter)
+
+    if not records:
+        pytest.skip("No data available for testing")
+
+    data_columns = set(records[0].keys())
+    schema_columns_set = set(schema_columns)
+
+    print(f"Data columns: {sorted(data_columns)}")
+
+    # Allow for LanceDB system columns in data (_distance, _rowid)
+    lancedb_system_columns = {'_distance', '_rowid'}
+    data_columns_without_system = data_columns - lancedb_system_columns
+
+    # Verify data columns match schema columns
+    assert data_columns_without_system == schema_columns_set, (
+        f"Data columns don't match schema: "
+        f"schema={sorted(schema_columns_set)}, data={sorted(data_columns_without_system)}"
+    )
+
+    print(f"\n✅ Schema matches data perfectly!")
+    print(f"   Schema columns: {sorted(schema_columns_set)}")
+    print(f"   Data columns (excluding system): {sorted(data_columns_without_system)}")
+    print(f"{'='*70}\n")
+
+
 if __name__ == "__main__":
     # Run tests with pytest
     pytest.main([__file__, "-v", "--tb=short"])

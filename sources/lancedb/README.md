@@ -367,6 +367,21 @@ The connector maps LanceDB data types to standard types as follows:
 - **API Format**: Data is returned in Apache Arrow format (handled automatically)
 - **Batch Size Limits**: Maximum 10,000 records per batch
 - **Rate Limits**: Subject to LanceDB Cloud rate limits
+- **Binary Columns & Ingestion Modes**: 
+  - **APPEND_ONLY mode**: Binary type columns (e.g., images, large BLOBs) can be ingested safely
+  - **SCD_TYPE_1 or SCD_TYPE_2 modes**: Binary columns **MUST be excluded** from ingestion
+  - **Reason**: Change Data Capture operations on binary columns can exceed Spark's memory limit (1024 MB in Databricks Serverless)
+  - **Error**: `UDF_PYSPARK_USER_CODE_ERROR.MEMORY_LIMIT_SERVERLESS: Function exceeded the limit of 1024 megabytes`
+  - **Solution**: Use the `columns` parameter to exclude binary columns when using SCD modes:
+    ```json
+    {
+      "tables": {
+        "my_table": {
+          "columns": ["id", "name", "vector", "metadata"]  // Exclude binary_data column
+        }
+      }
+    }
+    ```
 
 ---
 
@@ -390,6 +405,24 @@ The connector maps LanceDB data types to standard types as follows:
 4. **Column Selection**:
    - Specify only needed columns
    - Reduces bandwidth and parsing time
+
+5. **Binary Columns & Ingestion Modes** ⚠️:
+   - **For APPEND_ONLY ingestion**: Binary columns can be included safely
+   - **For SCD_TYPE_1 or SCD_TYPE_2 ingestion**: Exclude binary columns to avoid memory errors
+   - Example configuration:
+     ```json
+     {
+       "ingestion_type": "SCD_TYPE_2",
+       "tables": {
+         "people": {
+           "columns": ["id", "name", "age", "vector"],  // Excluded: image_bytes
+           "primary_keys": ["id"]
+         }
+       }
+     }
+     ```
+   - Why: Change tracking on large binary data (images, documents) can exceed Spark memory limits (1024 MB)
+   - Recommended: Store binary data references (URLs, S3 paths) instead of raw binary data for CDC operations
 
 ### Expected Performance
 
@@ -451,6 +484,48 @@ The connector maps LanceDB data types to standard types as follows:
 - Reduce batch size
 - Use pagination for large tables
 - Check network connectivity
+
+#### 6. Memory Limit Exceeded (Binary Columns)
+
+**Error**: 
+```
+org.apache.spark.SparkRuntimeException: [UDF_PYSPARK_USER_CODE_ERROR.MEMORY_LIMIT_SERVERLESS] 
+Execution failed. Function exceeded the limit of 1024 megabytes. 
+Please reduce the memory usage of your function.
+```
+
+**Cause**: Binary columns (images, large BLOBs) in SCD_TYPE_1 or SCD_TYPE_2 ingestion modes
+
+**Solution**:
+1. **Option A - Use APPEND_ONLY mode** (if change tracking not needed):
+   ```json
+   {
+     "ingestion_type": "APPEND_ONLY"
+   }
+   ```
+
+2. **Option B - Exclude binary columns** (if SCD required):
+   ```json
+   {
+     "ingestion_type": "SCD_TYPE_2",
+     "tables": {
+       "my_table": {
+         "columns": ["id", "name", "vector", "metadata"],  // Exclude binary columns
+         "primary_keys": ["id"]
+       }
+     }
+   }
+   ```
+
+3. **Option C - Store references instead**:
+   - Store S3 paths or URLs instead of raw binary data
+   - Keep binary data in object storage, reference it in LanceDB
+
+**Why this happens**: 
+- Change Data Capture (CDC) operations create copies of row data for comparison
+- Binary columns can be very large (images = 1-10 MB each)
+- Multiple rows with binary data quickly exceed Spark's 1024 MB UDF memory limit
+- APPEND_ONLY mode doesn't perform CDC, so it doesn't hit this limit
 
 ---
 
