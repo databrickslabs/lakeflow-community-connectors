@@ -185,6 +185,10 @@ def register_lakeflow_source(spark):
             Raises:
                 ValueError: If required options are missing
             """
+            # DEBUG: Print what options we receive
+            print(f"DEBUG: All options received by connector: {list(options.keys())}")
+            print(f"DEBUG: Options values (masked secrets): {[(k, v if k != 'client_secret' else '***REDACTED***') for k, v in options.items()]}")
+
             self.tenant_id = options.get("tenant_id")
             self.client_id = options.get("client_id")
             self.client_secret = options.get("client_secret")
