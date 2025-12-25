@@ -114,11 +114,9 @@ def ingest_team_data():
     print("STEP 3: Discovering teams and ingesting related data")
     print("=" * 80)
 
-    # Refresh tables to ensure they're visible
-    spark.sql(f"REFRESH TABLE {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.teams")
-
     # Query teams table to get all team IDs
-    teams_df = spark.table(f"{DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.teams")
+    # Note: No REFRESH needed in DLT - tables are automatically tracked
+    teams_df = spark.read.format("delta").table(f"{DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.teams")
     teams_list = teams_df.collect()
 
     print(f"Found {len(teams_list)} team(s)\n")
@@ -175,15 +173,9 @@ def ingest_team_data():
 
         # Ingest messages if enabled
         if ENABLE_MESSAGES_INGESTION:
-            # Refresh channels table to ensure latest data is visible
-            try:
-                spark.sql(f"REFRESH TABLE {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.channels")
-            except:
-                pass  # Table might not exist yet on first run
-
             # Query channels for this team
             try:
-                channels_df = spark.table(f"{DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.channels").filter(f"team_id = '{team_id}'")
+                channels_df = spark.read.format("delta").table(f"{DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.channels").filter(f"team_id = '{team_id}'")
                 channels_list = channels_df.collect()
                 print(f"  → Found {len(channels_list)} channel(s)")
             except Exception as e:
