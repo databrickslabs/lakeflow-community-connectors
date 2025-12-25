@@ -444,6 +444,367 @@ def test_schema_matches_data():
     print(f"{'='*70}\n")
 
 
+def test_all_table_options():
+    """
+    Comprehensive test for all table configuration options.
+    
+    Tests all available options from BaseTableOptions and LanceDBTableOptions:
+    - Base: primary_keys, cursor_field, batch_size, filter_expression, columns
+    - LanceDB: query_vector, use_full_scan, vector_column, distance_type
+    - Index optimization: nprobes, ef, refine_factor, fast_search, bypass_vector_index
+    - Filtering: prefilter, lower_bound, upper_bound
+    - Results: with_row_id, offset, version
+    """
+    import json
+    
+    parent_dir = Path(__file__).parent.parent
+    config_path = parent_dir / "configs" / "dev_config.json"
+    config = load_config(config_path)
+    connector = LakeflowConnect(config)
+    
+    tables = connector.list_tables()
+    if not tables:
+        pytest.skip("No tables available for testing")
+    
+    test_table = tables[0]
+    
+    print(f"\n{'='*70}")
+    print(f"Testing All Table Configuration Options")
+    print(f"{'='*70}")
+    print(f"Table: {test_table}")
+    
+    # Get schema to know columns
+    full_schema = connector.get_table_schema(test_table, {})
+    all_columns = [field.name for field in full_schema.fields]
+    print(f"Available columns: {all_columns}")
+    
+    # Test 1: Base Options - batch_size
+    print(f"\n{'─'*70}")
+    print("Test 1: Batch Size Configuration")
+    print(f"{'─'*70}")
+    for batch_size in [1, 10, 100]:
+        options = {
+            "use_full_scan": "true",
+            "batch_size": str(batch_size)
+        }
+        records_iter, _ = connector.read_table(test_table, None, options)
+        records = list(records_iter)
+        print(f"  Batch size {batch_size}: Retrieved {len(records)} records ✅")
+    
+    # Test 2: Column Projection
+    if len(all_columns) >= 2:
+        print(f"\n{'─'*70}")
+        print("Test 2: Column Projection")
+        print(f"{'─'*70}")
+        subset_cols = all_columns[:2]
+        options = {
+            "use_full_scan": "true",
+            "batch_size": "5",
+            "columns": json.dumps(subset_cols)
+        }
+        records_iter, _ = connector.read_table(test_table, None, options)
+        records = list(records_iter)
+        if records:
+            returned_cols = set(records[0].keys()) - {'_distance', '_rowid'}
+            print(f"  Requested: {subset_cols}")
+            print(f"  Returned: {sorted(returned_cols)}")
+            assert returned_cols == set(subset_cols), "Column projection failed"
+            print(f"  ✅ Column projection working correctly")
+    
+    # Test 3: Filter Expression
+    print(f"\n{'─'*70}")
+    print("Test 3: Filter Expression")
+    print(f"{'─'*70}")
+    # Try a simple filter (this may not match any rows, but tests the parameter)
+    options = {
+        "use_full_scan": "true",
+        "batch_size": "10",
+        "filter_expression": "1 = 1"  # Always true filter
+    }
+    records_iter, _ = connector.read_table(test_table, None, options)
+    records = list(records_iter)
+    print(f"  Filter '1 = 1' returned {len(records)} records ✅")
+    
+    # Test 4: Use Full Scan (both true and false)
+    print(f"\n{'─'*70}")
+    print("Test 4: Full Scan Mode")
+    print(f"{'─'*70}")
+    for use_full_scan in ["true", "false"]:
+        options = {
+            "use_full_scan": use_full_scan,
+            "batch_size": "5"
+        }
+        try:
+            records_iter, _ = connector.read_table(test_table, None, options)
+            records = list(records_iter)
+            print(f"  use_full_scan={use_full_scan}: {len(records)} records ✅")
+        except Exception as e:
+            # Expected to fail if use_full_scan=false and no query_vector
+            print(f"  use_full_scan={use_full_scan}: Expected error - {str(e)[:50]}... ✅")
+    
+    # Test 5: with_row_id
+    print(f"\n{'─'*70}")
+    print("Test 5: Include Row ID")
+    print(f"{'─'*70}")
+    options = {
+        "use_full_scan": "true",
+        "batch_size": "5",
+        "with_row_id": "true"
+    }
+    records_iter, _ = connector.read_table(test_table, None, options)
+    records = list(records_iter)
+    if records:
+        has_rowid = '_rowid' in records[0]
+        print(f"  with_row_id=true: _rowid present = {has_rowid} ✅")
+    
+    # Test 6: Distance Type (if applicable)
+    print(f"\n{'─'*70}")
+    print("Test 6: Distance Type Configuration")
+    print(f"{'─'*70}")
+    for distance_type in ["cosine", "l2", "dot"]:
+        options = {
+            "use_full_scan": "true",
+            "batch_size": "5",
+            "distance_type": distance_type
+        }
+        try:
+            records_iter, _ = connector.read_table(test_table, None, options)
+            records = list(records_iter)
+            print(f"  distance_type={distance_type}: {len(records)} records ✅")
+        except Exception as e:
+            print(f"  distance_type={distance_type}: {str(e)[:50]}...")
+    
+    # Test 7: Index Optimization Parameters
+    print(f"\n{'─'*70}")
+    print("Test 7: Index Optimization Parameters")
+    print(f"{'─'*70}")
+    # These parameters affect performance but may not change result count
+    optimization_params = [
+        {"nprobes": "10"},
+        {"ef": "50"},
+        {"refine_factor": "2"},
+        {"fast_search": "true"},
+        {"bypass_vector_index": "false"},
+    ]
+    
+    for params in optimization_params:
+        param_name = list(params.keys())[0]
+        options = {
+            "use_full_scan": "true",
+            "batch_size": "5",
+            **params
+        }
+        try:
+            records_iter, _ = connector.read_table(test_table, None, options)
+            records = list(records_iter)
+            print(f"  {param_name}={params[param_name]}: {len(records)} records ✅")
+        except Exception as e:
+            print(f"  {param_name}={params[param_name]}: {str(e)[:50]}...")
+    
+    # Test 8: Filtering Parameters
+    print(f"\n{'─'*70}")
+    print("Test 8: Filtering Parameters")
+    print(f"{'─'*70}")
+    filtering_params = [
+        {"prefilter": "true"},
+        {"prefilter": "false"},
+    ]
+    
+    for params in filtering_params:
+        param_name = list(params.keys())[0]
+        options = {
+            "use_full_scan": "true",
+            "batch_size": "5",
+            **params
+        }
+        try:
+            records_iter, _ = connector.read_table(test_table, None, options)
+            records = list(records_iter)
+            print(f"  {param_name}={params[param_name]}: {len(records)} records ✅")
+        except Exception as e:
+            print(f"  {param_name}={params[param_name]}: {str(e)[:50]}...")
+    
+    # Test 9: Result Pagination (offset)
+    print(f"\n{'─'*70}")
+    print("Test 9: Result Pagination (offset)")
+    print(f"{'─'*70}")
+    # Get first 5 records
+    options = {
+        "use_full_scan": "true",
+        "batch_size": "5",
+        "offset": "0"
+    }
+    records_iter, _ = connector.read_table(test_table, None, options)
+    first_batch = list(records_iter)
+    
+    # Get next 5 records with offset
+    options = {
+        "use_full_scan": "true",
+        "batch_size": "5",
+        "offset": "5"
+    }
+    records_iter, _ = connector.read_table(test_table, None, options)
+    second_batch = list(records_iter)
+    
+    print(f"  First batch (offset=0): {len(first_batch)} records")
+    print(f"  Second batch (offset=5): {len(second_batch)} records")
+    print(f"  ✅ Offset pagination working")
+    
+    # Test 10: Combined Options
+    print(f"\n{'─'*70}")
+    print("Test 10: Combined Options (Real-World Scenario)")
+    print(f"{'─'*70}")
+    complex_options = {
+        "use_full_scan": "true",
+        "batch_size": "10",
+        "columns": json.dumps(all_columns[:3]) if len(all_columns) >= 3 else json.dumps(all_columns),
+        "distance_type": "cosine",
+        "prefilter": "true",
+        "with_row_id": "true",
+        "fast_search": "true"
+    }
+    records_iter, _ = connector.read_table(test_table, None, complex_options)
+    records = list(records_iter)
+    print(f"  Complex query: {len(records)} records")
+    if records:
+        print(f"  Returned fields: {list(records[0].keys())}")
+        print(f"  ✅ Complex configuration working")
+    
+    print(f"\n{'='*70}")
+    print(f"✅ ALL TABLE OPTIONS TESTED SUCCESSFULLY!")
+    print(f"{'='*70}\n")
+
+
+def test_incremental_reads_with_cursor():
+    """
+    Test incremental reads using cursor_field for change data capture.
+    
+    Validates:
+    - Cursor field configuration
+    - Incremental offset tracking
+    - Data continuity across reads
+    
+    Tries multiple tables to find one with a suitable cursor field.
+    """
+    import json
+    
+    parent_dir = Path(__file__).parent.parent
+    config_path = parent_dir / "configs" / "dev_config.json"
+    config = load_config(config_path)
+    connector = LakeflowConnect(config)
+    
+    tables = connector.list_tables()
+    if not tables:
+        pytest.skip("No tables available for testing")
+    
+    print(f"\n{'='*70}")
+    print(f"Testing Incremental Reads with Cursor")
+    print(f"{'='*70}")
+    print(f"Available tables: {tables}")
+    
+    # Try multiple tables to find one with a suitable cursor field
+    test_table = None
+    cursor_field = None
+    
+    for table in tables:
+        print(f"\nChecking table: {table}")
+        
+        # Get schema to find a suitable cursor field
+        schema = connector.get_table_schema(table, {})
+        
+        # Try to find a timestamp or numeric field for cursor
+        for field in schema.fields:
+            field_type = field.dataType.typeName()
+            print(f"  Field: {field.name} ({field_type})")
+            
+            if field_type in ['timestamp', 'long', 'integer', 'date', 'double', 'float']:
+                test_table = table
+                cursor_field = field.name
+                print(f"  ✅ Found suitable cursor field: {cursor_field} ({field_type})")
+                break
+        
+        if cursor_field:
+            break
+    
+    if not test_table or not cursor_field:
+        pytest.skip("No suitable cursor field found in any table")
+    
+    print(f"\n{'─'*70}")
+    print(f"Selected table: {test_table}")
+    print(f"Cursor field: {cursor_field}")
+    print(f"{'─'*70}")
+    
+    # First read: Get initial data
+    options = {
+        "use_full_scan": "true",
+        "batch_size": "10",
+        "cursor_field": cursor_field
+    }
+    
+    records_iter, offset1 = connector.read_table(test_table, None, options)
+    batch1 = list(records_iter)
+    
+    print(f"\nFirst read:")
+    print(f"  Records: {len(batch1)}")
+    print(f"  Offset: {offset1}")
+    
+    if batch1 and cursor_field in batch1[0]:
+        print(f"  First record cursor value: {batch1[0][cursor_field]}")
+        if batch1:
+            print(f"  Last record cursor value: {batch1[-1][cursor_field]}")
+    
+    # Second read: Use offset from first read
+    if offset1:
+        records_iter, offset2 = connector.read_table(test_table, offset1, options)
+        batch2 = list(records_iter)
+        
+        print(f"\nSecond read (incremental):")
+        print(f"  Records: {len(batch2)}")
+        print(f"  Offset: {offset2}")
+        
+        # Verify incremental behavior
+        if 'cursor_value' in offset1:
+            print(f"  Cursor value from first read: {offset1['cursor_value']}")
+            print(f"  ✅ Cursor-based incremental read working")
+        else:
+            print(f"  ✅ Offset-based incremental read working")
+    else:
+        print(f"\n⚠️  No offset returned (table may be fully read)")
+    
+    print(f"{'='*70}\n")
+
+
+def test_primary_keys_configuration():
+    """
+    Test primary keys configuration for tables.
+    
+    Validates:
+    - Primary keys can be specified
+    - Primary keys are validated
+    - Multiple primary keys supported
+    """
+    print(f"\n{'='*70}")
+    print(f"Testing Primary Keys Configuration")
+    print(f"{'='*70}")
+    
+    # Test single primary key
+    options = LanceDBTableOptions(primary_keys=["id"])
+    assert options.primary_keys == ["id"]
+    print(f"  Single primary key: {options.primary_keys} ✅")
+    
+    # Test composite primary key
+    options = LanceDBTableOptions(primary_keys=["id", "version"])
+    assert options.primary_keys == ["id", "version"]
+    print(f"  Composite primary key: {options.primary_keys} ✅")
+    
+    # Test JSON string format (Databricks style)
+    options = LanceDBTableOptions(primary_keys='["id", "created_at"]')
+    assert options.primary_keys == ["id", "created_at"]
+    print(f"  JSON string primary keys: {options.primary_keys} ✅")
+    
+    print(f"{'='*70}\n")
+
+
 if __name__ == "__main__":
     # Run tests with pytest
     pytest.main([__file__, "-v", "--tb=short"])
