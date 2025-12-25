@@ -587,17 +587,61 @@ class BaseVectorDBConnector(ABC):
 
         Args:
             table_name: Name of the table
-            table_options: Table-specific options
+            table_options: Table-specific options (columns supported for filtering)
 
         Returns:
-            Spark StructType representing the schema
+            Spark StructType representing the schema (filtered if columns specified)
         """
         table_name = self._sanitize_identifier(table_name)
         method, endpoint, json_data, params = self._build_schema_request(
             table_name, table_options
         )
         response = self._make_request(method, endpoint, json_data, params)
-        return self._parse_schema_response(response, table_name)
+        schema = self._parse_schema_response(response, table_name)
+
+        # Filter schema based on columns parameter if specified
+        # This ensures schema matches the actual data returned (important for
+        # Spark)
+        try:
+            # Parse table options to check if columns filtering is requested
+            options = self._get_table_options(table_options)
+
+            if hasattr(options, 'columns') and options.columns:
+                # Filter schema to only include requested columns
+                filtered_fields = []
+                requested_columns_set = set(options.columns)
+
+                for field in schema.fields:
+                    if field.name in requested_columns_set:
+                        filtered_fields.append(field)
+
+                # Log the filtering
+                logger.info(
+                    "Filtered schema for table '%s': %d columns requested (from %d total)",
+                    table_name, len(filtered_fields), len(schema.fields)
+                )
+
+                schema = StructType(filtered_fields)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            # If anything goes wrong with filtering, return full schema
+            logger.debug(
+                "Could not filter schema (returning full schema): %s", e
+            )
+
+        return schema
+
+    def _get_table_options(self, table_options: Dict[str, str]):
+        """
+        Parse table options into appropriate options class.
+        Can be overridden by subclasses to use their specific options class.
+
+        Args:
+            table_options: Dictionary of table options
+
+        Returns:
+            Parsed options object (BaseTableOptions or subclass)
+        """
+        return BaseTableOptions(**table_options)
 
     def read_table_metadata(
         self, table_name: str, table_options: Dict[str, str]
@@ -1216,6 +1260,14 @@ class LakeflowConnect(BaseVectorDBConnector):
     # ========================================================================
     # LAKEFLOW read_table (Implements using base class patterns)
     # ========================================================================
+
+    def _get_table_options(self, table_options: Dict[str, str]):
+        """
+        Parse table options into LanceDBTableOptions.
+
+        Overrides base class to use LanceDB-specific options.
+        """
+        return LanceDBTableOptions(**table_options)
 
     def read_table(self,
                    table_name: str,
