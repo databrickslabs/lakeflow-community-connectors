@@ -1,11 +1,17 @@
 """
-Microsoft Teams Simple Ingestion Pipeline (DLT Compatible)
+Microsoft Teams Simple Ingestion Pipeline
 
-This is a simplified version that works with DLT's constraints.
-It ingests teams and chats only (no dynamic discovery).
+This is a simplified version that ingests teams and chats only (no channels/messages).
+Use this when you only need basic team and chat data.
 
-For full dynamic ingestion across all teams/channels/messages, you would need
-to run separate pipelines per team or use a non-DLT approach.
+For full dynamic ingestion across all teams/channels/messages, use:
+  example_microsoft_teams_ingest.py
+
+This simple version:
+- Ingests teams table (all teams)
+- Ingests chats table (all chats)
+- No discovery of channels or messages
+- Useful for quick setup or when you only need team/chat metadata
 
 Configuration:
 1. Update the credentials below
@@ -90,9 +96,9 @@ print("=" * 80)
 print("\nIngesting:")
 print("  • Teams")
 print("  • Chats")
-print("\nNote: To ingest channels/members/messages, you'll need to:")
-print("1. Query the teams table to get team IDs")
-print("2. Create a separate pipeline for each team with specific team_id")
+print("\nNote: This is the simple version (teams + chats only)")
+print("For full dynamic ingestion (teams/channels/members/messages):")
+print("  Use example_microsoft_teams_ingest.py instead")
 print()
 
 ingest(spark, pipeline_spec)
@@ -103,7 +109,8 @@ print("=" * 80)
 print(f"\nTables created:")
 print(f"  • {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}teams")
 print(f"  • {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}chats")
-print(f"\nNext steps:")
-print(f"1. Query teams: SELECT id, displayName FROM {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}teams")
-print(f"2. Copy a team_id from the results")
-print(f"3. See documentation for how to ingest channels/messages for specific teams")
+print(f"\nSample queries:")
+print(f"  SELECT * FROM {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}teams")
+print(f"  SELECT * FROM {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}chats")
+print(f"\nFor full ingestion (channels/members/messages):")
+print(f"  Use example_microsoft_teams_ingest.py")

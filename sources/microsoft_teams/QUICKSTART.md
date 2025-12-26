@@ -114,7 +114,7 @@ Databricks provides a streamlined "Custom Connector" flow that handles everythin
 
 The Microsoft Teams connector supports **fully automated ingestion** that discovers all teams and channels without requiring manual configuration.
 
-### Step 1: Copy the Dynamic Ingestion Template
+### Step 1: Copy the Ingestion Template
 
 1. Open your pipeline `microsoft_teams_ingestion_pipeline`
 2. Click on the `ingest.py` tab to edit it
@@ -122,7 +122,7 @@ The Microsoft Teams connector supports **fully automated ingestion** that discov
 
 ### Step 2: Update Configuration
 
-Update only the top section with your credentials:
+Update only the configuration section with your credentials:
 
 ```python
 # ==============================================================================
@@ -139,81 +139,160 @@ CLIENT_SECRET = "YOUR_CLIENT_SECRET"  # e.g., "your-secret-value-here"
 # Destination configuration
 DESTINATION_CATALOG = "main"
 DESTINATION_SCHEMA = "teams_data"
+TABLE_PREFIX = "lakeflow_connector_"  # Prefix for all tables
 
-# Ingestion options
-ENABLE_MESSAGES_INGESTION = True  # Set False to skip messages (large dataset)
-ENABLE_CHATS_INGESTION = True     # Set False to skip chats
-TOP = "50"
-MAX_PAGES_PER_BATCH = "10"
+# Config file path (automatically managed)
+CONFIG_PATH = "/FileStore/teams_connector/teams_config.json"
+
+# Discovery options (only used on first run)
+DISCOVER_CHANNELS = True  # Set False to skip channel discovery (teams/chats only)
+DISCOVER_MESSAGES = True  # Set False to skip message ingestion
 ```
 
 Replace `TENANT_ID`, `CLIENT_ID`, and `CLIENT_SECRET` with your actual Azure AD credentials.
 
-### How Dynamic Ingestion Works
+### How It Works - Single File, Fully Automated
 
-The pipeline automatically:
+The pipeline uses an intelligent auto-discovery approach:
 
-1. **Ingests all teams** your app has access to
-2. **Ingests all chats** (if enabled)
-3. **For each team discovered**:
-   - Ingests all channels in that team
-   - Ingests all members of that team
-   - **For each channel**: Ingests all messages (if enabled)
+**First Run:**
 
-**No manual team IDs or channel IDs needed!** The pipeline queries ingested data to discover IDs dynamically.
+1. Checks for existing configuration file
+2. If not found, automatically discovers all teams and channels via Microsoft Graph API
+3. Saves configuration to JSON file for future runs
+4. Builds complete pipeline specification
+5. Ingests all data into unified tables
+
+**Subsequent Runs:**
+
+1. Loads existing configuration from JSON file
+2. Builds pipeline specification from config
+3. Ingests data (incremental CDC for messages/chats)
+
+**To Re-discover Teams/Channels:**
+
+Simply delete the config file and re-run:
+```python
+dbutils.fs.rm('/FileStore/teams_connector/teams_config.json')
+```
+
+### What Gets Created
+
+The pipeline creates unified tables with configurable prefix:
+
+- `lakeflow_connector_teams` - all teams
+- `lakeflow_connector_chats` - all chats
+- `lakeflow_connector_channels` - all channels (from all teams)
+- `lakeflow_connector_members` - all members (from all teams)
+- `lakeflow_connector_messages` - all messages (from all channels)
+
+**No manual team IDs or channel IDs needed!** Everything is discovered automatically.
 
 ### Configuration Options
 
-- **ENABLE_MESSAGES_INGESTION**: Set to `False` to skip messages (can be a large dataset)
-- **ENABLE_CHATS_INGESTION**: Set to `False` to skip chats
+- **TABLE_PREFIX**: Prefix for all tables (default: `lakeflow_connector_`)
 - **DESTINATION_CATALOG / DESTINATION_SCHEMA**: Where to store the data
+- **DISCOVER_CHANNELS**: Set to `False` to skip channel discovery (teams/chats only)
+- **DISCOVER_MESSAGES**: Set to `False` to skip message ingestion
+- **CONFIG_PATH**: Location of the auto-generated JSON configuration file
 - **TOP**: Page size for API requests (default: 50)
 - **MAX_PAGES_PER_BATCH**: Max pages per batch for CDC tables (default: 10)
 
 ### Important Notes
 
+- **Single file solution**: No separate discovery script needed - everything in one file
 - **Fully automated**: No manual team_id or channel_id configuration required
+- **DLT-compatible**: Static configuration file satisfies DLT's static graph requirement
+- **Unified tables**: All teams/channels in single tables (not separate tables per team/channel)
 - **Incremental CDC**: Messages and chats use Change Data Capture - only new/modified records on subsequent runs
-- **Configurable**: Use flags to skip large datasets if needed
-- **Credentials required**: Must pass credentials via table_configuration for each table
+- **Plug and play**: Just update credentials and run
 
-### Step 2: Run the Pipeline
+### Step 3: Run the Pipeline
 
 1. Go back to the pipeline view
 2. Click **Start** to run the pipeline
 3. Wait for the pipeline to complete (monitor the progress in the UI)
 
-### Step 3: Monitor Pipeline Execution
+### Step 4: Monitor Pipeline Execution
 
-The pipeline will display progress as it runs:
+On first run, you'll see discovery happening:
 
 ```
 ================================================================================
-STEP 1: Ingesting all teams
+Microsoft Teams Fully Automated Dynamic Ingestion
 ================================================================================
-✓ Teams ingested
 
 ================================================================================
-STEP 2: Ingesting all chats
+FIRST RUN - Auto-Discovery Enabled
 ================================================================================
-✓ Chats ingested
+Configuration file not found: /FileStore/teams_connector/teams_config.json
+Generating configuration by discovering teams and channels...
+
+  → Authenticating with Microsoft Graph API...
+    ✓ Authentication successful
 
 ================================================================================
-STEP 3: Discovering teams and ingesting related data
+DISCOVERY MODE - First Run
 ================================================================================
-Found 3 team(s)
+Discovering Teams and channels via Microsoft Graph API...
 
-[1/3] Processing team: Sales Team
-  → Ingesting channels...
-  → Ingesting members...
-  → Found 5 channel(s)
-    • Ingesting messages from: General
-    • Ingesting messages from: Customer Updates
-    ...
+  → Discovering teams...
+    ✓ Found 3 team(s)
+  → Discovering channels for each team...
+
+  [1/3] Sales Team
+    ✓ Found 5 channel(s)
+  [2/3] Engineering Team
+    ✓ Found 8 channel(s)
+  [3/3] Marketing Team
+    ✓ Found 3 channel(s)
+
+================================================================================
+SAVING CONFIGURATION
+================================================================================
+✓ Configuration saved to: /FileStore/teams_connector/teams_config.json
+
+Configuration summary:
+  • Teams discovered: 3
+  • Total ingestion objects: 47
+
+================================================================================
+BUILDING PIPELINE SPECIFICATION
+================================================================================
+✓ Pipeline spec built with 47 table configuration(s)
+
+Tables to be created/updated:
+  • main.teams_data.lakeflow_connector_teams
+  • main.teams_data.lakeflow_connector_chats
+  • main.teams_data.lakeflow_connector_channels
+  • main.teams_data.lakeflow_connector_members
+  • main.teams_data.lakeflow_connector_messages
+
+================================================================================
+STARTING INGESTION
+================================================================================
+
+[Ingestion progress...]
 
 ================================================================================
 ✓ INGESTION COMPLETE!
 ================================================================================
+```
+
+On subsequent runs, it will use the saved configuration:
+
+```
+================================================================================
+LOADING EXISTING CONFIGURATION
+================================================================================
+Configuration loaded from: /FileStore/teams_connector/teams_config.json
+
+Configuration summary:
+  • Teams discovered: 3
+  • Total ingestion objects: 47
+
+To re-discover teams/channels, delete the config file:
+  dbutils.fs.rm('/FileStore/teams_connector/teams_config.json')
 ```
 
 ---
