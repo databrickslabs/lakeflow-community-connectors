@@ -278,31 +278,40 @@ def ingest(spark, pipeline_spec: dict) -> None:
                             .load()
                         )
 
-            # Create unified view that unions all staging views
-            unified_view_name = f"{source_table}_staging"
+            # For CDC mode with multiple configs, create streaming union view
+            if ingestion_type == "cdc":
+                unified_view_name = f"{source_table}_staging"
 
-            @sdp.view(name=unified_view_name)
-            def create_unified_view(views=staging_views):
-                dfs = [spark.table(view) for view in views]
-                from functools import reduce
-                return reduce(lambda df1, df2: df1.union(df2), dfs)
+                @sdp.view(name=unified_view_name)
+                def create_unified_view(views=staging_views):
+                    # For streaming views, we need to use readStream
+                    dfs = [spark.readStream.table(view) for view in views]
+                    from functools import reduce
+                    return reduce(lambda df1, df2: df1.union(df2), dfs)
 
-            # Create destination table with the unified view
-            if ingestion_type == "snapshot":
-                sdp.create_streaming_table(name=destination_table)
-                sdp.apply_changes_from_snapshot(
-                    target=destination_table,
-                    source=unified_view_name,
-                    keys=primary_keys,
-                    stored_as_scd_type=scd_type,
-                )
-            elif ingestion_type == "cdc":
                 sdp.create_streaming_table(name=destination_table)
                 sdp.apply_changes(
                     target=destination_table,
                     source=unified_view_name,
                     keys=primary_keys,
                     sequence_by=col(sequence_by),
+                    stored_as_scd_type=scd_type,
+                )
+            elif ingestion_type == "snapshot":
+                # For snapshot, use regular batch union
+                unified_view_name = f"{source_table}_staging"
+
+                @sdp.view(name=unified_view_name)
+                def create_unified_view(views=staging_views):
+                    dfs = [spark.table(view) for view in views]
+                    from functools import reduce
+                    return reduce(lambda df1, df2: df1.union(df2), dfs)
+
+                sdp.create_streaming_table(name=destination_table)
+                sdp.apply_changes_from_snapshot(
+                    target=destination_table,
+                    source=unified_view_name,
+                    keys=primary_keys,
                     stored_as_scd_type=scd_type,
                 )
             elif ingestion_type == "append":
