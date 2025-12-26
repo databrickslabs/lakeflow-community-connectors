@@ -1,24 +1,28 @@
 # Lakeflow Microsoft Teams Community Connector
 
-This documentation describes how to configure and use the **Microsoft Teams** Lakeflow community connector to ingest data from Microsoft Teams into Databricks using the Microsoft Graph API.
+Production-grade connector for ingesting Microsoft Teams data into Databricks using the Microsoft Graph API v1.0.
 
 ## Overview
 
 The Microsoft Teams connector enables you to:
-- Extract teams, channels, messages, members, and chats from Microsoft Teams
+- Extract teams, channels, messages, and members from Microsoft Teams
 - Support both snapshot (full refresh) and CDC (incremental) ingestion modes
-- Leverage Microsoft Graph API v1.0 for reliable data access
-- Ingest structured data with proper schema definitions into Databricks
+- Leverage Microsoft Graph API v1.0 with OAuth 2.0 authentication
+- Ingest structured data with proper schema definitions into Delta tables
+
+## Quick Start
+
+For a complete step-by-step setup guide, see **[QUICKSTART.md](QUICKSTART.md)**.
 
 ## Prerequisites
 
 ### 1. Microsoft 365 Environment
-- **Microsoft 365 tenant** with Microsoft Teams enabled
-- **Teams with data** to ingest (teams, channels, messages)
-- **Administrative access** to Azure AD for app registration
+- Microsoft 365 tenant with Microsoft Teams enabled
+- Teams with data to ingest (teams, channels, messages)
+- Administrative access to Azure AD for app registration
 
 ### 2. Azure AD App Registration
-You need to register an application in Azure Active Directory to obtain credentials:
+Register an application in Azure Active Directory to obtain credentials:
 - **Tenant ID**: Your Azure AD tenant identifier
 - **Client ID**: Application (client) ID from app registration
 - **Client Secret**: A valid client secret for authentication
@@ -33,123 +37,30 @@ The following **Application permissions** must be granted with admin consent:
 | `Channel.ReadBasic.All` | Reading channels | Required |
 | `ChannelMessage.Read.All` | Reading messages | Required |
 | `TeamMember.Read.All` | Reading members | Required |
-| `Chat.Read.All` | Reading chats | Required |
 
 **Note:** All permissions require **tenant administrator consent**.
+
+**⚠️ IMPORTANT - Chats Not Supported:**
+- The Microsoft Graph API `/chats` endpoint does NOT support Application Permissions (app-only authentication)
+- It only works with Delegated Permissions (interactive user login)
+- This connector uses Application Permissions for automated/scheduled pipelines
+- Therefore, **chats cannot be ingested**
+- You can ingest: teams, channels, members, and messages
 
 ### 4. Databricks Environment
 - Databricks workspace with Unity Catalog enabled
 - Permissions to create UC connections
-- SDP (Spark Declarative Pipeline) support
+- Delta Live Tables (DLT) support for declarative pipelines
 
 ---
 
-## Setup Guide
+## Supported Tables
 
-### Step 1: Register Application in Azure AD
-
-1. **Navigate to Azure Portal**
-   - Go to https://portal.azure.com
-   - Sign in with administrator credentials
-
-2. **Create App Registration**
-   - Navigate to **Azure Active Directory** → **App registrations**
-   - Click **New registration**
-   - Enter a name: `Databricks Teams Connector`
-   - Select **Accounts in this organizational directory only**
-   - Click **Register**
-
-3. **Note the Credentials**
-   - On the Overview page, copy:
-     - **Application (client) ID** → This is your `client_id`
-     - **Directory (tenant) ID** → This is your `tenant_id`
-
-4. **Create Client Secret**
-   - Navigate to **Certificates & secrets** → **Client secrets**
-   - Click **New client secret**
-   - Enter description: `Databricks Connector Secret`
-   - Set expiration (recommended: 24 months)
-   - Click **Add**
-   - **IMPORTANT:** Copy the **Value** immediately (you won't see it again) → This is your `client_secret`
-
-5. **Grant API Permissions**
-   - Navigate to **API permissions**
-   - Click **Add a permission** → **Microsoft Graph** → **Application permissions**
-   - Add each required permission:
-     - `Team.ReadBasic.All`
-     - `Channel.ReadBasic.All`
-     - `ChannelMessage.Read.All`
-     - `TeamMember.Read.All`
-     - `Chat.Read.All`
-   - Click **Grant admin consent for [Your Organization]**
-   - Verify all permissions show "Granted for [Your Organization]"
-
-### Step 2: Create Unity Catalog Connection
-
-Create a UC connection for the Microsoft Teams connector using Databricks CLI or UI.
-
-#### Option A: Using Databricks CLI
-
-```bash
-databricks connections create \
-  --json '{
-    "name": "microsoft_teams_connection",
-    "connection_type": "GENERIC_LAKEFLOW_CONNECT",
-    "options": {
-      "sourceName": "microsoft_teams",
-      "tenant_id": "your-tenant-id-guid",
-      "client_id": "your-client-id-guid",
-      "client_secret": "your-client-secret-value",
-      "externalOptionsAllowList": "team_id,channel_id,top,max_pages_per_batch,lookback_seconds,start_date"
-    }
-  }'
-```
-
-#### Option B: Using Databricks UI
-
-1. Navigate to **Catalog** → **Connections**
-2. Click **Create connection**
-3. Select **Lakeflow Community Connector**
-4. Choose **Microsoft Teams** (or **Add Community Connector** if not listed)
-5. Configure connection options:
-   - **Name**: `microsoft_teams_connection`
-   - **Source Name**: `microsoft_teams`
-   - **Tenant ID**: Your Azure AD tenant ID
-   - **Client ID**: Your application client ID
-   - **Client Secret**: Your client secret
-   - **External Options Allow List**: `team_id,channel_id,top,max_pages_per_batch,lookback_seconds,start_date`
-
-**IMPORTANT:** The `externalOptionsAllowList` must include all table-specific options that will be used in pipeline specs.
-
-### Step 3: Create Ingestion Pipeline
-
-1. **Navigate to Databricks**
-   - Click **New** → **Add or upload data**
-   - Select **Microsoft Teams** under Community connectors
-
-2. **Configure Pipeline**
-   - **Pipeline name**: `microsoft_teams_ingestion`
-   - **Event log location**: Catalog and schema for event logs (e.g., `main.teams_logs`)
-   - **Root path**: Workspace directory for connector source code (e.g., `/Workspace/Shared/connectors/microsoft_teams`)
-   - Click **Create pipeline**
-
-3. **Edit Pipeline Spec** (in `ingest.py`)
-   - Update the `objects` field to specify tables to ingest
-   - Configure table options (see Configuration Examples below)
-
-4. **Run Pipeline**
-   - Click **Start** to begin ingestion
-   - Monitor progress in pipeline UI
-
----
-
-## Supported Objects (Tables)
-
-The Microsoft Teams connector supports **5 core tables** with two ingestion modes:
+The Microsoft Teams connector supports **4 core tables** with two ingestion modes:
 
 **Ingestion Modes:**
-- **Snapshot (Full Refresh)**: Always fetches all data on every run. Recommended for small, infrequently changing datasets (teams, channels, members).
-- **CDC (Change Data Capture/Incremental)**: Only fetches new or modified records after the last cursor value. Recommended for large, frequently changing datasets (messages, chats).
+- **Snapshot (Full Refresh)**: Fetches all data on every run. Recommended for small, infrequently changing datasets (teams, channels, members).
+- **CDC (Change Data Capture/Incremental)**: Only fetches new or modified records after the last cursor value. Recommended for large, frequently changing datasets (messages).
 
 ### Summary Table
 
@@ -159,7 +70,6 @@ The Microsoft Teams connector supports **5 core tables** with two ingestion mode
 | channels | Snapshot | - | `team_id` |
 | messages | **CDC** | `lastModifiedDateTime` | `team_id`, `channel_id` |
 | members | Snapshot | - | `team_id` |
-| chats | **CDC** | `lastUpdatedDateTime` | None |
 
 ### 1. teams (Snapshot)
 
@@ -234,7 +144,7 @@ Messages within channels.
 **Primary Key:** `id`
 **Cursor Field:** `lastModifiedDateTime`
 **Required Table Options:** `team_id`, `channel_id`
-**Graph API Endpoint:** `GET /teams/{team_id}/channels/{channel_id}/messages?$filter=lastModifiedDateTime gt {cursor}`
+**Graph API Endpoint:** `GET /teams/{team_id}/channels/{channel_id}/messages`
 
 ---
 
@@ -259,62 +169,46 @@ Members of teams.
 
 ---
 
-### 5. chats (CDC)
-
-1:1 and group chats.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| id | String | Unique chat identifier |
-| topic | String | Chat subject (for group chats) |
-| chatType | String | `oneOnOne`, `group`, or `meeting` |
-| createdDateTime | String | ISO 8601 timestamp |
-| lastUpdatedDateTime | String | Last activity timestamp (cursor field) |
-| webUrl | String | URL to chat in Teams client |
-| onlineMeetingInfo | String | JSON string with meeting details |
-
-**Ingestion Type:** CDC (incremental - only fetches new/modified records after cursor)
-**Primary Key:** `id`
-**Cursor Field:** `lastUpdatedDateTime`
-**Required Table Options:** None
-**Graph API Endpoint:** `GET /chats?$filter=lastUpdatedDateTime gt {cursor}`
-
----
-
 ## Configuration Examples
 
-### Example 1: Dynamic Ingestion (Recommended)
+### Example 1: Configuration-Based Ingestion (Recommended)
 
-**Fully automated** ingestion that discovers all teams and channels without manual configuration.
+The recommended approach uses Python configuration lists for a DLT-compatible, incremental workflow.
 
-See the complete dynamic ingestion template in [`pipeline-spec/example_microsoft_teams_ingest.py`](../../pipeline-spec/example_microsoft_teams_ingest.py).
-
-This approach:
-- Ingests all teams and chats automatically
-- Discovers team IDs from ingested teams table
-- Ingests channels, members, and messages for each team dynamically
-- No manual team_id or channel_id configuration needed
+See the complete template in [`pipeline-spec/example_microsoft_teams_ingest.py`](../../pipeline-spec/example_microsoft_teams_ingest.py).
 
 ```python
-# Just configure credentials and options
+# Configure credentials and options
 TENANT_ID = "your-tenant-id"
 CLIENT_ID = "your-client-id"
 CLIENT_SECRET = "your-client-secret"
-DESTINATION_CATALOG = "main"
-DESTINATION_SCHEMA = "teams_data"
-ENABLE_MESSAGES_INGESTION = True
-ENABLE_CHATS_INGESTION = True
 
-# The rest is automated - see full template for implementation
+# Add team IDs to ingest
+TEAM_IDS = ["team-guid-1", "team-guid-2"]
+
+# Add specific channels for messages (optional)
+CHANNEL_IDS = [
+    {"team_id": "team-guid-1", "channel_id": "channel-guid-1"},
+]
+
+# Run pipeline
+ingest(spark, pipeline_spec)
 ```
+
+**Incremental Workflow:**
+1. Run with `TEAM_IDS = []` to ingest teams table
+2. Query teams table, copy IDs to `TEAM_IDS` list
+3. Run again to ingest channels and members for those teams
+4. Query channels table, copy IDs to `CHANNEL_IDS` list
+5. Run again to ingest messages from those channels
 
 ---
 
-### Example 2: Manual Configuration (Advanced)
+### Example 2: Simple Teams-Only Ingestion
 
-For specific teams/channels only, you can manually configure each table.
+For getting started, ingest just the teams table:
 
-**Basic Teams and Channels (Snapshot):**
+See [`pipeline-spec/example_microsoft_teams_simple_ingest.py`](../../pipeline-spec/example_microsoft_teams_simple_ingest.py).
 
 ```python
 pipeline_spec = {
@@ -323,51 +217,12 @@ pipeline_spec = {
         {
             "table": {
                 "source_table": "teams",
-                "table_configuration": {
-                    "tenant_id": "your-tenant-id",
-                    "client_id": "your-client-id",
-                    "client_secret": "your-client-secret"
-                }
-            }
-        },
-        {
-            "table": {
-                "source_table": "channels",
-                "table_configuration": {
-                    "tenant_id": "your-tenant-id",
-                    "client_id": "your-client-id",
-                    "client_secret": "your-client-secret",
-                    "team_id": "abc-123-team-id-guid"
-                }
-            }
-        }
-    ]
-}
-
-ingest(spark, pipeline_spec)
-```
-
-**Incremental Message Ingestion (CDC):**
-
-For a specific channel with incremental loading:
-
-```python
-pipeline_spec = {
-    "connection_name": "microsoft_teams_connection",
-    "objects": [
-        {
-            "table": {
-                "source_table": "messages",
                 "destination_catalog": "main",
                 "destination_schema": "teams_data",
                 "table_configuration": {
                     "tenant_id": "your-tenant-id",
                     "client_id": "your-client-id",
-                    "client_secret": "your-client-secret",
-                    "team_id": "abc-123-team-id-guid",
-                    "channel_id": "xyz-789-channel-id",
-                    "start_date": "2025-01-01T00:00:00Z",
-                    "lookback_seconds": "300"
+                    "client_secret": "your-client-secret"
                 }
             }
         }
@@ -395,62 +250,12 @@ ingest(spark, pipeline_spec)
 | `team_id` | String (GUID) | channels, members, messages | Parent team identifier |
 | `channel_id` | String (GUID) | messages | Parent channel identifier |
 
-### CDC Options (messages, chats)
+### CDC Options (messages only)
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `start_date` | String (ISO 8601) | None | Initial cursor for first sync (e.g., `2025-01-01T00:00:00Z`) |
 | `lookback_seconds` | String (integer) | `300` | Lookback window in seconds to catch late updates (5 minutes) |
-
----
-
-## How to Find team_id and channel_id
-
-### Option 1: Using Microsoft Graph Explorer
-
-1. Go to https://developer.microsoft.com/en-us/graph/graph-explorer
-2. Sign in with your account
-3. **Find team_id:**
-   - Run: `GET https://graph.microsoft.com/v1.0/me/joinedTeams`
-   - Copy the `id` field from the desired team
-4. **Find channel_id:**
-   - Run: `GET https://graph.microsoft.com/v1.0/teams/{team-id}/channels`
-   - Copy the `id` field from the desired channel
-
-### Option 2: Using Teams Web Client
-
-1. Open Microsoft Teams in your browser
-2. Navigate to the desired team and channel
-3. Look at the URL in the address bar:
-   ```
-   https://teams.microsoft.com/...?teamId=<TEAM_ID>...&channelId=<CHANNEL_ID>
-   ```
-4. Extract the `teamId` and `channelId` values
-
-**Note:** Channel IDs in URLs may be URL-encoded. Use the Graph Explorer method for accurate IDs.
-
----
-
-## Data Type Mapping
-
-Microsoft Graph JSON types are mapped to PySpark/Databricks types:
-
-| Graph API Type | Example Fields | PySpark Type | Notes |
-|----------------|----------------|--------------|-------|
-| String (GUID) | `id`, `userId`, `teamId` | `StringType` | UUIDs stored as strings |
-| String | `displayName`, `description` | `StringType` | UTF-8 text |
-| DateTimeOffset | `createdDateTime`, `lastModifiedDateTime` | `StringType` | ISO 8601 format (e.g., `2025-01-15T10:30:00.000Z`) |
-| Boolean | `isArchived`, `isFavoriteByDefault` | `BooleanType` | `true` / `false` |
-| Enum | `visibility`, `chatType`, `messageType` | `StringType` | Enum values as strings |
-| Object | `from`, `body`, `channelIdentity` | `StructType([...])` | Nested struct with defined fields |
-| Array[Object] | `attachments`, `mentions`, `reactions` | `ArrayType(StructType([...]))` | Array of structs |
-| Array[String] | `roles`, `topics` | `ArrayType(StringType())` | Simple string arrays |
-| Complex/Unknown | `policyViolation`, `eventDetail` | `StringType` | Stored as JSON string for flexibility |
-
-**Timestamp Handling:**
-- All timestamps are stored as **strings** in ISO 8601 format with UTC timezone
-- Downstream processing can cast to `TimestampType` as needed
-- Example: `2025-01-15T10:30:00.000Z`
 
 ---
 
@@ -462,7 +267,7 @@ Microsoft Graph JSON types are mapped to PySpark/Databricks types:
 - Test with a small date range for messages
 
 ### Use Incremental Sync
-- For **messages** and **chats**, always use CDC mode with `start_date`
+- For **messages**, always use CDC mode with `start_date`
 - Set appropriate `lookback_seconds` (default: 300 = 5 minutes) to catch late updates
 - Monitor cursor progression in pipeline event logs
 
@@ -485,7 +290,7 @@ Microsoft Graph JSON types are mapped to PySpark/Databricks types:
 
 ### Schedule Appropriately
 - **Snapshot tables** (teams, channels, members): Daily or weekly refresh (infrequent changes)
-- **CDC tables** (messages, chats): Hourly or continuous (for near real-time)
+- **CDC tables** (messages): Hourly or continuous (for near real-time)
 
 ---
 
@@ -555,38 +360,6 @@ Microsoft Graph JSON types are mapped to PySpark/Databricks types:
 
 ---
 
-### Schema Mismatches
-
-**Symptom:** Pipeline fails with schema errors
-
-**Cause:** Nested objects or arrays don't match expected schema
-
-**Solutions:**
-- Verify you're using the latest connector version
-- Check if Microsoft has changed Graph API schema
-- File an issue in the connector GitHub repository
-- As workaround, store problematic fields as JSON strings
-
----
-
-### Empty Results
-
-**Symptom:** Pipeline runs successfully but no data ingested
-
-**Possible Causes:**
-- No data exists in specified team/channel
-- `start_date` is in the future
-- Filters exclude all data
-- App doesn't have access to data
-
-**Solutions:**
-- Verify team/channel has messages using Teams client
-- Check `start_date` is in the past
-- Remove or adjust filters
-- Verify app has appropriate permissions
-
----
-
 ## Performance Considerations
 
 ### Expected Throughput
@@ -616,9 +389,10 @@ For organizations with millions of messages:
 ## References
 
 ### Connector Documentation
-- **Source Code:** `sources/microsoft_teams/microsoft_teams.py`
-- **API Documentation:** `sources/microsoft_teams/microsoft_teams_api_doc.md`
-- **Test Suite:** `sources/microsoft_teams/test/test_microsoft_teams.py`
+- **Quick Start Guide:** [QUICKSTART.md](QUICKSTART.md)
+- **Source Code:** [microsoft_teams.py](microsoft_teams.py)
+- **API Documentation:** [microsoft_teams_api_doc.md](microsoft_teams_api_doc.md)
+- **Test Suite:** [test/test_microsoft_teams.py](test/test_microsoft_teams.py)
 
 ### Microsoft Documentation
 - [Microsoft Graph API Overview](https://learn.microsoft.com/en-us/graph/api/resources/teams-api-overview?view=graph-rest-1.0)
@@ -638,9 +412,10 @@ For organizations with millions of messages:
 
 For issues or questions:
 1. Check the troubleshooting section above
-2. Review the API documentation (`microsoft_teams_api_doc.md`)
-3. Verify Azure AD app configuration
-4. File an issue in the GitHub repository with:
+2. Review the [QUICKSTART.md](QUICKSTART.md) guide
+3. Review the API documentation ([microsoft_teams_api_doc.md](microsoft_teams_api_doc.md))
+4. Verify Azure AD app configuration
+5. File an issue in the GitHub repository with:
    - Connector version
    - Error message and stack trace
    - Pipeline specification (redact credentials)

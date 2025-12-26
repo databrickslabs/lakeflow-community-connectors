@@ -30,10 +30,6 @@ class LakeflowConnect:
         Authentication uses the Client Credentials Flow with Application Permissions.
         Requires admin consent for all permissions.
         """
-        # DEBUG: Print what options we receive
-        print(f"DEBUG: All options received by connector: {list(options.keys())}")
-        print(f"DEBUG: Options values (masked secrets): {[(k, v if k != 'client_secret' else '***REDACTED***') for k, v in options.items()]}")
-
         self.tenant_id = options.get("tenant_id")
         self.client_id = options.get("client_id")
         self.client_secret = options.get("client_secret")
@@ -77,14 +73,6 @@ class LakeflowConnect:
                 "endpoint": "teams/{team_id}/members",
                 "requires_parent": ["team_id"],
                 # Required permission: TeamMember.Read.All (Application)
-            },
-            "chats": {
-                "primary_keys": ["id"],
-                "cursor_field": "lastUpdatedDateTime",
-                "ingestion_type": "cdc",
-                "endpoint": "chats",
-                # Required permission: Chat.Read.All (Application)
-                # Note: Using /chats directly for Application Permissions (not /me/chats)
             },
         }
 
@@ -304,6 +292,9 @@ class LakeflowConnect:
         """
         List all supported Microsoft Teams tables.
 
+        Note: Chats table is not supported because the Microsoft Graph API /chats endpoint
+        does not support Application Permissions (only Delegated Permissions with user context).
+
         Returns:
             list[str]: Static list of table names
         """
@@ -312,7 +303,6 @@ class LakeflowConnect:
             "channels",
             "messages",
             "members",
-            "chats",
         ]
 
     def get_table_schema(
@@ -426,21 +416,6 @@ class LakeflowConnect:
                 ]
             )
 
-        elif table_name == "chats":
-            return StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("topic", StringType(), True),
-                    StructField("createdDateTime", StringType(), True),
-                    StructField("lastUpdatedDateTime", StringType(), True),
-                    StructField("chatType", StringType(), True),
-                    StructField("webUrl", StringType(), True),
-                    StructField("tenantId", StringType(), True),
-                    # Store complex object as JSON string
-                    StructField("onlineMeetingInfo", StringType(), True),
-                ]
-            )
-
     def read_table_metadata(
         self, table_name: str, table_options: dict[str, str]
     ) -> dict:
@@ -505,8 +480,6 @@ class LakeflowConnect:
             return self._read_messages(start_offset, table_options)
         elif table_name == "members":
             return self._read_members(start_offset, table_options)
-        elif table_name == "chats":
-            return self._read_chats(start_offset, table_options)
 
     def _read_teams(
         self, start_offset: dict, table_options: dict[str, str]
@@ -825,101 +798,6 @@ class LakeflowConnect:
             except Exception:
                 # Fallback: use max_modified as-is
                 next_cursor = max_modified
-
-        next_offset = {"cursor": next_cursor} if next_cursor else {}
-        return iter(records), next_offset
-
-    def _read_chats(
-        self, start_offset: dict, table_options: dict[str, str]
-    ) -> Tuple[Iterator[dict], dict]:
-        """
-        Read chats table (CDC mode with timestamp-based filtering).
-
-        Args:
-            start_offset: Dictionary with cursor (e.g., {"cursor": "2025-01-15T10:30:00.000Z"})
-            table_options: Optional table options
-
-        Returns:
-            Tuple of (iterator of chat records, next_offset dict with updated cursor)
-        """
-        try:
-            top = int(table_options.get("top", 50))
-        except (TypeError, ValueError):
-            top = 50
-        top = max(1, min(top, 999))
-
-        try:
-            max_pages = int(table_options.get("max_pages_per_batch", 100))
-        except (TypeError, ValueError):
-            max_pages = 100
-
-        try:
-            lookback_seconds = int(table_options.get("lookback_seconds", 300))
-        except (TypeError, ValueError):
-            lookback_seconds = 300
-
-        # Determine starting cursor
-        cursor = None
-        if start_offset and isinstance(start_offset, dict):
-            cursor = start_offset.get("cursor")
-        if not cursor:
-            cursor = table_options.get("start_date")
-
-        endpoint = self._object_config["chats"]["endpoint"]
-        url = f"{self.base_url}/{endpoint}"
-        params = {"$top": top}
-
-        records: List[dict[str, Any]] = []
-        max_updated: str | None = None
-        pages_fetched = 0
-        next_url: str | None = url
-
-        while next_url and pages_fetched < max_pages:
-            if pages_fetched == 0:
-                data = self._make_request_with_retry(url, params=params)
-            else:
-                data = self._make_request_with_retry(next_url)
-
-            chats = data.get("value", [])
-
-            for chat in chats:
-                # Filter by cursor (client-side)
-                last_updated = chat.get("lastUpdatedDateTime")
-                if cursor and last_updated and last_updated < cursor:
-                    continue
-
-                record: dict[str, Any] = dict(chat)
-
-                # Serialize complex object
-                if "onlineMeetingInfo" in record and isinstance(
-                    record["onlineMeetingInfo"], dict
-                ):
-                    record["onlineMeetingInfo"] = json.dumps(
-                        record["onlineMeetingInfo"]
-                    )
-
-                records.append(record)
-
-                # Track max timestamp
-                if last_updated:
-                    if max_updated is None or last_updated > max_updated:
-                        max_updated = last_updated
-
-            next_url = data.get("@odata.nextLink")
-            pages_fetched += 1
-
-            if next_url:
-                time.sleep(0.1)
-
-        # Compute next cursor with lookback window
-        next_cursor = cursor
-        if max_updated:
-            try:
-                dt = datetime.fromisoformat(max_updated.replace("Z", "+00:00"))
-                dt_with_lookback = dt - timedelta(seconds=lookback_seconds)
-                next_cursor = dt_with_lookback.isoformat().replace("+00:00", "Z")
-            except Exception:
-                next_cursor = max_updated
 
         next_offset = {"cursor": next_cursor} if next_cursor else {}
         return iter(records), next_offset
