@@ -114,69 +114,192 @@ def _get_table_metadata(spark, connection_name: str, table_list: list[str]) -> d
 
 
 def ingest(spark, pipeline_spec: dict) -> None:
-    """Ingest a list of tables"""
+    """
+    Ingest tables from a pipeline specification.
 
-    # parse the pipeline spec
+    Supports multiple configurations for the same source table (e.g., channels for different teams).
+    Each configuration creates a separate staging view, then all are merged into the destination table.
+    """
+    # Parse the pipeline spec
     spec = SpecParser(pipeline_spec)
     connection_name = spec.connection_name()
-    table_list_raw = spec.get_table_list()
 
-    # Deduplicate table list for metadata fetch and view creation
-    # When the same source table appears multiple times (e.g., channels for different teams),
-    # we only need to create the view once and fetch metadata once
-    table_list = list(dict.fromkeys(table_list_raw))  # Preserves order, removes duplicates
+    # Get all objects with their full configurations
+    objects = spec._model.objects
 
-    metadata = _get_table_metadata(spark, connection_name, table_list)
+    # Group objects by (source_table, destination_table) to handle multiple configs
+    table_groups = {}
+    for idx, obj in enumerate(objects):
+        source_table = obj.table.source_table
+        dest_catalog = obj.table.destination_catalog
+        dest_schema = obj.table.destination_schema
+        dest_table = obj.table.destination_table or source_table
 
-    def _ingest_table(table: str) -> None:
-        """Helper function to ingest a single table"""
-        primary_keys = metadata[table].get("primary_keys")
-        cursor_field = metadata[table].get("cursor_field")
-        ingestion_type = metadata[table].get("ingestion_type", "cdc")
-        view_name = table + "_staging"
-        table_config = spec.get_table_configuration(table)
-        destination_table = spec.get_full_destination_table_name(table)
+        # Create full destination table name
+        if dest_catalog and dest_schema:
+            full_dest_table = f"`{dest_catalog}`.`{dest_schema}`.`{dest_table}`"
+        else:
+            full_dest_table = dest_table
 
-        # Override parameters with spec values if available
-        primary_keys = spec.get_primary_keys(table) or primary_keys
-        sequence_by = spec.get_sequence_by(table) or cursor_field
-        scd_type_raw = spec.get_scd_type(table)
-        if scd_type_raw == "APPEND_ONLY":
-            ingestion_type = "append"
-        scd_type = "2" if scd_type_raw == "SCD_TYPE_2" else "1"
+        # Use (source_table, full_dest_table) as key
+        key = (source_table, full_dest_table)
 
-        if ingestion_type == "cdc":
-            _create_cdc_table(
-                spark,
-                connection_name,
-                table,
-                destination_table,
-                primary_keys,
-                sequence_by,
-                scd_type,
-                view_name,
-                table_config,
+        if key not in table_groups:
+            table_groups[key] = []
+
+        table_groups[key].append((idx, obj))
+
+    # Get unique source tables for metadata fetch
+    unique_source_tables = list(dict.fromkeys([obj.table.source_table for obj in objects]))
+    metadata = _get_table_metadata(spark, connection_name, unique_source_tables)
+
+    # Process each table group
+    for (source_table, destination_table), object_list in table_groups.items():
+        # Get metadata for this source table
+        primary_keys = metadata[source_table].get("primary_keys")
+        cursor_field = metadata[source_table].get("cursor_field")
+        ingestion_type = metadata[source_table].get("ingestion_type", "cdc")
+
+        # If only one configuration, use the simple approach
+        if len(object_list) == 1:
+            idx, obj = object_list[0]
+            table_config = obj.table.table_configuration or {}
+
+            # Remove special keys
+            special_keys = {"scd_type", "primary_keys", "sequence_by"}
+            table_config = {k: v for k, v in table_config.items() if k not in special_keys}
+
+            # Override parameters with spec values if available
+            primary_keys = (
+                obj.table.table_configuration.get("primary_keys")
+                if obj.table.table_configuration
+                else None
+            ) or primary_keys
+            sequence_by = (
+                obj.table.table_configuration.get("sequence_by")
+                if obj.table.table_configuration
+                else None
+            ) or cursor_field
+            scd_type_raw = (
+                obj.table.table_configuration.get("scd_type")
+                if obj.table.table_configuration
+                else None
             )
-        elif ingestion_type == "snapshot":
-            _create_snapshot_table(
-                spark,
-                connection_name,
-                table,
-                destination_table,
-                primary_keys,
-                scd_type,
-                view_name,
-                table_config,
-            )
-        elif ingestion_type == "append":
-            _create_append_table(
-                spark,
-                connection_name,
-                table,
-                destination_table,
-                view_name,
-                table_config,
-            )
 
-    for table_name in table_list:
-        _ingest_table(table_name)
+            if scd_type_raw == "APPEND_ONLY":
+                ingestion_type = "append"
+            scd_type = "2" if scd_type_raw == "SCD_TYPE_2" else "1"
+
+            view_name = source_table + "_staging"
+
+            if ingestion_type == "cdc":
+                _create_cdc_table(
+                    spark,
+                    connection_name,
+                    source_table,
+                    destination_table,
+                    primary_keys,
+                    sequence_by,
+                    scd_type,
+                    view_name,
+                    table_config,
+                )
+            elif ingestion_type == "snapshot":
+                _create_snapshot_table(
+                    spark,
+                    connection_name,
+                    source_table,
+                    destination_table,
+                    primary_keys,
+                    scd_type,
+                    view_name,
+                    table_config,
+                )
+            elif ingestion_type == "append":
+                _create_append_table(
+                    spark,
+                    connection_name,
+                    source_table,
+                    destination_table,
+                    view_name,
+                    table_config,
+                )
+
+        # Multiple configurations - create separate views and merge
+        else:
+            # Get configuration from first object for defaults
+            first_obj = object_list[0][1]
+            scd_type_raw = (
+                first_obj.table.table_configuration.get("scd_type")
+                if first_obj.table.table_configuration
+                else None
+            )
+            if scd_type_raw == "APPEND_ONLY":
+                ingestion_type = "append"
+            scd_type = "2" if scd_type_raw == "SCD_TYPE_2" else "1"
+            sequence_by = (
+                first_obj.table.table_configuration.get("sequence_by")
+                if first_obj.table.table_configuration
+                else None
+            ) or cursor_field
+
+            # Create separate staging views for each configuration
+            staging_views = []
+            for idx, obj in object_list:
+                table_config = obj.table.table_configuration or {}
+
+                # Remove special keys
+                special_keys = {"scd_type", "primary_keys", "sequence_by"}
+                table_config = {k: v for k, v in table_config.items() if k not in special_keys}
+
+                # Create unique view name for this configuration
+                view_name = f"{source_table}_staging_{idx}"
+                staging_views.append(view_name)
+
+                # Create staging view
+                @sdp.view(name=view_name)
+                def create_staging_view(config=table_config):
+                    return (
+                        spark.read.format("lakeflow_connect")
+                        .option("databricks.connection", connection_name)
+                        .option("tableName", source_table)
+                        .options(**config)
+                        .load()
+                    )
+
+            # Create unified view that unions all staging views
+            unified_view_name = f"{source_table}_staging"
+
+            @sdp.view(name=unified_view_name)
+            def create_unified_view(views=staging_views):
+                dfs = [spark.table(view) for view in views]
+                from functools import reduce
+                return reduce(lambda df1, df2: df1.union(df2), dfs)
+
+            # Create destination table with the unified view
+            if ingestion_type == "snapshot":
+                sdp.create_streaming_table(name=destination_table)
+                sdp.apply_changes_from_snapshot(
+                    target=destination_table,
+                    source=unified_view_name,
+                    keys=primary_keys,
+                    stored_as_scd_type=scd_type,
+                )
+            elif ingestion_type == "cdc":
+                sdp.create_streaming_table(name=destination_table)
+                sdp.apply_changes(
+                    target=destination_table,
+                    source=unified_view_name,
+                    keys=primary_keys,
+                    sequence_by=col(sequence_by),
+                    stored_as_scd_type=scd_type,
+                )
+            elif ingestion_type == "append":
+                # For append mode, use streaming union
+                sdp.create_streaming_table(name=destination_table)
+
+                @sdp.append_flow(name=f"{source_table}_append_flow", target=destination_table)
+                def create_append_flow(views=staging_views):
+                    dfs = [spark.readStream.table(view) for view in views]
+                    from functools import reduce
+                    return reduce(lambda df1, df2: df1.union(df2), dfs)
