@@ -256,16 +256,27 @@ def ingest(spark, pipeline_spec: dict) -> None:
                 view_name = f"{source_table}_staging_{idx}"
                 staging_views.append(view_name)
 
-                # Create staging view
-                @sdp.view(name=view_name)
-                def create_staging_view(config=table_config):
-                    return (
-                        spark.read.format("lakeflow_connect")
-                        .option("databricks.connection", connection_name)
-                        .option("tableName", source_table)
-                        .options(**config)
-                        .load()
-                    )
+                # Create staging view - use readStream for CDC, read for snapshot
+                if ingestion_type == "cdc":
+                    @sdp.view(name=view_name)
+                    def create_staging_view(config=table_config):
+                        return (
+                            spark.readStream.format("lakeflow_connect")
+                            .option("databricks.connection", connection_name)
+                            .option("tableName", source_table)
+                            .options(**config)
+                            .load()
+                        )
+                else:
+                    @sdp.view(name=view_name)
+                    def create_staging_view(config=table_config):
+                        return (
+                            spark.read.format("lakeflow_connect")
+                            .option("databricks.connection", connection_name)
+                            .option("tableName", source_table)
+                            .options(**config)
+                            .load()
+                        )
 
             # Create unified view that unions all staging views
             unified_view_name = f"{source_table}_staging"
