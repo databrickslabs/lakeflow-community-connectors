@@ -119,7 +119,12 @@ def ingest(spark, pipeline_spec: dict) -> None:
     # parse the pipeline spec
     spec = SpecParser(pipeline_spec)
     connection_name = spec.connection_name()
-    table_list = spec.get_table_list()
+    table_list_raw = spec.get_table_list()
+
+    # Deduplicate table list for metadata fetch and view creation
+    # When the same source table appears multiple times (e.g., channels for different teams),
+    # we only need to create the view once and fetch metadata once
+    table_list = list(dict.fromkeys(table_list_raw))  # Preserves order, removes duplicates
 
     metadata = _get_table_metadata(spark, connection_name, table_list)
 

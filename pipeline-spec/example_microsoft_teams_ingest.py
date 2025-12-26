@@ -4,8 +4,14 @@ Microsoft Teams Ingestion Pipeline with Configuration
 This pipeline ingests Microsoft Teams data based on your configuration below.
 You can configure which teams and channels to ingest by listing their IDs.
 
+IMPORTANT LIMITATION - Chats Table:
+The Microsoft Graph API 'chats' endpoint does NOT support Application Permissions
+(tenant-wide access). It only works with Delegated Permissions (interactive user login).
+Since this connector uses Application Permissions for automated/scheduled pipelines,
+chats ingestion is not supported. You can still ingest: teams, channels, members, messages.
+
 How to get team IDs and channel IDs:
-1. Run the simple template first to ingest teams table
+1. Run with TEAM_IDS = [] to ingest teams table first
 2. Query: SELECT id, displayName FROM main.teams_data.lakeflow_connector_teams
 3. Copy the team IDs you want and add them to TEAM_IDS list below
 4. Run this pipeline to get channels for those teams
@@ -13,7 +19,7 @@ How to get team IDs and channel IDs:
 
 Configuration:
 1. Update credentials below
-2. Add team IDs to TEAM_IDS list (or set to [] to ingest all tables for ALL teams)
+2. Add team IDs to TEAM_IDS list (or set to [] to ingest just teams table)
 3. Optionally add specific channel IDs to CHANNEL_IDS
 4. Run the pipeline
 """
@@ -49,7 +55,7 @@ CHANNEL_IDS = []
 
 # Ingestion options
 INGEST_TEAMS = True  # Ingest teams table
-INGEST_CHATS = True  # Ingest chats table
+INGEST_CHATS = False  # Chats table NOT SUPPORTED with Application Permissions (requires Delegated auth)
 INGEST_CHANNELS = True  # Ingest channels for teams in TEAM_IDS
 INGEST_MEMBERS = True  # Ingest members for teams in TEAM_IDS
 INGEST_MESSAGES = True  # Ingest messages from channels

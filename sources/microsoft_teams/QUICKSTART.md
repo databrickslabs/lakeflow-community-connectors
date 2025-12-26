@@ -45,19 +45,25 @@ After registration, you'll see the app overview page:
 
 1. In the left menu, click **API permissions**
 2. Click **Add a permission** → **Microsoft Graph** → **Application permissions**
-3. Search for and add these 5 permissions:
+3. Search for and add these 4 permissions:
    - `Team.ReadBasic.All`
    - `Channel.ReadBasic.All`
    - `ChannelMessage.Read.All`
    - `TeamMember.Read.All`
-   - `Chat.Read.All`
 4. Click **Add permissions**
 5. **Click "Grant admin consent for [Your Organization]"** (requires admin rights)
    - ⚠️ Without this, authentication will fail with 403 errors
 
+**⚠️ IMPORTANT - Chats Not Supported:**
+
+- The `Chat.Read.All` application permission does NOT work for tenant-wide chat access
+- Microsoft Graph API `/chats` endpoint only supports Delegated Permissions (interactive user login)
+- This connector uses Application Permissions for automated pipelines, so **chats cannot be ingested**
+- You can still ingest: teams, channels, members, and messages
+
 ### Step 5: Verify Permissions
 
-Confirm you see all 5 permissions with green checkmarks under "Status: Granted"
+Confirm you see all 4 permissions with green checkmarks under "Status: Granted"
 
 **✅ Azure AD setup complete!** You now have:
 - `tenant_id`
@@ -181,31 +187,32 @@ dbutils.fs.rm('/FileStore/teams_connector/teams_config.json')
 The pipeline creates unified tables with configurable prefix:
 
 - `lakeflow_connector_teams` - all teams
-- `lakeflow_connector_chats` - all chats
 - `lakeflow_connector_channels` - all channels (from all teams)
 - `lakeflow_connector_members` - all members (from all teams)
 - `lakeflow_connector_messages` - all messages (from all channels)
 
-**No manual team IDs or channel IDs needed!** Everything is discovered automatically.
+**Note:** Chats table is NOT supported due to Microsoft Graph API limitations with Application Permissions.
 
 ### Configuration Options
 
 - **TABLE_PREFIX**: Prefix for all tables (default: `lakeflow_connector_`)
 - **DESTINATION_CATALOG / DESTINATION_SCHEMA**: Where to store the data
-- **DISCOVER_CHANNELS**: Set to `False` to skip channel discovery (teams/chats only)
-- **DISCOVER_MESSAGES**: Set to `False` to skip message ingestion
-- **CONFIG_PATH**: Location of the auto-generated JSON configuration file
+- **INGEST_TEAMS**: Set to `True` to ingest teams table
+- **INGEST_CHATS**: Set to `False` (chats not supported with Application Permissions)
+- **INGEST_CHANNELS**: Set to `True` to ingest channels for teams in TEAM_IDS
+- **INGEST_MEMBERS**: Set to `True` to ingest members for teams in TEAM_IDS
+- **INGEST_MESSAGES**: Set to `True` to ingest messages from channels
 - **TOP**: Page size for API requests (default: 50)
 - **MAX_PAGES_PER_BATCH**: Max pages per batch for CDC tables (default: 10)
 
 ### Important Notes
 
-- **Single file solution**: No separate discovery script needed - everything in one file
-- **Fully automated**: No manual team_id or channel_id configuration required
-- **DLT-compatible**: Static configuration file satisfies DLT's static graph requirement
+- **Configuration-based**: Add team IDs and channel IDs to Python lists
+- **DLT-compatible**: Static configuration evaluated at parse time
 - **Unified tables**: All teams/channels in single tables (not separate tables per team/channel)
-- **Incremental CDC**: Messages and chats use Change Data Capture - only new/modified records on subsequent runs
-- **Plug and play**: Just update credentials and run
+- **Incremental CDC**: Messages use Change Data Capture - only new/modified records on subsequent runs
+- **Chats not supported**: Microsoft Graph API limitation with Application Permissions
+- **Plug and play**: Just update credentials and team IDs, then run
 
 ### Step 3: Run the Pipeline
 
@@ -263,7 +270,6 @@ BUILDING PIPELINE SPECIFICATION
 
 Tables to be created/updated:
   • main.teams_data.lakeflow_connector_teams
-  • main.teams_data.lakeflow_connector_chats
   • main.teams_data.lakeflow_connector_channels
   • main.teams_data.lakeflow_connector_members
   • main.teams_data.lakeflow_connector_messages
@@ -303,17 +309,20 @@ Query your ingested data:
 
 ```sql
 -- View teams
-SELECT * FROM main.teams_data.teams;
+SELECT * FROM main.teams_data.lakeflow_connector_teams;
 
 -- View channels
-SELECT * FROM main.teams_data.channels;
+SELECT * FROM main.teams_data.lakeflow_connector_channels;
+
+-- View team members
+SELECT * FROM main.teams_data.lakeflow_connector_members;
 
 -- View recent messages
 SELECT
   createdDateTime,
   from.user.displayName as sender,
   body.content as message_text
-FROM main.teams_data.messages
+FROM main.teams_data.lakeflow_connector_messages
 ORDER BY createdDateTime DESC
 LIMIT 10;
 ```

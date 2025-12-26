@@ -1,17 +1,19 @@
 """
 Microsoft Teams Simple Ingestion Pipeline
 
-This is a simplified version that ingests teams and chats only (no channels/messages).
-Use this when you only need basic team and chat data.
+This is a simplified version that ingests only the teams table.
 
-For full dynamic ingestion across all teams/channels/messages, use:
+IMPORTANT LIMITATION - Chats Table:
+The Microsoft Graph API 'chats' endpoint does NOT support Application Permissions.
+Chats have been removed from this template. You can only ingest: teams table.
+
+For full ingestion (teams/channels/members/messages), use:
   example_microsoft_teams_ingest.py
 
 This simple version:
 - Ingests teams table (all teams)
-- Ingests chats table (all chats)
-- No discovery of channels or messages
-- Useful for quick setup or when you only need team/chat metadata
+- No channels, messages, members, or chats
+- Useful for quick setup or when you only need team metadata
 
 Configuration:
 1. Update the credentials below
@@ -52,7 +54,7 @@ register_lakeflow_source(spark)
 # PIPELINE SPECIFICATION
 # ==============================================================================
 
-# Ingest teams and chats (no parent IDs required)
+# Ingest teams only (chats not supported with Application Permissions)
 pipeline_spec = {
     "connection_name": connection_name,
     "objects": [
@@ -69,22 +71,6 @@ pipeline_spec = {
                     "client_secret": CLIENT_SECRET
                 }
             }
-        },
-        # Chats table
-        {
-            "table": {
-                "source_table": "chats",
-                "destination_catalog": DESTINATION_CATALOG,
-                "destination_schema": DESTINATION_SCHEMA,
-                "destination_table": f"{TABLE_PREFIX}chats",
-                "table_configuration": {
-                    "tenant_id": TENANT_ID,
-                    "client_id": CLIENT_ID,
-                    "client_secret": CLIENT_SECRET,
-                    "top": TOP,
-                    "max_pages_per_batch": MAX_PAGES_PER_BATCH
-                }
-            }
         }
     ]
 }
@@ -95,9 +81,9 @@ print("Microsoft Teams Ingestion")
 print("=" * 80)
 print("\nIngesting:")
 print("  • Teams")
-print("  • Chats")
-print("\nNote: This is the simple version (teams + chats only)")
-print("For full dynamic ingestion (teams/channels/members/messages):")
+print("\nNote: This is the simple version (teams only)")
+print("Note: Chats table NOT supported with Application Permissions")
+print("\nFor full ingestion (teams/channels/members/messages):")
 print("  Use example_microsoft_teams_ingest.py instead")
 print()
 
@@ -108,9 +94,7 @@ print("✓ Ingestion Complete")
 print("=" * 80)
 print(f"\nTables created:")
 print(f"  • {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}teams")
-print(f"  • {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}chats")
-print(f"\nSample queries:")
+print(f"\nSample query:")
 print(f"  SELECT * FROM {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}teams")
-print(f"  SELECT * FROM {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}chats")
 print(f"\nFor full ingestion (channels/members/messages):")
 print(f"  Use example_microsoft_teams_ingest.py")
