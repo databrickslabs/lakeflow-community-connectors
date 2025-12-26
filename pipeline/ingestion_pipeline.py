@@ -257,26 +257,30 @@ def ingest(spark, pipeline_spec: dict) -> None:
                 staging_views.append(view_name)
 
                 # Create staging view - use readStream for CDC, read for snapshot
-                if ingestion_type == "cdc":
-                    @sdp.view(name=view_name)
-                    def create_staging_view(config=table_config):
-                        return (
-                            spark.readStream.format("lakeflow_connect")
-                            .option("databricks.connection", connection_name)
-                            .option("tableName", source_table)
-                            .options(**config)
-                            .load()
-                        )
-                else:
-                    @sdp.view(name=view_name)
-                    def create_staging_view(config=table_config):
-                        return (
-                            spark.read.format("lakeflow_connect")
-                            .option("databricks.connection", connection_name)
-                            .option("tableName", source_table)
-                            .options(**config)
-                            .load()
-                        )
+                # IMPORTANT: We use a factory function to avoid Python closure issues
+                # where all views would share the same config reference
+                def make_view_function(config_copy):
+                    if ingestion_type == "cdc":
+                        def view_func():
+                            return (
+                                spark.readStream.format("lakeflow_connect")
+                                .option("databricks.connection", connection_name)
+                                .option("tableName", source_table)
+                                .options(**config_copy)
+                                .load()
+                            )
+                    else:
+                        def view_func():
+                            return (
+                                spark.read.format("lakeflow_connect")
+                                .option("databricks.connection", connection_name)
+                                .option("tableName", source_table)
+                                .options(**config_copy)
+                                .load()
+                            )
+                    return view_func
+
+                sdp.view(name=view_name)(make_view_function(table_config))
 
             # For CDC mode with multiple configs, create streaming union view
             if ingestion_type == "cdc":
