@@ -770,19 +770,14 @@ def register_lakeflow_source(spark):
 
             # Parse options
             try:
-                top = int(table_options.get("top", 50))
-            except (TypeError, ValueError):
-                top = 50
-            top = max(1, min(top, 999))
-
-            try:
                 max_pages = int(table_options.get("max_pages_per_batch", 100))
             except (TypeError, ValueError):
                 max_pages = 100
 
             # Build request
+            # Note: /teams/{id}/channels endpoint does NOT support $top parameter
             url = f"{self.base_url}/teams/{team_id}/channels"
-            params = {"$top": top}
+            params = {}  # No query parameters needed - API returns all channels with pagination
 
             records: List[dict[str, Any]] = []
             pages_fetched = 0
@@ -835,18 +830,13 @@ def register_lakeflow_source(spark):
                 )
 
             try:
-                top = int(table_options.get("top", 50))
-            except (TypeError, ValueError):
-                top = 50
-            top = max(1, min(top, 999))
-
-            try:
                 max_pages = int(table_options.get("max_pages_per_batch", 100))
             except (TypeError, ValueError):
                 max_pages = 100
 
+            # Note: /teams/{id}/members endpoint does NOT support $top parameter
             url = f"{self.base_url}/teams/{team_id}/members"
-            params = {"$top": top}
+            params = {}  # No query parameters needed - API returns all members with pagination
 
             records: List[dict[str, Any]] = []
             pages_fetched = 0
