@@ -36,3 +36,4 @@ def test_aeso_connector():
         f"Test suite had failures: {report.failed_tests} failed, {report.error_tests} errors"
     )
 
+
