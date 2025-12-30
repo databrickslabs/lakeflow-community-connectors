@@ -235,6 +235,34 @@ This repo includes a connector-agnostic DAB generator:
 
 It converts a CSV (what to ingest) into DAB YAML with one pipeline per group.
 
+For OSIPI (and any connector that provides reliable `read_table_metadata`), you can generate that CSV automatically based on table characteristics (e.g. `ingestion_type`) and optional schedules:
+
+- `tools/ingestion_dab_generator/discover_and_classify_tables.py`
+
+Example (group by ingestion type, give snapshots a daily schedule and append tables a 15-min schedule):
+
+```bash
+python3 tools/ingestion_dab_generator/discover_and_classify_tables.py \
+  --connector-name osipi \
+  --output-csv /tmp/osipi_classified.csv \
+  --connection-name osipi_connection \
+  --dest-catalog main \
+  --dest-schema bronze \
+  --group-by ingestion_type \
+  --schedule-snapshot "0 0 * * *" \
+  --schedule-append "*/15 * * * *"
+
+python3 tools/ingestion_dab_generator/generate_ingestion_dab_yaml.py \
+  --input-csv /tmp/osipi_classified.csv \
+  --output-yaml /tmp/osipi_pipelines.yml \
+  --connector-name osipi \
+  --connection-name osipi_connection \
+  --dest-catalog main \
+  --dest-schema bronze \
+  --emit-jobs \
+  --max-items-per-pipeline 10
+```
+
 ### Option A: Provide `pipeline_group` in CSV (explicit grouping)
 
 Rows with the same `pipeline_group` end up in the same Lakeflow pipeline.

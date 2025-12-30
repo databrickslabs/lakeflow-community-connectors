@@ -139,3 +139,73 @@ def test_e2e_hubspot_discover_to_yaml(tmp_path: Path):
 
     for pdef in data["resources"]["pipelines"].values():
         SpecParser(pdef["ingestion_definition"])
+
+
+def test_e2e_osipi_discover_classify_to_yaml(tmp_path: Path):
+    """End-to-end (offline): connector metadata -> classified CSV -> generator -> spec validation."""
+    repo = Path(__file__).resolve().parents[1]
+
+    import sys
+    sys.path.insert(0, str(repo))
+    from libs.spec_parser import SpecParser
+
+    discover = repo / "tools/ingestion_dab_generator/discover_and_classify_tables.py"
+    gen = repo / "tools/ingestion_dab_generator/generate_ingestion_dab_yaml.py"
+
+    csv_path = tmp_path / "osipi_classified.csv"
+    out_path = tmp_path / "out.yml"
+
+    subprocess.check_call(
+        [
+            "python3",
+            str(discover),
+            "--connector-name",
+            "osipi",
+            "--output-csv",
+            str(csv_path),
+            "--connection-name",
+            "osipi_connection",
+            "--dest-catalog",
+            "main",
+            "--dest-schema",
+            "bronze",
+            "--group-by",
+            "ingestion_type",
+            "--schedule-snapshot",
+            "0 0 * * *",
+            "--schedule-append",
+            "*/15 * * * *",
+        ]
+    )
+
+    subprocess.check_call(
+        [
+            "python3",
+            str(gen),
+            "--input-csv",
+            str(csv_path),
+            "--output-yaml",
+            str(out_path),
+            "--connector-name",
+            "osipi",
+            "--connection-name",
+            "osipi_connection",
+            "--dest-catalog",
+            "main",
+            "--dest-schema",
+            "bronze",
+            "--emit-jobs",
+            "--max-items-per-pipeline",
+            "10",
+        ]
+    )
+
+    yaml = pytest.importorskip("yaml")
+    data = yaml.safe_load(out_path.read_text())
+
+    assert "resources" in data and "pipelines" in data["resources"]
+    assert len(data["resources"]["pipelines"]) >= 2
+
+    # Validate that each ingestion_definition conforms to the PipelineSpec model
+    for pdef in data["resources"]["pipelines"].values():
+        SpecParser(pdef["ingestion_definition"])
