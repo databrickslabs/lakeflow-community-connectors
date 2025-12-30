@@ -1361,7 +1361,7 @@ def register_lakeflow_source(spark):
                 if fetch_all_messages:
                     # Fetch all messages from the channel to get message IDs
                     messages_url = f"{self.base_url}/teams/{current_team_id}/channels/{current_channel_id}/messages"
-                    messages_params = {"$top": 50, "$select": "id"}
+                    messages_params = {"$top": 50}
                     messages_next_url: str | None = messages_url
                     msg_pages_fetched = 0
 
