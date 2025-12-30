@@ -12,7 +12,7 @@ The Microsoft Teams connector enables you to:
 
 ## Quick Start
 
-For a complete step-by-step setup guide, see **[QUICKSTART.md](QUICKSTART.md)**.
+Follow these steps to get started with the Microsoft Teams connector:
 
 ## Prerequisites
 
@@ -208,7 +208,7 @@ Threaded message replies within channels.
 - To find message IDs with replies:
   1. First ingest the messages table
   2. Query for messages that likely have threads (e.g., by subject, date range)
-  3. Use the test script [test_replies_fetch.py](test_replies_fetch.py) to verify which messages have replies
+  3. Use the connector's test suite to verify which messages have replies
   4. Add those message IDs to your pipeline configuration
 - The `parent_message_id` field enables joining replies back to parent messages
 - Same schema as messages table for consistency
@@ -399,21 +399,18 @@ The connector implements discovery in two phases:
 
 ### Complete Example
 
-See [example_fetch_all_pipeline.py](example_fetch_all_pipeline.py) for complete working examples including:
+For complete working examples, see the [Configuration Examples](#configuration-examples) section below which includes:
 - Minimal configuration (teams + channels + members with zero manual setup)
 - Selective team with auto-discovery of channels/messages
-- Complete auto-discovery with replies
+- Complete auto-discovery with message replies
 
 ### Testing
 
-Before running in production, you can test the fetch_all modes with the provided test scripts:
+Before running in production, verify your setup with the unit test suite:
 
 ```bash
-# Test API patterns directly (no PySpark required)
-python sources/microsoft_teams/test_fetch_all_simple.py
-
-# Test connector implementation (requires connector dependencies)
-python sources/microsoft_teams/test_connector_direct.py
+# Run the comprehensive test suite
+pytest sources/microsoft_teams/test/test_microsoft_teams.py -v
 ```
 
 ---
@@ -535,13 +532,7 @@ ORDER BY createdDateTime DESC
 LIMIT 100;
 ```
 
-2. Use the test script to verify which messages have replies:
-
-```bash
-# Edit test_replies_fetch.py with your credentials and message IDs
-python sources/microsoft_teams/test_replies_fetch.py
-```
-
+2. Query the messages table to find messages that likely have replies (e.g., filter by subject, recent dates)
 3. Add confirmed message IDs to your pipeline configuration
 
 **Multiple threads:** To track multiple threaded messages, add multiple objects with different `message_id` values. The connector will merge all replies into a single `message_replies` table.
@@ -721,10 +712,10 @@ For organizations with millions of messages:
 ## References
 
 ### Connector Documentation
-- **Quick Start Guide:** [QUICKSTART.md](QUICKSTART.md)
+
 - **Source Code:** [microsoft_teams.py](microsoft_teams.py)
-- **API Documentation:** [microsoft_teams_api_doc.md](microsoft_teams_api_doc.md)
 - **Test Suite:** [test/test_microsoft_teams.py](test/test_microsoft_teams.py)
+- **Generated Bundle:** [_generated_microsoft_teams_python_source.py](_generated_microsoft_teams_python_source.py)
 
 ### Microsoft Documentation
 - [Microsoft Graph API Overview](https://learn.microsoft.com/en-us/graph/api/resources/teams-api-overview?view=graph-rest-1.0)
@@ -744,9 +735,9 @@ For organizations with millions of messages:
 
 For issues or questions:
 1. Check the troubleshooting section above
-2. Review the [QUICKSTART.md](QUICKSTART.md) guide
-3. Review the API documentation ([microsoft_teams_api_doc.md](microsoft_teams_api_doc.md))
-4. Verify Azure AD app configuration
+2. Review the [Prerequisites](#prerequisites) and [Configuration Examples](#configuration-examples) sections
+3. Review the [Microsoft Graph API documentation](https://learn.microsoft.com/en-us/graph/api/resources/teams-api-overview)
+4. Verify Azure AD app configuration and permissions
 5. File an issue in the GitHub repository with:
    - Connector version
    - Error message and stack trace
