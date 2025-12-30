@@ -42,21 +42,18 @@ DESTINATION_SCHEMA = "eduardo_lomonaco"
 TABLE_PREFIX = "lakeflow_connector_"
 
 # Ingestion options
-INGEST_TEAMS = True      # Ingest all teams
-INGEST_CHANNELS = True   # Auto-discover all teams, ingest all channels
-INGEST_MEMBERS = True    # Auto-discover all teams, ingest all members
-INGEST_MESSAGES = False  # Set to True to ingest messages (requires team IDs below)
-
-# Optional: Limit messages to specific teams (leave empty [] to skip messages)
-# Add team IDs here if you want to ingest messages
-TEAM_IDS = []
+INGEST_TEAMS = True           # Ingest all teams
+INGEST_CHANNELS = True        # Auto-discover all teams, ingest all channels
+INGEST_MEMBERS = True         # Auto-discover all teams, ingest all members
+INGEST_MESSAGES = True        # Auto-discover all teams and channels, ingest all messages
+INGEST_MESSAGE_REPLIES = False  # Auto-discover all teams, channels, and messages, ingest all replies
 
 # Pagination settings
 TOP = "50"
 MAX_PAGES_PER_BATCH = "100"
 
-# Optional: Limit messages by date (format: "YYYY-MM-DDTHH:MM:SSZ")
-# Set to None to ingest all messages
+# Optional: Limit messages/replies by date (format: "YYYY-MM-DDTHH:MM:SSZ")
+# Set to None to ingest all messages/replies
 START_DATE = "2025-01-01T00:00:00Z"
 
 # ==============================================================================
@@ -129,32 +126,60 @@ if INGEST_MEMBERS:
     })
     print("✓ Will ingest: members (auto-discovering all teams)")
 
-# Messages - auto-discover ALL channels in specified teams
-if INGEST_MESSAGES and TEAM_IDS:
-    for team_id in TEAM_IDS:
-        config = {
-            **creds,
-            "team_id": team_id,
-            "fetch_all_channels": "true",  # ← Auto-discover all channels!
-            "top": TOP,
-            "max_pages_per_batch": MAX_PAGES_PER_BATCH
+# Messages - auto-discover ALL channels across ALL teams
+if INGEST_MESSAGES:
+    config = {
+        **creds,
+        "fetch_all_teams": "true",      # ← Auto-discover all teams!
+        "fetch_all_channels": "true",   # ← Auto-discover all channels in each team!
+        "top": TOP,
+        "max_pages_per_batch": MAX_PAGES_PER_BATCH
+    }
+
+    # Add start_date if specified
+    if START_DATE:
+        config["start_date"] = START_DATE
+
+    pipeline_spec["objects"].append({
+        "table": {
+            "source_table": "messages",
+            "destination_catalog": DESTINATION_CATALOG,
+            "destination_schema": DESTINATION_SCHEMA,
+            "destination_table": f"{TABLE_PREFIX}messages",
+            "table_configuration": config
         }
+    })
 
-        # Add start_date if specified
-        if START_DATE:
-            config["start_date"] = START_DATE
+    print("✓ Will ingest: messages (auto-discovering all teams and all channels)")
+    if START_DATE:
+        print(f"  └─ Starting from: {START_DATE}")
 
-        pipeline_spec["objects"].append({
-            "table": {
-                "source_table": "messages",
-                "destination_catalog": DESTINATION_CATALOG,
-                "destination_schema": DESTINATION_SCHEMA,
-                "destination_table": f"{TABLE_PREFIX}messages",
-                "table_configuration": config
-            }
-        })
+# Message Replies - auto-discover ALL teams, channels, and messages
+if INGEST_MESSAGE_REPLIES:
+    config = {
+        **creds,
+        "fetch_all_teams": "true",      # ← Auto-discover all teams!
+        "fetch_all_channels": "true",   # ← Auto-discover all channels in each team!
+        "fetch_all_messages": "true",   # ← Auto-discover all messages in each channel!
+        "top": TOP,
+        "max_pages_per_batch": MAX_PAGES_PER_BATCH
+    }
 
-    print(f"✓ Will ingest: messages (auto-discovering all channels in {len(TEAM_IDS)} team(s))")
+    # Add start_date if specified
+    if START_DATE:
+        config["start_date"] = START_DATE
+
+    pipeline_spec["objects"].append({
+        "table": {
+            "source_table": "message_replies",
+            "destination_catalog": DESTINATION_CATALOG,
+            "destination_schema": DESTINATION_SCHEMA,
+            "destination_table": f"{TABLE_PREFIX}message_replies",
+            "table_configuration": config
+        }
+    })
+
+    print("✓ Will ingest: message_replies (auto-discovering all teams, channels, and messages)")
     if START_DATE:
         print(f"  └─ Starting from: {START_DATE}")
 

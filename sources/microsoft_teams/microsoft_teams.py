@@ -838,13 +838,14 @@ class LakeflowConnect:
         """
         Read messages table (CDC mode with timestamp-based filtering).
 
-        Two modes:
+        Three modes:
         1. Specific channel: Requires team_id and channel_id
-        2. Auto-discovery: Requires team_id and fetch_all_channels="true"
+        2. Auto-discover channels: Requires team_id and fetch_all_channels="true"
+        3. Auto-discover everything: Requires fetch_all_teams="true" and fetch_all_channels="true"
 
         Args:
             start_offset: Dictionary with cursor (e.g., {"cursor": "2025-01-15T10:30:00.000Z"})
-            table_options: Must include team_id, plus either channel_id or fetch_all_channels
+            table_options: Must include team_id OR fetch_all_teams, plus either channel_id or fetch_all_channels
 
         Returns:
             Tuple of (iterator of message records, next_offset dict with updated cursor)
@@ -855,11 +856,13 @@ class LakeflowConnect:
         team_id = table_options.get("team_id")
         channel_id = table_options.get("channel_id")
         fetch_all_channels = table_options.get("fetch_all_channels", "").lower() == "true"
+        fetch_all_teams = table_options.get("fetch_all_teams", "").lower() == "true"
 
         # Validate inputs
-        if not team_id:
+        if not team_id and not fetch_all_teams:
             raise ValueError(
-                "table_options for 'messages' must include 'team_id'"
+                "table_options for 'messages' must include either 'team_id' "
+                "or 'fetch_all_teams=true'"
             )
 
         if not channel_id and not fetch_all_channels:
@@ -892,43 +895,87 @@ class LakeflowConnect:
         if not cursor:
             cursor = table_options.get("start_date")
 
-        # If fetch_all_channels mode, first discover all channel IDs in the team
-        channel_ids_to_process = []
-        if fetch_all_channels:
-            # Fetch all channels from the team to get channel IDs
-            channels_url = f"{self.base_url}/teams/{team_id}/channels"
-            channels_params = {"$select": "id"}
-            channels_next_url: str | None = channels_url
-            ch_pages_fetched = 0
+        # If fetch_all_teams mode, first discover all team IDs
+        team_ids_to_process = []
+        if fetch_all_teams:
+            # Fetch all teams to get team IDs
+            teams_url = f"{self.base_url}/groups?$filter=resourceProvisioningOptions/Any(x:x eq 'Team')"
+            teams_params = {"$select": "id"}
+            teams_next_url: str | None = teams_url
+            tm_pages_fetched = 0
 
-            while channels_next_url and ch_pages_fetched < max_pages:
-                if ch_pages_fetched == 0:
-                    ch_data = self._make_request_with_retry(channels_url, params=channels_params)
+            while teams_next_url and tm_pages_fetched < max_pages:
+                if tm_pages_fetched == 0:
+                    tm_data = self._make_request_with_retry(teams_url, params=teams_params)
                 else:
-                    ch_data = self._make_request_with_retry(channels_next_url)
+                    tm_data = self._make_request_with_retry(teams_next_url)
 
-                channels = ch_data.get("value", [])
-                for ch in channels:
-                    ch_id = ch.get("id")
-                    if ch_id:
-                        channel_ids_to_process.append(ch_id)
+                teams = tm_data.get("value", [])
+                for tm in teams:
+                    tm_id = tm.get("id")
+                    if tm_id:
+                        team_ids_to_process.append(tm_id)
 
-                channels_next_url = ch_data.get("@odata.nextLink")
-                ch_pages_fetched += 1
+                teams_next_url = tm_data.get("@odata.nextLink")
+                tm_pages_fetched += 1
 
-                if channels_next_url:
+                if teams_next_url:
                     time.sleep(0.1)
         else:
-            # Single channel mode
-            channel_ids_to_process = [channel_id]
+            # Single team mode
+            team_ids_to_process = [team_id]
 
-        # Now fetch messages for all discovered channels
+        # Now process each team to get channels
+        all_team_channel_pairs = []
+        for current_team_id in team_ids_to_process:
+            # If fetch_all_channels mode, discover all channel IDs in this team
+            channel_ids_to_process = []
+            if fetch_all_channels:
+                # Fetch all channels from the team to get channel IDs
+                channels_url = f"{self.base_url}/teams/{current_team_id}/channels"
+                channels_params = {"$select": "id"}
+                channels_next_url: str | None = channels_url
+                ch_pages_fetched = 0
+
+                try:
+                    while channels_next_url and ch_pages_fetched < max_pages:
+                        if ch_pages_fetched == 0:
+                            ch_data = self._make_request_with_retry(channels_url, params=channels_params)
+                        else:
+                            ch_data = self._make_request_with_retry(channels_next_url)
+
+                        channels = ch_data.get("value", [])
+                        for ch in channels:
+                            ch_id = ch.get("id")
+                            if ch_id:
+                                channel_ids_to_process.append(ch_id)
+
+                        channels_next_url = ch_data.get("@odata.nextLink")
+                        ch_pages_fetched += 1
+
+                        if channels_next_url:
+                            time.sleep(0.1)
+                except Exception as e:
+                    # If a team is inaccessible, log and continue
+                    if "404" not in str(e) and "403" not in str(e):
+                        raise
+                    # Skip this team on 404/403
+                    continue
+            else:
+                # Single channel mode
+                channel_ids_to_process = [channel_id]
+
+            # Add all team-channel pairs
+            for ch_id in channel_ids_to_process:
+                all_team_channel_pairs.append((current_team_id, ch_id))
+
+        # Now fetch messages for all discovered team-channel pairs
         records: List[dict[str, Any]] = []
         max_modified: str | None = None
 
-        for current_channel_id in channel_ids_to_process:
+        for current_team_id, current_channel_id in all_team_channel_pairs:
             # Build request URL for this channel's messages
-            url = f"{self.base_url}/teams/{team_id}/channels/{current_channel_id}/messages"
+            url = f"{self.base_url}/teams/{current_team_id}/channels/{current_channel_id}/messages"
             params = {"$top": top}
 
             pages_fetched = 0
@@ -951,7 +998,7 @@ class LakeflowConnect:
 
                         # Add connector-derived fields
                         record: dict[str, Any] = dict(msg)
-                        record["team_id"] = team_id
+                        record["team_id"] = current_team_id
                         record["channel_id"] = current_channel_id
 
                         # Serialize complex objects to JSON strings
