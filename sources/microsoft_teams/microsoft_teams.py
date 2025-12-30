@@ -1180,3 +1180,29 @@ class LakeflowConnect:
 
         next_offset = {"cursor": next_cursor} if next_cursor else {}
         return iter(records), next_offset
+
+
+def register_lakeflow_source(spark):
+    """
+    Register the Microsoft Teams connector with the Lakeflow framework.
+
+    Args:
+        spark: The Spark session
+    """
+    from pyspark.sql.connect.dataframe import DataFrame as ConnectDataFrame
+
+    # Import lakeflow modules
+    try:
+        import lakeflow.sources.api as sources_api
+    except ImportError:
+        raise ImportError(
+            "Could not import lakeflow.sources.api. "
+            "Make sure lakeflow is installed and available."
+        )
+
+    # Register the connector
+    sources_api.register_python_source(
+        spark=spark,
+        source_name="microsoft_teams",
+        connector_class=MicrosoftTeamsConnector,
+    )
