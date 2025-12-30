@@ -6,6 +6,10 @@ from pyspark.sql.datasource import (
 )
 from typing import Iterator
 from sources.interface.lakeflow_connect import LakeflowConnect
+from pipeline.lakeflow_connect_enricher import (
+    LakeflowConnectEnricher,
+    HashedPrimaryKeyEnrichment,
+)
 
 
 METADATA_TABLE = "_lakeflow_metadata"
@@ -87,7 +91,12 @@ class LakeflowBatchReader(DataSourceReader):
 class LakeflowSource(DataSource):
     def __init__(self, options):
         self.options = options
-        self.lakeflow_connect = LakeflowConnect(options)
+        # Wrap the raw connect with enricher and add enrichments
+        raw_connect = LakeflowConnect(options)
+        self.lakeflow_connect = (
+            LakeflowConnectEnricher(raw_connect)
+            .add(HashedPrimaryKeyEnrichment())
+        )
 
     @classmethod
     def name(cls):
