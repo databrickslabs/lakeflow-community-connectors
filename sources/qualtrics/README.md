@@ -23,7 +23,7 @@ Provide the following **connection-level** options when configuring the connecto
 
 | Name | Type | Required | Description | Example |
 |------|------|----------|-------------|---------|
-| `api_token` | string | yes | Qualtrics API token for authentication | `Mwf5pyfP94EMcibA9rHWoDPyAIXccM00miGn5UB0` |
+| `api_token` | string | yes | Qualtrics API token for authentication | `YOUR_QUALTRICS_API_TOKEN` |
 | `datacenter_id` | string | yes | Qualtrics datacenter identifier where your account is hosted | `fra1`, `ca1`, `yourdatacenterid` |
 | `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names. This connector requires table-specific options for some tables. | `surveyId` |
 
