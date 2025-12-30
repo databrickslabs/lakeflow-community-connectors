@@ -56,20 +56,23 @@ The following **Application permissions** must be granted with admin consent:
 
 ## Supported Tables
 
-The Microsoft Teams connector supports **4 core tables** with two ingestion modes:
+The Microsoft Teams connector supports **5 core tables** with two ingestion modes:
 
 **Ingestion Modes:**
 - **Snapshot (Full Refresh)**: Fetches all data on every run. Recommended for small, infrequently changing datasets (teams, channels, members).
-- **CDC (Change Data Capture/Incremental)**: Only fetches new or modified records after the last cursor value. Recommended for large, frequently changing datasets (messages).
+- **CDC (Change Data Capture/Incremental)**: Only fetches new or modified records after the last cursor value. Recommended for large, frequently changing datasets (messages, message_replies).
 
 ### Summary Table
 
-| Table | Ingestion Type | Cursor Field | Parent IDs Required |
-|-------|---------------|--------------|---------------------|
-| teams | Snapshot | - | None |
-| channels | Snapshot | - | `team_id` |
-| messages | **CDC** | `lastModifiedDateTime` | `team_id`, `channel_id` |
-| members | Snapshot | - | `team_id` |
+| Table | Ingestion Type | Cursor Field | Parent IDs Required | Auto-Discovery Mode |
+|-------|---------------|--------------|---------------------|---------------------|
+| teams | Snapshot | - | None | - |
+| channels | Snapshot | - | `team_id` OR `fetch_all_teams` | `fetch_all_teams=true` |
+| messages | **CDC** | `lastModifiedDateTime` | `team_id`, `channel_id` OR `fetch_all_channels` | `fetch_all_channels=true` |
+| members | Snapshot | - | `team_id` OR `fetch_all_teams` | `fetch_all_teams=true` |
+| message_replies | **CDC** | `lastModifiedDateTime` | `team_id`, `channel_id`, `message_id` OR `fetch_all_messages` | `fetch_all_messages=true` |
+
+**Auto-Discovery Modes**: Instead of manually specifying parent IDs, you can use `fetch_all` modes to automatically discover and ingest all resources. See the [Automatic Discovery (fetch_all Modes)](#automatic-discovery-fetch_all-modes) section below.
 
 ### 1. teams (Snapshot)
 
@@ -169,6 +172,252 @@ Members of teams.
 
 ---
 
+### 5. message_replies (CDC)
+
+Threaded message replies within channels.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | String | Unique reply identifier |
+| parent_message_id | String | Parent message ID (connector-derived) |
+| team_id | String | Parent team ID (connector-derived) |
+| channel_id | String | Parent channel ID (connector-derived) |
+| replyToId | String | ID of message being replied to |
+| messageType | String | `message`, `systemEventMessage`, etc. |
+| createdDateTime | String | ISO 8601 timestamp |
+| lastModifiedDateTime | String | Last modification timestamp (cursor field) |
+| lastEditedDateTime | String | Last edit timestamp (null if never edited) |
+| deletedDateTime | String | Deletion timestamp (null if not deleted) |
+| importance | String | `normal`, `high`, or `urgent` |
+| from | Struct | Sender information (user, application, device) |
+| body | Struct | Reply content (contentType, content) |
+| attachments | Array[Struct] | File attachments |
+| mentions | Array[Struct] | @mentions in reply |
+| reactions | Array[Struct] | Emoji reactions |
+
+**Ingestion Type:** CDC (incremental - only fetches new/modified replies after cursor)
+**Primary Key:** `id`
+**Cursor Field:** `lastModifiedDateTime`
+**Required Table Options:** `team_id`, `channel_id`, `message_id`
+**Graph API Endpoint:** `GET /teams/{team_id}/channels/{channel_id}/messages/{message_id}/replies`
+
+**Usage Notes:**
+
+- Use this table to capture threaded conversations (replies to messages)
+- Requires manually specifying which parent messages to track
+- To find message IDs with replies:
+  1. First ingest the messages table
+  2. Query for messages that likely have threads (e.g., by subject, date range)
+  3. Use the test script [test_replies_fetch.py](test_replies_fetch.py) to verify which messages have replies
+  4. Add those message IDs to your pipeline configuration
+- The `parent_message_id` field enables joining replies back to parent messages
+- Same schema as messages table for consistency
+
+---
+
+## Automatic Discovery (fetch_all Modes)
+
+The connector supports automatic discovery modes that eliminate the need to manually configure parent resource IDs. Instead of running pipelines iteratively to discover teams, channels, and messages, you can use `fetch_all` options to automatically discover all resources in one run.
+
+### Overview
+
+| Table | Auto-Discovery Option | What It Does | Still Required |
+|-------|----------------------|--------------|----------------|
+| channels | `fetch_all_teams=true` | Discovers all teams, then fetches channels for each | Credentials only |
+| members | `fetch_all_teams=true` | Discovers all teams, then fetches members for each | Credentials only |
+| messages | `fetch_all_channels=true` | Discovers all channels in a team, then fetches messages for each | `team_id` |
+| message_replies | `fetch_all_messages=true` | Discovers all messages in a channel, then fetches replies for each | `team_id`, `channel_id` |
+
+### Benefits
+
+**Before (Manual Configuration):**
+```python
+# Step 1: Run pipeline to get teams
+# Step 2: Query teams table, copy IDs
+TEAM_IDS = ["abc-123-...", "def-456-...", ...]  # Manual copy-paste
+
+# Step 3: Run pipeline to get channels
+# Step 4: Query channels table, copy IDs
+CHANNEL_IDS = [
+    {"team_id": "abc-123-...", "channel_id": "xyz-789-..."},
+    {"team_id": "abc-123-...", "channel_id": "uvw-101-..."},
+    # ... dozens or hundreds of manual entries
+]
+```
+
+**After (Automatic Discovery):**
+```python
+# Just credentials - connector discovers everything automatically
+{
+    "tenant_id": "your-tenant-id",
+    "client_id": "your-client-id",
+    "client_secret": "your-client-secret",
+    "fetch_all_teams": "true"  # ← That's it!
+}
+```
+
+### Example: Zero-Configuration Ingestion
+
+The simplest possible configuration - ingest all teams, channels, and members without any manual ID configuration:
+
+```python
+# Your credentials
+creds = {
+    "tenant_id": "your-tenant-id",
+    "client_id": "your-client-id",
+    "client_secret": "your-client-secret"
+}
+
+pipeline_spec = {
+    "connection_name": "microsoft_teams_connection",
+    "objects": [
+        # 1. Teams (no fetch_all needed - already fetches all)
+        {
+            "table": {
+                "source_table": "teams",
+                "destination_catalog": "main",
+                "destination_schema": "teams_data",
+                "destination_table": "teams",
+                "table_configuration": creds
+            }
+        },
+        # 2. Channels (auto-discover ALL teams)
+        {
+            "table": {
+                "source_table": "channels",
+                "destination_catalog": "main",
+                "destination_schema": "teams_data",
+                "destination_table": "channels",
+                "table_configuration": {
+                    **creds,
+                    "fetch_all_teams": "true"  # ← Automatic discovery!
+                }
+            }
+        },
+        # 3. Members (auto-discover ALL teams)
+        {
+            "table": {
+                "source_table": "members",
+                "destination_catalog": "main",
+                "destination_schema": "teams_data",
+                "destination_table": "members",
+                "table_configuration": {
+                    **creds,
+                    "fetch_all_teams": "true"  # ← Automatic discovery!
+                }
+            }
+        }
+    ]
+}
+```
+
+**Result:** Single pipeline run ingests all teams, all channels across all teams, and all members across all teams - zero manual configuration.
+
+### Example: Auto-Discover All Channels for Messages
+
+Fetch messages from ALL channels in a specific team (useful for large teams with many channels):
+
+```python
+{
+    "table": {
+        "source_table": "messages",
+        "destination_catalog": "main",
+        "destination_schema": "teams_data",
+        "destination_table": "messages",
+        "table_configuration": {
+            **creds,
+            "team_id": "your-team-id",  # Still need to specify which team
+            "fetch_all_channels": "true",  # ← Auto-discover all channels
+            "start_date": "2025-01-01T00:00:00Z",
+            "top": "50",
+            "max_pages_per_batch": "100"
+        }
+    }
+}
+```
+
+**Result:** Discovers all channels in the team, then fetches messages from each channel. No need to manually list channel IDs.
+
+### Example: Auto-Discover All Messages for Replies
+
+Fetch threaded replies from ALL messages in a specific channel:
+
+```python
+{
+    "table": {
+        "source_table": "message_replies",
+        "destination_catalog": "main",
+        "destination_schema": "teams_data",
+        "destination_table": "message_replies",
+        "table_configuration": {
+            **creds,
+            "team_id": "your-team-id",
+            "channel_id": "your-channel-id",  # Still need to specify which channel
+            "fetch_all_messages": "true",  # ← Auto-discover all messages with replies
+            "start_date": "2025-01-01T00:00:00Z",
+            "top": "50",
+            "max_pages_per_batch": "100"
+        }
+    }
+}
+```
+
+**Result:** Discovers all messages in the channel, then fetches replies for each message (skipping messages with no replies). No need to manually identify which messages have threads.
+
+### How It Works
+
+The connector implements discovery in two phases:
+
+**Phase 1: Discovery**
+- Fetches parent resources (teams, channels, or messages)
+- Uses lightweight queries with `$select=id` for efficiency
+- Handles pagination to discover all parent resources
+
+**Phase 2: Ingestion**
+- Iterates through discovered parent IDs
+- Fetches child resources for each parent
+- Gracefully handles inaccessible resources (404/403) by skipping them
+- Merges all results into a single output stream
+
+### Performance Considerations
+
+**Automatic discovery is safe for production use:**
+- Connector respects API rate limits (100ms between requests, automatic retry on 429)
+- Uses pagination limits (`max_pages_per_batch`) to prevent runaway queries
+- Skips inaccessible resources instead of failing
+- Discovery phase uses minimal bandwidth (`$select=id` queries)
+
+**When to use fetch_all modes:**
+- **Use for channels/members:** When you have many teams and want all data without manual configuration
+- **Use for messages:** When a team has many channels and you want complete coverage
+- **Consider carefully for message_replies:** Fetching all replies can be expensive for channels with many messages. Use `start_date` to limit scope.
+
+**When to use manual IDs:**
+- When you only want data from specific teams/channels
+- When you need fine-grained control over which resources to ingest
+- For testing with a small subset of data
+
+### Complete Example
+
+See [example_fetch_all_pipeline.py](example_fetch_all_pipeline.py) for complete working examples including:
+- Minimal configuration (teams + channels + members with zero manual setup)
+- Selective team with auto-discovery of channels/messages
+- Complete auto-discovery with replies
+
+### Testing
+
+Before running in production, you can test the fetch_all modes with the provided test scripts:
+
+```bash
+# Test API patterns directly (no PySpark required)
+python sources/microsoft_teams/test_fetch_all_simple.py
+
+# Test connector implementation (requires connector dependencies)
+python sources/microsoft_teams/test_connector_direct.py
+```
+
+---
+
 ## Configuration Examples
 
 ### Example 1: Configuration-Based Ingestion (Recommended)
@@ -191,6 +440,11 @@ CHANNEL_IDS = [
     {"team_id": "team-guid-1", "channel_id": "channel-guid-1"},
 ]
 
+# Add specific messages for replies/threads (optional)
+REPLY_CONFIGS = [
+    {"team_id": "team-guid-1", "channel_id": "channel-guid-1", "message_id": "message-guid-1"},
+]
+
 # Run pipeline
 ingest(spark, pipeline_spec)
 ```
@@ -201,6 +455,8 @@ ingest(spark, pipeline_spec)
 3. Run again to ingest channels and members for those teams
 4. Query channels table, copy IDs to `CHANNEL_IDS` list
 5. Run again to ingest messages from those channels
+6. Query messages table to identify threads, copy to `REPLY_CONFIGS` list
+7. Run again to ingest message_replies from those threads
 
 ---
 
@@ -234,28 +490,97 @@ ingest(spark, pipeline_spec)
 
 ---
 
+### Example 3: Message Replies (Threaded Conversations)
+
+To ingest threaded message replies, you need to specify which parent messages to track:
+
+```python
+pipeline_spec = {
+    "connection_name": "microsoft_teams_connection",
+    "objects": [
+        {
+            "table": {
+                "source_table": "message_replies",
+                "destination_catalog": "main",
+                "destination_schema": "teams_data",
+                "destination_table": "message_replies",
+                "table_configuration": {
+                    "tenant_id": "your-tenant-id",
+                    "client_id": "your-client-id",
+                    "client_secret": "your-client-secret",
+                    "team_id": "team-guid-1",
+                    "channel_id": "channel-guid-1",
+                    "message_id": "message-guid-1",  # Parent message with replies
+                    "start_date": "2025-01-01T00:00:00Z",  # Optional: initial cursor
+                    "top": "50",
+                    "max_pages_per_batch": "100"
+                }
+            }
+        }
+    ]
+}
+
+ingest(spark, pipeline_spec)
+```
+
+**How to find message IDs with replies:**
+
+1. First, ingest messages and query for potential threaded messages:
+
+```sql
+SELECT id, team_id, channel_id, subject, createdDateTime
+FROM main.teams_data.messages
+WHERE subject IS NOT NULL  -- Messages with subjects often have replies
+ORDER BY createdDateTime DESC
+LIMIT 100;
+```
+
+2. Use the test script to verify which messages have replies:
+
+```bash
+# Edit test_replies_fetch.py with your credentials and message IDs
+python sources/microsoft_teams/test_replies_fetch.py
+```
+
+3. Add confirmed message IDs to your pipeline configuration
+
+**Multiple threads:** To track multiple threaded messages, add multiple objects with different `message_id` values. The connector will merge all replies into a single `message_replies` table.
+
+---
+
 ## Table Configuration Options
 
 ### Common Options (All Tables)
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `top` | String (integer) | `50` | Page size for pagination (max: 50 for messages, 999 for others) |
+| `top` | String (integer) | `50` | Page size for pagination (max: 50 for messages/message_replies, 999 for others) |
 | `max_pages_per_batch` | String (integer) | `100` | Maximum pages to fetch per batch (safety limit) |
 
 ### Parent-Child Options
 
-| Option | Type | Required For | Description |
-|--------|------|--------------|-------------|
-| `team_id` | String (GUID) | channels, members, messages | Parent team identifier |
-| `channel_id` | String (GUID) | messages | Parent channel identifier |
+| Option        | Type          | Required For                                 | Description                                    |
+|---------------|---------------|----------------------------------------------|------------------------------------------------|
+| `team_id`     | String (GUID) | channels, members, messages, message_replies | Parent team identifier                         |
+| `channel_id`  | String (GUID) | messages, message_replies                    | Parent channel identifier                      |
+| `message_id`  | String (GUID) | message_replies                              | Parent message identifier (for thread replies) |
 
-### CDC Options (messages only)
+### CDC Options (messages and message_replies)
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `start_date` | String (ISO 8601) | None | Initial cursor for first sync (e.g., `2025-01-01T00:00:00Z`) |
 | `lookback_seconds` | String (integer) | `300` | Lookback window in seconds to catch late updates (5 minutes) |
+
+### Auto-Discovery Options
+
+| Option | Type | Default | Tables | Description |
+|--------|------|---------|--------|-------------|
+| `fetch_all_teams` | String (boolean) | `false` | channels, members | Set to `"true"` to automatically discover and fetch from all teams |
+| `fetch_all_channels` | String (boolean) | `false` | messages | Set to `"true"` to automatically discover and fetch from all channels in the specified team |
+| `fetch_all_messages` | String (boolean) | `false` | message_replies | Set to `"true"` to automatically discover and fetch replies from all messages in the specified channel |
+
+**Note:** When using `fetch_all` modes, you don't need to specify the corresponding parent ID. For example, if `fetch_all_teams="true"`, you don't need to provide `team_id`.
 
 ---
 
@@ -267,12 +592,14 @@ ingest(spark, pipeline_spec)
 - Test with a small date range for messages
 
 ### Use Incremental Sync
-- For **messages**, always use CDC mode with `start_date`
+
+- For **messages** and **message_replies**, always use CDC mode with `start_date`
 - Set appropriate `lookback_seconds` (default: 300 = 5 minutes) to catch late updates
 - Monitor cursor progression in pipeline event logs
 
 ### Tune Batch Sizes
-- Use `top=50` for messages (API maximum)
+
+- Use `top=50` for messages and message_replies (API maximum)
 - Use `top=100` for other tables (balance efficiency and response size)
 - Adjust `max_pages_per_batch` based on dataset size (default: 100 pages)
 
@@ -285,12 +612,14 @@ ingest(spark, pipeline_spec)
 - Avoid running multiple concurrent pipelines with the same credentials
 
 ### Handle Deletions
-- **Soft deletes:** Messages have `deletedDateTime` field (filter on `deletedDateTime IS NULL` for active messages)
+
+- **Soft deletes:** Messages and message_replies have `deletedDateTime` field (filter on `deletedDateTime IS NULL` for active content)
 - **Hard deletes:** Not tracked by API; rely on full re-sync or change notifications
 
 ### Schedule Appropriately
+
 - **Snapshot tables** (teams, channels, members): Daily or weekly refresh (infrequent changes)
-- **CDC tables** (messages): Hourly or continuous (for near real-time)
+- **CDC tables** (messages, message_replies): Hourly or continuous (for near real-time)
 
 ---
 
@@ -365,15 +694,18 @@ ingest(spark, pipeline_spec)
 ### Expected Throughput
 
 Typical ingestion rates (approximate):
+
 - **Teams:** 100-500 teams/minute
 - **Channels:** 500-1,000 channels/minute
 - **Messages:** 1,000-5,000 messages/minute (depends on nested data)
 - **Members:** 500-2,000 members/minute
+- **Message Replies:** 1,000-5,000 replies/minute (similar to messages)
 
 **Factors affecting performance:**
+
 - API rate limits (primary bottleneck)
 - Network latency
-- Complexity of nested data (messages with many attachments/reactions)
+- Complexity of nested data (messages/replies with many attachments/reactions)
 - Concurrent pipeline runs
 
 ### Optimizing for Large Datasets

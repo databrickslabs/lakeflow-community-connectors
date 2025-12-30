@@ -56,23 +56,35 @@ class LakeflowConnect:
                 "primary_keys": ["id"],
                 "ingestion_type": "snapshot",
                 "endpoint": "teams/{team_id}/channels",
-                "requires_parent": ["team_id"],
+                "requires_parent": [],  # team_id optional with fetch_all_teams
                 # Required permission: Channel.ReadBasic.All (Application)
+                # Supports fetch_all_teams=true to auto-discover all teams
             },
             "messages": {
                 "primary_keys": ["id"],
                 "cursor_field": "lastModifiedDateTime",
                 "ingestion_type": "cdc",
                 "endpoint": "teams/{team_id}/channels/{channel_id}/messages",
-                "requires_parent": ["team_id", "channel_id"],
+                "requires_parent": ["team_id"],  # channel_id optional with fetch_all_channels
                 # Required permission: ChannelMessage.Read.All (Application)
+                # Supports fetch_all_channels=true to auto-discover all channels in team
             },
             "members": {
                 "primary_keys": ["id"],
                 "ingestion_type": "snapshot",
                 "endpoint": "teams/{team_id}/members",
-                "requires_parent": ["team_id"],
+                "requires_parent": [],  # team_id optional with fetch_all_teams
                 # Required permission: TeamMember.Read.All (Application)
+                # Supports fetch_all_teams=true to auto-discover all teams
+            },
+            "message_replies": {
+                "primary_keys": ["id"],
+                "cursor_field": "lastModifiedDateTime",
+                "ingestion_type": "cdc",
+                "endpoint": "teams/{team_id}/channels/{channel_id}/messages/{message_id}/replies",
+                "requires_parent": ["team_id", "channel_id"],  # message_id optional with fetch_all_messages
+                # Required permission: ChannelMessage.Read.All (Application) - same as messages
+                # Supports fetch_all_messages=true to auto-discover all messages in channel
             },
         }
 
@@ -303,6 +315,7 @@ class LakeflowConnect:
             "channels",
             "messages",
             "members",
+            "message_replies",
         ]
 
     def get_table_schema(
@@ -416,6 +429,47 @@ class LakeflowConnect:
                 ]
             )
 
+        elif table_name == "message_replies":
+            # Same schema as messages, plus parent_message_id
+            return StructType(
+                [
+                    StructField("id", StringType(), False),
+                    StructField(
+                        "parent_message_id", StringType(), False
+                    ),  # Connector-derived (NEW!)
+                    StructField(
+                        "team_id", StringType(), False
+                    ),  # Connector-derived
+                    StructField(
+                        "channel_id", StringType(), False
+                    ),  # Connector-derived
+                    StructField("replyToId", StringType(), True),
+                    StructField("etag", StringType(), True),
+                    StructField("messageType", StringType(), True),
+                    StructField("createdDateTime", StringType(), True),
+                    StructField("lastModifiedDateTime", StringType(), True),
+                    StructField("lastEditedDateTime", StringType(), True),
+                    StructField("deletedDateTime", StringType(), True),
+                    StructField("subject", StringType(), True),
+                    StructField("summary", StringType(), True),
+                    StructField("importance", StringType(), True),
+                    StructField("locale", StringType(), True),
+                    StructField("webUrl", StringType(), True),
+                    StructField("from", self._identity_set_schema, True),
+                    StructField("body", self._body_schema, True),
+                    StructField(
+                        "attachments", ArrayType(self._attachment_schema), True
+                    ),
+                    StructField("mentions", ArrayType(self._mention_schema), True),
+                    StructField("reactions", ArrayType(self._reaction_schema), True),
+                    StructField("channelIdentity", self._channel_identity_schema, True),
+                    # Store complex/polymorphic objects as JSON strings
+                    StructField("policyViolation", StringType(), True),
+                    StructField("eventDetail", StringType(), True),
+                    StructField("messageHistory", StringType(), True),
+                ]
+            )
+
     def read_table_metadata(
         self, table_name: str, table_options: dict[str, str]
     ) -> dict:
@@ -480,6 +534,8 @@ class LakeflowConnect:
             return self._read_messages(start_offset, table_options)
         elif table_name == "members":
             return self._read_members(start_offset, table_options)
+        elif table_name == "message_replies":
+            return self._read_message_replies(start_offset, table_options)
 
     def _read_teams(
         self, start_offset: dict, table_options: dict[str, str]
@@ -568,22 +624,28 @@ class LakeflowConnect:
         """
         Read channels table (snapshot mode).
 
-        Requires team_id in table_options.
+        Two modes:
+        1. Specific team: Requires team_id
+        2. Auto-discovery: Requires fetch_all_teams="true"
 
         Args:
             start_offset: Not used for snapshot tables
-            table_options: Must include team_id
+            table_options: Must include either team_id or fetch_all_teams
 
         Returns:
             Tuple of (iterator of channel records, empty offset dict)
 
         Raises:
-            ValueError: If team_id is missing
+            ValueError: If required options are missing
         """
         team_id = table_options.get("team_id")
-        if not team_id:
+        fetch_all_teams = table_options.get("fetch_all_teams", "").lower() == "true"
+
+        # Validate inputs
+        if not team_id and not fetch_all_teams:
             raise ValueError(
-                "table_options for 'channels' must include 'team_id'"
+                "table_options for 'channels' must include either 'team_id' "
+                "or 'fetch_all_teams=true'"
             )
 
         # Parse options
@@ -592,34 +654,75 @@ class LakeflowConnect:
         except (TypeError, ValueError):
             max_pages = 100
 
-        # Build request
-        # Note: /teams/{id}/channels endpoint does NOT support $top parameter
-        url = f"{self.base_url}/teams/{team_id}/channels"
-        params = {}  # No query parameters needed - API returns all channels with pagination
+        # If fetch_all_teams mode, first discover all team IDs
+        team_ids_to_process = []
+        if fetch_all_teams:
+            # Fetch all teams to get team IDs
+            teams_url = f"{self.base_url}/groups?$filter=resourceProvisioningOptions/Any(x:x eq 'Team')"
+            teams_params = {"$select": "id"}
+            teams_next_url: str | None = teams_url
+            tm_pages_fetched = 0
 
+            while teams_next_url and tm_pages_fetched < max_pages:
+                if tm_pages_fetched == 0:
+                    tm_data = self._make_request_with_retry(teams_url, params=teams_params)
+                else:
+                    tm_data = self._make_request_with_retry(teams_next_url)
+
+                teams = tm_data.get("value", [])
+                for tm in teams:
+                    tm_id = tm.get("id")
+                    if tm_id:
+                        team_ids_to_process.append(tm_id)
+
+                teams_next_url = tm_data.get("@odata.nextLink")
+                tm_pages_fetched += 1
+
+                if teams_next_url:
+                    time.sleep(0.1)
+        else:
+            # Single team mode
+            team_ids_to_process = [team_id]
+
+        # Now fetch channels for all discovered teams
         records: List[dict[str, Any]] = []
-        pages_fetched = 0
-        next_url: str | None = url
 
-        while next_url and pages_fetched < max_pages:
-            if pages_fetched == 0:
-                data = self._make_request_with_retry(url, params=params)
-            else:
-                data = self._make_request_with_retry(next_url)
+        for current_team_id in team_ids_to_process:
+            # Build request for this team's channels
+            url = f"{self.base_url}/teams/{current_team_id}/channels"
+            params = {}  # No query parameters needed - API returns all channels with pagination
 
-            channels = data.get("value", [])
+            pages_fetched = 0
+            next_url: str | None = url
 
-            for channel in channels:
-                # Add connector-derived field
-                record: dict[str, Any] = dict(channel)
-                record["team_id"] = team_id
-                records.append(record)
+            while next_url and pages_fetched < max_pages:
+                try:
+                    if pages_fetched == 0:
+                        data = self._make_request_with_retry(url, params=params)
+                    else:
+                        data = self._make_request_with_retry(next_url)
 
-            next_url = data.get("@odata.nextLink")
-            pages_fetched += 1
+                    channels = data.get("value", [])
 
-            if next_url:
-                time.sleep(0.1)
+                    for channel in channels:
+                        # Add connector-derived field
+                        record: dict[str, Any] = dict(channel)
+                        record["team_id"] = current_team_id
+                        records.append(record)
+
+                    next_url = data.get("@odata.nextLink")
+                    pages_fetched += 1
+
+                    if next_url:
+                        time.sleep(0.1)
+
+                except Exception as e:
+                    # If a team is inaccessible, log and continue
+                    if "404" not in str(e) and "403" not in str(e):
+                        # Only raise if it's not a 404/403 (inaccessible team)
+                        raise
+                    # Continue to next team on 404/403
+                    break
 
         return iter(records), {}
 
@@ -629,22 +732,28 @@ class LakeflowConnect:
         """
         Read members table (snapshot mode).
 
-        Requires team_id in table_options.
+        Two modes:
+        1. Specific team: Requires team_id
+        2. Auto-discovery: Requires fetch_all_teams="true"
 
         Args:
             start_offset: Not used for snapshot tables
-            table_options: Must include team_id
+            table_options: Must include either team_id or fetch_all_teams
 
         Returns:
             Tuple of (iterator of member records, empty offset dict)
 
         Raises:
-            ValueError: If team_id is missing
+            ValueError: If required options are missing
         """
         team_id = table_options.get("team_id")
-        if not team_id:
+        fetch_all_teams = table_options.get("fetch_all_teams", "").lower() == "true"
+
+        # Validate inputs
+        if not team_id and not fetch_all_teams:
             raise ValueError(
-                "table_options for 'members' must include 'team_id'"
+                "table_options for 'members' must include either 'team_id' "
+                "or 'fetch_all_teams=true'"
             )
 
         try:
@@ -652,32 +761,74 @@ class LakeflowConnect:
         except (TypeError, ValueError):
             max_pages = 100
 
-        # Note: /teams/{id}/members endpoint does NOT support $top parameter
-        url = f"{self.base_url}/teams/{team_id}/members"
-        params = {}  # No query parameters needed - API returns all members with pagination
+        # If fetch_all_teams mode, first discover all team IDs
+        team_ids_to_process = []
+        if fetch_all_teams:
+            # Fetch all teams to get team IDs
+            teams_url = f"{self.base_url}/groups?$filter=resourceProvisioningOptions/Any(x:x eq 'Team')"
+            teams_params = {"$select": "id"}
+            teams_next_url: str | None = teams_url
+            tm_pages_fetched = 0
 
+            while teams_next_url and tm_pages_fetched < max_pages:
+                if tm_pages_fetched == 0:
+                    tm_data = self._make_request_with_retry(teams_url, params=teams_params)
+                else:
+                    tm_data = self._make_request_with_retry(teams_next_url)
+
+                teams = tm_data.get("value", [])
+                for tm in teams:
+                    tm_id = tm.get("id")
+                    if tm_id:
+                        team_ids_to_process.append(tm_id)
+
+                teams_next_url = tm_data.get("@odata.nextLink")
+                tm_pages_fetched += 1
+
+                if teams_next_url:
+                    time.sleep(0.1)
+        else:
+            # Single team mode
+            team_ids_to_process = [team_id]
+
+        # Now fetch members for all discovered teams
         records: List[dict[str, Any]] = []
-        pages_fetched = 0
-        next_url: str | None = url
 
-        while next_url and pages_fetched < max_pages:
-            if pages_fetched == 0:
-                data = self._make_request_with_retry(url, params=params)
-            else:
-                data = self._make_request_with_retry(next_url)
+        for current_team_id in team_ids_to_process:
+            # Note: /teams/{id}/members endpoint does NOT support $top parameter
+            url = f"{self.base_url}/teams/{current_team_id}/members"
+            params = {}  # No query parameters needed - API returns all members with pagination
 
-            members = data.get("value", [])
+            pages_fetched = 0
+            next_url: str | None = url
 
-            for member in members:
-                record: dict[str, Any] = dict(member)
-                record["team_id"] = team_id
-                records.append(record)
+            while next_url and pages_fetched < max_pages:
+                try:
+                    if pages_fetched == 0:
+                        data = self._make_request_with_retry(url, params=params)
+                    else:
+                        data = self._make_request_with_retry(next_url)
 
-            next_url = data.get("@odata.nextLink")
-            pages_fetched += 1
+                    members = data.get("value", [])
 
-            if next_url:
-                time.sleep(0.1)
+                    for member in members:
+                        record: dict[str, Any] = dict(member)
+                        record["team_id"] = current_team_id
+                        records.append(record)
+
+                    next_url = data.get("@odata.nextLink")
+                    pages_fetched += 1
+
+                    if next_url:
+                        time.sleep(0.1)
+
+                except Exception as e:
+                    # If a team is inaccessible, log and continue
+                    if "404" not in str(e) and "403" not in str(e):
+                        # Only raise if it's not a 404/403 (inaccessible team)
+                        raise
+                    # Continue to next team on 404/403
+                    break
 
         return iter(records), {}
 
@@ -687,24 +838,34 @@ class LakeflowConnect:
         """
         Read messages table (CDC mode with timestamp-based filtering).
 
-        Requires team_id and channel_id in table_options.
+        Two modes:
+        1. Specific channel: Requires team_id and channel_id
+        2. Auto-discovery: Requires team_id and fetch_all_channels="true"
 
         Args:
             start_offset: Dictionary with cursor (e.g., {"cursor": "2025-01-15T10:30:00.000Z"})
-            table_options: Must include team_id and channel_id
+            table_options: Must include team_id, plus either channel_id or fetch_all_channels
 
         Returns:
             Tuple of (iterator of message records, next_offset dict with updated cursor)
 
         Raises:
-            ValueError: If team_id or channel_id is missing
+            ValueError: If required options are missing
         """
         team_id = table_options.get("team_id")
         channel_id = table_options.get("channel_id")
+        fetch_all_channels = table_options.get("fetch_all_channels", "").lower() == "true"
 
-        if not team_id or not channel_id:
+        # Validate inputs
+        if not team_id:
             raise ValueError(
-                "table_options for 'messages' must include 'team_id' and 'channel_id'"
+                "table_options for 'messages' must include 'team_id'"
+            )
+
+        if not channel_id and not fetch_all_channels:
+            raise ValueError(
+                "table_options for 'messages' must include either 'channel_id' "
+                "or 'fetch_all_channels=true'"
             )
 
         # Parse options
@@ -731,61 +892,279 @@ class LakeflowConnect:
         if not cursor:
             cursor = table_options.get("start_date")
 
-        # Build request
-        url = f"{self.base_url}/teams/{team_id}/channels/{channel_id}/messages"
-        params = {"$top": top}
+        # If fetch_all_channels mode, first discover all channel IDs in the team
+        channel_ids_to_process = []
+        if fetch_all_channels:
+            # Fetch all channels from the team to get channel IDs
+            channels_url = f"{self.base_url}/teams/{team_id}/channels"
+            channels_params = {"$select": "id"}
+            channels_next_url: str | None = channels_url
+            ch_pages_fetched = 0
 
+            while channels_next_url and ch_pages_fetched < max_pages:
+                if ch_pages_fetched == 0:
+                    ch_data = self._make_request_with_retry(channels_url, params=channels_params)
+                else:
+                    ch_data = self._make_request_with_retry(channels_next_url)
+
+                channels = ch_data.get("value", [])
+                for ch in channels:
+                    ch_id = ch.get("id")
+                    if ch_id:
+                        channel_ids_to_process.append(ch_id)
+
+                channels_next_url = ch_data.get("@odata.nextLink")
+                ch_pages_fetched += 1
+
+                if channels_next_url:
+                    time.sleep(0.1)
+        else:
+            # Single channel mode
+            channel_ids_to_process = [channel_id]
+
+        # Now fetch messages for all discovered channels
         records: List[dict[str, Any]] = []
         max_modified: str | None = None
-        pages_fetched = 0
-        next_url: str | None = url
 
-        while next_url and pages_fetched < max_pages:
-            if pages_fetched == 0:
-                data = self._make_request_with_retry(url, params=params)
-            else:
-                data = self._make_request_with_retry(next_url)
+        for current_channel_id in channel_ids_to_process:
+            # Build request URL for this channel's messages
+            url = f"{self.base_url}/teams/{team_id}/channels/{current_channel_id}/messages"
+            params = {"$top": top}
 
-            messages = data.get("value", [])
+            pages_fetched = 0
+            next_url: str | None = url
 
-            for msg in messages:
-                # Filter by cursor (client-side since API doesn't support $filter on /messages)
-                last_modified = msg.get("lastModifiedDateTime")
-                if cursor and last_modified and last_modified < cursor:
-                    continue  # Skip messages before cursor
+            while next_url and pages_fetched < max_pages:
+                try:
+                    if pages_fetched == 0:
+                        data = self._make_request_with_retry(url, params=params)
+                    else:
+                        data = self._make_request_with_retry(next_url)
 
-                # Add connector-derived fields
-                record: dict[str, Any] = dict(msg)
-                record["team_id"] = team_id
-                record["channel_id"] = channel_id
+                    messages = data.get("value", [])
 
-                # Serialize complex objects to JSON strings
-                if "policyViolation" in record and isinstance(
-                    record["policyViolation"], dict
-                ):
-                    record["policyViolation"] = json.dumps(record["policyViolation"])
+                    for msg in messages:
+                        # Filter by cursor (client-side since API doesn't support $filter on /messages)
+                        last_modified = msg.get("lastModifiedDateTime")
+                        if cursor and last_modified and last_modified < cursor:
+                            continue  # Skip messages before cursor
 
-                if "eventDetail" in record and isinstance(record["eventDetail"], dict):
-                    record["eventDetail"] = json.dumps(record["eventDetail"])
+                        # Add connector-derived fields
+                        record: dict[str, Any] = dict(msg)
+                        record["team_id"] = team_id
+                        record["channel_id"] = current_channel_id
 
-                if "messageHistory" in record and isinstance(
-                    record["messageHistory"], list
-                ):
-                    record["messageHistory"] = json.dumps(record["messageHistory"])
+                        # Serialize complex objects to JSON strings
+                        if "policyViolation" in record and isinstance(
+                            record["policyViolation"], dict
+                        ):
+                            record["policyViolation"] = json.dumps(record["policyViolation"])
 
-                records.append(record)
+                        if "eventDetail" in record and isinstance(record["eventDetail"], dict):
+                            record["eventDetail"] = json.dumps(record["eventDetail"])
 
-                # Track max timestamp
-                if last_modified:
-                    if max_modified is None or last_modified > max_modified:
-                        max_modified = last_modified
+                        if "messageHistory" in record and isinstance(
+                            record["messageHistory"], list
+                        ):
+                            record["messageHistory"] = json.dumps(record["messageHistory"])
 
-            # Handle pagination
-            next_url = data.get("@odata.nextLink")
-            pages_fetched += 1
+                        records.append(record)
 
-            if next_url:
-                time.sleep(0.1)
+                        # Track max timestamp
+                        if last_modified:
+                            if max_modified is None or last_modified > max_modified:
+                                max_modified = last_modified
+
+                    # Handle pagination
+                    next_url = data.get("@odata.nextLink")
+                    pages_fetched += 1
+
+                    if next_url:
+                        time.sleep(0.1)
+
+                except Exception as e:
+                    # If a channel is inaccessible, log and continue
+                    if "404" not in str(e) and "403" not in str(e):
+                        # Only raise if it's not a 404/403 (inaccessible channel)
+                        raise
+                    # Continue to next channel on 404/403
+                    break
+
+        # Compute next cursor with lookback window
+        next_cursor = cursor
+        if max_modified:
+            try:
+                # Parse ISO 8601 timestamp
+                dt = datetime.fromisoformat(max_modified.replace("Z", "+00:00"))
+                dt_with_lookback = dt - timedelta(seconds=lookback_seconds)
+                next_cursor = dt_with_lookback.isoformat().replace("+00:00", "Z")
+            except Exception:
+                # Fallback: use max_modified as-is
+                next_cursor = max_modified
+
+        next_offset = {"cursor": next_cursor} if next_cursor else {}
+        return iter(records), next_offset
+
+    def _read_message_replies(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> Tuple[Iterator[dict], dict]:
+        """
+        Read message replies (threads) for a specific message or all messages in a channel (CDC mode).
+
+        Two modes:
+        1. Specific message: Requires team_id, channel_id, and message_id
+        2. Auto-discovery: Requires team_id, channel_id, and fetch_all_messages="true"
+
+        Args:
+            start_offset: Dictionary with cursor (e.g., {"cursor": "2025-01-15T10:30:00.000Z"})
+            table_options: Must include team_id and channel_id, plus either message_id or fetch_all_messages
+
+        Returns:
+            Tuple of (iterator of reply records, next_offset dict with updated cursor)
+
+        Raises:
+            ValueError: If required options are missing
+        """
+        team_id = table_options.get("team_id")
+        channel_id = table_options.get("channel_id")
+        message_id = table_options.get("message_id")
+        fetch_all_messages = table_options.get("fetch_all_messages", "").lower() == "true"
+
+        # Validate inputs
+        if not team_id or not channel_id:
+            raise ValueError(
+                "table_options for 'message_replies' must include 'team_id' and 'channel_id'"
+            )
+
+        if not message_id and not fetch_all_messages:
+            raise ValueError(
+                "table_options for 'message_replies' must include either 'message_id' "
+                "or 'fetch_all_messages=true'"
+            )
+
+        # Parse options
+        try:
+            top = int(table_options.get("top", 50))
+        except (TypeError, ValueError):
+            top = 50
+        top = max(1, min(top, 50))  # Max 50 for replies endpoint
+
+        try:
+            max_pages = int(table_options.get("max_pages_per_batch", 100))
+        except (TypeError, ValueError):
+            max_pages = 100
+
+        try:
+            lookback_seconds = int(table_options.get("lookback_seconds", 300))
+        except (TypeError, ValueError):
+            lookback_seconds = 300
+
+        # Determine starting cursor
+        cursor = None
+        if start_offset and isinstance(start_offset, dict):
+            cursor = start_offset.get("cursor")
+        if not cursor:
+            cursor = table_options.get("start_date")
+
+        # If fetch_all_messages mode, first discover all message IDs in the channel
+        message_ids_to_process = []
+        if fetch_all_messages:
+            # Fetch all messages from the channel to get message IDs
+            messages_url = f"{self.base_url}/teams/{team_id}/channels/{channel_id}/messages"
+            messages_params = {"$top": 50, "$select": "id"}
+            messages_next_url: str | None = messages_url
+            msg_pages_fetched = 0
+
+            while messages_next_url and msg_pages_fetched < max_pages:
+                if msg_pages_fetched == 0:
+                    msg_data = self._make_request_with_retry(messages_url, params=messages_params)
+                else:
+                    msg_data = self._make_request_with_retry(messages_next_url)
+
+                messages = msg_data.get("value", [])
+                for msg in messages:
+                    msg_id = msg.get("id")
+                    if msg_id:
+                        message_ids_to_process.append(msg_id)
+
+                messages_next_url = msg_data.get("@odata.nextLink")
+                msg_pages_fetched += 1
+
+                if messages_next_url:
+                    time.sleep(0.1)
+        else:
+            # Single message mode
+            message_ids_to_process = [message_id]
+
+        # Now fetch replies for all discovered messages
+        records: List[dict[str, Any]] = []
+        max_modified: str | None = None
+
+        for current_message_id in message_ids_to_process:
+            # Build request URL for this message's replies
+            url = f"{self.base_url}/teams/{team_id}/channels/{channel_id}/messages/{current_message_id}/replies"
+            params = {"$top": top}
+
+            pages_fetched = 0
+            next_url: str | None = url
+
+            while next_url and pages_fetched < max_pages:
+                try:
+                    if pages_fetched == 0:
+                        data = self._make_request_with_retry(url, params=params)
+                    else:
+                        data = self._make_request_with_retry(next_url)
+
+                    replies = data.get("value", [])
+
+                    for reply in replies:
+                        # Filter by cursor (client-side since API doesn't support $filter on /replies)
+                        last_modified = reply.get("lastModifiedDateTime")
+                        if cursor and last_modified and last_modified < cursor:
+                            continue  # Skip replies before cursor
+
+                        # Add connector-derived fields
+                        record: dict[str, Any] = dict(reply)
+                        record["parent_message_id"] = current_message_id
+                        record["team_id"] = team_id
+                        record["channel_id"] = channel_id
+
+                        # Serialize complex objects to JSON strings
+                        if "policyViolation" in record and isinstance(
+                            record["policyViolation"], dict
+                        ):
+                            record["policyViolation"] = json.dumps(record["policyViolation"])
+
+                        if "eventDetail" in record and isinstance(record["eventDetail"], dict):
+                            record["eventDetail"] = json.dumps(record["eventDetail"])
+
+                        if "messageHistory" in record and isinstance(
+                            record["messageHistory"], list
+                        ):
+                            record["messageHistory"] = json.dumps(record["messageHistory"])
+
+                        records.append(record)
+
+                        # Track max timestamp
+                        if last_modified:
+                            if max_modified is None or last_modified > max_modified:
+                                max_modified = last_modified
+
+                    # Handle pagination
+                    next_url = data.get("@odata.nextLink")
+                    pages_fetched += 1
+
+                    if next_url:
+                        time.sleep(0.1)
+
+                except Exception as e:
+                    # If a message has no replies or is inaccessible, log and continue
+                    # (some messages might be deleted or inaccessible)
+                    if "404" not in str(e):
+                        # Only raise if it's not a 404 (no replies)
+                        raise
+                    # Continue to next message on 404
+                    break
 
         # Compute next cursor with lookback window
         next_cursor = cursor
