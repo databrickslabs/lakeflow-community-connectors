@@ -1,6 +1,31 @@
 # OSI PI Lakeflow Community Connector
 
-Industrial data connector for OSI PI historians via PI Web API.
+Lakeflow OSIPI Community Connector
+This documentation provides setup instructions and reference information for the OSI PI (PI Web API) source connector.
+
+## What is OSI PI?
+
+OSI PI (often referred to as the **PI System**) is an industrial time-series historian platform used to collect, store, and serve high-frequency operational data from industrial assets (sensors, PLC/SCADA systems, DCS, lab systems, etc.). PI Web API provides a modern HTTP interface to query that historian data, as well as related operational context like asset hierarchies and events.
+
+### Who typically uses it?
+
+OSI PI is commonly deployed by customers operating industrial assets, including:
+
+- Manufacturing (process and discrete)
+- Oil & gas, chemicals, mining, and metals
+- Utilities (power, water, renewables) and energy operators
+- Pharma / life sciences (regulated operations)
+- Large infrastructure operators (pipelines, transport, facilities)
+
+### Typical ingestion use cases for this community connector
+
+This community connector is typically used to ingest PI data into Databricks/Lakehouse for:
+
+- **Operational analytics**: KPIs, OEE, quality, downtime, yield, energy intensity
+- **Predictive maintenance & anomaly detection**: modeling from time-series + context
+- **Asset / topology enrichment**: bringing PI AF hierarchy and attributes into the lakehouse
+- **Event-based analysis**: batches/campaigns, event frames, and root-cause investigations
+- **Bronze-layer landing for downstream pipelines**: standardizing and incrementally refreshing PI extracts
 
 ## Features
 
