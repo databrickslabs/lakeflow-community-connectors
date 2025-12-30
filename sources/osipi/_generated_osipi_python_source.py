@@ -51,7 +51,10 @@ def register_lakeflow_source(spark):
             if not isinstance(value, dict):
                 raise ValueError(f"Expected a dictionary for StructType, got {type(value)}")
             if value == {}:
-                raise ValueError("field in StructType cannot be an empty dict. Please assign None as the default value instead.")
+                raise ValueError(
+                    "field in StructType cannot be an empty dict. Please assign None as the default value instead."
+                )
+
             fields = getattr(field_type, "fields", None) or []
             field_dict = {}
             for field in fields:
@@ -61,6 +64,7 @@ def register_lakeflow_source(spark):
                     field_dict[field.name] = None
                 else:
                     raise ValueError(f"Field {field.name} is not nullable but not found in the input")
+
             return Row(**field_dict)
 
         if type_name in ("array", "arraytype") or hasattr(field_type, "elementType"):
@@ -84,6 +88,7 @@ def register_lakeflow_source(spark):
         try:
             if type_name in ("string", "stringtype"):
                 return str(value) if value is not None else None
+
             if type_name in ("int", "integer", "integertype", "long", "longtype", "bigint"):
                 if isinstance(value, str) and value.strip():
                     if "." in value:
@@ -92,14 +97,17 @@ def register_lakeflow_source(spark):
                 if isinstance(value, (int, float)):
                     return int(value)
                 raise ValueError(f"Cannot convert {value} to integer")
+
             if type_name in ("float", "floattype", "double", "doubletype"):
                 if isinstance(value, str) and value.strip():
                     return float(value)
                 return float(value)
+
             if type_name in ("decimal", "decimaltype"):
                 if isinstance(value, str) and value.strip():
                     return Decimal(value)
                 return Decimal(str(value))
+
             if type_name in ("boolean", "booleantype"):
                 if isinstance(value, str):
                     lowered = value.lower()
@@ -108,6 +116,7 @@ def register_lakeflow_source(spark):
                     if lowered in ("false", "f", "no", "n", "0"):
                         return False
                 return bool(value)
+
             if type_name in ("date", "datetype"):
                 if isinstance(value, str):
                     for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"):
@@ -119,6 +128,7 @@ def register_lakeflow_source(spark):
                 if isinstance(value, datetime):
                     return value.date()
                 raise ValueError(f"Cannot convert {value} to date")
+
             if type_name in ("timestamp", "timestamptype"):
                 if isinstance(value, str):
                     if value.endswith("Z"):
@@ -136,14 +146,19 @@ def register_lakeflow_source(spark):
                 if isinstance(value, datetime):
                     return value
                 raise ValueError(f"Cannot convert {value} to timestamp")
+
             if type_name in ("null", "nulltype"):
                 return None
+
             raise TypeError(f"Unsupported field type: {field_type}")
+
         except (ValueError, TypeError) as e:
-            raise ValueError(f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}")
+            raise ValueError(
+                f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}"
+            )
+
 
     ########################################################
-
     # sources/osipi/osipi.py
     ########################################################
 
@@ -359,8 +374,10 @@ def register_lakeflow_source(spark):
         def __init__(self, options: Dict[str, str]) -> None:
             """
             IMPORTANT: This connector runs inside Spark Python Data Source workers.
-            Do NOT reference SparkSession/SparkContext here.
-            All configuration must come from `options` (UC Connection-injected).
+
+            Do NOT reference SparkSession/SparkContext here (or anywhere in the connector).
+            All configuration must come from `options`, including UC Connection-injected
+            options when `.option("databricks.connection", <name>)` is used.
             """
             self.options = options
 
@@ -371,16 +388,10 @@ def register_lakeflow_source(spark):
 
             self.session = requests.Session()
             self.session.headers.update({"Accept": "application/json"})
-            # NOTE: Some environments block passing `verify_ssl` externally via UC Connections.
-            # Support an alternate option name `requests_verify` to control TLS verification.
-            self.verify_ssl = _as_bool(
-                options.get("requests_verify")
-                if options.get("requests_verify") is not None
-                else options.get("verify_ssl"),
-                default=True,
-            )
+            self.verify_ssl = _as_bool(options.get("verify_ssl"), default=True)
             self._auth_resolved = False
 
+            # OIDC token cache (best-effort; refreshed when close to expiry)
             self._oidc_access_token: Optional[str] = None
             self._oidc_token_expires_at: Optional[datetime] = None
 
@@ -945,11 +956,11 @@ def register_lakeflow_source(spark):
             return handler()
 
 
-
         def _ensure_auth(self) -> None:
             """Authenticate using UC Connection-injected options (no Spark usage)."""
-            if getattr(self, "_auth_resolved", False):
-                if getattr(self, "_oidc_access_token", None) and getattr(self, "_oidc_token_expires_at", None):
+            # If we already resolved auth, refresh OIDC token when close to expiry.
+            if self._auth_resolved:
+                if self._oidc_access_token and self._oidc_token_expires_at:
                     if _utcnow() < self._oidc_token_expires_at - timedelta(minutes=5):
                         return
                     self._auth_resolved = False
@@ -960,6 +971,7 @@ def register_lakeflow_source(spark):
             if connection_name:
                 print(f"🔍 Using UC Connection: {connection_name}")
 
+            # Extract auth parameters from options
             access_token = self.options.get("access_token") or self.options.get("bearer_value_tmp")
             workspace_host = self.options.get("workspace_host")
             client_id = self.options.get("client_id")
@@ -988,6 +1000,7 @@ def register_lakeflow_source(spark):
                     "unknown",
                 )
                 print(f"ℹ️  Using workaround property name: {workaround_key}")
+                print("   (UC bug strips client_secret - fix coming soon)")
 
             # Opt-in: allow unauthenticated access (useful for debugging or public PI Web API endpoints).
             # NOTE: Default remains secure-by-default (no anonymous access unless explicitly enabled).
@@ -1001,16 +1014,18 @@ def register_lakeflow_source(spark):
                 self._auth_resolved = True
                 return
 
+            # Method 1: Bearer token
             if access_token:
                 self.session.headers.update({"Authorization": f"Bearer {access_token}"})
                 self._auth_resolved = True
                 return
 
+            # Method 2: OIDC with client credentials
             if workspace_host and client_id and client_secret:
                 if not workspace_host.startswith("http://") and not workspace_host.startswith("https://"):
                     workspace_host = "https://" + workspace_host
 
-                if getattr(self, "_oidc_access_token", None) and getattr(self, "_oidc_token_expires_at", None):
+                if self._oidc_access_token and self._oidc_token_expires_at:
                     if _utcnow() < self._oidc_token_expires_at - timedelta(minutes=5):
                         self.session.headers.update({"Authorization": f"Bearer {self._oidc_access_token}"})
                         self._auth_resolved = True
@@ -1029,15 +1044,14 @@ def register_lakeflow_source(spark):
                 token = payload.get("access_token")
                 if not token:
                     raise RuntimeError("OIDC endpoint did not return access_token")
-
                 expires_in = int(payload.get("expires_in") or 3600)
                 self._oidc_access_token = token
                 self._oidc_token_expires_at = _utcnow() + timedelta(seconds=expires_in)
-
                 self.session.headers.update({"Authorization": f"Bearer {token}"})
                 self._auth_resolved = True
                 return
 
+            # Method 3: Basic auth
             if username and password:
                 self.session.auth = (username, password)
                 self._auth_resolved = True
@@ -3093,9 +3107,6 @@ def register_lakeflow_source(spark):
     class LakeflowSource(DataSource):
         def __init__(self, options):
             self.options = options
-            # IMPORTANT: do not capture the outer `spark` session in this class.
-            # Lakeflow/SDP can serialize the DataSource; capturing SparkContext triggers:
-            #   [CONTEXT_ONLY_VALID_ON_DRIVER]
             self.lakeflow_connect = LakeflowConnect(options)
 
         @classmethod
