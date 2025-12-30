@@ -32,15 +32,21 @@ def get_register_function(source_name: str):
             f"Make sure the directory 'sources/{source_name}/' exists."
         )
 
-    # Import the generated module
+    # Try to import the generated module first, fall back to the regular module
     module_path = f"sources.{source_name}._generated_{source_name}_python_source"
     try:
         module = importlib.import_module(module_path)
     except ModuleNotFoundError:
-        raise ImportError(
-            f"Could not import '_generated_{source_name}_python_source.py' from source '{source_name}'. "
-            f"Please ensure 'sources/{source_name}/_generated_{source_name}_python_source.py' exists."
-        )
+        # Fall back to the regular module (e.g., sources.microsoft_teams.microsoft_teams)
+        module_path = f"sources.{source_name}.{source_name}"
+        try:
+            module = importlib.import_module(module_path)
+        except ModuleNotFoundError:
+            raise ImportError(
+                f"Could not import '_generated_{source_name}_python_source.py' or '{source_name}.py' from source '{source_name}'. "
+                f"Please ensure either 'sources/{source_name}/_generated_{source_name}_python_source.py' "
+                f"or 'sources/{source_name}/{source_name}.py' exists."
+            )
 
     # Check if the module has the register function
     if not hasattr(module, "register_lakeflow_source"):
