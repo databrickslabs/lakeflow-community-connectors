@@ -471,9 +471,11 @@ The connector implements discovery in two phases:
 ### Complete Example
 
 For complete working examples, see the [Configuration Examples](#configuration-examples) section below which includes:
-- Minimal configuration (teams + channels + members with zero manual setup)
-- Selective team with auto-discovery of channels/messages
-- Complete auto-discovery with message replies
+
+- Configuration-based ingestion (incremental workflow)
+- Simple teams-only ingestion
+- **Fully automated ingestion (zero configuration)** - See [sample-ingest.py](sample-ingest.py)
+- Message replies ingestion (threaded conversations)
 
 ### Testing
 
@@ -558,7 +560,109 @@ ingest(spark, pipeline_spec)
 
 ---
 
-### Example 3: Message Replies (Threaded Conversations)
+### Example 3: Fully Automated Ingestion (Zero Configuration)
+
+For the fastest setup, use the fully automated mode that discovers all resources without manual configuration:
+
+See [`sample-ingest.py`](sample-ingest.py) for a complete working example.
+
+```python
+# Just provide your credentials - connector auto-discovers everything!
+pipeline_spec = {
+    "connection_name": "microsoft_teams_connection",
+    "objects": [
+        # Teams (auto-discovers all teams)
+        {
+            "table": {
+                "source_table": "teams",
+                "destination_catalog": "main",
+                "destination_schema": "teams_data",
+                "destination_table": "lakeflow_connector_teams",
+                "table_configuration": {
+                    "tenant_id": "your-tenant-id",
+                    "client_id": "your-client-id",
+                    "client_secret": "your-client-secret"
+                }
+            }
+        },
+        # Channels (auto-discovers all teams, then all channels)
+        {
+            "table": {
+                "source_table": "channels",
+                "destination_catalog": "main",
+                "destination_schema": "teams_data",
+                "destination_table": "lakeflow_connector_channels",
+                "table_configuration": {
+                    "tenant_id": "your-tenant-id",
+                    "client_id": "your-client-id",
+                    "client_secret": "your-client-secret",
+                    "fetch_all_teams": "true"  # Auto-discover all teams
+                }
+            }
+        },
+        # Messages (auto-discovers all teams, channels, then messages)
+        {
+            "table": {
+                "source_table": "messages",
+                "destination_catalog": "main",
+                "destination_schema": "teams_data",
+                "destination_table": "lakeflow_connector_messages",
+                "table_configuration": {
+                    "tenant_id": "your-tenant-id",
+                    "client_id": "your-client-id",
+                    "client_secret": "your-client-secret",
+                    "fetch_all_teams": "true",     # Auto-discover all teams
+                    "fetch_all_channels": "true",  # Auto-discover all channels
+                    "start_date": "2024-12-01T00:00:00Z"
+                }
+            }
+        },
+        # Message Replies (auto-discovers teams, channels, messages, then replies)
+        {
+            "table": {
+                "source_table": "message_replies",
+                "destination_catalog": "main",
+                "destination_schema": "teams_data",
+                "destination_table": "lakeflow_connector_message_replies",
+                "table_configuration": {
+                    "tenant_id": "your-tenant-id",
+                    "client_id": "your-client-id",
+                    "client_secret": "your-client-secret",
+                    "fetch_all_teams": "true",     # Auto-discover all teams
+                    "fetch_all_channels": "true",  # Auto-discover all channels
+                    "fetch_all_messages": "true",  # Auto-discover all messages
+                    "start_date": "2024-12-01T00:00:00Z"
+                }
+            }
+        }
+    ]
+}
+
+ingest(spark, pipeline_spec)
+```
+
+**Benefits:**
+
+- No manual ID configuration required
+- Single pipeline run ingests all data
+- Perfect for initial setup or complete organization sync
+- Automatically handles new teams/channels as they're created
+
+**Use this when:**
+
+- You want to ingest all Teams data from your organization
+- You don't want to manually configure team/channel IDs
+- You're setting up for the first time and want a quick win
+
+**Consider the incremental approach (Example 1) when:**
+
+- You have many teams and want to start with a subset
+- You need fine-grained control over which teams/channels to ingest
+- You want to minimize API usage and ingestion time
+
+---
+
+### Example 4: Message Replies (Threaded Conversations)
 
 To ingest threaded message replies, you need to specify which parent messages to track:
 
