@@ -48,7 +48,7 @@ TABLE_PREFIX = "lakeflow_connector_"  # Tables: lakeflow_connector_teams, etc.
 
 # Ingestion Options
 START_DATE = "2024-12-01T00:00:00Z"  # Start date for incremental sync (messages, message_replies)
-LOOKBACK_SECONDS = "300"             # 5-minute lookback for late-arriving data
+LOOKBACK_SECONDS = "3600"            # 1-hour lookback for late-arriving data (no duplicates - deduped by ID)
 TOP = "50"                           # Page size for API requests
 MAX_PAGES_PER_BATCH = "200"          # Max pages per batch (controls checkpoint frequency)
 
