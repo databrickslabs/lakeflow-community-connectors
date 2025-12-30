@@ -248,7 +248,8 @@ python3 tools/ingestion_dab_generator/discover_and_classify_tables.py \
   --connection-name osipi_connection \
   --dest-catalog main \
   --dest-schema bronze \
-  --group-by ingestion_type \
+  --group-by category_and_ingestion_type \
+  # Produces groups like: time_series_append, asset_framework_snapshot, event_frames_append, ...
   --schedule-snapshot "0 0 * * *" \
   --schedule-append "*/15 * * * *"
 

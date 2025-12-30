@@ -121,6 +121,56 @@ def _default_weight_for_type(ingestion_type: str, *, snapshot: int, append: int,
     return unknown
 
 
+def _table_category_from_tables_lists(inst: Any, table_name: str) -> Optional[str]:
+    """Best-effort table category based on connector TABLES_* lists.
+
+    Many connectors (including OSIPI) define class attributes like TABLES_TIME_SERIES.
+    If present, we use them to produce stable categories without guessing from names.
+    """
+
+    t = (table_name or "").strip()
+    if not t:
+        return None
+
+    # Prefer class attributes to avoid triggering expensive network calls.
+    cls = inst.__class__
+    for attr in dir(cls):
+        if not attr.startswith("TABLES_"):
+            continue
+        v = getattr(cls, attr, None)
+        if isinstance(v, list) and t in v:
+            return attr[len("TABLES_"):].lower()
+    return None
+
+
+def _table_category_fallback_by_name(table_name: str) -> str:
+    """Fallback categorization when TABLES_* lists don't exist.
+
+    This is intentionally conservative: it tries to be useful for connectors with
+    common prefixes, but won't overfit.
+    """
+
+    t = (table_name or "").strip().lower()
+
+    # OSIPI-style patterns
+    if t.startswith("pi_streamset_") or t in ("pi_timeseries", "pi_interpolated", "pi_plot", "pi_summary", "pi_current_value"):
+        return "time_series"
+    if t.startswith("pi_event"):
+        return "event_frames"
+    if t.startswith("pi_af_") or t.startswith("pi_element_") or t.startswith("pi_asset") or t.startswith("pi_attribute_"):
+        return "asset_framework"
+
+    # Generic fallback: group by first token
+    if "_" in t:
+        return t.split("_", 1)[0]
+    return "unknown"
+
+
+def _table_category(inst: Any, table_name: str) -> str:
+    return _table_category_from_tables_lists(inst, table_name) or _table_category_fallback_by_name(table_name)
+
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Discover connector tables and generate a classified ingestion CSV.")
     p.add_argument("--connector-name", required=True, help="Connector name (e.g., osipi, hubspot).")
@@ -135,7 +185,7 @@ def main() -> int:
     p.add_argument(
         "--group-by",
         default="ingestion_type",
-        choices=["ingestion_type", "none"],
+        choices=["ingestion_type", "category", "category_and_ingestion_type", "none"],
         help="How to derive pipeline_group (default: ingestion_type).",
     )
 
@@ -190,6 +240,7 @@ def main() -> int:
         "ingestion_type",
         "primary_keys",
         "cursor_field",
+        "category",
     ]
 
     with out_path.open("w", newline="", encoding="utf-8") as f:
@@ -210,8 +261,14 @@ def main() -> int:
             cursor_field = meta.get("cursor_field")
             primary_keys = meta.get("primary_keys")
 
+            category = _table_category(inst, table)
+
             if args.group_by == "ingestion_type":
                 pipeline_group = ingestion_type
+            elif args.group_by == "category":
+                pipeline_group = category
+            elif args.group_by == "category_and_ingestion_type":
+                pipeline_group = f"{category}_{ingestion_type}"
             else:
                 pipeline_group = "all"
 
@@ -244,6 +301,7 @@ def main() -> int:
                 "ingestion_type": ingestion_type,
                 "primary_keys": _coerce_table_config(primary_keys),
                 "cursor_field": _coerce_table_config(cursor_field),
+                "category": category,
             }
             w.writerow(row)
 

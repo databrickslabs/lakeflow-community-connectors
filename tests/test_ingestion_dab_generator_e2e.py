@@ -209,3 +209,42 @@ def test_e2e_osipi_discover_classify_to_yaml(tmp_path: Path):
     # Validate that each ingestion_definition conforms to the PipelineSpec model
     for pdef in data["resources"]["pipelines"].values():
         SpecParser(pdef["ingestion_definition"])
+
+
+def test_e2e_osipi_discover_classify_by_category(tmp_path: Path):
+    """Offline: osipi TABLES_* categories -> pipeline_group splits time_series vs asset_framework vs event_frames."""
+    repo = Path(__file__).resolve().parents[1]
+
+    discover = repo / "tools/ingestion_dab_generator/discover_and_classify_tables.py"
+
+    csv_path = tmp_path / "osipi_by_category.csv"
+
+    subprocess.check_call(
+        [
+            "python3",
+            str(discover),
+            "--connector-name",
+            "osipi",
+            "--output-csv",
+            str(csv_path),
+            "--connection-name",
+            "osipi_connection",
+            "--dest-catalog",
+            "main",
+            "--dest-schema",
+            "bronze",
+            "--group-by",
+            "category_and_ingestion_type",
+        ]
+    )
+
+    import csv as _csv
+
+    groups = set()
+    with csv_path.open("r", newline="", encoding="utf-8") as f:
+        for r in _csv.DictReader(f):
+            groups.add(r["pipeline_group"])
+
+    assert any(g.startswith("time_series_") for g in groups)
+    assert any(g.startswith("asset_framework_") for g in groups)
+    assert any(g.startswith("event_frames_") for g in groups)
