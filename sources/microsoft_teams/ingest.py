@@ -46,7 +46,7 @@ INGEST_TEAMS = True           # Ingest all teams
 INGEST_CHANNELS = True        # Auto-discover all teams, ingest all channels
 INGEST_MEMBERS = True         # Auto-discover all teams, ingest all members
 INGEST_MESSAGES = True        # Auto-discover all teams and channels, ingest all messages
-INGEST_MESSAGE_REPLIES = False  # Auto-discover all teams, channels, and messages, ingest all replies
+INGEST_MESSAGE_REPLIES = True # Auto-discover all teams, channels, and messages, ingest all replies
 
 # Pagination settings
 TOP = "50"
