@@ -6,7 +6,7 @@ Create a comprehensive API documentation file that enables connector implementat
 
 ## Output
 
-Create `sources/{source_name}/{source_name}_api_doc.md` following the template at [source_api_doc_template](../prompts/source_api_doc_template.md).
+Create `sources/{source_name}/{source_name}_api_doc.md` following the template at [source_api_doc_template](template/source_api_doc_template.md).
 
 ## Core Principles
 

@@ -33,7 +33,7 @@ If you need comprehensive end-to-end validation:
 Produce a single Markdown document that accurately summarizes a source API for connector implementation. The document must be **complete, source-cited, and implementation-ready** (endpoints, auth, schemas, Python read paths, incremental strategy).
 
 ### Output Contract (Strict) 
-Create one file named `<source_name>_api_doc.md` under `sources/<source_name>/` directory following the `source_api_doc_template.md`. 
+Create one file named `<source_name>_api_doc.md` under `sources/<source_name>/` directory following the `template/source_api_doc_template.md`. 
 
 **General rules**
 - No invented fields. No placeholders unless clearly marked `TBD:` with a short reason.
@@ -404,7 +404,7 @@ test_incremental_after_write PASSED - Incremental sync captured new records
 Generate the **public-facing documentation** for the **{{source_name}}** connector, targeted at end users.
 
 ### Output Contract 
-Produce a Markdown file based on the standard template `community_connector_doc_template.md` at `sources/{{source_name}}/README.md`.
+Produce a Markdown file based on the standard template `template/community_connector_doc_template.md` at `sources/{{source_name}}/README.md`.
 
 ### Documentation Requirements
 - Please use the code implementation as the source of truth.

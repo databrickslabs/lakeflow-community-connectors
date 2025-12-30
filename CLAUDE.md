@@ -81,7 +81,7 @@ python scripts/merge_python_source.py {source_name}
 - `sources/zendesk/zendesk.py` - Reference implementation
 - `sources/example/example.py` - Reference implementation
 - `tests/test_suite.py` - Test harness
-- `prompts/vibe_coding_instruction.md` - Detailed development guide
-- `prompts/source_api_doc_template.md` - API documentation template
-- `prompts/community_connector_doc_template.md` - User documentation template
+- `prompts/README.md` - Detailed development guide
+- `prompts/template/source_api_doc_template.md` - API documentation template
+- `prompts/template/community_connector_doc_template.md` - User documentation template
 
