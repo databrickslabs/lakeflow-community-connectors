@@ -12,6 +12,8 @@ def test_google_analytics_aggregated_connector():
     
     Note: GA4 connector uses dynamic table names, so we test with specific
     table names from the config rather than relying on list_tables().
+    
+    This test suite covers both single and multiple property scenarios.
     """
     # Inject the LakeflowConnect class into test_suite module's namespace
     test_suite.LakeflowConnect = LakeflowConnect
@@ -24,15 +26,21 @@ def test_google_analytics_aggregated_connector():
     config = load_config(config_path)
     table_config = load_config(table_config_path)
 
-    # Initialize connector
+    # Initialize connector (property_id field is always included regardless of count)
     connector = LakeflowConnect(config)
+    
+    # Get property count for informational purposes
+    property_ids = config.get("property_ids", [])
+    property_count = len(property_ids)
     
     # Test 1: Initialization
     print("\n" + "="*50)
     print("TEST: Initialization")
     print("="*50)
     assert connector is not None, "Connector should initialize successfully"
-    print("✅ PASSED: Connector initialized")
+    assert len(connector.property_ids) == len(property_ids), "Property IDs should match config"
+    print(f"✅ PASSED: Connector initialized with {len(connector.property_ids)} properties")
+    print(f"  Property IDs: {connector.property_ids}")
 
     # Test 2: list_tables (returns empty for dynamic tables)
     print("\n" + "="*50)
@@ -55,6 +63,13 @@ def test_google_analytics_aggregated_connector():
             schema = connector.get_table_schema(table_name, table_options)
             assert schema is not None, "Schema should not be None"
             assert hasattr(schema, 'fields'), "Schema should have fields"
+            
+            field_names = [f.name for f in schema.fields]
+            
+            # property_id field is ALWAYS included for schema stability
+            assert "property_id" in field_names, "Schema should always include 'property_id' field"
+            assert field_names[0] == "property_id", "'property_id' should always be the first field"
+            print(f"✅ PASSED: 'property_id' field present at position 0 (schema stability)")
             print(f"✅ PASSED: Schema has {len(schema.fields)} fields")
             for field in schema.fields[:5]:  # Print first 5 fields
                 print(f"  - {field.name}: {field.dataType}")
@@ -69,9 +84,16 @@ def test_google_analytics_aggregated_connector():
             metadata = connector.read_table_metadata(table_name, table_options)
             assert isinstance(metadata, dict), "Metadata should be a dict"
             assert "ingestion_type" in metadata, "Metadata should include ingestion_type"
+            
+            primary_keys = metadata.get('primary_keys', [])
+            
+            # property_id is ALWAYS the first primary key for schema stability
+            assert "property_id" in primary_keys, "Primary keys should always include 'property_id'"
+            assert primary_keys[0] == "property_id", "'property_id' should always be the first primary key"
+            print(f"✅ PASSED: 'property_id' prepended to primary keys (schema stability)")
             print(f"✅ PASSED: Metadata retrieved")
             print(f"  - ingestion_type: {metadata.get('ingestion_type')}")
-            print(f"  - primary_keys: {metadata.get('primary_keys')}")
+            print(f"  - primary_keys: {primary_keys}")
             print(f"  - cursor_field: {metadata.get('cursor_field')}")
         except Exception as e:
             print(f"❌ FAILED: {str(e)}")
@@ -91,9 +113,19 @@ def test_google_analytics_aggregated_connector():
                 if i >= 4:  # Get first 5 records
                     break
             
+                # property_id field is ALWAYS included in records
+                if record_list:
+                    record_keys = list(record_list[0].keys())
+                    assert "property_id" in record_keys, "Records should always include 'property_id' field"
+                    # Verify property_id values are from the configured list
+                    property_values = set(r.get("property_id") for r in record_list)
+                    assert property_values.issubset(set(connector.property_ids)), \
+                        f"Property ID values {property_values} should be from {connector.property_ids}"
+                    print(f"✅ PASSED: Records contain 'property_id' field with values: {property_values}")
+            
             print(f"✅ PASSED: Retrieved {len(record_list)} records")
             if record_list:
-                print(f"  Sample record keys: {list(record_list[0].keys())}")
+                print(f"  Sample record keys: {record_keys}")
             print(f"  Next offset: {next_offset}")
         except Exception as e:
             print(f"❌ FAILED: {str(e)}")
@@ -273,6 +305,11 @@ def test_google_analytics_aggregated_connector():
         field_names = [f.name for f in schema.fields]
         assert "date" in field_names, "Should have date field"
         assert "country" in field_names, "Should have country field"
+        
+        # property_id field is ALWAYS included
+        assert "property_id" in field_names, "Should always have 'property_id' field"
+        assert field_names[0] == "property_id", "'property_id' should always be first"
+        
         print(f"✅ get_table_schema() works with just table name")
         print(f"  Fields: {', '.join(field_names)}")
         
@@ -280,7 +317,12 @@ def test_google_analytics_aggregated_connector():
         metadata = connector.read_table_metadata("traffic_by_country", empty_options)
         assert metadata is not None, "Metadata should not be None"
         assert "primary_keys" in metadata, "Should have primary_keys"
-        assert metadata["primary_keys"] == ["date", "country"], "Primary keys should match prebuilt config"
+        
+        # property_id is always prepended
+        expected_primary_keys = ["property_id", "date", "country"]
+        assert metadata["primary_keys"] == expected_primary_keys, \
+            f"Primary keys should always be: {expected_primary_keys}"
+        
         print(f"✅ read_table_metadata() works with just table name")
         print(f"  Primary keys: {metadata['primary_keys']}")
         print(f"  Ingestion type: {metadata.get('ingestion_type')}")
@@ -289,6 +331,11 @@ def test_google_analytics_aggregated_connector():
         records, offset = connector.read_table("traffic_by_country", {}, empty_options)
         records_list = list(records)
         assert len(records_list) > 0, "Should return some records"
+        
+        # property_id field is ALWAYS included in records
+        if records_list:
+            assert "property_id" in records_list[0], "Records should always have 'property_id' field"
+        
         print(f"✅ read_table() works with just table name")
         print(f"  Records returned: {len(records_list)}")
         
@@ -306,7 +353,7 @@ def test_google_analytics_aggregated_connector():
     shadow_options = {
         "dimensions": '["date", "city"]',  # Different from prebuilt!
         "metrics": '["sessions"]',
-        "primary_keys": ["date", "city"]
+        "primary_keys": ["property_id", "date", "city"]  # Always include property_id
     }
     
     try:
@@ -320,16 +367,58 @@ def test_google_analytics_aggregated_connector():
         
         # Metadata should also use custom config
         metadata = connector.read_table_metadata("traffic_by_country", shadow_options)
-        assert metadata["primary_keys"] == ["date", "city"], "Should use custom primary_keys"
+        expected_shadow_keys = ["property_id", "date", "city"]
+        assert metadata["primary_keys"] == expected_shadow_keys, \
+            f"Should use custom primary_keys: {expected_shadow_keys}"
         print(f"✅ Custom primary_keys override prebuilt report")
+        print(f"  Primary keys: {metadata['primary_keys']}")
         
         print(f"\n✅ PASSED: Can shadow prebuilt report names with explicit dimensions")
     except Exception as e:
         print(f"❌ FAILED: {str(e)}")
         raise
 
+    # Test 16: Single property mode (backward compatibility)
     print("\n" + "="*50)
-    print("ALL TESTS PASSED (INCLUDING PREBUILT REPORTS)")
+    print("TEST: Single property mode")
+    print("="*50)
+    
+    try:
+        # Create a connector with single property
+        single_property_config = config.copy()
+        single_property_config["property_ids"] = [connector.property_ids[0]]  # Take first property only
+        
+        single_connector = LakeflowConnect(single_property_config)
+        assert len(single_connector.property_ids) == 1, "Should have exactly 1 property"
+        print(f"✅ Single property connector initialized: {single_connector.property_ids}")
+        
+        # Test schema ALWAYS includes 'property_id' field for schema stability
+        schema = single_connector.get_table_schema("traffic_by_country", empty_options)
+        field_names = [f.name for f in schema.fields]
+        assert "property_id" in field_names, "Single property: Should ALWAYS have 'property_id' field for schema stability"
+        assert field_names[0] == "property_id", "'property_id' should be first"
+        print(f"✅ Single property: 'property_id' field present (schema stability)")
+        
+        # Test metadata ALWAYS includes 'property_id' in primary keys
+        metadata = single_connector.read_table_metadata("traffic_by_country", empty_options)
+        assert "property_id" in metadata["primary_keys"], "Single property: Should ALWAYS have 'property_id' in primary keys"
+        assert metadata["primary_keys"] == ["property_id", "date", "country"], "Single property: property_id always prepended"
+        print(f"✅ Single property: Primary keys = {metadata['primary_keys']}")
+        
+        # Test records ALWAYS include 'property_id' field
+        records, _ = single_connector.read_table("traffic_by_country", {}, empty_options)
+        records_list = list(records)
+        if records_list:
+            assert "property_id" in records_list[0], "Single property: Records should ALWAYS have 'property_id' field"
+            print(f"✅ Single property: Records include 'property_id' field")
+        
+        print(f"\n✅ PASSED: Single property mode includes 'property_id' for schema stability")
+    except Exception as e:
+        print(f"❌ FAILED: {str(e)}")
+        raise
+
+    print("\n" + "="*50)
+    print("ALL TESTS PASSED (INCLUDING MULTI-PROPERTY SUPPORT)")
     print("="*50)
 
 

@@ -184,14 +184,36 @@ def register_lakeflow_source(spark):
             Initialize the Google Analytics Aggregated Data connector with connection-level options.
 
             Expected options:
-                - property_id: Google Analytics 4 property ID (numeric string, e.g., "123456789").
+                - property_ids: List of Google Analytics 4 property IDs (JSON array of numeric strings)
+                  Examples: 
+                    - Single property: '["123456789"]'
+                    - Multiple properties: '["123456789", "987654321"]'
                 - credentials_json: Service account JSON credentials as a JSON object or string.
             """
-            property_id = options.get("property_id")
-            if not property_id:
+            property_ids_json = options.get("property_ids")
+
+            if not property_ids_json:
                 raise ValueError(
-                    "Google Analytics connector requires 'property_id' in options"
+                    "Google Analytics connector requires 'property_ids' (list) in options. "
+                    "Example: property_ids=['123456789'] or property_ids=['123456789', '987654321']"
                 )
+
+            # Parse property_ids
+            try:
+                if isinstance(property_ids_json, str):
+                    self.property_ids = json.loads(property_ids_json)
+                else:
+                    self.property_ids = property_ids_json
+
+                if not isinstance(self.property_ids, list) or len(self.property_ids) == 0:
+                    raise ValueError("property_ids must be a non-empty list")
+
+                # Validate all are strings
+                for pid in self.property_ids:
+                    if not isinstance(pid, str):
+                        raise ValueError(f"All property IDs must be strings, got: {type(pid)}")
+            except (json.JSONDecodeError, ValueError) as e:
+                raise ValueError(f"Invalid 'property_ids': {e}")
 
             credentials_json = options.get("credentials_json")
             if not credentials_json:
@@ -199,7 +221,6 @@ def register_lakeflow_source(spark):
                     "Google Analytics connector requires 'credentials_json' in options"
                 )
 
-            self.property_id = property_id
             self.base_url = "https://analyticsdata.googleapis.com/v1beta"
 
             # Parse credentials if provided as string
@@ -323,11 +344,15 @@ def register_lakeflow_source(spark):
               - 'available_metrics': set of valid metric names
 
             This is called once and cached for type inference and validation.
+            For multi-property connectors, fetches metadata from the first property
+            (standard dimensions/metrics are the same across all properties).
             """
             if self._metadata_cache is not None:
                 return self._metadata_cache
 
-            url = f"{self.base_url}/properties/{self.property_id}/metadata"
+            # Use first property for metadata (standard dimensions/metrics are consistent)
+            first_property_id = self.property_ids[0]
+            url = f"{self.base_url}/properties/{first_property_id}/metadata"
             headers = {
                 "Authorization": f"Bearer {self._get_access_token()}",
                 "Content-Type": "application/json",
@@ -437,12 +462,12 @@ def register_lakeflow_source(spark):
                     error_parts.append(f"\n  Available metrics include: {sorted(list(available_metrics))[:10]}...")
 
                 error_parts.append("\n\nTo see all available dimensions and metrics for your property:")
-                error_parts.append(f"\n  GET https://analyticsdata.googleapis.com/v1beta/properties/{self.property_id}/metadata")
+                error_parts.append(f"\n  GET https://analyticsdata.googleapis.com/v1beta/properties/{self.property_ids[0]}/metadata")
 
                 raise ValueError("".join(error_parts))
 
         def _make_api_request(
-            self, endpoint: str, body: dict, retry_count: int = 3
+            self, endpoint: str, body: dict, property_id: str, retry_count: int = 3
         ) -> dict:
             """
             Make an authenticated API request to Google Analytics Data API with retry logic.
@@ -450,12 +475,13 @@ def register_lakeflow_source(spark):
             Args:
                 endpoint: API endpoint path (without base URL)
                 body: Request body as dictionary
+                property_id: Google Analytics property ID to query
                 retry_count: Number of retries for rate limiting
 
             Returns:
                 Response JSON as dictionary
             """
-            url = f"{self.base_url}/properties/{self.property_id}:{endpoint}"
+            url = f"{self.base_url}/properties/{property_id}:{endpoint}"
             access_token = self._get_access_token()
 
             headers = {
@@ -500,7 +526,7 @@ def register_lakeflow_source(spark):
 
                 elif response.status_code == 403:
                     raise Exception(
-                        f"Permission denied. Ensure service account has access to property {self.property_id}: {response.text}"
+                        f"Permission denied. Ensure service account has access to property {property_id}: {response.text}"
                     )
 
                 else:
@@ -589,6 +615,9 @@ def register_lakeflow_source(spark):
             # Build schema fields
             schema_fields = []
 
+            # Always add property_id field for schema stability (allows adding properties later without schema changes)
+            schema_fields.append(StructField("property_id", StringType(), False))
+
             # Add dimension fields
             # Date-related dimensions use DateType, others use StringType
             date_dimensions = ["date", "firstSessionDate", "dateHour", "dateHourMinute"]
@@ -634,6 +663,9 @@ def register_lakeflow_source(spark):
 
                 # Primary keys are defined in the prebuilt report
                 primary_keys = report_config.get("primary_keys", [])
+
+                # Always prepend 'property_id' field to primary keys for schema stability
+                primary_keys = ["property_id"] + primary_keys
 
                 # Parse dimensions to determine cursor field
                 dimensions_json = report_config.get("dimensions", "[]")
@@ -712,7 +744,8 @@ def register_lakeflow_source(spark):
             # Until fixed, users MUST explicitly specify primary_keys for custom reports.
             #
             # Primary keys are all dimensions (composite key)
-            primary_keys = dimensions if dimensions else []
+            # Always prepend 'property_id' field for schema stability
+            primary_keys = ["property_id"] + (dimensions if dimensions else [])
 
             # Determine cursor field and ingestion type
             # If 'date' dimension is present, use it as cursor for append ingestion
@@ -891,84 +924,91 @@ def register_lakeflow_source(spark):
                         f"Invalid JSON in 'metric_filter': {metric_filter_json}"
                     )
 
-            # Fetch all pages
+            # Fetch data from all properties
             all_rows = []
-            offset = 0
             max_date = None
 
-            while True:
-                request_body["offset"] = offset
+            # Loop through each property and fetch data
+            for property_id in self.property_ids:
+                # Fetch all pages for this property
+                offset = 0
 
-                # Make API request
-                response = self._make_api_request("runReport", request_body)
+                while True:
+                    request_body["offset"] = offset
 
-                # Extract dimension and metric headers
-                dimension_headers = response.get("dimensionHeaders", [])
-                metric_headers = response.get("metricHeaders", [])
-                rows = response.get("rows", [])
+                    # Make API request for this property
+                    response = self._make_api_request("runReport", request_body, property_id)
 
-                if not rows:
-                    break
+                    # Extract dimension and metric headers
+                    dimension_headers = response.get("dimensionHeaders", [])
+                    metric_headers = response.get("metricHeaders", [])
+                    rows = response.get("rows", [])
 
-                # Parse rows into dictionaries
-                for row in rows:
-                    record = {}
+                    if not rows:
+                        break
 
-                    # Parse dimension values
-                    dimension_values = row.get("dimensionValues", [])
-                    for i, dim_header in enumerate(dimension_headers):
-                        dim_name = dim_header["name"]
-                        dim_value = (
-                            dimension_values[i]["value"] if i < len(dimension_values) else None
-                        )
+                    # Parse rows into dictionaries
+                    for row in rows:
+                        record = {}
 
-                        # Parse date dimensions from YYYYMMDD to YYYY-MM-DD string format
-                        # PySpark will convert the string to DateType based on the schema
-                        if dim_name in ["date", "firstSessionDate"] and dim_value and len(dim_value) == 8:
-                            try:
-                                # Convert YYYYMMDD to YYYY-MM-DD string
-                                year = int(dim_value[0:4])
-                                month = int(dim_value[4:6])
-                                day = int(dim_value[6:8])
-                                date_string = f"{year:04d}-{month:02d}-{day:02d}"
-                                record[dim_name] = date_string
+                        # Always add property_id field for schema stability
+                        record["property_id"] = property_id
 
-                                # Track max date for cursor
-                                if dim_name == "date":
-                                    if max_date is None or date_string > max_date:
-                                        max_date = date_string
-                            except (ValueError, IndexError):
-                                record[dim_name] = dim_value
-                        else:
-                            record[dim_name] = dim_value
-
-                    # Parse metric values according to their types
-                    metric_values = row.get("metricValues", [])
-                    for i, metric_header in enumerate(metric_headers):
-                        metric_name = metric_header["name"]
-                        metric_type = metric_header.get("type", "TYPE_STRING")
-                        metric_value_str = (
-                            metric_values[i]["value"] if i < len(metric_values) else None
-                        )
-
-                        # Parse the string value to the appropriate type
-                        if metric_value_str is None or metric_value_str == "":
-                            record[metric_name] = None
-                        else:
-                            record[metric_name] = self._parse_metric_value(
-                                metric_value_str, metric_type
+                        # Parse dimension values
+                        dimension_values = row.get("dimensionValues", [])
+                        for i, dim_header in enumerate(dimension_headers):
+                            dim_name = dim_header["name"]
+                            dim_value = (
+                                dimension_values[i]["value"] if i < len(dimension_values) else None
                             )
 
-                    all_rows.append(record)
+                            # Parse date dimensions from YYYYMMDD to YYYY-MM-DD string format
+                            # PySpark will convert the string to DateType based on the schema
+                            if dim_name in ["date", "firstSessionDate"] and dim_value and len(dim_value) == 8:
+                                try:
+                                    # Convert YYYYMMDD to YYYY-MM-DD string
+                                    year = int(dim_value[0:4])
+                                    month = int(dim_value[4:6])
+                                    day = int(dim_value[6:8])
+                                    date_string = f"{year:04d}-{month:02d}-{day:02d}"
+                                    record[dim_name] = date_string
 
-                # Check if we've reached the last page
-                if len(rows) < page_size:
-                    break
+                                    # Track max date for cursor (global across all properties)
+                                    if dim_name == "date":
+                                        if max_date is None or date_string > max_date:
+                                            max_date = date_string
+                                except (ValueError, IndexError):
+                                    record[dim_name] = dim_value
+                            else:
+                                record[dim_name] = dim_value
 
-                offset += page_size
+                        # Parse metric values according to their types
+                        metric_values = row.get("metricValues", [])
+                        for i, metric_header in enumerate(metric_headers):
+                            metric_name = metric_header["name"]
+                            metric_type = metric_header.get("type", "TYPE_STRING")
+                            metric_value_str = (
+                                metric_values[i]["value"] if i < len(metric_values) else None
+                            )
+
+                            # Parse the string value to the appropriate type
+                            if metric_value_str is None or metric_value_str == "":
+                                record[metric_name] = None
+                            else:
+                                record[metric_name] = self._parse_metric_value(
+                                    metric_value_str, metric_type
+                                )
+
+                        all_rows.append(record)
+
+                    # Check if we've reached the last page for this property
+                    if len(rows) < page_size:
+                        break
+
+                    offset += page_size
 
             # Determine next offset
-            # For append ingestion with date cursor, track the maximum date seen
+            # For append ingestion with date cursor, track the maximum date seen across all properties
             if max_date:
                 next_offset = {"last_date": max_date}
             else:
