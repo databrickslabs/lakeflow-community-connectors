@@ -733,10 +733,45 @@ LIMIT 100;
 
 ### CDC Options (messages and message_replies)
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `start_date` | String (ISO 8601) | None | Initial cursor for first sync (e.g., `2025-01-01T00:00:00Z`) |
-| `lookback_seconds` | String (integer) | `300` | Lookback window in seconds to catch late updates (5 minutes) |
+| Option             | Type              | Default | Description                                                     |
+|--------------------|-------------------|---------|----------------------------------------------------------------|
+| `start_date`       | String (ISO 8601) | None    | Initial cursor for first sync (e.g., `2025-01-01T00:00:00Z`)   |
+| `lookback_seconds` | String (integer)  | `300`   | Lookback window in seconds (see critical note below)           |
+
+**⚠️ CRITICAL:** `lookback_seconds` must be >= your pipeline run frequency to avoid missing messages.
+
+#### ⚠️ IMPORTANT: Lookback Window Must Match Run Frequency
+
+The `lookback_seconds` parameter determines how far back from the current checkpoint the connector will fetch data on each run. **This must be at least as long as your pipeline run frequency** to avoid missing messages.
+
+| Pipeline Frequency | Minimum `lookback_seconds` | Recommended Value  | Example                        |
+|--------------------|----------------------------|--------------------|--------------------------------|
+| Every 5 minutes    | `300` (5 min)              | `600` (10 min)     | Continuous/real-time ingestion |
+| Every 15 minutes   | `900` (15 min)             | `1800` (30 min)    | Frequent updates               |
+| Hourly             | `3600` (1 hour)            | `7200` (2 hours)   | Regular business hours sync    |
+| Every 6 hours      | `21600` (6 hours)          | `43200` (12 hours) | Periodic updates               |
+| Daily              | `86400` (24 hours)         | `172800` (48 hours)| Once-daily batch processing    |
+| Weekly             | `604800` (7 days)          | `1209600` (14 days)| Weekly reports                 |
+
+**Why This Matters:**
+
+- If you run **daily** with `lookback_seconds="300"` (5 min), you'll **miss 23 hours and 55 minutes** of messages
+- The lookback creates an overlap window to catch late-arriving or edited messages
+- No duplicate risk: CDC deduplicates automatically using message `id` as primary key
+- Longer lookback = safer, but slightly more API calls due to overlap
+
+**Example Configurations:**
+
+```python
+# Continuous sync (every 5-10 minutes)
+"lookback_seconds": "600"  # 10-minute lookback
+
+# Hourly sync
+"lookback_seconds": "7200"  # 2-hour lookback
+
+# Daily sync (common for batch processing)
+"lookback_seconds": "172800"  # 48-hour lookback (2 days)
+```
 
 ### Auto-Discovery Options
 
