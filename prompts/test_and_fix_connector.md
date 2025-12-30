@@ -1,0 +1,30 @@
+# Test and Fix the Connector
+
+## Goal
+Validate the generated connector for **{{source_name}}** by executing the provided test suite, diagnosing failures, and applying minimal, targeted fixes until all tests pass.
+
+## Instructions
+
+1. Create a `test_{source_name}_lakeflow_connect.py` under `sources/{source_name}/test/` directory.
+2. Use `test/test_suite.py` to run test and follow `sources/example/test/test_example_lakeflow_connect.py` or other sources as an example.
+3. Use the configuration file `sources/{source_name}/configs/dev_config.json` and `sources/{source_name}/configs/dev_table_config.json` to initialize your tests.
+   - example:
+```json
+{
+  "user": "YOUR_USER_NAME",
+  "password": "YOUR_PASSWORD",
+  "token": "YOUR_TOKEN"
+}
+```
+   - If `dev_config.json` does not exist, create it and ask the developers to provide the required parameters to connect to a test instance of the source.
+   - If needed, create `dev_table_config.json` and ask developers to supply the necessary table_options parameters for testing different cases.
+   - Be sure to remove these config files after testing is complete and before committing any changes.
+4. Run the tests using: `pytest sources/{source_name}/test/test_{source_name}_lakeflow_connect.py -v`
+5. Based on test failures, update the implementation under `sources/{source_name}` as needed. Use both the test results and the source API documentation, as well as any relevant libraries and test code, to guide your corrections.
+
+## Notes
+
+- This step is more interactive. Based on testing results, we need to make various adjustments.
+- Remove the `dev_config.json` after this step.
+- Avoid mocking data in tests. Config files will be supplied to enable connections to an actual instance.
+

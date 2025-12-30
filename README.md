@@ -21,7 +21,7 @@ Developers only need to implement or modify the source connector logic, while co
 
 ## Developing New Connectors
 
-Follow the instructions in [`prompts/vibe_coding_instruction.md`](prompts/vibe_coding_instruction.md) to create new connectors. The development workflow:
+Follow the instructions in [`prompts/README.md`](prompts/README.md) to create new connectors. The development workflow:
 
 1. **Understand the source** — Gather API specs, auth mechanisms, and schemas using the provided template
 2. **Implement the connector** — Implement the `LakeflowConnect` interface methods
@@ -29,6 +29,10 @@ Follow the instructions in [`prompts/vibe_coding_instruction.md`](prompts/vibe_c
    - *(Optional)* Implement write-back testing for end-to-end validation (write → read → verify cycle)
 4. **Generate documentation** — Create user-facing docs using the documentation template
    - *(Temporary)* Run `scripts/merge_python_source.py` to generate the deployable file
+
+### Claude Code
+Each step of the development is packaged as a SKILL under `.claude/skills`. 
+TODO: Add instructions and good practise of using Claude Code.
 
 ### API to Implement
 Connectors are built on the [Python Data Source API](https://spark.apache.org/docs/latest/api/python/tutorial/sql/python_data_source.html), with an abstraction layer (`LakeflowConnect`) that simplifies development. 
