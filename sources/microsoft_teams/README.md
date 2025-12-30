@@ -12,42 +12,113 @@ The Microsoft Teams connector enables you to:
 
 ## Quick Start
 
-Follow these steps to get started with the Microsoft Teams connector:
+### Step 1: Register Azure AD Application
 
-## Prerequisites
+1. **Navigate to Azure Portal**
+   - Go to [Azure Portal](https://portal.azure.com)
+   - Sign in with an account that has **Global Administrator** or **Application Administrator** role
 
-### 1. Microsoft 365 Environment
-- Microsoft 365 tenant with Microsoft Teams enabled
-- Teams with data to ingest (teams, channels, messages)
-- Administrative access to Azure AD for app registration
+2. **Register New Application**
+   - In the left navigation, select **Microsoft Entra ID** (formerly Azure Active Directory)
+   - Select **App registrations** → **New registration**
+   - Configure the registration:
+     - **Name**: `Microsoft Teams Connector` (or your preferred name)
+     - **Supported account types**: Select "Accounts in this organizational directory only (Single tenant)"
+     - **Redirect URI**: Leave blank (not needed for Application permissions)
+   - Click **Register**
 
-### 2. Azure AD App Registration
-Register an application in Azure Active Directory to obtain credentials:
-- **Tenant ID**: Your Azure AD tenant identifier
-- **Client ID**: Application (client) ID from app registration
-- **Client Secret**: A valid client secret for authentication
+3. **Copy Essential Credentials**
 
-### 3. Required API Permissions
+   After registration, copy these values (you'll need them for the connector):
 
-The following **Application permissions** must be granted with admin consent:
+   - **Application (client) ID**: Found on the Overview page
+   - **Directory (tenant) ID**: Found on the Overview page
 
-| Permission | Required For | Admin Consent |
-|------------|--------------|---------------|
-| `Team.ReadBasic.All` | Reading teams | Required |
-| `Channel.ReadBasic.All` | Reading channels | Required |
-| `ChannelMessage.Read.All` | Reading messages | Required |
-| `TeamMember.Read.All` | Reading members | Required |
+   Example values:
 
-**Note:** All permissions require **tenant administrator consent**.
+   ```text
+   Tenant ID:  a1b2c3d4-e5f6-7890-abcd-ef1234567890
+   Client ID:  f9e8d7c6-b5a4-3210-9876-543210fedcba
+   ```
+
+4. **Create Client Secret**
+   - In your app registration, navigate to **Certificates & secrets**
+   - Under **Client secrets**, click **New client secret**
+   - Add a description: `Databricks Teams Connector`
+   - Select expiration: **24 months** (recommended) or custom duration
+   - Click **Add**
+   - **⚠️ IMPORTANT**: Copy the **Value** immediately (it won't be shown again)
+
+   Example secret value:
+
+   ```text
+   Client Secret: abc123~xyz789.aBcDeFgHiJkLmNoPqRsTuVwXyZ
+   ```
+
+### Step 2: Configure API Permissions
+
+1. **Add Microsoft Graph Permissions**
+   - In your app registration, navigate to **API permissions**
+   - Click **Add a permission** → **Microsoft Graph** → **Application permissions**
+
+2. **Select Required Permissions**
+
+   Add each of the following permissions:
+
+   | Permission | Category | Required For |
+   |------------|----------|--------------|
+   | `Team.ReadBasic.All` | Microsoft Teams | Read team names and basic properties |
+   | `Channel.ReadBasic.All` | Microsoft Teams | Read channel names and properties |
+   | `ChannelMessage.Read.All` | Microsoft Teams | Read messages in all channels |
+   | `TeamMember.Read.All` | Microsoft Teams | Read team membership information |
+
+   **How to add each permission:**
+   - Click **Add a permission** → **Microsoft Graph** → **Application permissions**
+   - Search for the permission name (e.g., "Team.ReadBasic.All")
+   - Check the box next to the permission
+   - Click **Add permissions**
+   - Repeat for each permission
+
+3. **Grant Admin Consent** ⚠️ **CRITICAL STEP**
+
+   After adding all permissions:
+   - Click **Grant admin consent for [Your Organization Name]**
+   - Confirm by clicking **Yes**
+   - Verify all permissions show a **green checkmark** under "Status"
+
+   **Without admin consent, the connector will fail with 403 Forbidden errors.**
+
+### Step 3: Verify Setup
+
+Your **API permissions** page should look like this:
+
+```text
+API / Permissions name              Type         Status
+Microsoft Graph
+  Team.ReadBasic.All               Application  ✓ Granted for [Org]
+  Channel.ReadBasic.All            Application  ✓ Granted for [Org]
+  ChannelMessage.Read.All          Application  ✓ Granted for [Org]
+  TeamMember.Read.All              Application  ✓ Granted for [Org]
+```
 
 **⚠️ IMPORTANT - Chats Not Supported:**
-- The Microsoft Graph API `/chats` endpoint does NOT support Application Permissions (app-only authentication)
+
+- The Microsoft Graph API `/chats` endpoint does NOT support Application Permissions
 - It only works with Delegated Permissions (interactive user login)
 - This connector uses Application Permissions for automated/scheduled pipelines
 - Therefore, **chats cannot be ingested**
-- You can ingest: teams, channels, members, and messages
+- Supported tables: teams, channels, members, messages, message_replies
 
-### 4. Databricks Environment
+## Prerequisites
+
+### Microsoft 365 Environment
+
+- Microsoft 365 tenant with Microsoft Teams enabled
+- Teams with data to ingest (teams, channels, messages)
+- **Global Administrator** or **Application Administrator** role for app registration
+
+### Databricks Environment
+
 - Databricks workspace with Unity Catalog enabled
 - Permissions to create UC connections
 - Delta Live Tables (DLT) support for declarative pipelines
