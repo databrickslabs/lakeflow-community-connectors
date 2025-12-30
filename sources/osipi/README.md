@@ -188,6 +188,69 @@ def pi_temperature_data():
     )
 ```
 
+## Performance: Chunking / Batching (Why it’s needed)
+
+OSI PI time-series APIs can return very large payloads (high-frequency samples × many tags). In practice, requests that try to read “too much” can:
+
+- Time out or hit gateway / proxy limits
+- Overwhelm PI Web API with very large JSON responses
+- Reduce parallelism (one huge request blocks progress)
+
+This connector supports **connector-side chunking** to keep requests bounded and predictable.
+
+### Tag batching: `tags_per_request`
+
+For multi-tag tables (StreamSet-based reads), the connector can split a long `tag_webids` list into multiple smaller requests:
+
+- **`tags_per_request`**: max number of tag webIds to include per request
+  - `0` (default) means “do not split”
+  - Example: `tags_per_request=25` batches 250 tags into 10 requests
+
+### Time-window chunking: `window_seconds`
+
+For incremental time-series reads, the connector can enforce a maximum time window per micro-batch:
+
+- **`window_seconds`**: caps the effective `(startTime, endTime)` window per read
+  - `0` (default) means “no enforced window”
+  - Example: `window_seconds=300` reads at most 5 minutes per batch
+
+### Related knobs
+
+- **`maxCount`**: limits number of returned events per request (PI Web API parameter)
+- **`prefer_streamset`**: when multiple tags are requested, prefer StreamSet endpoints for efficiency
+
+All of these knobs are configured via `table_configuration` / `table_options` in your pipeline spec.
+
+## Multi-pipeline ingestion (recommended for scale)
+
+When ingesting many OSIPI tables (or many “slices” of the same table, e.g. different tag groups), a **single pipeline** can become slow and fragile. A **multi-pipeline** layout provides:
+
+- Better parallelism (pipelines run independently)
+- Failure isolation (one heavy group won’t block others)
+- Easier scheduling (different groups can run at different cadences)
+
+This repo includes a connector-agnostic DAB generator:
+
+- `tools/ingestion_dab_generator/generate_ingestion_dab_yaml.py`
+
+It converts a CSV (what to ingest) into DAB YAML with one pipeline per group.
+
+### Option A: Provide `pipeline_group` in CSV (explicit grouping)
+
+Rows with the same `pipeline_group` end up in the same Lakeflow pipeline.
+
+### Option B: Auto-balance into N pipelines (connector-agnostic)
+
+If your CSV omits `pipeline_group`, you can ask the generator to auto-assign groups:
+
+- **`--num-pipelines N`**: spreads rows across N pipelines using weights
+
+### Option C: Chunk (split) large groups into multiple pipelines
+
+Even when you provide `pipeline_group`, you can cap how many items land in one pipeline:
+
+- **`--max-items-per-pipeline K`**: splits large groups into `group_1`, `group_2`, … each with at most K items
+
 ### Asset Hierarchy Analysis
 
 ```python
