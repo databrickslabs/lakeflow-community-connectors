@@ -1186,23 +1186,12 @@ def register_lakeflow_source(spark):
     """
     Register the Microsoft Teams connector with the Lakeflow framework.
 
+    Note: This is a placeholder function for compatibility with the source_loader.
+    The actual registration happens through the ingestion pipeline.
+
     Args:
         spark: The Spark session
     """
-    from pyspark.sql.connect.dataframe import DataFrame as ConnectDataFrame
-
-    # Import lakeflow modules
-    try:
-        import lakeflow.sources.api as sources_api
-    except ImportError:
-        raise ImportError(
-            "Could not import lakeflow.sources.api. "
-            "Make sure lakeflow is installed and available."
-        )
-
-    # Register the connector
-    sources_api.register_python_source(
-        spark=spark,
-        source_name="microsoft_teams",
-        connector_class=MicrosoftTeamsConnector,
-    )
+    # No-op: The connector is used directly by the ingestion pipeline
+    # which doesn't require explicit registration
+    pass
