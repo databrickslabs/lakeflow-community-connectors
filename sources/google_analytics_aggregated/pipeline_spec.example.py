@@ -52,7 +52,8 @@ source_name = "google_analytics_aggregated"
 #             FOR CUSTOM REPORTS (Required):
 #             ├── dimensions (required): JSON array e.g., '["date", "country"]'
 #             ├── metrics (required): JSON array e.g., '["activeUsers", "sessions"]'
-#             ├── primary_keys (required): List matching dimensions
+#             ├── primary_keys (required): List with "property_id" first, then dimensions
+#             │                            e.g., ["property_id", "date", "country"]
 #             │                            TODO: This is redundant but required due to
 #             │                            architectural limitation. See connector code.
 #             ├── start_date (optional): Initial date range start (default: "30daysAgo")
@@ -84,7 +85,7 @@ reports = [
             "table_configuration": {
                 "dimensions": '["date", "deviceCategory"]',
                 "metrics": '["activeUsers", "engagementRate", "averageSessionDuration"]',
-                "primary_keys": ["date", "deviceCategory"],
+                "primary_keys": ["property_id", "date", "deviceCategory"],
                 "start_date": "90daysAgo",
                 "lookback_days": "3",
                 "page_size": "5000",
@@ -99,7 +100,7 @@ reports = [
             "table_configuration": {
                 "dimensions": '["date", "platform", "browser"]',
                 "metrics": '["sessions"]',
-                "primary_keys": ["date", "platform", "browser"],
+                "primary_keys": ["property_id", "date", "platform", "browser"],
                 "start_date": "7daysAgo",
                 "lookback_days": "3",
                 "dimension_filter": '{"filter": {"fieldName": "platform", "stringFilter": {"matchType": "EXACT", "value": "web"}}}',
@@ -114,7 +115,7 @@ reports = [
             "table_configuration": {
                 "dimensions": '["country"]',
                 "metrics": '["totalUsers", "sessions"]',
-                "primary_keys": ["country"],
+                "primary_keys": ["property_id", "country"],
                 "start_date": "2020-01-01",
                 "scd_type": "SCD_TYPE_1",
             },

@@ -67,7 +67,7 @@ This documentation describes how to configure and use the **Google Analytics Agg
    - Uncheck "Notify new users by email" (service accounts don't receive emails)
    - Click **Add**
 
-### Step 3: Find Your GA4 Property ID
+### Step 3: Find Your GA4 Property ID(s)
 
 Your Property ID is a numeric value (e.g., `123456789`) that identifies your GA4 property:
 
@@ -76,14 +76,19 @@ Your Property ID is a numeric value (e.g., `123456789`) that identifies your GA4
 3. Your **Property ID** is displayed at the top of the page (numeric value)
 4. Copy this value - you'll need it for the connector configuration
 
+**For Multiple Properties:**
+- The connector supports ingesting data from multiple GA4 properties in a single connection
+- Repeat the above steps for each property you want to include
+- Ensure the service account has access to all properties (repeat Step 2 for each property)
+
 ### Required Connection Parameters
 
 Provide the following **connection-level** options when configuring the connector:
 
 | Name                       | Type   | Required | Description                                                                                                                     | Example                            |
 |----------------------------|--------|----------|---------------------------------------------------------------------------------------------------------------------------------|------------------------------------|
-| `property_id`              | string | yes      | Google Analytics 4 property ID (numeric).                                                                                       | `"123456789"`                      |
-| `credentials_json`         | object | yes      | Complete service account JSON key as a JSON object (paste the entire content of the downloaded JSON file).                      | `{"type": "service_account", ...}` |
+| `property_ids`             | array  | yes      | List of Google Analytics 4 property IDs (numeric strings). For a single property, use a list with one element.                 | `["123456789"]` or `["123456789", "987654321"]` |
+| `credentials_json`         | object | yes      | Complete service account JSON key as a JSON object (paste the entire content of the downloaded JSON file). The service account must have access to all properties listed in `property_ids`. | `{"type": "service_account", ...}` |
 | `externalOptionsAllowList` | string | yes      | Comma-separated list of table-specific option names that are allowed to be passed through to the connector. This connector requires table-specific options, so this parameter must be set. | `dimensions,metrics,start_date,lookback_days,dimension_filter,metric_filter,page_size` |
 
 The full list of supported table-specific options for `externalOptionsAllowList` is:
@@ -93,11 +98,14 @@ The full list of supported table-specific options for `externalOptionsAllowList`
 
 ### Obtaining the Required Parameters
 
-- **Property ID**:
-  - Follow Step 3 above to find your numeric GA4 property ID.
+- **Property IDs**:
+  - Follow Step 3 above to find your numeric GA4 property ID(s).
+  - For a single property, provide a list with one element: `["123456789"]`
+  - For multiple properties, provide all property IDs in the list: `["123456789", "987654321"]`
   
 - **Service Account JSON**:
   - Follow Steps 1-2 above to create and download the service account JSON key file.
+  - Ensure the service account has access to **all** properties listed in `property_ids`.
   - Open the downloaded JSON file in a text editor.
   - Copy the **entire JSON content** (the whole object with all fields).
   - Paste this as the value of `credentials_json` when creating the connection.
@@ -118,6 +126,66 @@ The full list of supported table-specific options for `externalOptionsAllowList`
   "universe_domain": "googleapis.com"
 }
 ```
+
+### Multi-Property Support
+
+The connector supports ingesting data from **one or multiple GA4 properties** in a single connection.
+
+**Single Property Configuration:**
+```json
+{
+  "property_ids": ["123456789"],
+  "credentials_json": { ... }
+}
+```
+
+**Multiple Properties Configuration:**
+```json
+{
+  "property_ids": ["123456789", "987654321", "555666777"],
+  "credentials_json": { ... }
+}
+```
+
+**How Multi-Property Works:**
+- ✅ Fetches data from all specified properties in each sync
+- ✅ Automatically adds a `property_id` field to every record containing the numeric property ID
+- ✅ Prepends `property_id` to the primary keys to ensure uniqueness across properties
+- ✅ Tracks incremental sync cursors globally across all properties
+
+**Schema Stability Design:**
+
+To prevent breaking schema changes, the connector **always includes the `property_id` field** in the output schema and primary keys, regardless of whether you configure a single property or multiple properties. This design decision ensures:
+
+- ✅ **Forward compatibility**: You can add more properties later without breaking downstream pipelines
+- ✅ **Consistent schema**: The schema remains stable across configuration changes
+- ✅ **No data loss**: Existing data continues to work when properties are added
+
+| Field Name | Type | Description | Added When |
+|------------|------|-------------|------------|
+| `property_id` | string | The numeric GA4 property ID (e.g., "123456789") | **Always** (single or multiple properties) |
+
+This field is added as the **first field** in the schema and the **first element** in the primary key list.
+
+**Example Primary Keys (Always Include property_id):**
+
+| Report Configuration | Primary Keys |
+|----------------------|--------------|
+| Prebuilt: `traffic_by_country` | `["property_id", "date", "country"]` |
+| Custom with `date`, `deviceCategory` | `["property_id", "date", "deviceCategory"]` |
+| Custom snapshot (no date) | `["property_id", "country", "city"]` |
+
+> **Note**: Even with a single property, `property_id` is included to allow seamless addition of properties in the future.
+
+**Rate Limits & Quotas:**
+- Each property has **independent** rate limits and quotas
+- Total API load is the sum across all properties
+- One property reaching quota limits does not affect others
+
+**Use Cases for Multi-Property:**
+- Consolidate data from multiple brands or websites into a single table
+- Compare metrics across different GA4 properties
+- Simplify ETL pipelines when analyzing multiple properties together
 
 ### Create a Unity Catalog Connection
 
@@ -141,7 +209,9 @@ The connector includes predefined report configurations for common analytics nee
 
 | Report Name | Description | Dimensions | Metrics | Primary Keys |
 |-------------|-------------|------------|---------|--------------|
-| `traffic_by_country` | Daily active users, sessions, and page views by country | `date`, `country` | `activeUsers`, `sessions`, `screenPageViews` | `["date", "country"]` |
+| `traffic_by_country` | Daily active users, sessions, and page views by country | `date`, `country` | `activeUsers`, `sessions`, `screenPageViews` | `["property_id", "date", "country"]` |
+
+> **Note**: The `property_id` field is **always automatically included** as the first element in primary keys for schema stability.
 
 **Benefits:**
 - ✅ **Zero configuration** - just use the report name
@@ -161,7 +231,7 @@ The connector includes predefined report configurations for common analytics nee
 No `table_configuration` needed. The connector automatically knows:
 - Dimensions: `["date", "country"]`
 - Metrics: `["activeUsers", "sessions", "screenPageViews"]`
-- Primary Keys: `["date", "country"]`
+- Primary Keys: `["property_id", "date", "country"]` (property_id always included)
 - Ingestion Type: `append` (with `date` as cursor)
 
 **Example with optional overrides:**
@@ -197,13 +267,15 @@ For reports not covered by prebuilt options, you can manually configure dimensio
     "table_configuration": {
       "dimensions": "[\"date\", \"deviceCategory\"]",
       "metrics": "[\"activeUsers\", \"engagementRate\"]",
-      "primary_keys": ["date", "deviceCategory"],
+      "primary_keys": ["property_id", "date", "deviceCategory"],
       "start_date": "30daysAgo",
       "lookback_days": "3"
     }
   }
 }
 ```
+
+> **Important**: For custom reports, always prepend `"property_id"` to your `primary_keys` list for schema stability.
 
 ### Object summary, primary keys, and ingestion mode
 
@@ -222,6 +294,7 @@ The connector defines the ingestion mode and primary key dynamically based on th
 **For Prebuilt Reports** (using report name as `source_table`):
 - ✅ Primary keys are **automatically configured** - no need to specify them
 - The connector retrieves primary keys from the prebuilt report definition
+- `property_id` is **always automatically prepended** to the primary keys
 
 **For Custom Reports**:
 <!-- TODO: UX IMPROVEMENT - This requirement should be removed in future versions -->
@@ -235,8 +308,9 @@ The connector defines the ingestion mode and primary key dynamically based on th
 <!-- pass them to _get_table_metadata() with .options(**table_config). -->
 <!-- Until fixed, primary_keys MUST be explicitly specified for custom reports. -->
 - The primary key **must be explicitly defined** in `table_configuration` as `primary_keys`
-- It should be set to the **list of all dimensions** in your report (in the same order)
-- Example: If dimensions are `["date", "country"]`, set `"primary_keys": ["date", "country"]`
+- **Always start with `"property_id"`** as the first element for schema stability
+- Follow with **all dimensions** in your report (in the same order)
+- Example: If dimensions are `["date", "country"]`, set `"primary_keys": ["property_id", "date", "country"]`
 
 ### Required and optional table options
 
@@ -264,7 +338,7 @@ Optional overrides:
 |--------|------|----------|---------|-------------|
 | `dimensions` | string (JSON array) | yes | N/A | List of dimension names as a JSON string (e.g., `"[\"date\", \"country\"]"`). Up to 9 dimensions. |
 | `metrics` | string (JSON array) | yes | N/A | List of metric names as a JSON string (e.g., `"[\"activeUsers\", \"sessions\"]"`). At least 1 metric required, up to 10 metrics. |
-| `primary_keys` | array | yes | N/A | List of dimension names forming the composite key (e.g., `["date", "country"]`). **Must exactly match all dimensions** in your report. <!-- TODO: Remove this redundant requirement --> |
+| `primary_keys` | array | yes | N/A | Composite key starting with `"property_id"` followed by all dimension names (e.g., `["property_id", "date", "country"]`). **Must always start with `"property_id"`** for schema stability. <!-- TODO: Remove this redundant requirement --> |
 | `start_date` | string | no | `"30daysAgo"` | Initial start date for first sync. Can be YYYY-MM-DD format or relative like `"30daysAgo"`, `"7daysAgo"`, `"yesterday"`. |
 | `lookback_days` | string | no | `"3"` | Number of days to look back for incremental syncs (accounts for data processing delays). |
 | `dimension_filter` | string (JSON object) | no | null | Filter expression for dimensions as a JSON string (see Google Analytics Data API documentation for filter syntax). |
@@ -274,7 +348,7 @@ Optional overrides:
 > **Important**: 
 > - For **prebuilt reports**: Only specify `prebuilt_report` name, other settings are optional overrides
 > - For **custom reports**: `dimensions`, `metrics`, and filter options must be provided as **JSON strings** (e.g., `"[\"date\", \"country\"]"`)
-> - `primary_keys` is a **native array** (e.g., `["date", "country"]`) and only required for custom reports
+> - `primary_keys` is a **native array** (e.g., `["property_id", "date", "country"]`) and **must always start with `"property_id"`** for schema stability
 > - All other options are regular strings (e.g., `"30daysAgo"`, `"3"`)
 
 ### Common Dimensions and Metrics
@@ -322,8 +396,10 @@ This is useful for discovering custom dimensions/metrics defined in your GA4 pro
 
 ### Schema highlights
 
-- **Dynamic Schema**: The schema is generated dynamically based on the requested dimensions and metrics.
+- **Schema Stability**: The connector **always includes a `property_id` field** as the first column in every table, regardless of single or multi-property configuration. This ensures forward compatibility if you add more properties later.
+- **Dynamic Schema**: The schema is generated dynamically based on the requested dimensions and metrics, plus the `property_id` field.
 - **Type Inference**: The connector automatically determines proper data types by querying the Google Analytics metadata API:
+  - **Property ID**: `StringType` - Always the first field in the schema
   - **Date Dimensions** (`date`, `firstSessionDate`): `DateType` - Automatically parsed from YYYYMMDD format
   - **String Dimensions** (all others): `StringType`
   - **Integer Metrics** (`activeUsers`, `sessions`, etc.): `LongType` (64-bit integer)
@@ -334,8 +410,9 @@ This is useful for discovering custom dimensions/metrics defined in your GA4 pro
 
 The connector automatically infers proper data types using the Google Analytics metadata API:
 
-| GA4 API Type     | Example Fields                  | Connector Type | Example Values | Notes |
-|------------------|---------------------------------|----------------|----------------|-------|
+| GA4 API Type / Field | Example Fields                  | Connector Type | Example Values | Notes |
+|----------------------|---------------------------------|----------------|----------------|-------|
+| **Property ID** (added by connector) | property_id | StringType | "123456789" | **Always included** as the first field for schema stability |
 | Dimension (any)  | country, city, deviceCategory   | StringType     | "United States", "desktop" | All non-date dimensions are strings |
 | Date dimension   | date, firstSessionDate          | DateType       | 2025-12-24 | Parsed from YYYYMMDD format (e.g., "20251224" → date(2025, 12, 24)) |
 | TYPE_INTEGER     | activeUsers, sessions, newUsers | LongType       | 1234 | 64-bit integers, parsed from API string responses |
@@ -347,10 +424,14 @@ The connector automatically infers proper data types using the Google Analytics 
 
 1. **Initialization**: Connector calls the Google Analytics `getMetadata` API once to retrieve type information for all dimensions and metrics in your property
 2. **Caching**: Metadata is cached for the duration of the connector session (no repeated API calls)
-3. **Schema Generation**: When generating a table schema, the connector looks up each metric's type and maps it to the appropriate PySpark type
-4. **Data Parsing**: When reading data, string values from the API are parsed to their target types (integers, floats, dates)
+3. **Schema Generation**: When generating a table schema:
+   - The `property_id` field is always added first as StringType
+   - The connector looks up each dimension and metric's type and maps it to the appropriate PySpark type
+4. **Data Parsing**: When reading data:
+   - The `property_id` is added to each record from the configuration
+   - String values from the API are parsed to their target types (integers, floats, dates)
 
-This ensures that your data arrives in Databricks with proper types, ready for analytics without additional transformation.
+This ensures that your data arrives in Databricks with proper types and schema stability, ready for analytics without additional transformation.
 
 ## How to Run
 
@@ -382,7 +463,7 @@ Example `pipeline_spec` mixing prebuilt and custom reports:
         "table_configuration": {
           "dimensions": "[\"date\", \"deviceCategory\"]",
           "metrics": "[\"activeUsers\", \"engagementRate\"]",
-          "primary_keys": ["date", "deviceCategory"],
+          "primary_keys": ["property_id", "date", "deviceCategory"],
           "start_date": "30daysAgo",
           "lookback_days": "3"
         }
@@ -392,7 +473,7 @@ Example `pipeline_spec` mixing prebuilt and custom reports:
 }
 ```
 
-- `connection_name` must point to the UC connection configured with your GA4 `property_id` and `credentials_json`.
+- `connection_name` must point to the UC connection configured with your GA4 `property_ids` and `credentials_json`.
 - For each report:
   - `source_table` - Give each report a **unique, descriptive name**
     - **For prebuilt reports**: Use the prebuilt report name (e.g., `"traffic_by_country"`)
@@ -462,7 +543,7 @@ No configuration needed! The connector automatically knows:
     "table_configuration": {
       "dimensions": "[\"date\", \"deviceCategory\", \"browser\"]",
       "metrics": "[\"activeUsers\", \"sessions\", \"bounceRate\"]",
-      "primary_keys": ["date", "deviceCategory", "browser"],
+      "primary_keys": ["property_id", "date", "deviceCategory", "browser"],
       "start_date": "7daysAgo",
       "lookback_days": "2"
     }
@@ -478,7 +559,7 @@ No configuration needed! The connector automatically knows:
     "table_configuration": {
       "dimensions": "[\"date\", \"sessionSource\", \"sessionMedium\", \"sessionCampaignName\"]",
       "metrics": "[\"sessions\", \"conversions\", \"totalRevenue\"]",
-      "primary_keys": ["date", "sessionSource", "sessionMedium", "sessionCampaignName"],
+      "primary_keys": ["property_id", "date", "sessionSource", "sessionMedium", "sessionCampaignName"],
       "start_date": "90daysAgo",
       "lookback_days": "7"
     }
@@ -494,7 +575,7 @@ No configuration needed! The connector automatically knows:
     "table_configuration": {
       "dimensions": "[\"pagePath\", \"pageTitle\"]",
       "metrics": "[\"screenPageViews\", \"averageSessionDuration\"]",
-      "primary_keys": ["pagePath", "pageTitle"],
+      "primary_keys": ["property_id", "pagePath", "pageTitle"],
       "start_date": "7daysAgo",
       "scd_type": "SCD_TYPE_1"
     }
@@ -507,8 +588,8 @@ No configuration needed! The connector automatically knows:
 Common issues and how to address them:
 
 - **Authentication failures (`403 Forbidden`)**:
-  - Verify that the service account email has been added to the GA4 property with Viewer or Analyst role.
-  - Check that the `property_id` is correct and matches the property where access was granted.
+  - Verify that the service account email has been added to all GA4 properties (listed in `property_ids`) with Viewer or Analyst role.
+  - Check that the `property_ids` are correct and match the properties where access was granted.
   - Ensure the `credentials_json` is valid and complete.
 
 - **Invalid dimension or metric names**:
@@ -567,6 +648,11 @@ Google Analytics Data API enforces the following quotas per property:
 - Additional tokens based on complexity (dimensions beyond 4, metrics beyond 4)
 
 The connector automatically handles rate limiting with exponential backoff and retry logic.
+
+**Multi-Property Considerations**:
+- Each property has **independent quotas** - one property exhausting its quota does not affect others
+- Total API load is the **sum** of requests across all properties
+- Plan sync frequency and report complexity accordingly when using multiple properties
 
 ## Known Limitations
 

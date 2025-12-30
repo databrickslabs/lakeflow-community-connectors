@@ -1,5 +1,5 @@
 {
-  "property_id": "123456789",
+  "property_ids": ["123456789", "987654321"],
   "credentials_json": {
     "type": "service_account",
     "project_id": "your-project-id",

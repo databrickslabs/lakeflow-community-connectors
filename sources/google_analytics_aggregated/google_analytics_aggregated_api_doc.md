@@ -36,7 +36,7 @@ curl -X POST \
 Notes:
 - The Google Analytics property ID is required and must be numeric (e.g., `123456789`).
 - The connector **stores** service account credentials or OAuth refresh tokens and exchanges for access tokens at runtime; it **does not** run user-facing OAuth flows.
-- Rate limits apply per property: **25,000 tokens per day** and **5,000 tokens per hour** for standard properties (see Rate Limits section below).
+- Rate limits apply **per property**: **25,000 tokens per day** and **5,000 tokens per hour** for standard properties (see Rate Limits section below).
 - The connector automatically handles token refresh when tokens expire
 
 
@@ -305,49 +305,17 @@ The schema for Google Analytics reports is **dynamic** and depends on the dimens
 
 ## **Get Object Primary Keys**
 
-Google Analytics Data API does not provide a dedicated endpoint to retrieve primary keys. Primary keys must be **determined by the connector based on the dimensions requested** in the report.
+Google Analytics Data API does not provide a dedicated endpoint to retrieve primary keys. 
 
-### **Primary Key Logic**
+**API Behavior:**
+- The API does not assign or return primary keys
+- Rows in a `runReport` response are identified by the combination of their dimension values
+- There is no single global identifier field in the API response
 
-For the `custom_report` object, the primary key is the **combination of all dimensions** included in the report:
-
-**Rules:**
-1. If a report includes dimensions, the primary key is the composite of all dimension values
-2. If a report includes the `date` dimension, it should be part of the primary key
-3. If a report has no dimensions (metrics-only report), there is no meaningful primary key and the report should be treated as a single-row aggregate
-
-**Examples:**
-
-| Dimensions Requested | Primary Key |
-|---------------------|-------------|
-| `date`, `country` | Composite of (`date`, `country`) |
-| `date`, `deviceCategory`, `sessionSource` | Composite of (`date`, `deviceCategory`, `sessionSource`) |
-| `eventName`, `pagePath` | Composite of (`eventName`, `pagePath`) |
-| (no dimensions) | No primary key (single aggregate row) |
-
-**Implementation Guidance:**
-
-```python
-def get_primary_keys(dimensions):
-    """
-    Returns the list of dimension names that form the primary key.
-    
-    Args:
-        dimensions: List of dimension names requested in the report
-        
-    Returns:
-        List of dimension names forming the primary key, or empty list if no dimensions
-    """
-    if not dimensions:
-        return []
-    return dimensions  # All dimensions form the composite primary key
-```
-
-**Notes:**
-- The primary key is **always composite** when multiple dimensions are present
-- There is no single global identifier for rows in Google Analytics reports
-- The uniqueness of rows is guaranteed by the combination of all dimension values within the specified date range
-- For incremental ingestion, the combination of dimensions + date range determines which records to fetch
+**Connector Responsibility:**
+- The connector must determine appropriate primary keys based on the dimensions requested in the report
+- Typically, the primary key is a composite of all dimension values
+- For reports with no dimensions (metrics-only), there is no natural primary key (single aggregate row per property)
 
 
 ## **Object's ingestion type**
@@ -392,17 +360,12 @@ The Google Analytics Data API supports different ingestion patterns depending on
 
 ### **Recommended Configuration**
 
-For most use cases, **`append` ingestion** is recommended with the following parameters:
+For most use cases, **`append` ingestion** with date-based cursor tracking is recommended:
 
-```json
-{
-  "ingestion_type": "append",
-  "cursor_field": "date",
-  "primary_keys": ["date", "country"],  // Example: all dimensions
-  "lookback_days": 3,  // Adjust based on data freshness requirements
-  "incremental_strategy": "date_range"
-}
-```
+- **Primary key**: Composite of all dimensions (e.g., `["date", "country"]`)
+- **Cursor field**: `date` dimension (for time-series reports)
+- **Lookback window**: 3-7 days to account for data processing delays
+- **Incremental strategy**: Use `startDate` parameter based on last seen date minus lookback window
 
 **Data Freshness Considerations:**
 
@@ -1069,6 +1032,38 @@ However, this is separate from the Data API and is not part of the connector's f
 - **Indicator**: `metadata.emptyReason` may explain why (e.g., "NO_DATA")
 - **Impact**: Connector must handle empty `rows` array
 - **Solution**: Return empty result set; log reason if available
+
+
+## **Connector Implementation Notes**
+
+This section provides brief guidance on how a connector should implement the patterns documented above.
+
+### **Multi-Property Support**
+
+The Google Analytics Data API accepts one `property_id` per request. To support syncing data from multiple GA4 properties:
+
+- **Implementation Pattern**: Loop through each property ID and make separate API calls
+- **Property Field**: Add a `property` field (string, containing the numeric property ID) to each record to identify its source
+- **Primary Keys**: Prepend `property` to the composite primary key to ensure uniqueness across properties
+- **Schema Stability**: Always include the `property` field (even for single-property configurations) to allow users to add properties later without schema changes
+- **Cursor Tracking**: Track the global maximum date across all properties for consistent incremental sync
+
+### **Primary Key Determination**
+
+Since the API doesn't provide primary keys:
+
+- **Composite Key**: Use all dimension values as a composite primary key
+- **With Property Field**: For schema stability, prepend `property` to the key: `["property"] + dimensions`
+- **Metrics-Only Reports**: For reports with no dimensions, use `["property"]` as the key (single aggregate per property)
+
+### **Type Inference**
+
+Use the `getMetadata` API to infer proper data types:
+
+- **Date Dimensions** (`date`, `firstSessionDate`): Parse YYYYMMDD format to DateType
+- **Integer Metrics** (TYPE_INTEGER): LongType (64-bit)
+- **Float Metrics** (TYPE_FLOAT, TYPE_CURRENCY, etc.): DoubleType
+- **All Dimensions** (except dates): StringType
 
 
 ## **Research Log**
