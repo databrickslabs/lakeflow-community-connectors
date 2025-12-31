@@ -1,3 +1,4 @@
+"""Tests for the HubSpot LakeFlow connector."""
 import pytest
 import json
 from pathlib import Path

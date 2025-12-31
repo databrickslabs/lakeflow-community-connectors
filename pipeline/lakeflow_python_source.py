@@ -1,3 +1,4 @@
+"""PySpark DataSource implementation for LakeFlow connectors."""
 from pyspark.sql.types import *
 from pyspark.sql.datasource import (
     DataSource,

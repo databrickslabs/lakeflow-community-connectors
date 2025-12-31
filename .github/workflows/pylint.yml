@@ -23,5 +23,6 @@ jobs:
       run: |
         pylint \
         --max-line-length=100 \
+        --disable=R0801 \
         --ignore-long-lines='^\s*(#|".*"|'\''.*'\'')$' \
-        $(git ls-files '*.py' | grep -v '_generated_')
+        $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py')

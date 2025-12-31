@@ -1,3 +1,4 @@
+"""Test utility functions for loading configs."""
 import json
 from pathlib import Path
 from typing import Any

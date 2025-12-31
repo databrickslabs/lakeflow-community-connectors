@@ -1,3 +1,4 @@
+"""Test suite framework for LakeFlow connectors."""
 import traceback
 from typing import Any, Dict, List, Tuple, Iterator, Optional, Callable
 from dataclasses import dataclass, field

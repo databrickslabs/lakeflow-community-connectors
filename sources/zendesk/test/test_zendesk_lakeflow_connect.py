@@ -1,4 +1,4 @@
-import pytest
+"""Tests for the Zendesk LakeFlow connector."""
 from pathlib import Path
 
 from tests import test_suite

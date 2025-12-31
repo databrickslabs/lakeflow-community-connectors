@@ -1,3 +1,4 @@
+"""Tests for the GitHub LakeFlow connector."""
 from pathlib import Path
 
 from tests import test_suite

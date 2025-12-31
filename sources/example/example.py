@@ -1,3 +1,4 @@
+"""Example LakeFlow connector implementation for demonstration."""
 import random
 from typing import Dict, List, Iterator
 

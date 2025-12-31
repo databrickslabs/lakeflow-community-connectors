@@ -1,3 +1,4 @@
+"""Template for LakeFlow connector ingestion pipelines."""
 from pipeline.ingestion_pipeline import ingest
 from libs.source_loader import get_register_function
 

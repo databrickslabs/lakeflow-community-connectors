@@ -1,3 +1,4 @@
+"""Abstract base interface for LakeFlow connectors."""
 from pyspark.sql.types import *
 from datetime import datetime
 from typing import Iterator, Any

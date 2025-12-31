@@ -1,3 +1,4 @@
+"""Stripe LakeFlow connector implementation."""
 import requests
 import json
 from pyspark.sql.types import (

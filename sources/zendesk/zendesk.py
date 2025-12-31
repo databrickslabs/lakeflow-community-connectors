@@ -1,3 +1,4 @@
+"""Zendesk LakeFlow connector implementation."""
 import requests
 import base64
 from pyspark.sql.types import *

@@ -1,4 +1,4 @@
-import pytest
+"""Tests for the Stripe LakeFlow connector."""
 import json
 from pathlib import Path
 
