@@ -300,6 +300,143 @@ class LakeflowConnect:
 
         raise RuntimeError(f"Max retries ({max_retries}) exceeded for: {url}")
 
+    # =========================================================================
+    # Helper Methods for Auto-Discovery
+    # =========================================================================
+
+    def _fetch_all_team_ids(self, max_pages: int) -> List[str]:
+        """
+        Fetch all team IDs from the organization.
+
+        Args:
+            max_pages: Maximum number of pages to fetch
+
+        Returns:
+            List of team ID strings (GUIDs)
+        """
+        teams_url = f"{self.base_url}/groups?$filter=resourceProvisioningOptions/Any(x:x eq 'Team')"
+        teams_params = {"$select": "id"}
+        team_ids = []
+        pages_fetched = 0
+        next_url: str | None = teams_url
+
+        while next_url and pages_fetched < max_pages:
+            if pages_fetched == 0:
+                data = self._make_request_with_retry(teams_url, params=teams_params)
+            else:
+                data = self._make_request_with_retry(next_url)
+
+            teams = data.get("value", [])
+            for team in teams:
+                team_id = team.get("id")
+                if team_id:
+                    team_ids.append(team_id)
+
+            next_url = data.get("@odata.nextLink")
+            pages_fetched += 1
+
+            if next_url:
+                time.sleep(0.1)
+
+        return team_ids
+
+    def _fetch_all_channel_ids(self, team_id: str, max_pages: int) -> List[str]:
+        """
+        Fetch all channel IDs for a specific team.
+
+        Args:
+            team_id: Team GUID
+            max_pages: Maximum number of pages to fetch
+
+        Returns:
+            List of channel ID strings (GUIDs)
+
+        Note:
+            Returns empty list if team is inaccessible (404/403)
+        """
+        channels_url = f"{self.base_url}/teams/{team_id}/channels"
+        channels_params = {"$select": "id"}
+        channel_ids = []
+        pages_fetched = 0
+        next_url: str | None = channels_url
+
+        try:
+            while next_url and pages_fetched < max_pages:
+                if pages_fetched == 0:
+                    data = self._make_request_with_retry(channels_url, params=channels_params)
+                else:
+                    data = self._make_request_with_retry(next_url)
+
+                channels = data.get("value", [])
+                for channel in channels:
+                    channel_id = channel.get("id")
+                    if channel_id:
+                        channel_ids.append(channel_id)
+
+                next_url = data.get("@odata.nextLink")
+                pages_fetched += 1
+
+                if next_url:
+                    time.sleep(0.1)
+        except Exception as e:
+            # If team is inaccessible, return empty list
+            if "404" in str(e) or "403" in str(e):
+                return []
+            raise
+
+        return channel_ids
+
+    def _fetch_all_message_ids(self, team_id: str, channel_id: str, max_pages: int) -> List[str]:
+        """
+        Fetch all message IDs for a specific channel.
+
+        Args:
+            team_id: Team GUID
+            channel_id: Channel GUID
+            max_pages: Maximum number of pages to fetch
+
+        Returns:
+            List of message ID strings
+
+        Note:
+            Returns empty list if channel is inaccessible (404/403)
+        """
+        messages_url = f"{self.base_url}/teams/{team_id}/channels/{channel_id}/messages"
+        messages_params = {"$top": 50}
+        message_ids = []
+        pages_fetched = 0
+        next_url: str | None = messages_url
+
+        try:
+            while next_url and pages_fetched < max_pages:
+                if pages_fetched == 0:
+                    data = self._make_request_with_retry(messages_url, params=messages_params)
+                else:
+                    data = self._make_request_with_retry(next_url)
+
+                messages = data.get("value", [])
+                for message in messages:
+                    message_id = message.get("id")
+                    if message_id:
+                        message_ids.append(message_id)
+
+                next_url = data.get("@odata.nextLink")
+                pages_fetched += 1
+
+                if next_url:
+                    time.sleep(0.1)
+        except Exception as e:
+            # If channel is inaccessible, return empty list
+            if "404" in str(e) or "403" in str(e):
+                return []
+            raise
+
+        return message_ids
+
+    # =========================================================================
+    # Public Interface Methods
+    # =========================================================================
+
     def list_tables(self) -> list[str]:
         """
         List all supported Microsoft Teams tables.
@@ -654,34 +791,10 @@ class LakeflowConnect:
         except (TypeError, ValueError):
             max_pages = 100
 
-        # If fetch_all_teams mode, first discover all team IDs
-        team_ids_to_process = []
+        # Determine which teams to process
         if fetch_all_teams:
-            # Fetch all teams to get team IDs
-            teams_url = f"{self.base_url}/groups?$filter=resourceProvisioningOptions/Any(x:x eq 'Team')"
-            teams_params = {"$select": "id"}
-            teams_next_url: str | None = teams_url
-            tm_pages_fetched = 0
-
-            while teams_next_url and tm_pages_fetched < max_pages:
-                if tm_pages_fetched == 0:
-                    tm_data = self._make_request_with_retry(teams_url, params=teams_params)
-                else:
-                    tm_data = self._make_request_with_retry(teams_next_url)
-
-                teams = tm_data.get("value", [])
-                for tm in teams:
-                    tm_id = tm.get("id")
-                    if tm_id:
-                        team_ids_to_process.append(tm_id)
-
-                teams_next_url = tm_data.get("@odata.nextLink")
-                tm_pages_fetched += 1
-
-                if teams_next_url:
-                    time.sleep(0.1)
+            team_ids_to_process = self._fetch_all_team_ids(max_pages)
         else:
-            # Single team mode
             team_ids_to_process = [team_id]
 
         # Now fetch channels for all discovered teams
@@ -761,34 +874,10 @@ class LakeflowConnect:
         except (TypeError, ValueError):
             max_pages = 100
 
-        # If fetch_all_teams mode, first discover all team IDs
-        team_ids_to_process = []
+        # Determine which teams to process
         if fetch_all_teams:
-            # Fetch all teams to get team IDs
-            teams_url = f"{self.base_url}/groups?$filter=resourceProvisioningOptions/Any(x:x eq 'Team')"
-            teams_params = {"$select": "id"}
-            teams_next_url: str | None = teams_url
-            tm_pages_fetched = 0
-
-            while teams_next_url and tm_pages_fetched < max_pages:
-                if tm_pages_fetched == 0:
-                    tm_data = self._make_request_with_retry(teams_url, params=teams_params)
-                else:
-                    tm_data = self._make_request_with_retry(teams_next_url)
-
-                teams = tm_data.get("value", [])
-                for tm in teams:
-                    tm_id = tm.get("id")
-                    if tm_id:
-                        team_ids_to_process.append(tm_id)
-
-                teams_next_url = tm_data.get("@odata.nextLink")
-                tm_pages_fetched += 1
-
-                if teams_next_url:
-                    time.sleep(0.1)
+            team_ids_to_process = self._fetch_all_team_ids(max_pages)
         else:
-            # Single team mode
             team_ids_to_process = [team_id]
 
         # Now fetch members for all discovered teams
@@ -895,74 +984,22 @@ class LakeflowConnect:
         if not cursor:
             cursor = table_options.get("start_date")
 
-        # If fetch_all_teams mode, first discover all team IDs
-        team_ids_to_process = []
+        # Determine which teams to process
         if fetch_all_teams:
-            # Fetch all teams to get team IDs
-            teams_url = f"{self.base_url}/groups?$filter=resourceProvisioningOptions/Any(x:x eq 'Team')"
-            teams_params = {"$select": "id"}
-            teams_next_url: str | None = teams_url
-            tm_pages_fetched = 0
-
-            while teams_next_url and tm_pages_fetched < max_pages:
-                if tm_pages_fetched == 0:
-                    tm_data = self._make_request_with_retry(teams_url, params=teams_params)
-                else:
-                    tm_data = self._make_request_with_retry(teams_next_url)
-
-                teams = tm_data.get("value", [])
-                for tm in teams:
-                    tm_id = tm.get("id")
-                    if tm_id:
-                        team_ids_to_process.append(tm_id)
-
-                teams_next_url = tm_data.get("@odata.nextLink")
-                tm_pages_fetched += 1
-
-                if teams_next_url:
-                    time.sleep(0.1)
+            team_ids_to_process = self._fetch_all_team_ids(max_pages)
         else:
-            # Single team mode
             team_ids_to_process = [team_id]
 
         # Now process each team to get channels
         all_team_channel_pairs = []
         for current_team_id in team_ids_to_process:
-            # If fetch_all_channels mode, discover all channel IDs in this team
-            channel_ids_to_process = []
+            # Determine which channels to process for this team
             if fetch_all_channels:
-                # Fetch all channels from the team to get channel IDs
-                channels_url = f"{self.base_url}/teams/{current_team_id}/channels"
-                channels_params = {"$select": "id"}
-                channels_next_url: str | None = channels_url
-                ch_pages_fetched = 0
-
-                try:
-                    while channels_next_url and ch_pages_fetched < max_pages:
-                        if ch_pages_fetched == 0:
-                            ch_data = self._make_request_with_retry(channels_url, params=channels_params)
-                        else:
-                            ch_data = self._make_request_with_retry(channels_next_url)
-
-                        channels = ch_data.get("value", [])
-                        for ch in channels:
-                            ch_id = ch.get("id")
-                            if ch_id:
-                                channel_ids_to_process.append(ch_id)
-
-                        channels_next_url = ch_data.get("@odata.nextLink")
-                        ch_pages_fetched += 1
-
-                        if channels_next_url:
-                            time.sleep(0.1)
-                except Exception as e:
-                    # If a team is inaccessible, log and continue
-                    if "404" not in str(e) and "403" not in str(e):
-                        raise
-                    # Skip this team on 404/403
+                channel_ids_to_process = self._fetch_all_channel_ids(current_team_id, max_pages)
+                if not channel_ids_to_process:
+                    # Team is inaccessible (404/403), skip it
                     continue
             else:
-                # Single channel mode
                 channel_ids_to_process = [channel_id]
 
             # Add all team-channel pairs
@@ -1124,74 +1161,22 @@ class LakeflowConnect:
         if not cursor:
             cursor = table_options.get("start_date")
 
-        # If fetch_all_teams mode, first discover all team IDs
-        team_ids_to_process = []
+        # Determine which teams to process
         if fetch_all_teams:
-            # Fetch all teams to get team IDs
-            teams_url = f"{self.base_url}/groups?$filter=resourceProvisioningOptions/Any(x:x eq 'Team')"
-            teams_params = {"$select": "id"}
-            teams_next_url: str | None = teams_url
-            tm_pages_fetched = 0
-
-            while teams_next_url and tm_pages_fetched < max_pages:
-                if tm_pages_fetched == 0:
-                    tm_data = self._make_request_with_retry(teams_url, params=teams_params)
-                else:
-                    tm_data = self._make_request_with_retry(teams_next_url)
-
-                teams = tm_data.get("value", [])
-                for tm in teams:
-                    tm_id = tm.get("id")
-                    if tm_id:
-                        team_ids_to_process.append(tm_id)
-
-                teams_next_url = tm_data.get("@odata.nextLink")
-                tm_pages_fetched += 1
-
-                if teams_next_url:
-                    time.sleep(0.1)
+            team_ids_to_process = self._fetch_all_team_ids(max_pages)
         else:
-            # Single team mode
             team_ids_to_process = [team_id]
 
         # Now process each team to get channels
         all_team_channel_pairs = []
         for current_team_id in team_ids_to_process:
-            # If fetch_all_channels mode, discover all channel IDs in this team
-            channel_ids_to_process = []
+            # Determine which channels to process for this team
             if fetch_all_channels:
-                # Fetch all channels from the team to get channel IDs
-                channels_url = f"{self.base_url}/teams/{current_team_id}/channels"
-                channels_params = {"$select": "id"}
-                channels_next_url: str | None = channels_url
-                ch_pages_fetched = 0
-
-                try:
-                    while channels_next_url and ch_pages_fetched < max_pages:
-                        if ch_pages_fetched == 0:
-                            ch_data = self._make_request_with_retry(channels_url, params=channels_params)
-                        else:
-                            ch_data = self._make_request_with_retry(channels_next_url)
-
-                        channels = ch_data.get("value", [])
-                        for ch in channels:
-                            ch_id = ch.get("id")
-                            if ch_id:
-                                channel_ids_to_process.append(ch_id)
-
-                        channels_next_url = ch_data.get("@odata.nextLink")
-                        ch_pages_fetched += 1
-
-                        if channels_next_url:
-                            time.sleep(0.1)
-                except Exception as e:
-                    # If a team is inaccessible, log and continue
-                    if "404" not in str(e) and "403" not in str(e):
-                        raise
-                    # Skip this team on 404/403
+                channel_ids_to_process = self._fetch_all_channel_ids(current_team_id, max_pages)
+                if not channel_ids_to_process:
+                    # Team is inaccessible (404/403), skip it
                     continue
             else:
-                # Single channel mode
                 channel_ids_to_process = [channel_id]
 
             # Add all team-channel pairs
@@ -1201,41 +1186,13 @@ class LakeflowConnect:
         # Now process each team-channel pair to get messages
         all_team_channel_message_triples = []
         for current_team_id, current_channel_id in all_team_channel_pairs:
-            # If fetch_all_messages mode, discover all message IDs in this channel
-            message_ids_to_process = []
+            # Determine which messages to process for this channel
             if fetch_all_messages:
-                # Fetch all messages from the channel to get message IDs
-                messages_url = f"{self.base_url}/teams/{current_team_id}/channels/{current_channel_id}/messages"
-                messages_params = {"$top": 50}
-                messages_next_url: str | None = messages_url
-                msg_pages_fetched = 0
-
-                try:
-                    while messages_next_url and msg_pages_fetched < max_pages:
-                        if msg_pages_fetched == 0:
-                            msg_data = self._make_request_with_retry(messages_url, params=messages_params)
-                        else:
-                            msg_data = self._make_request_with_retry(messages_next_url)
-
-                        messages = msg_data.get("value", [])
-                        for msg in messages:
-                            msg_id = msg.get("id")
-                            if msg_id:
-                                message_ids_to_process.append(msg_id)
-
-                        messages_next_url = msg_data.get("@odata.nextLink")
-                        msg_pages_fetched += 1
-
-                        if messages_next_url:
-                            time.sleep(0.1)
-                except Exception as e:
-                    # If a channel is inaccessible, log and continue
-                    if "404" not in str(e) and "403" not in str(e):
-                        raise
-                    # Skip this channel on 404/403
+                message_ids_to_process = self._fetch_all_message_ids(current_team_id, current_channel_id, max_pages)
+                if not message_ids_to_process:
+                    # Channel is inaccessible (404/403), skip it
                     continue
             else:
-                # Single message mode
                 message_ids_to_process = [message_id]
 
             # Add all team-channel-message triples

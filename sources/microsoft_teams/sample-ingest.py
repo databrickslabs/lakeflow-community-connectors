@@ -20,10 +20,11 @@ Prerequisites:
    - TeamMember.Read.All
 2. Admin consent granted for all permissions
 3. Unity Catalog connection created
+4. Databricks Secrets configured with Azure AD credentials
 
 Usage:
-1. Update the credentials below (TENANT_ID, CLIENT_ID, CLIENT_SECRET)
-2. Update destination catalog and schema
+1. Create Databricks Secrets scope 'microsoft_teams' with keys: tenant_id, client_id, client_secret
+2. Update destination catalog and schema if needed
 3. Run this script as a Databricks notebook or pipeline
 """
 
@@ -36,10 +37,10 @@ from libs.source_loader import get_register_function
 source_name = "microsoft_teams"
 connection_name = "microsoft_teams_connection"
 
-# Azure AD Application Credentials
-TENANT_ID = "YOUR_TENANT_ID"        # Directory (tenant) ID from Azure Portal
-CLIENT_ID = "YOUR_CLIENT_ID"        # Application (client) ID from Azure Portal
-CLIENT_SECRET = "YOUR_CLIENT_SECRET"  # Client secret value (copy immediately after creation)
+# Azure AD Application Credentials (from Databricks Secrets)
+TENANT_ID = dbutils.secrets.get("microsoft_teams", "tenant_id")
+CLIENT_ID = dbutils.secrets.get("microsoft_teams", "client_id")
+CLIENT_SECRET = dbutils.secrets.get("microsoft_teams", "client_secret")
 
 # Destination Configuration
 DESTINATION_CATALOG = "main"

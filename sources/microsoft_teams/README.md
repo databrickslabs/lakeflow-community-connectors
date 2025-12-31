@@ -109,6 +109,143 @@ Microsoft Graph
 - Therefore, **chats cannot be ingested**
 - Supported tables: teams, channels, members, messages, message_replies
 
+### Step 4: Setup in Databricks
+
+After registering your Azure AD application and granting permissions, you need to configure the connector in your Databricks workspace.
+
+#### Store Credentials Securely
+
+**Before creating the connection**, store your Azure AD credentials in Databricks Secrets:
+
+```bash
+# Create a secret scope (one-time setup)
+databricks secrets create-scope microsoft_teams
+
+# Store your credentials using the Databricks CLI
+# You'll need to provide the secret value via string-value flag or it will open an editor
+databricks secrets put microsoft_teams tenant_id --string-value "your-tenant-id-here"
+databricks secrets put microsoft_teams client_id --string-value "your-client-id-here"
+databricks secrets put microsoft_teams client_secret --string-value "your-client-secret-here"
+```
+
+Alternatively, you can create secrets via the Databricks UI:
+
+1. Navigate to **Settings** → **Secrets** (or use the URL: `https://<your-workspace>/#secrets/createScope`)
+2. Create a new scope named `microsoft_teams`
+3. Add secrets for `tenant_id`, `client_id`, and `client_secret`
+
+#### Create a Unity Catalog Connection
+
+A Unity Catalog connection for this connector can be created via the Databricks UI:
+
+1. **Navigate to Catalog → External Data**
+   - In your Databricks workspace, click **Catalog** in the left sidebar
+   - Click **External Data** at the top
+   - Navigate to the **Connections** tab
+
+2. **Create Connection**
+   - Click **Create connection** button
+   - This will open the connection setup wizard
+
+3. **Step 1: Connection Basics**
+   - **Connection name**: Enter a name for your connection (e.g., `LakeflowCommunityConnectorMSTeams`)
+   - **Connection type**: Select **Lakeflow Community Connector**
+   - **Comment** (optional): Add a description of the connection
+
+4. **Step 2: Connection Details**
+   - **Source name**: Enter `microsoft_teams` (this must match the connector source name)
+   - **Additional Options**: Configure the connection parameters as key-value pairs
+
+   **Required Parameters:**
+
+   | Key | Value | Description |
+   | --- | ----- | ----------- |
+   | `tenant_id` | `{{secrets/microsoft_teams/tenant_id}}` | Azure AD tenant ID from Step 1 |
+   | `client_id` | `{{secrets/microsoft_teams/client_id}}` | Application (client) ID from Step 1 |
+   | `client_secret` | `{{secrets/microsoft_teams/client_secret}}` | Client secret value from Step 1 |
+   | `externalOptionsAllowList` | `team_id,channel_id,message_id,start_date,top,max_pages_per_batch,lookback_seconds,fetch_all_teams,fetch_all_channels,fetch_all_messages` | Comma-separated list of table-specific options |
+
+   **⚠️ IMPORTANT**:
+   - Use Databricks Secrets references (format: `{{secrets/scope_name/key_name}}`) instead of hardcoding credentials
+   - The `externalOptionsAllowList` parameter is required for this connector to accept table-specific options
+   - You must create the secrets first (see [Store Credentials Securely](#store-credentials-securely) section above)
+
+5. **Create Connection**
+   - Click **Create** to save the connection
+   - The connection will now be available in the **Connections** list
+
+The connection can also be created programmatically using the Unity Catalog API or Databricks CLI.
+
+#### Add Custom Connector Source
+
+You need to register the connector source code from GitHub so Databricks can access it during ingestion:
+
+1. **Navigate to Catalog → Connections**
+   - In your Databricks workspace, click **Catalog** in the left sidebar
+   - Click **External Data** at the top
+   - Navigate to the **Connections** tab
+
+2. **Add Custom Connector**
+   - Click on your connection (e.g., `LakeflowCommunityConnectorMSTeams`)
+   - In the connection details page, look for the **Add custom connector** option or button
+   - This will open the "Add custom connector" dialog
+
+3. **Configure Connector Source**
+   - **Source name**: Enter `microsoft_teams` (must match the directory name in the repository)
+   - **Git Repository URL**: Enter the repository URL:
+     ```
+     https://github.com/eduardohl/lakeflow-community-connectors-teams
+     ```
+   - Click **Add Connector**
+
+4. **Verify Registration**
+   - The connector source will now appear in your connection details
+   - Databricks will fetch the connector code from GitHub when running ingestion pipelines
+
+**📝 Note**: The source name must exactly match the directory name containing the connector code in the repository (in this case: `microsoft_teams`).
+
+#### Run Your First Pipeline
+
+Once the connection is created and the custom connector is registered, you can create an ingestion pipeline using the Databricks UI:
+
+1. **Navigate to Jobs & Pipelines**
+   - In your Databricks workspace, click **Jobs & Pipelines** in the left sidebar
+   - Click **Create new** dropdown
+   - Select **Ingestion pipeline** (Ingest data from apps, databases and files)
+
+2. **Add Data Source**
+   - In the "Add data" screen, scroll down to **Community connectors** section
+   - Click **Custom Connector**
+   - In the "Add custom connector" dialog:
+     - **Source name**: Enter `microsoft_teams`
+     - **Git Repository URL**: Enter `https://github.com/eduardohl/lakeflow-community-connectors-teams`
+     - Click **Add Connector**
+
+3. **Select Connection (STEP 1)**
+   - The wizard will show "Ingest data from Microsoft_teams"
+   - Under "Connection to the source", select your connection from the dropdown
+   - Available connections will be listed (e.g., `lakeflowcommunityconnectormsteams`, `microsoft_teams_connection`)
+   - Click to proceed to **STEP 2**
+
+4. **Configure Ingestion Setup (STEP 2)**
+   - **Pipeline name**: Enter a descriptive name (e.g., `LakeflowCommunityConnectorMSTeams`)
+   - **Event log location**:
+     - Select catalog (e.g., `users`)
+     - Select schema for event logs (or leave default)
+   - **Root path**: Enter the path where connector assets will be stored
+     - Example: `/Users/eduardo.lomonaco@databricks.com/connectors/microsoft_teams`
+   - The system will create the ingestion pipeline
+
+5. **View and Run Pipeline**
+   - Once created, you'll see your pipeline listed under **Jobs & Pipelines** → **Pipelines**
+   - Click on the pipeline name to view details
+   - The pipeline will show your connection and ingestion setup
+   - Click **Run now** or configure a schedule to start ingesting data
+
+**📝 Note**: For a complete example with all 5 tables, see [sample-ingest.py](sample-ingest.py).
+
+---
+
 ## Prerequisites
 
 ### Microsoft 365 Environment
@@ -318,11 +455,11 @@ CHANNEL_IDS = [
 
 **After (Automatic Discovery):**
 ```python
-# Just credentials - connector discovers everything automatically
+# Just credentials from secrets - connector discovers everything automatically
 {
-    "tenant_id": "your-tenant-id",
-    "client_id": "your-client-id",
-    "client_secret": "your-client-secret",
+    "tenant_id": dbutils.secrets.get("microsoft_teams", "tenant_id"),
+    "client_id": dbutils.secrets.get("microsoft_teams", "client_id"),
+    "client_secret": dbutils.secrets.get("microsoft_teams", "client_secret"),
     "fetch_all_teams": "true"  # ← That's it!
 }
 ```
@@ -332,11 +469,11 @@ CHANNEL_IDS = [
 The simplest possible configuration - ingest all teams, channels, and members without any manual ID configuration:
 
 ```python
-# Your credentials
+# Your credentials from Databricks Secrets
 creds = {
-    "tenant_id": "your-tenant-id",
-    "client_id": "your-client-id",
-    "client_secret": "your-client-secret"
+    "tenant_id": dbutils.secrets.get("microsoft_teams", "tenant_id"),
+    "client_id": dbutils.secrets.get("microsoft_teams", "client_id"),
+    "client_secret": dbutils.secrets.get("microsoft_teams", "client_secret")
 }
 
 pipeline_spec = {
@@ -497,10 +634,10 @@ The recommended approach uses Python configuration lists for a DLT-compatible, i
 See the complete template in [`pipeline-spec/example_microsoft_teams_ingest.py`](../../pipeline-spec/example_microsoft_teams_ingest.py).
 
 ```python
-# Configure credentials and options
-TENANT_ID = "your-tenant-id"
-CLIENT_ID = "your-client-id"
-CLIENT_SECRET = "your-client-secret"
+# Configure credentials using Databricks Secrets
+TENANT_ID = dbutils.secrets.get("microsoft_teams", "tenant_id")
+CLIENT_ID = dbutils.secrets.get("microsoft_teams", "client_id")
+CLIENT_SECRET = dbutils.secrets.get("microsoft_teams", "client_secret")
 
 # Add team IDs to ingest
 TEAM_IDS = ["team-guid-1", "team-guid-2"]
@@ -546,9 +683,9 @@ pipeline_spec = {
                 "destination_catalog": "main",
                 "destination_schema": "teams_data",
                 "table_configuration": {
-                    "tenant_id": "your-tenant-id",
-                    "client_id": "your-client-id",
-                    "client_secret": "your-client-secret"
+                    "tenant_id": dbutils.secrets.get("microsoft_teams", "tenant_id"),
+                    "client_id": dbutils.secrets.get("microsoft_teams", "client_id"),
+                    "client_secret": dbutils.secrets.get("microsoft_teams", "client_secret")
                 }
             }
         }
@@ -567,7 +704,13 @@ For the fastest setup, use the fully automated mode that discovers all resources
 See [`sample-ingest.py`](sample-ingest.py) for a complete working example.
 
 ```python
-# Just provide your credentials - connector auto-discovers everything!
+# Credentials from Databricks Secrets - connector auto-discovers everything!
+creds = {
+    "tenant_id": dbutils.secrets.get("microsoft_teams", "tenant_id"),
+    "client_id": dbutils.secrets.get("microsoft_teams", "client_id"),
+    "client_secret": dbutils.secrets.get("microsoft_teams", "client_secret")
+}
+
 pipeline_spec = {
     "connection_name": "microsoft_teams_connection",
     "objects": [
@@ -578,11 +721,7 @@ pipeline_spec = {
                 "destination_catalog": "main",
                 "destination_schema": "teams_data",
                 "destination_table": "lakeflow_connector_teams",
-                "table_configuration": {
-                    "tenant_id": "your-tenant-id",
-                    "client_id": "your-client-id",
-                    "client_secret": "your-client-secret"
-                }
+                "table_configuration": creds
             }
         },
         # Channels (auto-discovers all teams, then all channels)
@@ -593,9 +732,7 @@ pipeline_spec = {
                 "destination_schema": "teams_data",
                 "destination_table": "lakeflow_connector_channels",
                 "table_configuration": {
-                    "tenant_id": "your-tenant-id",
-                    "client_id": "your-client-id",
-                    "client_secret": "your-client-secret",
+                    **creds,
                     "fetch_all_teams": "true"  # Auto-discover all teams
                 }
             }
@@ -608,9 +745,7 @@ pipeline_spec = {
                 "destination_schema": "teams_data",
                 "destination_table": "lakeflow_connector_messages",
                 "table_configuration": {
-                    "tenant_id": "your-tenant-id",
-                    "client_id": "your-client-id",
-                    "client_secret": "your-client-secret",
+                    **creds,
                     "fetch_all_teams": "true",     # Auto-discover all teams
                     "fetch_all_channels": "true",  # Auto-discover all channels
                     "start_date": "2024-12-01T00:00:00Z"
@@ -625,9 +760,7 @@ pipeline_spec = {
                 "destination_schema": "teams_data",
                 "destination_table": "lakeflow_connector_message_replies",
                 "table_configuration": {
-                    "tenant_id": "your-tenant-id",
-                    "client_id": "your-client-id",
-                    "client_secret": "your-client-secret",
+                    **creds,
                     "fetch_all_teams": "true",     # Auto-discover all teams
                     "fetch_all_channels": "true",  # Auto-discover all channels
                     "fetch_all_messages": "true",  # Auto-discover all messages
@@ -677,9 +810,9 @@ pipeline_spec = {
                 "destination_schema": "teams_data",
                 "destination_table": "message_replies",
                 "table_configuration": {
-                    "tenant_id": "your-tenant-id",
-                    "client_id": "your-client-id",
-                    "client_secret": "your-client-secret",
+                    "tenant_id": dbutils.secrets.get("microsoft_teams", "tenant_id"),
+                    "client_id": dbutils.secrets.get("microsoft_teams", "client_id"),
+                    "client_secret": dbutils.secrets.get("microsoft_teams", "client_secret"),
                     "team_id": "team-guid-1",
                     "channel_id": "channel-guid-1",
                     "message_id": "message-guid-1",  # Parent message with replies
