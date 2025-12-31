@@ -25,10 +25,10 @@ Provide the following **connection-level** options when configuring the connecto
 |------|------|----------|-------------|---------|
 | `api_token` | string | yes | Qualtrics API token for authentication | `YOUR_QUALTRICS_API_TOKEN` |
 | `datacenter_id` | string | yes | Qualtrics datacenter identifier where your account is hosted | `fra1`, `ca1`, `yourdatacenterid` |
-| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names. This connector requires table-specific options for some tables. | `surveyId` |
+| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names. This connector requires table-specific options for some tables. | `surveyId,mailingListId,directoryId` |
 
 The full list of supported table-specific options for `externalOptionsAllowList` is:
-`surveyId`
+`surveyId,mailingListId,directoryId`
 
 > **Note**: Table-specific options such as `surveyId` are **not** connection parameters. They are provided per-table via table options in the pipeline specification. The option name must be included in `externalOptionsAllowList` for the connection to allow it.
 
@@ -74,7 +74,7 @@ A Unity Catalog connection for this connector can be created via the UI:
 3. Provide the required parameters:
    - `api_token`: Your Qualtrics API token
    - `datacenter_id`: Your datacenter identifier
-   - `externalOptionsAllowList`: Set to `surveyId` (required for survey_responses table)
+   - `externalOptionsAllowList`: Set to `surveyId,mailingListId,directoryId` to enable all table-specific options
 
 The connection can also be created using the standard Unity Catalog API.
 
@@ -84,6 +84,8 @@ The Qualtrics connector exposes a **static list** of tables:
 
 - `surveys` - Survey definitions and metadata
 - `survey_responses` - Individual survey response data
+- `distributions` - Survey distribution records (email sends, SMS, anonymous links)
+- `contacts` - Contact records within mailing lists
 
 ### Object Summary, Primary Keys, and Ingestion Mode
 
@@ -91,6 +93,8 @@ The Qualtrics connector exposes a **static list** of tables:
 |-------|-------------|----------------|-------------|-------------------|
 | `surveys` | Survey metadata including name, status, creation/modification dates | `cdc` | `id` | `lastModified` |
 | `survey_responses` | Individual responses to surveys including all question answers | `append` | `responseId` | `recordedDate` |
+| `distributions` | Distribution records for survey invitations and sends | `cdc` | `id` | `modifiedDate` |
+| `contacts` | Contact records within mailing lists | `cdc` | `id` | `lastModifiedDate` |
 
 ### Required and Optional Table Options
 
@@ -103,9 +107,27 @@ Table-specific options are passed via the pipeline spec under `table` in `object
 
 #### `survey_responses` table
 - **`surveyId`** (string, **required**): The Survey ID to export responses from
-  - Format: `SV_...` (e.g., `SV_6J3cuObw2G9Iuns`)
+  - Format: `SV_...` (e.g., `SV_abc123xyz`)
   - Can be found in Qualtrics UI under: Survey → Tools → Survey IDs
   - Or in the browser URL when editing a survey
+
+#### `distributions` table
+- **`surveyId`** (string, **required**): The Survey ID to retrieve distributions for
+  - Format: `SV_...` (e.g., `SV_abc123xyz`)
+  - Same format as survey_responses table
+  - Retrieves all distributions (email sends, SMS, etc.) for the specified survey
+
+#### `contacts` table
+- **`directoryId`** (string, **required**): The Directory ID (also called Pool ID)
+  - Format: `POOL_...` (e.g., `POOL_abc123xyz`)
+  - Can be found in Qualtrics UI: Account Settings → Qualtrics IDs
+  - Identifies your XM Directory
+- **`mailingListId`** (string, **required**): The Mailing List ID
+  - Format: `CG_...` (e.g., `CG_def456xyz`)
+  - Can be found in: Contacts → Lists → Select a list → check URL or list details
+  - Or via API: GET `/directories/{directoryId}/mailinglists`
+
+> **Note**: The `contacts` table is only available for XM Directory users (not XM Directory Lite accounts).
 
 ### Schema Highlights
 
@@ -149,6 +171,47 @@ Table-specific options are passed via the pipeline spec under `table` in `object
 - `embeddedData` (map<string, string>): Custom embedded data fields
 
 > **Note**: Question IDs (e.g., `QID1`, `QID2`) are dynamic and specific to each survey. The `values` field uses a map type to accommodate any question structure.
+
+#### `distributions` table schema:
+- `id` (string): Unique distribution identifier (primary key)
+- `surveyId` (string): Survey ID this distribution belongs to
+- `ownerId` (string): User ID who created the distribution
+- `organizationId` (string): Organization ID
+- `requestType` (string): Distribution method (e.g., Invite, Reminder, ThankYou)
+- `requestStatus` (string): Status (e.g., pending, inProgress, complete)
+- `sentDate` (string): ISO 8601 timestamp when sent (may be null if not yet sent)
+- `createdDate` (string): ISO 8601 timestamp when created
+- `modifiedDate` (string): ISO 8601 timestamp of last modification (incremental cursor)
+- `headers` (struct): Email distribution headers
+  - `fromEmail` (string): Sender email address
+  - `fromName` (string): Sender name
+  - `replyToEmail` (string): Reply-to email address
+  - `subject` (string): Email subject line
+- `stats` (struct): Distribution statistics
+  - `sent` (long): Number of emails/SMS sent
+  - `failed` (long): Number of send failures
+  - `started` (long): Number of surveys started
+  - `bounced` (long): Number of bounced emails
+  - `opened` (long): Number of emails opened
+  - `skipped` (long): Number skipped
+  - `finished` (long): Number of surveys completed
+  - `complaints` (long): Number of complaints
+  - `blocked` (long): Number blocked
+
+#### `contacts` table schema:
+- `id` (string): Unique contact identifier (primary key)
+- `firstName` (string): Contact's first name
+- `lastName` (string): Contact's last name
+- `email` (string): Contact's email address
+- `phone` (string): Contact's phone number
+- `externalDataReference` (string): External reference ID
+- `language` (string): Preferred language code
+- `unsubscribed` (boolean): Whether contact has unsubscribed
+- `responseHistory` (array<string>): Array of response IDs
+- `emailHistory` (array<string>): Array of email distribution IDs
+- `creationDate` (string): ISO 8601 timestamp when contact was created
+- `lastModifiedDate` (string): ISO 8601 timestamp of last modification (incremental cursor)
+- `embeddedData` (map<string, string>): Custom embedded data fields
 
 ## Data Type Mapping
 
@@ -199,13 +262,20 @@ Example `pipeline_spec`:
       {
         "table": {
           "source_table": "survey_responses",
-          "surveyId": "SV_6J3cuObw2G9Iuns"
+          "surveyId": "SV_abc123xyz"
         }
       },
       {
         "table": {
-          "source_table": "survey_responses",
+          "source_table": "distributions",
           "surveyId": "SV_abc123xyz"
+        }
+      },
+      {
+        "table": {
+          "source_table": "contacts",
+          "directoryId": "POOL_abc123xyz",
+          "mailingListId": "CG_def456xyz"
         }
       }
     ]
@@ -216,7 +286,9 @@ Example `pipeline_spec`:
 - `connection_name` must point to the UC connection configured with your Qualtrics `api_token` and `datacenter_id`
 - For `surveys` table: No additional options needed
 - For `survey_responses` table: `surveyId` is **required**
-  - You can ingest multiple surveys by adding multiple `survey_responses` table entries with different `surveyId` values
+- For `distributions` table: `surveyId` is **required**
+- For `contacts` table: Both `directoryId` and `mailingListId` are **required**
+  - You can ingest multiple surveys/lists by adding multiple table entries with different IDs
 
 ### Step 3: Run and Schedule the Pipeline
 
@@ -237,6 +309,16 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
   1. Create export job
   2. Poll for completion
   3. Download and parse results
+
+**For `distributions` table (CDC)**:
+- **First run**: Retrieves all distributions for the specified survey
+- **Subsequent runs**: Only fetches distributions modified since last sync (based on `modifiedDate` field)
+- Supports tracking email sends, SMS, and other distribution methods
+
+**For `contacts` table (CDC)**:
+- **First run**: Retrieves all contacts in the specified mailing list
+- **Subsequent runs**: Only fetches contacts modified since last sync (based on `lastModifiedDate` field)
+- Requires XM Directory (not available for XM Directory Lite)
 
 > **Note**: Survey response exports can take 30-90 seconds to complete depending on response count. The connector handles this automatically with appropriate wait times and polling.
 

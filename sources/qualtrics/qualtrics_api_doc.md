@@ -13,6 +13,8 @@
   - Log in to Qualtrics account → Account Settings → Qualtrics IDs → Generate Token
   - The token is user-specific and should be kept secure
 
+**Note on Directory ID**: The `{directoryid}` (also called Pool ID) is required for contacts endpoints. It is provided as a table-level parameter, not a connection-level parameter, for maximum flexibility.
+
 **Example authenticated request**:
 
 ```bash
@@ -316,13 +318,15 @@ curl -X GET \
 
 ### `contacts` object
 
-**Source endpoint**:  
-`GET /mailinglists/{mailingListId}/contacts`
+**Source endpoint**:
+`GET /directories/{directoryId}/mailinglists/{mailingListId}/contacts`
 
 **Key behavior**:
-- Returns contacts within a specific mailing list
+- Returns contacts within a specific mailing list in a directory
+- Requires both `directoryId` and `mailingListId` as table-level parameters
 - Contacts can have custom embedded data fields
 - Supports pagination
+- Only available for XM Directory users (not XM Directory Lite)
 
 **High-level schema**:
 
@@ -492,9 +496,16 @@ Primary keys for each object are static and defined by the connector:
 
 ### `contacts` endpoint
 
-**Endpoint**: `GET /mailinglists/{mailingListId}/contacts`
+**Endpoint**: `GET /directories/{directoryId}/mailinglists/{mailingListId}/contacts`
 
 **Method**: GET
+
+**Path Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `directoryId` | string | Yes | Directory ID (from table configuration). |
+| `mailingListId` | string | Yes | Mailing List ID (from table configuration). |
 
 **Query Parameters**:
 
@@ -504,8 +515,9 @@ Primary keys for each object are static and defined by the connector:
 | `skipToken` | string | No | Pagination token. |
 
 **Notes**:
-- Requires `mailingListId` as a table parameter
+- Requires both `directoryId` and `mailingListId` as table-level parameters
 - Each mailing list is treated as a separate table of contacts
+- Only available for XM Directory users (not XM Directory Lite)
 
 **Incremental retrieval**:
 - Filter by `lastModifiedDate >= last_sync_time` (client-side)
@@ -752,6 +764,10 @@ Field names are generally consistent between write and read operations for surve
 | Official Docs | https://api.qualtrics.com/ | 2024-12-23 | High | API reference, endpoints, response structures |
 | Web Search | Multiple searches for specific endpoints | 2024-12-23 | Medium | Pagination mechanism, export workflow, rate limits |
 | YouTube Tutorial | https://www.youtube.com/watch?v=_uhY_a4NgNc | 2024-12-23 | Medium | Response export workflow confirmation |
+| Python Lib Docs | https://www.qualtricsapi-pydocs.com/distributions.html | 2024-12-31 | High | Distributions endpoint requires surveyId parameter |
+| Python Lib Docs | https://www.qualtricsapi-pydocs.com/mailinglist(XM%20Subscribers).html | 2024-12-31 | High | Contacts endpoint structure, mailingListId parameter |
+| Community | Qualtrics Community discussions | 2024-12-31 | Medium | DirectoryId requirement for contacts endpoint |
+| API Reference | Stoplight API docs | 2024-12-31 | High | Full endpoint path: /directories/{directoryId}/mailinglists/{mailingListId}/contacts |
 
 ### Write Operations Research (Testing Only)
 
@@ -773,6 +789,8 @@ Field names are generally consistent between write and read operations for surve
 - Specific response status codes beyond 0 (in progress) and 1 (completed) need verification
 - Some nested structures in distributions and mailing lists may have additional fields not documented here
 - Exact behavior of delete detection may require testing
+- Mailing lists endpoint (`GET /directories/{directoryId}/mailinglists`) documented but not yet implemented
+- Directories endpoint (`GET /directories`) documented but not yet implemented
 
 ## **Sources and References**
 
@@ -800,8 +818,9 @@ Field names are generally consistent between write and read operations for surve
 - Any assumptions are noted in the "Gaps and TBD items" section
 
 **Documentation completeness**:
-- ✅ Authentication method documented
+- ✅ Authentication method documented (API token + datacenter ID + directory ID)
 - ✅ Primary objects (surveys, responses) fully documented
+- ✅ Secondary objects (distributions, contacts) documented with correct endpoints
 - ✅ Pagination mechanism described
 - ✅ Incremental sync strategy defined
 - ✅ Field schemas include all known fields
@@ -810,6 +829,8 @@ Field names are generally consistent between write and read operations for surve
 - ✅ Write-back APIs documented for testing purposes (Step 5 complete)
 - ✅ Field transformations between write and read operations documented
 - ✅ Write-specific constraints and eventual consistency delays documented
-- ⚠️ Some secondary objects (distributions, contacts) have simplified schemas; may need expansion during implementation
+- ✅ Directory ID requirement for contacts endpoint documented (corrected 2024-12-31)
+- ✅ Survey ID requirement for distributions endpoint verified (2024-12-31)
 - ⚠️ Sessions API availability may vary by Qualtrics license tier - requires verification
+- ⚠️ Mailing lists and directories endpoints documented but not yet implemented
 

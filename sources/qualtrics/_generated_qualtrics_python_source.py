@@ -195,7 +195,7 @@ def register_lakeflow_source(spark):
             }
 
             # Supported tables
-            self.tables = ["surveys", "survey_responses"]
+            self.tables = ["surveys", "survey_responses", "distributions", "contacts"]
 
         def list_tables(self) -> List[str]:
             """
@@ -228,6 +228,10 @@ def register_lakeflow_source(spark):
                 return self._get_surveys_schema()
             elif table_name == "survey_responses":
                 return self._get_survey_responses_schema()
+            elif table_name == "distributions":
+                return self._get_distributions_schema()
+            elif table_name == "contacts":
+                return self._get_contacts_schema()
             else:
                 raise ValueError(f"Unknown table: {table_name}")
 
@@ -280,6 +284,55 @@ def register_lakeflow_source(spark):
                 StructField("embeddedData", MapType(StringType(), StringType()), True)
             ])
 
+        def _get_distributions_schema(self) -> StructType:
+            """Get schema for distributions table."""
+            return StructType([
+                StructField("id", StringType(), True),
+                StructField("surveyId", StringType(), True),
+                StructField("ownerId", StringType(), True),
+                StructField("organizationId", StringType(), True),
+                StructField("requestType", StringType(), True),
+                StructField("requestStatus", StringType(), True),
+                StructField("sentDate", StringType(), True),
+                StructField("createdDate", StringType(), True),
+                StructField("modifiedDate", StringType(), True),
+                StructField("headers", StructType([
+                    StructField("fromEmail", StringType(), True),
+                    StructField("fromName", StringType(), True),
+                    StructField("replyToEmail", StringType(), True),
+                    StructField("subject", StringType(), True)
+                ]), True),
+                StructField("stats", StructType([
+                    StructField("sent", LongType(), True),
+                    StructField("failed", LongType(), True),
+                    StructField("started", LongType(), True),
+                    StructField("bounced", LongType(), True),
+                    StructField("opened", LongType(), True),
+                    StructField("skipped", LongType(), True),
+                    StructField("finished", LongType(), True),
+                    StructField("complaints", LongType(), True),
+                    StructField("blocked", LongType(), True)
+                ]), True)
+            ])
+
+        def _get_contacts_schema(self) -> StructType:
+            """Get schema for contacts table."""
+            return StructType([
+                StructField("id", StringType(), True),
+                StructField("firstName", StringType(), True),
+                StructField("lastName", StringType(), True),
+                StructField("email", StringType(), True),
+                StructField("phone", StringType(), True),
+                StructField("externalDataReference", StringType(), True),
+                StructField("language", StringType(), True),
+                StructField("unsubscribed", BooleanType(), True),
+                StructField("responseHistory", ArrayType(StringType()), True),
+                StructField("emailHistory", ArrayType(StringType()), True),
+                StructField("creationDate", StringType(), True),
+                StructField("lastModifiedDate", StringType(), True),
+                StructField("embeddedData", MapType(StringType(), StringType()), True)
+            ])
+
         def read_table_metadata(
             self, table_name: str, table_options: Dict[str, str]
         ) -> Dict:
@@ -310,6 +363,18 @@ def register_lakeflow_source(spark):
                     "cursor_field": "recordedDate",
                     "ingestion_type": "append"
                 }
+            elif table_name == "distributions":
+                return {
+                    "primary_keys": ["id"],
+                    "cursor_field": "modifiedDate",
+                    "ingestion_type": "cdc"
+                }
+            elif table_name == "contacts":
+                return {
+                    "primary_keys": ["id"],
+                    "cursor_field": "lastModifiedDate",
+                    "ingestion_type": "cdc"
+                }
             else:
                 raise ValueError(f"Unknown table: {table_name}")
 
@@ -336,6 +401,10 @@ def register_lakeflow_source(spark):
                 return self._read_surveys(start_offset)
             elif table_name == "survey_responses":
                 return self._read_survey_responses(start_offset, table_options)
+            elif table_name == "distributions":
+                return self._read_distributions(start_offset, table_options)
+            elif table_name == "contacts":
+                return self._read_contacts(start_offset, table_options)
             else:
                 raise ValueError(f"Unknown table: {table_name}")
 
@@ -692,6 +761,187 @@ def register_lakeflow_source(spark):
             processed["embeddedData"] = embedded_data
 
             return processed
+
+        def _read_distributions(
+            self, start_offset: dict, table_options: Dict[str, str]
+        ) -> (Iterator[dict], dict):
+            """
+            Read distributions from Qualtrics API.
+
+            Args:
+                start_offset: Dictionary containing pagination token and cursor timestamp
+                table_options: Must contain 'surveyId'
+
+            Returns:
+                Tuple of (iterator of distribution records, new offset)
+            """
+            survey_id = table_options.get("surveyId")
+            if not survey_id:
+                raise ValueError(
+                    "surveyId is required in table_options for distributions table"
+                )
+
+            all_distributions = []
+            skip_token = start_offset.get("skipToken") if start_offset else None
+            modified_date_cursor = start_offset.get("modifiedDate") if start_offset else None
+
+            # Fetch all pages
+            while True:
+                url = f"{self.base_url}/distributions"
+                params = {
+                    "surveyId": survey_id,
+                    "pageSize": 100
+                }
+
+                if skip_token:
+                    params["skipToken"] = skip_token
+
+                try:
+                    response = self._make_request("GET", url, params=params)
+
+                    result = response.get("result", {})
+                    elements = result.get("elements", [])
+
+                    if not elements:
+                        break
+
+                    # Filter by modifiedDate if doing incremental sync
+                    if modified_date_cursor:
+                        filtered_elements = []
+                        for dist in elements:
+                            dist_modified_date = dist.get("modifiedDate", "")
+                            if dist_modified_date and dist_modified_date > modified_date_cursor:
+                                filtered_elements.append(dist)
+                        all_distributions.extend(filtered_elements)
+                    else:
+                        all_distributions.extend(elements)
+
+                    # Check for next page
+                    next_page = result.get("nextPage")
+                    if next_page:
+                        # Extract skipToken from nextPage URL
+                        if "skipToken=" in next_page:
+                            skip_token = next_page.split("skipToken=")[-1].split("&")[0]
+                        else:
+                            break
+                    else:
+                        break
+
+                except Exception as e:
+                    print(f"Error fetching distributions: {e}")
+                    break
+
+            # Calculate new offset
+            new_offset = {}
+            if all_distributions:
+                # Find max modifiedDate from distributions that have it
+                modified_dates = [
+                    dist.get("modifiedDate", "")
+                    for dist in all_distributions
+                    if dist.get("modifiedDate")
+                ]
+                if modified_dates:
+                    max_modified_date = max(modified_dates)
+                    new_offset["modifiedDate"] = max_modified_date
+                elif modified_date_cursor:
+                    new_offset["modifiedDate"] = modified_date_cursor
+            elif modified_date_cursor:
+                # No new data, keep the same cursor
+                new_offset["modifiedDate"] = modified_date_cursor
+
+            return iter(all_distributions), new_offset
+
+        def _read_contacts(
+            self, start_offset: dict, table_options: Dict[str, str]
+        ) -> (Iterator[dict], dict):
+            """
+            Read contacts from Qualtrics API.
+
+            Args:
+                start_offset: Dictionary containing pagination token and cursor timestamp
+                table_options: Must contain 'directoryId' and 'mailingListId'
+
+            Returns:
+                Tuple of (iterator of contact records, new offset)
+            """
+            directory_id = table_options.get("directoryId")
+            if not directory_id:
+                raise ValueError(
+                    "directoryId is required in table_options for contacts table"
+                )
+
+            mailing_list_id = table_options.get("mailingListId")
+            if not mailing_list_id:
+                raise ValueError(
+                    "mailingListId is required in table_options for contacts table"
+                )
+
+            all_contacts = []
+            skip_token = start_offset.get("skipToken") if start_offset else None
+            last_modified_cursor = start_offset.get("lastModifiedDate") if start_offset else None
+
+            # Fetch all pages
+            while True:
+                url = f"{self.base_url}/directories/{directory_id}/mailinglists/{mailing_list_id}/contacts"
+                params = {"pageSize": 100}
+
+                if skip_token:
+                    params["skipToken"] = skip_token
+
+                try:
+                    response = self._make_request("GET", url, params=params)
+
+                    result = response.get("result", {})
+                    elements = result.get("elements", [])
+
+                    if not elements:
+                        break
+
+                    # Filter by lastModifiedDate if doing incremental sync
+                    if last_modified_cursor:
+                        filtered_elements = []
+                        for contact in elements:
+                            contact_last_modified = contact.get("lastModifiedDate", "")
+                            if contact_last_modified and contact_last_modified > last_modified_cursor:
+                                filtered_elements.append(contact)
+                        all_contacts.extend(filtered_elements)
+                    else:
+                        all_contacts.extend(elements)
+
+                    # Check for next page
+                    next_page = result.get("nextPage")
+                    if next_page:
+                        # Extract skipToken from nextPage URL
+                        if "skipToken=" in next_page:
+                            skip_token = next_page.split("skipToken=")[-1].split("&")[0]
+                        else:
+                            break
+                    else:
+                        break
+
+                except Exception as e:
+                    print(f"Error fetching contacts: {e}")
+                    break
+
+            # Calculate new offset
+            new_offset = {}
+            if all_contacts:
+                # Find max lastModifiedDate from contacts that have it
+                last_modified_dates = [
+                    contact.get("lastModifiedDate", "")
+                    for contact in all_contacts
+                    if contact.get("lastModifiedDate")
+                ]
+                if last_modified_dates:
+                    max_last_modified = max(last_modified_dates)
+                    new_offset["lastModifiedDate"] = max_last_modified
+                elif last_modified_cursor:
+                    new_offset["lastModifiedDate"] = last_modified_cursor
+            elif last_modified_cursor:
+                # No new data, keep the same cursor
+                new_offset["lastModifiedDate"] = last_modified_cursor
+
+            return iter(all_contacts), new_offset
 
         def _make_request(
             self,
