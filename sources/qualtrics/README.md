@@ -94,7 +94,7 @@ The Qualtrics connector exposes a **static list** of tables:
 | `surveys` | Survey metadata including name, status, creation/modification dates | `cdc` | `id` | `lastModified` |
 | `survey_responses` | Individual responses to surveys including all question answers | `append` | `responseId` | `recordedDate` |
 | `distributions` | Distribution records for survey invitations and sends | `cdc` | `id` | `modifiedDate` |
-| `contacts` | Contact records within mailing lists | `cdc` | `id` | `lastModifiedDate` |
+| `contacts` | Contact records within mailing lists | `snapshot` | `contactId` | N/A (full refresh) |
 
 ### Required and Optional Table Options
 
@@ -135,15 +135,11 @@ Table-specific options are passed via the pipeline spec under `table` in `object
 - `id` (string): Unique survey identifier (primary key)
 - `name` (string): Survey name/title
 - `ownerId` (string): User ID of survey owner
-- `organizationId` (string): Organization ID
 - `isActive` (boolean): Whether survey is currently active
 - `creationDate` (string): ISO 8601 timestamp when survey was created
 - `lastModified` (string): ISO 8601 timestamp of last modification (incremental cursor)
-- `expiration` (struct): Nested object containing start and end dates
-  - `startDate` (string): When survey becomes active
-  - `endDate` (string): When survey expires
-- `brandId` (string): Brand ID associated with survey
-- `brandBaseURL` (string): Base URL for the brand
+
+> **Note**: Fields like `brandId`, `brandBaseURL`, `organizationId`, and `expiration` are not returned by the list surveys endpoint. Use the GET /surveys/{id} endpoint if you need these fields.
 
 #### `survey_responses` table schema:
 - `responseId` (string): Unique response identifier (primary key)
@@ -174,19 +170,31 @@ Table-specific options are passed via the pipeline spec under `table` in `object
 
 #### `distributions` table schema:
 - `id` (string): Unique distribution identifier (primary key)
-- `surveyId` (string): Survey ID this distribution belongs to
+- `parentDistributionId` (string): Parent distribution ID (for follow-ups/reminders)
 - `ownerId` (string): User ID who created the distribution
 - `organizationId` (string): Organization ID
-- `requestType` (string): Distribution method (e.g., Invite, Reminder, ThankYou)
-- `requestStatus` (string): Status (e.g., pending, inProgress, complete)
-- `sentDate` (string): ISO 8601 timestamp when sent (may be null if not yet sent)
+- `requestType` (string): Distribution method (e.g., GeneratedInvite, Invite, Reminder)
+- `requestStatus` (string): Status (e.g., Generated, pending, inProgress, complete)
+- `sendDate` (string): ISO 8601 timestamp when sent/scheduled
 - `createdDate` (string): ISO 8601 timestamp when created
 - `modifiedDate` (string): ISO 8601 timestamp of last modification (incremental cursor)
 - `headers` (struct): Email distribution headers
   - `fromEmail` (string): Sender email address
   - `fromName` (string): Sender name
   - `replyToEmail` (string): Reply-to email address
-  - `subject` (string): Email subject line
+- `recipients` (struct): Recipient information
+  - `mailingListId` (string): Mailing list ID
+  - `contactId` (string): Specific contact ID (if targeted)
+  - `libraryId` (string): Library ID
+  - `sampleId` (string): Sample ID (if using sample)
+- `message` (struct): Message details
+  - `libraryId` (string): Message library ID
+  - `messageId` (string): Message template ID
+  - `messageType` (string): Type (e.g., Inline, InviteEmail)
+- `surveyLink` (struct): Survey link information
+  - `surveyId` (string): Survey ID this distribution belongs to
+  - `expirationDate` (string): When survey link expires
+  - `linkType` (string): Link type (e.g., Individual, Multiple, Anonymous)
 - `stats` (struct): Distribution statistics
   - `sent` (long): Number of emails/SMS sent
   - `failed` (long): Number of send failures
@@ -199,19 +207,16 @@ Table-specific options are passed via the pipeline spec under `table` in `object
   - `blocked` (long): Number blocked
 
 #### `contacts` table schema:
-- `id` (string): Unique contact identifier (primary key)
+- `contactId` (string): Unique contact identifier (primary key)
 - `firstName` (string): Contact's first name
 - `lastName` (string): Contact's last name
 - `email` (string): Contact's email address
 - `phone` (string): Contact's phone number
-- `externalDataReference` (string): External reference ID
+- `extRef` (string): External reference ID
 - `language` (string): Preferred language code
-- `unsubscribed` (boolean): Whether contact has unsubscribed
-- `responseHistory` (array<string>): Array of response IDs
-- `emailHistory` (array<string>): Array of email distribution IDs
-- `creationDate` (string): ISO 8601 timestamp when contact was created
-- `lastModifiedDate` (string): ISO 8601 timestamp of last modification (incremental cursor)
-- `embeddedData` (map<string, string>): Custom embedded data fields
+- `unsubscribed` (boolean): Whether contact has unsubscribed globally
+- `mailingListUnsubscribed` (boolean): Whether contact has unsubscribed from this mailing list
+- `contactLookupId` (string): Contact lookup identifier
 
 ## Data Type Mapping
 
@@ -315,9 +320,9 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 - **Subsequent runs**: Only fetches distributions modified since last sync (based on `modifiedDate` field)
 - Supports tracking email sends, SMS, and other distribution methods
 
-**For `contacts` table (CDC)**:
-- **First run**: Retrieves all contacts in the specified mailing list
-- **Subsequent runs**: Only fetches contacts modified since last sync (based on `lastModifiedDate` field)
+**For `contacts` table (Snapshot)**:
+- **All runs**: Performs full refresh of all contacts in the specified mailing list
+- **Note**: The Qualtrics API does not return `lastModifiedDate` for contacts, so incremental sync is not supported
 - Requires XM Directory (not available for XM Directory Lite)
 
 > **Note**: Survey response exports can take 30-90 seconds to complete depending on response count. The connector handles this automatically with appropriate wait times and polling.

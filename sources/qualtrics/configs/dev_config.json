@@ -1,5 +1,4 @@
 {
-  "api_token": "YOUR_QUALTRICS_API_TOKEN",
+  "api_token": "YOUR_API_TOKEN",
   "datacenter_id": "YOUR_DATACENTER_ID"
 }
-
