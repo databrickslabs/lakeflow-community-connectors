@@ -284,8 +284,9 @@ class SpecParser:
         Returns:
             The full destination table name in the format
             'destination_catalog.destination_schema.destination_table',
-            or 'destination_catalog.destination_schema.table_name' if destination_table is not specified,
-            or table_name if destination_catalog or destination_schema is not specified.
+            or 'destination_catalog.destination_schema.table_name' if destination_table is
+            not specified, or table_name if destination_catalog or destination_schema is
+            not specified.
 
         Raises:
             ValueError: If the table_name is not found in the object list.

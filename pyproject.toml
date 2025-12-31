@@ -7,7 +7,7 @@ name = "lakeflow-community-connectors"
 version = "0.1.0"
 description = "Lakeflow community connectors built on Spark Python Data Source API"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = [
     "pyspark>=3.5.0",
     "pydantic>=2.0.0",

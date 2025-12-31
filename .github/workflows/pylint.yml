@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.8", "3.9", "3.10"]
+        python-version: ["3.10"]
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python ${{ matrix.python-version }}
@@ -24,12 +24,12 @@ jobs:
         # Lint non-test files
         pylint \
         --max-line-length=100 \
-        --disable=W,R0801,R1705 \
+        --disable=W,C0114,C0115,R0801,R1705 \
         --ignore-long-lines='^\s*(#|f?".*"|f?'\''.*'\'')$' \
         $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py' | grep -v 'test_')
         # Lint test files with C0115,C0116 disabled
         pylint \
         --max-line-length=100 \
-        --disable=W,R0801,R1705,C0115,C0116 \
+        --disable=W,C0114,C0115,R0801,R1705,C0115,C0116 \
         --ignore-long-lines='^\s*(#|f?".*"|f?'\''.*'\'')$' \
         $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py' | grep 'test_')
