@@ -33,10 +33,8 @@ class LakeflowConnect:
                 the source API may require extra parameters needed to fetch the schema.
                 If there are no additional options required, you can ignore this
                 parameter, and no options will be provided during execution.
-                # Only add parameters to table_options if they are essential for
-                # accessing or retrieving the data (such as specifying table namespaces).
-                # Do not include options like filters for row or column selection here;
-                # those features may be supported in the future.
+                Only add parameters to table_options if they are essential for accessing
+                or retrieving the data (such as specifying table namespaces).
         Returns:
             A StructType object representing the schema of the table.
         """
@@ -52,10 +50,8 @@ class LakeflowConnect:
                 the source API may require extra parameters needed to fetch the metadata.
                 If there are no additional options required, you can ignore this
                 parameter, and no options will be provided during execution.
-                # Only add parameters to table_options if they are essential for
-                # accessing or retrieving the data (such as specifying table namespaces).
-                # Do not include options like filters for row or column selection here;
-                # those features may be supported in the future.
+                Only add parameters to table_options if they are essential for accessing
+                or retrieving the data (such as specifying table namespaces).
         Returns:
             A dictionary containing the metadata of the table. It should include the
             following keys:
@@ -91,10 +87,8 @@ class LakeflowConnect:
                 the source API may require extra parameters needed to read the table.
                 If there are no additional options required, you can ignore this
                 parameter, and no options will be provided during execution.
-                # Only add parameters to table_options if they are essential for
-                # accessing or retrieving the data (such as specifying table namespaces).
-                # Do not include options like filters for row or column selection here;
-                # those features may be supported in the future.
+                Only add parameters to table_options if they are essential for accessing
+                or retrieving the data (such as specifying table namespaces).
         Returns:
             An iterator of records in JSON format and an offset.
             DO NOT convert the JSON based on the schema in `get_table_schema` in
