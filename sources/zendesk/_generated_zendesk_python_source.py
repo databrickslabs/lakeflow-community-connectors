@@ -51,9 +51,7 @@ def register_lakeflow_source(spark):
                 # 1. set it to None when schema marks it as nullable
                 # 2. Otherwise, raise an error.
                 if field.name in value:
-                    field_dict[field.name] = parse_value(
-                        value.get(field.name), field.dataType
-                    )
+                    field_dict[field.name] = parse_value(value.get(field.name), field.dataType)
                 elif field.nullable:
                     field_dict[field.name] = None
                 else:
@@ -162,7 +160,6 @@ def register_lakeflow_source(spark):
                 f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}"
             )
 
-
     ########################################################
     # sources/zendesk/zendesk.py
     ########################################################
@@ -193,9 +190,7 @@ def register_lakeflow_source(spark):
                 "users",
             ]
 
-        def get_table_schema(
-            self, table_name: str, table_options: Dict[str, str]
-        ) -> StructType:
+        def get_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
             """
             Fetch the schema of a table.
             """
@@ -233,13 +228,9 @@ def register_lakeflow_source(spark):
                             "custom_fields",
                             ArrayType(MapType(StringType(), StringType())),
                         ),
-                        StructField(
-                            "satisfaction_rating", MapType(StringType(), StringType())
-                        ),
+                        StructField("satisfaction_rating", MapType(StringType(), StringType())),
                         StructField("sharing_agreement_ids", ArrayType(LongType())),
-                        StructField(
-                            "fields", ArrayType(MapType(StringType(), StringType()))
-                        ),
+                        StructField("fields", ArrayType(MapType(StringType(), StringType()))),
                         StructField("followup_ids", ArrayType(LongType())),
                         StructField("ticket_form_id", LongType()),
                         StructField("brand_id", LongType()),
@@ -264,9 +255,7 @@ def register_lakeflow_source(spark):
                         StructField("shared_tickets", BooleanType()),
                         StructField("shared_comments", BooleanType()),
                         StructField("tags", ArrayType(StringType())),
-                        StructField(
-                            "organization_fields", MapType(StringType(), StringType())
-                        ),
+                        StructField("organization_fields", MapType(StringType(), StringType())),
                     ]
                 ),
                 "articles": StructType(
@@ -354,9 +343,7 @@ def register_lakeflow_source(spark):
                         StructField("follower_ids", ArrayType(LongType())),
                         StructField("ticket_form_id", LongType()),
                         StructField("brand_id", LongType()),
-                        StructField(
-                            "comments", ArrayType(MapType(StringType(), StringType()))
-                        ),
+                        StructField("comments", ArrayType(MapType(StringType(), StringType()))),
                     ]
                 ),
                 "topics": StructType(
@@ -424,9 +411,7 @@ def register_lakeflow_source(spark):
 
             return schemas[table_name]
 
-        def read_table_metadata(
-            self, table_name: str, table_options: Dict[str, str]
-        ) -> dict:
+        def read_table_metadata(self, table_name: str, table_options: Dict[str, str]) -> dict:
             """
             Fetch the metadata of a table.
             """
@@ -636,7 +621,6 @@ def register_lakeflow_source(spark):
 
             return all_records, {"page": current_page}
 
-
     ########################################################
     # pipeline/lakeflow_python_source.py
     ########################################################
@@ -644,7 +628,6 @@ def register_lakeflow_source(spark):
     METADATA_TABLE = "_lakeflow_metadata"
     TABLE_NAME = "tableName"
     TABLE_NAME_LIST = "tableNameList"
-
 
     class LakeflowStreamReader(SimpleDataSourceStreamReader):
         """
@@ -682,7 +665,6 @@ def register_lakeflow_source(spark):
             # are missed in the returned records.
             return self.read(start)[0]
 
-
     class LakeflowBatchReader(DataSourceReader):
         def __init__(
             self,
@@ -716,7 +698,6 @@ def register_lakeflow_source(spark):
                 all_records.append({"tableName": table, **metadata})
             return all_records
 
-
     class LakeflowSource(DataSource):
         def __init__(self, options):
             self.options = options
@@ -746,6 +727,5 @@ def register_lakeflow_source(spark):
 
         def simpleStreamReader(self, schema: StructType):
             return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
-
 
     spark.dataSource.register(LakeflowSource)

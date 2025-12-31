@@ -39,7 +39,9 @@ class LakeflowConnectTestUtils:
         """
         return ["contacts", "companies"]
 
-    def generate_rows_and_write(self, table_name: str, number_of_rows: int) -> Tuple[bool, List[Dict], Dict[str, str]]:
+    def generate_rows_and_write(
+        self, table_name: str, number_of_rows: int
+    ) -> Tuple[bool, List[Dict], Dict[str, str]]:
         """
         Generate specified number of rows and write them to the given HubSpot table.
 
@@ -95,7 +97,7 @@ class LakeflowConnectTestUtils:
                     "lastname": f"LastName_{i}",
                     "phone": f"+1-555-{random.randint(100, 999)}-{random.randint(1000, 9999)}",
                     "jobtitle": f"Job Title {i}",
-                    "company": f"Company {i}"
+                    "company": f"Company {i}",
                 }
             elif table_name == "companies":
                 row = {
@@ -105,14 +107,14 @@ class LakeflowConnectTestUtils:
                     "state": "California",
                     "country": "United States",
                     "industry": "ACCOUNTING",
-                    "phone": f"+1-555-{random.randint(100, 999)}-{random.randint(1000, 9999)}"
+                    "phone": f"+1-555-{random.randint(100, 999)}-{random.randint(1000, 9999)}",
                 }
             else:
                 # Fallback for unsupported tables
                 row = {
                     "hs_timestamp": str(int(datetime.now().timestamp() * 1000)),
                     "subject": f"Generated {table_name} {i}",
-                    "body": f"This is generated content for {table_name} record {i}"
+                    "body": f"This is generated content for {table_name} record {i}",
                 }
 
             rows.append(row)
@@ -140,9 +142,7 @@ class LakeflowConnectTestUtils:
         """Create a single record in HubSpot."""
         url = f"{self.base_url}/crm/v3/objects/{table_name}"
 
-        payload = {
-            "properties": record
-        }
+        payload = {"properties": record}
 
         try:
             response = requests.post(url, headers=self.auth_header, json=payload)
@@ -151,7 +151,9 @@ class LakeflowConnectTestUtils:
                 print(f"Successfully created {table_name} record")
                 return True
             else:
-                print(f"Failed to create {table_name} record: {response.status_code} {response.text}")
+                print(
+                    f"Failed to create {table_name} record: {response.status_code} {response.text}"
+                )
                 return False
 
         except Exception as e:
@@ -175,7 +177,9 @@ class LakeflowConnectTestUtils:
                 print(f"Successfully created {len(results)} {table_name} records via batch API")
                 return True
             else:
-                print(f"Failed to create batch {table_name} records: {response.status_code} {response.text}")
+                print(
+                    f"Failed to create batch {table_name} records: {response.status_code} {response.text}"
+                )
                 # Fallback to individual creation if batch fails
                 return self._fallback_individual_creation(table_name, records)
 

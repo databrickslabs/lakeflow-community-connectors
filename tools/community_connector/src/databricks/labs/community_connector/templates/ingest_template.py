@@ -1,7 +1,7 @@
 from pipeline.ingestion_pipeline import ingest
 from libs.source_loader import get_register_function
 
-# Connector source name. 
+# Connector source name.
 source_name = "{SOURCE_NAME}"  # e.g., "github", "salesforce"
 
 # =============================================================================

@@ -186,9 +186,7 @@ def _validate_table_configuration(config: dict, path: str) -> list[str]:
     if "scd_type" in config:
         scd_type = config["scd_type"]
         if not isinstance(scd_type, str):
-            raise PipelineSpecValidationError(
-                "'scd_type' must be a string", f"{path}.scd_type"
-            )
+            raise PipelineSpecValidationError("'scd_type' must be a string", f"{path}.scd_type")
         if scd_type not in VALID_SCD_TYPES:
             raise PipelineSpecValidationError(
                 f"'scd_type' must be one of {VALID_SCD_TYPES}, got '{scd_type}'",
@@ -230,4 +228,3 @@ def validate_and_report(spec: dict) -> Optional[str]:
         return None
     except PipelineSpecValidationError as e:
         return str(e)
-

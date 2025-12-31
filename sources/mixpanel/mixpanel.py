@@ -34,15 +34,19 @@ class LakeflowConnect:
             }
             print(self.auth_header)
         else:
-            raise ValueError("Authentication credentials required: either (username, secret) or api_secret")
-        
+            raise ValueError(
+                "Authentication credentials required: either (username, secret) or api_secret"
+            )
+
         # Configuration options
         self.region = options.get("region", "US")
         self.timezone = options.get("project_timezone", "US/Pacific")
-        
+
         # Historical data settings
-        self.historical_days = int(options.get("historical_days", 10))  # Default to 10 days of history
-        
+        self.historical_days = int(
+            options.get("historical_days", 10)
+        )  # Default to 10 days of history
+
         # Set base URLs based on region
         if self.region.upper() == "EU":
             self.base_url = "https://data-eu.mixpanel.com/api/2.0"
@@ -50,7 +54,7 @@ class LakeflowConnect:
         else:
             self.base_url = "https://data.mixpanel.com/api/2.0"
             self.cohorts_base_url = "https://mixpanel.com/api"
-        
+
         # Cache for schemas
         self._schema_cache = {}
 
@@ -65,7 +69,7 @@ class LakeflowConnect:
             "%Y-%m-%d %H:%M:%S",
             "%Y-%m-%dT%H:%M:%SZ",
             "%Y-%m-%dT%H:%M:%S.%f",
-            "%Y-%m-%dT%H:%M:%S.%fZ"
+            "%Y-%m-%dT%H:%M:%S.%fZ",
         ]
 
         for fmt in datetime_formats:
@@ -82,44 +86,66 @@ class LakeflowConnect:
 
     # Standard property keys for different Mixpanel object types
     _EVENT_STANDARD_KEYS = {
-        "time", "distinct_id", "$browser", "$browser_version",
-        "$city", "$current_url", "$device_id", "$initial_referrer",
-        "$initial_referring_domain", "$lib_version", "$mp_api_endpoint",
-        "$mp_api_timestamp_ms", "$os", "$region", "$screen_height",
-        "$screen_width", "mp_country_code", "mp_lib",
-        "mp_processing_time_ms", "mp_sent_by_lib_version"
+        "time",
+        "distinct_id",
+        "$browser",
+        "$browser_version",
+        "$city",
+        "$current_url",
+        "$device_id",
+        "$initial_referrer",
+        "$initial_referring_domain",
+        "$lib_version",
+        "$mp_api_endpoint",
+        "$mp_api_timestamp_ms",
+        "$os",
+        "$region",
+        "$screen_height",
+        "$screen_width",
+        "mp_country_code",
+        "mp_lib",
+        "mp_processing_time_ms",
+        "mp_sent_by_lib_version",
     }
-    
+
     _ENGAGE_STANDARD_KEYS = {
-        "$first_name", "$last_name", "$email", "$created", "$last_seen",
-        "$name", "$phone", "$city", "$region", "$country_code",
-        "$timezone", "$browser", "$os"
+        "$first_name",
+        "$last_name",
+        "$email",
+        "$created",
+        "$last_seen",
+        "$name",
+        "$phone",
+        "$city",
+        "$region",
+        "$country_code",
+        "$timezone",
+        "$browser",
+        "$os",
     }
 
     def _separate_standard_and_custom_properties(
-        self, 
-        properties: dict, 
-        standard_keys: set
+        self, properties: dict, standard_keys: set
     ) -> tuple[dict, dict]:
         """
         Generic function to separate standard properties from custom properties.
-        
+
         Args:
             properties: The properties dict to process
             standard_keys: Set of keys considered "standard" for this object type
-            
+
         Returns:
             Tuple of (standard_props, custom_props)
         """
         standard_props = {}
         custom_props = {}
-        
+
         for key, value in properties.items():
             if key in standard_keys:
                 standard_props[key] = value
             else:
                 custom_props[key] = value
-        
+
         return standard_props, custom_props
 
     def _process_event(self, event: dict) -> dict:
@@ -127,21 +153,18 @@ class LakeflowConnect:
         Process event to separate standard properties from custom properties.
         """
         properties = event.get("properties", {})
-        
+
         # Extract $insert_id to top level (not part of standard_props)
         insert_id = properties.get("$insert_id")
-        
+
         standard_props, custom_props = self._separate_standard_and_custom_properties(
             properties, self._EVENT_STANDARD_KEYS
         )
-        
+
         return {
             "event": event.get("event"),
             "$insert_id": insert_id,
-            "properties": {
-                **standard_props,
-                "custom_properties": custom_props
-            }
+            "properties": {**standard_props, "custom_properties": custom_props},
         }
 
     def _process_engage_profile(self, profile: dict) -> dict:
@@ -152,29 +175,19 @@ class LakeflowConnect:
         standard_props, custom_props = self._separate_standard_and_custom_properties(
             properties, self._ENGAGE_STANDARD_KEYS
         )
-        
+
         return {
             "$distinct_id": profile.get("$distinct_id"),
-            "$properties": {
-                **standard_props,
-                "custom_properties": custom_props
-            }
+            "$properties": {**standard_props, "custom_properties": custom_props},
         }
 
     def list_tables(self) -> list[str]:
         """
         List available tables/streams in Mixpanel
         """
-        return [
-            "events",
-            "cohorts",
-            "cohort_members",
-            "engage"
-        ]
+        return ["events", "cohorts", "cohort_members", "engage"]
 
-    def get_table_schema(
-        self, table_name: str, table_options: dict[str, str]
-    ) -> StructType:
+    def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
         """
         Fetch the schema of a table.
         Args:
@@ -188,84 +201,104 @@ class LakeflowConnect:
             return self._schema_cache[table_name]
 
         schemas = {
-            "events": StructType([
-                StructField("event", StringType()),
-                StructField("$insert_id", StringType()),
-                StructField("properties", StructType([
-                    StructField("time", LongType()),
+            "events": StructType(
+                [
+                    StructField("event", StringType()),
+                    StructField("$insert_id", StringType()),
+                    StructField(
+                        "properties",
+                        StructType(
+                            [
+                                StructField("time", LongType()),
+                                StructField("distinct_id", StringType()),
+                                StructField("$browser", StringType()),
+                                StructField("$browser_version", LongType()),
+                                StructField("$city", StringType()),
+                                StructField("$current_url", StringType()),
+                                StructField("$device_id", StringType()),
+                                StructField("$initial_referrer", StringType()),
+                                StructField("$initial_referring_domain", StringType()),
+                                StructField("$lib_version", StringType()),
+                                StructField("$mp_api_endpoint", StringType()),
+                                StructField("$mp_api_timestamp_ms", LongType()),
+                                StructField("$os", StringType()),
+                                StructField("$region", StringType()),
+                                StructField("$screen_height", LongType()),
+                                StructField("$screen_width", LongType()),
+                                StructField("mp_country_code", StringType()),
+                                StructField("mp_lib", StringType()),
+                                StructField("mp_processing_time_ms", LongType()),
+                                StructField("mp_sent_by_lib_version", StringType()),
+                                StructField(
+                                    "custom_properties", MapType(StringType(), StringType())
+                                ),
+                            ]
+                        ),
+                    ),
+                    StructField("generated_timestamp", LongType()),
+                ]
+            ),
+            "cohorts": StructType(
+                [
+                    StructField("id", LongType()),
+                    StructField("name", StringType()),
+                    StructField("description", StringType()),
+                    StructField("count", LongType()),
+                    StructField("is_visible", BooleanType()),
+                    StructField("is_dynamic", BooleanType()),
+                    StructField("created", StringType()),
+                    StructField("project_id", LongType()),
+                    StructField("generated_timestamp", LongType()),
+                ]
+            ),
+            "cohort_members": StructType(
+                [
+                    StructField("cohort_id", LongType()),
                     StructField("distinct_id", StringType()),
-                    StructField("$browser", StringType()),
-                    StructField("$browser_version", LongType()),
-                    StructField("$city", StringType()),
-                    StructField("$current_url", StringType()),
-                    StructField("$device_id", StringType()),
-                    StructField("$initial_referrer", StringType()),
-                    StructField("$initial_referring_domain", StringType()),
-                    StructField("$lib_version", StringType()),
-                    StructField("$mp_api_endpoint", StringType()),
-                    StructField("$mp_api_timestamp_ms", LongType()),
-                    StructField("$os", StringType()),
-                    StructField("$region", StringType()),
-                    StructField("$screen_height", LongType()),
-                    StructField("$screen_width", LongType()),
-                    StructField("mp_country_code", StringType()),
-                    StructField("mp_lib", StringType()),
-                    StructField("mp_processing_time_ms", LongType()),
-                    StructField("mp_sent_by_lib_version", StringType()),
-                    StructField("custom_properties", MapType(StringType(), StringType())),
-                ])),
-                StructField("generated_timestamp", LongType()),
-            ]),
-            "cohorts": StructType([
-                StructField("id", LongType()),
-                StructField("name", StringType()),
-                StructField("description", StringType()),
-                StructField("count", LongType()),
-                StructField("is_visible", BooleanType()),
-                StructField("is_dynamic", BooleanType()),
-                StructField("created", StringType()),
-                StructField("project_id", LongType()),
-                StructField("generated_timestamp", LongType()),
-            ]),
-            "cohort_members": StructType([
-                StructField("cohort_id", LongType()),
-                StructField("distinct_id", StringType()),
-                StructField("generated_timestamp", LongType()),
-            ]),
-            "engage": StructType([
-                StructField("$distinct_id", StringType()),
-                StructField("$properties", StructType([
-                    StructField("$first_name", StringType()),
-                    StructField("$last_name", StringType()),
-                    StructField("$email", StringType()),
-                    StructField("$created", StringType()),
-                    StructField("$last_seen", StringType()),
-                    StructField("$name", StringType()),
-                    StructField("$phone", StringType()),
-                    StructField("$city", StringType()),
-                    StructField("$region", StringType()),
-                    StructField("$country_code", StringType()),
-                    StructField("$timezone", StringType()),
-                    StructField("$browser", StringType()),
-                    StructField("$os", StringType()),
-                    StructField("custom_properties", MapType(StringType(), StringType())),
-                ])),
-                StructField("generated_timestamp", LongType()),
-            ])
+                    StructField("generated_timestamp", LongType()),
+                ]
+            ),
+            "engage": StructType(
+                [
+                    StructField("$distinct_id", StringType()),
+                    StructField(
+                        "$properties",
+                        StructType(
+                            [
+                                StructField("$first_name", StringType()),
+                                StructField("$last_name", StringType()),
+                                StructField("$email", StringType()),
+                                StructField("$created", StringType()),
+                                StructField("$last_seen", StringType()),
+                                StructField("$name", StringType()),
+                                StructField("$phone", StringType()),
+                                StructField("$city", StringType()),
+                                StructField("$region", StringType()),
+                                StructField("$country_code", StringType()),
+                                StructField("$timezone", StringType()),
+                                StructField("$browser", StringType()),
+                                StructField("$os", StringType()),
+                                StructField(
+                                    "custom_properties", MapType(StringType(), StringType())
+                                ),
+                            ]
+                        ),
+                    ),
+                    StructField("generated_timestamp", LongType()),
+                ]
+            ),
         }
-        
+
         if table_name not in schemas:
             raise ValueError(f"Unknown table: {table_name}")
-        
+
         # Cache the result
         schema = schemas[table_name]
         self._schema_cache[table_name] = schema
-        
+
         return schema
 
-    def read_table_metadata(
-        self, table_name: str, table_options: dict[str, str]
-    ) -> dict:
+    def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
         """
         Fetch the metadata of a table.
         Args:
@@ -281,28 +314,24 @@ class LakeflowConnect:
             "events": {
                 "primary_keys": ["$insert_id"],
                 "cursor_field": "properties.time",
-                "ingestion_type": "cdc"
+                "ingestion_type": "cdc",
             },
-            "cohorts": {
-                "primary_keys": ["id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot"
-            },
+            "cohorts": {"primary_keys": ["id"], "cursor_field": None, "ingestion_type": "snapshot"},
             "cohort_members": {
                 "primary_keys": ["cohort_id", "distinct_id"],
                 "cursor_field": None,
-                "ingestion_type": "snapshot"
+                "ingestion_type": "snapshot",
             },
             "engage": {
                 "primary_keys": ["$distinct_id"],
                 "cursor_field": "$properties.$last_seen",
-                "ingestion_type": "cdc"
-            }
+                "ingestion_type": "cdc",
+            },
         }
-        
+
         if table_name not in metadata:
             raise ValueError(f"Unknown table: {table_name}")
-        
+
         return metadata[table_name]
 
     def read_table(
@@ -320,7 +349,7 @@ class LakeflowConnect:
         # Handle None start_offset by providing default empty dict
         if start_offset is None:
             start_offset = {}
-            
+
         if table_name == "events":
             return self._read_events_table(start_offset)
         elif table_name == "cohorts":
@@ -341,7 +370,9 @@ class LakeflowConnect:
 
         if not start_date:
             # For initial snapshot, start from configured historical days ago
-            start_date = (datetime.now() - timedelta(days=self.historical_days)).strftime("%Y-%m-%d")
+            start_date = (datetime.now() - timedelta(days=self.historical_days)).strftime(
+                "%Y-%m-%d"
+            )
 
         # End date is today (inclusive)
         today = datetime.now().strftime("%Y-%m-%d")
@@ -358,7 +389,10 @@ class LakeflowConnect:
         # Loop through date ranges in 7-day chunks until we reach today
         while current_start <= today:
             # Calculate end date for this chunk
-            chunk_end = (datetime.strptime(current_start, "%Y-%m-%d") + timedelta(days=self.BATCH_SIZE_DAYS - 1)).strftime("%Y-%m-%d")
+            chunk_end = (
+                datetime.strptime(current_start, "%Y-%m-%d")
+                + timedelta(days=self.BATCH_SIZE_DAYS - 1)
+            ).strftime("%Y-%m-%d")
             if chunk_end > today:
                 chunk_end = today
 
@@ -370,7 +404,7 @@ class LakeflowConnect:
             }
 
             # Only add project_id for service account authentication (username + secret)
-            if self.project_id and hasattr(self, 'username') and hasattr(self, 'secret'):
+            if self.project_id and hasattr(self, "username") and hasattr(self, "secret"):
                 params["project_id"] = self.project_id
 
             try:
@@ -385,7 +419,7 @@ class LakeflowConnect:
                 total_api_calls += 1
 
                 # Mixpanel export returns JSONL format
-                response_lines = response.text.strip().split('\n')
+                response_lines = response.text.strip().split("\n")
                 total_lines = len(response_lines)
                 non_empty_lines = len([line for line in response_lines if line.strip()])
                 chunk_records = 0
@@ -409,7 +443,9 @@ class LakeflowConnect:
                             print(f"Problematic line (first 100 chars): {line[:100]}")
                             continue
 
-                print(f"Fetched {chunk_records} events from {current_start} to {chunk_end} ({json_errors} JSON errors)")
+                print(
+                    f"Fetched {chunk_records} events from {current_start} to {chunk_end} ({json_errors} JSON errors)"
+                )
 
             except requests.exceptions.RequestException as e:
                 print(f"Error fetching events data for {current_start} to {chunk_end}: {e}")
@@ -421,13 +457,19 @@ class LakeflowConnect:
                     return iter(all_records), next_offset
 
             # Move to next chunk
-            current_start = (datetime.strptime(chunk_end, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+            current_start = (datetime.strptime(chunk_end, "%Y-%m-%d") + timedelta(days=1)).strftime(
+                "%Y-%m-%d"
+            )
 
         # All data fetched successfully - set up incremental mode for tomorrow
-        next_start_date = (datetime.strptime(today, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+        next_start_date = (datetime.strptime(today, "%Y-%m-%d") + timedelta(days=1)).strftime(
+            "%Y-%m-%d"
+        )
         next_offset = {"start_date": next_start_date}
 
-        print(f"Total: {total_api_calls} API calls, {len(all_records)} events from {start_date} to {today}")
+        print(
+            f"Total: {total_api_calls} API calls, {len(all_records)} events from {start_date} to {today}"
+        )
 
         # Return the records as an iterator
         def record_iterator():
@@ -464,7 +506,7 @@ class LakeflowConnect:
             return iter(records), start_offset if start_offset else {}
 
         print(f"Fetched {len(records)} cohorts (full refresh)")
-        
+
         # For snapshot tables, return the same offset
         return iter(records), start_offset if start_offset else {}
 
@@ -476,66 +518,67 @@ class LakeflowConnect:
         # First, get all cohorts
         url = f"{self.cohorts_base_url}/query/cohorts/list"
         records = []
-        
+
         try:
             # Fetch all cohorts
             response = requests.post(url, headers=self.auth_header, timeout=30)
             response.raise_for_status()
             cohorts_data = response.json()
-            
+
             # Handle both response formats: list directly or dict with "cohorts" key
-            cohorts = cohorts_data if isinstance(cohorts_data, list) else cohorts_data.get("cohorts", [])
+            cohorts = (
+                cohorts_data if isinstance(cohorts_data, list) else cohorts_data.get("cohorts", [])
+            )
             print(f"Found {len(cohorts)} cohorts, fetching members...")
-            
+
             # For each cohort, fetch its members
             for cohort in cohorts:
                 cohort_id = cohort.get("id")
                 if not cohort_id:
                     continue
-                
+
                 # Fetch cohort members using the engage API with cohort filter
                 members_url = f"{self.cohorts_base_url}/query/engage"
                 params = {"where": f'properties["$cohort"] == "{cohort_id}"'}
-                
+
                 # Only add project_id for service account authentication
-                if self.project_id and hasattr(self, 'username') and hasattr(self, 'secret'):
+                if self.project_id and hasattr(self, "username") and hasattr(self, "secret"):
                     params["project_id"] = self.project_id
-                
+
                 try:
                     members_response = requests.post(
-                        members_url, 
-                        params=params, 
-                        headers=self.auth_header, 
-                        timeout=60
+                        members_url, params=params, headers=self.auth_header, timeout=60
                     )
                     members_response.raise_for_status()
                     members_data = members_response.json()
-                    
+
                     # Extract distinct_id from each member
                     for member in members_data.get("results", []):
                         distinct_id = member.get("$distinct_id")
                         if distinct_id:
-                            records.append({
-                                "cohort_id": cohort_id,
-                                "distinct_id": distinct_id,
-                                "generated_timestamp": int(time.time() * 1000)
-                            })
-                    
+                            records.append(
+                                {
+                                    "cohort_id": cohort_id,
+                                    "distinct_id": distinct_id,
+                                    "generated_timestamp": int(time.time() * 1000),
+                                }
+                            )
+
                     # Rate limiting: small delay between cohort member fetches
                     if len(cohorts) > 1:
                         time.sleep(0.34)
-                        
+
                 except requests.exceptions.RequestException as e:
                     print(f"Error fetching members for cohort {cohort_id}: {e}")
                     # Continue to next cohort
                     continue
-            
+
         except requests.exceptions.RequestException as e:
             print(f"Error fetching cohorts list: {e}")
             return iter(records), start_offset if start_offset else {}
-        
+
         print(f"Fetched {len(records)} cohort member relationships across {len(cohorts)} cohorts")
-        
+
         # For snapshot tables, return the same offset (no incremental cursor)
         return iter(records), start_offset if start_offset else {}
 
@@ -569,7 +612,7 @@ class LakeflowConnect:
         if current_session_id:
             params["session_id"] = current_session_id
         # Only add project_id for service account authentication (username + secret)
-        if self.project_id and hasattr(self, 'username') and hasattr(self, 'secret'):
+        if self.project_id and hasattr(self, "username") and hasattr(self, "secret"):
             params["project_id"] = self.project_id
 
         while True:
@@ -587,7 +630,7 @@ class LakeflowConnect:
                     # Apply incremental filtering based on $last_seen (from $properties)
                     profile_props = profile.get("$properties", {})
                     profile_last_seen = profile_props.get("$last_seen")
-                    
+
                     if profile_last_seen:
                         try:
                             parsed_last_seen = self._parse_datetime(profile_last_seen)
@@ -629,11 +672,15 @@ class LakeflowConnect:
                 break
 
         # Update offset with latest cursor for next incremental sync
-        next_offset = {
-            "last_seen": latest_last_seen,
-            "page": 0,  # Reset page for next sync
-            "session_id": None  # Reset session for next sync
-        } if latest_last_seen else (start_offset if start_offset else {})
+        next_offset = (
+            {
+                "last_seen": latest_last_seen,
+                "page": 0,  # Reset page for next sync
+                "session_id": None,  # Reset session for next sync
+            }
+            if latest_last_seen
+            else (start_offset if start_offset else {})
+        )
 
         print(f"Fetched {len(records)} engage records, next sync from: {latest_last_seen}")
         return iter(records), next_offset

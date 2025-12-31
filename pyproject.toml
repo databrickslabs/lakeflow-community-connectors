@@ -33,3 +33,8 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v"
 
+[tool.black]
+line-length = 100
+
+[tool.ruff]
+line-length = 100

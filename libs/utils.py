@@ -28,15 +28,11 @@ def parse_value(value: Any, field_type: DataType) -> Any:
             # 1. set it to None when schema marks it as nullable
             # 2. Otherwise, raise an error.
             if field.name in value:
-                field_dict[field.name] = parse_value(
-                    value.get(field.name), field.dataType
-                )
+                field_dict[field.name] = parse_value(value.get(field.name), field.dataType)
             elif field.nullable:
                 field_dict[field.name] = None
             else:
-                raise ValueError(
-                    f"Field {field.name} is not nullable but not found in the input"
-                )
+                raise ValueError(f"Field {field.name} is not nullable but not found in the input")
 
         return Row(**field_dict)
     elif isinstance(field_type, ArrayType):
@@ -135,6 +131,4 @@ def parse_value(value: Any, field_type: DataType) -> Any:
             raise TypeError(f"Unsupported field type: {field_type}")
     except (ValueError, TypeError) as e:
         # Add context to the error
-        raise ValueError(
-            f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}"
-        )
+        raise ValueError(f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}")

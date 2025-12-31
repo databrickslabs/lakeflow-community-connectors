@@ -57,9 +57,7 @@ class LakeflowConnect:
             "reviews",
         ]
 
-    def get_table_schema(
-        self, table_name: str, table_options: dict[str, str]
-    ) -> StructType:
+    def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
         """
         Fetch the schema of a table.
 
@@ -253,9 +251,7 @@ class LakeflowConnect:
                     StructField("updated_at", StringType(), True),
                     StructField("permissions", permissions_struct, True),
                     StructField("allow_rebase_merge", BooleanType(), True),
-                    StructField(
-                        "template_repository", template_repository_struct, True
-                    ),
+                    StructField("template_repository", template_repository_struct, True),
                     StructField("temp_clone_token", StringType(), True),
                     StructField("allow_squash_merge", BooleanType(), True),
                     StructField("allow_merge_commit", BooleanType(), True),
@@ -285,12 +281,8 @@ class LakeflowConnect:
                     StructField("merged_at", StringType(), True),
                     StructField("merge_commit_sha", StringType(), True),
                     StructField("user", user_struct, True),
-                    StructField(
-                        "base", MapType(StringType(), StringType(), True), True
-                    ),
-                    StructField(
-                        "head", MapType(StringType(), StringType(), True), True
-                    ),
+                    StructField("base", MapType(StringType(), StringType(), True), True),
+                    StructField("head", MapType(StringType(), StringType(), True), True),
                     StructField("html_url", StringType(), True),
                     StructField("url", StringType(), True),
                 ]
@@ -472,9 +464,7 @@ class LakeflowConnect:
 
         raise ValueError(f"Unsupported table: {table_name!r}")
 
-    def read_table_metadata(
-        self, table_name: str, table_options: dict[str, str]
-    ) -> dict:
+    def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
         """
         Fetch metadata for the given table.
 
@@ -666,9 +656,7 @@ class LakeflowConnect:
 
             issues = response.json() or []
             if not isinstance(issues, list):
-                raise ValueError(
-                    f"Unexpected response format for issues: {type(issues).__name__}"
-                )
+                raise ValueError(f"Unexpected response format for issues: {type(issues).__name__}")
 
             for issue in issues:
                 # Shallow-copy the raw JSON and add connector-derived fields.
@@ -1484,8 +1472,7 @@ class LakeflowConnect:
                 team_obj = detail_resp.json() or {}
                 if not isinstance(team_obj, dict):
                     raise ValueError(
-                        "Unexpected response format for team detail: "
-                        f"{type(team_obj).__name__}"
+                        f"Unexpected response format for team detail: {type(team_obj).__name__}"
                     )
 
                 record: dict[str, Any] = dict(team_obj)
@@ -1524,9 +1511,7 @@ class LakeflowConnect:
 
         user_obj = response.json() or {}
         if not isinstance(user_obj, dict):
-            raise ValueError(
-                f"Unexpected response format for user: {type(user_obj).__name__}"
-            )
+            raise ValueError(f"Unexpected response format for user: {type(user_obj).__name__}")
 
         record: dict[str, Any] = dict(user_obj)
         return iter([record]), {}
@@ -1594,8 +1579,7 @@ class LakeflowConnect:
                 reviews = response.json() or []
                 if not isinstance(reviews, list):
                     raise ValueError(
-                        "Unexpected response format for reviews: "
-                        f"{type(reviews).__name__}"
+                        f"Unexpected response format for reviews: {type(reviews).__name__}"
                     )
 
                 for review in reviews:

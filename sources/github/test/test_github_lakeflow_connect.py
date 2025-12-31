@@ -29,6 +29,5 @@ def test_github_connector():
 
     # Assert that all tests passed
     assert report.passed_tests == report.total_tests, (
-        f"Test suite had failures: {report.failed_tests} failed, "
-        f"{report.error_tests} errors"
+        f"Test suite had failures: {report.failed_tests} failed, {report.error_tests} errors"
     )

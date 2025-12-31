@@ -37,4 +37,3 @@ def test_stripe_connector():
     assert report.passed_tests == report.total_tests, (
         f"Test suite had failures: {report.failed_tests} failed, {report.error_tests} errors"
     )
-

@@ -30,4 +30,3 @@ register_lakeflow_source(spark)
 
 # Ingest the tables specified in the pipeline spec
 ingest(spark, pipeline_spec)
-

@@ -171,11 +171,15 @@ class TestDecimalType:
 class TestBooleanType:
     """Test BooleanType conversion."""
 
-    @pytest.mark.parametrize("value", [True, "true", "True", "TRUE", "t", "T", "yes", "Yes", "y", "Y", "1"])
+    @pytest.mark.parametrize(
+        "value", [True, "true", "True", "TRUE", "t", "T", "yes", "Yes", "y", "Y", "1"]
+    )
     def test_truthy_values(self, value):
         assert parse_value(value, BooleanType()) is True
 
-    @pytest.mark.parametrize("value", [False, "false", "False", "FALSE", "f", "F", "no", "No", "n", "N", "0"])
+    @pytest.mark.parametrize(
+        "value", [False, "false", "False", "FALSE", "f", "F", "no", "No", "n", "N", "0"]
+    )
     def test_falsy_values(self, value):
         assert parse_value(value, BooleanType()) is False
 
@@ -317,7 +321,9 @@ class TestMapType:
     """Test MapType conversion."""
 
     def test_string_to_string_map(self):
-        result = parse_value({"key1": "value1", "key2": "value2"}, MapType(StringType(), StringType()))
+        result = parse_value(
+            {"key1": "value1", "key2": "value2"}, MapType(StringType(), StringType())
+        )
         assert result == {"key1": "value1", "key2": "value2"}
 
     def test_string_to_int_map(self):
@@ -348,53 +354,66 @@ class TestStructType:
     """Test StructType conversion."""
 
     def test_simple_struct(self):
-        schema = StructType([
-            StructField("name", StringType(), True),
-            StructField("age", IntegerType(), True),
-        ])
+        schema = StructType(
+            [
+                StructField("name", StringType(), True),
+                StructField("age", IntegerType(), True),
+            ]
+        )
         result = parse_value({"name": "Alice", "age": 30}, schema)
         assert isinstance(result, Row)
         assert result.name == "Alice"
         assert result.age == 30
 
     def test_struct_with_type_conversion(self):
-        schema = StructType([
-            StructField("id", LongType(), True),
-            StructField("active", BooleanType(), True),
-        ])
+        schema = StructType(
+            [
+                StructField("id", LongType(), True),
+                StructField("active", BooleanType(), True),
+            ]
+        )
         result = parse_value({"id": "123", "active": "yes"}, schema)
         assert result.id == 123
         assert result.active is True
 
     def test_nested_struct(self):
-        schema = StructType([
-            StructField("person", StructType([
-                StructField("name", StringType(), True),
-                StructField("age", IntegerType(), True),
-            ]), True),
-            StructField("city", StringType(), True),
-        ])
-        result = parse_value({
-            "person": {"name": "Bob", "age": 25},
-            "city": "NYC"
-        }, schema)
+        schema = StructType(
+            [
+                StructField(
+                    "person",
+                    StructType(
+                        [
+                            StructField("name", StringType(), True),
+                            StructField("age", IntegerType(), True),
+                        ]
+                    ),
+                    True,
+                ),
+                StructField("city", StringType(), True),
+            ]
+        )
+        result = parse_value({"person": {"name": "Bob", "age": 25}, "city": "NYC"}, schema)
         assert result.person.name == "Bob"
         assert result.person.age == 25
         assert result.city == "NYC"
 
     def test_struct_with_array_field(self):
-        schema = StructType([
-            StructField("tags", ArrayType(StringType()), True),
-            StructField("total", IntegerType(), True),
-        ])
+        schema = StructType(
+            [
+                StructField("tags", ArrayType(StringType()), True),
+                StructField("total", IntegerType(), True),
+            ]
+        )
         result = parse_value({"tags": ["a", "b", "c"], "total": 3}, schema)
         assert result.tags == ["a", "b", "c"]
         assert result.total == 3
 
     def test_struct_with_map_field(self):
-        schema = StructType([
-            StructField("metadata", MapType(StringType(), StringType()), True),
-        ])
+        schema = StructType(
+            [
+                StructField("metadata", MapType(StringType(), StringType()), True),
+            ]
+        )
         result = parse_value({"metadata": {"key": "value"}}, schema)
         assert result.metadata == {"key": "value"}
 
@@ -416,11 +435,13 @@ class TestMissingNullableFields:
     """Test that missing nullable fields are set to None."""
 
     def test_missing_nullable_field_is_none(self):
-        schema = StructType([
-            StructField("name", StringType(), nullable=True),
-            StructField("age", IntegerType(), nullable=True),
-            StructField("email", StringType(), nullable=True),
-        ])
+        schema = StructType(
+            [
+                StructField("name", StringType(), nullable=True),
+                StructField("age", IntegerType(), nullable=True),
+                StructField("email", StringType(), nullable=True),
+            ]
+        )
         # Only provide 'name', missing 'age' and 'email'
         result = parse_value({"name": "Alice"}, schema)
         assert result.name == "Alice"
@@ -428,11 +449,13 @@ class TestMissingNullableFields:
         assert result.email is None
 
     def test_all_fields_missing_but_nullable(self):
-        schema = StructType([
-            StructField("field1", StringType(), nullable=True),
-            StructField("field2", IntegerType(), nullable=True),
-            StructField("field3", BooleanType(), nullable=True),
-        ])
+        schema = StructType(
+            [
+                StructField("field1", StringType(), nullable=True),
+                StructField("field2", IntegerType(), nullable=True),
+                StructField("field3", BooleanType(), nullable=True),
+            ]
+        )
         # Provide at least one field to avoid empty dict error
         # The function requires at least one field to be present
         result = parse_value({"field1": "value"}, schema)
@@ -441,21 +464,31 @@ class TestMissingNullableFields:
         assert result.field3 is None
 
     def test_missing_non_nullable_field_raises_error(self):
-        schema = StructType([
-            StructField("name", StringType(), nullable=True),
-            StructField("id", IntegerType(), nullable=False),  # Not nullable!
-        ])
+        schema = StructType(
+            [
+                StructField("name", StringType(), nullable=True),
+                StructField("id", IntegerType(), nullable=False),  # Not nullable!
+            ]
+        )
         with pytest.raises(ValueError, match="not nullable but not found"):
             parse_value({"name": "Alice"}, schema)
 
     def test_partial_fields_in_nested_struct(self):
-        schema = StructType([
-            StructField("outer", StructType([
-                StructField("inner1", StringType(), nullable=True),
-                StructField("inner2", IntegerType(), nullable=True),
-                StructField("inner3", BooleanType(), nullable=True),
-            ]), nullable=True),
-        ])
+        schema = StructType(
+            [
+                StructField(
+                    "outer",
+                    StructType(
+                        [
+                            StructField("inner1", StringType(), nullable=True),
+                            StructField("inner2", IntegerType(), nullable=True),
+                            StructField("inner3", BooleanType(), nullable=True),
+                        ]
+                    ),
+                    nullable=True,
+                ),
+            ]
+        )
         # Provide only inner1
         result = parse_value({"outer": {"inner1": "hello"}}, schema)
         assert result.outer.inner1 == "hello"
@@ -463,38 +496,56 @@ class TestMissingNullableFields:
         assert result.outer.inner3 is None
 
     def test_null_nested_struct(self):
-        schema = StructType([
-            StructField("name", StringType(), nullable=True),
-            StructField("address", StructType([
-                StructField("city", StringType(), nullable=True),
-                StructField("zip", StringType(), nullable=True),
-            ]), nullable=True),
-        ])
+        schema = StructType(
+            [
+                StructField("name", StringType(), nullable=True),
+                StructField(
+                    "address",
+                    StructType(
+                        [
+                            StructField("city", StringType(), nullable=True),
+                            StructField("zip", StringType(), nullable=True),
+                        ]
+                    ),
+                    nullable=True,
+                ),
+            ]
+        )
         # address is None
         result = parse_value({"name": "Bob", "address": None}, schema)
         assert result.name == "Bob"
         assert result.address is None
 
     def test_missing_nested_struct_field_is_none(self):
-        schema = StructType([
-            StructField("name", StringType(), nullable=True),
-            StructField("address", StructType([
-                StructField("city", StringType(), nullable=True),
-                StructField("zip", StringType(), nullable=True),
-            ]), nullable=True),
-        ])
+        schema = StructType(
+            [
+                StructField("name", StringType(), nullable=True),
+                StructField(
+                    "address",
+                    StructType(
+                        [
+                            StructField("city", StringType(), nullable=True),
+                            StructField("zip", StringType(), nullable=True),
+                        ]
+                    ),
+                    nullable=True,
+                ),
+            ]
+        )
         # address is not provided
         result = parse_value({"name": "Charlie"}, schema)
         assert result.name == "Charlie"
         assert result.address is None
 
     def test_mixed_nullable_and_non_nullable_fields(self):
-        schema = StructType([
-            StructField("id", IntegerType(), nullable=False),
-            StructField("name", StringType(), nullable=True),
-            StructField("email", StringType(), nullable=True),
-            StructField("created_at", TimestampType(), nullable=True),
-        ])
+        schema = StructType(
+            [
+                StructField("id", IntegerType(), nullable=False),
+                StructField("name", StringType(), nullable=True),
+                StructField("email", StringType(), nullable=True),
+                StructField("created_at", TimestampType(), nullable=True),
+            ]
+        )
         # Only provide required field 'id'
         result = parse_value({"id": 42}, schema)
         assert result.id == 42
@@ -503,19 +554,21 @@ class TestMissingNullableFields:
         assert result.created_at is None
 
     def test_array_of_structs_with_missing_fields(self):
-        inner_schema = StructType([
-            StructField("name", StringType(), nullable=True),
-            StructField("value", IntegerType(), nullable=True),
-        ])
+        inner_schema = StructType(
+            [
+                StructField("name", StringType(), nullable=True),
+                StructField("value", IntegerType(), nullable=True),
+            ]
+        )
         schema = ArrayType(inner_schema)
-        
+
         data = [
             {"name": "first"},  # missing 'value'
-            {"value": 100},     # missing 'name'
+            {"value": 100},  # missing 'name'
             {"name": "third", "value": 300},  # complete
         ]
         result = parse_value(data, schema)
-        
+
         assert len(result) == 3
         assert result[0].name == "first"
         assert result[0].value is None
@@ -532,13 +585,27 @@ class TestComplexNestedStructures:
     """Test complex combinations of nested types."""
 
     def test_deeply_nested_structure(self):
-        schema = StructType([
-            StructField("level1", StructType([
-                StructField("level2", StructType([
-                    StructField("level3", StringType(), nullable=True),
-                ]), nullable=True),
-            ]), nullable=True),
-        ])
+        schema = StructType(
+            [
+                StructField(
+                    "level1",
+                    StructType(
+                        [
+                            StructField(
+                                "level2",
+                                StructType(
+                                    [
+                                        StructField("level3", StringType(), nullable=True),
+                                    ]
+                                ),
+                                nullable=True,
+                            ),
+                        ]
+                    ),
+                    nullable=True,
+                ),
+            ]
+        )
         result = parse_value({"level1": {"level2": {"level3": "deep"}}}, schema)
         assert result.level1.level2.level3 == "deep"
 
@@ -555,19 +622,21 @@ class TestComplexNestedStructures:
         assert result == {"nums": [1, 2, 3], "more_nums": [4, 5]}
 
     def test_struct_with_all_types(self):
-        schema = StructType([
-            StructField("string_field", StringType(), nullable=True),
-            StructField("int_field", IntegerType(), nullable=True),
-            StructField("long_field", LongType(), nullable=True),
-            StructField("float_field", FloatType(), nullable=True),
-            StructField("double_field", DoubleType(), nullable=True),
-            StructField("decimal_field", DecimalType(10, 2), nullable=True),
-            StructField("bool_field", BooleanType(), nullable=True),
-            StructField("date_field", DateType(), nullable=True),
-            StructField("timestamp_field", TimestampType(), nullable=True),
-            StructField("array_field", ArrayType(StringType()), nullable=True),
-            StructField("map_field", MapType(StringType(), IntegerType()), nullable=True),
-        ])
+        schema = StructType(
+            [
+                StructField("string_field", StringType(), nullable=True),
+                StructField("int_field", IntegerType(), nullable=True),
+                StructField("long_field", LongType(), nullable=True),
+                StructField("float_field", FloatType(), nullable=True),
+                StructField("double_field", DoubleType(), nullable=True),
+                StructField("decimal_field", DecimalType(10, 2), nullable=True),
+                StructField("bool_field", BooleanType(), nullable=True),
+                StructField("date_field", DateType(), nullable=True),
+                StructField("timestamp_field", TimestampType(), nullable=True),
+                StructField("array_field", ArrayType(StringType()), nullable=True),
+                StructField("map_field", MapType(StringType(), IntegerType()), nullable=True),
+            ]
+        )
         data = {
             "string_field": "hello",
             "int_field": 42,
@@ -582,7 +651,7 @@ class TestComplexNestedStructures:
             "map_field": {"x": 1, "y": 2},
         }
         result = parse_value(data, schema)
-        
+
         assert result.string_field == "hello"
         assert result.int_field == 42
         assert result.long_field == 9999999999
@@ -596,19 +665,27 @@ class TestComplexNestedStructures:
         assert result.map_field == {"x": 1, "y": 2}
 
     def test_struct_with_all_types_missing_optional_fields(self):
-        schema = StructType([
-            StructField("id", IntegerType(), nullable=False),
-            StructField("string_field", StringType(), nullable=True),
-            StructField("int_field", IntegerType(), nullable=True),
-            StructField("array_field", ArrayType(StringType()), nullable=True),
-            StructField("map_field", MapType(StringType(), IntegerType()), nullable=True),
-            StructField("nested", StructType([
-                StructField("inner", StringType(), nullable=True),
-            ]), nullable=True),
-        ])
+        schema = StructType(
+            [
+                StructField("id", IntegerType(), nullable=False),
+                StructField("string_field", StringType(), nullable=True),
+                StructField("int_field", IntegerType(), nullable=True),
+                StructField("array_field", ArrayType(StringType()), nullable=True),
+                StructField("map_field", MapType(StringType(), IntegerType()), nullable=True),
+                StructField(
+                    "nested",
+                    StructType(
+                        [
+                            StructField("inner", StringType(), nullable=True),
+                        ]
+                    ),
+                    nullable=True,
+                ),
+            ]
+        )
         # Only provide required field
         result = parse_value({"id": 1}, schema)
-        
+
         assert result.id == 1
         assert result.string_field is None
         assert result.int_field is None
@@ -627,7 +704,7 @@ class TestErrorCases:
         # Create a custom DataType that's not supported
         class CustomType(DataType):
             pass
-        
+
         with pytest.raises((ValueError, TypeError)):
             parse_value("value", CustomType())
 
@@ -652,4 +729,3 @@ class TestErrorCases:
     def test_invalid_timestamp_format(self):
         with pytest.raises(ValueError):
             parse_value("invalid-timestamp", TimestampType())
-

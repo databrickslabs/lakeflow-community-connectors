@@ -53,9 +53,7 @@ def register_lakeflow_source(spark):
                 # 1. set it to None when schema marks it as nullable
                 # 2. Otherwise, raise an error.
                 if field.name in value:
-                    field_dict[field.name] = parse_value(
-                        value.get(field.name), field.dataType
-                    )
+                    field_dict[field.name] = parse_value(value.get(field.name), field.dataType)
                 elif field.nullable:
                     field_dict[field.name] = None
                 else:
@@ -163,7 +161,6 @@ def register_lakeflow_source(spark):
             raise ValueError(
                 f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}"
             )
-
 
     ########################################################
     # sources/stripe/stripe.py
@@ -637,7 +634,9 @@ def register_lakeflow_source(spark):
                         StructField("receipt_url", StringType(), True),
                         StructField("statement_descriptor", StringType(), True),
                         StructField("billing_details", self._billing_details_schema, True),
-                        StructField("payment_method_details", self._payment_method_details_schema, True),
+                        StructField(
+                            "payment_method_details", self._payment_method_details_schema, True
+                        ),
                         StructField("outcome", self._outcome_schema, True),
                         StructField("metadata", StringType(), True),
                         StructField("failure_code", StringType(), True),
@@ -666,7 +665,9 @@ def register_lakeflow_source(spark):
                         StructField("capture_method", StringType(), True),
                         StructField("confirmation_method", StringType(), True),
                         StructField("charges", StringType(), True),
-                        StructField("payment_method_options", self._payment_method_options_schema, True),
+                        StructField(
+                            "payment_method_options", self._payment_method_options_schema, True
+                        ),
                         StructField("shipping", StringType(), True),
                         StructField("metadata", StringType(), True),
                         StructField("latest_charge", StringType(), True),
@@ -781,7 +782,9 @@ def register_lakeflow_source(spark):
                         StructField("issuer", StringType(), True),
                         StructField("last_finalization_error", StringType(), True),
                         StructField("lines", self._invoice_lines_schema, True),
-                        StructField("payment_settings", self._invoice_payment_settings_schema, True),
+                        StructField(
+                            "payment_settings", self._invoice_payment_settings_schema, True
+                        ),
                         StructField("rendering", StringType(), True),
                         StructField("shipping_cost", StringType(), True),
                         StructField("shipping_details", StringType(), True),
@@ -1038,9 +1041,7 @@ def register_lakeflow_source(spark):
                 "coupons",
             ]
 
-        def get_table_schema(
-            self, table_name: str, table_options: Dict[str, str]
-        ) -> StructType:
+        def get_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
             """
             Get the Spark schema for a Stripe table.
 
@@ -1057,9 +1058,7 @@ def register_lakeflow_source(spark):
             schema = self._schema_config[table_name]
             return schema
 
-        def read_table_metadata(
-            self, table_name: str, table_options: Dict[str, str]
-        ) -> dict:
+        def read_table_metadata(self, table_name: str, table_options: Dict[str, str]) -> dict:
             """
             Get metadata for a Stripe table.
 
@@ -1102,8 +1101,7 @@ def register_lakeflow_source(spark):
 
             # Determine if this is an incremental read
             is_incremental = (
-                start_offset is not None
-                and start_offset.get(config["cursor_field"]) is not None
+                start_offset is not None and start_offset.get(config["cursor_field"]) is not None
             )
 
             if is_incremental:
@@ -1269,7 +1267,6 @@ def register_lakeflow_source(spark):
             except Exception as e:
                 return {"status": "error", "message": f"Connection failed: {str(e)}"}
 
-
     ########################################################
     # pipeline/lakeflow_python_source.py
     ########################################################
@@ -1277,7 +1274,6 @@ def register_lakeflow_source(spark):
     METADATA_TABLE = "_lakeflow_metadata"
     TABLE_NAME = "tableName"
     TABLE_NAME_LIST = "tableNameList"
-
 
     class LakeflowStreamReader(SimpleDataSourceStreamReader):
         """
@@ -1315,7 +1311,6 @@ def register_lakeflow_source(spark):
             # are missed in the returned records.
             return self.read(start)[0]
 
-
     class LakeflowBatchReader(DataSourceReader):
         def __init__(
             self,
@@ -1349,7 +1344,6 @@ def register_lakeflow_source(spark):
                 all_records.append({"tableName": table, **metadata})
             return all_records
 
-
     class LakeflowSource(DataSource):
         def __init__(self, options):
             self.options = options
@@ -1379,6 +1373,5 @@ def register_lakeflow_source(spark):
 
         def simpleStreamReader(self, schema: StructType):
             return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
-
 
     spark.dataSource.register(LakeflowSource)

@@ -1,3 +1,6 @@
+"""Parser for LakeFlow connector pipeline specifications."""
+
+# pylint: disable=too-few-public-methods
 from typing import List, Dict, Any, Optional
 import json
 
@@ -51,9 +54,7 @@ class TableSpec(BaseModel):
 
     @field_validator("table_configuration", mode="before")
     @classmethod
-    def normalize_table_configuration(
-        cls, v: Optional[Dict[str, Any]]
-    ) -> Optional[Dict[str, str]]:
+    def normalize_table_configuration(cls, v: Optional[Dict[str, Any]]) -> Optional[Dict[str, str]]:
         """
         Ensure table_configuration is a mapping of string -> string.
 
@@ -108,6 +109,7 @@ class PipelineSpec(BaseModel):
     @field_validator("connection_name")
     @classmethod
     def connection_name_not_empty(cls, v: StrictStr) -> StrictStr:
+        """Validate that connection_name is not empty or whitespace-only."""
         if not v.strip():
             raise ValueError("'connection_name' must be a non-empty string")
         return v
@@ -115,6 +117,7 @@ class PipelineSpec(BaseModel):
     @field_validator("objects")
     @classmethod
     def objects_must_not_be_empty(cls, v: List[ObjectSpec]) -> List[ObjectSpec]:
+        """Validate that objects list is not empty."""
         if not v:
             raise ValueError("'objects' must be a non-empty list")
         return v
@@ -245,9 +248,7 @@ class SpecParser:
                 if primary_keys_value is None:
                     return None
                 # If it's a JSON string (list was serialized), parse it
-                if isinstance(
-                    primary_keys_value, str
-                ) and primary_keys_value.startswith("["):
+                if isinstance(primary_keys_value, str) and primary_keys_value.startswith("["):
                     return json.loads(primary_keys_value)
                 # If it's a single string, return as a single-item list
                 return (
@@ -297,7 +298,6 @@ class SpecParser:
 
                 if catalog is None or schema is None:
                     return table
-                else:
-                    return f"`{catalog}`.`{schema}`.`{table}`"
+                return f"`{catalog}`.`{schema}`.`{table}`"
 
         raise ValueError(f"Table '{table_name}' not found in the pipeline spec")

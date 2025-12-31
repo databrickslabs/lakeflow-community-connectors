@@ -482,7 +482,9 @@ class LakeflowConnect:
                     StructField("receipt_url", StringType(), True),
                     StructField("statement_descriptor", StringType(), True),
                     StructField("billing_details", self._billing_details_schema, True),
-                    StructField("payment_method_details", self._payment_method_details_schema, True),
+                    StructField(
+                        "payment_method_details", self._payment_method_details_schema, True
+                    ),
                     StructField("outcome", self._outcome_schema, True),
                     StructField("metadata", StringType(), True),
                     StructField("failure_code", StringType(), True),
@@ -511,7 +513,9 @@ class LakeflowConnect:
                     StructField("capture_method", StringType(), True),
                     StructField("confirmation_method", StringType(), True),
                     StructField("charges", StringType(), True),
-                    StructField("payment_method_options", self._payment_method_options_schema, True),
+                    StructField(
+                        "payment_method_options", self._payment_method_options_schema, True
+                    ),
                     StructField("shipping", StringType(), True),
                     StructField("metadata", StringType(), True),
                     StructField("latest_charge", StringType(), True),
@@ -883,9 +887,7 @@ class LakeflowConnect:
             "coupons",
         ]
 
-    def get_table_schema(
-        self, table_name: str, table_options: Dict[str, str]
-    ) -> StructType:
+    def get_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
         """
         Get the Spark schema for a Stripe table.
 
@@ -902,9 +904,7 @@ class LakeflowConnect:
         schema = self._schema_config[table_name]
         return schema
 
-    def read_table_metadata(
-        self, table_name: str, table_options: Dict[str, str]
-    ) -> dict:
+    def read_table_metadata(self, table_name: str, table_options: Dict[str, str]) -> dict:
         """
         Get metadata for a Stripe table.
 
@@ -947,8 +947,7 @@ class LakeflowConnect:
 
         # Determine if this is an incremental read
         is_incremental = (
-            start_offset is not None
-            and start_offset.get(config["cursor_field"]) is not None
+            start_offset is not None and start_offset.get(config["cursor_field"]) is not None
         )
 
         if is_incremental:

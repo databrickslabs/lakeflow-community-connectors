@@ -108,7 +108,9 @@ class RepoClient:
         """
         return self._client.repos.get(repo_id=repo_id)
 
-    def update(self, repo_id: int, branch: Optional[str] = None, tag: Optional[str] = None) -> RepoInfo:
+    def update(
+        self, repo_id: int, branch: Optional[str] = None, tag: Optional[str] = None
+    ) -> RepoInfo:
         """
         Update a repo to a different branch or tag.
 
@@ -147,5 +149,4 @@ class RepoClient:
         """
         if repo_info is None:
             return None
-        return getattr(repo_info, 'path', None)
-
+        return getattr(repo_info, "path", None)
