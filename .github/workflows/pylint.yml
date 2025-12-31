@@ -24,4 +24,4 @@ jobs:
         pylint \
         --max-line-length=100 \
         --ignore-long-lines='^\s*(#|".*"|'\''.*'\'')$' \
-        $(git ls-files '*.py')
+        $(git ls-files '*.py' | grep -v '_generated_')
