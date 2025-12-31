@@ -322,6 +322,14 @@ SUMMARY:
 - **Solution**: Use `MapType` for `values` field to handle any question structure
 - **Flexibility**: Works with any survey without schema changes
 
+### 5. Missing surveyId in API Response
+- **Issue**: Qualtrics export API does NOT return `surveyId` field in response records
+- **Documentation Gap**: Official API docs show `surveyId` in examples, but actual API returns `null`
+- **Solution**: Connector manually adds `surveyId` to each response record using the known survey ID from query parameters
+- **Implementation**: `_process_response_record()` method adds `surveyId` field
+- **Impact**: None - users get complete records with proper survey association
+- **Validation**: Confirmed through live API testing and schema validation
+
 ---
 
 ## Deployment Recommendations

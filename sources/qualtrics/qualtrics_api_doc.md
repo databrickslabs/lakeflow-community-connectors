@@ -248,12 +248,14 @@ curl -X GET \
 
 **Example response data (after extracting JSON from zip)**:
 
+**⚠️ Important**: The API does NOT return `surveyId` in the response records, even though it's shown in API documentation examples. Since we know which survey we're querying (passed as parameter), the connector manually adds `surveyId` to each response record.
+
 ```json
 {
   "responses": [
     {
       "responseId": "R_abc123xyz",
-      "surveyId": "SV_abc123xyz",
+      "surveyId": null,
       "recordedDate": "2024-12-20T10:30:45Z",
       "startDate": "2024-12-20T10:28:12Z",
       "endDate": "2024-12-20T10:30:45Z",

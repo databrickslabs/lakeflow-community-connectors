@@ -678,7 +678,7 @@ def register_lakeflow_source(spark):
                 # Process responses to handle nested structures correctly
                 processed_responses = []
                 for response in responses:
-                    processed_response = self._process_response_record(response)
+                    processed_response = self._process_response_record(response, survey_id)
                     processed_responses.append(processed_response)
 
                 return processed_responses
@@ -686,12 +686,13 @@ def register_lakeflow_source(spark):
             except Exception as e:
                 raise Exception(f"Failed to download response export: {e}")
 
-        def _process_response_record(self, record: dict) -> dict:
+        def _process_response_record(self, record: dict, survey_id: str) -> dict:
             """
             Process a response record to ensure proper structure.
 
             Args:
                 record: Raw response record from API
+                survey_id: Survey ID to add to the record (API doesn't return this)
 
             Returns:
                 Processed response record
@@ -700,7 +701,7 @@ def register_lakeflow_source(spark):
 
             # Copy simple fields - try both top-level and from values map
             simple_fields = [
-                "responseId", "surveyId", "recordedDate", "startDate", "endDate",
+                "responseId", "recordedDate", "startDate", "endDate",
                 "status", "ipAddress", "progress", "duration", "finished",
                 "distributionChannel", "userLanguage", "locationLatitude", "locationLongitude"
             ]
@@ -721,6 +722,9 @@ def register_lakeflow_source(spark):
                         processed[field] = value_obj
                 else:
                     processed[field] = None
+
+            # Add surveyId - API doesn't return this, but we know it from the query
+            processed["surveyId"] = survey_id
 
             # Special handling for responseId which might be _recordId in values
             if not processed.get("responseId") and "_recordId" in values_map:
