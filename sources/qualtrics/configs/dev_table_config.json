@@ -1,6 +1,13 @@
 {
     "survey_responses": {
         "surveyId": "YOUR_SURVEY_ID"
+    },
+    "distributions": {
+        "surveyId": "YOUR_SURVEY_ID"
+    },
+    "contacts": {
+        "directoryId": "YOUR_DIRECTORY_ID",
+        "mailingListId": "YOUR_MAILING_LIST_ID"
     }
 }
 
