@@ -295,7 +295,7 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     """
     # Get the project root directory
     script_dir = Path(__file__).parent
-    project_root = script_dir.parent
+    project_root = script_dir.parent.parent
 
     # Define file paths
     utils_path = project_root / "libs" / "utils.py"
