@@ -62,21 +62,6 @@ class PipelineClient:
 
         API Reference: https://docs.databricks.com/api/workspace/pipelines/create
         """
-        # TODO: Fill in the detailed payload for the API call
-        # The SDK method has many parameters. Key ones include:
-        # workspace_client.pipelines.create(
-        #     name: str,
-        #     catalog: Optional[str] = None,
-        #     channel: Optional[str] = None,
-        #     clusters: Optional[List[PipelineCluster]] = None,
-        #     configuration: Optional[Dict[str, str]] = None,
-        #     continuous: Optional[bool] = None,
-        #     development: Optional[bool] = None,
-        #     libraries: Optional[List[PipelineLibrary]] = None,
-        #     target: Optional[str] = None,
-        #     ...
-        # )
-
         create_kwargs = self._build_create_payload(config, repo_path, source_name)
         return self._client.pipelines.create(**create_kwargs)
 
@@ -96,8 +81,6 @@ class PipelineClient:
 
         Returns:
             Dictionary of keyword arguments for the create API call.
-
-        TODO: Customize this method to build the exact payload you need.
         """
         payload = {
             "name": config.name,
@@ -132,36 +115,7 @@ class PipelineClient:
         if config.libraries:
             payload["libraries"] = self._build_libraries(config.libraries)
 
-        # TODO: Build clusters configuration if needed
-        # from databricks.sdk.service.pipelines import PipelineCluster
-        # if config.clusters:
-        #     payload["clusters"] = self._build_clusters(config.clusters)
-
         return payload
-
-    def _build_libraries_for_source(self, source_name: str, repo_path: str) -> list:
-        """
-        Build the libraries configuration for a specific source.
-
-        Args:
-            source_name: Name of the connector source (e.g., 'github', 'stripe').
-            repo_path: Workspace path to the repo.
-
-        Returns:
-            List of library configurations.
-
-        TODO: Customize this method to return the correct library paths for each source.
-        """
-        # TODO: Fill in the library paths for each source
-        # Example implementation:
-        # from databricks.sdk.service.pipelines import PipelineLibrary, FileLibrary
-        #
-        # source_file = f"sources/{source_name}/_generated_{source_name}_python_source.py"
-        # full_path = f"{repo_path}/{source_file}"
-        # return [PipelineLibrary(file=FileLibrary(path=full_path))]
-
-        # Placeholder - you'll fill in the actual library configuration
-        return []
 
     def _build_libraries(self, libraries: list) -> list:
         """
@@ -203,31 +157,6 @@ class PipelineClient:
 
         return result
 
-    def _build_clusters(self, clusters: list) -> list:
-        """
-        Build the clusters configuration for the pipeline.
-
-        Args:
-            clusters: List of cluster configurations from PipelineConfig.
-
-        Returns:
-            List of PipelineCluster objects.
-
-        TODO: Implement this method based on your cluster configuration format.
-        """
-        # TODO: Fill in the cluster building logic
-        # from databricks.sdk.service.pipelines import PipelineCluster
-        # result = []
-        # for cluster in clusters:
-        #     result.append(PipelineCluster(
-        #         label=cluster.get("label", "default"),
-        #         num_workers=cluster.get("num_workers"),
-        #         node_type_id=cluster.get("node_type_id"),
-        #         ...
-        #     ))
-        # return result
-        return clusters
-
     def get(self, pipeline_id: str) -> GetPipelineResponse:
         """
         Get information about a pipeline.
@@ -239,28 +168,6 @@ class PipelineClient:
             GetPipelineResponse object containing pipeline information.
         """
         return self._client.pipelines.get(pipeline_id=pipeline_id)
-
-    def update(self, pipeline_id: str, config: PipelineConfig, repo_path: Optional[str] = None) -> None:
-        """
-        Update an existing pipeline.
-
-        Args:
-            pipeline_id: The ID of the pipeline to update.
-            config: PipelineConfig containing the new configuration.
-            repo_path: Optional workspace path to prepend to relative library paths.
-        """
-        update_kwargs = self._build_create_payload(config, repo_path)
-        update_kwargs["pipeline_id"] = pipeline_id
-        self._client.pipelines.update(**update_kwargs)
-
-    def delete(self, pipeline_id: str) -> None:
-        """
-        Delete a pipeline.
-
-        Args:
-            pipeline_id: The ID of the pipeline to delete.
-        """
-        self._client.pipelines.delete(pipeline_id=pipeline_id)
 
     def start(self, pipeline_id: str, full_refresh: bool = False) -> StartUpdateResponse:
         """
@@ -277,15 +184,6 @@ class PipelineClient:
             pipeline_id=pipeline_id,
             full_refresh=full_refresh,
         )
-
-    def stop(self, pipeline_id: str) -> None:
-        """
-        Stop a pipeline.
-
-        Args:
-            pipeline_id: The ID of the pipeline to stop.
-        """
-        self._client.pipelines.stop(pipeline_id=pipeline_id)
 
     def list(self, filter: Optional[str] = None, max_results: Optional[int] = None):
         """

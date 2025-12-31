@@ -64,12 +64,9 @@ class RepoClient:
         # If a specific branch is requested, update the repo to that branch
         # (The create API doesn't accept branch, so we need a separate update call)
         if config.branch and repo_id:
-            self._client.repos.update(
-                repo_id=repo_id,
-                branch=config.branch,
-            )
+            self.update(repo_id=repo_id, branch=config.branch)
             # Fetch the updated repo info to ensure we have complete data
-            repo_info = self._client.repos.get(repo_id=repo_id)
+            repo_info = self.get(repo_id=repo_id)
 
         return repo_info
 
@@ -124,15 +121,6 @@ class RepoClient:
             RepoInfo object containing updated information about the repo.
         """
         return self._client.repos.update(repo_id=repo_id, branch=branch, tag=tag)
-
-    def delete(self, repo_id: int) -> None:
-        """
-        Delete a repo.
-
-        Args:
-            repo_id: The ID of the repo to delete.
-        """
-        self._client.repos.delete(repo_id=repo_id)
 
     def list(self, path_prefix: Optional[str] = None, next_page_token: Optional[str] = None):
         """
