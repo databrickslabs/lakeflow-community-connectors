@@ -25,11 +25,11 @@ jobs:
         pylint \
         --max-line-length=100 \
         --disable=R0801 \
-        --ignore-long-lines='^\s*(#|".*"|'\''.*'\'')$' \
+        --ignore-long-lines='^\s*(#|f?".*"|f?'\''.*'\'')$' \
         $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py' | grep -v 'test_')
-        # Lint test files with C0116 disabled
+        # Lint test files with C0115,C0116 disabled
         pylint \
         --max-line-length=100 \
         --disable=R0801,C0115,C0116 \
-        --ignore-long-lines='^\s*(#|".*"|'\''.*'\'')$' \
+        --ignore-long-lines='^\s*(#|f?".*"|f?'\''.*'\'')$' \
         $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py' | grep 'test_')
