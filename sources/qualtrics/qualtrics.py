@@ -482,69 +482,70 @@ class LakeflowConnect:
     def _download_response_export(self, survey_id: str, file_id: str) -> List[dict]:
         """
         Download and parse the response export file.
-        
+
         Args:
             survey_id: Survey ID
             file_id: File ID from completed export
-            
+
         Returns:
             List of response records
         """
         url = f"{self.base_url}/surveys/{survey_id}/export-responses/{file_id}/file"
-        
+
         try:
             # Download ZIP file
             response = requests.get(url, headers=self.headers)
             response.raise_for_status()
-            
+
             # Extract JSON from ZIP
             zip_content = zipfile.ZipFile(io.BytesIO(response.content))
-            
+
             # Find the JSON file in the ZIP
             json_files = [f for f in zip_content.namelist() if f.endswith('.json')]
-            
+
             if not json_files:
                 raise ValueError("No JSON file found in export ZIP")
-            
+
             # Read the first JSON file
             json_content = zip_content.read(json_files[0])
             data = json.loads(json_content)
-            
+
             # Extract responses array
             responses = data.get("responses", [])
-            
+
             # Process responses to handle nested structures correctly
             processed_responses = []
             for response in responses:
-                processed_response = self._process_response_record(response)
+                processed_response = self._process_response_record(response, survey_id)
                 processed_responses.append(processed_response)
-            
+
             return processed_responses
-            
+
         except Exception as e:
             raise Exception(f"Failed to download response export: {e}")
     
-    def _process_response_record(self, record: dict) -> dict:
+    def _process_response_record(self, record: dict, survey_id: str) -> dict:
         """
         Process a response record to ensure proper structure.
-        
+
         Args:
             record: Raw response record from API
-            
+            survey_id: Survey ID to add to the record (API doesn't return this)
+
         Returns:
             Processed response record
         """
         processed = {}
-        
+
         # Copy simple fields - try both top-level and from values map
         simple_fields = [
-            "responseId", "surveyId", "recordedDate", "startDate", "endDate",
+            "responseId", "recordedDate", "startDate", "endDate",
             "status", "ipAddress", "progress", "duration", "finished",
             "distributionChannel", "userLanguage", "locationLatitude", "locationLongitude"
         ]
-        
+
         values_map = record.get("values", {})
-        
+
         for field in simple_fields:
             # Try top-level first
             if field in record and record[field] is not None:
@@ -559,6 +560,9 @@ class LakeflowConnect:
                     processed[field] = value_obj
             else:
                 processed[field] = None
+
+        # Add surveyId - API doesn't return this, but we know it from the query
+        processed["surveyId"] = survey_id
         
         # Special handling for responseId which might be _recordId in values
         if not processed.get("responseId") and "_recordId" in values_map:
