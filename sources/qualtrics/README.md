@@ -133,7 +133,7 @@ Table-specific options are passed via the pipeline spec under `table` in `object
 - `ipAddress` (string): Respondent's IP address (if collected)
 - `progress` (long): Percentage completed (0-100)
 - `duration` (long): Time spent in seconds
-- `finished` (long): Whether response is finished
+- `finished` (boolean): Whether response is finished (true/false)
 - `distributionChannel` (string): How survey was distributed (email, anonymous, etc.)
 - `userLanguage` (string): Language code used by respondent
 - `locationLatitude` (string): Latitude (if location collected)
