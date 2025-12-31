@@ -1,4 +1,4 @@
-"""Tests for the Zendesk LakeFlow connector."""
+import pytest
 from pathlib import Path
 
 from tests import test_suite

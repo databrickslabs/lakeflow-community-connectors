@@ -45,7 +45,9 @@ def register_lakeflow_source(spark):
                 # 1. set it to None when schema marks it as nullable
                 # 2. Otherwise, raise an error.
                 if field.name in value:
-                    field_dict[field.name] = parse_value(value.get(field.name), field.dataType)
+                    field_dict[field.name] = parse_value(
+                        value.get(field.name), field.dataType
+                    )
                 elif field.nullable:
                     field_dict[field.name] = None
                 else:
@@ -154,6 +156,7 @@ def register_lakeflow_source(spark):
                 f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}"
             )
 
+
     ########################################################
     # sources/github/github.py
     ########################################################
@@ -202,7 +205,9 @@ def register_lakeflow_source(spark):
                 "reviews",
             ]
 
-        def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
+        def get_table_schema(
+            self, table_name: str, table_options: dict[str, str]
+        ) -> StructType:
             """
             Fetch the schema of a table.
 
@@ -396,7 +401,9 @@ def register_lakeflow_source(spark):
                         StructField("updated_at", StringType(), True),
                         StructField("permissions", permissions_struct, True),
                         StructField("allow_rebase_merge", BooleanType(), True),
-                        StructField("template_repository", template_repository_struct, True),
+                        StructField(
+                            "template_repository", template_repository_struct, True
+                        ),
                         StructField("temp_clone_token", StringType(), True),
                         StructField("allow_squash_merge", BooleanType(), True),
                         StructField("allow_merge_commit", BooleanType(), True),
@@ -426,8 +433,12 @@ def register_lakeflow_source(spark):
                         StructField("merged_at", StringType(), True),
                         StructField("merge_commit_sha", StringType(), True),
                         StructField("user", user_struct, True),
-                        StructField("base", MapType(StringType(), StringType(), True), True),
-                        StructField("head", MapType(StringType(), StringType(), True), True),
+                        StructField(
+                            "base", MapType(StringType(), StringType(), True), True
+                        ),
+                        StructField(
+                            "head", MapType(StringType(), StringType(), True), True
+                        ),
                         StructField("html_url", StringType(), True),
                         StructField("url", StringType(), True),
                     ]
@@ -609,7 +620,9 @@ def register_lakeflow_source(spark):
 
             raise ValueError(f"Unsupported table: {table_name!r}")
 
-        def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
+        def read_table_metadata(
+            self, table_name: str, table_options: dict[str, str]
+        ) -> dict:
             """
             Fetch metadata for the given table.
 
@@ -1619,7 +1632,8 @@ def register_lakeflow_source(spark):
                     team_obj = detail_resp.json() or {}
                     if not isinstance(team_obj, dict):
                         raise ValueError(
-                            f"Unexpected response format for team detail: {type(team_obj).__name__}"
+                            "Unexpected response format for team detail: "
+                            f"{type(team_obj).__name__}"
                         )
 
                     record: dict[str, Any] = dict(team_obj)
@@ -1658,7 +1672,9 @@ def register_lakeflow_source(spark):
 
             user_obj = response.json() or {}
             if not isinstance(user_obj, dict):
-                raise ValueError(f"Unexpected response format for user: {type(user_obj).__name__}")
+                raise ValueError(
+                    f"Unexpected response format for user: {type(user_obj).__name__}"
+                )
 
             record: dict[str, Any] = dict(user_obj)
             return iter([record]), {}
@@ -1726,7 +1742,8 @@ def register_lakeflow_source(spark):
                     reviews = response.json() or []
                     if not isinstance(reviews, list):
                         raise ValueError(
-                            f"Unexpected response format for reviews: {type(reviews).__name__}"
+                            "Unexpected response format for reviews: "
+                            f"{type(reviews).__name__}"
                         )
 
                     for review in reviews:
@@ -1826,6 +1843,7 @@ def register_lakeflow_source(spark):
                         return section[start + 1 : end]
             return None
 
+
     ########################################################
     # pipeline/lakeflow_python_source.py
     ########################################################
@@ -1833,6 +1851,7 @@ def register_lakeflow_source(spark):
     METADATA_TABLE = "_lakeflow_metadata"
     TABLE_NAME = "tableName"
     TABLE_NAME_LIST = "tableNameList"
+
 
     class LakeflowStreamReader(SimpleDataSourceStreamReader):
         """
@@ -1870,6 +1889,7 @@ def register_lakeflow_source(spark):
             # are missed in the returned records.
             return self.read(start)[0]
 
+
     class LakeflowBatchReader(DataSourceReader):
         def __init__(
             self,
@@ -1903,6 +1923,7 @@ def register_lakeflow_source(spark):
                 all_records.append({"tableName": table, **metadata})
             return all_records
 
+
     class LakeflowSource(DataSource):
         def __init__(self, options):
             self.options = options
@@ -1932,5 +1953,6 @@ def register_lakeflow_source(spark):
 
         def simpleStreamReader(self, schema: StructType):
             return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
+
 
     spark.dataSource.register(LakeflowSource)

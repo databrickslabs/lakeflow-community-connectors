@@ -48,7 +48,9 @@ def register_lakeflow_source(spark):
                 # 1. set it to None when schema marks it as nullable
                 # 2. Otherwise, raise an error.
                 if field.name in value:
-                    field_dict[field.name] = parse_value(value.get(field.name), field.dataType)
+                    field_dict[field.name] = parse_value(
+                        value.get(field.name), field.dataType
+                    )
                 elif field.nullable:
                     field_dict[field.name] = None
                 else:
@@ -157,6 +159,7 @@ def register_lakeflow_source(spark):
                 f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}"
             )
 
+
     ########################################################
     # sources/mixpanel/mixpanel.py
     ########################################################
@@ -188,18 +191,14 @@ def register_lakeflow_source(spark):
                 }
                 print(self.auth_header)
             else:
-                raise ValueError(
-                    "Authentication credentials required: either (username, secret) or api_secret"
-                )
+                raise ValueError("Authentication credentials required: either (username, secret) or api_secret")
 
             # Configuration options
             self.region = options.get("region", "US")
             self.timezone = options.get("project_timezone", "US/Pacific")
 
             # Historical data settings
-            self.historical_days = int(
-                options.get("historical_days", 10)
-            )  # Default to 10 days of history
+            self.historical_days = int(options.get("historical_days", 10))  # Default to 10 days of history
 
             # Set base URLs based on region
             if self.region.upper() == "EU":
@@ -223,7 +222,7 @@ def register_lakeflow_source(spark):
                 "%Y-%m-%d %H:%M:%S",
                 "%Y-%m-%dT%H:%M:%SZ",
                 "%Y-%m-%dT%H:%M:%S.%f",
-                "%Y-%m-%dT%H:%M:%S.%fZ",
+                "%Y-%m-%dT%H:%M:%S.%fZ"
             ]
 
             for fmt in datetime_formats:
@@ -240,46 +239,24 @@ def register_lakeflow_source(spark):
 
         # Standard property keys for different Mixpanel object types
         _EVENT_STANDARD_KEYS = {
-            "time",
-            "distinct_id",
-            "$browser",
-            "$browser_version",
-            "$city",
-            "$current_url",
-            "$device_id",
-            "$initial_referrer",
-            "$initial_referring_domain",
-            "$lib_version",
-            "$mp_api_endpoint",
-            "$mp_api_timestamp_ms",
-            "$os",
-            "$region",
-            "$screen_height",
-            "$screen_width",
-            "mp_country_code",
-            "mp_lib",
-            "mp_processing_time_ms",
-            "mp_sent_by_lib_version",
+            "time", "distinct_id", "$browser", "$browser_version",
+            "$city", "$current_url", "$device_id", "$initial_referrer",
+            "$initial_referring_domain", "$lib_version", "$mp_api_endpoint",
+            "$mp_api_timestamp_ms", "$os", "$region", "$screen_height",
+            "$screen_width", "mp_country_code", "mp_lib",
+            "mp_processing_time_ms", "mp_sent_by_lib_version"
         }
 
         _ENGAGE_STANDARD_KEYS = {
-            "$first_name",
-            "$last_name",
-            "$email",
-            "$created",
-            "$last_seen",
-            "$name",
-            "$phone",
-            "$city",
-            "$region",
-            "$country_code",
-            "$timezone",
-            "$browser",
-            "$os",
+            "$first_name", "$last_name", "$email", "$created", "$last_seen",
+            "$name", "$phone", "$city", "$region", "$country_code",
+            "$timezone", "$browser", "$os"
         }
 
         def _separate_standard_and_custom_properties(
-            self, properties: dict, standard_keys: set
+            self, 
+            properties: dict, 
+            standard_keys: set
         ) -> tuple[dict, dict]:
             """
             Generic function to separate standard properties from custom properties.
@@ -318,7 +295,10 @@ def register_lakeflow_source(spark):
             return {
                 "event": event.get("event"),
                 "$insert_id": insert_id,
-                "properties": {**standard_props, "custom_properties": custom_props},
+                "properties": {
+                    **standard_props,
+                    "custom_properties": custom_props
+                }
             }
 
         def _process_engage_profile(self, profile: dict) -> dict:
@@ -332,16 +312,26 @@ def register_lakeflow_source(spark):
 
             return {
                 "$distinct_id": profile.get("$distinct_id"),
-                "$properties": {**standard_props, "custom_properties": custom_props},
+                "$properties": {
+                    **standard_props,
+                    "custom_properties": custom_props
+                }
             }
 
         def list_tables(self) -> list[str]:
             """
             List available tables/streams in Mixpanel
             """
-            return ["events", "cohorts", "cohort_members", "engage"]
+            return [
+                "events",
+                "cohorts",
+                "cohort_members",
+                "engage"
+            ]
 
-        def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
+        def get_table_schema(
+            self, table_name: str, table_options: dict[str, str]
+        ) -> StructType:
             """
             Fetch the schema of a table.
             Args:
@@ -355,92 +345,70 @@ def register_lakeflow_source(spark):
                 return self._schema_cache[table_name]
 
             schemas = {
-                "events": StructType(
-                    [
-                        StructField("event", StringType()),
-                        StructField("$insert_id", StringType()),
-                        StructField(
-                            "properties",
-                            StructType(
-                                [
-                                    StructField("time", LongType()),
-                                    StructField("distinct_id", StringType()),
-                                    StructField("$browser", StringType()),
-                                    StructField("$browser_version", LongType()),
-                                    StructField("$city", StringType()),
-                                    StructField("$current_url", StringType()),
-                                    StructField("$device_id", StringType()),
-                                    StructField("$initial_referrer", StringType()),
-                                    StructField("$initial_referring_domain", StringType()),
-                                    StructField("$lib_version", StringType()),
-                                    StructField("$mp_api_endpoint", StringType()),
-                                    StructField("$mp_api_timestamp_ms", LongType()),
-                                    StructField("$os", StringType()),
-                                    StructField("$region", StringType()),
-                                    StructField("$screen_height", LongType()),
-                                    StructField("$screen_width", LongType()),
-                                    StructField("mp_country_code", StringType()),
-                                    StructField("mp_lib", StringType()),
-                                    StructField("mp_processing_time_ms", LongType()),
-                                    StructField("mp_sent_by_lib_version", StringType()),
-                                    StructField(
-                                        "custom_properties", MapType(StringType(), StringType())
-                                    ),
-                                ]
-                            ),
-                        ),
-                        StructField("generated_timestamp", LongType()),
-                    ]
-                ),
-                "cohorts": StructType(
-                    [
-                        StructField("id", LongType()),
-                        StructField("name", StringType()),
-                        StructField("description", StringType()),
-                        StructField("count", LongType()),
-                        StructField("is_visible", BooleanType()),
-                        StructField("is_dynamic", BooleanType()),
-                        StructField("created", StringType()),
-                        StructField("project_id", LongType()),
-                        StructField("generated_timestamp", LongType()),
-                    ]
-                ),
-                "cohort_members": StructType(
-                    [
-                        StructField("cohort_id", LongType()),
+                "events": StructType([
+                    StructField("event", StringType()),
+                    StructField("$insert_id", StringType()),
+                    StructField("properties", StructType([
+                        StructField("time", LongType()),
                         StructField("distinct_id", StringType()),
-                        StructField("generated_timestamp", LongType()),
-                    ]
-                ),
-                "engage": StructType(
-                    [
-                        StructField("$distinct_id", StringType()),
-                        StructField(
-                            "$properties",
-                            StructType(
-                                [
-                                    StructField("$first_name", StringType()),
-                                    StructField("$last_name", StringType()),
-                                    StructField("$email", StringType()),
-                                    StructField("$created", StringType()),
-                                    StructField("$last_seen", StringType()),
-                                    StructField("$name", StringType()),
-                                    StructField("$phone", StringType()),
-                                    StructField("$city", StringType()),
-                                    StructField("$region", StringType()),
-                                    StructField("$country_code", StringType()),
-                                    StructField("$timezone", StringType()),
-                                    StructField("$browser", StringType()),
-                                    StructField("$os", StringType()),
-                                    StructField(
-                                        "custom_properties", MapType(StringType(), StringType())
-                                    ),
-                                ]
-                            ),
-                        ),
-                        StructField("generated_timestamp", LongType()),
-                    ]
-                ),
+                        StructField("$browser", StringType()),
+                        StructField("$browser_version", LongType()),
+                        StructField("$city", StringType()),
+                        StructField("$current_url", StringType()),
+                        StructField("$device_id", StringType()),
+                        StructField("$initial_referrer", StringType()),
+                        StructField("$initial_referring_domain", StringType()),
+                        StructField("$lib_version", StringType()),
+                        StructField("$mp_api_endpoint", StringType()),
+                        StructField("$mp_api_timestamp_ms", LongType()),
+                        StructField("$os", StringType()),
+                        StructField("$region", StringType()),
+                        StructField("$screen_height", LongType()),
+                        StructField("$screen_width", LongType()),
+                        StructField("mp_country_code", StringType()),
+                        StructField("mp_lib", StringType()),
+                        StructField("mp_processing_time_ms", LongType()),
+                        StructField("mp_sent_by_lib_version", StringType()),
+                        StructField("custom_properties", MapType(StringType(), StringType())),
+                    ])),
+                    StructField("generated_timestamp", LongType()),
+                ]),
+                "cohorts": StructType([
+                    StructField("id", LongType()),
+                    StructField("name", StringType()),
+                    StructField("description", StringType()),
+                    StructField("count", LongType()),
+                    StructField("is_visible", BooleanType()),
+                    StructField("is_dynamic", BooleanType()),
+                    StructField("created", StringType()),
+                    StructField("project_id", LongType()),
+                    StructField("generated_timestamp", LongType()),
+                ]),
+                "cohort_members": StructType([
+                    StructField("cohort_id", LongType()),
+                    StructField("distinct_id", StringType()),
+                    StructField("generated_timestamp", LongType()),
+                ]),
+                "engage": StructType([
+                    StructField("$distinct_id", StringType()),
+                    StructField("$properties", StructType([
+                        StructField("$first_name", StringType()),
+                        StructField("$last_name", StringType()),
+                        StructField("$email", StringType()),
+                        StructField("$created", StringType()),
+                        StructField("$last_seen", StringType()),
+                        StructField("$name", StringType()),
+                        StructField("$phone", StringType()),
+                        StructField("$city", StringType()),
+                        StructField("$region", StringType()),
+                        StructField("$country_code", StringType()),
+                        StructField("$timezone", StringType()),
+                        StructField("$browser", StringType()),
+                        StructField("$os", StringType()),
+                        StructField("custom_properties", MapType(StringType(), StringType())),
+                    ])),
+                    StructField("generated_timestamp", LongType()),
+                ])
             }
 
             if table_name not in schemas:
@@ -452,7 +420,9 @@ def register_lakeflow_source(spark):
 
             return schema
 
-        def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
+        def read_table_metadata(
+            self, table_name: str, table_options: dict[str, str]
+        ) -> dict:
             """
             Fetch the metadata of a table.
             Args:
@@ -468,23 +438,23 @@ def register_lakeflow_source(spark):
                 "events": {
                     "primary_keys": ["$insert_id"],
                     "cursor_field": "properties.time",
-                    "ingestion_type": "cdc",
+                    "ingestion_type": "cdc"
                 },
                 "cohorts": {
                     "primary_keys": ["id"],
                     "cursor_field": None,
-                    "ingestion_type": "snapshot",
+                    "ingestion_type": "snapshot"
                 },
                 "cohort_members": {
                     "primary_keys": ["cohort_id", "distinct_id"],
                     "cursor_field": None,
-                    "ingestion_type": "snapshot",
+                    "ingestion_type": "snapshot"
                 },
                 "engage": {
                     "primary_keys": ["$distinct_id"],
                     "cursor_field": "$properties.$last_seen",
-                    "ingestion_type": "cdc",
-                },
+                    "ingestion_type": "cdc"
+                }
             }
 
             if table_name not in metadata:
@@ -528,18 +498,14 @@ def register_lakeflow_source(spark):
 
             if not start_date:
                 # For initial snapshot, start from configured historical days ago
-                start_date = (datetime.now() - timedelta(days=self.historical_days)).strftime(
-                    "%Y-%m-%d"
-                )
+                start_date = (datetime.now() - timedelta(days=self.historical_days)).strftime("%Y-%m-%d")
 
             # End date is today (inclusive)
             today = datetime.now().strftime("%Y-%m-%d")
 
             # If start_date is ahead of today, set it to today
             if start_date > today:
-                print(
-                    f"Start date {start_date} is ahead of today {today}, setting start date to today"
-                )
+                print(f"Start date {start_date} is ahead of today {today}, setting start date to today")
                 start_date = today
 
             all_records = []
@@ -549,10 +515,7 @@ def register_lakeflow_source(spark):
             # Loop through date ranges in 7-day chunks until we reach today
             while current_start <= today:
                 # Calculate end date for this chunk
-                chunk_end = (
-                    datetime.strptime(current_start, "%Y-%m-%d")
-                    + timedelta(days=self.BATCH_SIZE_DAYS - 1)
-                ).strftime("%Y-%m-%d")
+                chunk_end = (datetime.strptime(current_start, "%Y-%m-%d") + timedelta(days=self.BATCH_SIZE_DAYS - 1)).strftime("%Y-%m-%d")
                 if chunk_end > today:
                     chunk_end = today
 
@@ -564,7 +527,7 @@ def register_lakeflow_source(spark):
                 }
 
                 # Only add project_id for service account authentication (username + secret)
-                if self.project_id and hasattr(self, "username") and hasattr(self, "secret"):
+                if self.project_id and hasattr(self, 'username') and hasattr(self, 'secret'):
                     params["project_id"] = self.project_id
 
                 try:
@@ -574,22 +537,18 @@ def register_lakeflow_source(spark):
                     if total_api_calls > 0:
                         time.sleep(0.34)  # Slightly more than 1/3 second to stay under 3 req/sec
 
-                    response = requests.get(
-                        url, params=params, headers=self.auth_header, timeout=120
-                    )
+                    response = requests.get(url, params=params, headers=self.auth_header, timeout=120)
                     response.raise_for_status()
                     total_api_calls += 1
 
                     # Mixpanel export returns JSONL format
-                    response_lines = response.text.strip().split("\n")
+                    response_lines = response.text.strip().split('\n')
                     total_lines = len(response_lines)
                     non_empty_lines = len([line for line in response_lines if line.strip()])
                     chunk_records = 0
                     json_errors = 0
 
-                    print(
-                        f"API Response: {total_lines} total lines, {non_empty_lines} non-empty lines"
-                    )
+                    print(f"API Response: {total_lines} total lines, {non_empty_lines} non-empty lines")
 
                     for line_num, line in enumerate(response_lines):
                         if line.strip():
@@ -607,9 +566,7 @@ def register_lakeflow_source(spark):
                                 print(f"Problematic line (first 100 chars): {line[:100]}")
                                 continue
 
-                    print(
-                        f"Fetched {chunk_records} events from {current_start} to {chunk_end} ({json_errors} JSON errors)"
-                    )
+                    print(f"Fetched {chunk_records} events from {current_start} to {chunk_end} ({json_errors} JSON errors)")
 
                 except requests.exceptions.RequestException as e:
                     print(f"Error fetching events data for {current_start} to {chunk_end}: {e}")
@@ -621,19 +578,13 @@ def register_lakeflow_source(spark):
                         return iter(all_records), next_offset
 
                 # Move to next chunk
-                current_start = (
-                    datetime.strptime(chunk_end, "%Y-%m-%d") + timedelta(days=1)
-                ).strftime("%Y-%m-%d")
+                current_start = (datetime.strptime(chunk_end, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
 
             # All data fetched successfully - set up incremental mode for tomorrow
-            next_start_date = (datetime.strptime(today, "%Y-%m-%d") + timedelta(days=1)).strftime(
-                "%Y-%m-%d"
-            )
+            next_start_date = (datetime.strptime(today, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
             next_offset = {"start_date": next_start_date}
 
-            print(
-                f"Total: {total_api_calls} API calls, {len(all_records)} events from {start_date} to {today}"
-            )
+            print(f"Total: {total_api_calls} API calls, {len(all_records)} events from {start_date} to {today}")
 
             # Return the records as an iterator
             def record_iterator():
@@ -690,11 +641,7 @@ def register_lakeflow_source(spark):
                 cohorts_data = response.json()
 
                 # Handle both response formats: list directly or dict with "cohorts" key
-                cohorts = (
-                    cohorts_data
-                    if isinstance(cohorts_data, list)
-                    else cohorts_data.get("cohorts", [])
-                )
+                cohorts = cohorts_data if isinstance(cohorts_data, list) else cohorts_data.get("cohorts", [])
                 print(f"Found {len(cohorts)} cohorts, fetching members...")
 
                 # For each cohort, fetch its members
@@ -708,12 +655,15 @@ def register_lakeflow_source(spark):
                     params = {"where": f'properties["$cohort"] == "{cohort_id}"'}
 
                     # Only add project_id for service account authentication
-                    if self.project_id and hasattr(self, "username") and hasattr(self, "secret"):
+                    if self.project_id and hasattr(self, 'username') and hasattr(self, 'secret'):
                         params["project_id"] = self.project_id
 
                     try:
                         members_response = requests.post(
-                            members_url, params=params, headers=self.auth_header, timeout=60
+                            members_url, 
+                            params=params, 
+                            headers=self.auth_header, 
+                            timeout=60
                         )
                         members_response.raise_for_status()
                         members_data = members_response.json()
@@ -722,13 +672,11 @@ def register_lakeflow_source(spark):
                         for member in members_data.get("results", []):
                             distinct_id = member.get("$distinct_id")
                             if distinct_id:
-                                records.append(
-                                    {
-                                        "cohort_id": cohort_id,
-                                        "distinct_id": distinct_id,
-                                        "generated_timestamp": int(time.time() * 1000),
-                                    }
-                                )
+                                records.append({
+                                    "cohort_id": cohort_id,
+                                    "distinct_id": distinct_id,
+                                    "generated_timestamp": int(time.time() * 1000)
+                                })
 
                         # Rate limiting: small delay between cohort member fetches
                         if len(cohorts) > 1:
@@ -743,9 +691,7 @@ def register_lakeflow_source(spark):
                 print(f"Error fetching cohorts list: {e}")
                 return iter(records), start_offset if start_offset else {}
 
-            print(
-                f"Fetched {len(records)} cohort member relationships across {len(cohorts)} cohorts"
-            )
+            print(f"Fetched {len(records)} cohort member relationships across {len(cohorts)} cohorts")
 
             # For snapshot tables, return the same offset (no incremental cursor)
             return iter(records), start_offset if start_offset else {}
@@ -780,14 +726,12 @@ def register_lakeflow_source(spark):
             if current_session_id:
                 params["session_id"] = current_session_id
             # Only add project_id for service account authentication (username + secret)
-            if self.project_id and hasattr(self, "username") and hasattr(self, "secret"):
+            if self.project_id and hasattr(self, 'username') and hasattr(self, 'secret'):
                 params["project_id"] = self.project_id
 
             while True:
                 try:
-                    response = requests.post(
-                        url, params=params, headers=self.auth_header, timeout=30
-                    )
+                    response = requests.post(url, params=params, headers=self.auth_header, timeout=30)
                     response.raise_for_status()
                     data = response.json()
 
@@ -810,21 +754,14 @@ def register_lakeflow_source(spark):
                                 if profile_last_seen_iso >= start_time:
                                     # Process profile to separate standard and custom properties
                                     processed_profile = self._process_engage_profile(profile)
-                                    processed_profile["generated_timestamp"] = int(
-                                        time.time() * 1000
-                                    )
+                                    processed_profile["generated_timestamp"] = int(time.time() * 1000)
                                     records.append(processed_profile)
 
                                     # Track latest last_seen timestamp for next sync
-                                    if (
-                                        not latest_last_seen
-                                        or profile_last_seen_iso > latest_last_seen
-                                    ):
+                                    if not latest_last_seen or profile_last_seen_iso > latest_last_seen:
                                         latest_last_seen = profile_last_seen_iso
                             except Exception as e:
-                                print(
-                                    f"Error parsing last_seen timestamp '{profile_last_seen}': {e}"
-                                )
+                                print(f"Error parsing last_seen timestamp '{profile_last_seen}': {e}")
                                 # Include record anyway but don't update cursor
                                 processed_profile = self._process_engage_profile(profile)
                                 processed_profile["generated_timestamp"] = int(time.time() * 1000)
@@ -849,18 +786,15 @@ def register_lakeflow_source(spark):
                     break
 
             # Update offset with latest cursor for next incremental sync
-            next_offset = (
-                {
-                    "last_seen": latest_last_seen,
-                    "page": 0,  # Reset page for next sync
-                    "session_id": None,  # Reset session for next sync
-                }
-                if latest_last_seen
-                else (start_offset if start_offset else {})
-            )
+            next_offset = {
+                "last_seen": latest_last_seen,
+                "page": 0,  # Reset page for next sync
+                "session_id": None  # Reset session for next sync
+            } if latest_last_seen else (start_offset if start_offset else {})
 
             print(f"Fetched {len(records)} engage records, next sync from: {latest_last_seen}")
             return iter(records), next_offset
+
 
     ########################################################
     # pipeline/lakeflow_python_source.py
@@ -869,6 +803,7 @@ def register_lakeflow_source(spark):
     METADATA_TABLE = "_lakeflow_metadata"
     TABLE_NAME = "tableName"
     TABLE_NAME_LIST = "tableNameList"
+
 
     class LakeflowStreamReader(SimpleDataSourceStreamReader):
         """
@@ -906,6 +841,7 @@ def register_lakeflow_source(spark):
             # are missed in the returned records.
             return self.read(start)[0]
 
+
     class LakeflowBatchReader(DataSourceReader):
         def __init__(
             self,
@@ -939,6 +875,7 @@ def register_lakeflow_source(spark):
                 all_records.append({"tableName": table, **metadata})
             return all_records
 
+
     class LakeflowSource(DataSource):
         def __init__(self, options):
             self.options = options
@@ -968,5 +905,6 @@ def register_lakeflow_source(spark):
 
         def simpleStreamReader(self, schema: StructType):
             return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
+
 
     spark.dataSource.register(LakeflowSource)

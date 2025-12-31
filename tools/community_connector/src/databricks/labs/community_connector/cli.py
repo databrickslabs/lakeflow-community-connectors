@@ -52,10 +52,10 @@ def _parse_pipeline_spec(spec_input: str, validate: bool = True) -> dict:
     )
 
     # Check if it's a file path
-    if spec_input.endswith((".yaml", ".yml", ".json")):
+    if spec_input.endswith(('.yaml', '.yml', '.json')):
         try:
-            with open(spec_input, "r") as f:
-                if spec_input.endswith(".json"):
+            with open(spec_input, 'r') as f:
+                if spec_input.endswith('.json'):
                     spec = json.load(f)
                 else:
                     spec = yaml.safe_load(f)
@@ -103,9 +103,7 @@ def _find_pipeline_by_name(workspace_client, pipeline_name: str) -> str:
         raise click.ClickException(f"Pipeline '{pipeline_name}' not found")
 
     if len(pipelines) > 1:
-        click.echo(
-            f"Warning: Found {len(pipelines)} pipelines matching '{pipeline_name}', using first match"
-        )
+        click.echo(f"Warning: Found {len(pipelines)} pipelines matching '{pipeline_name}', using first match")
 
     return pipelines[0].pipeline_id
 
@@ -151,9 +149,7 @@ def _create_workspace_file(workspace_client, path: str, content: str) -> None:
     )
 
 
-def _delete_workspace_files(
-    workspace_client, base_path: str, files: list, debug: bool = False
-) -> None:
+def _delete_workspace_files(workspace_client, base_path: str, files: list, debug: bool = False) -> None:
     """
     Delete files from the Databricks workspace.
 
@@ -192,9 +188,7 @@ def _replace_placeholder_in_value(value, placeholder: str, replacement: str):
         Value with placeholder replaced.
     """
     if isinstance(value, dict):
-        return {
-            k: _replace_placeholder_in_value(v, placeholder, replacement) for k, v in value.items()
-        }
+        return {k: _replace_placeholder_in_value(v, placeholder, replacement) for k, v in value.items()}
     elif isinstance(value, list):
         return [_replace_placeholder_in_value(item, placeholder, replacement) for item in value]
     elif isinstance(value, str):
@@ -289,7 +283,9 @@ def create_pipeline(
 
     # Validate: either connection_name or pipeline_spec_input must be provided
     if not connection_name and not pipeline_spec_input:
-        raise click.ClickException("Either --connection-name or --pipeline-spec must be provided")
+        raise click.ClickException(
+            "Either --connection-name or --pipeline-spec must be provided"
+        )
 
     # Build config with precedence: CLI args > config file > defaults
     workspace_path, repo_config, pipeline_config = build_config(
@@ -331,9 +327,7 @@ def create_pipeline(
 
     # Step 3: Replace {WORKSPACE_PATH} in pipeline.root_path
     if pipeline_config.root_path:
-        pipeline_config.root_path = pipeline_config.root_path.replace(
-            "{WORKSPACE_PATH}", workspace_path
-        )
+        pipeline_config.root_path = pipeline_config.root_path.replace("{WORKSPACE_PATH}", workspace_path)
 
     # Step 4: Replace {WORKSPACE_PATH} in libraries
     if pipeline_config.libraries:
@@ -405,7 +399,6 @@ def create_pipeline(
         if pipeline_spec_input:
             # Parse the provided pipeline spec (connection_name is always required in spec)
             import json
-
             pipeline_spec = _parse_pipeline_spec(pipeline_spec_input)
 
             # If CLI connection_name provided, it overrides the spec
@@ -418,9 +411,7 @@ def create_pipeline(
             # Use the base template with pipeline_spec placeholder
             ingest_content = _load_ingest_template("ingest_template_base.py")
             ingest_content = ingest_content.replace("{SOURCE_NAME}", source_name)
-            ingest_content = ingest_content.replace(
-                "{PIPELINE_SPEC}", json.dumps(pipeline_spec, indent=4)
-            )
+            ingest_content = ingest_content.replace("{PIPELINE_SPEC}", json.dumps(pipeline_spec, indent=4))
         else:
             # Use the full template with placeholders replaced
             # connection_name is required here (already validated above)
@@ -656,13 +647,12 @@ def create_connection(ctx: click.Context, source_name: str, connection_name: str
     except Exception as e:
         # Show more detailed error information
         error_msg = str(e)
-        if hasattr(e, "message"):
+        if hasattr(e, 'message'):
             error_msg = e.message
-        if hasattr(e, "error_code"):
+        if hasattr(e, 'error_code'):
             error_msg = f"[{e.error_code}] {error_msg}"
         if debug:
             import traceback
-
             click.echo(f"\n[DEBUG] Full exception: {traceback.format_exc()}", err=True)
         raise click.ClickException(f"Failed to create connection: {error_msg}")
 
@@ -752,13 +742,12 @@ def update_connection(ctx: click.Context, source_name: str, connection_name: str
     except Exception as e:
         # Show more detailed error information
         error_msg = str(e)
-        if hasattr(e, "message"):
+        if hasattr(e, 'message'):
             error_msg = e.message
-        if hasattr(e, "error_code"):
+        if hasattr(e, 'error_code'):
             error_msg = f"[{e.error_code}] {error_msg}"
         if debug:
             import traceback
-
             click.echo(f"\n[DEBUG] Full exception: {traceback.format_exc()}", err=True)
         raise click.ClickException(f"Failed to update connection: {error_msg}")
 

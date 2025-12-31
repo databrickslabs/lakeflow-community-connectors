@@ -18,7 +18,9 @@ class TestValidPipelineSpec:
         """Test minimal valid spec with required fields only."""
         spec = {
             "connection_name": "my_connection",
-            "objects": [{"table": {"source_table": "users"}}],
+            "objects": [
+                {"table": {"source_table": "users"}}
+            ],
         }
         warnings = validate_pipeline_spec(spec)
         assert warnings == []
@@ -412,3 +414,4 @@ class TestErrorPaths:
             validate_pipeline_spec(spec)
         assert "table_configuration" in str(exc_info.value)
         assert "scd_type" in str(exc_info.value)
+

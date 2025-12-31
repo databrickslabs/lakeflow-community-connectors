@@ -1,4 +1,3 @@
-"""Zendesk LakeFlow connector implementation."""
 import requests
 import base64
 from pyspark.sql.types import *
@@ -32,7 +31,9 @@ class LakeflowConnect:
             "users",
         ]
 
-    def get_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
+    def get_table_schema(
+        self, table_name: str, table_options: Dict[str, str]
+    ) -> StructType:
         """
         Fetch the schema of a table.
         """
@@ -70,9 +71,13 @@ class LakeflowConnect:
                         "custom_fields",
                         ArrayType(MapType(StringType(), StringType())),
                     ),
-                    StructField("satisfaction_rating", MapType(StringType(), StringType())),
+                    StructField(
+                        "satisfaction_rating", MapType(StringType(), StringType())
+                    ),
                     StructField("sharing_agreement_ids", ArrayType(LongType())),
-                    StructField("fields", ArrayType(MapType(StringType(), StringType()))),
+                    StructField(
+                        "fields", ArrayType(MapType(StringType(), StringType()))
+                    ),
                     StructField("followup_ids", ArrayType(LongType())),
                     StructField("ticket_form_id", LongType()),
                     StructField("brand_id", LongType()),
@@ -97,7 +102,9 @@ class LakeflowConnect:
                     StructField("shared_tickets", BooleanType()),
                     StructField("shared_comments", BooleanType()),
                     StructField("tags", ArrayType(StringType())),
-                    StructField("organization_fields", MapType(StringType(), StringType())),
+                    StructField(
+                        "organization_fields", MapType(StringType(), StringType())
+                    ),
                 ]
             ),
             "articles": StructType(
@@ -185,7 +192,9 @@ class LakeflowConnect:
                     StructField("follower_ids", ArrayType(LongType())),
                     StructField("ticket_form_id", LongType()),
                     StructField("brand_id", LongType()),
-                    StructField("comments", ArrayType(MapType(StringType(), StringType()))),
+                    StructField(
+                        "comments", ArrayType(MapType(StringType(), StringType()))
+                    ),
                 ]
             ),
             "topics": StructType(
@@ -253,7 +262,9 @@ class LakeflowConnect:
 
         return schemas[table_name]
 
-    def read_table_metadata(self, table_name: str, table_options: Dict[str, str]) -> dict:
+    def read_table_metadata(
+        self, table_name: str, table_options: Dict[str, str]
+    ) -> dict:
         """
         Fetch the metadata of a table.
         """

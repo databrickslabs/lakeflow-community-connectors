@@ -1,4 +1,3 @@
-"""Abstract base interface for LakeFlow connectors."""
 from pyspark.sql.types import *
 from datetime import datetime
 from typing import Iterator, Any
@@ -22,7 +21,9 @@ class LakeflowConnect:
             A list of table names.
         """
 
-    def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
+    def get_table_schema(
+        self, table_name: str, table_options: dict[str, str]
+    ) -> StructType:
         """
         Fetch the schema of a table.
         Args:
@@ -35,7 +36,9 @@ class LakeflowConnect:
             A StructType object representing the schema of the table.
         """
 
-    def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
+    def read_table_metadata(
+        self, table_name: str, table_options: dict[str, str]
+    ) -> dict:
         """
         Fetch the metadata of a table.
         Args:

@@ -246,7 +246,8 @@ def build_config(
     sparse_checkout = repo_data.get("sparse_checkout")
     if sparse_checkout and "patterns" in sparse_checkout:
         updated_patterns = [
-            pattern.replace("{SOURCE_NAME}", source_name) for pattern in sparse_checkout["patterns"]
+            pattern.replace("{SOURCE_NAME}", source_name)
+            for pattern in sparse_checkout["patterns"]
         ]
         sparse_checkout = {"patterns": updated_patterns}
 

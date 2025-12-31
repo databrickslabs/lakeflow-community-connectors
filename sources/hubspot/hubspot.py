@@ -1,4 +1,3 @@
-"""HubSpot LakeFlow connector implementation."""
 import requests
 import json
 from pyspark.sql.types import *
@@ -151,7 +150,9 @@ class LakeflowConnect:
         """Get configuration for a specific object type"""
         return self._object_config.get(table_name, self._default_object_config)
 
-    def get_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
+    def get_table_schema(
+        self, table_name: str, table_options: Dict[str, str]
+    ) -> StructType:
         """
         Fetch the schema of a table.
 
@@ -163,10 +164,8 @@ class LakeflowConnect:
         """
         supported_tables = self.list_tables()
         if table_name not in supported_tables:
-            raise ValueError(
-                f"Unsupported table: {table_name}. Supported tables are: {supported_tables}"
-            )
-
+            raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
+        
         # Check cache first
         if table_name in self._schema_cache:
             return self._schema_cache[table_name]
@@ -179,7 +178,9 @@ class LakeflowConnect:
 
         return schema
 
-    def read_table_metadata(self, table_name: str, table_options: Dict[str, str]) -> dict:
+    def read_table_metadata(
+        self, table_name: str, table_options: Dict[str, str]
+    ) -> dict:
         """
         Fetch the metadata of a table.
 
@@ -197,10 +198,8 @@ class LakeflowConnect:
         """
         supported_tables = self.list_tables()
         if table_name not in supported_tables:
-            raise ValueError(
-                f"Unsupported table: {table_name}. Supported tables are: {supported_tables}"
-            )
-
+            raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
+        
         # Check cache first
         if table_name in self._metadata_cache:
             return self._metadata_cache[table_name]
@@ -343,26 +342,21 @@ class LakeflowConnect:
         """
         supported_tables = self.list_tables()
         if table_name not in supported_tables:
-            raise ValueError(
-                f"Unsupported table: {table_name}. Supported tables are: {supported_tables}"
-            )
-
+            raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
+        
         # Determine if this is an incremental read
-        is_incremental = start_offset is not None and start_offset.get("updatedAt") is not None
+        is_incremental = (
+            start_offset is not None and start_offset.get("updatedAt") is not None
+        )
 
         if is_incremental:
-            return self._read_data(
-                table_name, start_offset, incremental=True, table_options=table_options
-            )
+            return self._read_data(table_name, start_offset, incremental=True, table_options=table_options)
         else:
             return self._read_data(table_name, None, incremental=False, table_options=table_options)
 
     def _read_data(
-        self,
-        table_name: str,
-        start_offset: dict = None,
-        incremental: bool = False,
-        table_options: Dict[str, str] = None,
+        self, table_name: str, start_offset: dict = None, incremental: bool = False,
+        table_options: Dict[str, str] = None
     ):
         """Unified method to read data from HubSpot API"""
 
@@ -386,7 +380,9 @@ class LakeflowConnect:
                     start_offset,
                     after,
                 )
-                if updated_time and (not latest_updated or updated_time > latest_updated):
+                if updated_time and (
+                    not latest_updated or updated_time > latest_updated
+                ):
                     latest_updated = updated_time
             else:
                 # Use objects API for full refresh
@@ -405,7 +401,9 @@ class LakeflowConnect:
             if not incremental:
                 for record in transformed_records:
                     updated_at = record.get("updatedAt")
-                    if updated_at and (not latest_updated or updated_at > latest_updated):
+                    if updated_at and (
+                        not latest_updated or updated_at > latest_updated
+                    ):
                         latest_updated = updated_at
 
             if not after:
@@ -436,7 +434,9 @@ class LakeflowConnect:
 
         resp = requests.get(url, headers=self.auth_header)
         if resp.status_code != 200:
-            raise Exception(f"HubSpot API error for {table_name}: {resp.status_code} {resp.text}")
+            raise Exception(
+                f"HubSpot API error for {table_name}: {resp.status_code} {resp.text}"
+            )
 
         data = resp.json()
         records = data.get("results", [])
@@ -458,7 +458,8 @@ class LakeflowConnect:
         # Convert to milliseconds for HubSpot
         try:
             last_updated_ms = int(
-                datetime.fromisoformat(last_updated.replace("Z", "+00:00")).timestamp() * 1000
+                datetime.fromisoformat(last_updated.replace("Z", "+00:00")).timestamp()
+                * 1000
             )
         except:
             last_updated_ms = 0
@@ -475,7 +476,9 @@ class LakeflowConnect:
                     ]
                 }
             ],
-            "sorts": [{"propertyName": cursor_property_field, "direction": "ASCENDING"}],
+            "sorts": [
+                {"propertyName": cursor_property_field, "direction": "ASCENDING"}
+            ],
             "limit": 100,
             "properties": property_names or [],
         }
@@ -487,7 +490,9 @@ class LakeflowConnect:
         resp = requests.post(url, headers=self.auth_header, json=search_body)
 
         if resp.status_code != 200:
-            raise Exception(f"HubSpot API error for {table_name}: {resp.status_code} {resp.text}")
+            raise Exception(
+                f"HubSpot API error for {table_name}: {resp.status_code} {resp.text}"
+            )
 
         data = resp.json()
         records = data.get("results", [])
@@ -532,7 +537,9 @@ class LakeflowConnect:
             if association_type in associations_data:
                 assoc_data = associations_data[association_type]
                 if isinstance(assoc_data, dict) and "results" in assoc_data:
-                    association_list = [item.get("id", "") for item in assoc_data["results"]]
+                    association_list = [
+                        item.get("id", "") for item in assoc_data["results"]
+                    ]
                 elif isinstance(assoc_data, list):
                     association_list = [
                         str(item) if not isinstance(item, dict) else item.get("id", "")

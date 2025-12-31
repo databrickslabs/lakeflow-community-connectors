@@ -1,4 +1,3 @@
-"""Tests for the example LakeFlow connector."""
 import pytest
 from pathlib import Path
 

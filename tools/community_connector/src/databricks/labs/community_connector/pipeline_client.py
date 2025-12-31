@@ -137,11 +137,7 @@ class PipelineClient:
             if isinstance(lib, dict):
                 if "notebook" in lib:
                     notebook_config = lib["notebook"]
-                    path = (
-                        notebook_config.get("path")
-                        if isinstance(notebook_config, dict)
-                        else notebook_config
-                    )
+                    path = notebook_config.get("path") if isinstance(notebook_config, dict) else notebook_config
                     result.append(PipelineLibrary(notebook=NotebookLibrary(path=path)))
                 elif "file" in lib:
                     file_config = lib["file"]
@@ -150,9 +146,7 @@ class PipelineClient:
                 elif "glob" in lib:
                     # Convert glob.include to file library
                     glob_config = lib["glob"]
-                    path = (
-                        glob_config.get("include") if isinstance(glob_config, dict) else glob_config
-                    )
+                    path = glob_config.get("include") if isinstance(glob_config, dict) else glob_config
                     result.append(PipelineLibrary(file=FileLibrary(path=path)))
                 else:
                     # Unknown format - skip with warning (could log this)
@@ -203,3 +197,4 @@ class PipelineClient:
             Iterator of PipelineStateInfo objects.
         """
         return self._client.pipelines.list_pipelines(filter=filter, max_results=max_results)
+

@@ -1,4 +1,3 @@
-"""Example LakeFlow connector implementation for demonstration."""
 import random
 from typing import Dict, List, Iterator
 
@@ -30,7 +29,9 @@ class LakeflowConnect:
         """
         return self.tables
 
-    def get_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
+    def get_table_schema(
+        self, table_name: str, table_options: Dict[str, str]
+    ) -> StructType:
         """
         Fetch the schema of a table.
         """
@@ -53,7 +54,9 @@ class LakeflowConnect:
 
         return schema
 
-    def read_table_metadata(self, table_name: str, table_options: Dict[str, str]) -> Dict[str, str]:
+    def read_table_metadata(
+        self, table_name: str, table_options: Dict[str, str]
+    ) -> Dict[str, str]:
         """
         Fetch the metadata of a table.
         """

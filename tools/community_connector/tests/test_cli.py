@@ -30,9 +30,7 @@ class TestParsePipelineSpec:
 
     def test_parse_json_string(self):
         """Test parsing a valid JSON string."""
-        json_str = (
-            '{"connection_name": "my_conn", "objects": [{"table": {"source_table": "users"}}]}'
-        )
+        json_str = '{"connection_name": "my_conn", "objects": [{"table": {"source_table": "users"}}]}'
         result = _parse_pipeline_spec(json_str)
 
         assert result["connection_name"] == "my_conn"
@@ -52,7 +50,7 @@ class TestParsePipelineSpec:
             "objects": [{"table": {"source_table": "orders"}}],
         }
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
             json.dump(spec, f)
             temp_path = f.name
 
@@ -71,7 +69,7 @@ objects:
   - table:
       source_table: products
 """
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
             f.write(yaml_content)
             temp_path = f.name
 
@@ -177,19 +175,19 @@ class TestCreatePipelineCommand:
         """Test that either --connection-name or --pipeline-spec is required."""
         runner = CliRunner()
 
-        with patch("databricks.labs.community_connector.cli.WorkspaceClient"):
+        with patch('databricks.labs.community_connector.cli.WorkspaceClient'):
             result = runner.invoke(
                 main,
-                ["create_pipeline", "github", "my_pipeline"],
+                ['create_pipeline', 'github', 'my_pipeline'],
             )
 
         assert result.exit_code != 0
         assert "Either --connection-name or --pipeline-spec must be provided" in result.output
 
-    @patch("databricks.labs.community_connector.cli.WorkspaceClient")
-    @patch("databricks.labs.community_connector.cli.RepoClient")
-    @patch("databricks.labs.community_connector.cli.PipelineClient")
-    @patch("databricks.labs.community_connector.cli._create_workspace_file")
+    @patch('databricks.labs.community_connector.cli.WorkspaceClient')
+    @patch('databricks.labs.community_connector.cli.RepoClient')
+    @patch('databricks.labs.community_connector.cli.PipelineClient')
+    @patch('databricks.labs.community_connector.cli._create_workspace_file')
     def test_create_pipeline_with_connection_name(
         self, mock_create_file, mock_pipeline_client, mock_repo_client, mock_workspace_client
     ):
@@ -218,7 +216,7 @@ class TestCreatePipelineCommand:
 
         result = runner.invoke(
             main,
-            ["create_pipeline", "github", "my_pipeline", "-n", "my_conn"],
+            ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn'],
         )
 
         # Should succeed (or at least pass the validation)
@@ -228,8 +226,8 @@ class TestCreatePipelineCommand:
 class TestRunPipelineCommand:
     """Tests for run_pipeline command."""
 
-    @patch("databricks.labs.community_connector.cli.WorkspaceClient")
-    @patch("databricks.labs.community_connector.cli.PipelineClient")
+    @patch('databricks.labs.community_connector.cli.WorkspaceClient')
+    @patch('databricks.labs.community_connector.cli.PipelineClient')
     def test_run_pipeline_finds_by_name(self, mock_pipeline_client, mock_workspace_client):
         """Test that run_pipeline finds pipeline by name."""
         runner = CliRunner()
@@ -251,13 +249,13 @@ class TestRunPipelineCommand:
 
         result = runner.invoke(
             main,
-            ["run_pipeline", "my_test_pipeline"],
+            ['run_pipeline', 'my_test_pipeline'],
         )
 
         assert result.exit_code == 0
         assert "Pipeline run started" in result.output
 
-    @patch("databricks.labs.community_connector.cli.WorkspaceClient")
+    @patch('databricks.labs.community_connector.cli.WorkspaceClient')
     def test_run_pipeline_not_found(self, mock_workspace_client):
         """Test error when pipeline is not found."""
         runner = CliRunner()
@@ -268,7 +266,7 @@ class TestRunPipelineCommand:
 
         result = runner.invoke(
             main,
-            ["run_pipeline", "nonexistent_pipeline"],
+            ['run_pipeline', 'nonexistent_pipeline'],
         )
 
         assert result.exit_code != 0
@@ -278,8 +276,8 @@ class TestRunPipelineCommand:
 class TestShowPipelineCommand:
     """Tests for show_pipeline command."""
 
-    @patch("databricks.labs.community_connector.cli.WorkspaceClient")
-    @patch("databricks.labs.community_connector.cli.PipelineClient")
+    @patch('databricks.labs.community_connector.cli.WorkspaceClient')
+    @patch('databricks.labs.community_connector.cli.PipelineClient')
     def test_show_pipeline_displays_info(self, mock_pipeline_client, mock_workspace_client):
         """Test that show_pipeline displays pipeline information."""
         runner = CliRunner()
@@ -304,7 +302,7 @@ class TestShowPipelineCommand:
 
         result = runner.invoke(
             main,
-            ["show_pipeline", "my_pipeline"],
+            ['show_pipeline', 'my_pipeline'],
         )
 
         assert result.exit_code == 0
@@ -322,7 +320,7 @@ class TestCreateConnectionCommand:
 
         result = runner.invoke(
             main,
-            ["create_connection", "github", "my_conn"],
+            ['create_connection', 'github', 'my_conn'],
         )
 
         assert result.exit_code != 0
@@ -334,13 +332,13 @@ class TestCreateConnectionCommand:
 
         result = runner.invoke(
             main,
-            ["create_connection", "github", "my_conn", "-o", "not json"],
+            ['create_connection', 'github', 'my_conn', '-o', 'not json'],
         )
 
         assert result.exit_code != 0
         assert "Invalid JSON" in result.output
 
-    @patch("databricks.labs.community_connector.cli.WorkspaceClient")
+    @patch('databricks.labs.community_connector.cli.WorkspaceClient')
     def test_create_connection_warns_missing_external_options(self, mock_workspace_client):
         """Test warning when externalOptionsAllowList is missing."""
         runner = CliRunner()
@@ -351,7 +349,7 @@ class TestCreateConnectionCommand:
 
         result = runner.invoke(
             main,
-            ["create_connection", "github", "my_conn", "-o", '{"host": "api.github.com"}'],
+            ['create_connection', 'github', 'my_conn', '-o', '{"host": "api.github.com"}'],
         )
 
         assert "externalOptionsAllowList" in result.output
@@ -363,7 +361,7 @@ class TestVersionAndHelp:
     def test_version_option(self):
         """Test --version displays version."""
         runner = CliRunner()
-        result = runner.invoke(main, ["--version"])
+        result = runner.invoke(main, ['--version'])
 
         assert result.exit_code == 0
         assert "community-connector" in result.output
@@ -371,7 +369,7 @@ class TestVersionAndHelp:
     def test_help_option(self):
         """Test --help displays help."""
         runner = CliRunner()
-        result = runner.invoke(main, ["--help"])
+        result = runner.invoke(main, ['--help'])
 
         assert result.exit_code == 0
         assert "create_pipeline" in result.output
@@ -383,10 +381,11 @@ class TestVersionAndHelp:
     def test_create_pipeline_help(self):
         """Test create_pipeline --help."""
         runner = CliRunner()
-        result = runner.invoke(main, ["create_pipeline", "--help"])
+        result = runner.invoke(main, ['create_pipeline', '--help'])
 
         assert result.exit_code == 0
         assert "--connection-name" in result.output
         assert "--pipeline-spec" in result.output
         assert "--catalog" in result.output
         assert "--target" in result.output
+

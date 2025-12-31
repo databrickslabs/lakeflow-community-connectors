@@ -1,4 +1,3 @@
-"""PySpark DataSource implementation for LakeFlow connectors."""
 from pyspark.sql.types import *
 from pyspark.sql.datasource import (
     DataSource,
@@ -68,7 +67,9 @@ class LakeflowBatchReader(DataSourceReader):
         if self.table_name == METADATA_TABLE:
             all_records = self._read_table_metadata()
         else:
-            all_records, _ = self.lakeflow_connect.read_table(self.table_name, None, self.options)
+            all_records, _ = self.lakeflow_connect.read_table(
+                self.table_name, None, self.options
+            )
 
         rows = map(lambda x: parse_value(x, self.schema), all_records)
         return iter(rows)

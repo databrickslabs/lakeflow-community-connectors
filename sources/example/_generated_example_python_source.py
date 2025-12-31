@@ -51,7 +51,9 @@ def register_lakeflow_source(spark):
                 # 1. set it to None when schema marks it as nullable
                 # 2. Otherwise, raise an error.
                 if field.name in value:
-                    field_dict[field.name] = parse_value(value.get(field.name), field.dataType)
+                    field_dict[field.name] = parse_value(
+                        value.get(field.name), field.dataType
+                    )
                 elif field.nullable:
                     field_dict[field.name] = None
                 else:
@@ -160,6 +162,7 @@ def register_lakeflow_source(spark):
                 f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}"
             )
 
+
     ########################################################
     # sources/example/example.py
     ########################################################
@@ -168,6 +171,7 @@ def register_lakeflow_source(spark):
         model_config = ConfigDict(extra="allow")
 
         num_rows: PositiveInt
+
 
     # This is an example implementation of the LakeflowConnect class.
     # Test a change 123
@@ -187,7 +191,9 @@ def register_lakeflow_source(spark):
             """
             return self.tables
 
-        def get_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
+        def get_table_schema(
+            self, table_name: str, table_options: Dict[str, str]
+        ) -> StructType:
             """
             Fetch the schema of a table.
             """
@@ -277,6 +283,7 @@ def register_lakeflow_source(spark):
 
                 yield record
 
+
     ########################################################
     # pipeline/lakeflow_python_source.py
     ########################################################
@@ -284,6 +291,7 @@ def register_lakeflow_source(spark):
     METADATA_TABLE = "_lakeflow_metadata"
     TABLE_NAME = "tableName"
     TABLE_NAME_LIST = "tableNameList"
+
 
     class LakeflowStreamReader(SimpleDataSourceStreamReader):
         """
@@ -321,6 +329,7 @@ def register_lakeflow_source(spark):
             # are missed in the returned records.
             return self.read(start)[0]
 
+
     class LakeflowBatchReader(DataSourceReader):
         def __init__(
             self,
@@ -354,6 +363,7 @@ def register_lakeflow_source(spark):
                 all_records.append({"tableName": table, **metadata})
             return all_records
 
+
     class LakeflowSource(DataSource):
         def __init__(self, options):
             self.options = options
@@ -383,5 +393,6 @@ def register_lakeflow_source(spark):
 
         def simpleStreamReader(self, schema: StructType):
             return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
+
 
     spark.dataSource.register(LakeflowSource)

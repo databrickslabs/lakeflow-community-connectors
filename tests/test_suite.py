@@ -1,4 +1,3 @@
-"""Test suite framework for LakeFlow connectors."""
 import traceback
 from typing import Any, Dict, List, Tuple, Iterator, Optional, Callable
 from dataclasses import dataclass, field
@@ -54,7 +53,9 @@ class TestFailedException(Exception):
 
 
 class LakeflowConnectTester:
-    def __init__(self, init_options: dict, table_configs: Dict[str, Dict[str, Any]] = {}):
+    def __init__(
+        self, init_options: dict, table_configs: Dict[str, Dict[str, Any]] = {}
+    ):
         self._init_options = init_options
         # Per-table configuration passed as table_options into connector methods.
         # Keys are table names, values are dicts of options for that table.
@@ -77,7 +78,10 @@ class LakeflowConnectTester:
             self.test_read_table()
 
             # Test write functionality if connector_test_utils is available
-            if hasattr(self, "connector_test_utils") and self.connector_test_utils is not None:
+            if (
+                hasattr(self, "connector_test_utils")
+                and self.connector_test_utils is not None
+            ):
                 self.test_list_insertable_tables()
                 self.test_write_to_source()
                 self.test_incremental_after_write()
@@ -376,9 +380,9 @@ class LakeflowConnectTester:
                     table_name, self._get_table_options(table_name)
                 )
 
-                if self._should_validate_primary_key(metadata) and not self._validate_primary_keys(
-                    metadata["primary_keys"], schema
-                ):
+                if self._should_validate_primary_key(
+                    metadata
+                ) and not self._validate_primary_keys(metadata["primary_keys"], schema):
                     failed_tables.append(
                         {
                             "table": table_name,
@@ -386,9 +390,10 @@ class LakeflowConnectTester:
                             "primary_keys": metadata["primary_keys"],
                         }
                     )
-                elif self._should_validate_cursor_field(
-                    metadata
-                ) and not self._field_exists_in_schema(metadata["cursor_field"], schema):
+                elif (
+                    self._should_validate_cursor_field(metadata)
+                    and not self._field_exists_in_schema(metadata["cursor_field"], schema)
+                ):
                     failed_tables.append(
                         {
                             "table": table_name,
@@ -551,7 +556,7 @@ class LakeflowConnectTester:
                             break
                         record_count += 1
                         sample_records.append(record)
-
+                    
                     # Add to passed_tables if we didn't fail validation
                     # (check if table is not in failed_tables)
                     if not any(f["table"] == table_name for f in failed_tables):
@@ -560,7 +565,9 @@ class LakeflowConnectTester:
                                 "table": table_name,
                                 "records_sampled": record_count,
                                 "offset_keys": list(offset.keys()),
-                                "sample_records": sample_records[:2],  # Show first 2 records
+                                "sample_records": sample_records[
+                                    :2
+                                ],  # Show first 2 records
                             }
                         )
                 except Exception as iter_e:
@@ -655,27 +662,26 @@ class LakeflowConnectTester:
         Supports both top-level fields and nested fields (e.g., "properties.time").
         """
         # Handle simple field names without dots
-        if "." not in field_path:
+        if '.' not in field_path:
             return field_path in schema.fieldNames()
-
+        
         # Handle nested paths
-        parts = field_path.split(".", 1)
+        parts = field_path.split('.', 1)
         field_name = parts[0]
         remaining_path = parts[1]
-
+        
         if field_name not in schema.fieldNames():
             return False
-
+        
         # Get the field type
         field = schema[field_name]
         field_type = field.dataType
-
+        
         # If it's a StructType, recursively check the remaining path
         from pyspark.sql.types import StructType
-
         if isinstance(field_type, StructType):
             return self._field_exists_in_schema(remaining_path, field_type)
-
+        
         # Field exists but can't traverse further (not a struct)
         return False
 
@@ -864,7 +870,9 @@ class LakeflowConnectTester:
                         }
                     )
                 else:
-                    failed_tables.append({"table": test_table, "reason": "Write unsuccessful"})
+                    failed_tables.append(
+                        {"table": test_table, "reason": "Write unsuccessful"}
+                    )
 
             except Exception as e:
                 error_tables.append({"table": test_table, "error": str(e)})
@@ -960,7 +968,9 @@ class LakeflowConnectTester:
                         initial_record_count += 1
 
                 # Write 1 row to the table
-                write_result = self.connector_test_utils.generate_rows_and_write(test_table, 1)
+                write_result = self.connector_test_utils.generate_rows_and_write(
+                    test_table, 1
+                )
                 if not isinstance(write_result, tuple) or len(write_result) != 3:
                     failed_tables.append(
                         {
@@ -984,7 +994,10 @@ class LakeflowConnectTester:
                 after_write_result = self.connector.read_table(
                     test_table, initial_offset, self._get_table_options(test_table)
                 )
-                if not isinstance(after_write_result, tuple) or len(after_write_result) != 2:
+                if (
+                    not isinstance(after_write_result, tuple)
+                    or len(after_write_result) != 2
+                ):
                     failed_tables.append(
                         {
                             "table": test_table,
@@ -1048,7 +1061,9 @@ class LakeflowConnectTester:
                     continue
 
                 expected_display = (
-                    "≥ 1" if ingestion_type in ["cdc", "append"] else str(initial_record_count + 1)
+                    "≥ 1"
+                    if ingestion_type in ["cdc", "append"]
+                    else str(initial_record_count + 1)
                 )
                 passed_tables.append(
                     {
@@ -1201,7 +1216,9 @@ class LakeflowConnectTester:
                 print(f"  Message: {result.message}")
 
                 if result.details:
-                    print(f"  Details: {json.dumps(result.details, indent=4, default=str)}")
+                    print(
+                        f"  Details: {json.dumps(result.details, indent=4, default=str)}"
+                    )
 
                 if result.traceback_str and result.status in [
                     TestStatus.ERROR,
@@ -1213,9 +1230,13 @@ class LakeflowConnectTester:
 
         if report.failed_tests > 0 or report.error_tests > 0:
             failed_tests = [
-                r.test_name for r in report.test_results if r.status == TestStatus.FAILED
+                r.test_name
+                for r in report.test_results
+                if r.status == TestStatus.FAILED
             ]
-            error_tests = [r.test_name for r in report.test_results if r.status == TestStatus.ERROR]
+            error_tests = [
+                r.test_name for r in report.test_results if r.status == TestStatus.ERROR
+            ]
 
             error_parts = []
             if failed_tests:

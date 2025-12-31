@@ -54,7 +54,9 @@ def register_lakeflow_source(spark):
                 # 1. set it to None when schema marks it as nullable
                 # 2. Otherwise, raise an error.
                 if field.name in value:
-                    field_dict[field.name] = parse_value(value.get(field.name), field.dataType)
+                    field_dict[field.name] = parse_value(
+                        value.get(field.name), field.dataType
+                    )
                 elif field.nullable:
                     field_dict[field.name] = None
                 else:
@@ -162,6 +164,7 @@ def register_lakeflow_source(spark):
             raise ValueError(
                 f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}"
             )
+
 
     ########################################################
     # sources/hubspot/hubspot.py
@@ -310,7 +313,9 @@ def register_lakeflow_source(spark):
             """Get configuration for a specific object type"""
             return self._object_config.get(table_name, self._default_object_config)
 
-        def get_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
+        def get_table_schema(
+            self, table_name: str, table_options: Dict[str, str]
+        ) -> StructType:
             """
             Fetch the schema of a table.
 
@@ -322,9 +327,7 @@ def register_lakeflow_source(spark):
             """
             supported_tables = self.list_tables()
             if table_name not in supported_tables:
-                raise ValueError(
-                    f"Unsupported table: {table_name}. Supported tables are: {supported_tables}"
-                )
+                raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
 
             # Check cache first
             if table_name in self._schema_cache:
@@ -338,7 +341,9 @@ def register_lakeflow_source(spark):
 
             return schema
 
-        def read_table_metadata(self, table_name: str, table_options: Dict[str, str]) -> dict:
+        def read_table_metadata(
+            self, table_name: str, table_options: Dict[str, str]
+        ) -> dict:
             """
             Fetch the metadata of a table.
 
@@ -356,9 +361,7 @@ def register_lakeflow_source(spark):
             """
             supported_tables = self.list_tables()
             if table_name not in supported_tables:
-                raise ValueError(
-                    f"Unsupported table: {table_name}. Supported tables are: {supported_tables}"
-                )
+                raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
 
             # Check cache first
             if table_name in self._metadata_cache:
@@ -438,9 +441,7 @@ def register_lakeflow_source(spark):
                     properties_fields.append(StructField(prop_name, spark_type, True))
 
             # Create nested properties StructType
-            properties_struct = (
-                StructType(properties_fields) if properties_fields else StructType([])
-            )
+            properties_struct = StructType(properties_fields) if properties_fields else StructType([])
 
             # Add properties as a nested field
             base_fields.append(StructField("properties", properties_struct, True))
@@ -504,28 +505,21 @@ def register_lakeflow_source(spark):
             """
             supported_tables = self.list_tables()
             if table_name not in supported_tables:
-                raise ValueError(
-                    f"Unsupported table: {table_name}. Supported tables are: {supported_tables}"
-                )
+                raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
 
             # Determine if this is an incremental read
-            is_incremental = start_offset is not None and start_offset.get("updatedAt") is not None
+            is_incremental = (
+                start_offset is not None and start_offset.get("updatedAt") is not None
+            )
 
             if is_incremental:
-                return self._read_data(
-                    table_name, start_offset, incremental=True, table_options=table_options
-                )
+                return self._read_data(table_name, start_offset, incremental=True, table_options=table_options)
             else:
-                return self._read_data(
-                    table_name, None, incremental=False, table_options=table_options
-                )
+                return self._read_data(table_name, None, incremental=False, table_options=table_options)
 
         def _read_data(
-            self,
-            table_name: str,
-            start_offset: dict = None,
-            incremental: bool = False,
-            table_options: Dict[str, str] = None,
+            self, table_name: str, start_offset: dict = None, incremental: bool = False,
+            table_options: Dict[str, str] = None
         ):
             """Unified method to read data from HubSpot API"""
 
@@ -549,7 +543,9 @@ def register_lakeflow_source(spark):
                         start_offset,
                         after,
                     )
-                    if updated_time and (not latest_updated or updated_time > latest_updated):
+                    if updated_time and (
+                        not latest_updated or updated_time > latest_updated
+                    ):
                         latest_updated = updated_time
                 else:
                     # Use objects API for full refresh
@@ -568,7 +564,9 @@ def register_lakeflow_source(spark):
                 if not incremental:
                     for record in transformed_records:
                         updated_at = record.get("updatedAt")
-                        if updated_at and (not latest_updated or updated_at > latest_updated):
+                        if updated_at and (
+                            not latest_updated or updated_at > latest_updated
+                        ):
                             latest_updated = updated_at
 
                 if not after:
@@ -623,7 +621,8 @@ def register_lakeflow_source(spark):
             # Convert to milliseconds for HubSpot
             try:
                 last_updated_ms = int(
-                    datetime.fromisoformat(last_updated.replace("Z", "+00:00")).timestamp() * 1000
+                    datetime.fromisoformat(last_updated.replace("Z", "+00:00")).timestamp()
+                    * 1000
                 )
             except:
                 last_updated_ms = 0
@@ -640,7 +639,9 @@ def register_lakeflow_source(spark):
                         ]
                     }
                 ],
-                "sorts": [{"propertyName": cursor_property_field, "direction": "ASCENDING"}],
+                "sorts": [
+                    {"propertyName": cursor_property_field, "direction": "ASCENDING"}
+                ],
                 "limit": 100,
                 "properties": property_names or [],
             }
@@ -699,7 +700,9 @@ def register_lakeflow_source(spark):
                 if association_type in associations_data:
                     assoc_data = associations_data[association_type]
                     if isinstance(assoc_data, dict) and "results" in assoc_data:
-                        association_list = [item.get("id", "") for item in assoc_data["results"]]
+                        association_list = [
+                            item.get("id", "") for item in assoc_data["results"]
+                        ]
                     elif isinstance(assoc_data, list):
                         association_list = [
                             str(item) if not isinstance(item, dict) else item.get("id", "")
@@ -726,6 +729,7 @@ def register_lakeflow_source(spark):
             except Exception as e:
                 return {"status": "error", "message": f"Connection failed: {str(e)}"}
 
+
     ########################################################
     # pipeline/lakeflow_python_source.py
     ########################################################
@@ -733,6 +737,7 @@ def register_lakeflow_source(spark):
     METADATA_TABLE = "_lakeflow_metadata"
     TABLE_NAME = "tableName"
     TABLE_NAME_LIST = "tableNameList"
+
 
     class LakeflowStreamReader(SimpleDataSourceStreamReader):
         """
@@ -770,6 +775,7 @@ def register_lakeflow_source(spark):
             # are missed in the returned records.
             return self.read(start)[0]
 
+
     class LakeflowBatchReader(DataSourceReader):
         def __init__(
             self,
@@ -803,6 +809,7 @@ def register_lakeflow_source(spark):
                 all_records.append({"tableName": table, **metadata})
             return all_records
 
+
     class LakeflowSource(DataSource):
         def __init__(self, options):
             self.options = options
@@ -832,5 +839,6 @@ def register_lakeflow_source(spark):
 
         def simpleStreamReader(self, schema: StructType):
             return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
+
 
     spark.dataSource.register(LakeflowSource)
