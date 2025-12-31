@@ -15,7 +15,7 @@ Developers only need to implement or modify the source connector logic, while co
 - `sources/` — Source connectors (e.g., `github/`, `zendesk/`, `stripe/`). The `interface/` subfolder defines the `LakeflowConnect` base interface.
 - `libs/` — Shared utilities for data type parsing, spec parsing, and module loading
 - `pipeline/` — Core ingestion logic: PySpark Data Source implementation and SDP orchestration
-- `scripts/` — Build tools for merging connectors into deployable files
+- `tools/` — Tools to build and deploy community connectors tools 
 - `tests/` — Generic test suites for validating connector implementations
 - `prompts/` — Templates for AI-assisted connector development
 
@@ -28,7 +28,7 @@ Follow the instructions in [`prompts/README.md`](prompts/README.md) to create ne
 3. **Test & iterate** — Run the standard test suites against a real source system
    - *(Optional)* Implement write-back testing for end-to-end validation (write → read → verify cycle)
 4. **Generate documentation** — Create user-facing docs using the documentation template
-   - *(Temporary)* Run `scripts/merge_python_source.py` to generate the deployable file
+   - *(Temporary)* Run `tools/scripts/merge_python_source.py` to generate the deployable file
 
 ### Claude Code
 Each step of the development is packaged as a SKILL under `.claude/skills`. 
