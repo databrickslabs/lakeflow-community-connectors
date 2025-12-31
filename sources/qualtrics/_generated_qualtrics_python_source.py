@@ -236,21 +236,19 @@ def register_lakeflow_source(spark):
                 raise ValueError(f"Unknown table: {table_name}")
 
         def _get_surveys_schema(self) -> StructType:
-            """Get schema for surveys table."""
+            """Get schema for surveys table.
+
+            Note: Based on actual API response from GET /surveys endpoint.
+            Fields like brandId, brandBaseURL, organizationId, expiration are NOT
+            returned by the list surveys endpoint (they may be in GET /surveys/{id}).
+            """
             return StructType([
                 StructField("id", StringType(), True),
                 StructField("name", StringType(), True),
                 StructField("ownerId", StringType(), True),
-                StructField("organizationId", StringType(), True),
                 StructField("isActive", BooleanType(), True),
                 StructField("creationDate", StringType(), True),
-                StructField("lastModified", StringType(), True),
-                StructField("expiration", StructType([
-                    StructField("startDate", StringType(), True),
-                    StructField("endDate", StringType(), True)
-                ]), True),
-                StructField("brandId", StringType(), True),
-                StructField("brandBaseURL", StringType(), True)
+                StructField("lastModified", StringType(), True)
             ])
 
         def _get_survey_responses_schema(self) -> StructType:
@@ -285,22 +283,41 @@ def register_lakeflow_source(spark):
             ])
 
         def _get_distributions_schema(self) -> StructType:
-            """Get schema for distributions table."""
+            """Get schema for distributions table.
+
+            Note: Based on actual API response from GET /distributions endpoint.
+            Schema includes nested structures for surveyLink, recipients, message, etc.
+            """
             return StructType([
                 StructField("id", StringType(), True),
-                StructField("surveyId", StringType(), True),
+                StructField("parentDistributionId", StringType(), True),
                 StructField("ownerId", StringType(), True),
                 StructField("organizationId", StringType(), True),
                 StructField("requestType", StringType(), True),
                 StructField("requestStatus", StringType(), True),
-                StructField("sentDate", StringType(), True),
+                StructField("sendDate", StringType(), True),
                 StructField("createdDate", StringType(), True),
                 StructField("modifiedDate", StringType(), True),
                 StructField("headers", StructType([
                     StructField("fromEmail", StringType(), True),
                     StructField("fromName", StringType(), True),
-                    StructField("replyToEmail", StringType(), True),
-                    StructField("subject", StringType(), True)
+                    StructField("replyToEmail", StringType(), True)
+                ]), True),
+                StructField("recipients", StructType([
+                    StructField("mailingListId", StringType(), True),
+                    StructField("contactId", StringType(), True),
+                    StructField("libraryId", StringType(), True),
+                    StructField("sampleId", StringType(), True)
+                ]), True),
+                StructField("message", StructType([
+                    StructField("libraryId", StringType(), True),
+                    StructField("messageId", StringType(), True),
+                    StructField("messageType", StringType(), True)
+                ]), True),
+                StructField("surveyLink", StructType([
+                    StructField("surveyId", StringType(), True),
+                    StructField("expirationDate", StringType(), True),
+                    StructField("linkType", StringType(), True)
                 ]), True),
                 StructField("stats", StructType([
                     StructField("sent", LongType(), True),
@@ -316,21 +333,23 @@ def register_lakeflow_source(spark):
             ])
 
         def _get_contacts_schema(self) -> StructType:
-            """Get schema for contacts table."""
+            """Get schema for contacts table.
+
+            Note: Based on actual API response, the fields are:
+            contactId, firstName, lastName, email, phone, extRef, language,
+            unsubscribed, mailingListUnsubscribed, contactLookupId
+            """
             return StructType([
-                StructField("id", StringType(), True),
+                StructField("contactId", StringType(), True),
                 StructField("firstName", StringType(), True),
                 StructField("lastName", StringType(), True),
                 StructField("email", StringType(), True),
                 StructField("phone", StringType(), True),
-                StructField("externalDataReference", StringType(), True),
+                StructField("extRef", StringType(), True),
                 StructField("language", StringType(), True),
                 StructField("unsubscribed", BooleanType(), True),
-                StructField("responseHistory", ArrayType(StringType()), True),
-                StructField("emailHistory", ArrayType(StringType()), True),
-                StructField("creationDate", StringType(), True),
-                StructField("lastModifiedDate", StringType(), True),
-                StructField("embeddedData", MapType(StringType(), StringType()), True)
+                StructField("mailingListUnsubscribed", BooleanType(), True),
+                StructField("contactLookupId", StringType(), True)
             ])
 
         def read_table_metadata(
@@ -371,9 +390,9 @@ def register_lakeflow_source(spark):
                 }
             elif table_name == "contacts":
                 return {
-                    "primary_keys": ["id"],
-                    "cursor_field": "lastModifiedDate",
-                    "ingestion_type": "cdc"
+                    "primary_keys": ["contactId"],
+                    "cursor_field": None,
+                    "ingestion_type": "snapshot"
                 }
             else:
                 raise ValueError(f"Unknown table: {table_name}")
@@ -857,12 +876,15 @@ def register_lakeflow_source(spark):
             """
             Read contacts from Qualtrics API.
 
+            Note: Contacts table uses snapshot mode (full refresh) as the API
+            does not return lastModifiedDate field for incremental sync.
+
             Args:
-                start_offset: Dictionary containing pagination token and cursor timestamp
+                start_offset: Dictionary containing pagination token (ignored for snapshot mode)
                 table_options: Must contain 'directoryId' and 'mailingListId'
 
             Returns:
-                Tuple of (iterator of contact records, new offset)
+                Tuple of (iterator of contact records, empty offset dict)
             """
             directory_id = table_options.get("directoryId")
             if not directory_id:
@@ -877,8 +899,7 @@ def register_lakeflow_source(spark):
                 )
 
             all_contacts = []
-            skip_token = start_offset.get("skipToken") if start_offset else None
-            last_modified_cursor = start_offset.get("lastModifiedDate") if start_offset else None
+            skip_token = None
 
             # Fetch all pages
             while True:
@@ -897,16 +918,8 @@ def register_lakeflow_source(spark):
                     if not elements:
                         break
 
-                    # Filter by lastModifiedDate if doing incremental sync
-                    if last_modified_cursor:
-                        filtered_elements = []
-                        for contact in elements:
-                            contact_last_modified = contact.get("lastModifiedDate", "")
-                            if contact_last_modified and contact_last_modified > last_modified_cursor:
-                                filtered_elements.append(contact)
-                        all_contacts.extend(filtered_elements)
-                    else:
-                        all_contacts.extend(elements)
+                    # Add all contacts (no filtering for snapshot mode)
+                    all_contacts.extend(elements)
 
                     # Check for next page
                     next_page = result.get("nextPage")
@@ -923,23 +936,8 @@ def register_lakeflow_source(spark):
                     print(f"Error fetching contacts: {e}")
                     break
 
-            # Calculate new offset
+            # Return empty offset for snapshot mode
             new_offset = {}
-            if all_contacts:
-                # Find max lastModifiedDate from contacts that have it
-                last_modified_dates = [
-                    contact.get("lastModifiedDate", "")
-                    for contact in all_contacts
-                    if contact.get("lastModifiedDate")
-                ]
-                if last_modified_dates:
-                    max_last_modified = max(last_modified_dates)
-                    new_offset["lastModifiedDate"] = max_last_modified
-                elif last_modified_cursor:
-                    new_offset["lastModifiedDate"] = last_modified_cursor
-            elif last_modified_cursor:
-                # No new data, keep the same cursor
-                new_offset["lastModifiedDate"] = last_modified_cursor
 
             return iter(all_contacts), new_offset
 

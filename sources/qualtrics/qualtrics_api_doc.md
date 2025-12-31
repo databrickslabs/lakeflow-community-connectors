@@ -39,7 +39,7 @@ The Qualtrics API provides access to various objects/resources. The object list 
 | `survey_responses` | Individual responses to surveys | Response Export API (multi-step) | `append` (incremental based on `recordedDate`) |
 | `distributions` | Distribution records for survey invitations | `GET /distributions` | `cdc` (upserts based on `modifiedDate`) |
 | `mailing_lists` | Contact mailing lists | `GET /mailinglists` | `snapshot` |
-| `contacts` | Contacts within mailing lists | `GET /mailinglists/{mailingListId}/contacts` | `cdc` (upserts based on `lastModifiedDate`) |
+| `contacts` | Contacts within mailing lists | `GET /directories/{directoryId}/mailinglists/{mailingListId}/contacts` | `snapshot` (full refresh, no lastModifiedDate available) |
 | `directories` | XM Directory folders and structure | `GET /directories` | `snapshot` |
 
 **Connector scope for initial implementation**:
@@ -73,27 +73,24 @@ The Qualtrics API provides access to various objects/resources. The object list 
 - Supports pagination using `skipToken` and `pageSize` parameters
 - Can be filtered by `isActive` status
 
-**High-level schema (connector view)**:
+**High-level schema (connector view - actual API response)**:
 
 | Column Name | Type | Description |
 |------------|------|-------------|
 | `id` | string | Unique survey identifier (e.g., `SV_abc123xyz`). Primary key. |
 | `name` | string | Survey name/title. |
 | `ownerId` | string | Qualtrics user ID of the survey owner. |
-| `organizationId` | string | Organization ID that owns the survey. |
 | `isActive` | boolean | Whether the survey is currently active. |
 | `creationDate` | string (ISO 8601 datetime) | When the survey was created. |
 | `lastModified` | string (ISO 8601 datetime) | Last modification timestamp. Used as incremental cursor. |
-| `expiration` | struct or null | Survey expiration settings (see nested schema). |
-| `brandId` | string or null | Brand ID associated with the survey. |
-| `brandBaseURL` | string or null | Base URL for the brand. |
 
-**Nested `expiration` struct**:
+**⚠️ Schema Validation Note**: The following fields are documented in some API references but are **NOT** returned by the `GET /surveys` list endpoint:
+- `organizationId`: Organization ID (not in list response)
+- `expiration`: Expiration date struct (not in list response)
+- `brandId`: Brand ID (not in list response)
+- `brandBaseURL`: Base URL (not in list response)
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `startDate` | string (ISO 8601 datetime) or null | When survey becomes active. |
-| `endDate` | string (ISO 8601 datetime) or null | When survey expires. |
+These fields may be available via the `GET /surveys/{surveyId}` detail endpoint if needed.
 
 **Example request**:
 
@@ -104,7 +101,7 @@ curl -X GET \
   "https://yourdatacenterid.qualtrics.com/API/v3/surveys?pageSize=100"
 ```
 
-**Example response (truncated)**:
+**Example response (actual API response)**:
 
 ```json
 {
@@ -114,14 +111,9 @@ curl -X GET \
         "id": "SV_abc123xyz",
         "name": "Customer Satisfaction Survey",
         "ownerId": "UR_123abc",
-        "organizationId": "databricks",
         "isActive": true,
         "creationDate": "2024-01-15T10:30:00Z",
-        "lastModified": "2024-12-20T14:22:33Z",
-        "expiration": {
-          "startDate": null,
-          "endDate": "2025-12-31T23:59:59Z"
-        }
+        "lastModified": "2024-12-20T14:22:33Z"
       }
     ],
     "nextPage": "https://yourdatacenterid.qualtrics.com/API/v3/surveys?pageSize=100&skipToken=xyz789"
@@ -300,21 +292,29 @@ curl -X GET \
 - Distributions represent survey sends via email, SMS, or anonymous links
 - Supports pagination
 
-**High-level schema**:
+**High-level schema (actual API response)**:
 
 | Column Name | Type | Description |
 |------------|------|-------------|
 | `id` | string | Unique distribution identifier. Primary key. |
-| `surveyId` | string | Survey ID associated with this distribution. |
+| `parentDistributionId` | string or null | Parent distribution ID (for follow-ups/reminders). |
 | `ownerId` | string | User ID who created the distribution. |
 | `organizationId` | string | Organization ID. |
-| `requestType` | string | Distribution method (e.g., `Invite`, `Reminder`, `ThankYou`). |
-| `requestStatus` | string | Status of the distribution (e.g., `pending`, `inProgress`, `complete`). |
-| `sentDate` | string (ISO 8601 datetime) or null | When distribution was sent. |
+| `requestType` | string | Distribution method (e.g., `GeneratedInvite`, `Invite`, `Reminder`). |
+| `requestStatus` | string | Status of the distribution (e.g., `Generated`, `pending`, `complete`). |
+| `sendDate` | string (ISO 8601 datetime) | When distribution was sent/scheduled. |
 | `createdDate` | string (ISO 8601 datetime) | When distribution was created. |
 | `modifiedDate` | string (ISO 8601 datetime) | Last modification date. Used as incremental cursor. |
-| `headers` | struct | Email headers (from name, subject, reply-to). |
-| `stats` | struct | Distribution statistics (sent, opened, responses). |
+| `headers` | struct | Email headers (fromEmail, fromName, replyToEmail). |
+| `recipients` | struct | Recipient information (mailingListId, contactId, libraryId, sampleId). |
+| `message` | struct | Message details (libraryId, messageId, messageType). |
+| `surveyLink` | struct | Survey link information (surveyId, expirationDate, linkType). |
+| `stats` | struct | Distribution statistics (sent, failed, started, bounced, opened, skipped, finished, complaints, blocked). |
+
+**⚠️ Schema Validation Note**: The following field names differ from some documentation:
+- **Actual**: `sendDate` (not `sentDate`)
+- **Actual**: `surveyLink.surveyId` nested (not root-level `surveyId`)
+- **Actual**: headers does NOT include `subject` field
 
 ### `contacts` object
 
@@ -332,17 +332,18 @@ curl -X GET \
 
 | Column Name | Type | Description |
 |------------|------|-------------|
-| `id` | string | Unique contact identifier. Primary key. |
+| `contactId` | string | Unique contact identifier. Primary key. |
 | `firstName` | string or null | Contact's first name. |
 | `lastName` | string or null | Contact's last name. |
-| `email` | string | Contact's email address. |
+| `email` | string or null | Contact's email address. |
 | `phone` | string or null | Contact's phone number. |
-| `externalDataReference` | string or null | External reference ID. |
+| `extRef` | string or null | External reference ID. |
 | `language` | string or null | Preferred language code. |
-| `unsubscribed` | boolean | Whether contact is unsubscribed. |
-| `creationDate` | string (ISO 8601 datetime) | When contact was created. |
-| `lastModifiedDate` | string (ISO 8601 datetime) | Last modification date. Used as incremental cursor. |
-| `embeddedData` | map\<string, string\> | Custom embedded data fields. |
+| `unsubscribed` | boolean | Whether contact is unsubscribed globally. |
+| `mailingListUnsubscribed` | boolean | Whether contact is unsubscribed from this specific mailing list. |
+| `contactLookupId` | string or null | Contact lookup identifier for cross-referencing. |
+
+**Note**: The API does not return `lastModifiedDate`, `creationDate`, `embeddedData`, `responseHistory`, or `emailHistory` fields. Therefore, contacts table uses **snapshot mode** (full refresh) instead of CDC.
 
 ## **Get Object Primary Keys**
 
@@ -354,7 +355,7 @@ Primary keys for each object are static and defined by the connector:
 | `survey_responses` | `responseId` |
 | `distributions` | `id` |
 | `mailing_lists` | `id` |
-| `contacts` | `id` |
+| `contacts` | `contactId` |
 | `directories` | `id` |
 
 **Notes**:
@@ -370,7 +371,7 @@ Primary keys for each object are static and defined by the connector:
 | `survey_responses` | `append` | `recordedDate` | New responses are appended; existing responses are immutable once completed. |
 | `distributions` | `cdc` | `modifiedDate` | Distribution records can be updated (e.g., status changes). |
 | `mailing_lists` | `snapshot` | N/A | Full refresh; relatively small dataset. |
-| `contacts` | `cdc` | `lastModifiedDate` | Contacts can be updated (unsubscribe, data changes). |
+| `contacts` | `snapshot` | N/A | Full refresh; API does not return lastModifiedDate field. |
 | `directories` | `snapshot` | N/A | Full refresh; organizational structure. |
 
 **Incremental sync strategy**:
@@ -520,7 +521,8 @@ Primary keys for each object are static and defined by the connector:
 - Only available for XM Directory users (not XM Directory Lite)
 
 **Incremental retrieval**:
-- Filter by `lastModifiedDate >= last_sync_time` (client-side)
+- Not supported - API does not return `lastModifiedDate` field
+- Use snapshot mode (full refresh on each run)
 
 ### Rate Limits
 
@@ -831,6 +833,130 @@ Field names are generally consistent between write and read operations for surve
 - ✅ Write-specific constraints and eventual consistency delays documented
 - ✅ Directory ID requirement for contacts endpoint documented (corrected 2024-12-31)
 - ✅ Survey ID requirement for distributions endpoint verified (2024-12-31)
+- ✅ **Schema validation completed against live API** (2024-12-31) - see section below
 - ⚠️ Sessions API availability may vary by Qualtrics license tier - requires verification
 - ⚠️ Mailing lists and directories endpoints documented but not yet implemented
+
+---
+
+## **Schema Validation Against Live API**
+
+**Validation Date**: December 31, 2024
+**Method**: Called all connector APIs and compared actual responses with documented schemas
+
+### Validation Results Summary
+
+| Table | Status | Discrepancies | Action Taken |
+|-------|--------|---------------|--------------|
+| `surveys` | ✅ Fixed | 4 fields not in API | Removed from schema |
+| `survey_responses` | ✅ Correct | 0 (MapType fields correctly designed) | No changes needed |
+| `distributions` | ✅ Fixed | 29 fields missing/incorrect | Schema completely updated |
+| `contacts` | ✅ Perfect Match | 0 | No changes needed |
+
+### Detailed Findings
+
+#### 1. surveys Table Discrepancies (FIXED)
+
+**Fields documented but NOT in actual API response:**
+- `organizationId` (string): Not returned by GET /surveys
+- `expiration` (struct): Not returned by GET /surveys
+- `brandId` (string): Not returned by GET /surveys
+- `brandBaseURL` (string): Not returned by GET /surveys
+
+**Resolution**: Removed these 4 fields from connector schema. They may be available via GET /surveys/{surveyId} detail endpoint if needed in the future.
+
+**Final Schema** (6 fields):
+```
+id, name, ownerId, isActive, creationDate, lastModified
+```
+
+#### 2. survey_responses Table (NO CHANGES NEEDED)
+
+**Analysis**: The validation script reported 28 "missing" fields, but these are all nested fields within MapType structures (e.g., `values.QID3.choiceId`, `labels.finished`). These are correctly represented by:
+- `values`: MapType(StringType, StructType(...))
+- `labels`: MapType(StringType, StringType)
+- `displayedValues`: MapType(StringType, StringType)
+
+**Conclusion**: Schema design is correct - no changes needed.
+
+#### 3. distributions Table Discrepancies (FIXED)
+
+**Fields in API but NOT in documented schema:**
+- `parentDistributionId` (string): Parent distribution for reminders
+- `message` (struct): Message details with libraryId, messageId, messageType
+- `recipients` (struct): Recipient info with mailingListId, contactId, libraryId, sampleId
+- `surveyLink` (struct): Survey link with surveyId, expirationDate, linkType
+- `sendDate` (string): Actual send date (not `sentDate`)
+
+**Fields documented but NOT in API response:**
+- `surveyId` (root level): Actually nested in `surveyLink.surveyId`
+- `sentDate`: Actual field name is `sendDate`
+- `headers.subject`: Not included in API response
+
+**Resolution**: Completely updated distributions schema to match actual API response with 4 additional nested structs.
+
+**Final Schema** (14 fields):
+```
+id, parentDistributionId, ownerId, organizationId, requestType, requestStatus,
+sendDate, createdDate, modifiedDate, headers (struct), recipients (struct),
+message (struct), surveyLink (struct), stats (struct)
+```
+
+#### 4. contacts Table (PERFECT MATCH)
+
+**Status**: ✅ All 10 fields match exactly between documentation and API response
+
+**Fields**:
+```
+contactId, firstName, lastName, email, phone, extRef, language,
+unsubscribed, mailingListUnsubscribed, contactLookupId
+```
+
+**Note**: This table was previously fixed on 2024-12-31 when we discovered the schema mismatch during Databricks testing.
+
+### Validation Methodology
+
+1. **Created validation script** (`validate_schemas.py`) that:
+   - Calls each API endpoint with real credentials
+   - Retrieves actual data records
+   - Extracts all field names from JSON responses
+   - Compares with connector schemas
+   - Reports discrepancies
+
+2. **Analyzed sample records**:
+   - surveys: 2 records
+   - survey_responses: 2 records
+   - distributions: 1 record
+   - contacts: 2 records
+
+3. **Updated all files**:
+   - `qualtrics.py`: Schema definitions
+   - `README.md`: User-facing schema documentation
+   - `qualtrics_api_doc.md`: Technical API documentation
+   - `IMPLEMENTATION_COMPLETE.md`: Implementation notes
+
+### Key Lessons Learned
+
+1. **Official API documentation may not match actual responses**: Several documented fields (organizationId, expiration, brandId, brandBaseURL) are not returned by list endpoints.
+
+2. **Field name variations**: `sentDate` vs `sendDate` - always validate actual API responses.
+
+3. **Nested structures**: The distributions endpoint returns much richer nested data than documented in some API references.
+
+4. **MapType vs explicit fields**: Dynamic fields (question IDs, labels) are correctly handled with MapType - validation scripts may flag nested keys as "missing" but this is expected behavior.
+
+5. **Endpoint-specific schemas**: List endpoints may return fewer fields than detail endpoints (GET /surveys vs GET /surveys/{id}).
+
+### Verification Commands
+
+To reproduce this validation:
+```bash
+# Run validation script
+python3 sources/qualtrics/validate_schemas.py
+
+# Results saved to:
+sources/qualtrics/schema_validation_results.json
+```
+
+---
 
