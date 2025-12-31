@@ -21,7 +21,7 @@ Notes:
 - We intentionally do NOT require UC Connections here; the generic test suite
   operates by instantiating the connector class directly.
 - If you want to validate UC Connections wiring, use the Databricks notebook
-  `test_uc_connection.py`.
+  `sources/osipi/examples/uc_connection/test_uc_connection.py`.
 """
 
 from __future__ import annotations
