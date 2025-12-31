@@ -66,9 +66,9 @@ Each connector must include tests that run the **generic test suite** against a 
 - **Write-back testing** *(recommended)* — Use the provided test harness to write data, read it back, and verify incremental reads work correctly
 - **Unit tests** — Recommended for complex library code or connector-specific logic
 
-## Using Community Connectors
+## Using and Testing Community Connectors
 
-Each connector runs as a configurable SDP. Define a **pipeline spec** to specify which tables to ingest and where to store them. See more details in this [example](pipeline-spec/example_ingest.py).
+Each connector runs as a configurable SDP. Define a **pipeline spec** to specify which tables to ingest and where to store them. See more details in this [example](pipeline-spec/example_ingest.py). You don't need to manually create files below, as both UI and CLI tool will automatically generate these files when setting the connector.
 
 ```python
 from pipeline.ingestion_pipeline import ingest
@@ -88,6 +88,18 @@ register_lakeflow_source = get_register_function(source_name)
 register_lakeflow_source(spark)
 ingest(spark, pipeline_spec)
 ```
+
+There are two ways to set up and run the community connectors. By default, the source code from the main repository (databrickslabs/lakeflow-community-connectors) is used to run the community connector. However, both methods described below allow you to override this by using your own Git repository, which should be cloned from the main repository.
+
+### Databricks UI
+On Databricks main page, click **“+New”** -> **“Add or upload data”**, and then select the source under **“Community connectors”**.
+If you are using a custom connector from your own Git repository, select **"+ Add Community Connector"**.
+
+### CLI tool
+The **"community-connector"** CLI tool provides functionality equivalent to the UI. While access to a Databricks workspace is still required, this tool is particularly useful for validating and testing connectors during the development phase.
+
+See more details at [tools/community_connector](tools/community_connector/README.md)
+ 
 
 ### Pipeline Spec Reference
 
