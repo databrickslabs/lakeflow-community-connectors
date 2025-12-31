@@ -21,8 +21,15 @@ jobs:
         pip install -e ".[dev]"
     - name: Analysing the code with pylint
       run: |
+        # Lint non-test files
         pylint \
         --max-line-length=100 \
         --disable=R0801 \
         --ignore-long-lines='^\s*(#|".*"|'\''.*'\'')$' \
-        $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py')
+        $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py' | grep -v 'test_')
+        # Lint test files with C0116 disabled
+        pylint \
+        --max-line-length=100 \
+        --disable=R0801,C0115,C0116 \
+        --ignore-long-lines='^\s*(#|".*"|'\''.*'\'')$' \
+        $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py' | grep 'test_')
