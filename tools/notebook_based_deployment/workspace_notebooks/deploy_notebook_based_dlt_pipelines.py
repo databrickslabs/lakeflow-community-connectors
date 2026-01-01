@@ -185,11 +185,14 @@ def _mkdirs(w: WorkspaceClient, path: str) -> None:
 
 
 def _import_py_source(w: WorkspaceClient, *, local_path: Path, workspace_path: str) -> None:
+    import base64
+
     w.workspace.import_(
         path=workspace_path,
         format=workspace.ImportFormat.SOURCE,
         language=workspace.Language.PYTHON,
-        content=local_path.read_bytes(),
+        # Databricks Workspace import expects base64-encoded content in JSON.
+        content=base64.b64encode(local_path.read_bytes()).decode("utf-8"),
         overwrite=True,
     )
 
