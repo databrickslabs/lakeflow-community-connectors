@@ -215,10 +215,17 @@ def _as_payload(obj: Any) -> dict:
         return {}
     if isinstance(obj, dict):
         return obj
-    as_dict = getattr(obj, "as_dict", None)
-    if callable(as_dict):
-        return as_dict()
-    raise TypeError(f"Unsupported payload type: {type(obj)}")
+    as_dict_attr = getattr(obj, 'as_dict', None)
+    # Some SDK versions expose .as_dict() method
+    if callable(as_dict_attr):
+        out = as_dict_attr()
+        if not isinstance(out, dict):
+            raise TypeError(f'as_dict() must return dict, got: {type(out)}')
+        return out
+    # Some SDK versions expose .as_dict as a dict property
+    if isinstance(as_dict_attr, dict):
+        return as_dict_attr
+    raise TypeError(f'Unsupported payload type: {type(obj)}')
 
 
 @dataclass
@@ -425,13 +432,21 @@ else:
     # Allow rerunning just this cell: define helper if earlier cells were not rerun.
     if '_as_payload' not in globals():
         def _as_payload(obj: Any) -> dict:
+            """Normalize SDK request objects to plain dict payloads."""
             if obj is None:
                 return {}
             if isinstance(obj, dict):
                 return obj
-            as_dict = getattr(obj, 'as_dict', None)
-            if callable(as_dict):
-                return as_dict()
+            as_dict_attr = getattr(obj, 'as_dict', None)
+            # Some SDK versions expose .as_dict() method
+            if callable(as_dict_attr):
+                out = as_dict_attr()
+                if not isinstance(out, dict):
+                    raise TypeError(f'as_dict() must return dict, got: {type(out)}')
+                return out
+            # Some SDK versions expose .as_dict as a dict property
+            if isinstance(as_dict_attr, dict):
+                return as_dict_attr
             raise TypeError(f'Unsupported payload type: {type(obj)}')
 
     schedules: Dict[str, str] = {}
@@ -480,7 +495,10 @@ else:
             created_jobs[group] = jid
         else:
             print("Creating job:", job_name)
-            out = w.jobs.create(**_as_payload(job_settings))  # type: ignore[arg-type]
+            payload = _as_payload(job_settings)
+            if not isinstance(payload, dict):
+                raise TypeError(f"Jobs create payload must be dict, got: {type(payload)}")
+            out = w.jobs.create(**payload)  # type: ignore[arg-type]
             created_jobs[group] = out.job_id
 
     print("Jobs:")
