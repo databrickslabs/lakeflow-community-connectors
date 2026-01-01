@@ -28,7 +28,7 @@ _os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 _sys.dont_write_bytecode = True
 
 try:
-    dbutils.widgets.text("CONNECTOR_NAME", "osipi", "Connector name")
+    dbutils.widgets.text("CONNECTOR_NAME", "osipi", "Connector name (e.g. osipi) NOT UC connection name")
     dbutils.widgets.text(
         "CSV_REL_PATH",
         "tools/notebook_based_deployment/examples/osipi/osipi_by_category_and_ingestion_type.csv",
@@ -305,6 +305,14 @@ csv_path = repo_root / CSV_REL_PATH
 connector_src_path = repo_root / CONNECTOR_GENERATED_SOURCE_REL_PATH
 print("CSV:", csv_path)
 print("Connector source:", connector_src_path)
+
+connector_dir = repo_root / "sources" / CONNECTOR_NAME
+if not connector_dir.is_dir():
+    raise ValueError(
+        f"CONNECTOR_NAME={CONNECTOR_NAME!r} does not match a directory under sources/. "
+        "This is usually because CONNECTOR_NAME was set to a UC connection name. "
+        "Set CONNECTOR_NAME to the connector id (e.g. 'osipi')."
+    )
 
 if not csv_path.exists():
     raise FileNotFoundError(csv_path)
