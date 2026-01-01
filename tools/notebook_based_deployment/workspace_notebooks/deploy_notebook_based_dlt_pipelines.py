@@ -422,6 +422,18 @@ for g, pid in created_pipeline_ids.items():
 if not CREATE_SCHEDULED_JOBS:
     print("CREATE_SCHEDULED_JOBS is False; skipping job creation.")
 else:
+    # Allow rerunning just this cell: define helper if earlier cells were not rerun.
+    if '_as_payload' not in globals():
+        def _as_payload(obj: Any) -> dict:
+            if obj is None:
+                return {}
+            if isinstance(obj, dict):
+                return obj
+            as_dict = getattr(obj, 'as_dict', None)
+            if callable(as_dict):
+                return as_dict()
+            raise TypeError(f'Unsupported payload type: {type(obj)}')
+
     schedules: Dict[str, str] = {}
     for r in rows:
         if r.schedule and r.pipeline_group not in schedules:
