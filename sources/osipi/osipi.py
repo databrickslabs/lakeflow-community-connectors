@@ -304,6 +304,32 @@ class LakeflowConnect:
         # the initial DataSource instantiation. We validate in _ensure_auth instead.
         self.base_url = (options.get("pi_base_url") or options.get("pi_web_api_url") or "").rstrip("/")
 
+        # UC ConnectionType.HTTP (bearer) exposes standard option keys like host/base_path/port.
+        # Support those so users can store PI host + bearer token in UC without custom option keys.
+        if not self.base_url:
+            host = (options.get("host") or "").strip()
+            base_path = (options.get("base_path") or "").strip()
+            port = (options.get("port") or "").strip()
+
+            if host:
+                # Normalize scheme
+                if host.startswith("http://") or host.startswith("https://"):
+                    scheme_host = host
+                else:
+                    scheme_host = "https://" + host
+
+                # Optional port
+                if port and ":" not in scheme_host.split("//", 1)[-1]:
+                    scheme_host = scheme_host.rstrip("/") + f":{port}"
+
+                # Optional base_path (avoid trailing slash)
+                if base_path:
+                    if not base_path.startswith("/"):
+                        base_path = "/" + base_path
+                    scheme_host = scheme_host.rstrip("/") + base_path.rstrip("/")
+
+                self.base_url = scheme_host.rstrip("/")
+
         self.session = requests.Session()
         self.session.headers.update({"Accept": "application/json"})
         self.verify_ssl = _as_bool(options.get("verify_ssl"), default=True)
@@ -890,7 +916,13 @@ class LakeflowConnect:
             print(f"🔍 Using UC Connection: {connection_name}")
 
         # Extract auth parameters from options
-        access_token = self.options.get("access_token") or self.options.get("bearer_value_tmp")
+        access_token = (
+            self.options.get("access_token")
+            or self.options.get("bearer_value_tmp")
+            or self.options.get("bearer_token")
+            # UC ConnectionType.DATABRICKS stores its secret as personalAccessToken
+            or self.options.get("personalAccessToken")
+        )
         workspace_host = self.options.get("workspace_host")
         client_id = self.options.get("client_id")
         client_secret = (

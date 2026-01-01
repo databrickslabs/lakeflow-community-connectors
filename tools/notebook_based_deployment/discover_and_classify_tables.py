@@ -4,7 +4,7 @@
 Goal
 ----
 Turn a connector implementation into an ingestion CSV that can be fed into:
-  tools/ingestion_dab_generator/generate_ingestion_dab_yaml.py
+  tools/notebook_based_deployment/generate_dab_yaml_notebooks.py
 
 This script is connector-agnostic. It uses the connector's own:
 - list_tables()
@@ -27,7 +27,7 @@ Typical usage
 2) CSV -> DAB YAML (optionally auto-balance further)
 
 Example:
-  python3 tools/ingestion_dab_generator/discover_and_classify_tables.py \
+  python3 tools/notebook_based_deployment/discover_and_classify_tables.py \
     --connector-name osipi \
     --output-csv /tmp/osipi.csv \
     --dest-catalog main \
@@ -38,7 +38,7 @@ Example:
     --schedule-append "*/15 * * * *"
 
 Then:
-  python3 tools/ingestion_dab_generator/generate_ingestion_dab_yaml.py \
+  python3 tools/notebook_based_deployment/generate_dab_yaml_notebooks.py \
     --input-csv /tmp/osipi.csv \
     --output-yaml /tmp/osipi_pipelines.yml \
     --connector-name osipi \

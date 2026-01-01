@@ -133,7 +133,7 @@ fi
 # Step 3: Generate DAB YAML
 print_header "Step 3: Generate DAB YAML"
 
-DAB_DIR="tools/ingestion_dab_generator/dab_template"
+DAB_DIR="tools/notebook_based_deployment/dab_template"
 YAML_OUTPUT="$DAB_DIR/resources/${CONNECTOR_NAME}_pipelines.yml"
 
 mkdir -p "$DAB_DIR/resources"

@@ -256,21 +256,20 @@ When ingesting many OSIPI tables (or many “slices” of the same table, e.g. d
 
 This repo includes a connector-agnostic DAB generator:
 
-- `tools/ingestion_dab_generator/generate_ingestion_dab_yaml.py`
+- `tools/notebook_based_deployment/generate_dab_yaml_notebooks.py`
 
 It converts a CSV (what to ingest) into DAB YAML with one pipeline per group.
 
 For OSIPI (and any connector that provides reliable `read_table_metadata`), you can generate that CSV automatically based on table characteristics (e.g. `ingestion_type`) and optional schedules:
 
-- `tools/ingestion_dab_generator/discover_and_classify_tables.py`
+- `tools/notebook_based_deployment/discover_and_classify_tables.py`
 
 Example (group by ingestion type, give snapshots a daily schedule and append tables a 15-min schedule):
 
 ```bash
-python3 tools/ingestion_dab_generator/discover_and_classify_tables.py \
+python3 tools/notebook_based_deployment/discover_and_classify_tables.py \
   --connector-name osipi \
   --output-csv /tmp/osipi_classified.csv \
-  --connection-name osipi_connection \
   --dest-catalog main \
   --dest-schema bronze \
   --group-by category_and_ingestion_type \
@@ -278,15 +277,13 @@ python3 tools/ingestion_dab_generator/discover_and_classify_tables.py \
   --schedule-snapshot "0 0 * * *" \
   --schedule-append "*/15 * * * *"
 
-python3 tools/ingestion_dab_generator/generate_ingestion_dab_yaml.py \
+python3 tools/notebook_based_deployment/generate_dab_yaml_notebooks.py \
   --input-csv /tmp/osipi_classified.csv \
   --output-yaml /tmp/osipi_pipelines.yml \
   --connector-name osipi \
-  --connection-name osipi_connection \
   --dest-catalog main \
   --dest-schema bronze \
   --emit-jobs \
-  --max-items-per-pipeline 10
 ```
 
 ### Option A: Provide `pipeline_group` in CSV (explicit grouping)
@@ -303,7 +300,6 @@ If your CSV omits `pipeline_group`, you can ask the generator to auto-assign gro
 
 Even when you provide `pipeline_group`, you can cap how many items land in one pipeline:
 
-- **`--max-items-per-pipeline K`**: splits large groups into `group_1`, `group_2`, … each with at most K items
 
 ### Asset Hierarchy Analysis
 
