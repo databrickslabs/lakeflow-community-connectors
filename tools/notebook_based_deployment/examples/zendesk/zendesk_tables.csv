@@ -1,3 +1,0 @@
-source_table,destination_table,destination_catalog,destination_schema,pipeline_group,schedule,table_options_json,weight
-tickets,tickets,support,bronze,main,0 1 * * *,{"maxCount":"1000"},100
-users,users,support,bronze,main,0 1 * * *,,50
