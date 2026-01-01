@@ -491,14 +491,17 @@ else:
         if job_name in existing_jobs:
             jid = existing_jobs[job_name].job_id
             print("Resetting existing job:", job_name, jid)
-            w.jobs.reset(job_id=jid, new_settings=_as_payload(job_settings))
+            # JobsAPI.reset expects a JobSettings object (not a dict)
+            w.jobs.reset(job_id=jid, new_settings=job_settings)
             created_jobs[group] = jid
         else:
             print("Creating job:", job_name)
-            payload = _as_payload(job_settings)
-            if not isinstance(payload, dict):
-                raise TypeError(f"Jobs create payload must be dict, got: {type(payload)}")
-            out = w.jobs.create(**payload)  # type: ignore[arg-type]
+            # JobsAPI.create expects keyword args with typed SDK objects (CronSchedule/Task/etc.)
+            out = w.jobs.create(
+                name=job_settings.name,
+                schedule=job_settings.schedule,
+                tasks=job_settings.tasks,
+            )
             created_jobs[group] = out.job_id
 
     print("Jobs:")
