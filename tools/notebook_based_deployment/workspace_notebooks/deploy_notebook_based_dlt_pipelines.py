@@ -152,19 +152,32 @@ def _ctx_user() -> str:
 
 
 def _repo_root_fs_from_notebook_path(nb_path: str) -> Path:
-    """Infer /Workspace/Repos/<user>/<repo> from /Repos/<user>/<repo>/..."""
-    m = re.match(r"^/Repos/([^/]+)/([^/]+)(/.*)?$", nb_path or "")
-    if not m:
-        raise ValueError(
-            "Unable to infer repo root from notebookPath. "
-            "Run this notebook from within a Databricks Repo (under /Repos/...). "
-            f"notebookPath={nb_path!r}"
-        )
-    user, repo = m.group(1), m.group(2)
-    root = Path("/Workspace/Repos") / user / repo
-    if not (root / "sources").is_dir():
-        raise ValueError(f"Inferred repo root does not contain sources/: {root}")
-    return root
+    """Infer the project root on the driver filesystem from the workspace notebook path.
+
+    Works for both:
+    - Databricks Repos paths:      /Repos/<user>/<repo>/...
+    - Workspace user folder paths: /Users/<user>/<folder>/...
+
+    Strategy:
+    - Convert the workspace notebook path to the driver-mounted workspace filesystem:
+        /Workspace/<notebookPath>
+    - Walk up parents until we find a folder containing `sources/`.
+    """
+    nb_path = (nb_path or "").strip()
+    if not nb_path.startswith("/"):
+        raise ValueError(f"Unexpected notebookPath (expected absolute): {nb_path!r}")
+
+    fs_path = Path("/Workspace") / nb_path.lstrip("/")
+
+    for p in [fs_path] + list(fs_path.parents):
+        if (p / "sources").is_dir():
+            return p
+
+    raise ValueError(
+        "Unable to infer project root containing `sources/` from notebookPath. "
+        "Run this notebook from within a synced project folder that contains `sources/` "
+        f"(e.g. under /Repos/... or /Users/...). notebookPath={nb_path!r}"
+    )
 
 
 def _mkdirs(w: WorkspaceClient, path: str) -> None:
