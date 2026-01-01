@@ -50,6 +50,7 @@ try:
     dbutils.widgets.dropdown("CONTINUOUS", "false", ["true", "false"], "Pipeline continuous")
     dbutils.widgets.dropdown("CREATE_SCHEDULED_JOBS", "true", ["true", "false"], "Create jobs from CSV schedules")
     dbutils.widgets.dropdown("RECREATE_EXISTING", "false", ["true", "false"], "Delete/recreate existing resources")
+    dbutils.widgets.dropdown("PURGE_WORKSPACE_DIRS", "false", ["true", "false"], "Purge workspace connectors/notebooks dirs before upload")
     dbutils.widgets.text("DLT_NUM_WORKERS", "1", "DLT num_workers (classic DLT)")
 
     dbutils.widgets.text(
@@ -113,6 +114,7 @@ DEVELOPMENT = _w_bool("DEVELOPMENT", False)
 CONTINUOUS = _w_bool("CONTINUOUS", False)
 CREATE_SCHEDULED_JOBS = _w_bool("CREATE_SCHEDULED_JOBS", True)
 RECREATE_EXISTING = _w_bool("RECREATE_EXISTING", False)
+PURGE_WORKSPACE_DIRS = _w_bool("PURGE_WORKSPACE_DIRS", False)
 DLT_NUM_WORKERS = _w_int("DLT_NUM_WORKERS", 1)
 
 _connector_config_raw = _w("CONNECTOR_CONFIG_JSON", "").strip()
@@ -323,6 +325,18 @@ if not connector_src_path.exists():
 
 # DBTITLE 1,Upload connector generated source into workspace
 w = WorkspaceClient()
+
+if PURGE_WORKSPACE_DIRS:
+    try:
+        print("Purging workspace connectors dir:", WORKSPACE_CONNECTORS_DIR)
+        w.workspace.delete(path=WORKSPACE_CONNECTORS_DIR, recursive=True)
+    except Exception as e:
+        print("(ignore) purge connectors dir failed:", e)
+    try:
+        print("Purging workspace notebooks dir:", WORKSPACE_NOTEBOOKS_DIR)
+        w.workspace.delete(path=WORKSPACE_NOTEBOOKS_DIR, recursive=True)
+    except Exception as e:
+        print("(ignore) purge notebooks dir failed:", e)
 
 _mkdirs(w, WORKSPACE_CONNECTORS_DIR)
 
