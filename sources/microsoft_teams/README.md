@@ -134,6 +134,11 @@ Alternatively, you can create secrets via the Databricks UI:
 2. Create a new scope named `microsoft_teams`
 3. Add secrets for `tenant_id`, `client_id`, and `client_secret`
 
+**⚠️ IMPORTANT**:
+- Credentials stored here will be referenced in your pipeline code using `dbutils.secrets.get()`
+- **Do NOT store credentials in the Unity Catalog Connection parameters**
+- The connection only needs `externalOptionsAllowList` configured (optional)
+
 #### Create a Unity Catalog Connection
 
 A Unity Catalog connection for this connector can be created via the Databricks UI:
@@ -156,19 +161,17 @@ A Unity Catalog connection for this connector can be created via the Databricks 
    - **Source name**: Enter `microsoft_teams` (this must match the connector source name)
    - **Additional Options**: Configure the connection parameters as key-value pairs
 
-   **Required Parameters:**
+   **Optional Parameters:**
 
    | Key | Value | Description |
    | --- | ----- | ----------- |
-   | `tenant_id` | `{{secrets/microsoft_teams/tenant_id}}` | Azure AD tenant ID from Step 1 |
-   | `client_id` | `{{secrets/microsoft_teams/client_id}}` | Application (client) ID from Step 1 |
-   | `client_secret` | `{{secrets/microsoft_teams/client_secret}}` | Client secret value from Step 1 |
-   | `externalOptionsAllowList` | `team_id,channel_id,message_id,start_date,top,max_pages_per_batch,lookback_seconds,fetch_all_teams,fetch_all_channels,fetch_all_messages` | Comma-separated list of table-specific options |
+   | `externalOptionsAllowList` | `team_id,channel_id,message_id,start_date,top,max_pages_per_batch,lookback_seconds,fetch_all_teams,fetch_all_channels,fetch_all_messages` | (Optional) Comma-separated list of table-specific options users can pass. May not be enforced in current Databricks versions but recommended for future compatibility. |
 
-   **⚠️ IMPORTANT**:
-   - Use Databricks Secrets references (format: `{{secrets/scope_name/key_name}}`) instead of hardcoding credentials
-   - The `externalOptionsAllowList` parameter is required for this connector to accept table-specific options
-   - You must create the secrets first (see [Store Credentials Securely](#store-credentials-securely) section above)
+   **⚠️ IMPORTANT - Credentials:**
+   - **Do NOT store credentials (tenant_id, client_id, client_secret) in the connection**
+   - Due to Python Data Source API limitations, connection-level credentials are not accessible to the connector
+   - All credentials must be passed via `table_configuration` in your pipeline spec using `dbutils.secrets.get()`
+   - See the configuration examples below for the correct pattern
 
 5. **Create Connection**
    - Click **Create** to save the connection
@@ -203,6 +206,21 @@ You need to register the connector source code from GitHub so Databricks can acc
    - Databricks will fetch the connector code from GitHub when running ingestion pipelines
 
 **📝 Note**: The source name must exactly match the directory name containing the connector code in the repository (in this case: `microsoft_teams`).
+
+#### Architecture Note: Credential Flow
+
+Due to Python Data Source API limitations in Databricks:
+
+1. **Unity Catalog Connection** serves as a reference and defines:
+   - Connection name for pipeline specs
+   - `externalOptionsAllowList` (optional table-specific options whitelist)
+
+2. **Credentials flow** happens through pipeline code:
+   - Retrieved from Databricks Secrets via `dbutils.secrets.get()`
+   - Passed in `table_configuration` for each table
+   - Received by connector in the `options` dictionary
+
+This pattern differs from managed Databricks connectors where credentials can be stored at the connection level. Custom Python Data Source connectors require explicit credential passing through table configuration.
 
 #### Run Your First Pipeline
 
