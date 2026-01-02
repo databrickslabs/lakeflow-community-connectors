@@ -201,18 +201,20 @@ def register_lakeflow_source(spark):
             return [
                 "tickets",
                 "problems",
-                ##"changes",
+                "changes",
                 "releases",
-                ##"requesters",
-                ##"agents",
+                "agents",
+                "requesters",
                 "locations",
                 "products",
                 "vendors",
                 "assets",
+                "asset_types",
                 "purchase_orders",
                 "software",
-                ## "satisfaction_survey_responses",
+                "service_catalog",
                 "requested_items",
+                "conversations",
             ]
 
         def get_table_schema(
@@ -305,17 +307,7 @@ def register_lakeflow_source(spark):
                         StructField("item_category", StringType(), True),
                         StructField("custom_fields", StringType(), True),
                         StructField("tags", ArrayType(StringType(), True), True),
-                        StructField(
-                            "analysis_fields",
-                            StructType(
-                                [
-                                    StructField("problem_cause", StringType(), True),
-                                    StructField("problem_symptom", StringType(), True),
-                                    StructField("problem_impact", StringType(), True),
-                                ]
-                            ),
-                            True,
-                        ),
+                        StructField("analysis_fields", StringType(), True),
                         StructField("assets", ArrayType(StringType(), True), True),
                         StructField("workspace_id", LongType(), True),
                     ]
@@ -346,17 +338,7 @@ def register_lakeflow_source(spark):
                         StructField("sub_category", StringType(), True),
                         StructField("item_category", StringType(), True),
                         StructField("custom_fields", StringType(), True),
-                        StructField(
-                            "planning_fields",
-                            StructType(
-                                [
-                                    StructField("maintenance_window", StringType(), True),
-                                    StructField("rollout_plan", StringType(), True),
-                                    StructField("backout_plan", StringType(), True),
-                                ]
-                            ),
-                            True,
-                        ),
+                        StructField("planning_fields", StringType(), True),
                         StructField("tags", ArrayType(StringType(), True), True),
                         StructField("assets", ArrayType(StringType(), True), True),
                         StructField("workspace_id", LongType(), True),
@@ -386,18 +368,47 @@ def register_lakeflow_source(spark):
                         StructField("sub_category", StringType(), True),
                         StructField("item_category", StringType(), True),
                         StructField("custom_fields", StringType(), True),
-                        StructField(
-                            "planning_fields",
-                            StructType(
-                                [
-                                    StructField("release_notes", StringType(), True),
-                                    StructField("deployment_plan", StringType(), True),
-                                ]
-                            ),
-                            True,
-                        ),
+                        StructField("planning_fields", StringType(), True),
                         StructField("tags", ArrayType(StringType(), True), True),
                         StructField("assets", ArrayType(StringType(), True), True),
+                        StructField("workspace_id", LongType(), True),
+                    ]
+                )
+
+            if table_name == "agents":
+                return StructType(
+                    [
+                        StructField("id", LongType(), False),
+                        StructField("created_at", StringType(), True),
+                        StructField("updated_at", StringType(), True),
+                        StructField("first_name", StringType(), True),
+                        StructField("last_name", StringType(), True),
+                        StructField("occasional", BooleanType(), True),
+                        StructField("job_title", StringType(), True),
+                        StructField("email", StringType(), True),
+                        StructField("work_phone_number", StringType(), True),
+                        StructField("mobile_phone_number", StringType(), True),
+                        StructField("department_ids", ArrayType(LongType(), True), True),
+                        StructField(
+                            "can_see_all_tickets_from_associated_departments",
+                            BooleanType(),
+                            True,
+                        ),
+                        StructField("reporting_manager_id", LongType(), True),
+                        StructField("address", StringType(), True),
+                        StructField("time_zone", StringType(), True),
+                        StructField("time_format", StringType(), True),
+                        StructField("language", StringType(), True),
+                        StructField("location_id", LongType(), True),
+                        StructField("background_information", StringType(), True),
+                        StructField("scoreboard_level_id", LongType(), True),
+                        StructField("member_of", ArrayType(LongType(), True), True),
+                        StructField("observer_of", ArrayType(LongType(), True), True),
+                        StructField("roles", StringType(), True),
+                        StructField("signature", StringType(), True),
+                        StructField("custom_fields", StringType(), True),
+                        StructField("active", BooleanType(), True),
+                        StructField("has_logged_in", BooleanType(), True),
                         StructField("workspace_id", LongType(), True),
                     ]
                 )
@@ -438,41 +449,67 @@ def register_lakeflow_source(spark):
                     ]
                 )
 
-            if table_name == "agents":
+            if table_name == "asset_types":
+                return StructType(
+                    [
+                        StructField("id", LongType(), False),
+                        StructField("name", StringType(), True),
+                        StructField("description", StringType(), True),
+                        StructField("parent_asset_type_id", LongType(), True),
+                        StructField("visible", BooleanType(), True),
+                        StructField("created_at", StringType(), True),
+                        StructField("updated_at", StringType(), True),
+                    ]
+                )
+
+            if table_name == "service_catalog":
                 return StructType(
                     [
                         StructField("id", LongType(), False),
                         StructField("created_at", StringType(), True),
                         StructField("updated_at", StringType(), True),
-                        StructField("first_name", StringType(), True),
-                        StructField("last_name", StringType(), True),
-                        StructField("occasional", BooleanType(), True),
-                        StructField("job_title", StringType(), True),
-                        StructField("email", StringType(), True),
-                        StructField("work_phone_number", StringType(), True),
-                        StructField("mobile_phone_number", StringType(), True),
-                        StructField("department_ids", ArrayType(LongType(), True), True),
-                        StructField(
-                            "can_see_all_tickets_from_associated_departments",
-                            BooleanType(),
-                            True,
-                        ),
-                        StructField("reporting_manager_id", LongType(), True),
-                        StructField("address", StringType(), True),
-                        StructField("time_zone", StringType(), True),
-                        StructField("time_format", StringType(), True),
-                        StructField("language", StringType(), True),
-                        StructField("location_id", LongType(), True),
-                        StructField("background_information", StringType(), True),
-                        StructField("scoreboard_level_id", LongType(), True),
-                        StructField("member_of", ArrayType(LongType(), True), True),
-                        StructField("observer_of", ArrayType(LongType(), True), True),
-                        StructField("roles", StringType(), True),
-                        StructField("signature", StringType(), True),
-                        StructField("custom_fields", StringType(), True),
-                        StructField("active", BooleanType(), True),
-                        StructField("has_logged_in", BooleanType(), True),
-                        StructField("workspace_id", LongType(), True),
+                        StructField("name", StringType(), True),
+                        StructField("delivery_time", LongType(), True),
+                        StructField("display_id", LongType(), True),
+                        StructField("category_id", LongType(), True),
+                        StructField("product_id", LongType(), True),
+                        StructField("quantity", LongType(), True),
+                        StructField("deleted", BooleanType(), True),
+                        StructField("icon_name", StringType(), True),
+                        StructField("group_visibility", LongType(), True),
+                        StructField("item_type", LongType(), True),
+                        StructField("ci_type_id", LongType(), True),
+                        StructField("product_provider", StringType(), True),
+                        StructField("delivery_time_type", StringType(), True),
+                        StructField("botified", BooleanType(), True),
+                        StructField("visibility", LongType(), True),
+                        StructField("allow_attachments", BooleanType(), True),
+                        StructField("allow_quantity", BooleanType(), True),
+                        StructField("is_bundle", BooleanType(), True),
+                        StructField("create_child", BooleanType(), True),
+                        StructField("description", StringType(), True),
+                        StructField("short_description", StringType(), True),
+                    ]
+                )
+
+            if table_name == "conversations":
+                return StructType(
+                    [
+                        StructField("id", LongType(), False),
+                        StructField("ticket_id", LongType(), False),
+                        StructField("created_at", StringType(), True),
+                        StructField("updated_at", StringType(), True),
+                        StructField("body", StringType(), True),
+                        StructField("body_text", StringType(), True),
+                        StructField("incoming", BooleanType(), True),
+                        StructField("private", BooleanType(), True),
+                        StructField("user_id", LongType(), True),
+                        StructField("support_email", StringType(), True),
+                        StructField("to_emails", ArrayType(StringType(), True), True),
+                        StructField("from_email", StringType(), True),
+                        StructField("cc_emails", ArrayType(StringType(), True), True),
+                        StructField("bcc_emails", ArrayType(StringType(), True), True),
+                        StructField("attachments", ArrayType(StringType(), True), True),
                     ]
                 )
 
@@ -657,16 +694,18 @@ def register_lakeflow_source(spark):
 
             # Snapshot tables
             if table_name in [
-                "requesters",
                 "agents",
+                "requesters",
                 "locations",
                 "products",
                 "vendors",
                 "assets",
+                "asset_types",
                 "purchase_orders",
                 "software",
-                "satisfaction_survey_responses",
+                "service_catalog",
                 "requested_items",
+                "conversations",
             ]:
                 return {
                     "primary_keys": ["id"],
@@ -693,10 +732,10 @@ def register_lakeflow_source(spark):
                 return self._read_changes(start_offset, table_options)
             if table_name == "releases":
                 return self._read_releases(start_offset, table_options)
-            if table_name == "requesters":
-                return self._read_requesters(start_offset, table_options)
             if table_name == "agents":
                 return self._read_agents(start_offset, table_options)
+            if table_name == "requesters":
+                return self._read_requesters(start_offset, table_options)
             if table_name == "locations":
                 return self._read_locations(start_offset, table_options)
             if table_name == "products":
@@ -705,14 +744,18 @@ def register_lakeflow_source(spark):
                 return self._read_vendors(start_offset, table_options)
             if table_name == "assets":
                 return self._read_assets(start_offset, table_options)
+            if table_name == "asset_types":
+                return self._read_asset_types(start_offset, table_options)
             if table_name == "purchase_orders":
                 return self._read_purchase_orders(start_offset, table_options)
             if table_name == "software":
                 return self._read_software(start_offset, table_options)
-            if table_name == "satisfaction_survey_responses":
-                return self._read_satisfaction_survey_responses(start_offset, table_options)
+            if table_name == "service_catalog":
+                return self._read_service_catalog(start_offset, table_options)
             if table_name == "requested_items":
                 return self._read_requested_items(start_offset, table_options)
+            if table_name == "conversations":
+                return self._read_conversations(start_offset, table_options)
 
             raise ValueError(f"Unsupported table: {table_name!r}")
 
@@ -724,6 +767,7 @@ def register_lakeflow_source(spark):
 
             Endpoint: GET /api/v2/tickets
             Supports incremental sync with updated_since parameter.
+            Supports include parameter for additional related data.
             """
             return self._read_cdc_table(
                 endpoint="/tickets",
@@ -777,20 +821,6 @@ def register_lakeflow_source(spark):
                 table_options=table_options,
             )
 
-        def _read_requesters(
-            self, start_offset: dict, table_options: dict[str, str]
-        ) -> (Iterator[dict], dict):
-            """
-            Read the requesters table (Snapshot).
-
-            Endpoint: GET /api/v2/requesters
-            """
-            return self._read_snapshot_table(
-                endpoint="/requesters",
-                resource_key="requesters",
-                table_options=table_options,
-            )
-
         def _read_agents(
             self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
@@ -802,6 +832,20 @@ def register_lakeflow_source(spark):
             return self._read_snapshot_table(
                 endpoint="/agents",
                 resource_key="agents",
+                table_options=table_options,
+            )
+
+        def _read_requesters(
+            self, start_offset: dict, table_options: dict[str, str]
+        ) -> (Iterator[dict], dict):
+            """
+            Read the requesters table (Snapshot).
+
+            Endpoint: GET /api/v2/requesters
+            """
+            return self._read_snapshot_table(
+                endpoint="/requesters",
+                resource_key="requesters",
                 table_options=table_options,
             )
 
@@ -889,17 +933,31 @@ def register_lakeflow_source(spark):
                 table_options=table_options,
             )
 
-        def _read_satisfaction_survey_responses(
+        def _read_asset_types(
             self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """
-            Read the satisfaction_survey_responses table (Snapshot).
+            Read the asset_types table (Snapshot).
 
-            Endpoint: GET /api/v2/surveys/satisfaction_responses
+            Endpoint: GET /api/v2/asset_types
             """
             return self._read_snapshot_table(
-                endpoint="/surveys/satisfaction_responses",
-                resource_key="survey_responses",
+                endpoint="/asset_types",
+                resource_key="asset_types",
+                table_options=table_options,
+            )
+
+        def _read_service_catalog(
+            self, start_offset: dict, table_options: dict[str, str]
+        ) -> (Iterator[dict], dict):
+            """
+            Read the service_catalog table (Snapshot).
+
+            Endpoint: GET /api/v2/service_catalog/items
+            """
+            return self._read_snapshot_table(
+                endpoint="/service_catalog/items",
+                resource_key="service_items",
                 table_options=table_options,
             )
 
@@ -972,6 +1030,71 @@ def register_lakeflow_source(spark):
 
             return iter(records), {}
 
+        def _read_conversations(
+            self, start_offset: dict, table_options: dict[str, str]
+        ) -> (Iterator[dict], dict):
+            """
+            Read the conversations table (Snapshot).
+
+            This is a nested resource under tickets.
+            We need to first list all tickets, then fetch conversations for each.
+
+            Endpoint pattern: GET /api/v2/tickets/{ticket_id}/conversations
+            """
+            try:
+                per_page = int(table_options.get("per_page", 100))
+            except (TypeError, ValueError):
+                per_page = 100
+            per_page = max(1, min(per_page, 100))
+
+            try:
+                max_pages_per_batch = int(table_options.get("max_pages_per_batch", 50))
+            except (TypeError, ValueError):
+                max_pages_per_batch = 50
+
+            records: list[dict[str, Any]] = []
+
+            # First, get all tickets
+            page = 1
+            pages_fetched = 0
+
+            while pages_fetched < max_pages_per_batch:
+                url = f"{self.base_url}/tickets"
+                params = {"page": page, "per_page": per_page}
+
+                response = self._session.get(url, params=params, timeout=30)
+                if response.status_code != 200:
+                    raise RuntimeError(
+                        f"Freshservice API error for tickets: {response.status_code} {response.text}"
+                    )
+
+                data = response.json()
+                tickets = data.get("tickets", [])
+
+                if not tickets:
+                    break
+
+                # Fetch conversations for each ticket
+                for ticket in tickets:
+                    ticket_id = ticket.get("id")
+                    if ticket_id:
+                        conversations = self._fetch_conversations_for_ticket(
+                            ticket_id, per_page, max_pages_per_batch
+                        )
+                        for conversation in conversations:
+                            conversation["ticket_id"] = ticket_id
+                            records.append(conversation)
+
+                # Check for pagination via Link header
+                link_header = response.headers.get("Link", "")
+                if not self._has_next_page(link_header):
+                    break
+
+                page += 1
+                pages_fetched += 1
+
+            return iter(records), {}
+
         def _fetch_requested_items_for_ticket(
             self, ticket_id: int, per_page: int, max_pages: int
         ) -> list[dict]:
@@ -1014,6 +1137,48 @@ def register_lakeflow_source(spark):
 
             return items
 
+        def _fetch_conversations_for_ticket(
+            self, ticket_id: int, per_page: int, max_pages: int
+        ) -> list[dict]:
+            """
+            Fetch all conversations for a specific ticket.
+            """
+            conversations = []
+            page = 1
+            pages_fetched = 0
+
+            while pages_fetched < max_pages:
+                url = f"{self.base_url}/tickets/{ticket_id}/conversations"
+                params = {"page": page, "per_page": per_page}
+
+                response = self._session.get(url, params=params, timeout=30)
+                if response.status_code == 404:
+                    # No conversations for this ticket
+                    break
+                if response.status_code != 200:
+                    raise RuntimeError(
+                        f"Freshservice API error for conversations (ticket {ticket_id}): "
+                        f"{response.status_code} {response.text}"
+                    )
+
+                data = response.json()
+                ticket_conversations = data.get("conversations", [])
+
+                if not ticket_conversations:
+                    break
+
+                conversations.extend(ticket_conversations)
+
+                # Check for pagination
+                link_header = response.headers.get("Link", "")
+                if not self._has_next_page(link_header):
+                    break
+
+                page += 1
+                pages_fetched += 1
+
+            return conversations
+
         def _read_cdc_table(
             self,
             endpoint: str,
@@ -1055,6 +1220,11 @@ def register_lakeflow_source(spark):
 
             if cursor:
                 params["updated_since"] = cursor
+
+            # Add include parameter if specified in table_options
+            include_param = table_options.get("include")
+            if include_param:
+                params["include"] = include_param
 
             records: list[dict[str, Any]] = []
             max_updated_at: str | None = None
