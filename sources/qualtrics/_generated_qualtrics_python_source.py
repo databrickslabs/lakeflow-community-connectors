@@ -7,12 +7,7 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import (
-    Any,
-    Dict,
-    Iterator,
-    List,
-)
+from typing import Any, Iterator
 import io
 import json
 import re
@@ -195,7 +190,7 @@ def register_lakeflow_source(spark):
 
 
     class LakeflowConnect:
-        def __init__(self, options: Dict[str, str]) -> None:
+        def __init__(self, options: dict[str, str]) -> None:
             """
             Initialize the Qualtrics source connector with authentication parameters.
 
@@ -221,7 +216,7 @@ def register_lakeflow_source(spark):
             # Supported tables
             self.tables = ["surveys", "survey_definitions", "survey_responses", "distributions", "contacts"]
 
-        def list_tables(self) -> List[str]:
+        def list_tables(self) -> list[str]:
             """
             List all available tables supported by this connector.
 
@@ -276,7 +271,7 @@ def register_lakeflow_source(spark):
             return normalized
 
         def get_table_schema(
-            self, table_name: str, table_options: Dict[str, str]
+            self, table_name: str, table_options: dict[str, str]
         ) -> StructType:
             """
             Get the schema for the specified table.
@@ -460,7 +455,7 @@ def register_lakeflow_source(spark):
             ])
 
         def read_table_metadata(
-            self, table_name: str, table_options: Dict[str, str]
+            self, table_name: str, table_options: dict[str, str]
         ) -> Dict:
             """
             Get metadata for the specified table.
@@ -511,7 +506,7 @@ def register_lakeflow_source(spark):
                 raise ValueError(f"Unknown table: {table_name}")
 
         def read_table(
-            self, table_name: str, start_offset: dict, table_options: Dict[str, str]
+            self, table_name: str, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """
             Read data from the specified table.
@@ -542,7 +537,80 @@ def register_lakeflow_source(spark):
             else:
                 raise ValueError(f"Unknown table: {table_name}")
 
-        def _get_all_survey_ids(self, table_options: Dict[str, str]) -> List[str]:
+        def _fetch_paginated_list(
+            self,
+            endpoint: str,
+            start_offset: dict,
+            cursor_field: str = None,
+            extra_params: dict = None
+        ) -> (Iterator[dict], dict):
+            """
+            Generic paginated list API helper for standard Qualtrics list endpoints.
+
+            Args:
+                endpoint: API endpoint path (e.g., "/surveys", "/distributions")
+                start_offset: Dictionary with cursor info
+                cursor_field: Field name for incremental filtering (e.g., "lastModified")
+                extra_params: Additional query params (e.g., {"surveyId": "SV_xxx"})
+
+            Returns:
+                Tuple of (iterator of normalized records, new offset)
+            """
+            all_items = []
+            skip_token = start_offset.get("skipToken") if start_offset else None
+            cursor_value = start_offset.get(cursor_field) if start_offset and cursor_field else None
+
+            while True:
+                url = f"{self.base_url}{endpoint}"
+                params = {"pageSize": QualtricsConfig.DEFAULT_PAGE_SIZE}
+
+                if skip_token:
+                    params["skipToken"] = skip_token
+                if extra_params:
+                    params.update(extra_params)
+
+                try:
+                    response = self._make_request("GET", url, params=params)
+                    result = response.get("result", {})
+                    elements = result.get("elements", [])
+
+                    if not elements:
+                        break
+
+                    if cursor_field and cursor_value:
+                        filtered = [
+                            item for item in elements
+                            if item.get(cursor_field, "") and item.get(cursor_field, "") > cursor_value
+                        ]
+                        all_items.extend(filtered)
+                    else:
+                        all_items.extend(elements)
+
+                    next_page = result.get("nextPage")
+                    if next_page and "skipToken=" in next_page:
+                        skip_token = next_page.split("skipToken=")[-1].split("&")[0]
+                    else:
+                        break
+
+                except Exception as e:
+                    logger.error(f"Error fetching {endpoint}: {e}", exc_info=True)
+                    break
+
+            new_offset = {}
+            if cursor_field:
+                if all_items:
+                    dates = [item.get(cursor_field, "") for item in all_items if item.get(cursor_field)]
+                    if dates:
+                        new_offset[cursor_field] = max(dates)
+                    elif cursor_value:
+                        new_offset[cursor_field] = cursor_value
+                elif cursor_value:
+                    new_offset[cursor_field] = cursor_value
+
+            normalized = (self._normalize_keys(item) for item in all_items)
+            return normalized, new_offset
+
+        def _get_all_survey_ids(self, table_options: dict[str, str]) -> list[str]:
             """
             Get all survey IDs for auto-consolidation.
 
@@ -602,77 +670,10 @@ def register_lakeflow_source(spark):
             Returns:
                 Tuple of (iterator of survey records, new offset)
             """
-            all_surveys = []
-            skip_token = start_offset.get("skipToken") if start_offset else None
-            last_modified_cursor = start_offset.get("lastModified") if start_offset else None
-
-            # Fetch all pages
-            while True:
-                url = f"{self.base_url}/surveys"
-                params = {"pageSize": QualtricsConfig.DEFAULT_PAGE_SIZE}
-
-                if skip_token:
-                    params["skipToken"] = skip_token
-
-                try:
-                    response = self._make_request("GET", url, params=params)
-
-                    result = response.get("result", {})
-                    elements = result.get("elements", [])
-
-                    if not elements:
-                        break
-
-                    # Filter by lastModified if doing incremental sync
-                    if last_modified_cursor:
-                        filtered_elements = []
-                        for survey in elements:
-                            survey_last_modified = survey.get("lastModified", "")
-                            if survey_last_modified and survey_last_modified > last_modified_cursor:
-                                filtered_elements.append(survey)
-                        all_surveys.extend(filtered_elements)
-                    else:
-                        all_surveys.extend(elements)
-
-                    # Check for next page
-                    next_page = result.get("nextPage")
-                    if next_page:
-                        # Extract skipToken from nextPage URL
-                        if "skipToken=" in next_page:
-                            skip_token = next_page.split("skipToken=")[-1].split("&")[0]
-                        else:
-                            break
-                    else:
-                        break
-
-                except Exception as e:
-                    logger.error(f"Error fetching surveys: {e}", exc_info=True)
-                    break
-
-            # Calculate new offset
-            new_offset = {}
-            if all_surveys:
-                # Find max lastModified from surveys that have it
-                last_modified_dates = [
-                    survey.get("lastModified", "")
-                    for survey in all_surveys
-                    if survey.get("lastModified")
-                ]
-                if last_modified_dates:
-                    max_last_modified = max(last_modified_dates)
-                    new_offset["lastModified"] = max_last_modified
-                elif last_modified_cursor:
-                    new_offset["lastModified"] = last_modified_cursor
-            elif last_modified_cursor:
-                # No new data, keep the same cursor
-                new_offset["lastModified"] = last_modified_cursor
-
-            # Normalize all keys to snake_case before returning
-            normalized_surveys = (self._normalize_keys(survey) for survey in all_surveys)
-            return normalized_surveys, new_offset
+            return self._fetch_paginated_list("/surveys", start_offset, cursor_field="lastModified")
 
         def _read_survey_definitions(
-            self, start_offset: dict, table_options: Dict[str, str]
+            self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """
             Read survey definition from Qualtrics API.
@@ -778,7 +779,7 @@ def register_lakeflow_source(spark):
                 logger.error(f"Error fetching survey definition for {survey_id}: {e}", exc_info=True)
                 raise
 
-        def _read_all_survey_definitions(self, start_offset: dict, table_options: Dict[str, str]) -> (Iterator[dict], dict):
+        def _read_all_survey_definitions(self, start_offset: dict, table_options: dict[str, str]) -> (Iterator[dict], dict):
             """
             Read survey definitions for all surveys from Qualtrics API.
 
@@ -861,7 +862,7 @@ def register_lakeflow_source(spark):
             return iter(all_definitions), new_offset
 
         def _read_survey_responses(
-            self, start_offset: dict, table_options: Dict[str, str]
+            self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """
             Read survey responses using the Qualtrics export API.
@@ -947,7 +948,7 @@ def register_lakeflow_source(spark):
             return iter(responses), new_offset
 
         def _read_all_survey_responses(
-            self, start_offset: dict, table_options: Dict[str, str]
+            self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """
             Read survey responses for all surveys from Qualtrics API.
@@ -1243,7 +1244,7 @@ def register_lakeflow_source(spark):
             return self._normalize_keys(processed)
 
         def _read_distributions(
-            self, start_offset: dict, table_options: Dict[str, str]
+            self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """
             Read distributions from Qualtrics API.
@@ -1283,80 +1284,15 @@ def register_lakeflow_source(spark):
             Returns:
                 Tuple of (iterator of distribution records, new offset)
             """
-            all_distributions = []
-            skip_token = start_offset.get("skipToken") if start_offset else None
-            modified_date_cursor = start_offset.get("modifiedDate") if start_offset else None
-
-            # Fetch all pages
-            while True:
-                url = f"{self.base_url}/distributions"
-                params = {
-                    "surveyId": survey_id,
-                    "pageSize": QualtricsConfig.DEFAULT_PAGE_SIZE
-                }
-
-                if skip_token:
-                    params["skipToken"] = skip_token
-
-                try:
-                    response = self._make_request("GET", url, params=params)
-
-                    result = response.get("result", {})
-                    elements = result.get("elements", [])
-
-                    if not elements:
-                        break
-
-                    # Filter by modifiedDate if doing incremental sync
-                    if modified_date_cursor:
-                        filtered_elements = []
-                        for dist in elements:
-                            dist_modified_date = dist.get("modifiedDate", "")
-                            if dist_modified_date and dist_modified_date > modified_date_cursor:
-                                filtered_elements.append(dist)
-                        all_distributions.extend(filtered_elements)
-                    else:
-                        all_distributions.extend(elements)
-
-                    # Check for next page
-                    next_page = result.get("nextPage")
-                    if next_page:
-                        # Extract skipToken from nextPage URL
-                        if "skipToken=" in next_page:
-                            skip_token = next_page.split("skipToken=")[-1].split("&")[0]
-                        else:
-                            break
-                    else:
-                        break
-
-                except Exception as e:
-                    logger.error(f"Error fetching distributions: {e}", exc_info=True)
-                    break
-
-            # Calculate new offset
-            new_offset = {}
-            if all_distributions:
-                # Find max modifiedDate from distributions that have it
-                modified_dates = [
-                    dist.get("modifiedDate", "")
-                    for dist in all_distributions
-                    if dist.get("modifiedDate")
-                ]
-                if modified_dates:
-                    max_modified_date = max(modified_dates)
-                    new_offset["modifiedDate"] = max_modified_date
-                elif modified_date_cursor:
-                    new_offset["modifiedDate"] = modified_date_cursor
-            elif modified_date_cursor:
-                # No new data, keep the same cursor
-                new_offset["modifiedDate"] = modified_date_cursor
-
-            # Normalize all keys to snake_case before returning
-            normalized_distributions = (self._normalize_keys(dist) for dist in all_distributions)
-            return normalized_distributions, new_offset
+            return self._fetch_paginated_list(
+                "/distributions",
+                start_offset,
+                cursor_field="modifiedDate",
+                extra_params={"surveyId": survey_id}
+            )
 
         def _read_all_survey_distributions(
-            self, start_offset: dict, table_options: Dict[str, str]
+            self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """
             Read distributions for all surveys from Qualtrics API.
@@ -1434,7 +1370,7 @@ def register_lakeflow_source(spark):
             return iter(all_distributions), new_offset
 
         def _read_contacts(
-            self, start_offset: dict, table_options: Dict[str, str]
+            self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """
             Read contacts from Qualtrics API.
@@ -1461,50 +1397,8 @@ def register_lakeflow_source(spark):
                     "mailingListId is required in table_options for contacts table"
                 )
 
-            all_contacts = []
-            skip_token = None
-
-            # Fetch all pages
-            while True:
-                url = f"{self.base_url}/directories/{directory_id}/mailinglists/{mailing_list_id}/contacts"
-                params = {"pageSize": QualtricsConfig.DEFAULT_PAGE_SIZE}
-
-                if skip_token:
-                    params["skipToken"] = skip_token
-
-                try:
-                    response = self._make_request("GET", url, params=params)
-
-                    result = response.get("result", {})
-                    elements = result.get("elements", [])
-
-                    if not elements:
-                        break
-
-                    # Add all contacts (no filtering for snapshot mode)
-                    all_contacts.extend(elements)
-
-                    # Check for next page
-                    next_page = result.get("nextPage")
-                    if next_page:
-                        # Extract skipToken from nextPage URL
-                        if "skipToken=" in next_page:
-                            skip_token = next_page.split("skipToken=")[-1].split("&")[0]
-                        else:
-                            break
-                    else:
-                        break
-
-                except Exception as e:
-                    logger.error(f"Error fetching contacts: {e}", exc_info=True)
-                    break
-
-            # Return empty offset for snapshot mode
-            new_offset = {}
-
-            # Normalize all keys to snake_case before returning
-            normalized_contacts = (self._normalize_keys(contact) for contact in all_contacts)
-            return normalized_contacts, new_offset
+            endpoint = f"/directories/{directory_id}/mailinglists/{mailing_list_id}/contacts"
+            return self._fetch_paginated_list(endpoint, start_offset, cursor_field=None)
 
         def _make_request(
             self,
