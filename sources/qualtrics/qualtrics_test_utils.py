@@ -380,11 +380,14 @@ class LakeflowConnectTestUtils:
         # Provide mapping for documentation purposes
         # Test will attempt matching but gracefully handle when Sessions API
         # responses don't appear in exports (known Qualtrics API limitation)
-        # 
+        #
         # Note: We only map fields that reliably match. surveyId is often null
         # in exported responses, so we omit it from matching.
+        #
+        # IMPORTANT: Field names are normalized to snake_case by the connector,
+        # so we must use snake_case names here (e.g., "user_language" not "userLanguage")
         column_mapping = {
-            "language": "userLanguage",
+            "language": "user_language",  # Maps to user_language (snake_case) in returned records
         }
         
         return column_mapping
