@@ -37,7 +37,6 @@ def register_lakeflow_source(spark):
         # Handle complex types
         if isinstance(field_type, StructType):
             # Validate input for StructType
-            # "test"
             if not isinstance(value, dict):
                 raise ValueError(f"Expected a dictionary for StructType, got {type(value)}")
             # Spark Python -> Arrow conversion require missing StructType fields to be assigned None.
