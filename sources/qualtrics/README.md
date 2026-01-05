@@ -25,10 +25,10 @@ Provide the following **connection-level** options when configuring the connecto
 |------|------|----------|-------------|---------|
 | `api_token` | string | yes | Qualtrics API token for authentication | `YOUR_QUALTRICS_API_TOKEN` |
 | `datacenter_id` | string | yes | Qualtrics datacenter identifier where your account is hosted | `fra1`, `ca1`, `yourdatacenterid` |
-| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names. This connector requires table-specific options for some tables. | `surveyId,mailingListId,directoryId` |
+| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names. This connector requires table-specific options for some tables. | `surveyId,mailingListId,directoryId,only_active_surveys,max_surveys` |
 
 The full list of supported table-specific options for `externalOptionsAllowList` is:
-`surveyId,mailingListId,directoryId`
+`surveyId,mailingListId,directoryId,only_active_surveys,max_surveys`
 
 > **Note**: Table-specific options such as `surveyId` are **not** connection parameters. They are provided per-table via table options in the pipeline specification. The option name must be included in `externalOptionsAllowList` for the connection to allow it.
 
@@ -108,22 +108,25 @@ Table-specific options are passed via the pipeline spec under `table` in `object
 - Supports incremental sync based on `lastModified` timestamp
 
 #### `survey_definitions` table
-- **`surveyId`** (string, **required**): The Survey ID to retrieve the definition for
+- **`surveyId`** (string, **optional**): The Survey ID to retrieve the definition for
   - Format: `SV_...` (e.g., `SV_abc123xyz`)
   - Returns the complete survey structure including all questions, choices, blocks, and flow
   - Useful for building data dictionaries to interpret survey response values
+  - **If not provided**: Auto-consolidates definitions from all surveys (see Auto-Consolidation below)
 
 #### `survey_responses` table
-- **`surveyId`** (string, **required**): The Survey ID to export responses from
+- **`surveyId`** (string, **optional**): The Survey ID to export responses from
   - Format: `SV_...` (e.g., `SV_abc123xyz`)
   - Can be found in Qualtrics UI under: Survey → Tools → Survey IDs
   - Or in the browser URL when editing a survey
+  - **If not provided**: Auto-consolidates responses from all surveys (see Auto-Consolidation below)
 
 #### `distributions` table
-- **`surveyId`** (string, **required**): The Survey ID to retrieve distributions for
+- **`surveyId`** (string, **optional**): The Survey ID to retrieve distributions for
   - Format: `SV_...` (e.g., `SV_abc123xyz`)
   - Same format as survey_responses table
   - Retrieves all distributions (email sends, SMS, etc.) for the specified survey
+  - **If not provided**: Auto-consolidates distributions from all surveys (see Auto-Consolidation below)
 
 #### `contacts` table
 - **`directoryId`** (string, **required**): The Directory ID (also called Pool ID)
@@ -136,6 +139,76 @@ Table-specific options are passed via the pipeline spec under `table` in `object
   - Or via API: GET `/directories/{directoryId}/mailinglists`
 
 > **Note**: The `contacts` table is only available for XM Directory users (not XM Directory Lite accounts).
+
+### Auto-Consolidation Feature
+
+**New in v1.1**: The connector now supports automatic consolidation of data from multiple surveys into a single table. When `surveyId` is **not provided** for `survey_definitions`, `survey_responses`, or `distributions` tables, the connector will automatically:
+
+1. Retrieve all survey IDs from your account
+2. Fetch data for each survey
+3. Consolidate all records into a single table
+
+This eliminates the need to manually union data from multiple surveys in your downstream analytics.
+
+#### Auto-Consolidation Options
+
+When using auto-consolidation (no `surveyId` specified), you can control the behavior with these additional table options:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `only_active_surveys` | string | `"true"` | Set to `"true"` to only include active surveys, `"false"` to include all surveys |
+| `max_surveys` | string | `"100"` | Maximum number of surveys to process (safety limit to prevent excessive API calls) |
+
+#### Auto-Consolidation Examples
+
+**Example 1: Consolidate responses from all active surveys**
+```json
+{
+  "table": {
+    "source_table": "survey_responses"
+  }
+}
+```
+
+**Example 2: Consolidate from all surveys (including inactive)**
+```json
+{
+  "table": {
+    "source_table": "survey_responses",
+    "only_active_surveys": "false"
+  }
+}
+```
+
+**Example 3: Consolidate from first 50 surveys only**
+```json
+{
+  "table": {
+    "source_table": "survey_responses",
+    "max_surveys": "50"
+  }
+}
+```
+
+**Example 4: Use specific survey (backward compatible)**
+```json
+{
+  "table": {
+    "source_table": "survey_responses",
+    "surveyId": "SV_abc123xyz"
+  }
+}
+```
+
+#### Performance Considerations for Auto-Consolidation
+
+When using auto-consolidation:
+
+- **API Calls**: The connector makes one API call per survey (e.g., 10 surveys = 10 API calls)
+- **Rate Limiting**: Built-in delays (0.5 seconds) between surveys to respect Qualtrics rate limits
+- **Incremental Sync**: For `survey_responses` and `distributions`, the connector tracks offsets per survey to support incremental updates
+- **Error Handling**: If one survey fails, the connector continues with others and logs warnings
+- **Recommended for**: Most use cases with <100 surveys. For larger deployments, consider filtering with `max_surveys` or using specific `surveyId` per table
 
 ### Schema Highlights
 
@@ -285,7 +358,46 @@ In your pipeline code (e.g., `ingestion_pipeline.py`), configure a `pipeline_spe
 - A **Unity Catalog connection** that uses this Qualtrics connector
 - One or more **tables** to ingest, with required table options
 
-Example `pipeline_spec`:
+Example `pipeline_spec` with auto-consolidation (recommended):
+
+```json
+{
+  "pipeline_spec": {
+    "connection_name": "qualtrics_connection",
+    "object": [
+      {
+        "table": {
+          "source_table": "surveys"
+        }
+      },
+      {
+        "table": {
+          "source_table": "survey_definitions"
+        }
+      },
+      {
+        "table": {
+          "source_table": "survey_responses"
+        }
+      },
+      {
+        "table": {
+          "source_table": "distributions"
+        }
+      },
+      {
+        "table": {
+          "source_table": "contacts",
+          "directoryId": "POOL_abc123xyz",
+          "mailingListId": "CG_def456xyz"
+        }
+      }
+    ]
+  }
+}
+```
+
+Example `pipeline_spec` with specific surveys (backward compatible):
 
 ```json
 {
@@ -327,13 +439,14 @@ Example `pipeline_spec`:
 }
 ```
 
+Configuration notes:
 - `connection_name` must point to the UC connection configured with your Qualtrics `api_token` and `datacenter_id`
 - For `surveys` table: No additional options needed
-- For `survey_definitions` table: `surveyId` is **required**
-- For `survey_responses` table: `surveyId` is **required**
-- For `distributions` table: `surveyId` is **required**
+- For `survey_definitions` table: `surveyId` is **optional** (omit for auto-consolidation)
+- For `survey_responses` table: `surveyId` is **optional** (omit for auto-consolidation)
+- For `distributions` table: `surveyId` is **optional** (omit for auto-consolidation)
 - For `contacts` table: Both `directoryId` and `mailingListId` are **required**
-  - You can ingest multiple surveys/lists by adding multiple table entries with different IDs
+- When using auto-consolidation, all surveys' data is consolidated into a single table automatically
 
 ### Step 3: Run and Schedule the Pipeline
 
@@ -487,7 +600,8 @@ For development and testing:
 
 ---
 
-**Version**: 1.0.0  
-**Last Updated**: December 2025  
+**Version**: 1.1.0
+**Last Updated**: January 2026
 **Connector Status**: Production-ready ✅
+**New in v1.1**: Auto-consolidation feature - automatically fetch data from all surveys without manually specifying surveyId
 

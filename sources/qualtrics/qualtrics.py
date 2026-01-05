@@ -33,6 +33,10 @@ class QualtricsConfig:
     # Request timeout
     REQUEST_TIMEOUT = 30  # seconds per HTTP request
 
+    # Auto-consolidation configuration (when surveyId not provided)
+    MAX_SURVEYS_TO_CONSOLIDATE = 100  # Safety limit to prevent excessive API calls
+    CONSOLIDATION_DELAY_BETWEEN_SURVEYS = 0.5  # seconds (to respect rate limits)
+
 
 class LakeflowConnect:
     def __init__(self, options: Dict[str, str]) -> None:
@@ -247,7 +251,8 @@ class LakeflowConnect:
             StructField("headers", StructType([
                 StructField("from_email", StringType(), True),
                 StructField("from_name", StringType(), True),
-                StructField("reply_to_email", StringType(), True)
+                StructField("reply_to_email", StringType(), True),
+                StructField("subject", StringType(), True)
             ]), True),
             StructField("recipients", StructType([
                 StructField("mailing_list_id", StringType(), True),
@@ -354,12 +359,12 @@ class LakeflowConnect:
     ) -> (Iterator[dict], dict):
         """
         Read data from the specified table.
-        
+
         Args:
             table_name: Name of the table to read
             start_offset: Starting offset for incremental reads
             table_options: Additional options (e.g., surveyId for survey_responses)
-            
+
         Returns:
             Tuple of (iterator of records, end offset)
         """
@@ -367,7 +372,7 @@ class LakeflowConnect:
             raise ValueError(
                 f"Unsupported table: {table_name}. Supported tables are: {self.tables}"
             )
-        
+
         if table_name == "surveys":
             return self._read_surveys(start_offset)
         elif table_name == "survey_definitions":
@@ -380,6 +385,56 @@ class LakeflowConnect:
             return self._read_contacts(start_offset, table_options)
         else:
             raise ValueError(f"Unknown table: {table_name}")
+
+    def _get_all_survey_ids(self, table_options: Dict[str, str]) -> List[str]:
+        """
+        Get all survey IDs for auto-consolidation.
+
+        Args:
+            table_options: May contain filters like:
+                - only_active_surveys: "true" to filter only active surveys (default: true)
+                - max_surveys: Maximum number of surveys to process (default: 100)
+
+        Returns:
+            List of survey IDs
+        """
+        # Check if we should only include active surveys (default: true)
+        only_active = table_options.get("only_active_surveys", "true").lower() == "true"
+
+        # Get max surveys limit
+        max_surveys_str = table_options.get("max_surveys", str(QualtricsConfig.MAX_SURVEYS_TO_CONSOLIDATE))
+        try:
+            max_surveys = int(max_surveys_str)
+        except ValueError:
+            logger.warning(f"Invalid max_surveys value '{max_surveys_str}', using default {QualtricsConfig.MAX_SURVEYS_TO_CONSOLIDATE}")
+            max_surveys = QualtricsConfig.MAX_SURVEYS_TO_CONSOLIDATE
+
+        # Fetch all surveys
+        surveys_iter, _ = self._read_surveys({})
+        surveys = list(surveys_iter)
+
+        if not surveys:
+            logger.warning("No surveys found")
+            return []
+
+        # Filter surveys
+        survey_ids = []
+        for survey in surveys:
+            # Apply active filter
+            if only_active and not survey.get("is_active", False):
+                continue
+
+            survey_id = survey.get("id")
+            if survey_id:
+                survey_ids.append(survey_id)
+
+            # Check max limit
+            if len(survey_ids) >= max_surveys:
+                logger.warning(f"Reached max_surveys limit of {max_surveys}. Consider increasing this limit in table_options if needed.")
+                break
+
+        logger.info(f"Found {len(survey_ids)} survey(s) to process (only_active={only_active}, max_surveys={max_surveys})")
+        return survey_ids
     
     def _read_surveys(self, start_offset: dict) -> (Iterator[dict], dict):
         """
@@ -468,17 +523,36 @@ class LakeflowConnect:
 
         Args:
             start_offset: Dictionary (ignored for snapshot mode)
-            table_options: Must contain 'surveyId'
+            table_options: Optional 'surveyId' parameter
+                - If provided: Returns definition for that specific survey
+                - If not provided: Returns definitions for all surveys (auto-consolidation)
+                Additional options for auto-consolidation:
+                - only_active_surveys: "true" to filter only active surveys (default: true)
+                - max_surveys: Maximum number of surveys to process (default: 100)
 
         Returns:
             Tuple of (iterator of survey definition records, empty offset dict)
         """
         survey_id = table_options.get("surveyId")
-        if not survey_id:
-            raise ValueError(
-                "surveyId is required in table_options for survey_definitions table"
-            )
 
+        # If surveyId is provided, fetch that specific survey (backward compatibility)
+        if survey_id:
+            return self._read_single_survey_definition(survey_id)
+
+        # Otherwise, fetch all surveys and consolidate their definitions
+        logger.info("No surveyId provided, auto-consolidating definitions from all surveys")
+        return self._read_all_survey_definitions(table_options)
+
+    def _read_single_survey_definition(self, survey_id: str) -> (Iterator[dict], dict):
+        """
+        Read a single survey definition from Qualtrics API.
+
+        Args:
+            survey_id: The survey ID to fetch
+
+        Returns:
+            Tuple of (iterator of survey definition record, empty offset dict)
+        """
         url = f"{self.base_url}/survey-definitions/{survey_id}"
 
         try:
@@ -493,7 +567,7 @@ class LakeflowConnect:
             # This is needed because the API returns variable structures (dict or array)
             # for fields like Blocks, which can't be handled by a fixed schema
             processed = {}
-            
+
             # Copy simple string fields as-is
             simple_fields = [
                 "SurveyID", "SurveyName", "SurveyStatus", "OwnerID", "CreatorID",
@@ -502,7 +576,7 @@ class LakeflowConnect:
             ]
             for field in simple_fields:
                 processed[field] = result.get(field)
-            
+
             # Serialize complex nested fields as JSON strings
             complex_fields = [
                 "Questions", "Blocks", "SurveyFlow", "SurveyOptions",
@@ -523,50 +597,117 @@ class LakeflowConnect:
             logger.error(f"Error fetching survey definition for {survey_id}: {e}", exc_info=True)
             raise
 
+    def _read_all_survey_definitions(self, table_options: Dict[str, str]) -> (Iterator[dict], dict):
+        """
+        Read survey definitions for all surveys from Qualtrics API.
+
+        Args:
+            table_options: Optional filters (only_active_surveys, max_surveys)
+
+        Returns:
+            Tuple of (iterator of all survey definition records, empty offset dict)
+        """
+        # Get all survey IDs
+        survey_ids = self._get_all_survey_ids(table_options)
+
+        if not survey_ids:
+            logger.warning("No surveys found to fetch definitions for")
+            return iter([]), {}
+
+        logger.info(f"Fetching survey definitions for {len(survey_ids)} survey(s)")
+
+        # Fetch definition for each survey
+        all_definitions = []
+        success_count = 0
+        failure_count = 0
+
+        for idx, survey_id in enumerate(survey_ids, 1):
+            try:
+                logger.info(f"Fetching definition {idx}/{len(survey_ids)} for survey {survey_id}")
+                definition_iter, _ = self._read_single_survey_definition(survey_id)
+                definitions = list(definition_iter)
+                all_definitions.extend(definitions)
+                success_count += 1
+
+                # Add delay between requests to respect rate limits
+                if idx < len(survey_ids):
+                    time.sleep(QualtricsConfig.CONSOLIDATION_DELAY_BETWEEN_SURVEYS)
+
+            except Exception as e:
+                logger.warning(f"Failed to fetch definition for survey {survey_id}: {e}")
+                failure_count += 1
+                # Continue with other surveys even if one fails
+                continue
+
+        logger.info(f"Completed fetching survey definitions: {success_count} succeeded, {failure_count} failed, {len(all_definitions)} total records")
+        return iter(all_definitions), {}
+
     def _read_survey_responses(
         self, start_offset: dict, table_options: Dict[str, str]
     ) -> (Iterator[dict], dict):
         """
         Read survey responses using the Qualtrics export API.
-        
+
         This requires a 3-step process:
         1. Create export job
         2. Poll for completion
         3. Download and parse results
-        
+
         Args:
-            start_offset: Dictionary containing cursor timestamp
-            table_options: Must contain 'surveyId'
-            
+            start_offset: Dictionary containing cursor timestamp(s)
+            table_options: Optional 'surveyId' parameter
+                - If provided: Returns responses for that specific survey
+                - If not provided: Returns responses for all surveys (auto-consolidation)
+                Additional options for auto-consolidation:
+                - only_active_surveys: "true" to filter only active surveys (default: true)
+                - max_surveys: Maximum number of surveys to process (default: 100)
+
         Returns:
             Tuple of (iterator of response records, new offset)
         """
         survey_id = table_options.get("surveyId")
-        if not survey_id:
-            raise ValueError(
-                "surveyId is required in table_options for survey_responses table"
-            )
-        
+
+        # If surveyId is provided, fetch that specific survey (backward compatibility)
+        if survey_id:
+            return self._read_single_survey_responses(survey_id, start_offset)
+
+        # Otherwise, fetch all surveys and consolidate their responses
+        logger.info("No surveyId provided, auto-consolidating responses from all surveys")
+        return self._read_all_survey_responses(start_offset, table_options)
+
+    def _read_single_survey_responses(
+        self, survey_id: str, start_offset: dict
+    ) -> (Iterator[dict], dict):
+        """
+        Read survey responses for a single survey using the Qualtrics export API.
+
+        Args:
+            survey_id: The survey ID to export responses from
+            start_offset: Dictionary containing cursor timestamp
+
+        Returns:
+            Tuple of (iterator of response records, new offset)
+        """
         recorded_date_cursor = start_offset.get("recordedDate") if start_offset else None
-        
+
         # Step 1: Create export
         # Note: useLabels parameter cannot be used with JSON format per Qualtrics API
         export_body = {
             "format": "json"
         }
-        
+
         # Add incremental filter if cursor exists
         if recorded_date_cursor:
             export_body["startDate"] = recorded_date_cursor
-        
+
         progress_id = self._create_response_export(survey_id, export_body)
-        
+
         # Step 2: Poll for completion
         file_id = self._poll_export_progress(survey_id, progress_id)
-        
+
         # Step 3: Download and parse
         responses = self._download_response_export(survey_id, file_id)
-        
+
         # Calculate new offset
         new_offset = {}
         if responses:
@@ -584,8 +725,86 @@ class LakeflowConnect:
         elif recorded_date_cursor:
             # No new data, keep the same cursor
             new_offset["recordedDate"] = recorded_date_cursor
-        
+
         return iter(responses), new_offset
+
+    def _read_all_survey_responses(
+        self, start_offset: dict, table_options: Dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read survey responses for all surveys from Qualtrics API.
+
+        Args:
+            start_offset: Dictionary containing per-survey cursor timestamps
+                Format: {"surveys": {"SV_123": {"recordedDate": "2024-01-01"}, ...}, "recordedDate": "..."}
+            table_options: Optional filters (only_active_surveys, max_surveys)
+
+        Returns:
+            Tuple of (iterator of all response records, new offset dict with per-survey cursors)
+        """
+        # Get all survey IDs
+        survey_ids = self._get_all_survey_ids(table_options)
+
+        if not survey_ids:
+            logger.warning("No surveys found to fetch responses for")
+            return iter([]), {}
+
+        logger.info(f"Fetching survey responses for {len(survey_ids)} survey(s)")
+
+        # Track per-survey offsets
+        per_survey_offsets = start_offset.get("surveys", {}) if start_offset else {}
+
+        # Fetch responses for each survey
+        all_responses = []
+        new_per_survey_offsets = {}
+        success_count = 0
+        failure_count = 0
+
+        for idx, survey_id in enumerate(survey_ids, 1):
+            try:
+                logger.info(f"Fetching responses {idx}/{len(survey_ids)} for survey {survey_id}")
+
+                # Get this survey's specific offset
+                survey_offset = per_survey_offsets.get(survey_id, {})
+
+                # Fetch responses for this survey
+                responses_iter, new_survey_offset = self._read_single_survey_responses(survey_id, survey_offset)
+                responses = list(responses_iter)
+                all_responses.extend(responses)
+                success_count += 1
+
+                # Save the new offset for this survey
+                new_per_survey_offsets[survey_id] = new_survey_offset
+
+                # Add delay between surveys to respect rate limits
+                if idx < len(survey_ids):
+                    time.sleep(QualtricsConfig.CONSOLIDATION_DELAY_BETWEEN_SURVEYS)
+
+            except Exception as e:
+                logger.warning(f"Failed to fetch responses for survey {survey_id}: {e}")
+                failure_count += 1
+                # Keep the old offset if we failed
+                if survey_id in per_survey_offsets:
+                    new_per_survey_offsets[survey_id] = per_survey_offsets[survey_id]
+                # Continue with other surveys even if one fails
+                continue
+
+        logger.info(f"Completed fetching survey responses: {success_count} succeeded, {failure_count} failed, {len(all_responses)} total records")
+
+        # Build consolidated offset
+        new_offset = {"surveys": new_per_survey_offsets}
+
+        # Also include a global recordedDate for convenience (max across all surveys)
+        if all_responses:
+            recorded_dates = [
+                resp.get("recordedDate", "")
+                for resp in all_responses
+                if resp.get("recordedDate")
+            ]
+            if recorded_dates:
+                new_offset["recordedDate"] = max(recorded_dates)
+
+        return iter(all_responses), new_offset
     
     def _create_response_export(self, survey_id: str, export_body: dict) -> str:
         """
@@ -812,18 +1031,40 @@ class LakeflowConnect:
         Read distributions from Qualtrics API.
 
         Args:
-            start_offset: Dictionary containing pagination token and cursor timestamp
-            table_options: Must contain 'surveyId'
+            start_offset: Dictionary containing pagination token and cursor timestamp(s)
+            table_options: Optional 'surveyId' parameter
+                - If provided: Returns distributions for that specific survey
+                - If not provided: Returns distributions for all surveys (auto-consolidation)
+                Additional options for auto-consolidation:
+                - only_active_surveys: "true" to filter only active surveys (default: true)
+                - max_surveys: Maximum number of surveys to process (default: 100)
 
         Returns:
             Tuple of (iterator of distribution records, new offset)
         """
         survey_id = table_options.get("surveyId")
-        if not survey_id:
-            raise ValueError(
-                "surveyId is required in table_options for distributions table"
-            )
 
+        # If surveyId is provided, fetch that specific survey (backward compatibility)
+        if survey_id:
+            return self._read_single_survey_distributions(survey_id, start_offset)
+
+        # Otherwise, fetch all surveys and consolidate their distributions
+        logger.info("No surveyId provided, auto-consolidating distributions from all surveys")
+        return self._read_all_survey_distributions(start_offset, table_options)
+
+    def _read_single_survey_distributions(
+        self, survey_id: str, start_offset: dict
+    ) -> (Iterator[dict], dict):
+        """
+        Read distributions for a single survey from Qualtrics API.
+
+        Args:
+            survey_id: The survey ID to fetch distributions for
+            start_offset: Dictionary containing pagination token and cursor timestamp
+
+        Returns:
+            Tuple of (iterator of distribution records, new offset)
+        """
         all_distributions = []
         skip_token = start_offset.get("skipToken") if start_offset else None
         modified_date_cursor = start_offset.get("modifiedDate") if start_offset else None
@@ -895,6 +1136,84 @@ class LakeflowConnect:
         # Normalize all keys to snake_case before returning
         normalized_distributions = (self._normalize_keys(dist) for dist in all_distributions)
         return normalized_distributions, new_offset
+
+    def _read_all_survey_distributions(
+        self, start_offset: dict, table_options: Dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read distributions for all surveys from Qualtrics API.
+
+        Args:
+            start_offset: Dictionary containing per-survey cursor timestamps
+                Format: {"surveys": {"SV_123": {"modifiedDate": "2024-01-01"}, ...}, "modifiedDate": "..."}
+            table_options: Optional filters (only_active_surveys, max_surveys)
+
+        Returns:
+            Tuple of (iterator of all distribution records, new offset dict with per-survey cursors)
+        """
+        # Get all survey IDs
+        survey_ids = self._get_all_survey_ids(table_options)
+
+        if not survey_ids:
+            logger.warning("No surveys found to fetch distributions for")
+            return iter([]), {}
+
+        logger.info(f"Fetching distributions for {len(survey_ids)} survey(s)")
+
+        # Track per-survey offsets
+        per_survey_offsets = start_offset.get("surveys", {}) if start_offset else {}
+
+        # Fetch distributions for each survey
+        all_distributions = []
+        new_per_survey_offsets = {}
+        success_count = 0
+        failure_count = 0
+
+        for idx, survey_id in enumerate(survey_ids, 1):
+            try:
+                logger.info(f"Fetching distributions {idx}/{len(survey_ids)} for survey {survey_id}")
+
+                # Get this survey's specific offset
+                survey_offset = per_survey_offsets.get(survey_id, {})
+
+                # Fetch distributions for this survey
+                distributions_iter, new_survey_offset = self._read_single_survey_distributions(survey_id, survey_offset)
+                distributions = list(distributions_iter)
+                all_distributions.extend(distributions)
+                success_count += 1
+
+                # Save the new offset for this survey
+                new_per_survey_offsets[survey_id] = new_survey_offset
+
+                # Add delay between surveys to respect rate limits
+                if idx < len(survey_ids):
+                    time.sleep(QualtricsConfig.CONSOLIDATION_DELAY_BETWEEN_SURVEYS)
+
+            except Exception as e:
+                logger.warning(f"Failed to fetch distributions for survey {survey_id}: {e}")
+                failure_count += 1
+                # Keep the old offset if we failed
+                if survey_id in per_survey_offsets:
+                    new_per_survey_offsets[survey_id] = per_survey_offsets[survey_id]
+                # Continue with other surveys even if one fails
+                continue
+
+        logger.info(f"Completed fetching distributions: {success_count} succeeded, {failure_count} failed, {len(all_distributions)} total records")
+
+        # Build consolidated offset
+        new_offset = {"surveys": new_per_survey_offsets}
+
+        # Also include a global modifiedDate for convenience (max across all surveys)
+        if all_distributions:
+            modified_dates = [
+                dist.get("modifiedDate", "")
+                for dist in all_distributions
+                if dist.get("modifiedDate")
+            ]
+            if modified_dates:
+                new_offset["modifiedDate"] = max(modified_dates)
+
+        return iter(all_distributions), new_offset
 
     def _read_contacts(
         self, start_offset: dict, table_options: Dict[str, str]
