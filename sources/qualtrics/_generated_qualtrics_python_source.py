@@ -287,33 +287,24 @@ def register_lakeflow_source(spark):
                 # Survey identification - these are consistently typed
                 StructField("SurveyID", StringType(), True),
                 StructField("SurveyName", StringType(), True),
-                StructField("SurveyDescription", StringType(), True),
-                StructField("SurveyOwnerID", StringType(), True),
-                StructField("SurveyBrandID", StringType(), True),
-                StructField("DivisionID", StringType(), True),
-                StructField("SurveyLanguage", StringType(), True),
-                StructField("SurveyActiveResponseSet", StringType(), True),
                 StructField("SurveyStatus", StringType(), True),
-                StructField("SurveyStartDate", StringType(), True),
-                StructField("SurveyExpirationDate", StringType(), True),
-                StructField("SurveyCreationDate", StringType(), True),
+                StructField("OwnerID", StringType(), True),
                 StructField("CreatorID", StringType(), True),
+                StructField("BrandID", StringType(), True),
+                StructField("BrandBaseURL", StringType(), True),
                 StructField("LastModified", StringType(), True),
                 StructField("LastAccessed", StringType(), True),
                 StructField("LastActivated", StringType(), True),
-                StructField("Deleted", StringType(), True),
-                StructField("ProjectCategory", StringType(), True),
-                StructField("ProjectType", StringType(), True),
+                StructField("QuestionCount", StringType(), True),
                 # Complex nested structures - stored as StringType (JSON)
                 # These fields have variable structure depending on survey configuration
                 StructField("Questions", StringType(), True),
                 StructField("Blocks", StringType(), True),
-                StructField("Flow", StringType(), True),
-                StructField("EmbeddedData", StringType(), True),
+                StructField("SurveyFlow", StringType(), True),
                 StructField("SurveyOptions", StringType(), True),
                 StructField("ResponseSets", StringType(), True),
-                StructField("LoopAndMerge", StringType(), True),
-                StructField("Scoring", StringType(), True)
+                StructField("Scoring", StringType(), True),
+                StructField("ProjectInfo", StringType(), True)
             ])
 
         def _get_survey_responses_schema(self) -> StructType:
@@ -613,19 +604,17 @@ def register_lakeflow_source(spark):
 
                 # Copy simple string fields as-is
                 simple_fields = [
-                    "SurveyID", "SurveyName", "SurveyDescription", "SurveyOwnerID",
-                    "SurveyBrandID", "DivisionID", "SurveyLanguage", "SurveyActiveResponseSet",
-                    "SurveyStatus", "SurveyStartDate", "SurveyExpirationDate",
-                    "SurveyCreationDate", "CreatorID", "LastModified", "LastAccessed",
-                    "LastActivated", "Deleted", "ProjectCategory", "ProjectType"
+                    "SurveyID", "SurveyName", "SurveyStatus", "OwnerID", "CreatorID",
+                    "BrandID", "BrandBaseURL", "LastModified", "LastAccessed",
+                    "LastActivated", "QuestionCount"
                 ]
                 for field in simple_fields:
                     processed[field] = result.get(field)
 
                 # Serialize complex nested fields as JSON strings
                 complex_fields = [
-                    "Questions", "Blocks", "Flow", "EmbeddedData",
-                    "SurveyOptions", "ResponseSets", "LoopAndMerge", "Scoring"
+                    "Questions", "Blocks", "SurveyFlow", "SurveyOptions",
+                    "ResponseSets", "Scoring", "ProjectInfo"
                 ]
                 for field in complex_fields:
                     value = result.get(field)
