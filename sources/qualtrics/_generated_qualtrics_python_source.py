@@ -486,8 +486,8 @@ def register_lakeflow_source(spark):
             elif table_name == "survey_definitions":
                 return {
                     "primary_keys": ["survey_id"],
-                    "cursor_field": None,
-                    "ingestion_type": "snapshot"
+                    "cursor_field": "last_modified",
+                    "ingestion_type": "cdc"
                 }
             elif table_name == "survey_responses":
                 return {
@@ -678,7 +678,9 @@ def register_lakeflow_source(spark):
             Read survey definition from Qualtrics API.
 
             Args:
-                start_offset: Dictionary (ignored for snapshot mode)
+                start_offset: Dictionary containing cursor timestamp
+                    - For single survey: {"lastModified": "2024-01-01T00:00:00Z"}
+                    - For auto-consolidation: {"surveys": {"SV_123": {"lastModified": "..."}, ...}, "lastModified": "..."}
                 table_options: Optional 'surveyId' parameter
                     - If provided: Returns definition for that specific survey
                     - If not provided: Returns definitions for all surveys (auto-consolidation)
@@ -687,28 +689,31 @@ def register_lakeflow_source(spark):
                     - max_surveys: Maximum number of surveys to process (default: 100)
 
             Returns:
-                Tuple of (iterator of survey definition records, empty offset dict)
+                Tuple of (iterator of survey definition records, offset dict)
             """
             survey_id = table_options.get("surveyId")
 
             # If surveyId is provided, fetch that specific survey (backward compatibility)
             if survey_id:
-                return self._read_single_survey_definition(survey_id)
+                return self._read_single_survey_definition(survey_id, start_offset)
 
             # Otherwise, fetch all surveys and consolidate their definitions
             logger.info("No surveyId provided, auto-consolidating definitions from all surveys")
-            return self._read_all_survey_definitions(table_options)
+            return self._read_all_survey_definitions(start_offset, table_options)
 
-        def _read_single_survey_definition(self, survey_id: str) -> (Iterator[dict], dict):
+        def _read_single_survey_definition(self, survey_id: str, start_offset: dict) -> (Iterator[dict], dict):
             """
             Read a single survey definition from Qualtrics API.
 
             Args:
                 survey_id: The survey ID to fetch
+                start_offset: Dictionary containing cursor timestamp
 
             Returns:
-                Tuple of (iterator of survey definition record, empty offset dict)
+                Tuple of (iterator of survey definition record, new offset dict)
             """
+            last_modified_cursor = start_offset.get("lastModified") if start_offset else None
+
             url = f"{self.base_url}/survey-definitions/{survey_id}"
 
             try:
@@ -717,7 +722,19 @@ def register_lakeflow_source(spark):
 
                 if not result:
                     logger.warning(f"No survey definition found for survey {survey_id}")
-                    return iter([]), {}
+                    # Return existing cursor if no definition found
+                    new_offset = {}
+                    if last_modified_cursor:
+                        new_offset["lastModified"] = last_modified_cursor
+                    return iter([]), new_offset
+
+                # Check if this definition was modified since last sync (CDC mode)
+                survey_last_modified = result.get("LastModified")
+                if last_modified_cursor and survey_last_modified:
+                    if survey_last_modified <= last_modified_cursor:
+                        # No changes since last sync, skip this definition
+                        logger.info(f"Survey {survey_id} not modified since {last_modified_cursor}, skipping")
+                        return iter([]), {"lastModified": last_modified_cursor}
 
                 # Process the result to serialize complex nested fields as JSON strings
                 # This is needed because the API returns variable structures (dict or array)
@@ -747,21 +764,31 @@ def register_lakeflow_source(spark):
 
                 # Normalize all keys to snake_case before returning
                 normalized = self._normalize_keys(processed)
-                return iter([normalized]), {}
+
+                # Calculate new offset based on this definition's last_modified
+                new_offset = {}
+                if survey_last_modified:
+                    new_offset["lastModified"] = survey_last_modified
+                elif last_modified_cursor:
+                    new_offset["lastModified"] = last_modified_cursor
+
+                return iter([normalized]), new_offset
 
             except Exception as e:
                 logger.error(f"Error fetching survey definition for {survey_id}: {e}", exc_info=True)
                 raise
 
-        def _read_all_survey_definitions(self, table_options: Dict[str, str]) -> (Iterator[dict], dict):
+        def _read_all_survey_definitions(self, start_offset: dict, table_options: Dict[str, str]) -> (Iterator[dict], dict):
             """
             Read survey definitions for all surveys from Qualtrics API.
 
             Args:
+                start_offset: Dictionary containing per-survey cursor timestamps
+                    Format: {"surveys": {"SV_123": {"lastModified": "2024-01-01"}, ...}, "lastModified": "..."}
                 table_options: Optional filters (only_active_surveys, max_surveys)
 
             Returns:
-                Tuple of (iterator of all survey definition records, empty offset dict)
+                Tuple of (iterator of all survey definition records, new offset dict with per-survey cursors)
             """
             # Get all survey IDs
             survey_ids = self._get_all_survey_ids(table_options)
@@ -772,18 +799,36 @@ def register_lakeflow_source(spark):
 
             logger.info(f"Fetching survey definitions for {len(survey_ids)} survey(s)")
 
+            # Track per-survey offsets
+            per_survey_offsets = start_offset.get("surveys", {}) if start_offset else {}
+
             # Fetch definition for each survey
             all_definitions = []
+            new_per_survey_offsets = {}
             success_count = 0
             failure_count = 0
+            skipped_count = 0
 
             for idx, survey_id in enumerate(survey_ids, 1):
                 try:
                     logger.info(f"Fetching definition {idx}/{len(survey_ids)} for survey {survey_id}")
-                    definition_iter, _ = self._read_single_survey_definition(survey_id)
+
+                    # Get this survey's specific offset
+                    survey_offset = per_survey_offsets.get(survey_id, {})
+
+                    # Fetch definition for this survey
+                    definition_iter, new_survey_offset = self._read_single_survey_definition(survey_id, survey_offset)
                     definitions = list(definition_iter)
-                    all_definitions.extend(definitions)
-                    success_count += 1
+
+                    if definitions:
+                        all_definitions.extend(definitions)
+                        success_count += 1
+                    else:
+                        # No definitions returned (either not found or not modified)
+                        skipped_count += 1
+
+                    # Save the new offset for this survey
+                    new_per_survey_offsets[survey_id] = new_survey_offset
 
                     # Add delay between requests to respect rate limits
                     if idx < len(survey_ids):
@@ -792,11 +837,28 @@ def register_lakeflow_source(spark):
                 except Exception as e:
                     logger.warning(f"Failed to fetch definition for survey {survey_id}: {e}")
                     failure_count += 1
+                    # Keep the old offset if we failed
+                    if survey_id in per_survey_offsets:
+                        new_per_survey_offsets[survey_id] = per_survey_offsets[survey_id]
                     # Continue with other surveys even if one fails
                     continue
 
-            logger.info(f"Completed fetching survey definitions: {success_count} succeeded, {failure_count} failed, {len(all_definitions)} total records")
-            return iter(all_definitions), {}
+            logger.info(f"Completed fetching survey definitions: {success_count} succeeded, {skipped_count} skipped (not modified), {failure_count} failed, {len(all_definitions)} total records")
+
+            # Build consolidated offset
+            new_offset = {"surveys": new_per_survey_offsets}
+
+            # Also include a global lastModified for convenience (max across all surveys)
+            if all_definitions:
+                last_modified_dates = [
+                    defn.get("last_modified", "")
+                    for defn in all_definitions
+                    if defn.get("last_modified")
+                ]
+                if last_modified_dates:
+                    new_offset["lastModified"] = max(last_modified_dates)
+
+            return iter(all_definitions), new_offset
 
         def _read_survey_responses(
             self, start_offset: dict, table_options: Dict[str, str]

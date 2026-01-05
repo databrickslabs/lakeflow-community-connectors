@@ -93,7 +93,7 @@ The Qualtrics connector exposes a **static list** of tables:
 | Table | Description | Ingestion Type | Primary Key | Incremental Cursor |
 |-------|-------------|----------------|-------------|-------------------|
 | `surveys` | Survey metadata including name, status, creation/modification dates | `cdc` | `id` | `last_modified` |
-| `survey_definitions` | Full survey structure with questions, blocks, flow, and options | `snapshot` | `survey_id` | N/A (full refresh) |
+| `survey_definitions` | Full survey structure with questions, blocks, flow, and options | `cdc` | `survey_id` | `last_modified` |
 | `survey_responses` | Individual responses to surveys including all question answers | `append` | `response_id` | `recorded_date` |
 | `distributions` | Distribution records for survey invitations and sends | `cdc` | `id` | `modified_date` |
 | `contacts` | Contact records within mailing lists | `snapshot` | `contact_id` | N/A (full refresh) |
@@ -459,10 +459,13 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 - **Subsequent runs**: Only fetches surveys modified since last sync (based on `last_modified` field)
 - Automatically maintains cursor state
 
-**For `survey_definitions` table (Snapshot)**:
-- **All runs**: Retrieves the complete survey definition for the specified survey
+**For `survey_definitions` table (CDC)**:
+- **First run**: Retrieves all survey definitions
+- **Subsequent runs**: Only fetches definitions modified since last sync (based on `last_modified` field)
+- Supports SCD Type 2 for tracking survey structure changes over time
+- Useful for auditing when questions, blocks, or flow were modified
 - Returns questions, blocks, flow, and all survey structure in a single record
-- Useful for building data dictionaries to interpret response values
+- Automatically maintains cursor state per survey (when using auto-consolidation)
 
 **For `survey_responses` table (Append)**:
 - **First run**: Exports all responses for the specified survey
@@ -600,8 +603,14 @@ For development and testing:
 
 ---
 
-**Version**: 1.1.0
+**Version**: 1.2.0
 **Last Updated**: January 2026
 **Connector Status**: Production-ready ✅
-**New in v1.1**: Auto-consolidation feature - automatically fetch data from all surveys without manually specifying surveyId
+
+**New in v1.2**:
+- Survey definitions now support CDC mode with SCD Type 2 for tracking historical changes to survey structure
+- Only fetch definitions modified since last sync, improving efficiency
+
+**New in v1.1**:
+- Auto-consolidation feature - automatically fetch data from all surveys without manually specifying surveyId
 
