@@ -105,7 +105,10 @@ The connector automatically handles end dates and fetches up to "now" on every r
 | `rolling_30day_avg` | double (nullable) | 30-day rolling average ($/MWh) |
 | `ingestion_time` | timestamp | UTC timestamp when the row was last ingested/updated |
 
-**Ingestion type:** CDC with upsert by `begin_datetime_utc`
+**Ingestion type:** CDC (SCD Type 1)
+- **Primary Key**: `begin_datetime_utc` (unique hour identifier)
+- **Cursor**: `begin_datetime_utc` (incremental progress tracking)
+- **Sequence By**: `ingestion_time` (determines latest record for merges)
 
 ## How It Works
 

@@ -37,14 +37,14 @@ curl -H "X-API-Key: YOUR_API_KEY" \
 
 ## Ingestion Type
 
-| Object | Type | Primary Key | Cursor | Rationale |
-|--------|------|-------------|--------|-----------|
-| `pool_price` | `cdc` | `begin_datetime_utc` | `begin_datetime_utc` | Records can be updated due to late-arriving data and settlement adjustments. CDC with lookback window ensures updates are captured. |
+| Object | Type | Primary Key | Cursor | Sequence By | Rationale |
+|--------|------|-------------|--------|-------------|-----------|
+| `pool_price` | `cdc` | `begin_datetime_utc` | `begin_datetime_utc` | `ingestion_time` | Records can be updated due to late-arriving data and settlement adjustments. CDC with lookback window ensures updates are captured. |
 
-**CDC Strategy**:
+**CDC Strategy** (SCD Type 1):
 - **Initial load**: Fetch from `start_date` (configured) to current date
 - **Incremental**: Fetch from `(high_watermark - lookback_hours)` to current date
-- **Merge**: Upsert by `begin_datetime_utc` primary key
+- **Merge**: Upsert by `begin_datetime_utc` primary key, sequenced by `ingestion_time` (latest wins)
 
 ## Read API
 

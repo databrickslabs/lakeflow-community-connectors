@@ -240,6 +240,7 @@ def register_lakeflow_source(spark):
                 return {
                     "primary_keys": ["begin_datetime_utc"],
                     "cursor_field": "begin_datetime_utc",
+                    "sequence_by": "ingestion_time",
                     "ingestion_type": "cdc"
                 }
 
