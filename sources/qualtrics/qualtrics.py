@@ -72,7 +72,7 @@ class LakeflowConnect:
         }
 
         # Supported tables
-        self.tables = ["surveys", "survey_definitions", "survey_responses", "distributions", "contacts"]
+        self.tables = ["surveys", "survey_definitions", "survey_responses", "distributions", "contacts", "directories"]
     
     def list_tables(self) -> list[str]:
         """
@@ -115,6 +115,8 @@ class LakeflowConnect:
             return self._get_distributions_schema()
         elif table_name == "contacts":
             return self._get_contacts_schema()
+        elif table_name == "directories":
+            return self._get_directories_schema()
         else:
             raise ValueError(f"Unknown table: {table_name}")
     
@@ -271,6 +273,26 @@ class LakeflowConnect:
             StructField("contact_lookup_id", StringType(), True)
         ])
 
+    def _get_directories_schema(self) -> StructType:
+        """Get schema for directories table.
+
+        Note: Based on actual API response from GET /directories endpoint.
+        Schema verified against live API on 2026-01-05.
+        """
+        return StructType([
+            StructField("directory_id", StringType(), True),
+            StructField("name", StringType(), True),
+            StructField("contact_count", LongType(), True),
+            StructField("is_default", BooleanType(), True),
+            StructField("deduplication_criteria", StructType([
+                StructField("email", BooleanType(), True),
+                StructField("first_name", BooleanType(), True),
+                StructField("last_name", BooleanType(), True),
+                StructField("external_data_reference", BooleanType(), True),
+                StructField("phone", BooleanType(), True)
+            ]), True)
+        ])
+
     # =========================================================================
     # Table Metadata and Routing
     # =========================================================================
@@ -323,6 +345,12 @@ class LakeflowConnect:
                 "cursor_field": None,
                 "ingestion_type": "snapshot"
             }
+        elif table_name == "directories":
+            return {
+                "primary_keys": ["directory_id"],
+                "cursor_field": None,
+                "ingestion_type": "snapshot"
+            }
         else:
             raise ValueError(f"Unknown table: {table_name}")
     
@@ -355,6 +383,8 @@ class LakeflowConnect:
             return self._read_distributions(start_offset, table_options)
         elif table_name == "contacts":
             return self._read_contacts(start_offset, table_options)
+        elif table_name == "directories":
+            return self._read_directories(start_offset)
         else:
             raise ValueError(f"Unknown table: {table_name}")
 
@@ -1232,4 +1262,23 @@ class LakeflowConnect:
 
         endpoint = f"/directories/{directory_id}/mailinglists/{mailing_list_id}/contacts"
         return self._fetch_paginated_list(endpoint, start_offset, cursor_field=None)
+
+    # =========================================================================
+    # Table Readers: Directories
+    # =========================================================================
+
+    def _read_directories(self, start_offset: dict) -> (Iterator[dict], dict):
+        """
+        Read directories (XM Directory pools) from Qualtrics API.
+
+        Note: Directories table uses snapshot mode (full refresh) as the API
+        does not return modification timestamps for incremental sync.
+
+        Args:
+            start_offset: Dictionary containing pagination token (ignored for snapshot mode)
+
+        Returns:
+            Tuple of (iterator of directory records, empty offset dict)
+        """
+        return self._fetch_paginated_list("/directories", start_offset, cursor_field=None)
 

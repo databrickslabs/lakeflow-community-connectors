@@ -87,6 +87,7 @@ The Qualtrics connector exposes a **static list** of tables:
 - `survey_responses` - Individual survey response data
 - `distributions` - Survey distribution records (email sends, SMS, anonymous links)
 - `contacts` - Contact records within mailing lists
+- `directories` - XM Directory instances (organizational containers for contacts and mailing lists)
 
 ### Object Summary, Primary Keys, and Ingestion Mode
 
@@ -97,6 +98,7 @@ The Qualtrics connector exposes a **static list** of tables:
 | `survey_responses` | Individual responses to surveys including all question answers | `append` | `response_id` | `recorded_date` |
 | `distributions` | Distribution records for survey invitations and sends | `cdc` | `id` | `modified_date` |
 | `contacts` | Contact records within mailing lists | `snapshot` | `contact_id` | N/A (full refresh) |
+| `directories` | XM Directory instances (organizational structure) | `snapshot` | `directory_id` | N/A (full refresh) |
 
 ### Required and Optional Table Options
 
@@ -139,6 +141,11 @@ Table-specific options are passed via the pipeline spec under `table` in `object
   - Or via API: GET `/directories/{directoryId}/mailinglists`
 
 > **Note**: The `contacts` table is only available for XM Directory users (not XM Directory Lite accounts).
+
+#### `directories` table
+- **No table options required**: This table lists all accessible XM Directory instances
+- Returns organizational containers for contacts and mailing lists
+- Use the `directory_id` from this table as input for the `contacts` table's `directoryId` option
 
 ### Auto-Consolidation Feature
 
@@ -324,6 +331,18 @@ When using auto-consolidation:
 - `mailing_list_unsubscribed` (boolean): Whether contact has unsubscribed from this mailing list
 - `contact_lookup_id` (string): Contact lookup identifier
 
+#### `directories` table schema:
+- `directory_id` (string): Unique directory identifier (primary key) - Format: `POOL_...`
+- `name` (string): Directory display name (may be null for default directories)
+- `contact_count` (long): Number of contacts in the directory
+- `is_default` (boolean): Whether this is the default directory for the account
+- `deduplication_criteria` (struct): Contact deduplication settings
+  - `email` (boolean): Deduplicate by email address
+  - `first_name` (boolean): Deduplicate by first name
+  - `last_name` (boolean): Deduplicate by last name
+  - `external_data_reference` (boolean): Deduplicate by external reference
+  - `phone` (boolean): Deduplicate by phone number
+
 ## Data Type Mapping
 
 Qualtrics JSON fields are mapped to Spark types as follows:
@@ -391,6 +410,11 @@ Example `pipeline_spec` with auto-consolidation (recommended):
           "directoryId": "POOL_abc123xyz",
           "mailingListId": "CG_def456xyz"
         }
+      },
+      {
+        "table": {
+          "source_table": "directories"
+        }
       }
     ]
   }
@@ -432,6 +456,11 @@ Example `pipeline_spec` with specific surveys (backward compatible):
           "source_table": "contacts",
           "directoryId": "POOL_abc123xyz",
           "mailingListId": "CG_def456xyz"
+        }
+      },
+      {
+        "table": {
+          "source_table": "directories"
         }
       }
     ]

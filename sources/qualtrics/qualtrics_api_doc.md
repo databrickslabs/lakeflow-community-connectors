@@ -349,6 +349,42 @@ curl -X GET \
 
 **Note**: The API does not return `lastModifiedDate`, `creationDate`, `embeddedData`, `responseHistory`, or `emailHistory` fields. Therefore, contacts table uses **snapshot mode** (full refresh) instead of CDC.
 
+### `directories` object
+
+**Source endpoint**:  
+`GET /directories`
+
+**Key behavior**:
+- Returns a list of XM Directory instances (also known as "Pools") accessible to the authenticated user
+- Directories are organizational containers for contacts, mailing lists, and other XM data
+- The `directoryId` (also called `poolId`) is required for accessing contacts and mailing lists within a directory
+- Supports pagination using `skipToken` and `pageSize` parameters
+- Read-only endpoint for listing directories
+
+**High-level schema (connector view - actual API response)**:
+
+| Column Name | Type | Description |
+|------------|------|-------------|
+| `directoryId` | string | Unique directory identifier (e.g., `POOL_abc123xyz`). Also known as poolId. Primary key. |
+| `name` | string or null | Display name of the directory (may be null for default directories). |
+| `contactCount` | integer | Number of contacts in the directory. |
+| `isDefault` | boolean | Whether this is the default directory for the account. |
+| `deduplicationCriteria` | struct | Criteria used for contact deduplication (see below). |
+
+**Deduplication Criteria structure**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `email` | boolean | Whether to deduplicate by email address. |
+| `firstName` | boolean | Whether to deduplicate by first name. |
+| `lastName` | boolean | Whether to deduplicate by last name. |
+| `externalDataReference` | boolean | Whether to deduplicate by external reference ID. |
+| `phone` | boolean | Whether to deduplicate by phone number. |
+
+**✅ Schema Validation**: Schema verified against live API on 2026-01-05. All fields match actual API response.
+
+**Note**: Use snapshot mode for ingestion since the API does not return modification timestamps.
+
 ### `survey_definitions` object
 
 **Source endpoint**:
@@ -609,7 +645,7 @@ Primary keys for each object are static and defined by the connector:
 | `distributions` | `id` |
 | `mailing_lists` | `id` |
 | `contacts` | `contactId` |
-| `directories` | `id` |
+| `directories` | `directoryId` |
 
 **Notes**:
 - All primary keys are string type
@@ -626,7 +662,7 @@ Primary keys for each object are static and defined by the connector:
 | `distributions` | `cdc` | `modifiedDate` | Distribution records can be updated (e.g., status changes). |
 | `mailing_lists` | `snapshot` | N/A | Full refresh; relatively small dataset. |
 | `contacts` | `snapshot` | N/A | Full refresh; API does not return lastModifiedDate field. |
-| `directories` | `snapshot` | N/A | Full refresh; organizational structure. |
+| `directories` | `snapshot` | N/A | Full refresh; organizational structure. API does not return modification timestamps. |
 
 **Incremental sync strategy**:
 - For `cdc` objects: Store the maximum cursor value from previous sync; on next sync, filter by `cursor_field >= last_max_value`
@@ -836,6 +872,79 @@ Primary keys for each object are static and defined by the connector:
 **Incremental retrieval**:
 - Not supported - API does not return `lastModifiedDate` field
 - Use snapshot mode (full refresh on each run)
+
+### `directories` endpoint
+
+**Endpoint**: `GET /directories`
+
+**Method**: GET
+
+**Path Parameters**: None
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `pageSize` | integer | No | Number of results per page (default: 100, max: 100). |
+| `skipToken` | string | No | Token for pagination (obtained from `nextPage` in response). |
+
+**Response structure**:
+
+```json
+{
+  "result": {
+    "elements": [
+      {
+        "directoryId": "POOL_2s74jRYyTkLxXl5",
+        "name": "My XM Directory",
+        "contactCount": 150,
+        "isDefault": true,
+        "deduplicationCriteria": {
+          "email": true,
+          "firstName": false,
+          "lastName": false,
+          "externalDataReference": false,
+          "phone": false
+        }
+      }
+    ],
+    "nextPage": "https://...?skipToken=xyz"
+  },
+  "meta": {
+    "httpStatus": "200 - OK"
+  }
+}
+```
+
+**Pagination**:
+- Uses cursor-based pagination with `skipToken`
+- The `nextPage` URL in the response contains the full URL for the next page
+- When `nextPage` is absent, you've reached the last page
+- Same pagination pattern as surveys endpoint
+
+**Incremental retrieval**:
+- Not supported - API does not return modification timestamps (`lastModified`, `createdDate`, etc.)
+- Use snapshot mode (full refresh on each sync)
+- Directories are organizational structures that rarely change, making full refresh efficient
+
+**Usage pattern for connector**:
+1. Call `GET /directories` to list all accessible directories
+2. Extract `directoryId` field from each directory (this is the `directoryId`/`poolId`)
+3. Use the `directoryId` to access contacts: `GET /directories/{directoryId}/mailinglists/{mailingListId}/contacts`
+
+**Example request**:
+
+```bash
+curl -X GET \
+  -H "X-API-TOKEN: <YOUR_API_TOKEN>" \
+  -H "Content-Type: application/json" \
+  "https://yourdatacenterid.qualtrics.com/API/v3/directories?pageSize=100"
+```
+
+**✅ Schema Verified**: 
+- Response schema verified against live Qualtrics API (fra1 datacenter) on 2026-01-05
+- All fields documented match actual API response
+- Field naming: `directoryId` (camelCase in API), normalized to `directory_id` (snake_case in connector)
 
 ### Rate Limits
 
@@ -1086,6 +1195,9 @@ Field names are generally consistent between write and read operations for surve
 | Community | Qualtrics Community discussions | 2024-12-31 | Medium | DirectoryId requirement for contacts endpoint |
 | API Reference | Stoplight API docs | 2024-12-31 | High | Full endpoint path: /directories/{directoryId}/mailinglists/{mailingListId}/contacts |
 | Official Docs | https://www.qualtrics.com/support/integrations/api-integration/finding-qualtrics-ids/ | 2026-01-05 | High | SurveyID format and location |
+| Web Search | Multiple searches for Qualtrics directories API | 2026-01-05 | Medium | Confirmed GET /directories endpoint exists, authentication pattern, basic usage |
+| Official Docs | https://api.qualtrics.com/ | 2026-01-05 | Medium | Directories endpoint listed in general API reference |
+| Inference | Based on directoryId usage in other endpoints | 2026-01-05 | Medium | Directory ID format (POOL_*), role as container for contacts/mailing lists |
 
 ### Write Operations Research (Testing Only)
 
@@ -1108,7 +1220,7 @@ Field names are generally consistent between write and read operations for surve
 - Some nested structures in distributions and mailing lists may have additional fields not documented here
 - Exact behavior of delete detection may require testing
 - Mailing lists endpoint (`GET /directories/{directoryId}/mailinglists`) documented but not yet implemented
-- Directories endpoint (`GET /directories`) documented but not yet implemented
+- ✅ Directories endpoint (`GET /directories`) fully implemented and schema validated against live API (2026-01-05)
 
 ## **Sources and References**
 
@@ -1152,7 +1264,8 @@ Field names are generally consistent between write and read operations for surve
 - ✅ Survey ID requirement for distributions endpoint verified (2024-12-31)
 - ✅ **Schema validation completed against live API** (2024-12-31) - see section below
 - ⚠️ Sessions API availability may vary by Qualtrics license tier - requires verification
-- ⚠️ Mailing lists and directories endpoints documented but not yet implemented
+- ⚠️ Mailing lists endpoint documented but not yet implemented
+- ✅ Directories endpoint (`GET /directories`) fully implemented and schema validated against live API (2026-01-05)
 - ✅ survey_definitions schema validated against live API (2026-01-05)
 
 ---
@@ -1170,6 +1283,7 @@ Field names are generally consistent between write and read operations for surve
 | `survey_responses` | ✅ Correct | 0 (MapType fields correctly designed) | No changes needed |
 | `distributions` | ✅ Fixed | 29 fields missing/incorrect | Schema completely updated |
 | `contacts` | ✅ Perfect Match | 0 | No changes needed |
+| `directories` | ✅ Perfect Match | 0 | Validated 2026-01-05 |
 
 ### Detailed Findings
 
@@ -1231,6 +1345,50 @@ unsubscribed, mailingListUnsubscribed, contactLookupId
 ```
 
 **Note**: This table was previously fixed on 2024-12-31 when we discovered the schema mismatch during Databricks testing.
+
+#### 5. directories Table (PERFECT MATCH)
+
+**Validation Date**: 2026-01-05  
+**Status**: ✅ All 5 fields match exactly between schema and API response
+
+**Fields**:
+```
+directory_id, name, contact_count, is_default, deduplication_criteria
+```
+
+**Schema Details**:
+- **Primary Key**: `directory_id` (format: `POOL_xxx`)
+- **Ingestion Type**: `snapshot` (API does not return modification timestamps)
+- **Nested Structure**: `deduplication_criteria` is a StructType with 5 boolean fields (email, first_name, last_name, external_data_reference, phone)
+
+**Validation Results**:
+- ✅ All 5 top-level fields match
+- ✅ Nested struct with 5 boolean fields validated
+- ✅ Primary key confirmed to exist in API response
+- ✅ Field types match (string, int, bool, struct)
+- ✅ 100% match rate
+
+**Initial Schema Issues (FIXED)**:
+- Originally documented with inferred fields: `id`, `type`, `status`, `creation_date`, `last_modified`
+- Live API validation revealed actual fields are different
+- Updated schema to match actual API response exactly
+
+**Sample API Response**:
+```json
+{
+  "directory_id": "POOL_2s74jRYyTkLxXl5",
+  "name": null,
+  "contact_count": 0,
+  "is_default": true,
+  "deduplication_criteria": {
+    "email": true,
+    "first_name": false,
+    "last_name": false,
+    "external_data_reference": false,
+    "phone": false
+  }
+}
+```
 
 ### Validation Methodology
 
