@@ -40,7 +40,8 @@ The Qualtrics API provides access to various objects/resources. The object list 
 | `survey_responses` | Individual responses to surveys | Response Export API (multi-step) | `append` (incremental based on `recordedDate`) |
 | `distributions` | Distribution records for survey invitations | `GET /distributions` | `cdc` (upserts based on `modifiedDate`) |
 | `mailing_lists` | Contact mailing lists | `GET /mailinglists` | `snapshot` |
-| `contacts` | Contacts within mailing lists | `GET /directories/{directoryId}/mailinglists/{mailingListId}/contacts` | `snapshot` (full refresh, no lastModifiedDate available) |
+| `mailing_list_contacts` | Contacts within a specific mailing list | `GET /directories/{directoryId}/mailinglists/{mailingListId}/contacts` | `snapshot` (full refresh, no lastModifiedDate available) |
+| `directory_contacts` | All contacts across all mailing lists in a directory | `GET /directories/{directoryId}/contacts` | `snapshot` (full refresh, no lastModifiedDate available) |
 | `directories` | XM Directory folders and structure | `GET /directories` | `snapshot` |
 
 **Connector scope for initial implementation**:
@@ -53,7 +54,8 @@ The Qualtrics API provides access to various objects/resources. The object list 
 - **survey_responses**: Actual response data from survey participants; requires multi-step export process
 - **distributions**: Tracks how surveys were distributed (email, SMS, anonymous link, etc.)
 - **mailing_lists**: Collections of contacts used for survey distribution
-- **contacts**: Individual contact records with custom attributes and embedded data
+- **mailing_list_contacts**: Individual contact records within a specific mailing list
+- **directory_contacts**: All contact records across all mailing lists in a directory
 - **directories**: Organizational structure for managing contacts and other XM data
 
 ## **Object Schema**
@@ -320,7 +322,7 @@ curl -X GET \
 - **Actual**: `surveyLink.surveyId` nested (not root-level `surveyId`)
 - **Actual**: headers does NOT include `subject` field
 
-### `contacts` object
+### `mailing_list_contacts` object
 
 **Source endpoint**:
 `GET /directories/{directoryId}/mailinglists/{mailingListId}/contacts`
@@ -347,7 +349,37 @@ curl -X GET \
 | `mailingListUnsubscribed` | boolean | Whether contact is unsubscribed from this specific mailing list. |
 | `contactLookupId` | string or null | Contact lookup identifier for cross-referencing. |
 
-**Note**: The API does not return `lastModifiedDate`, `creationDate`, `embeddedData`, `responseHistory`, or `emailHistory` fields. Therefore, contacts table uses **snapshot mode** (full refresh) instead of CDC.
+**Note**: The API does not return `lastModifiedDate`, `creationDate`, `embeddedData`, `responseHistory`, or `emailHistory` fields. Therefore, mailing_list_contacts table uses **snapshot mode** (full refresh) instead of CDC.
+
+### `directory_contacts` object
+
+**Source endpoint**:
+`GET /directories/{directoryId}/contacts`
+
+**Key behavior**:
+- Returns all contacts across all mailing lists in a directory
+- Requires only `directoryId` as table-level parameter
+- Returns the same contact schema as mailing_list_contacts
+- Supports pagination
+- Only available for XM Directory users (not XM Directory Lite)
+- Use this endpoint when you want all contacts from a directory without filtering by mailing list
+
+**High-level schema**:
+
+| Column Name | Type | Description |
+|------------|------|-------------|
+| `contactId` | string | Unique contact identifier. Primary key. |
+| `firstName` | string or null | Contact's first name. |
+| `lastName` | string or null | Contact's last name. |
+| `email` | string or null | Contact's email address. |
+| `phone` | string or null | Contact's phone number. |
+| `extRef` | string or null | External reference ID. |
+| `language` | string or null | Preferred language code. |
+| `unsubscribed` | boolean | Whether contact is unsubscribed globally. |
+| `mailingListUnsubscribed` | boolean | Whether contact is unsubscribed from this specific mailing list. |
+| `contactLookupId` | string or null | Contact lookup identifier for cross-referencing. |
+
+**Note**: The API does not return `lastModifiedDate`, `creationDate`, `embeddedData`, `responseHistory`, or `emailHistory` fields. Therefore, directory_contacts table uses **snapshot mode** (full refresh) instead of CDC.
 
 ### `directories` object
 
@@ -644,7 +676,8 @@ Primary keys for each object are static and defined by the connector:
 | `survey_responses` | `responseId` |
 | `distributions` | `id` |
 | `mailing_lists` | `id` |
-| `contacts` | `contactId` |
+| `mailing_list_contacts` | `contactId` |
+| `directory_contacts` | `contactId` |
 | `directories` | `directoryId` |
 
 **Notes**:
@@ -661,7 +694,8 @@ Primary keys for each object are static and defined by the connector:
 | `survey_responses` | `append` | `recordedDate` | New responses are appended; existing responses are immutable once completed. |
 | `distributions` | `cdc` | `modifiedDate` | Distribution records can be updated (e.g., status changes). |
 | `mailing_lists` | `snapshot` | N/A | Full refresh; relatively small dataset. |
-| `contacts` | `snapshot` | N/A | Full refresh; API does not return lastModifiedDate field. |
+| `mailing_list_contacts` | `snapshot` | N/A | Full refresh; API does not return lastModifiedDate field. Requires directoryId and mailingListId. |
+| `directory_contacts` | `snapshot` | N/A | Full refresh; API does not return lastModifiedDate field. Requires only directoryId. |
 | `directories` | `snapshot` | N/A | Full refresh; organizational structure. API does not return modification timestamps. |
 
 **Incremental sync strategy**:
@@ -844,7 +878,7 @@ Primary keys for each object are static and defined by the connector:
 **Incremental retrieval**:
 - Filter by `modifiedDate >= last_sync_time` (client-side after retrieval)
 
-### `contacts` endpoint
+### `mailing_list_contacts` endpoint
 
 **Endpoint**: `GET /directories/{directoryId}/mailinglists/{mailingListId}/contacts`
 
@@ -868,6 +902,35 @@ Primary keys for each object are static and defined by the connector:
 - Requires both `directoryId` and `mailingListId` as table-level parameters
 - Each mailing list is treated as a separate table of contacts
 - Only available for XM Directory users (not XM Directory Lite)
+
+**Incremental retrieval**:
+- Not supported - API does not return `lastModifiedDate` field
+- Use snapshot mode (full refresh on each run)
+
+### `directory_contacts` endpoint
+
+**Endpoint**: `GET /directories/{directoryId}/contacts`
+
+**Method**: GET
+
+**Path Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `directoryId` | string | Yes | Directory ID (from table configuration). |
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `pageSize` | integer | No | Results per page (default: 100, max: 500). |
+| `skipToken` | string | No | Pagination token. |
+
+**Notes**:
+- Requires only `directoryId` as table-level parameter
+- Returns all contacts across all mailing lists in the directory
+- Only available for XM Directory users (not XM Directory Lite)
+- Use this endpoint when you want all contacts from a directory without filtering by mailing list
 
 **Incremental retrieval**:
 - Not supported - API does not return `lastModifiedDate` field

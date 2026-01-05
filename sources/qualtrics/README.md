@@ -86,7 +86,8 @@ The Qualtrics connector exposes a **static list** of tables:
 - `survey_definitions` - Full survey structure including questions, blocks, and flow
 - `survey_responses` - Individual survey response data
 - `distributions` - Survey distribution records (email sends, SMS, anonymous links)
-- `contacts` - Contact records within mailing lists
+- `mailing_list_contacts` - Contact records within a specific mailing list
+- `directory_contacts` - All contact records across all mailing lists in a directory
 - `directories` - XM Directory instances (organizational containers for contacts and mailing lists)
 
 ### Object Summary, Primary Keys, and Ingestion Mode
@@ -97,7 +98,8 @@ The Qualtrics connector exposes a **static list** of tables:
 | `survey_definitions` | Full survey structure with questions, blocks, flow, and options | `cdc` | `survey_id` | `last_modified` |
 | `survey_responses` | Individual responses to surveys including all question answers | `append` | `response_id` | `recorded_date` |
 | `distributions` | Distribution records for survey invitations and sends | `cdc` | `id` | `modified_date` |
-| `contacts` | Contact records within mailing lists | `snapshot` | `contact_id` | N/A (full refresh) |
+| `mailing_list_contacts` | Contact records within a specific mailing list | `snapshot` | `contact_id` | N/A (full refresh) |
+| `directory_contacts` | All contacts across all mailing lists in a directory | `snapshot` | `contact_id` | N/A (full refresh) |
 | `directories` | XM Directory instances (organizational structure) | `snapshot` | `directory_id` | N/A (full refresh) |
 
 ### Required and Optional Table Options
@@ -130,7 +132,7 @@ Table-specific options are passed via the pipeline spec under `table` in `object
   - Retrieves all distributions (email sends, SMS, etc.) for the specified survey
   - **If not provided**: Auto-consolidates distributions from all surveys (see Auto-Consolidation below)
 
-#### `contacts` table
+#### `mailing_list_contacts` table
 - **`directoryId`** (string, **required**): The Directory ID (also called Pool ID)
   - Format: `POOL_...` (e.g., `POOL_abc123xyz`)
   - Can be found in Qualtrics UI: Account Settings → Qualtrics IDs
@@ -140,12 +142,22 @@ Table-specific options are passed via the pipeline spec under `table` in `object
   - Can be found in: Contacts → Lists → Select a list → check URL or list details
   - Or via API: GET `/directories/{directoryId}/mailinglists`
 
-> **Note**: The `contacts` table is only available for XM Directory users (not XM Directory Lite accounts).
+> **Note**: The `mailing_list_contacts` table is only available for XM Directory users (not XM Directory Lite accounts).
+
+#### `directory_contacts` table
+- **`directoryId`** (string, **required**): The Directory ID (also called Pool ID)
+  - Format: `POOL_...` (e.g., `POOL_abc123xyz`)
+  - Can be found in Qualtrics UI: Account Settings → Qualtrics IDs
+  - Identifies your XM Directory
+- Returns all contacts across all mailing lists in the directory
+- Use this table when you want all contacts from a directory without filtering by mailing list
+
+> **Note**: The `directory_contacts` table is only available for XM Directory users (not XM Directory Lite accounts).
 
 #### `directories` table
 - **No table options required**: This table lists all accessible XM Directory instances
 - Returns organizational containers for contacts and mailing lists
-- Use the `directory_id` from this table as input for the `contacts` table's `directoryId` option
+- Use the `directory_id` from this table as input for the `mailing_list_contacts` or `directory_contacts` table's `directoryId` option
 
 ### Auto-Consolidation Feature
 
@@ -319,7 +331,7 @@ When using auto-consolidation:
   - `complaints` (long): Number of complaints
   - `blocked` (long): Number blocked
 
-#### `contacts` table schema:
+#### `mailing_list_contacts` and `directory_contacts` table schemas:
 - `contact_id` (string): Unique contact identifier (primary key)
 - `first_name` (string): Contact's first name
 - `last_name` (string): Contact's last name
@@ -406,9 +418,15 @@ Example `pipeline_spec` with auto-consolidation (recommended):
       },
       {
         "table": {
-          "source_table": "contacts",
+          "source_table": "mailing_list_contacts",
           "directoryId": "POOL_abc123xyz",
           "mailingListId": "CG_def456xyz"
+        }
+      },
+      {
+        "table": {
+          "source_table": "directory_contacts",
+          "directoryId": "POOL_abc123xyz"
         }
       },
       {
@@ -453,9 +471,15 @@ Example `pipeline_spec` with specific surveys (backward compatible):
       },
       {
         "table": {
-          "source_table": "contacts",
+          "source_table": "mailing_list_contacts",
           "directoryId": "POOL_abc123xyz",
           "mailingListId": "CG_def456xyz"
+        }
+      },
+      {
+        "table": {
+          "source_table": "directory_contacts",
+          "directoryId": "POOL_abc123xyz"
         }
       },
       {
@@ -474,7 +498,8 @@ Configuration notes:
 - For `survey_definitions` table: `surveyId` is **optional** (omit for auto-consolidation)
 - For `survey_responses` table: `surveyId` is **optional** (omit for auto-consolidation)
 - For `distributions` table: `surveyId` is **optional** (omit for auto-consolidation)
-- For `contacts` table: Both `directoryId` and `mailingListId` are **required**
+- For `mailing_list_contacts` table: Both `directoryId` and `mailingListId` are **required**
+- For `directory_contacts` table: Only `directoryId` is **required**
 - When using auto-consolidation, all surveys' data is consolidated into a single table automatically
 
 ### Step 3: Run and Schedule the Pipeline
@@ -510,10 +535,16 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 - **Subsequent runs**: Only fetches distributions modified since last sync (based on `modified_date` field)
 - Supports tracking email sends, SMS, and other distribution methods
 
-**For `contacts` table (Snapshot)**:
+**For `mailing_list_contacts` table (Snapshot)**:
 - **All runs**: Performs full refresh of all contacts in the specified mailing list
 - **Note**: The Qualtrics API does not return `last_modified_date` for contacts, so incremental sync is not supported
 - Requires XM Directory (not available for XM Directory Lite)
+
+**For `directory_contacts` table (Snapshot)**:
+- **All runs**: Performs full refresh of all contacts across all mailing lists in the directory
+- **Note**: The Qualtrics API does not return `last_modified_date` for contacts, so incremental sync is not supported
+- Requires XM Directory (not available for XM Directory Lite)
+- Use this when you want all contacts from a directory without filtering by mailing list
 
 > **Note**: Survey response exports can take 30-90 seconds to complete depending on response count. The connector handles this automatically with appropriate wait times and polling.
 
