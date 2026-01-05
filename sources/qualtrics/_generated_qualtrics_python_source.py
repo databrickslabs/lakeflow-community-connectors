@@ -190,10 +190,6 @@ def register_lakeflow_source(spark):
 
 
     class LakeflowConnect:
-        # =========================================================================
-        # Public API
-        # =========================================================================
-
         def __init__(self, options: dict[str, str]) -> None:
             """
             Initialize the Qualtrics source connector with authentication parameters.
@@ -505,7 +501,7 @@ def register_lakeflow_source(spark):
                 raise ValueError(f"Unknown table: {table_name}")
 
         # =========================================================================
-        # Core Helpers
+        # Helpers
         # =========================================================================
 
         def _to_snake_case(self, name: str) -> str:
@@ -739,6 +735,65 @@ def register_lakeflow_source(spark):
 
             logger.info(f"Found {len(survey_ids)} survey(s) to process (only_active={only_active}, max_surveys={max_surveys})")
             return survey_ids
+
+        def _make_request(
+            self,
+            method: str,
+            url: str,
+            params: dict = None,
+            json_body: dict = None,
+            max_retries: int = QualtricsConfig.MAX_HTTP_RETRIES
+        ) -> dict:
+            """
+            Make an HTTP request to Qualtrics API with retry logic.
+
+            Args:
+                method: HTTP method (GET, POST, etc.)
+                url: Full URL to request
+                params: Query parameters
+                json_body: JSON body for POST requests
+                max_retries: Maximum number of retry attempts
+
+            Returns:
+                Parsed JSON response
+            """
+            for attempt in range(max_retries):
+                try:
+                    if method == "GET":
+                        response = requests.get(url, headers=self.headers, params=params)
+                    elif method == "POST":
+                        response = requests.post(url, headers=self.headers, json=json_body)
+                    else:
+                        raise ValueError(f"Unsupported HTTP method: {method}")
+
+                    # Handle rate limiting
+                    if response.status_code == 429:
+                        retry_after = int(response.headers.get("Retry-After", QualtricsConfig.RATE_LIMIT_DEFAULT_WAIT))
+                        logger.warning(f"Rate limited. Waiting {retry_after} seconds...")
+                        time.sleep(retry_after)
+                        continue
+
+                    # Capture response body for debugging before raising
+                    if not response.ok:
+                        try:
+                            error_detail = response.json()
+                            logger.error(f"API Error Response: {error_detail}")
+                        except:
+                            logger.error(f"API Error Response (raw): {response.text}")
+
+                    response.raise_for_status()
+                    return response.json()
+
+                except requests.exceptions.RequestException as e:
+                    if attempt == max_retries - 1:
+                        raise Exception(f"Request failed after {max_retries} attempts: {e}")
+
+                    # Exponential backoff
+                    wait_time = 2 ** attempt
+                    logger.warning(f"Request failed, retrying in {wait_time} seconds... (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+
+            raise Exception("Request failed")
 
         # =========================================================================
         # Table Readers: Surveys
@@ -1319,69 +1374,6 @@ def register_lakeflow_source(spark):
 
             endpoint = f"/directories/{directory_id}/mailinglists/{mailing_list_id}/contacts"
             return self._fetch_paginated_list(endpoint, start_offset, cursor_field=None)
-
-        # =========================================================================
-        # HTTP Layer
-        # =========================================================================
-
-        def _make_request(
-            self,
-            method: str,
-            url: str,
-            params: dict = None,
-            json_body: dict = None,
-            max_retries: int = QualtricsConfig.MAX_HTTP_RETRIES
-        ) -> dict:
-            """
-            Make an HTTP request to Qualtrics API with retry logic.
-
-            Args:
-                method: HTTP method (GET, POST, etc.)
-                url: Full URL to request
-                params: Query parameters
-                json_body: JSON body for POST requests
-                max_retries: Maximum number of retry attempts
-
-            Returns:
-                Parsed JSON response
-            """
-            for attempt in range(max_retries):
-                try:
-                    if method == "GET":
-                        response = requests.get(url, headers=self.headers, params=params)
-                    elif method == "POST":
-                        response = requests.post(url, headers=self.headers, json=json_body)
-                    else:
-                        raise ValueError(f"Unsupported HTTP method: {method}")
-
-                    # Handle rate limiting
-                    if response.status_code == 429:
-                        retry_after = int(response.headers.get("Retry-After", QualtricsConfig.RATE_LIMIT_DEFAULT_WAIT))
-                        logger.warning(f"Rate limited. Waiting {retry_after} seconds...")
-                        time.sleep(retry_after)
-                        continue
-
-                    # Capture response body for debugging before raising
-                    if not response.ok:
-                        try:
-                            error_detail = response.json()
-                            logger.error(f"API Error Response: {error_detail}")
-                        except:
-                            logger.error(f"API Error Response (raw): {response.text}")
-
-                    response.raise_for_status()
-                    return response.json()
-
-                except requests.exceptions.RequestException as e:
-                    if attempt == max_retries - 1:
-                        raise Exception(f"Request failed after {max_retries} attempts: {e}")
-
-                    # Exponential backoff
-                    wait_time = 2 ** attempt
-                    logger.warning(f"Request failed, retrying in {wait_time} seconds... (attempt {attempt + 1}/{max_retries})")
-                    time.sleep(wait_time)
-
-            raise Exception("Request failed")
 
 
     ########################################################
