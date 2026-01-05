@@ -92,11 +92,11 @@ The Qualtrics connector exposes a **static list** of tables:
 
 | Table | Description | Ingestion Type | Primary Key | Incremental Cursor |
 |-------|-------------|----------------|-------------|-------------------|
-| `surveys` | Survey metadata including name, status, creation/modification dates | `cdc` | `id` | `lastModified` |
-| `survey_definitions` | Full survey structure with questions, blocks, flow, and options | `snapshot` | `SurveyID` | N/A (full refresh) |
-| `survey_responses` | Individual responses to surveys including all question answers | `append` | `responseId` | `recordedDate` |
-| `distributions` | Distribution records for survey invitations and sends | `cdc` | `id` | `modifiedDate` |
-| `contacts` | Contact records within mailing lists | `snapshot` | `contactId` | N/A (full refresh) |
+| `surveys` | Survey metadata including name, status, creation/modification dates | `cdc` | `id` | `last_modified` |
+| `survey_definitions` | Full survey structure with questions, blocks, flow, and options | `snapshot` | `survey_id` | N/A (full refresh) |
+| `survey_responses` | Individual responses to surveys including all question answers | `append` | `response_id` | `recorded_date` |
+| `distributions` | Distribution records for survey invitations and sends | `cdc` | `id` | `modified_date` |
+| `contacts` | Contact records within mailing lists | `snapshot` | `contact_id` | N/A (full refresh) |
 
 ### Required and Optional Table Options
 
@@ -142,92 +142,92 @@ Table-specific options are passed via the pipeline spec under `table` in `object
 #### `surveys` table schema:
 - `id` (string): Unique survey identifier (primary key)
 - `name` (string): Survey name/title
-- `ownerId` (string): User ID of survey owner
-- `isActive` (boolean): Whether survey is currently active
-- `creationDate` (string): ISO 8601 timestamp when survey was created
-- `lastModified` (string): ISO 8601 timestamp of last modification (incremental cursor)
+- `owner_id` (string): User ID of survey owner
+- `is_active` (boolean): Whether survey is currently active
+- `creation_date` (string): ISO 8601 timestamp when survey was created
+- `last_modified` (string): ISO 8601 timestamp of last modification (incremental cursor)
 
-> **Note**: Fields like `brandId`, `brandBaseURL`, `organizationId`, and `expiration` are not returned by the list surveys endpoint. Use the `survey_definitions` table if you need detailed survey structure.
+> **Note**: Fields like `brand_id`, `brand_base_url`, `organization_id`, and `expiration` are not returned by the list surveys endpoint. Use the `survey_definitions` table if you need detailed survey structure.
 
 #### `survey_definitions` table schema:
-- `SurveyID` (string): Unique survey identifier (primary key)
-- `SurveyName` (string): Survey name/title
-- `SurveyStatus` (string): Survey status (e.g., Active, Inactive)
-- `OwnerID` (string): User ID of survey owner
-- `CreatorID` (string): User ID who created the survey
-- `BrandID` (string): Brand identifier
-- `BrandBaseURL` (string): Brand base URL (e.g., `https://yourbrand.qualtrics.com`)
-- `LastModified` (string): ISO 8601 timestamp of last modification
-- `LastAccessed` (string): ISO 8601 timestamp of last access
-- `LastActivated` (string): ISO 8601 timestamp of last activation
-- `QuestionCount` (string): Number of questions in the survey
-- `Questions` (string): JSON string containing map of question IDs to question definitions
-- `Blocks` (string): JSON string containing block definitions
-- `SurveyFlow` (string): JSON string containing flow elements defining survey navigation
-- `SurveyOptions` (string): JSON string containing survey-level settings
-- `ResponseSets` (string): JSON string containing response set definitions
-- `Scoring` (string): JSON string containing scoring configuration
-- `ProjectInfo` (string): JSON string containing project metadata (ProjectCategory, ProjectType, etc.)
+- `survey_id` (string): Unique survey identifier (primary key)
+- `survey_name` (string): Survey name/title
+- `survey_status` (string): Survey status (e.g., Active, Inactive)
+- `owner_id` (string): User ID of survey owner
+- `creator_id` (string): User ID who created the survey
+- `brand_id` (string): Brand identifier
+- `brand_base_url` (string): Brand base URL (e.g., `https://yourbrand.qualtrics.com`)
+- `last_modified` (string): ISO 8601 timestamp of last modification
+- `last_accessed` (string): ISO 8601 timestamp of last access
+- `last_activated` (string): ISO 8601 timestamp of last activation
+- `question_count` (string): Number of questions in the survey
+- `questions` (string): JSON string containing map of question IDs to question definitions
+- `blocks` (string): JSON string containing block definitions
+- `survey_flow` (string): JSON string containing flow elements defining survey navigation
+- `survey_options` (string): JSON string containing survey-level settings
+- `response_sets` (string): JSON string containing response set definitions
+- `scoring` (string): JSON string containing scoring configuration
+- `project_info` (string): JSON string containing project metadata (ProjectCategory, ProjectType, etc.)
 
-> **Note**: Complex nested fields (`Questions`, `Blocks`, `SurveyFlow`, etc.) are stored as JSON strings because the Qualtrics API returns variable structures. Use Spark's `from_json()` function to parse them:
+> **Note**: Complex nested fields (`questions`, `blocks`, `survey_flow`, etc.) are stored as JSON strings because the Qualtrics API returns variable structures. Use Spark's `from_json()` function to parse them:
 > ```sql
-> SELECT SurveyID, from_json(Questions, 'MAP<STRING, STRUCT<QuestionText: STRING>>') FROM survey_definitions
+> SELECT survey_id, from_json(questions, 'MAP<STRING, STRUCT<QuestionText: STRING>>') FROM survey_definitions
 > ```
 
 #### `survey_responses` table schema:
-- `responseId` (string): Unique response identifier (primary key)
-- `surveyId` (string): Survey ID this response belongs to
-- `recordedDate` (string): ISO 8601 timestamp when response was recorded (incremental cursor)
-- `startDate` (string): When respondent started the survey
-- `endDate` (string): When respondent completed the survey
+- `response_id` (string): Unique response identifier (primary key)
+- `survey_id` (string): Survey ID this response belongs to
+- `recorded_date` (string): ISO 8601 timestamp when response was recorded (incremental cursor)
+- `start_date` (string): When respondent started the survey
+- `end_date` (string): When respondent completed the survey
 - `status` (long): Response status (0=In Progress, 1=Completed, etc.)
-- `ipAddress` (string): Respondent's IP address (if collected)
+- `ip_address` (string): Respondent's IP address (if collected)
 - `progress` (long): Percentage completed (0-100)
 - `duration` (long): Time spent in seconds
 - `finished` (boolean): Whether response is finished (true/false)
-- `distributionChannel` (string): How survey was distributed (email, anonymous, etc.)
-- `userLanguage` (string): Language code used by respondent
-- `locationLatitude` (string): Latitude (if location collected)
-- `locationLongitude` (string): Longitude (if location collected)
+- `distribution_channel` (string): How survey was distributed (email, anonymous, etc.)
+- `user_language` (string): Language code used by respondent
+- `location_latitude` (string): Latitude (if location collected)
+- `location_longitude` (string): Longitude (if location collected)
 - `values` (map<string, struct>): Question responses keyed by Question ID
   - Each value contains:
-    - `choiceText` (string): Text of selected choice
-    - `choiceId` (string): ID of selected choice
-    - `textEntry` (string): Free text entry
+    - `choice_text` (string): Text of selected choice
+    - `choice_id` (string): ID of selected choice
+    - `text_entry` (string): Free text entry
 - `labels` (map<string, string>): Human-readable labels for responses
-- `displayedFields` (array<string>): Fields displayed to respondent
-- `displayedValues` (map<string, string>): Displayed values
-- `embeddedData` (map<string, string>): Custom embedded data fields
+- `displayed_fields` (array<string>): Fields displayed to respondent
+- `displayed_values` (map<string, string>): Displayed values
+- `embedded_data` (map<string, string>): Custom embedded data fields
 
 > **Note**: Question IDs (e.g., `QID1`, `QID2`) are dynamic and specific to each survey. The `values` field uses a map type to accommodate any question structure.
 
 #### `distributions` table schema:
 - `id` (string): Unique distribution identifier (primary key)
-- `parentDistributionId` (string): Parent distribution ID (for follow-ups/reminders)
-- `ownerId` (string): User ID who created the distribution
-- `organizationId` (string): Organization ID
-- `requestType` (string): Distribution method (e.g., GeneratedInvite, Invite, Reminder)
-- `requestStatus` (string): Status (e.g., Generated, pending, inProgress, complete)
-- `sendDate` (string): ISO 8601 timestamp when sent/scheduled
-- `createdDate` (string): ISO 8601 timestamp when created
-- `modifiedDate` (string): ISO 8601 timestamp of last modification (incremental cursor)
+- `parent_distribution_id` (string): Parent distribution ID (for follow-ups/reminders)
+- `owner_id` (string): User ID who created the distribution
+- `organization_id` (string): Organization ID
+- `request_type` (string): Distribution method (e.g., GeneratedInvite, Invite, Reminder)
+- `request_status` (string): Status (e.g., Generated, pending, inProgress, complete)
+- `send_date` (string): ISO 8601 timestamp when sent/scheduled
+- `created_date` (string): ISO 8601 timestamp when created
+- `modified_date` (string): ISO 8601 timestamp of last modification (incremental cursor)
 - `headers` (struct): Email distribution headers
-  - `fromEmail` (string): Sender email address
-  - `fromName` (string): Sender name
-  - `replyToEmail` (string): Reply-to email address
+  - `from_email` (string): Sender email address
+  - `from_name` (string): Sender name
+  - `reply_to_email` (string): Reply-to email address
 - `recipients` (struct): Recipient information
-  - `mailingListId` (string): Mailing list ID
-  - `contactId` (string): Specific contact ID (if targeted)
-  - `libraryId` (string): Library ID
-  - `sampleId` (string): Sample ID (if using sample)
+  - `mailing_list_id` (string): Mailing list ID
+  - `contact_id` (string): Specific contact ID (if targeted)
+  - `library_id` (string): Library ID
+  - `sample_id` (string): Sample ID (if using sample)
 - `message` (struct): Message details
-  - `libraryId` (string): Message library ID
-  - `messageId` (string): Message template ID
-  - `messageType` (string): Type (e.g., Inline, InviteEmail)
-- `surveyLink` (struct): Survey link information
-  - `surveyId` (string): Survey ID this distribution belongs to
-  - `expirationDate` (string): When survey link expires
-  - `linkType` (string): Link type (e.g., Individual, Multiple, Anonymous)
+  - `library_id` (string): Message library ID
+  - `message_id` (string): Message template ID
+  - `message_type` (string): Type (e.g., Inline, InviteEmail)
+- `survey_link` (struct): Survey link information
+  - `survey_id` (string): Survey ID this distribution belongs to
+  - `expiration_date` (string): When survey link expires
+  - `link_type` (string): Link type (e.g., Individual, Multiple, Anonymous)
 - `stats` (struct): Distribution statistics
   - `sent` (long): Number of emails/SMS sent
   - `failed` (long): Number of send failures
@@ -240,16 +240,16 @@ Table-specific options are passed via the pipeline spec under `table` in `object
   - `blocked` (long): Number blocked
 
 #### `contacts` table schema:
-- `contactId` (string): Unique contact identifier (primary key)
-- `firstName` (string): Contact's first name
-- `lastName` (string): Contact's last name
+- `contact_id` (string): Unique contact identifier (primary key)
+- `first_name` (string): Contact's first name
+- `last_name` (string): Contact's last name
 - `email` (string): Contact's email address
 - `phone` (string): Contact's phone number
-- `extRef` (string): External reference ID
+- `ext_ref` (string): External reference ID
 - `language` (string): Preferred language code
 - `unsubscribed` (boolean): Whether contact has unsubscribed globally
-- `mailingListUnsubscribed` (boolean): Whether contact has unsubscribed from this mailing list
-- `contactLookupId` (string): Contact lookup identifier
+- `mailing_list_unsubscribed` (boolean): Whether contact has unsubscribed from this mailing list
+- `contact_lookup_id` (string): Contact lookup identifier
 
 ## Data Type Mapping
 
@@ -343,7 +343,7 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 
 **For `surveys` table (CDC)**:
 - **First run**: Retrieves all surveys
-- **Subsequent runs**: Only fetches surveys modified since last sync (based on `lastModified` field)
+- **Subsequent runs**: Only fetches surveys modified since last sync (based on `last_modified` field)
 - Automatically maintains cursor state
 
 **For `survey_definitions` table (Snapshot)**:
@@ -353,7 +353,7 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 
 **For `survey_responses` table (Append)**:
 - **First run**: Exports all responses for the specified survey
-- **Subsequent runs**: Only exports responses recorded since last sync (based on `recordedDate` field)
+- **Subsequent runs**: Only exports responses recorded since last sync (based on `recorded_date` field)
 - New responses are appended; existing responses are immutable
 - Export process uses Qualtrics 3-step workflow:
   1. Create export job
@@ -362,12 +362,12 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 
 **For `distributions` table (CDC)**:
 - **First run**: Retrieves all distributions for the specified survey
-- **Subsequent runs**: Only fetches distributions modified since last sync (based on `modifiedDate` field)
+- **Subsequent runs**: Only fetches distributions modified since last sync (based on `modified_date` field)
 - Supports tracking email sends, SMS, and other distribution methods
 
 **For `contacts` table (Snapshot)**:
 - **All runs**: Performs full refresh of all contacts in the specified mailing list
-- **Note**: The Qualtrics API does not return `lastModifiedDate` for contacts, so incremental sync is not supported
+- **Note**: The Qualtrics API does not return `last_modified_date` for contacts, so incremental sync is not supported
 - Requires XM Directory (not available for XM Directory Lite)
 
 > **Note**: Survey response exports can take 30-90 seconds to complete depending on response count. The connector handles this automatically with appropriate wait times and polling.

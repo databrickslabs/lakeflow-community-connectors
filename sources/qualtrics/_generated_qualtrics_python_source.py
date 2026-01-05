@@ -15,6 +15,7 @@ from typing import (
 )
 import io
 import json
+import re
 import time
 
 from pyspark.sql import Row
@@ -225,6 +226,51 @@ def register_lakeflow_source(spark):
             """
             return self.tables
 
+        def _to_snake_case(self, name: str) -> str:
+            """
+            Convert camelCase or PascalCase to snake_case.
+
+            Args:
+                name: Field name in camelCase or PascalCase
+
+            Returns:
+                Field name in snake_case
+            """
+            # Insert underscore before uppercase letters that follow lowercase letters
+            s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+            # Insert underscore before uppercase letters that follow numbers or lowercase letters
+            s2 = re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1)
+            return s2.lower()
+
+        def _normalize_keys(self, data: dict) -> dict:
+            """
+            Recursively transform all keys in a dict to snake_case.
+
+            Args:
+                data: Dictionary with API field names (camelCase or PascalCase)
+
+            Returns:
+                Dictionary with snake_case field names
+            """
+            if not isinstance(data, dict):
+                return data
+
+            normalized = {}
+            for key, value in data.items():
+                snake_key = self._to_snake_case(key)
+
+                if isinstance(value, dict):
+                    normalized[snake_key] = self._normalize_keys(value)
+                elif isinstance(value, list):
+                    normalized[snake_key] = [
+                        self._normalize_keys(item) if isinstance(item, dict) else item
+                        for item in value
+                    ]
+                else:
+                    normalized[snake_key] = value
+
+            return normalized
+
         def get_table_schema(
             self, table_name: str, table_options: Dict[str, str]
         ) -> StructType:
@@ -266,10 +312,10 @@ def register_lakeflow_source(spark):
             return StructType([
                 StructField("id", StringType(), True),
                 StructField("name", StringType(), True),
-                StructField("ownerId", StringType(), True),
-                StructField("isActive", BooleanType(), True),
-                StructField("creationDate", StringType(), True),
-                StructField("lastModified", StringType(), True)
+                StructField("owner_id", StringType(), True),
+                StructField("is_active", BooleanType(), True),
+                StructField("creation_date", StringType(), True),
+                StructField("last_modified", StringType(), True)
             ])
 
         def _get_survey_definitions_schema(self) -> StructType:
@@ -285,57 +331,57 @@ def register_lakeflow_source(spark):
             """
             return StructType([
                 # Survey identification - these are consistently typed
-                StructField("SurveyID", StringType(), True),
-                StructField("SurveyName", StringType(), True),
-                StructField("SurveyStatus", StringType(), True),
-                StructField("OwnerID", StringType(), True),
-                StructField("CreatorID", StringType(), True),
-                StructField("BrandID", StringType(), True),
-                StructField("BrandBaseURL", StringType(), True),
-                StructField("LastModified", StringType(), True),
-                StructField("LastAccessed", StringType(), True),
-                StructField("LastActivated", StringType(), True),
-                StructField("QuestionCount", StringType(), True),
+                StructField("survey_id", StringType(), True),
+                StructField("survey_name", StringType(), True),
+                StructField("survey_status", StringType(), True),
+                StructField("owner_id", StringType(), True),
+                StructField("creator_id", StringType(), True),
+                StructField("brand_id", StringType(), True),
+                StructField("brand_base_url", StringType(), True),
+                StructField("last_modified", StringType(), True),
+                StructField("last_accessed", StringType(), True),
+                StructField("last_activated", StringType(), True),
+                StructField("question_count", StringType(), True),
                 # Complex nested structures - stored as StringType (JSON)
                 # These fields have variable structure depending on survey configuration
-                StructField("Questions", StringType(), True),
-                StructField("Blocks", StringType(), True),
-                StructField("SurveyFlow", StringType(), True),
-                StructField("SurveyOptions", StringType(), True),
-                StructField("ResponseSets", StringType(), True),
-                StructField("Scoring", StringType(), True),
-                StructField("ProjectInfo", StringType(), True)
+                StructField("questions", StringType(), True),
+                StructField("blocks", StringType(), True),
+                StructField("survey_flow", StringType(), True),
+                StructField("survey_options", StringType(), True),
+                StructField("response_sets", StringType(), True),
+                StructField("scoring", StringType(), True),
+                StructField("project_info", StringType(), True)
             ])
 
         def _get_survey_responses_schema(self) -> StructType:
             """Get schema for survey_responses table."""
             return StructType([
-                StructField("responseId", StringType(), True),
-                StructField("surveyId", StringType(), True),
-                StructField("recordedDate", StringType(), True),
-                StructField("startDate", StringType(), True),
-                StructField("endDate", StringType(), True),
+                StructField("response_id", StringType(), True),
+                StructField("survey_id", StringType(), True),
+                StructField("recorded_date", StringType(), True),
+                StructField("start_date", StringType(), True),
+                StructField("end_date", StringType(), True),
                 StructField("status", LongType(), True),
-                StructField("ipAddress", StringType(), True),
+                StructField("ip_address", StringType(), True),
                 StructField("progress", LongType(), True),
                 StructField("duration", LongType(), True),
                 StructField("finished", BooleanType(), True),
-                StructField("distributionChannel", StringType(), True),
-                StructField("userLanguage", StringType(), True),
-                StructField("locationLatitude", StringType(), True),
-                StructField("locationLongitude", StringType(), True),
+                StructField("distribution_channel", StringType(), True),
+                StructField("user_language", StringType(), True),
+                StructField("location_latitude", StringType(), True),
+                StructField("location_longitude", StringType(), True),
                 StructField("values", MapType(
                     StringType(),
                     StructType([
-                        StructField("choiceText", StringType(), True),
-                        StructField("choiceId", StringType(), True),
-                        StructField("textEntry", StringType(), True)
+                        StructField("choice_text", StringType(), True),
+                        StructField("choice_id", StringType(), True),
+                        StructField("text_entry", StringType(), True)
                     ])
                 ), True),
                 StructField("labels", MapType(StringType(), StringType()), True),
-                StructField("displayedFields", ArrayType(StringType()), True),
-                StructField("displayedValues", MapType(StringType(), StringType()), True),
-                StructField("embeddedData", MapType(StringType(), StringType()), True)
+                StructField("displayed_fields", ArrayType(StringType()), True),
+                StructField("displayed_values", MapType(StringType(), StringType()), True),
+                StructField("embedded_data", MapType(StringType(), StringType()), True)
             ])
 
         def _get_distributions_schema(self) -> StructType:
@@ -346,34 +392,34 @@ def register_lakeflow_source(spark):
             """
             return StructType([
                 StructField("id", StringType(), True),
-                StructField("parentDistributionId", StringType(), True),
-                StructField("ownerId", StringType(), True),
-                StructField("organizationId", StringType(), True),
-                StructField("requestType", StringType(), True),
-                StructField("requestStatus", StringType(), True),
-                StructField("sendDate", StringType(), True),
-                StructField("createdDate", StringType(), True),
-                StructField("modifiedDate", StringType(), True),
+                StructField("parent_distribution_id", StringType(), True),
+                StructField("owner_id", StringType(), True),
+                StructField("organization_id", StringType(), True),
+                StructField("request_type", StringType(), True),
+                StructField("request_status", StringType(), True),
+                StructField("send_date", StringType(), True),
+                StructField("created_date", StringType(), True),
+                StructField("modified_date", StringType(), True),
                 StructField("headers", StructType([
-                    StructField("fromEmail", StringType(), True),
-                    StructField("fromName", StringType(), True),
-                    StructField("replyToEmail", StringType(), True)
+                    StructField("from_email", StringType(), True),
+                    StructField("from_name", StringType(), True),
+                    StructField("reply_to_email", StringType(), True)
                 ]), True),
                 StructField("recipients", StructType([
-                    StructField("mailingListId", StringType(), True),
-                    StructField("contactId", StringType(), True),
-                    StructField("libraryId", StringType(), True),
-                    StructField("sampleId", StringType(), True)
+                    StructField("mailing_list_id", StringType(), True),
+                    StructField("contact_id", StringType(), True),
+                    StructField("library_id", StringType(), True),
+                    StructField("sample_id", StringType(), True)
                 ]), True),
                 StructField("message", StructType([
-                    StructField("libraryId", StringType(), True),
-                    StructField("messageId", StringType(), True),
-                    StructField("messageType", StringType(), True)
+                    StructField("library_id", StringType(), True),
+                    StructField("message_id", StringType(), True),
+                    StructField("message_type", StringType(), True)
                 ]), True),
-                StructField("surveyLink", StructType([
-                    StructField("surveyId", StringType(), True),
-                    StructField("expirationDate", StringType(), True),
-                    StructField("linkType", StringType(), True)
+                StructField("survey_link", StructType([
+                    StructField("survey_id", StringType(), True),
+                    StructField("expiration_date", StringType(), True),
+                    StructField("link_type", StringType(), True)
                 ]), True),
                 StructField("stats", StructType([
                     StructField("sent", LongType(), True),
@@ -396,16 +442,16 @@ def register_lakeflow_source(spark):
             unsubscribed, mailingListUnsubscribed, contactLookupId
             """
             return StructType([
-                StructField("contactId", StringType(), True),
-                StructField("firstName", StringType(), True),
-                StructField("lastName", StringType(), True),
+                StructField("contact_id", StringType(), True),
+                StructField("first_name", StringType(), True),
+                StructField("last_name", StringType(), True),
                 StructField("email", StringType(), True),
                 StructField("phone", StringType(), True),
-                StructField("extRef", StringType(), True),
+                StructField("ext_ref", StringType(), True),
                 StructField("language", StringType(), True),
                 StructField("unsubscribed", BooleanType(), True),
-                StructField("mailingListUnsubscribed", BooleanType(), True),
-                StructField("contactLookupId", StringType(), True)
+                StructField("mailing_list_unsubscribed", BooleanType(), True),
+                StructField("contact_lookup_id", StringType(), True)
             ])
 
         def read_table_metadata(
@@ -429,30 +475,30 @@ def register_lakeflow_source(spark):
             if table_name == "surveys":
                 return {
                     "primary_keys": ["id"],
-                    "cursor_field": "lastModified",
+                    "cursor_field": "last_modified",
                     "ingestion_type": "cdc"
                 }
             elif table_name == "survey_definitions":
                 return {
-                    "primary_keys": ["SurveyID"],
+                    "primary_keys": ["survey_id"],
                     "cursor_field": None,
                     "ingestion_type": "snapshot"
                 }
             elif table_name == "survey_responses":
                 return {
-                    "primary_keys": ["responseId"],
-                    "cursor_field": "recordedDate",
+                    "primary_keys": ["response_id"],
+                    "cursor_field": "recorded_date",
                     "ingestion_type": "append"
                 }
             elif table_name == "distributions":
                 return {
                     "primary_keys": ["id"],
-                    "cursor_field": "modifiedDate",
+                    "cursor_field": "modified_date",
                     "ingestion_type": "cdc"
                 }
             elif table_name == "contacts":
                 return {
-                    "primary_keys": ["contactId"],
+                    "primary_keys": ["contact_id"],
                     "cursor_field": None,
                     "ingestion_type": "snapshot"
                 }
@@ -566,7 +612,9 @@ def register_lakeflow_source(spark):
                 # No new data, keep the same cursor
                 new_offset["lastModified"] = last_modified_cursor
 
-            return iter(all_surveys), new_offset
+            # Normalize all keys to snake_case before returning
+            normalized_surveys = (self._normalize_keys(survey) for survey in all_surveys)
+            return normalized_surveys, new_offset
 
         def _read_survey_definitions(
             self, start_offset: dict, table_options: Dict[str, str]
@@ -623,7 +671,9 @@ def register_lakeflow_source(spark):
                     else:
                         processed[field] = None
 
-                return iter([processed]), {}
+                # Normalize all keys to snake_case before returning
+                normalized = self._normalize_keys(processed)
+                return iter([normalized]), {}
 
             except Exception as e:
                 logger.error(f"Error fetching survey definition for {survey_id}: {e}", exc_info=True)
@@ -908,7 +958,8 @@ def register_lakeflow_source(spark):
                     embedded_data = ed_obj.get("textEntry")
             processed["embeddedData"] = embedded_data
 
-            return processed
+            # Normalize all keys to snake_case before returning
+            return self._normalize_keys(processed)
 
         def _read_distributions(
             self, start_offset: dict, table_options: Dict[str, str]
@@ -997,7 +1048,9 @@ def register_lakeflow_source(spark):
                 # No new data, keep the same cursor
                 new_offset["modifiedDate"] = modified_date_cursor
 
-            return iter(all_distributions), new_offset
+            # Normalize all keys to snake_case before returning
+            normalized_distributions = (self._normalize_keys(dist) for dist in all_distributions)
+            return normalized_distributions, new_offset
 
         def _read_contacts(
             self, start_offset: dict, table_options: Dict[str, str]
@@ -1068,7 +1121,9 @@ def register_lakeflow_source(spark):
             # Return empty offset for snapshot mode
             new_offset = {}
 
-            return iter(all_contacts), new_offset
+            # Normalize all keys to snake_case before returning
+            normalized_contacts = (self._normalize_keys(contact) for contact in all_contacts)
+            return normalized_contacts, new_offset
 
         def _make_request(
             self,
