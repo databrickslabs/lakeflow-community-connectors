@@ -81,7 +81,7 @@ Validate the generated connector for **{{source_name}}** by executing the provid
 7. **Re-run tests** and **regenerate merged file**:
    ```bash
    pytest sources/{source_name}/test/ -v
-   python scripts/merge_python_source.py {source_name}
+   python tools/scripts/merge_python_source.py {source_name}
    ```
 
 ### Understanding Nested Fields
