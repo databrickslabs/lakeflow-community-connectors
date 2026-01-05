@@ -83,50 +83,9 @@ class LakeflowConnect:
         """
         return self.tables
 
-    def _to_snake_case(self, name: str) -> str:
-        """
-        Convert camelCase or PascalCase to snake_case.
-
-        Args:
-            name: Field name in camelCase or PascalCase
-
-        Returns:
-            Field name in snake_case
-        """
-        # Insert underscore before uppercase letters that follow lowercase letters
-        s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
-        # Insert underscore before uppercase letters that follow numbers or lowercase letters
-        s2 = re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1)
-        return s2.lower()
-
-    def _normalize_keys(self, data: dict) -> dict:
-        """
-        Recursively transform all keys in a dict to snake_case.
-
-        Args:
-            data: Dictionary with API field names (camelCase or PascalCase)
-
-        Returns:
-            Dictionary with snake_case field names
-        """
-        if not isinstance(data, dict):
-            return data
-
-        normalized = {}
-        for key, value in data.items():
-            snake_key = self._to_snake_case(key)
-
-            if isinstance(value, dict):
-                normalized[snake_key] = self._normalize_keys(value)
-            elif isinstance(value, list):
-                normalized[snake_key] = [
-                    self._normalize_keys(item) if isinstance(item, dict) else item
-                    for item in value
-                ]
-            else:
-                normalized[snake_key] = value
-
-        return normalized
+    # =========================================================================
+    # Schema Definitions
+    # =========================================================================
 
     def get_table_schema(
         self, table_name: str, table_options: dict[str, str]
@@ -311,7 +270,11 @@ class LakeflowConnect:
             StructField("mailing_list_unsubscribed", BooleanType(), True),
             StructField("contact_lookup_id", StringType(), True)
         ])
-    
+
+    # =========================================================================
+    # Table Metadata and Routing
+    # =========================================================================
+
     def read_table_metadata(
         self, table_name: str, table_options: dict[str, str]
     ) -> dict:
@@ -395,6 +358,55 @@ class LakeflowConnect:
         else:
             raise ValueError(f"Unknown table: {table_name}")
 
+    # =========================================================================
+    # Helpers
+    # =========================================================================
+
+    def _to_snake_case(self, name: str) -> str:
+        """
+        Convert camelCase or PascalCase to snake_case.
+
+        Args:
+            name: Field name in camelCase or PascalCase
+
+        Returns:
+            Field name in snake_case
+        """
+        # Insert underscore before uppercase letters that follow lowercase letters
+        s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+        # Insert underscore before uppercase letters that follow numbers or lowercase letters
+        s2 = re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1)
+        return s2.lower()
+
+    def _normalize_keys(self, data: dict) -> dict:
+        """
+        Recursively transform all keys in a dict to snake_case.
+
+        Args:
+            data: Dictionary with API field names (camelCase or PascalCase)
+
+        Returns:
+            Dictionary with snake_case field names
+        """
+        if not isinstance(data, dict):
+            return data
+
+        normalized = {}
+        for key, value in data.items():
+            snake_key = self._to_snake_case(key)
+
+            if isinstance(value, dict):
+                normalized[snake_key] = self._normalize_keys(value)
+            elif isinstance(value, list):
+                normalized[snake_key] = [
+                    self._normalize_keys(item) if isinstance(item, dict) else item
+                    for item in value
+                ]
+            else:
+                normalized[snake_key] = value
+
+        return normalized
+
     def _fetch_paginated_list(
         self,
         endpoint: str,
@@ -468,6 +480,70 @@ class LakeflowConnect:
         normalized = (self._normalize_keys(item) for item in all_items)
         return normalized, new_offset
 
+    def _iterate_all_surveys(
+        self,
+        start_offset: dict,
+        table_options: dict[str, str],
+        single_survey_reader,
+        cursor_field: str,
+        data_type: str
+    ) -> (Iterator[dict], dict):
+        """
+        Generic helper to consolidate data across all surveys.
+
+        Args:
+            start_offset: Dictionary with per-survey cursors {"surveys": {...}}
+            table_options: Options for survey filtering (only_active_surveys, max_surveys)
+            single_survey_reader: Function(survey_id, offset) -> (Iterator[dict], dict)
+            cursor_field: Field name for global cursor (e.g., "lastModified")
+            data_type: Data type name for logging (e.g., "definitions")
+
+        Returns:
+            Tuple of (iterator of all records, consolidated offset dict)
+        """
+        survey_ids = self._get_all_survey_ids(table_options)
+        if not survey_ids:
+            logger.warning(f"No surveys found to fetch {data_type} for")
+            return iter([]), {}
+
+        logger.info(f"Fetching {data_type} for {len(survey_ids)} survey(s)")
+
+        per_survey_offsets = start_offset.get("surveys", {}) if start_offset else {}
+        all_records = []
+        new_per_survey_offsets = {}
+        success_count = 0
+        failure_count = 0
+
+        for idx, survey_id in enumerate(survey_ids, 1):
+            try:
+                logger.info(f"Fetching {data_type} {idx}/{len(survey_ids)} for survey {survey_id}")
+                survey_offset = per_survey_offsets.get(survey_id, {})
+                records_iter, new_survey_offset = single_survey_reader(survey_id, survey_offset)
+                records = list(records_iter)
+                all_records.extend(records)
+                success_count += 1
+                new_per_survey_offsets[survey_id] = new_survey_offset
+
+                if idx < len(survey_ids):
+                    time.sleep(QualtricsConfig.CONSOLIDATION_DELAY_BETWEEN_SURVEYS)
+
+            except Exception as e:
+                logger.warning(f"Failed to fetch {data_type} for survey {survey_id}: {e}")
+                failure_count += 1
+                if survey_id in per_survey_offsets:
+                    new_per_survey_offsets[survey_id] = per_survey_offsets[survey_id]
+                continue
+
+        logger.info(f"Completed fetching {data_type}: {success_count} succeeded, {failure_count} failed, {len(all_records)} total records")
+
+        new_offset = {"surveys": new_per_survey_offsets}
+        if all_records and cursor_field:
+            dates = [r.get(cursor_field, "") for r in all_records if r.get(cursor_field)]
+            if dates:
+                new_offset[cursor_field] = max(dates)
+
+        return iter(all_records), new_offset
+
     def _get_all_survey_ids(self, table_options: dict[str, str]) -> list[str]:
         """
         Get all survey IDs for auto-consolidation.
@@ -517,7 +593,70 @@ class LakeflowConnect:
 
         logger.info(f"Found {len(survey_ids)} survey(s) to process (only_active={only_active}, max_surveys={max_surveys})")
         return survey_ids
-    
+
+    def _make_request(
+        self,
+        method: str,
+        url: str,
+        params: dict = None,
+        json_body: dict = None,
+        max_retries: int = QualtricsConfig.MAX_HTTP_RETRIES
+    ) -> dict:
+        """
+        Make an HTTP request to Qualtrics API with retry logic.
+        
+        Args:
+            method: HTTP method (GET, POST, etc.)
+            url: Full URL to request
+            params: Query parameters
+            json_body: JSON body for POST requests
+            max_retries: Maximum number of retry attempts
+            
+        Returns:
+            Parsed JSON response
+        """
+        for attempt in range(max_retries):
+            try:
+                if method == "GET":
+                    response = requests.get(url, headers=self.headers, params=params)
+                elif method == "POST":
+                    response = requests.post(url, headers=self.headers, json=json_body)
+                else:
+                    raise ValueError(f"Unsupported HTTP method: {method}")
+                
+                # Handle rate limiting
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get("Retry-After", QualtricsConfig.RATE_LIMIT_DEFAULT_WAIT))
+                    logger.warning(f"Rate limited. Waiting {retry_after} seconds...")
+                    time.sleep(retry_after)
+                    continue
+
+                # Capture response body for debugging before raising
+                if not response.ok:
+                    try:
+                        error_detail = response.json()
+                        logger.error(f"API Error Response: {error_detail}")
+                    except:
+                        logger.error(f"API Error Response (raw): {response.text}")
+                
+                response.raise_for_status()
+                return response.json()
+                
+            except requests.exceptions.RequestException as e:
+                if attempt == max_retries - 1:
+                    raise Exception(f"Request failed after {max_retries} attempts: {e}")
+                
+                # Exponential backoff
+                wait_time = 2 ** attempt
+                logger.warning(f"Request failed, retrying in {wait_time} seconds... (attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait_time)
+        
+        raise Exception("Request failed")
+
+    # =========================================================================
+    # Table Readers: Surveys
+    # =========================================================================
+
     def _read_surveys(self, start_offset: dict) -> (Iterator[dict], dict):
         """
         Read surveys from Qualtrics API.
@@ -529,6 +668,10 @@ class LakeflowConnect:
             Tuple of (iterator of survey records, new offset)
         """
         return self._fetch_paginated_list("/surveys", start_offset, cursor_field="lastModified")
+
+    # =========================================================================
+    # Table Readers: Survey Definitions
+    # =========================================================================
 
     def _read_survey_definitions(
         self, start_offset: dict, table_options: dict[str, str]
@@ -643,81 +786,21 @@ class LakeflowConnect:
 
         Args:
             start_offset: Dictionary containing per-survey cursor timestamps
-                Format: {"surveys": {"SV_123": {"lastModified": "2024-01-01"}, ...}, "lastModified": "..."}
             table_options: Optional filters (only_active_surveys, max_surveys)
 
         Returns:
             Tuple of (iterator of all survey definition records, new offset dict with per-survey cursors)
         """
-        # Get all survey IDs
-        survey_ids = self._get_all_survey_ids(table_options)
+        return self._iterate_all_surveys(
+            start_offset, table_options,
+            self._read_single_survey_definition,
+            cursor_field="last_modified",
+            data_type="definitions"
+        )
 
-        if not survey_ids:
-            logger.warning("No surveys found to fetch definitions for")
-            return iter([]), {}
-
-        logger.info(f"Fetching survey definitions for {len(survey_ids)} survey(s)")
-
-        # Track per-survey offsets
-        per_survey_offsets = start_offset.get("surveys", {}) if start_offset else {}
-
-        # Fetch definition for each survey
-        all_definitions = []
-        new_per_survey_offsets = {}
-        success_count = 0
-        failure_count = 0
-        skipped_count = 0
-
-        for idx, survey_id in enumerate(survey_ids, 1):
-            try:
-                logger.info(f"Fetching definition {idx}/{len(survey_ids)} for survey {survey_id}")
-
-                # Get this survey's specific offset
-                survey_offset = per_survey_offsets.get(survey_id, {})
-
-                # Fetch definition for this survey
-                definition_iter, new_survey_offset = self._read_single_survey_definition(survey_id, survey_offset)
-                definitions = list(definition_iter)
-
-                if definitions:
-                    all_definitions.extend(definitions)
-                    success_count += 1
-                else:
-                    # No definitions returned (either not found or not modified)
-                    skipped_count += 1
-
-                # Save the new offset for this survey
-                new_per_survey_offsets[survey_id] = new_survey_offset
-
-                # Add delay between requests to respect rate limits
-                if idx < len(survey_ids):
-                    time.sleep(QualtricsConfig.CONSOLIDATION_DELAY_BETWEEN_SURVEYS)
-
-            except Exception as e:
-                logger.warning(f"Failed to fetch definition for survey {survey_id}: {e}")
-                failure_count += 1
-                # Keep the old offset if we failed
-                if survey_id in per_survey_offsets:
-                    new_per_survey_offsets[survey_id] = per_survey_offsets[survey_id]
-                # Continue with other surveys even if one fails
-                continue
-
-        logger.info(f"Completed fetching survey definitions: {success_count} succeeded, {skipped_count} skipped (not modified), {failure_count} failed, {len(all_definitions)} total records")
-
-        # Build consolidated offset
-        new_offset = {"surveys": new_per_survey_offsets}
-
-        # Also include a global lastModified for convenience (max across all surveys)
-        if all_definitions:
-            last_modified_dates = [
-                defn.get("last_modified", "")
-                for defn in all_definitions
-                if defn.get("last_modified")
-            ]
-            if last_modified_dates:
-                new_offset["lastModified"] = max(last_modified_dates)
-
-        return iter(all_definitions), new_offset
+    # =========================================================================
+    # Table Readers: Survey Responses
+    # =========================================================================
 
     def _read_survey_responses(
         self, start_offset: dict, table_options: dict[str, str]
@@ -813,75 +896,17 @@ class LakeflowConnect:
 
         Args:
             start_offset: Dictionary containing per-survey cursor timestamps
-                Format: {"surveys": {"SV_123": {"recordedDate": "2024-01-01"}, ...}, "recordedDate": "..."}
             table_options: Optional filters (only_active_surveys, max_surveys)
 
         Returns:
             Tuple of (iterator of all response records, new offset dict with per-survey cursors)
         """
-        # Get all survey IDs
-        survey_ids = self._get_all_survey_ids(table_options)
-
-        if not survey_ids:
-            logger.warning("No surveys found to fetch responses for")
-            return iter([]), {}
-
-        logger.info(f"Fetching survey responses for {len(survey_ids)} survey(s)")
-
-        # Track per-survey offsets
-        per_survey_offsets = start_offset.get("surveys", {}) if start_offset else {}
-
-        # Fetch responses for each survey
-        all_responses = []
-        new_per_survey_offsets = {}
-        success_count = 0
-        failure_count = 0
-
-        for idx, survey_id in enumerate(survey_ids, 1):
-            try:
-                logger.info(f"Fetching responses {idx}/{len(survey_ids)} for survey {survey_id}")
-
-                # Get this survey's specific offset
-                survey_offset = per_survey_offsets.get(survey_id, {})
-
-                # Fetch responses for this survey
-                responses_iter, new_survey_offset = self._read_single_survey_responses(survey_id, survey_offset)
-                responses = list(responses_iter)
-                all_responses.extend(responses)
-                success_count += 1
-
-                # Save the new offset for this survey
-                new_per_survey_offsets[survey_id] = new_survey_offset
-
-                # Add delay between surveys to respect rate limits
-                if idx < len(survey_ids):
-                    time.sleep(QualtricsConfig.CONSOLIDATION_DELAY_BETWEEN_SURVEYS)
-
-            except Exception as e:
-                logger.warning(f"Failed to fetch responses for survey {survey_id}: {e}")
-                failure_count += 1
-                # Keep the old offset if we failed
-                if survey_id in per_survey_offsets:
-                    new_per_survey_offsets[survey_id] = per_survey_offsets[survey_id]
-                # Continue with other surveys even if one fails
-                continue
-
-        logger.info(f"Completed fetching survey responses: {success_count} succeeded, {failure_count} failed, {len(all_responses)} total records")
-
-        # Build consolidated offset
-        new_offset = {"surveys": new_per_survey_offsets}
-
-        # Also include a global recordedDate for convenience (max across all surveys)
-        if all_responses:
-            recorded_dates = [
-                resp.get("recordedDate", "")
-                for resp in all_responses
-                if resp.get("recordedDate")
-            ]
-            if recorded_dates:
-                new_offset["recordedDate"] = max(recorded_dates)
-
-        return iter(all_responses), new_offset
+        return self._iterate_all_surveys(
+            start_offset, table_options,
+            self._read_single_survey_responses,
+            cursor_field="recordedDate",
+            data_type="responses"
+        )
     
     def _create_response_export(self, survey_id: str, export_body: dict) -> str:
         """
@@ -1100,7 +1125,11 @@ class LakeflowConnect:
 
         # Normalize all keys to snake_case before returning
         return self._normalize_keys(processed)
-    
+
+    # =========================================================================
+    # Table Readers: Distributions
+    # =========================================================================
+
     def _read_distributions(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
@@ -1157,75 +1186,21 @@ class LakeflowConnect:
 
         Args:
             start_offset: Dictionary containing per-survey cursor timestamps
-                Format: {"surveys": {"SV_123": {"modifiedDate": "2024-01-01"}, ...}, "modifiedDate": "..."}
             table_options: Optional filters (only_active_surveys, max_surveys)
 
         Returns:
             Tuple of (iterator of all distribution records, new offset dict with per-survey cursors)
         """
-        # Get all survey IDs
-        survey_ids = self._get_all_survey_ids(table_options)
+        return self._iterate_all_surveys(
+            start_offset, table_options,
+            self._read_single_survey_distributions,
+            cursor_field="modifiedDate",
+            data_type="distributions"
+        )
 
-        if not survey_ids:
-            logger.warning("No surveys found to fetch distributions for")
-            return iter([]), {}
-
-        logger.info(f"Fetching distributions for {len(survey_ids)} survey(s)")
-
-        # Track per-survey offsets
-        per_survey_offsets = start_offset.get("surveys", {}) if start_offset else {}
-
-        # Fetch distributions for each survey
-        all_distributions = []
-        new_per_survey_offsets = {}
-        success_count = 0
-        failure_count = 0
-
-        for idx, survey_id in enumerate(survey_ids, 1):
-            try:
-                logger.info(f"Fetching distributions {idx}/{len(survey_ids)} for survey {survey_id}")
-
-                # Get this survey's specific offset
-                survey_offset = per_survey_offsets.get(survey_id, {})
-
-                # Fetch distributions for this survey
-                distributions_iter, new_survey_offset = self._read_single_survey_distributions(survey_id, survey_offset)
-                distributions = list(distributions_iter)
-                all_distributions.extend(distributions)
-                success_count += 1
-
-                # Save the new offset for this survey
-                new_per_survey_offsets[survey_id] = new_survey_offset
-
-                # Add delay between surveys to respect rate limits
-                if idx < len(survey_ids):
-                    time.sleep(QualtricsConfig.CONSOLIDATION_DELAY_BETWEEN_SURVEYS)
-
-            except Exception as e:
-                logger.warning(f"Failed to fetch distributions for survey {survey_id}: {e}")
-                failure_count += 1
-                # Keep the old offset if we failed
-                if survey_id in per_survey_offsets:
-                    new_per_survey_offsets[survey_id] = per_survey_offsets[survey_id]
-                # Continue with other surveys even if one fails
-                continue
-
-        logger.info(f"Completed fetching distributions: {success_count} succeeded, {failure_count} failed, {len(all_distributions)} total records")
-
-        # Build consolidated offset
-        new_offset = {"surveys": new_per_survey_offsets}
-
-        # Also include a global modifiedDate for convenience (max across all surveys)
-        if all_distributions:
-            modified_dates = [
-                dist.get("modifiedDate", "")
-                for dist in all_distributions
-                if dist.get("modifiedDate")
-            ]
-            if modified_dates:
-                new_offset["modifiedDate"] = max(modified_dates)
-
-        return iter(all_distributions), new_offset
+    # =========================================================================
+    # Table Readers: Contacts
+    # =========================================================================
 
     def _read_contacts(
         self, start_offset: dict, table_options: dict[str, str]
@@ -1257,63 +1232,4 @@ class LakeflowConnect:
 
         endpoint = f"/directories/{directory_id}/mailinglists/{mailing_list_id}/contacts"
         return self._fetch_paginated_list(endpoint, start_offset, cursor_field=None)
-
-    def _make_request(
-        self,
-        method: str,
-        url: str,
-        params: dict = None,
-        json_body: dict = None,
-        max_retries: int = QualtricsConfig.MAX_HTTP_RETRIES
-    ) -> dict:
-        """
-        Make an HTTP request to Qualtrics API with retry logic.
-        
-        Args:
-            method: HTTP method (GET, POST, etc.)
-            url: Full URL to request
-            params: Query parameters
-            json_body: JSON body for POST requests
-            max_retries: Maximum number of retry attempts
-            
-        Returns:
-            Parsed JSON response
-        """
-        for attempt in range(max_retries):
-            try:
-                if method == "GET":
-                    response = requests.get(url, headers=self.headers, params=params)
-                elif method == "POST":
-                    response = requests.post(url, headers=self.headers, json=json_body)
-                else:
-                    raise ValueError(f"Unsupported HTTP method: {method}")
-                
-                # Handle rate limiting
-                if response.status_code == 429:
-                    retry_after = int(response.headers.get("Retry-After", QualtricsConfig.RATE_LIMIT_DEFAULT_WAIT))
-                    logger.warning(f"Rate limited. Waiting {retry_after} seconds...")
-                    time.sleep(retry_after)
-                    continue
-
-                # Capture response body for debugging before raising
-                if not response.ok:
-                    try:
-                        error_detail = response.json()
-                        logger.error(f"API Error Response: {error_detail}")
-                    except:
-                        logger.error(f"API Error Response (raw): {response.text}")
-                
-                response.raise_for_status()
-                return response.json()
-                
-            except requests.exceptions.RequestException as e:
-                if attempt == max_retries - 1:
-                    raise Exception(f"Request failed after {max_retries} attempts: {e}")
-                
-                # Exponential backoff
-                wait_time = 2 ** attempt
-                logger.warning(f"Request failed, retrying in {wait_time} seconds... (attempt {attempt + 1}/{max_retries})")
-                time.sleep(wait_time)
-        
-        raise Exception("Request failed")
 
