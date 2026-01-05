@@ -158,15 +158,16 @@ Table-specific options are passed via the pipeline spec under `table` in `object
 - `SurveyLanguage` (string): Default language code
 - `SurveyCreationDate` (string): ISO 8601 timestamp when created
 - `LastModified` (string): ISO 8601 timestamp of last modification
-- `Questions` (map<string, struct>): Map of question IDs to question definitions
-  - Each question contains: `QuestionID`, `QuestionText`, `QuestionType`, `Selector`, `Choices`, `Answers`, `Validation`, etc.
-- `Blocks` (map<string, struct>): Map of block IDs to block definitions
-  - Each block contains: `Type`, `Description`, `ID`, `BlockElements`, `Options`
-- `Flow` (array<struct>): Array of flow elements defining survey navigation
-- `EmbeddedData` (array<struct>): Embedded data field definitions
-- `SurveyOptions` (struct): Survey-level settings and options
+- `Questions` (string): JSON string containing map of question IDs to question definitions
+- `Blocks` (string): JSON string containing block definitions
+- `Flow` (string): JSON string containing flow elements defining survey navigation
+- `EmbeddedData` (string): JSON string containing embedded data field definitions
+- `SurveyOptions` (string): JSON string containing survey-level settings
 
-> **Note**: Use `survey_definitions` to build a data dictionary that maps Question IDs (e.g., `QID1`) to human-readable question text and choice labels.
+> **Note**: Complex nested fields (`Questions`, `Blocks`, `Flow`, etc.) are stored as JSON strings because the Qualtrics API returns variable structures. Use Spark's `from_json()` function to parse them:
+> ```sql
+> SELECT SurveyID, from_json(Questions, 'MAP<STRING, STRUCT<QuestionText: STRING>>') FROM survey_definitions
+> ```
 
 #### `survey_responses` table schema:
 - `responseId` (string): Unique response identifier (primary key)
