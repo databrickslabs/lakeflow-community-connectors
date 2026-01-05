@@ -20,6 +20,7 @@ import time
 from pyspark.sql import Row
 from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
 from pyspark.sql.types import *
+import logging
 import requests
 import zipfile
 
@@ -163,6 +164,30 @@ def register_lakeflow_source(spark):
     ########################################################
     # sources/qualtrics/qualtrics.py
     ########################################################
+
+    logger = logging.getLogger(__name__)
+
+
+    class QualtricsConfig:
+        """Configuration constants for Qualtrics connector."""
+
+        # Export polling configuration
+        MAX_EXPORT_POLL_ATTEMPTS = 60  # Max polling attempts (2 min total at 2s/attempt)
+        EXPORT_POLL_INTERVAL_FAST = 1  # seconds (when >50% complete)
+        EXPORT_POLL_INTERVAL_SLOW = 2  # seconds (when <50% complete)
+
+        # HTTP retry configuration (uses exponential backoff: 2^attempt)
+        MAX_HTTP_RETRIES = 3  # Results in 1s, 2s, 4s waits = 7s total max
+
+        # Rate limiting
+        RATE_LIMIT_DEFAULT_WAIT = 60  # seconds (when Retry-After header missing)
+
+        # Pagination
+        DEFAULT_PAGE_SIZE = 100
+
+        # Request timeout
+        REQUEST_TIMEOUT = 30  # seconds per HTTP request
+
 
     class LakeflowConnect:
         def __init__(self, options: Dict[str, str]) -> None:
@@ -438,7 +463,7 @@ def register_lakeflow_source(spark):
             # Fetch all pages
             while True:
                 url = f"{self.base_url}/surveys"
-                params = {"pageSize": 100}
+                params = {"pageSize": QualtricsConfig.DEFAULT_PAGE_SIZE}
 
                 if skip_token:
                     params["skipToken"] = skip_token
@@ -475,7 +500,7 @@ def register_lakeflow_source(spark):
                         break
 
                 except Exception as e:
-                    print(f"Error fetching surveys: {e}")
+                    logger.error(f"Error fetching surveys: {e}", exc_info=True)
                     break
 
             # Calculate new offset
@@ -587,12 +612,12 @@ def register_lakeflow_source(spark):
 
             except Exception as e:
                 error_msg = f"Failed to create response export for survey {survey_id}: {e}"
-                print(f"ERROR: {error_msg}")
-                print(f"This survey might not have any responses yet, or the API token lacks response export permissions.")
+                logger.error(error_msg, exc_info=True)
+                logger.info("This survey might not have any responses yet, or the API token lacks response export permissions.")
                 raise Exception(error_msg)
 
         def _poll_export_progress(
-            self, survey_id: str, progress_id: str, max_attempts: int = 60
+            self, survey_id: str, progress_id: str, max_attempts: int = QualtricsConfig.MAX_EXPORT_POLL_ATTEMPTS
         ) -> str:
             """
             Poll the export progress until completion.
@@ -624,9 +649,9 @@ def register_lakeflow_source(spark):
 
                     # Wait before next poll (adaptive based on progress)
                     if percent_complete < 50:
-                        time.sleep(2)
+                        time.sleep(QualtricsConfig.EXPORT_POLL_INTERVAL_SLOW)
                     else:
-                        time.sleep(1)
+                        time.sleep(QualtricsConfig.EXPORT_POLL_INTERVAL_FAST)
 
                 except Exception as e:
                     if attempt == max_attempts - 1:
@@ -807,7 +832,7 @@ def register_lakeflow_source(spark):
                 url = f"{self.base_url}/distributions"
                 params = {
                     "surveyId": survey_id,
-                    "pageSize": 100
+                    "pageSize": QualtricsConfig.DEFAULT_PAGE_SIZE
                 }
 
                 if skip_token:
@@ -845,7 +870,7 @@ def register_lakeflow_source(spark):
                         break
 
                 except Exception as e:
-                    print(f"Error fetching distributions: {e}")
+                    logger.error(f"Error fetching distributions: {e}", exc_info=True)
                     break
 
             # Calculate new offset
@@ -902,7 +927,7 @@ def register_lakeflow_source(spark):
             # Fetch all pages
             while True:
                 url = f"{self.base_url}/directories/{directory_id}/mailinglists/{mailing_list_id}/contacts"
-                params = {"pageSize": 100}
+                params = {"pageSize": QualtricsConfig.DEFAULT_PAGE_SIZE}
 
                 if skip_token:
                     params["skipToken"] = skip_token
@@ -931,7 +956,7 @@ def register_lakeflow_source(spark):
                         break
 
                 except Exception as e:
-                    print(f"Error fetching contacts: {e}")
+                    logger.error(f"Error fetching contacts: {e}", exc_info=True)
                     break
 
             # Return empty offset for snapshot mode
@@ -945,7 +970,7 @@ def register_lakeflow_source(spark):
             url: str,
             params: dict = None,
             json_body: dict = None,
-            max_retries: int = 3
+            max_retries: int = QualtricsConfig.MAX_HTTP_RETRIES
         ) -> dict:
             """
             Make an HTTP request to Qualtrics API with retry logic.
@@ -971,8 +996,8 @@ def register_lakeflow_source(spark):
 
                     # Handle rate limiting
                     if response.status_code == 429:
-                        retry_after = int(response.headers.get("Retry-After", 60))
-                        print(f"Rate limited. Waiting {retry_after} seconds...")
+                        retry_after = int(response.headers.get("Retry-After", QualtricsConfig.RATE_LIMIT_DEFAULT_WAIT))
+                        logger.warning(f"Rate limited. Waiting {retry_after} seconds...")
                         time.sleep(retry_after)
                         continue
 
@@ -980,9 +1005,9 @@ def register_lakeflow_source(spark):
                     if not response.ok:
                         try:
                             error_detail = response.json()
-                            print(f"API Error Response: {error_detail}")
+                            logger.error(f"API Error Response: {error_detail}")
                         except:
-                            print(f"API Error Response (raw): {response.text}")
+                            logger.error(f"API Error Response (raw): {response.text}")
 
                     response.raise_for_status()
                     return response.json()
@@ -993,7 +1018,7 @@ def register_lakeflow_source(spark):
 
                     # Exponential backoff
                     wait_time = 2 ** attempt
-                    print(f"Request failed, retrying in {wait_time} seconds...")
+                    logger.warning(f"Request failed, retrying in {wait_time} seconds... (attempt {attempt + 1}/{max_retries})")
                     time.sleep(wait_time)
 
             raise Exception("Request failed")
