@@ -92,25 +92,58 @@ def _create_append_table(
         )
 
 
-def _get_table_metadata(spark, connection_name: str, table_list: list[str]) -> dict:
+def _get_table_metadata(
+    spark, 
+    connection_name: str, 
+    table_list: list[str],
+    table_configs: dict[str, dict] = None
+) -> dict:
     """Get table metadata (primary_keys, cursor_field, ingestion_type etc.)"""
-    df = (
-        spark.read.format("lakeflow_connect")
-        .option("databricks.connection", connection_name)
-        .option("tableName", "_lakeflow_metadata")
-        .option("tableNameList", ",".join(table_list))
-        .load()
-    )
+    
+    # If table_configs not passed, assume static schema connector (batch call)
+    if table_configs is None:
+        df = (
+            spark.read.format("lakeflow_connect")
+            .option("databricks.connection", connection_name)
+            .option("tableName", "_lakeflow_metadata")
+            .option("tableNameList", ",".join(table_list))
+            .load()
+        )
+        metadata = {}
+        for row in df.collect():
+            table_metadata = {}
+            if row["primary_keys"] is not None:
+                table_metadata["primary_keys"] = row["primary_keys"]
+            if row["cursor_field"] is not None:
+                table_metadata["cursor_field"] = row["cursor_field"]
+            if row["ingestion_type"] is not None:
+                table_metadata["ingestion_type"] = row["ingestion_type"]
+            metadata[row["tableName"]] = table_metadata
+        return metadata
+    
+    # If table_configs passed, call per-table with options (dynamic schema connector)
     metadata = {}
-    for row in df.collect():
-        table_metadata = {}
-        if row["primary_keys"] is not None:
-            table_metadata["primary_keys"] = row["primary_keys"]
-        if row["cursor_field"] is not None:
-            table_metadata["cursor_field"] = row["cursor_field"]
-        if row["ingestion_type"] is not None:
-            table_metadata["ingestion_type"] = row["ingestion_type"]
-        metadata[row["tableName"]] = table_metadata
+    for table_name in table_list:
+        table_config = table_configs.get(table_name, {})
+        df = (
+            spark.read.format("lakeflow_connect")
+            .option("databricks.connection", connection_name)
+            .option("tableName", "_lakeflow_metadata")
+            .option("tableNameList", table_name)
+            .options(**table_config)
+            .load()
+        )
+        
+        for row in df.collect():
+            table_metadata = {}
+            if row["primary_keys"] is not None:
+                table_metadata["primary_keys"] = row["primary_keys"]
+            if row["cursor_field"] is not None:
+                table_metadata["cursor_field"] = row["cursor_field"]
+            if row["ingestion_type"] is not None:
+                table_metadata["ingestion_type"] = row["ingestion_type"]
+            metadata[row["tableName"]] = table_metadata
+    
     return metadata
 
 
@@ -122,7 +155,14 @@ def ingest(spark, pipeline_spec: dict) -> None:
     connection_name = spec.connection_name()
     table_list = spec.get_table_list()
 
-    metadata = _get_table_metadata(spark, connection_name, table_list)
+    # Collect table configurations for dynamic schema connectors
+    table_configs = {table: spec.get_table_configuration(table) for table in table_list}
+    
+    # Only pass configs if any table actually has configuration
+    if any(bool(config) for config in table_configs.values()):
+        metadata = _get_table_metadata(spark, connection_name, table_list, table_configs)
+    else:
+        metadata = _get_table_metadata(spark, connection_name, table_list)
 
     def _ingest_table(table: str) -> None:
         """Helper function to ingest a single table"""
