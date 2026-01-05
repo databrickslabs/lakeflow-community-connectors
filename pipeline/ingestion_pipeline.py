@@ -17,7 +17,6 @@ def _create_cdc_table(
     table_config: dict[str, str],
 ) -> None:
     """Create CDC table using streaming and apply_changes"""
-    "test"
 
     @sdp.view(name=view_name)
     def v():
