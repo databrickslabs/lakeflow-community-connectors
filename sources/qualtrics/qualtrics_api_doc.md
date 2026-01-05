@@ -367,36 +367,27 @@ curl -X GET \
 |------------|------|-------------|
 | `SurveyID` | string | Unique survey identifier. Primary key. |
 | `SurveyName` | string | Name/title of the survey. |
-| `SurveyDescription` | string or null | Description of the survey. |
-| `SurveyOwnerID` | string | User ID of the survey owner. |
-| `SurveyBrandID` | string | Brand ID associated with the survey. |
-| `DivisionID` | string or null | Division ID if applicable. |
-| `SurveyLanguage` | string | Default language code (e.g., "EN"). |
-| `SurveyActiveResponseSet` | string | ID of the active response set. |
 | `SurveyStatus` | string | Survey status (e.g., "Inactive", "Active"). |
-| `SurveyStartDate` | string or null | Survey start date (ISO 8601). |
-| `SurveyExpirationDate` | string or null | Survey expiration date (ISO 8601). |
-| `SurveyCreationDate` | string | When the survey was created (ISO 8601). |
+| `OwnerID` | string | User ID of the survey owner. |
 | `CreatorID` | string | User ID who created the survey. |
+| `BrandID` | string | Brand identifier. |
+| `BrandBaseURL` | string | Brand base URL (e.g., `https://yourbrand.qualtrics.com`). |
 | `LastModified` | string | Last modification timestamp (ISO 8601). |
 | `LastAccessed` | string or null | Last access timestamp (ISO 8601). |
 | `LastActivated` | string or null | Last activation timestamp (ISO 8601). |
-| `Deleted` | string or null | Deletion timestamp if deleted (ISO 8601). |
-| `ProjectCategory` | string | Project category (e.g., "CORE"). |
-| `ProjectType` | string | Project type identifier. |
+| `QuestionCount` | string | Number of questions in the survey. |
 
-**Nested objects** (stored as complex types):
+**Nested objects** (stored as JSON strings):
 
 | Column Name | Type | Description |
 |------------|------|-------------|
-| `Questions` | map\<string, struct\> | Map of question IDs (e.g., `QID1`, `QID2`) to question definitions. |
-| `Blocks` | map\<string, struct\> | Map of block IDs to block definitions containing question order. |
-| `Flow` | array\<struct\> | Array of flow elements defining survey navigation logic. |
-| `EmbeddedData` | array\<struct\> | Array of embedded data field definitions. |
-| `ResponseSets` | map\<string, struct\> | Map of response set IDs to response set definitions. |
-| `SurveyOptions` | struct | Survey-level options and settings. |
-| `Scoring` | struct or null | Scoring definitions if configured. |
-| `LoopAndMerge` | map\<string, struct\> or null | Loop and merge configurations. |
+| `Questions` | string (JSON) | Map of question IDs (e.g., `QID1`, `QID2`) to question definitions. |
+| `Blocks` | string (JSON) | Map of block IDs to block definitions containing question order. |
+| `SurveyFlow` | string (JSON) | Object containing `Flow` array defining survey navigation logic. |
+| `SurveyOptions` | string (JSON) | Survey-level options and settings. |
+| `ResponseSets` | string (JSON) | Map of response set IDs to response set definitions. |
+| `Scoring` | string (JSON) | Scoring definitions if configured. |
+| `ProjectInfo` | string (JSON) | Project metadata including ProjectCategory, ProjectType, etc. |
 
 **Question struct** (elements of `Questions` map):
 
@@ -457,7 +448,7 @@ curl -X GET \
 | `BlockElements` | array\<struct\> | Array of elements in the block (questions, page breaks). |
 | `Options` | struct | Block options (randomization, looping). |
 
-**Flow element struct** (elements of `Flow` array):
+**Flow element struct** (elements of `SurveyFlow.Flow` array):
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -482,13 +473,27 @@ curl -X GET \
   "result": {
     "SurveyID": "SV_abc123xyz",
     "SurveyName": "Customer Satisfaction Survey",
-    "SurveyDescription": "Q4 2024 Customer Feedback",
-    "SurveyOwnerID": "UR_123abc",
-    "SurveyLanguage": "EN",
     "SurveyStatus": "Active",
-    "SurveyCreationDate": "2024-01-15T10:30:00Z",
+    "OwnerID": "UR_123abc",
+    "CreatorID": "UR_123abc",
+    "BrandID": "yourbrand",
+    "BrandBaseURL": "https://yourbrand.qualtrics.com",
     "LastModified": "2024-12-20T14:22:33Z",
-    "ProjectCategory": "CORE",
+    "LastAccessed": "2024-12-20T14:22:33Z",
+    "LastActivated": "2024-01-15T10:30:00Z",
+    "QuestionCount": "5",
+    "ProjectInfo": {
+      "SurveyID": "SV_abc123xyz",
+      "ProjectCategory": "CORE",
+      "ProjectType": "NonDistributedSurvey"
+    },
+    "SurveyFlow": {
+      "Flow": [
+        {"Type": "Block", "ID": "BL_abc123", "FlowID": "FL_1"}
+      ],
+      "FlowID": "FL_1",
+      "Type": "Root"
+    },
     "Questions": {
       "QID1": {
         "QuestionID": "QID1",
@@ -1148,7 +1153,7 @@ Field names are generally consistent between write and read operations for surve
 - ✅ **Schema validation completed against live API** (2024-12-31) - see section below
 - ⚠️ Sessions API availability may vary by Qualtrics license tier - requires verification
 - ⚠️ Mailing lists and directories endpoints documented but not yet implemented
-- ⚠️ survey_definitions schema validation against live API pending
+- ✅ survey_definitions schema validated against live API (2026-01-05)
 
 ---
 

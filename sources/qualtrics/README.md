@@ -152,19 +152,24 @@ Table-specific options are passed via the pipeline spec under `table` in `object
 #### `survey_definitions` table schema:
 - `SurveyID` (string): Unique survey identifier (primary key)
 - `SurveyName` (string): Survey name/title
-- `SurveyDescription` (string): Survey description
-- `SurveyOwnerID` (string): User ID of survey owner
 - `SurveyStatus` (string): Survey status (e.g., Active, Inactive)
-- `SurveyLanguage` (string): Default language code
-- `SurveyCreationDate` (string): ISO 8601 timestamp when created
+- `OwnerID` (string): User ID of survey owner
+- `CreatorID` (string): User ID who created the survey
+- `BrandID` (string): Brand identifier
+- `BrandBaseURL` (string): Brand base URL (e.g., `https://yourbrand.qualtrics.com`)
 - `LastModified` (string): ISO 8601 timestamp of last modification
+- `LastAccessed` (string): ISO 8601 timestamp of last access
+- `LastActivated` (string): ISO 8601 timestamp of last activation
+- `QuestionCount` (string): Number of questions in the survey
 - `Questions` (string): JSON string containing map of question IDs to question definitions
 - `Blocks` (string): JSON string containing block definitions
-- `Flow` (string): JSON string containing flow elements defining survey navigation
-- `EmbeddedData` (string): JSON string containing embedded data field definitions
+- `SurveyFlow` (string): JSON string containing flow elements defining survey navigation
 - `SurveyOptions` (string): JSON string containing survey-level settings
+- `ResponseSets` (string): JSON string containing response set definitions
+- `Scoring` (string): JSON string containing scoring configuration
+- `ProjectInfo` (string): JSON string containing project metadata (ProjectCategory, ProjectType, etc.)
 
-> **Note**: Complex nested fields (`Questions`, `Blocks`, `Flow`, etc.) are stored as JSON strings because the Qualtrics API returns variable structures. Use Spark's `from_json()` function to parse them:
+> **Note**: Complex nested fields (`Questions`, `Blocks`, `SurveyFlow`, etc.) are stored as JSON strings because the Qualtrics API returns variable structures. Use Spark's `from_json()` function to parse them:
 > ```sql
 > SELECT SurveyID, from_json(Questions, 'MAP<STRING, STRUCT<QuestionText: STRING>>') FROM survey_definitions
 > ```
