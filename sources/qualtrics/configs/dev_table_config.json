@@ -1,4 +1,7 @@
 {
+    "survey_definitions": {
+        "surveyId": "YOUR_SURVEY_ID"
+    },
     "survey_responses": {
         "surveyId": "YOUR_SURVEY_ID"
     },
