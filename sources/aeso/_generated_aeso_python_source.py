@@ -218,10 +218,10 @@ def register_lakeflow_source(spark):
             if table_name == "pool_price":
                 return StructType([
                     StructField("begin_datetime_utc", TimestampType(), False),
-                    StructField("begin_datetime_mpt", TimestampType(), False),
                     StructField("pool_price", DoubleType(), True),  # Nullable - null for future hours with only forecasts
                     StructField("forecast_pool_price", DoubleType(), True),
                     StructField("rolling_30day_avg", DoubleType(), True),
+                    StructField("ingestion_time", TimestampType(), False),  # UTC timestamp when row was ingested
                 ])
 
             raise ValueError(f"Unknown table: {table_name}")
@@ -299,6 +299,9 @@ def register_lakeflow_source(spark):
 
             print(f"Fetching: {fetch_start_date} to {fetch_end_date}")
 
+            # Capture ingestion timestamp once for this batch
+            ingestion_timestamp = datetime.utcnow()
+
             while current_date <= fetch_end_date:
                 batch_end_dt = datetime.strptime(current_date, "%Y-%m-%d") + timedelta(days=max_batch_days - 1)
                 batch_end_date = min(batch_end_dt.strftime("%Y-%m-%d"), fetch_end_date)
@@ -313,23 +316,19 @@ def register_lakeflow_source(spark):
                     )
 
                     for price_obj in pool_prices:
-                        # Convert timezone-aware datetimes to timezone-naive to avoid PySpark conversion issues
-                        # PySpark will treat these as UTC/local time respectively without additional conversion
+                        # Get UTC datetime from source (natively UTC)
                         utc_dt = price_obj.begin_datetime_utc
-                        mpt_dt = price_obj.begin_datetime_mpt
 
-                        # Remove timezone info if present (convert to naive datetime)
+                        # Remove timezone info if present (keep as naive UTC datetime)
                         if hasattr(utc_dt, 'tzinfo') and utc_dt.tzinfo is not None:
                             utc_dt = utc_dt.replace(tzinfo=None)
-                        if hasattr(mpt_dt, 'tzinfo') and mpt_dt.tzinfo is not None:
-                            mpt_dt = mpt_dt.replace(tzinfo=None)
 
                         all_records.append({
                             "begin_datetime_utc": utc_dt,
-                            "begin_datetime_mpt": mpt_dt,
                             "pool_price": float(price_obj.pool_price) if price_obj.pool_price is not None else None,
                             "forecast_pool_price": float(price_obj.forecast_pool_price) if price_obj.forecast_pool_price is not None else None,
                             "rolling_30day_avg": float(price_obj.rolling_30day_avg) if price_obj.rolling_30day_avg is not None else None,
+                            "ingestion_time": ingestion_timestamp,
                         })
 
                     print(f"Fetched {len(pool_prices)} records")

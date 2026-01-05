@@ -27,11 +27,11 @@ curl -H "X-API-Key: YOUR_API_KEY" \
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `begin_datetime_utc` | timestamp (ISO 8601) | Settlement hour start in UTC |
-| `begin_datetime_mpt` | timestamp (ISO 8601) | Settlement hour start in Mountain Time |
+| `begin_datetime_utc` | timestamp (ISO 8601) | Settlement hour start in UTC - natively UTC from source |
 | `pool_price` | decimal (nullable) | Actual pool price ($/MWh) - null for future hours with forecast only |
 | `forecast_pool_price` | decimal (nullable) | Forecasted price ($/MWh) |
 | `rolling_30day_avg` | decimal (nullable) | 30-day rolling average ($/MWh) |
+| `ingestion_time` | timestamp (ISO 8601) | UTC timestamp when the row was last ingested/updated |
 
 **Primary Key**: `begin_datetime_utc`
 
@@ -84,11 +84,11 @@ curl -H "X-API-Key: YOUR_API_KEY" \
   "return": {
     "Pool Price Report": [
       {
-        "begin_datetime_utc": "2024-12-01T07:00:00Z",
-        "begin_datetime_mpt": "2024-12-01T01:00:00",
+        "begin_datetime_utc": "2024-12-01T07:00:00",
         "pool_price": 45.67,
         "forecast_pool_price": 44.50,
-        "rolling_30day_avg": 52.33
+        "rolling_30day_avg": 52.33,
+        "ingestion_time": "2024-12-01T10:30:00"
       }
     ]
   }

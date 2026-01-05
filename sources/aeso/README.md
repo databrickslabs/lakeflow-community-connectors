@@ -99,11 +99,11 @@ The connector automatically handles end dates and fetches up to "now" on every r
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `begin_datetime_utc` | timestamp | Settlement hour start (UTC) - Primary Key |
-| `begin_datetime_mpt` | timestamp | Settlement hour start (Mountain Time) |
+| `begin_datetime_utc` | timestamp | Settlement hour start (UTC) - Primary Key, natively UTC from source |
 | `pool_price` | double (nullable) | Actual pool price ($/MWh) - null for future hours |
 | `forecast_pool_price` | double (nullable) | Forecasted price ($/MWh) |
 | `rolling_30day_avg` | double (nullable) | 30-day rolling average ($/MWh) |
+| `ingestion_time` | timestamp | UTC timestamp when the row was last ingested/updated |
 
 **Ingestion type:** CDC with upsert by `begin_datetime_utc`
 
