@@ -83,6 +83,7 @@ The connection can also be created using the standard Unity Catalog API.
 The Qualtrics connector exposes a **static list** of tables:
 
 - `surveys` - Survey definitions and metadata
+- `survey_definitions` - Full survey structure including questions, blocks, and flow
 - `survey_responses` - Individual survey response data
 - `distributions` - Survey distribution records (email sends, SMS, anonymous links)
 - `contacts` - Contact records within mailing lists
@@ -92,6 +93,7 @@ The Qualtrics connector exposes a **static list** of tables:
 | Table | Description | Ingestion Type | Primary Key | Incremental Cursor |
 |-------|-------------|----------------|-------------|-------------------|
 | `surveys` | Survey metadata including name, status, creation/modification dates | `cdc` | `id` | `lastModified` |
+| `survey_definitions` | Full survey structure with questions, blocks, flow, and options | `snapshot` | `SurveyID` | N/A (full refresh) |
 | `survey_responses` | Individual responses to surveys including all question answers | `append` | `responseId` | `recordedDate` |
 | `distributions` | Distribution records for survey invitations and sends | `cdc` | `id` | `modifiedDate` |
 | `contacts` | Contact records within mailing lists | `snapshot` | `contactId` | N/A (full refresh) |
@@ -104,6 +106,12 @@ Table-specific options are passed via the pipeline spec under `table` in `object
 - **No table-specific options required**
 - Automatically retrieves all surveys accessible to the authenticated account
 - Supports incremental sync based on `lastModified` timestamp
+
+#### `survey_definitions` table
+- **`surveyId`** (string, **required**): The Survey ID to retrieve the definition for
+  - Format: `SV_...` (e.g., `SV_abc123xyz`)
+  - Returns the complete survey structure including all questions, choices, blocks, and flow
+  - Useful for building data dictionaries to interpret survey response values
 
 #### `survey_responses` table
 - **`surveyId`** (string, **required**): The Survey ID to export responses from
@@ -139,7 +147,27 @@ Table-specific options are passed via the pipeline spec under `table` in `object
 - `creationDate` (string): ISO 8601 timestamp when survey was created
 - `lastModified` (string): ISO 8601 timestamp of last modification (incremental cursor)
 
-> **Note**: Fields like `brandId`, `brandBaseURL`, `organizationId`, and `expiration` are not returned by the list surveys endpoint. Use the GET /surveys/{id} endpoint if you need these fields.
+> **Note**: Fields like `brandId`, `brandBaseURL`, `organizationId`, and `expiration` are not returned by the list surveys endpoint. Use the `survey_definitions` table if you need detailed survey structure.
+
+#### `survey_definitions` table schema:
+- `SurveyID` (string): Unique survey identifier (primary key)
+- `SurveyName` (string): Survey name/title
+- `SurveyDescription` (string): Survey description
+- `SurveyOwnerID` (string): User ID of survey owner
+- `SurveyStatus` (string): Survey status (e.g., Active, Inactive)
+- `SurveyLanguage` (string): Default language code
+- `SurveyCreationDate` (string): ISO 8601 timestamp when created
+- `LastModified` (string): ISO 8601 timestamp of last modification
+- `Questions` (string): JSON string containing map of question IDs to question definitions
+- `Blocks` (string): JSON string containing block definitions
+- `Flow` (string): JSON string containing flow elements defining survey navigation
+- `EmbeddedData` (string): JSON string containing embedded data field definitions
+- `SurveyOptions` (string): JSON string containing survey-level settings
+
+> **Note**: Complex nested fields (`Questions`, `Blocks`, `Flow`, etc.) are stored as JSON strings because the Qualtrics API returns variable structures. Use Spark's `from_json()` function to parse them:
+> ```sql
+> SELECT SurveyID, from_json(Questions, 'MAP<STRING, STRUCT<QuestionText: STRING>>') FROM survey_definitions
+> ```
 
 #### `survey_responses` table schema:
 - `responseId` (string): Unique response identifier (primary key)
@@ -266,6 +294,12 @@ Example `pipeline_spec`:
       },
       {
         "table": {
+          "source_table": "survey_definitions",
+          "surveyId": "SV_abc123xyz"
+        }
+      },
+      {
+        "table": {
           "source_table": "survey_responses",
           "surveyId": "SV_abc123xyz"
         }
@@ -290,6 +324,7 @@ Example `pipeline_spec`:
 
 - `connection_name` must point to the UC connection configured with your Qualtrics `api_token` and `datacenter_id`
 - For `surveys` table: No additional options needed
+- For `survey_definitions` table: `surveyId` is **required**
 - For `survey_responses` table: `surveyId` is **required**
 - For `distributions` table: `surveyId` is **required**
 - For `contacts` table: Both `directoryId` and `mailingListId` are **required**
@@ -305,6 +340,11 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 - **First run**: Retrieves all surveys
 - **Subsequent runs**: Only fetches surveys modified since last sync (based on `lastModified` field)
 - Automatically maintains cursor state
+
+**For `survey_definitions` table (Snapshot)**:
+- **All runs**: Retrieves the complete survey definition for the specified survey
+- Returns questions, blocks, flow, and all survey structure in a single record
+- Useful for building data dictionaries to interpret response values
 
 **For `survey_responses` table (Append)**:
 - **First run**: Exports all responses for the specified survey

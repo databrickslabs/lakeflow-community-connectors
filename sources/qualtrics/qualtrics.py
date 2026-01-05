@@ -58,7 +58,7 @@ class LakeflowConnect:
         }
 
         # Supported tables
-        self.tables = ["surveys", "survey_responses", "distributions", "contacts"]
+        self.tables = ["surveys", "survey_definitions", "survey_responses", "distributions", "contacts"]
     
     def list_tables(self) -> List[str]:
         """
@@ -89,6 +89,8 @@ class LakeflowConnect:
         
         if table_name == "surveys":
             return self._get_surveys_schema()
+        elif table_name == "survey_definitions":
+            return self._get_survey_definitions_schema()
         elif table_name == "survey_responses":
             return self._get_survey_responses_schema()
         elif table_name == "distributions":
@@ -113,7 +115,51 @@ class LakeflowConnect:
             StructField("creationDate", StringType(), True),
             StructField("lastModified", StringType(), True)
         ])
-    
+
+    def _get_survey_definitions_schema(self) -> StructType:
+        """Get schema for survey_definitions table.
+
+        Note: Based on GET /survey-definitions/{surveyId} endpoint.
+        Returns full survey structure including questions, blocks, flow.
+        
+        The Qualtrics API returns variable structures for nested fields (e.g., Blocks
+        can be a dict or array depending on the survey). To handle this variability,
+        we use a simplified schema that captures key metadata fields and stores
+        complex nested structures as flexible StringType (JSON strings).
+        """
+        return StructType([
+            # Survey identification - these are consistently typed
+            StructField("SurveyID", StringType(), True),
+            StructField("SurveyName", StringType(), True),
+            StructField("SurveyDescription", StringType(), True),
+            StructField("SurveyOwnerID", StringType(), True),
+            StructField("SurveyBrandID", StringType(), True),
+            StructField("DivisionID", StringType(), True),
+            StructField("SurveyLanguage", StringType(), True),
+            StructField("SurveyActiveResponseSet", StringType(), True),
+            StructField("SurveyStatus", StringType(), True),
+            StructField("SurveyStartDate", StringType(), True),
+            StructField("SurveyExpirationDate", StringType(), True),
+            StructField("SurveyCreationDate", StringType(), True),
+            StructField("CreatorID", StringType(), True),
+            StructField("LastModified", StringType(), True),
+            StructField("LastAccessed", StringType(), True),
+            StructField("LastActivated", StringType(), True),
+            StructField("Deleted", StringType(), True),
+            StructField("ProjectCategory", StringType(), True),
+            StructField("ProjectType", StringType(), True),
+            # Complex nested structures - stored as StringType (JSON)
+            # These fields have variable structure depending on survey configuration
+            StructField("Questions", StringType(), True),
+            StructField("Blocks", StringType(), True),
+            StructField("Flow", StringType(), True),
+            StructField("EmbeddedData", StringType(), True),
+            StructField("SurveyOptions", StringType(), True),
+            StructField("ResponseSets", StringType(), True),
+            StructField("LoopAndMerge", StringType(), True),
+            StructField("Scoring", StringType(), True)
+        ])
+
     def _get_survey_responses_schema(self) -> StructType:
         """Get schema for survey_responses table."""
         return StructType([
@@ -239,6 +285,12 @@ class LakeflowConnect:
                 "cursor_field": "lastModified",
                 "ingestion_type": "cdc"
             }
+        elif table_name == "survey_definitions":
+            return {
+                "primary_keys": ["SurveyID"],
+                "cursor_field": None,
+                "ingestion_type": "snapshot"
+            }
         elif table_name == "survey_responses":
             return {
                 "primary_keys": ["responseId"],
@@ -281,6 +333,8 @@ class LakeflowConnect:
         
         if table_name == "surveys":
             return self._read_surveys(start_offset)
+        elif table_name == "survey_definitions":
+            return self._read_survey_definitions(start_offset, table_options)
         elif table_name == "survey_responses":
             return self._read_survey_responses(start_offset, table_options)
         elif table_name == "distributions":
@@ -366,7 +420,70 @@ class LakeflowConnect:
             new_offset["lastModified"] = last_modified_cursor
         
         return iter(all_surveys), new_offset
-    
+
+    def _read_survey_definitions(
+        self, start_offset: dict, table_options: Dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read survey definition from Qualtrics API.
+
+        Args:
+            start_offset: Dictionary (ignored for snapshot mode)
+            table_options: Must contain 'surveyId'
+
+        Returns:
+            Tuple of (iterator of survey definition records, empty offset dict)
+        """
+        survey_id = table_options.get("surveyId")
+        if not survey_id:
+            raise ValueError(
+                "surveyId is required in table_options for survey_definitions table"
+            )
+
+        url = f"{self.base_url}/survey-definitions/{survey_id}"
+
+        try:
+            response = self._make_request("GET", url)
+            result = response.get("result", {})
+
+            if not result:
+                logger.warning(f"No survey definition found for survey {survey_id}")
+                return iter([]), {}
+
+            # Process the result to serialize complex nested fields as JSON strings
+            # This is needed because the API returns variable structures (dict or array)
+            # for fields like Blocks, which can't be handled by a fixed schema
+            processed = {}
+            
+            # Copy simple string fields as-is
+            simple_fields = [
+                "SurveyID", "SurveyName", "SurveyDescription", "SurveyOwnerID",
+                "SurveyBrandID", "DivisionID", "SurveyLanguage", "SurveyActiveResponseSet",
+                "SurveyStatus", "SurveyStartDate", "SurveyExpirationDate",
+                "SurveyCreationDate", "CreatorID", "LastModified", "LastAccessed",
+                "LastActivated", "Deleted", "ProjectCategory", "ProjectType"
+            ]
+            for field in simple_fields:
+                processed[field] = result.get(field)
+            
+            # Serialize complex nested fields as JSON strings
+            complex_fields = [
+                "Questions", "Blocks", "Flow", "EmbeddedData",
+                "SurveyOptions", "ResponseSets", "LoopAndMerge", "Scoring"
+            ]
+            for field in complex_fields:
+                value = result.get(field)
+                if value is not None:
+                    processed[field] = json.dumps(value)
+                else:
+                    processed[field] = None
+
+            return iter([processed]), {}
+
+        except Exception as e:
+            logger.error(f"Error fetching survey definition for {survey_id}: {e}", exc_info=True)
+            raise
+
     def _read_survey_responses(
         self, start_offset: dict, table_options: Dict[str, str]
     ) -> (Iterator[dict], dict):
