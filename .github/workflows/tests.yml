@@ -11,22 +11,61 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      libs: ${{ steps.filter.outputs.libs }}
-      pipeline: ${{ steps.filter.outputs.pipeline }}
-      example: ${{ steps.filter.outputs.example }}
+      libs: ${{ steps.check.outputs.libs }}
+      pipeline: ${{ steps.check.outputs.pipeline }}
+      example: ${{ steps.check.outputs.example }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
+      # cannot use dorny because of ip allowlisting
+      # - uses: dorny/paths-filter@v3
         with:
-          filters: |
-            libs:
-              - 'libs/**'
-            pipeline:
-              - 'pipeline/**'
-            example:
-              - 'sources/example/**'
-              - 'sources/interface/**'
+          fetch-depth: 0
+      - name: Check changed paths
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE_SHA="${{ github.event.before }}"
+            HEAD_SHA="${{ github.event.after }}"
+          fi
+
+          # Handle initial commit or force push
+          if ! git cat-file -e "$BASE_SHA" 2>/dev/null; then
+            BASE_SHA=$(git rev-parse HEAD~1 2>/dev/null || echo "")
+          fi
+
+          if [ -z "$BASE_SHA" ]; then
+            # First commit, check all files
+            CHANGED_FILES=$(git ls-files)
+          else
+            CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          fi
+
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+
+          # Check libs
+          if echo "$CHANGED_FILES" | grep -q '^libs/'; then
+            echo "libs=true" >> $GITHUB_OUTPUT
+          else
+            echo "libs=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Check pipeline
+          if echo "$CHANGED_FILES" | grep -q '^pipeline/'; then
+            echo "pipeline=true" >> $GITHUB_OUTPUT
+          else
+            echo "pipeline=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Check example (also triggers on interface changes)
+          if echo "$CHANGED_FILES" | grep -qE '^sources/(example|interface)/'; then
+            echo "example=true" >> $GITHUB_OUTPUT
+          else
+            echo "example=false" >> $GITHUB_OUTPUT
+          fi
 
   # Test libs
   test-libs:
