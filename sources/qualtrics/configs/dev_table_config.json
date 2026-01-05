@@ -8,8 +8,11 @@
     "distributions": {
         "surveyId": "YOUR_SURVEY_ID"
     },
-    "contacts": {
+    "mailing_list_contacts": {
         "directoryId": "YOUR_DIRECTORY_ID",
         "mailingListId": "YOUR_MAILING_LIST_ID"
+    },
+    "directory_contacts": {
+        "directoryId": "YOUR_DIRECTORY_ID"
     }
 }

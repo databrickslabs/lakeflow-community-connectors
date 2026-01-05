@@ -72,7 +72,7 @@ class LakeflowConnect:
         }
 
         # Supported tables
-        self.tables = ["surveys", "survey_definitions", "survey_responses", "distributions", "contacts", "directories"]
+        self.tables = ["surveys", "survey_definitions", "survey_responses", "distributions", "mailing_list_contacts", "directory_contacts", "directories"]
     
     def list_tables(self) -> list[str]:
         """
@@ -113,8 +113,10 @@ class LakeflowConnect:
             return self._get_survey_responses_schema()
         elif table_name == "distributions":
             return self._get_distributions_schema()
-        elif table_name == "contacts":
-            return self._get_contacts_schema()
+        elif table_name == "mailing_list_contacts":
+            return self._get_mailing_list_contacts_schema()
+        elif table_name == "directory_contacts":
+            return self._get_directory_contacts_schema()
         elif table_name == "directories":
             return self._get_directories_schema()
         else:
@@ -253,8 +255,8 @@ class LakeflowConnect:
             ]), True)
         ])
 
-    def _get_contacts_schema(self) -> StructType:
-        """Get schema for contacts table.
+    def _get_mailing_list_contacts_schema(self) -> StructType:
+        """Get schema for mailing_list_contacts table.
 
         Note: Based on actual API response, the fields are:
         contactId, firstName, lastName, email, phone, extRef, language,
@@ -272,6 +274,15 @@ class LakeflowConnect:
             StructField("mailing_list_unsubscribed", BooleanType(), True),
             StructField("contact_lookup_id", StringType(), True)
         ])
+
+    def _get_directory_contacts_schema(self) -> StructType:
+        """Get schema for directory_contacts table.
+
+        Note: Returns same schema as mailing_list_contacts since both endpoints
+        return the same contact structure. Directory contacts endpoint returns
+        all contacts across all mailing lists in a directory.
+        """
+        return self._get_mailing_list_contacts_schema()
 
     def _get_directories_schema(self) -> StructType:
         """Get schema for directories table.
@@ -339,7 +350,13 @@ class LakeflowConnect:
                 "cursor_field": "modified_date",
                 "ingestion_type": "cdc"
             }
-        elif table_name == "contacts":
+        elif table_name == "mailing_list_contacts":
+            return {
+                "primary_keys": ["contact_id"],
+                "cursor_field": None,
+                "ingestion_type": "snapshot"
+            }
+        elif table_name == "directory_contacts":
             return {
                 "primary_keys": ["contact_id"],
                 "cursor_field": None,
@@ -381,8 +398,10 @@ class LakeflowConnect:
             return self._read_survey_responses(start_offset, table_options)
         elif table_name == "distributions":
             return self._read_distributions(start_offset, table_options)
-        elif table_name == "contacts":
-            return self._read_contacts(start_offset, table_options)
+        elif table_name == "mailing_list_contacts":
+            return self._read_mailing_list_contacts(start_offset, table_options)
+        elif table_name == "directory_contacts":
+            return self._read_directory_contacts(start_offset, table_options)
         elif table_name == "directories":
             return self._read_directories(start_offset)
         else:
@@ -1229,16 +1248,16 @@ class LakeflowConnect:
         )
 
     # =========================================================================
-    # Table Readers: Contacts
+    # Table Readers: Mailing List Contacts
     # =========================================================================
 
-    def _read_contacts(
+    def _read_mailing_list_contacts(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
-        Read contacts from Qualtrics API.
+        Read contacts from a specific mailing list in Qualtrics API.
 
-        Note: Contacts table uses snapshot mode (full refresh) as the API
+        Note: Mailing list contacts table uses snapshot mode (full refresh) as the API
         does not return lastModifiedDate field for incremental sync.
 
         Args:
@@ -1251,16 +1270,46 @@ class LakeflowConnect:
         directory_id = table_options.get("directoryId")
         if not directory_id:
             raise ValueError(
-                "directoryId is required in table_options for contacts table"
+                "directoryId is required in table_options for mailing_list_contacts table"
             )
 
         mailing_list_id = table_options.get("mailingListId")
         if not mailing_list_id:
             raise ValueError(
-                "mailingListId is required in table_options for contacts table"
+                "mailingListId is required in table_options for mailing_list_contacts table"
             )
 
         endpoint = f"/directories/{directory_id}/mailinglists/{mailing_list_id}/contacts"
+        return self._fetch_paginated_list(endpoint, start_offset, cursor_field=None)
+
+    # =========================================================================
+    # Table Readers: Directory Contacts
+    # =========================================================================
+
+    def _read_directory_contacts(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read all contacts from a directory in Qualtrics API.
+
+        Note: Directory contacts table uses snapshot mode (full refresh) as the API
+        does not return lastModifiedDate field for incremental sync. This endpoint
+        returns all contacts across all mailing lists in the directory.
+
+        Args:
+            start_offset: Dictionary containing pagination token (ignored for snapshot mode)
+            table_options: Must contain 'directoryId'
+
+        Returns:
+            Tuple of (iterator of contact records, empty offset dict)
+        """
+        directory_id = table_options.get("directoryId")
+        if not directory_id:
+            raise ValueError(
+                "directoryId is required in table_options for directory_contacts table"
+            )
+
+        endpoint = f"/directories/{directory_id}/contacts"
         return self._fetch_paginated_list(endpoint, start_offset, cursor_field=None)
 
     # =========================================================================
