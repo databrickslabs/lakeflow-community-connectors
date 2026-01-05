@@ -9,14 +9,16 @@ Lakeflow Community Connectors enable data ingestion from various source systems 
 ## Project Structure
 
 ```
-sources/           # Source connectors (github/, zendesk/, stripe/, etc.)
-  interface/       # LakeflowConnect base interface
-  {source}/        # Each connector has: {source}.py, README.md, test/, configs/
-libs/              # Shared utilities (spec_parser.py, utils.py, source_loader.py)
-pipeline/          # Core ingestion logic (PySpark Data Source, SDP orchestration)
-scripts/           # Build tools (merge_python_source.py)
-tests/             # Generic test suites (test_suite.py, lakeflow_connect_test_utils.py)
-prompts/           # Templates for AI-assisted development
+sources/                 # Source connectors (github/, zendesk/, stripe/, etc.)
+  interface/             # LakeflowConnect base interface
+  {source}/              # Each connector has: {source}.py, README.md, test/, configs/
+libs/                    # Shared utilities (spec_parser.py, utils.py, source_loader.py)
+pipeline/                # Core ingestion logic (PySpark Data Source, SDP orchestration)
+tools/
+  community_connector/   # CLI tool to set up and run community connectors in Databricks workspace.
+  scripts/               # Build tools (merge_python_source.py)
+tests/                   # Generic test suites (test_suite.py, lakeflow_connect_test_utils.py)
+prompts/                 # Templates for AI-assisted development
 ```
 
 ## Core Interface
@@ -51,7 +53,7 @@ pytest sources/{source_name}/test/test_{source_name}_lakeflow_connect.py -v
 pytest -v
 
 # Generate deployable file (temporary workaround)
-python scripts/merge_python_source.py {source_name}
+python tools/scripts/merge_python_source.py {source_name}
 ```
 
 ## Development Workflow
@@ -61,7 +63,7 @@ python scripts/merge_python_source.py {source_name}
 3. **Test & iterate** — Run the standard test suites against a real source system
    - *(Optional)* Implement write-back testing for end-to-end validation (write → read → verify cycle)
 4. **Generate documentation** — Create user-facing docs using the documentation template
-   - *(Temporary)* Run `scripts/merge_python_source.py` to generate the deployable file
+   - *(Temporary)* Run `tools/scripts/merge_python_source.py` to generate the deployable file
 
 ## Implementation Guidelines
 

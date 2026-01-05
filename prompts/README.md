@@ -28,7 +28,7 @@ If you need comprehensive end-to-end validation:
 - **Step 6: Create Public Documentation** - Generate user-facing README
   - See details in [create_connector_documentation.md](create_connector_documentation.md)
 - **(Temporary) Step 7: Run merge scripts**
-  - As a temporary workaround for current compatibility issues with Python Data Source and SDP, please run `scripts/merge_python_source.py` on your newly developed source. This will combine the source implementation into a single file.
+  - As a temporary workaround for current compatibility issues with Python Data Source and SDP, please run `tools/scripts/merge_python_source.py` on your newly developed source. This will combine the source implementation into a single file.
 
 ## Templates
 - [Source API Document Template](templates/source_api_doc_template.md): Used in Step 1 to document the researched API endpoints.

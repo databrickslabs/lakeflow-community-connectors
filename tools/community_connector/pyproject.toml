@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "databricks-labs-community-connector"
+version = "0.1.0"
+description = "CLI tool for setting up Databricks LakeFlow community connectors"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "Databricks Labs"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "databricks-sdk>=0.20.0",
+    "click>=8.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-mock>=3.0.0",
+]
+
+[project.scripts]
+community-connector = "databricks.labs.community_connector.cli:main"
+
+[project.entry-points."databricks.labs"]
+community_connector = "databricks.labs.community_connector"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+namespaces = true
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.package-data]
+"databricks.labs.community_connector" = ["*.yaml"]
+"databricks.labs.community_connector.templates" = ["*.py"]
+
