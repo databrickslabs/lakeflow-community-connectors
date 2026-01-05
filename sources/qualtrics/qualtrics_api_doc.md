@@ -36,6 +36,7 @@ The Qualtrics API provides access to various objects/resources. The object list 
 | Object Name | Description | Primary Endpoint | Ingestion Type |
 |------------|-------------|------------------|----------------|
 | `surveys` | Survey definitions and metadata | `GET /surveys` | `cdc` (upserts based on `lastModified`) |
+| `survey_definitions` | Full survey structure with questions, blocks, and flow | `GET /survey-definitions/{surveyId}` | `snapshot` (full refresh per survey) |
 | `survey_responses` | Individual responses to surveys | Response Export API (multi-step) | `append` (incremental based on `recordedDate`) |
 | `distributions` | Distribution records for survey invitations | `GET /distributions` | `cdc` (upserts based on `modifiedDate`) |
 | `mailing_lists` | Contact mailing lists | `GET /mailinglists` | `snapshot` |
@@ -48,6 +49,7 @@ The Qualtrics API provides access to various objects/resources. The object list 
 
 **High-level notes on objects**:
 - **surveys**: Core survey metadata including name, creation date, modification date, and status
+- **survey_definitions**: Complete survey structure including all questions, response choices, blocks, survey flow, and embedded data definitions. Provides the detailed schema needed to interpret survey responses.
 - **survey_responses**: Actual response data from survey participants; requires multi-step export process
 - **distributions**: Tracks how surveys were distributed (email, SMS, anonymous link, etc.)
 - **mailing_lists**: Collections of contacts used for survey distribution
@@ -347,6 +349,249 @@ curl -X GET \
 
 **Note**: The API does not return `lastModifiedDate`, `creationDate`, `embeddedData`, `responseHistory`, or `emailHistory` fields. Therefore, contacts table uses **snapshot mode** (full refresh) instead of CDC.
 
+### `survey_definitions` object
+
+**Source endpoint**:
+`GET /survey-definitions/{surveyId}`
+
+**Key behavior**:
+- Returns the complete survey structure including questions, blocks, flow, and embedded data definitions
+- Requires `surveyId` as a path parameter (obtained from the `surveys` table)
+- One API call per survey - no pagination (returns complete definition in single response)
+- Provides detailed question structure needed to interpret survey response data
+- Useful for building data dictionaries and understanding response field mappings
+
+**High-level schema (connector view)**:
+
+| Column Name | Type | Description |
+|------------|------|-------------|
+| `SurveyID` | string | Unique survey identifier. Primary key. |
+| `SurveyName` | string | Name/title of the survey. |
+| `SurveyDescription` | string or null | Description of the survey. |
+| `SurveyOwnerID` | string | User ID of the survey owner. |
+| `SurveyBrandID` | string | Brand ID associated with the survey. |
+| `DivisionID` | string or null | Division ID if applicable. |
+| `SurveyLanguage` | string | Default language code (e.g., "EN"). |
+| `SurveyActiveResponseSet` | string | ID of the active response set. |
+| `SurveyStatus` | string | Survey status (e.g., "Inactive", "Active"). |
+| `SurveyStartDate` | string or null | Survey start date (ISO 8601). |
+| `SurveyExpirationDate` | string or null | Survey expiration date (ISO 8601). |
+| `SurveyCreationDate` | string | When the survey was created (ISO 8601). |
+| `CreatorID` | string | User ID who created the survey. |
+| `LastModified` | string | Last modification timestamp (ISO 8601). |
+| `LastAccessed` | string or null | Last access timestamp (ISO 8601). |
+| `LastActivated` | string or null | Last activation timestamp (ISO 8601). |
+| `Deleted` | string or null | Deletion timestamp if deleted (ISO 8601). |
+| `ProjectCategory` | string | Project category (e.g., "CORE"). |
+| `ProjectType` | string | Project type identifier. |
+
+**Nested objects** (stored as complex types):
+
+| Column Name | Type | Description |
+|------------|------|-------------|
+| `Questions` | map\<string, struct\> | Map of question IDs (e.g., `QID1`, `QID2`) to question definitions. |
+| `Blocks` | map\<string, struct\> | Map of block IDs to block definitions containing question order. |
+| `Flow` | array\<struct\> | Array of flow elements defining survey navigation logic. |
+| `EmbeddedData` | array\<struct\> | Array of embedded data field definitions. |
+| `ResponseSets` | map\<string, struct\> | Map of response set IDs to response set definitions. |
+| `SurveyOptions` | struct | Survey-level options and settings. |
+| `Scoring` | struct or null | Scoring definitions if configured. |
+| `LoopAndMerge` | map\<string, struct\> or null | Loop and merge configurations. |
+
+**Question struct** (elements of `Questions` map):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `QuestionID` | string | Unique question identifier (e.g., `QID1`). |
+| `QuestionText` | string | The question text/prompt displayed to respondents. |
+| `QuestionDescription` | string | Internal description of the question. |
+| `DataExportTag` | string | Tag used in data exports (often same as QuestionID). |
+| `QuestionType` | string | Type of question (e.g., `MC`, `TE`, `Matrix`, `Slider`). |
+| `Selector` | string | Question selector/subtype (e.g., `SAVR`, `SACOL`, `SL`). |
+| `SubSelector` | string or null | Sub-selector for additional variations. |
+| `Configuration` | struct | Question-specific configuration options. |
+| `QuestionText_Unsafe` | string or null | Raw HTML version of question text. |
+| `Validation` | struct | Validation settings (force response, etc.). |
+| `Language` | array\<struct\> or null | Multi-language translations. |
+| `NextChoiceId` | integer | Next available choice ID for new choices. |
+| `NextAnswerId` | integer | Next available answer ID. |
+| `Choices` | map\<string, struct\> or null | Map of choice IDs to choice definitions (for MC questions). |
+| `ChoiceOrder` | array\<string\> or null | Order of choice IDs for display. |
+| `Answers` | map\<string, struct\> or null | Map of answer IDs to answer definitions (for Matrix questions). |
+| `AnswerOrder` | array\<string\> or null | Order of answer IDs for display. |
+| `RecodeValues` | map\<string, string\> or null | Recode mappings for choice values. |
+| `VariableNaming` | map\<string, string\> or null | Variable naming conventions for export. |
+| `DisplayLogic` | struct or null | Display logic conditions. |
+| `SkipLogic` | struct or null | Skip logic conditions. |
+| `GradingData` | array\<struct\> or null | Grading configuration for scored questions. |
+| `Randomization` | struct or null | Randomization settings for choices. |
+
+**Common QuestionType values**:
+
+| QuestionType | Description |
+|-------------|-------------|
+| `MC` | Multiple Choice |
+| `TE` | Text Entry |
+| `Matrix` | Matrix/Likert Scale |
+| `Slider` | Slider |
+| `RO` | Rank Order |
+| `CS` | Constant Sum |
+| `DD` | Drill Down |
+| `PGR` | Pick, Group, and Rank |
+| `SBS` | Side by Side |
+| `HotSpot` | Hot Spot |
+| `HeatMap` | Heat Map |
+| `GAP` | Graphic Association (Gap Analysis) |
+| `DB` | Descriptive Text / Graphic |
+| `Timing` | Timing Question |
+| `Meta` | Meta Info Question |
+| `Captcha` | Captcha Verification |
+
+**Block struct** (elements of `Blocks` map):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Type` | string | Block type (e.g., `Default`, `Standard`, `Trash`). |
+| `Description` | string | Block description/name. |
+| `ID` | string | Block identifier. |
+| `BlockElements` | array\<struct\> | Array of elements in the block (questions, page breaks). |
+| `Options` | struct | Block options (randomization, looping). |
+
+**Flow element struct** (elements of `Flow` array):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Type` | string | Flow element type (e.g., `Block`, `EmbeddedData`, `Branch`, `EndSurvey`). |
+| `ID` | string | Block ID or element identifier. |
+| `FlowID` | string | Unique flow element ID. |
+| `Autofill` | array\<struct\> or null | Autofill configurations. |
+
+**Example request**:
+
+```bash
+curl -X GET \
+  -H "X-API-TOKEN: <YOUR_API_TOKEN>" \
+  -H "Content-Type: application/json" \
+  "https://yourdatacenterid.qualtrics.com/API/v3/survey-definitions/SV_abc123xyz"
+```
+
+**Example response** (abbreviated):
+
+```json
+{
+  "result": {
+    "SurveyID": "SV_abc123xyz",
+    "SurveyName": "Customer Satisfaction Survey",
+    "SurveyDescription": "Q4 2024 Customer Feedback",
+    "SurveyOwnerID": "UR_123abc",
+    "SurveyLanguage": "EN",
+    "SurveyStatus": "Active",
+    "SurveyCreationDate": "2024-01-15T10:30:00Z",
+    "LastModified": "2024-12-20T14:22:33Z",
+    "ProjectCategory": "CORE",
+    "Questions": {
+      "QID1": {
+        "QuestionID": "QID1",
+        "QuestionText": "How satisfied are you with our service?",
+        "QuestionDescription": "Satisfaction Rating",
+        "DataExportTag": "Q1",
+        "QuestionType": "MC",
+        "Selector": "SAVR",
+        "SubSelector": "TX",
+        "Choices": {
+          "1": { "Display": "Very Satisfied", "RecodeValue": "5" },
+          "2": { "Display": "Satisfied", "RecodeValue": "4" },
+          "3": { "Display": "Neutral", "RecodeValue": "3" },
+          "4": { "Display": "Dissatisfied", "RecodeValue": "2" },
+          "5": { "Display": "Very Dissatisfied", "RecodeValue": "1" }
+        },
+        "ChoiceOrder": ["1", "2", "3", "4", "5"],
+        "Validation": {
+          "Settings": {
+            "ForceResponse": "OFF",
+            "Type": "None"
+          }
+        }
+      },
+      "QID2": {
+        "QuestionID": "QID2",
+        "QuestionText": "Please share any additional feedback:",
+        "QuestionDescription": "Open Feedback",
+        "DataExportTag": "Q2",
+        "QuestionType": "TE",
+        "Selector": "SL",
+        "Validation": {
+          "Settings": {
+            "ForceResponse": "OFF",
+            "Type": "None"
+          }
+        }
+      }
+    },
+    "Blocks": {
+      "BL_abc123": {
+        "Type": "Default",
+        "Description": "Default Question Block",
+        "ID": "BL_abc123",
+        "BlockElements": [
+          { "Type": "Question", "QuestionID": "QID1" },
+          { "Type": "Question", "QuestionID": "QID2" }
+        ]
+      }
+    },
+    "Flow": [
+      {
+        "Type": "Block",
+        "ID": "BL_abc123",
+        "FlowID": "FL_1"
+      },
+      {
+        "Type": "EndSurvey",
+        "FlowID": "FL_2"
+      }
+    ],
+    "EmbeddedData": [
+      {
+        "Description": "userId",
+        "Type": "Custom",
+        "Field": "userId",
+        "VariableType": "String"
+      }
+    ],
+    "SurveyOptions": {
+      "BackButton": "false",
+      "SaveAndContinue": "true",
+      "SurveyProtection": "PublicSurvey",
+      "BallotBoxStuffingPrevention": "false",
+      "NoIndex": "Yes",
+      "SecureResponseFiles": "true",
+      "SurveyExpiration": "None",
+      "SurveyTermination": "DefaultMessage",
+      "Header": "",
+      "Footer": "",
+      "ProgressBarDisplay": "None",
+      "PartialData": "+1 week",
+      "ValidationMessage": "",
+      "PreviousButton": "",
+      "NextButton": "",
+      "SurveyTitle": "Customer Satisfaction Survey"
+    }
+  },
+  "meta": {
+    "httpStatus": "200 - OK",
+    "requestId": "abc123-def456"
+  }
+}
+```
+
+**Notes on survey_definitions**:
+- This endpoint returns the complete survey structure in a single API call (no pagination)
+- The `Questions` map contains all question definitions keyed by Question ID
+- The `Choices` object within questions provides response option labels and recode values
+- Use this data to build a data dictionary that maps Question IDs to human-readable labels
+- The `Flow` array defines the order and logic of survey navigation
+- Combine with `survey_responses` data to interpret response values
+
 ## **Get Object Primary Keys**
 
 Primary keys for each object are static and defined by the connector:
@@ -354,6 +599,7 @@ Primary keys for each object are static and defined by the connector:
 | Object Name | Primary Key Column(s) |
 |------------|----------------------|
 | `surveys` | `id` |
+| `survey_definitions` | `SurveyID` |
 | `survey_responses` | `responseId` |
 | `distributions` | `id` |
 | `mailing_lists` | `id` |
@@ -370,6 +616,7 @@ Primary keys for each object are static and defined by the connector:
 | Object Name | Ingestion Type | Cursor Field | Notes |
 |------------|---------------|--------------|-------|
 | `surveys` | `cdc` | `lastModified` | Supports incremental updates based on modification timestamp. |
+| `survey_definitions` | `snapshot` | N/A | Full refresh per survey; requires `surveyId` parameter. Contains complete survey structure. |
 | `survey_responses` | `append` | `recordedDate` | New responses are appended; existing responses are immutable once completed. |
 | `distributions` | `cdc` | `modifiedDate` | Distribution records can be updated (e.g., status changes). |
 | `mailing_lists` | `snapshot` | N/A | Full refresh; relatively small dataset. |
@@ -424,6 +671,65 @@ Primary keys for each object are static and defined by the connector:
 **Incremental retrieval**:
 - Filter surveys using `lastModified >= last_sync_time` (client-side filtering after retrieval)
 - Note: The API does not support server-side filtering by date on `/surveys`
+
+### `survey_definitions` endpoint
+
+**Endpoint**: `GET /survey-definitions/{surveyId}`
+
+**Method**: GET
+
+**Path Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `surveyId` | string | Yes | The unique survey identifier (e.g., `SV_abc123xyz`). Obtain from `surveys` table. |
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `format` | string | No | Response format. Options: `qsf` (Qualtrics Survey Format, default is JSON). |
+
+**Response structure**:
+
+```json
+{
+  "result": {
+    "SurveyID": "SV_abc123xyz",
+    "SurveyName": "...",
+    "Questions": { "QID1": {...}, "QID2": {...} },
+    "Blocks": { "BL_abc": {...} },
+    "Flow": [...],
+    "EmbeddedData": [...],
+    "SurveyOptions": {...},
+    ...
+  },
+  "meta": {
+    "httpStatus": "200 - OK"
+  }
+}
+```
+
+**Pagination**:
+- None - Returns complete survey definition in a single response
+- Each survey must be fetched individually by its `surveyId`
+
+**Incremental retrieval**:
+- Not applicable - Use snapshot mode (full refresh per survey)
+- To detect survey definition changes, compare `LastModified` timestamp
+- Recommended pattern: Fetch survey definitions for surveys where `lastModified` has changed since last sync
+
+**Usage pattern for connector**:
+1. First sync the `surveys` table to get list of all survey IDs
+2. For each survey ID, call `GET /survey-definitions/{surveyId}`
+3. Store the complete definition as a single record per survey
+4. Use the definitions to build data dictionaries for interpreting `survey_responses`
+
+**Notes**:
+- The response can be large for complex surveys with many questions
+- Consider storing as a single JSON/struct column or flattening specific fields
+- The `Questions` map provides the schema needed to interpret response data
+- `Choices` and `Answers` within questions provide the valid response options
 
 ### `survey_responses` export workflow
 
@@ -766,12 +1072,15 @@ Field names are generally consistent between write and read operations for surve
 | Official Docs | https://www.qualtrics.com/support/integrations/api-integration/overview/ | 2024-12-23 | High | Authentication method (API token), header format |
 | Official Docs | https://www.qualtrics.com/support/integrations/api-integration/using-qualtrics-api-documentation/ | 2024-12-23 | High | Base URL structure, datacenter ID location |
 | Official Docs | https://api.qualtrics.com/ | 2024-12-23 | High | API reference, endpoints, response structures |
+| Official Docs | https://api.qualtrics.com/ZG9jOjg0MDczOA-api-reference | 2026-01-05 | High | Survey-definitions endpoint structure, Questions/Blocks/Flow schema |
 | Web Search | Multiple searches for specific endpoints | 2024-12-23 | Medium | Pagination mechanism, export workflow, rate limits |
+| Web Search | Qualtrics survey-definitions API search | 2026-01-05 | High | GET /survey-definitions/{surveyId} endpoint, response structure |
 | YouTube Tutorial | https://www.youtube.com/watch?v=_uhY_a4NgNc | 2024-12-23 | Medium | Response export workflow confirmation |
 | Python Lib Docs | https://www.qualtricsapi-pydocs.com/distributions.html | 2024-12-31 | High | Distributions endpoint requires surveyId parameter |
 | Python Lib Docs | https://www.qualtricsapi-pydocs.com/mailinglist(XM%20Subscribers).html | 2024-12-31 | High | Contacts endpoint structure, mailingListId parameter |
 | Community | Qualtrics Community discussions | 2024-12-31 | Medium | DirectoryId requirement for contacts endpoint |
 | API Reference | Stoplight API docs | 2024-12-31 | High | Full endpoint path: /directories/{directoryId}/mailinglists/{mailingListId}/contacts |
+| Official Docs | https://www.qualtrics.com/support/integrations/api-integration/finding-qualtrics-ids/ | 2026-01-05 | High | SurveyID format and location |
 
 ### Write Operations Research (Testing Only)
 
@@ -825,6 +1134,7 @@ Field names are generally consistent between write and read operations for surve
 - ✅ Authentication method documented (API token + datacenter ID + directory ID)
 - ✅ Primary objects (surveys, responses) fully documented
 - ✅ Secondary objects (distributions, contacts) documented with correct endpoints
+- ✅ **survey_definitions** object fully documented with Questions/Blocks/Flow schema (2026-01-05)
 - ✅ Pagination mechanism described
 - ✅ Incremental sync strategy defined
 - ✅ Field schemas include all known fields
@@ -838,6 +1148,7 @@ Field names are generally consistent between write and read operations for surve
 - ✅ **Schema validation completed against live API** (2024-12-31) - see section below
 - ⚠️ Sessions API availability may vary by Qualtrics license tier - requires verification
 - ⚠️ Mailing lists and directories endpoints documented but not yet implemented
+- ⚠️ survey_definitions schema validation against live API pending
 
 ---
 
