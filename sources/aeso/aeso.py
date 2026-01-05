@@ -134,14 +134,14 @@ class LakeflowConnect:
         all_records = []
         current_date = fetch_start_date
         fetch_end_date = today
-        max_batch_days = 7  # Fetch in 7-day batches
+        max_batch_days = 365  # Fetch in 7-day batches
         
         print(f"Fetching: {fetch_start_date} to {fetch_end_date}")
         
         # Capture ingestion timestamp once for this batch
         ingestion_timestamp = datetime.utcnow()
         
-        while current_date <= fetch_end_date:
+        while current_date <= fetch_end_date:z
             batch_end_dt = datetime.strptime(current_date, "%Y-%m-%d") + timedelta(days=max_batch_days - 1)
             batch_end_date = min(batch_end_dt.strftime("%Y-%m-%d"), fetch_end_date)
             

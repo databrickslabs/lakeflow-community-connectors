@@ -2,6 +2,10 @@
 
 Extract Alberta electricity market data from AESO API into Databricks Delta lake. Supports incremental CDC synchronization for hourly pool price data.
 
+## SCD Type 1 Automatic Configuration
+
+The connector automatically configures `sequence_by: "ingestion_time"` for proper merge behavior. You can optionally override this in your pipeline specification if needed. See [PIPELINE_CONFIG.md](PIPELINE_CONFIG.md) for advanced configuration options.
+
 ## Prerequisites
 
 - AESO API key from [AESO API Portal](https://api.aeso.ca)
@@ -42,13 +46,19 @@ Extract Alberta electricity market data from AESO API into Databricks Delta lake
     "object": [
       {
         "table": {
-          "source_table": "pool_price"
+          "source_table": "pool_price",
+          "destination_catalog": "your_catalog",
+          "destination_schema": "your_schema",
+          "destination_table": "pool_price",
+          "scd_type": "SCD_TYPE_1"
         }
       }
     ]
   }
 }
 ```
+
+**Note**: The connector automatically configures `sequence_by: "ingestion_time"` for proper SCD Type 1 merges. You don't need to specify it unless you want to override the default behavior.
 
 ### 3. Schedule & Run
 

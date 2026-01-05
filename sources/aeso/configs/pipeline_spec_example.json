@@ -1,0 +1,92 @@
+{
+  "_description": "Example AESO pipeline specification - sequence_by is auto-configured from connector metadata",
+  
+  "minimal": {
+    "pipeline_spec": {
+      "connection_name": "aeso_connection",
+      "object": [
+        {
+          "table": {
+            "source_table": "pool_price",
+            "scd_type": "SCD_TYPE_1"
+          }
+        }
+      ]
+    }
+  },
+  
+  "complete": {
+    "pipeline_spec": {
+      "connection_name": "aeso_connection",
+      "object": [
+        {
+          "table": {
+            "source_table": "pool_price",
+            "destination_catalog": "main",
+            "destination_schema": "energy",
+            "destination_table": "aeso_pool_price",
+            "scd_type": "SCD_TYPE_1"
+          }
+        }
+      ]
+    }
+  },
+  
+  "realtime_15min": {
+    "_note": "For 15-minute schedule with 6-hour lookback",
+    "pipeline_spec": {
+      "connection_name": "aeso_realtime",
+      "object": [
+        {
+          "table": {
+            "source_table": "pool_price",
+            "destination_schema": "energy_realtime",
+            "destination_table": "pool_price_live",
+            "scd_type": "SCD_TYPE_1"
+          }
+        }
+      ]
+    }
+  },
+  
+  "hourly": {
+    "_note": "For hourly schedule with 24-hour lookback",
+    "pipeline_spec": {
+      "connection_name": "aeso_hourly",
+      "object": [
+        {
+          "table": {
+            "source_table": "pool_price",
+            "destination_schema": "energy",
+            "destination_table": "pool_price",
+            "scd_type": "SCD_TYPE_1"
+          }
+        }
+      ]
+    }
+  },
+  
+  "daily": {
+    "_note": "For daily schedule with 72-hour lookback",
+    "pipeline_spec": {
+      "connection_name": "aeso_daily",
+      "object": [
+        {
+          "table": {
+            "source_table": "pool_price",
+            "destination_schema": "energy_historical",
+            "destination_table": "pool_price",
+            "scd_type": "SCD_TYPE_1"
+          }
+        }
+      ]
+    }
+  },
+  
+  "_important_notes": {
+    "sequence_by": "Auto-configured from connector metadata (ingestion_time) - no need to specify",
+    "scd_type": "Use 'SCD_TYPE_1' for latest-value-wins behavior (recommended)",
+    "how_it_works": "Pipeline framework reads sequence_by from connector metadata automatically"
+  }
+}
+

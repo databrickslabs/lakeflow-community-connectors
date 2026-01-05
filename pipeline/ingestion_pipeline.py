@@ -134,7 +134,7 @@ def ingest(spark, pipeline_spec: dict) -> None:
 
         # Override parameters with spec values if available
         primary_keys = spec.get_primary_keys(table) or primary_keys
-        sequence_by = spec.get_sequence_by(table) or cursor_field
+        sequence_by = spec.get_sequence_by(table) or metadata[table].get("sequence_by") or cursor_field
         scd_type_raw = spec.get_scd_type(table)
         if scd_type_raw == "APPEND_ONLY":
             ingestion_type = "append"
