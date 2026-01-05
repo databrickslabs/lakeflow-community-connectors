@@ -214,7 +214,7 @@ def register_lakeflow_source(spark):
             }
 
             # Supported tables
-            self.tables = ["surveys", "survey_responses", "distributions", "contacts"]
+            self.tables = ["surveys", "survey_definitions", "survey_responses", "distributions", "contacts"]
 
         def list_tables(self) -> List[str]:
             """
@@ -245,6 +245,8 @@ def register_lakeflow_source(spark):
 
             if table_name == "surveys":
                 return self._get_surveys_schema()
+            elif table_name == "survey_definitions":
+                return self._get_survey_definitions_schema()
             elif table_name == "survey_responses":
                 return self._get_survey_responses_schema()
             elif table_name == "distributions":
@@ -268,6 +270,176 @@ def register_lakeflow_source(spark):
                 StructField("isActive", BooleanType(), True),
                 StructField("creationDate", StringType(), True),
                 StructField("lastModified", StringType(), True)
+            ])
+
+        def _get_survey_definitions_schema(self) -> StructType:
+            """Get schema for survey_definitions table.
+
+            Note: Based on GET /survey-definitions/{surveyId} endpoint.
+            Returns full survey structure including questions, blocks, flow.
+            Uses MapType for dynamic structures (Questions, Blocks) since keys are dynamic IDs.
+            """
+            # Choice struct for question choices
+            choice_struct = StructType([
+                StructField("Display", StringType(), True),
+                StructField("RecodeValue", StringType(), True),
+                StructField("ExclusiveAnswer", BooleanType(), True),
+                StructField("TextEntry", StringType(), True),
+                StructField("TextEntrySize", StringType(), True),
+                StructField("Analyze", BooleanType(), True)
+            ])
+
+            # Validation settings struct
+            validation_settings_struct = StructType([
+                StructField("ForceResponse", StringType(), True),
+                StructField("ForceResponseType", StringType(), True),
+                StructField("Type", StringType(), True)
+            ])
+
+            validation_struct = StructType([
+                StructField("Settings", validation_settings_struct, True)
+            ])
+
+            # Question struct - simplified to capture key fields
+            question_struct = StructType([
+                StructField("QuestionID", StringType(), True),
+                StructField("QuestionText", StringType(), True),
+                StructField("QuestionDescription", StringType(), True),
+                StructField("DataExportTag", StringType(), True),
+                StructField("QuestionType", StringType(), True),
+                StructField("Selector", StringType(), True),
+                StructField("SubSelector", StringType(), True),
+                StructField("QuestionText_Unsafe", StringType(), True),
+                StructField("Validation", validation_struct, True),
+                StructField("NextChoiceId", LongType(), True),
+                StructField("NextAnswerId", LongType(), True),
+                # Choices and Answers are maps with dynamic keys
+                StructField("Choices", MapType(StringType(), choice_struct), True),
+                StructField("ChoiceOrder", ArrayType(StringType()), True),
+                StructField("Answers", MapType(StringType(), choice_struct), True),
+                StructField("AnswerOrder", ArrayType(StringType()), True),
+                StructField("RecodeValues", MapType(StringType(), StringType()), True),
+                StructField("VariableNaming", MapType(StringType(), StringType()), True),
+                # Complex nested structures stored as strings (JSON serialized)
+                StructField("Configuration", MapType(StringType(), StringType()), True),
+                StructField("DisplayLogic", MapType(StringType(), StringType()), True),
+                StructField("SkipLogic", MapType(StringType(), StringType()), True),
+                StructField("GradingData", ArrayType(MapType(StringType(), StringType())), True),
+                StructField("Randomization", MapType(StringType(), StringType()), True),
+                StructField("Language", ArrayType(MapType(StringType(), StringType())), True)
+            ])
+
+            # Block element struct
+            block_element_struct = StructType([
+                StructField("Type", StringType(), True),
+                StructField("QuestionID", StringType(), True)
+            ])
+
+            # Block options struct
+            block_options_struct = StructType([
+                StructField("BlockLocking", StringType(), True),
+                StructField("RandomizeQuestions", StringType(), True),
+                StructField("BlockVisibility", StringType(), True),
+                StructField("Looping", BooleanType(), True)
+            ])
+
+            # Block struct
+            block_struct = StructType([
+                StructField("Type", StringType(), True),
+                StructField("Description", StringType(), True),
+                StructField("ID", StringType(), True),
+                StructField("BlockElements", ArrayType(block_element_struct), True),
+                StructField("Options", block_options_struct, True)
+            ])
+
+            # Flow element struct
+            flow_element_struct = StructType([
+                StructField("Type", StringType(), True),
+                StructField("ID", StringType(), True),
+                StructField("FlowID", StringType(), True),
+                StructField("Autofill", ArrayType(MapType(StringType(), StringType())), True)
+            ])
+
+            # Embedded data struct
+            embedded_data_struct = StructType([
+                StructField("Description", StringType(), True),
+                StructField("Type", StringType(), True),
+                StructField("Field", StringType(), True),
+                StructField("VariableType", StringType(), True),
+                StructField("DataVisibility", ArrayType(StringType()), True),
+                StructField("AnalyzeText", BooleanType(), True),
+                StructField("Value", StringType(), True)
+            ])
+
+            # Survey options struct - key settings
+            survey_options_struct = StructType([
+                StructField("BackButton", StringType(), True),
+                StructField("SaveAndContinue", StringType(), True),
+                StructField("SurveyProtection", StringType(), True),
+                StructField("BallotBoxStuffingPrevention", StringType(), True),
+                StructField("NoIndex", StringType(), True),
+                StructField("SecureResponseFiles", StringType(), True),
+                StructField("SurveyExpiration", StringType(), True),
+                StructField("SurveyTermination", StringType(), True),
+                StructField("Header", StringType(), True),
+                StructField("Footer", StringType(), True),
+                StructField("ProgressBarDisplay", StringType(), True),
+                StructField("PartialData", StringType(), True),
+                StructField("ValidationMessage", StringType(), True),
+                StructField("PreviousButton", StringType(), True),
+                StructField("NextButton", StringType(), True),
+                StructField("SurveyTitle", StringType(), True),
+                StructField("SkinLibrary", StringType(), True),
+                StructField("SkinType", StringType(), True),
+                StructField("Skin", StringType(), True),
+                StructField("NewScoring", LongType(), True),
+                StructField("EOSRedirectURL", StringType(), True),
+                StructField("ShowExportTags", StringType(), True),
+                StructField("CollectGeoLocation", StringType(), True),
+                StructField("SurveyMetaDescription", StringType(), True),
+                StructField("PasswordProtection", StringType(), True),
+                StructField("AnonymizeResponse", StringType(), True),
+                StructField("RefererCheck", StringType(), True),
+                StructField("RefererURL", StringType(), True),
+                StructField("SurveyLanguage", StringType(), True),
+                StructField("InactiveSurvey", StringType(), True),
+                StructField("PartialDataCloseAfter", StringType(), True),
+                StructField("ActiveResponseSet", StringType(), True),
+                StructField("AvailableLanguages", MapType(StringType(), StringType()), True),
+                StructField("Scoring", MapType(StringType(), StringType()), True)
+            ])
+
+            return StructType([
+                # Survey identification
+                StructField("SurveyID", StringType(), True),
+                StructField("SurveyName", StringType(), True),
+                StructField("SurveyDescription", StringType(), True),
+                StructField("SurveyOwnerID", StringType(), True),
+                StructField("SurveyBrandID", StringType(), True),
+                StructField("DivisionID", StringType(), True),
+                StructField("SurveyLanguage", StringType(), True),
+                StructField("SurveyActiveResponseSet", StringType(), True),
+                StructField("SurveyStatus", StringType(), True),
+                StructField("SurveyStartDate", StringType(), True),
+                StructField("SurveyExpirationDate", StringType(), True),
+                StructField("SurveyCreationDate", StringType(), True),
+                StructField("CreatorID", StringType(), True),
+                StructField("LastModified", StringType(), True),
+                StructField("LastAccessed", StringType(), True),
+                StructField("LastActivated", StringType(), True),
+                StructField("Deleted", StringType(), True),
+                StructField("ProjectCategory", StringType(), True),
+                StructField("ProjectType", StringType(), True),
+                # Complex nested structures
+                StructField("Questions", MapType(StringType(), question_struct), True),
+                StructField("Blocks", MapType(StringType(), block_struct), True),
+                StructField("Flow", ArrayType(flow_element_struct), True),
+                StructField("EmbeddedData", ArrayType(embedded_data_struct), True),
+                StructField("SurveyOptions", survey_options_struct, True),
+                # ResponseSets and other complex structures as generic maps
+                StructField("ResponseSets", MapType(StringType(), MapType(StringType(), StringType())), True),
+                StructField("LoopAndMerge", MapType(StringType(), MapType(StringType(), StringType())), True),
+                StructField("Scoring", MapType(StringType(), MapType(StringType(), StringType())), True)
             ])
 
         def _get_survey_responses_schema(self) -> StructType:
@@ -395,6 +567,12 @@ def register_lakeflow_source(spark):
                     "cursor_field": "lastModified",
                     "ingestion_type": "cdc"
                 }
+            elif table_name == "survey_definitions":
+                return {
+                    "primary_keys": ["SurveyID"],
+                    "cursor_field": None,
+                    "ingestion_type": "snapshot"
+                }
             elif table_name == "survey_responses":
                 return {
                     "primary_keys": ["responseId"],
@@ -437,6 +615,8 @@ def register_lakeflow_source(spark):
 
             if table_name == "surveys":
                 return self._read_surveys(start_offset)
+            elif table_name == "survey_definitions":
+                return self._read_survey_definitions(start_offset, table_options)
             elif table_name == "survey_responses":
                 return self._read_survey_responses(start_offset, table_options)
             elif table_name == "distributions":
@@ -522,6 +702,42 @@ def register_lakeflow_source(spark):
                 new_offset["lastModified"] = last_modified_cursor
 
             return iter(all_surveys), new_offset
+
+        def _read_survey_definitions(
+            self, start_offset: dict, table_options: Dict[str, str]
+        ) -> (Iterator[dict], dict):
+            """
+            Read survey definition from Qualtrics API.
+
+            Args:
+                start_offset: Dictionary (ignored for snapshot mode)
+                table_options: Must contain 'surveyId'
+
+            Returns:
+                Tuple of (iterator of survey definition records, empty offset dict)
+            """
+            survey_id = table_options.get("surveyId")
+            if not survey_id:
+                raise ValueError(
+                    "surveyId is required in table_options for survey_definitions table"
+                )
+
+            url = f"{self.base_url}/survey-definitions/{survey_id}"
+
+            try:
+                response = self._make_request("GET", url)
+                result = response.get("result", {})
+
+                if not result:
+                    logger.warning(f"No survey definition found for survey {survey_id}")
+                    return iter([]), {}
+
+                # Return raw API response - no processing needed
+                return iter([result]), {}
+
+            except Exception as e:
+                logger.error(f"Error fetching survey definition for {survey_id}: {e}", exc_info=True)
+                raise
 
         def _read_survey_responses(
             self, start_offset: dict, table_options: Dict[str, str]
