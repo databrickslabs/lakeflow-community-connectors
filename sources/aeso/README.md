@@ -101,9 +101,9 @@ The connector automatically handles end dates and fetches up to "now" on every r
 |-------|------|-------------|
 | `begin_datetime_utc` | timestamp | Settlement hour start (UTC) - Primary Key |
 | `begin_datetime_mpt` | timestamp | Settlement hour start (Mountain Time) |
-| `pool_price` | double | Actual pool price ($/MWh) |
-| `forecast_pool_price` | double | Forecasted price ($/MWh) |
-| `rolling_30day_avg` | double | 30-day rolling average ($/MWh) |
+| `pool_price` | double (nullable) | Actual pool price ($/MWh) - null for future hours |
+| `forecast_pool_price` | double (nullable) | Forecasted price ($/MWh) |
+| `rolling_30day_avg` | double (nullable) | 30-day rolling average ($/MWh) |
 
 **Ingestion type:** CDC with upsert by `begin_datetime_utc`
 

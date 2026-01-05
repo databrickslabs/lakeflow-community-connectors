@@ -219,7 +219,7 @@ def register_lakeflow_source(spark):
                 return StructType([
                     StructField("begin_datetime_utc", TimestampType(), False),
                     StructField("begin_datetime_mpt", TimestampType(), False),
-                    StructField("pool_price", DoubleType(), False),
+                    StructField("pool_price", DoubleType(), True),  # Nullable - null for future hours with only forecasts
                     StructField("forecast_pool_price", DoubleType(), True),
                     StructField("rolling_30day_avg", DoubleType(), True),
                 ])
@@ -313,10 +313,21 @@ def register_lakeflow_source(spark):
                     )
 
                     for price_obj in pool_prices:
+                        # Convert timezone-aware datetimes to timezone-naive to avoid PySpark conversion issues
+                        # PySpark will treat these as UTC/local time respectively without additional conversion
+                        utc_dt = price_obj.begin_datetime_utc
+                        mpt_dt = price_obj.begin_datetime_mpt
+
+                        # Remove timezone info if present (convert to naive datetime)
+                        if hasattr(utc_dt, 'tzinfo') and utc_dt.tzinfo is not None:
+                            utc_dt = utc_dt.replace(tzinfo=None)
+                        if hasattr(mpt_dt, 'tzinfo') and mpt_dt.tzinfo is not None:
+                            mpt_dt = mpt_dt.replace(tzinfo=None)
+
                         all_records.append({
-                            "begin_datetime_utc": price_obj.begin_datetime_utc,
-                            "begin_datetime_mpt": price_obj.begin_datetime_mpt,
-                            "pool_price": float(price_obj.pool_price),
+                            "begin_datetime_utc": utc_dt,
+                            "begin_datetime_mpt": mpt_dt,
+                            "pool_price": float(price_obj.pool_price) if price_obj.pool_price is not None else None,
                             "forecast_pool_price": float(price_obj.forecast_pool_price) if price_obj.forecast_pool_price is not None else None,
                             "rolling_30day_avg": float(price_obj.rolling_30day_avg) if price_obj.rolling_30day_avg is not None else None,
                         })

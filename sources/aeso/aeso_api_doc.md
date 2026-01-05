@@ -29,7 +29,7 @@ curl -H "X-API-Key: YOUR_API_KEY" \
 |-------|------|-------------|
 | `begin_datetime_utc` | timestamp (ISO 8601) | Settlement hour start in UTC |
 | `begin_datetime_mpt` | timestamp (ISO 8601) | Settlement hour start in Mountain Time |
-| `pool_price` | decimal | Actual pool price ($/MWh) |
+| `pool_price` | decimal (nullable) | Actual pool price ($/MWh) - null for future hours with forecast only |
 | `forecast_pool_price` | decimal (nullable) | Forecasted price ($/MWh) |
 | `rolling_30day_avg` | decimal (nullable) | 30-day rolling average ($/MWh) |
 
