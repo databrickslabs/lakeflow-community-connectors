@@ -60,7 +60,7 @@ def _create_cdc_table(
     scd_type: str,
     view_name: str,
     table_config: dict[str, str],
-    hard_deletion_sync: bool = False,
+    deletion_sync: bool = False,
 ) -> None:
     """Create CDC table using streaming and apply_changes"""
 
@@ -83,8 +83,8 @@ def _create_cdc_table(
         stored_as_scd_type=scd_type,
     )
 
-    # Add delete flow for SCD type 1 tables with hard_deletion_sync enabled (from second run onwards)
-    if scd_type == "1" and hard_deletion_sync and not _is_first_run(spark, destination_table):
+    # Add delete flow for SCD type 1 tables with deletion_sync enabled (from second run onwards)
+    if scd_type == "1" and deletion_sync and not _is_first_run(spark, destination_table):
         delete_view_name = source_table + "_delete_staging"
 
         @sdp.view(name=delete_view_name)
@@ -212,7 +212,7 @@ def ingest(spark, pipeline_spec: dict) -> None:
         if scd_type_raw == "APPEND_ONLY":
             ingestion_type = "append"
         scd_type = "2" if scd_type_raw == "SCD_TYPE_2" else "1"
-        hard_deletion_sync = spec.get_hard_deletion_sync(table)
+        deletion_sync = spec.get_deletion_sync(table)
 
         if ingestion_type == "cdc":
             _create_cdc_table(
@@ -225,7 +225,7 @@ def ingest(spark, pipeline_spec: dict) -> None:
                 scd_type,
                 view_name,
                 table_config,
-                hard_deletion_sync,
+                deletion_sync,
             )
         elif ingestion_type == "snapshot":
             _create_snapshot_table(
