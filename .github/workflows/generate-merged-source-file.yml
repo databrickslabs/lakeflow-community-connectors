@@ -34,7 +34,7 @@ jobs:
 
       - name: Get changed source files
         id: changed-files
-        uses: tj-actions/changed-files@v44
+        uses: tj-actions/changed-files@v46
         with:
           files: |
             sources/**/*.py
@@ -46,7 +46,7 @@ jobs:
 
       - name: Get changed generated files
         id: changed-generated
-        uses: tj-actions/changed-files@v44
+        uses: tj-actions/changed-files@v46
         with:
           files: |
             sources/**/_generated_*.py
