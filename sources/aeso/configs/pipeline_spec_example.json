@@ -1,7 +1,6 @@
 {
   "_comment": "AESO Pipeline Specification Examples",
-  "_important": "Only SCD_TYPE_1 is supported. sequence_by is auto-configured from connector metadata.",
-  
+
   "minimal_example": {
     "_description": "Minimal configuration with defaults",
     "connection_name": "aeso_connection",
@@ -45,9 +44,9 @@
           "destination_table": "pool_price_live",
           "table_configuration": {
             "scd_type": "SCD_TYPE_1",
-            "lookback_hours": "24",
+            "lookback_hours": "2",
             "batch_size_days": "7",
-            "rate_limit_delay": "0.05"
+            "rate_limit_delay": "0.1"
           }
         }
       }
@@ -69,7 +68,7 @@
             "start_date": "2020-01-01",
             "lookback_hours": "72",
             "batch_size_days": "30",
-            "rate_limit_delay": "0.2"
+            "rate_limit_delay": "0.1"
           }
         }
       }
