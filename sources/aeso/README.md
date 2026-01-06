@@ -5,9 +5,9 @@ Ingest Alberta electricity market data (hourly pool prices) from the AESO API in
 ## What You Get
 
 - ⚡ **Hourly pool price data** - Actual prices, forecasts, and 30-day averages
-- 🔄 **Automatic updates** - Captures late-arriving data with configurable lookback
+- 🔄 **Automatic forecast updates** - Captures frequently updated forecast prices with configurable lookback
 - 📊 **SCD Type 1** - Latest values always win (historical tracking not supported)
-- 🚀 **Sub-minute latency** - Optional continuous mode for real-time dashboards
+- 🚀 **Sub-minute latency** - Optional continuous mode for real-time use cases
 
 ## Quick Start
 
@@ -47,7 +47,7 @@ Create a Unity Catalog connection with your API key:
 }
 ```
 
-**With custom options:**
+**With all table configuration options:**
 
 ```json
 {
@@ -58,10 +58,13 @@ Create a Unity Catalog connection with your API key:
         "source_table": "pool_price",
         "destination_catalog": "main",
         "destination_schema": "energy",
+        "destination_table": "pool_price",
         "table_configuration": {
           "scd_type": "SCD_TYPE_1",
           "start_date": "2024-01-01",
-          "lookback_hours": "24"
+          "lookback_hours": "24",
+          "batch_size_days": "30",
+          "rate_limit_delay": "0.1"
         }
       }
     }]
@@ -96,7 +99,7 @@ Create a Unity Catalog connection with your API key:
 |--------|---------|-------------|
 | `scd_type` | - | **Required.** Must be `"SCD_TYPE_1"` (only supported type) |
 | `start_date` | 30 days ago | Historical start date for initial load (YYYY-MM-DD) |
-| `lookback_hours` | 24 | Hours to look back on each sync to capture late updates |
+| `lookback_hours` | 24 | Hours to look back on each sync. **Minimum: 24 hours** (required for settlement adjustments). Used for: (1) backfill when pipeline has been stopped, (2) capturing frequent forecast price updates |
 | `batch_size_days` | 30 | Days per API batch (reduce for memory constraints) |
 | `rate_limit_delay` | 0.1 | Seconds between API calls (increase if rate limited) |
 
@@ -104,12 +107,16 @@ Create a Unity Catalog connection with your API key:
 
 | Schedule | `lookback_hours` | Best For |
 |----------|------------------|----------|
-| **Continuous** | 1-6 | Real-time dashboards, sub-minute latency |
-| Every 15 min | 6 | Ultra-low latency monitoring |
+| **Continuous** | 24 | Real-time use cases, sub-minute latency |
+| Every 15 min | 24 | Ultra-low latency monitoring |
 | **Hourly (recommended)** | **24** | **Standard production use** |
 | Daily | 72 | Cost-optimized, non-time-sensitive |
 
-**Key insight:** `lookback_hours` should cover the window where AESO may update past records. Hourly data can be revised for settlement, so 24 hours captures most updates.
+**Key insight:** `lookback_hours` serves two purposes:
+1. **Backfill after downtime** - If your pipeline stops for hours/days, the lookback ensures you recapture data from that gap
+2. **Capture forecast updates** - AESO continuously updates `forecast_pool_price` as settlement hours approach
+
+Actual pool prices are also revised during final settlement. **A minimum 24-hour lookback is enforced** to safely capture settlement adjustments and late-arriving data.
 
 ## Output Schema
 
@@ -118,8 +125,8 @@ Create a Unity Catalog connection with your API key:
 | Column | Type | Description |
 |--------|------|-------------|
 | `begin_datetime_utc` | timestamp | Hour start in UTC (Primary Key) |
-| `pool_price` | double | Actual price $/MWh (null for future hours) |
-| `forecast_pool_price` | double | Forecasted price $/MWh |
+| `pool_price` | double | Actual price $/MWh (null for future hours; finalized during settlement) |
+| `forecast_pool_price` | double | Forecasted price $/MWh (updated frequently as hour approaches) |
 | `rolling_30day_avg` | double | 30-day rolling average $/MWh |
 | `ingestion_time` | timestamp | When this record was last updated |
 
@@ -132,9 +139,10 @@ Fetches from `start_date` (or last 30 days) to today, creating your baseline dat
 
 ### Incremental Updates
 Each run fetches from `(last_watermark - lookback_hours)` to today, ensuring:
-- New hourly records are captured
-- Updated prices (settlements) are merged in
-- No data is missed even with late-arriving updates
+- **Pipeline downtime backfill** - If the pipeline stops for any period, the lookback recaptures missed data
+- **New hourly records** are captured as hours complete
+- **Updated forecast prices** are merged in (AESO updates forecasts frequently as hours approach)
+- **Revised actual prices** are captured during final settlement (typically within 24-72 hours)
 
 **Example (hourly schedule, 24h lookback):**
 - **Run 1:** Fetch Jan 1 → Jan 15 (initial load)
@@ -161,7 +169,7 @@ Each run fetches from `(last_watermark - lookback_hours)` to today, ensuring:
 }
 ```
 
-### Real-Time Dashboard (continuous)
+### Real-Time Use Cases (continuous)
 
 ```json
 "table_configuration": {
@@ -179,6 +187,25 @@ Each run fetches from `(last_watermark - lookback_hours)` to today, ensuring:
 }
 ```
 
+### Recovery from Pipeline Downtime
+
+If your pipeline stops for hours or days, the `lookback_hours` setting provides automatic backfill:
+
+```json
+"table_configuration": {
+  "scd_type": "SCD_TYPE_1",
+  "lookback_hours": "72"
+}
+```
+
+**How it works:**
+- Pipeline stops at Jan 5, 10:00 AM
+- Pipeline restarts at Jan 8, 2:00 PM
+- Next run fetches from Jan 5 (watermark - 72h lookback) → today
+- All missed data is automatically recaptured
+
+**Recommendation:** Set `lookback_hours` ≥ your maximum expected downtime.
+
 ## Troubleshooting
 
 | Issue | Solution |
@@ -191,8 +218,10 @@ Each run fetches from `(last_watermark - lookback_hours)` to today, ensuring:
 ## Important Notes
 
 - ⚠️ **Only SCD Type 1** is supported. SCD Type 2 (historical tracking) is not available.
+- **Forecast prices update frequently** - AESO revises `forecast_pool_price` as settlement hours approach. Use appropriate `lookback_hours` to capture updates.
+- **Actual prices finalize later** - `pool_price` is updated during settlement (typically 24-72 hours after the hour).
 - Prices can be **negative** during oversupply conditions (this is normal).
-- AESO publishes **hourly**, so frequent schedules (e.g., every 15 min) will often find no new data.
+- AESO publishes **hourly**, so frequent schedules (e.g., every 15 min) will often find no new completed hours.
 - Always use `begin_datetime_utc` as your time dimension (DST-safe).
 
 ## Resources

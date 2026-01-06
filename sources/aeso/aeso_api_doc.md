@@ -79,8 +79,8 @@ Top-level fields (all from the AESO API):
 |------------|------|-------------|
 | `begin_datetime_utc` | timestamp (UTC) | Settlement hour start time in UTC. Primary key and natural sort field. |
 | `begin_datetime_mpt` | timestamp (Mountain Time) | Settlement hour start time in Mountain Time (includes DST transitions). |
-| `pool_price` | float (nullable) | Actual electricity pool price in $/MWh. Null for future hours with only forecasts available. |
-| `forecast_pool_price` | float (nullable) | Forecasted pool price in $/MWh. |
+| `pool_price` | float (nullable) | Actual electricity pool price in $/MWh. Null for future hours with only forecasts available. Finalized during settlement (typically within 24-72 hours). |
+| `forecast_pool_price` | float (nullable) | Forecasted pool price in $/MWh. Updated frequently by AESO as the settlement hour approaches. |
 | `rolling_30day_avg` | float (nullable) | 30-day rolling average pool price in $/MWh. |
 
 **Additional connector-derived fields**:
@@ -95,7 +95,8 @@ Top-level fields (all from the AESO API):
 - **Price units**: All prices are in Canadian dollars per megawatt-hour ($/MWh).
 - **Nullable fields**: `pool_price` is null for future hours; other fields may be null during data gaps.
 - **Price ranges**: Pool prices can be negative during oversupply conditions (common in renewable-heavy grids).
-- **Updates**: Historical records can be updated due to settlement adjustments, typically within 24-72 hours of initial publication.
+- **Frequent forecast updates**: `forecast_pool_price` is revised continuously by AESO as settlement hours approach. The connector's lookback window captures these updates.
+- **Settlement updates**: `pool_price` (actual) is finalized during settlement, typically within 24-72 hours of the hour. The connector's lookback captures these revisions.
 
 **Example API response** (from Python wrapper):
 
@@ -238,14 +239,14 @@ prices = aeso.get_pool_price_report(
   - Uses a configurable `start_date` for historical backfill, or
   - Defaults to 30 days ago if no `start_date` is provided.
 - On subsequent runs:
-  - Uses the maximum `begin_datetime_utc` from the previous sync minus a configurable lookback window (default 24 hours).
+  - Uses the maximum `begin_datetime_utc` from the previous sync minus a configurable lookback window (default: 24 hours, minimum: 24 hours).
   - Fetches from `(high_watermark - lookback_hours)` to today.
   - Applies upserts based on `begin_datetime_utc`, with `ingestion_time` determining the newest record for SCD Type 1.
 
 **Handling updates**:
 - AESO updates pool prices as settlement calculations are finalized, typically within 24-72 hours.
 - The connector captures updates by:
-  - Fetching overlapping data via the lookback window on each run.
+  - Fetching overlapping data via the lookback window on each run (minimum 24 hours enforced).
   - Using `ingestion_time` (connector-generated) to determine which version is newest.
   - Upserting records with the latest `ingestion_time` for each `begin_datetime_utc`.
 

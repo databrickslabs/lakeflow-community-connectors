@@ -8,10 +8,7 @@
     "objects": [
       {
         "table": {
-          "source_table": "pool_price",
-          "table_configuration": {
-            "scd_type": "SCD_TYPE_1"
-          }
+          "source_table": "pool_price"
         }
       }
     ]
@@ -48,9 +45,9 @@
           "destination_table": "pool_price_live",
           "table_configuration": {
             "scd_type": "SCD_TYPE_1",
-            "lookback_hours": "2",
+            "lookback_hours": "24",
             "batch_size_days": "7",
-            "rate_limit_delay": "0.1"
+            "rate_limit_delay": "0.05"
           }
         }
       }
@@ -86,7 +83,7 @@
     "table_configuration": {
       "scd_type": "Required. Must be 'SCD_TYPE_1' (only supported type).",
       "start_date": "Optional. Format: YYYY-MM-DD. Default: 30 days ago. Used for initial load only.",
-      "lookback_hours": "Optional. Default: 24. Hours to look back for CDC updates on each sync.",
+      "lookback_hours": "Optional. Default: 24. Minimum: 24. Hours to look back for CDC updates and settlement adjustments.",
       "batch_size_days": "Optional. Default: 30. Days per API batch (reduce for memory constraints).",
       "rate_limit_delay": "Optional. Default: 0.1. Seconds between API calls (increase if rate limited)."
     },

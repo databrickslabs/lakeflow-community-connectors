@@ -103,7 +103,7 @@ Set in `table_configuration` section of pipeline spec:
 |-----------|----------|---------|-------------|
 | `scd_type` | Yes | - | Must be `"SCD_TYPE_1"` (only supported type) |
 | `start_date` | No | 30 days ago | Historical start date (YYYY-MM-DD) for initial load |
-| `lookback_hours` | No | 24 | Hours to look back for CDC updates |
+| `lookback_hours` | No | 24 | Hours to look back (min: 24). Used for: (1) backfill after downtime, (2) capturing forecast price updates |
 | `batch_size_days` | No | 30 | Days per API batch |
 | `rate_limit_delay` | No | 0.1 | Seconds between API calls |
 
@@ -133,8 +133,9 @@ Set in `table_configuration` section of pipeline spec:
 {
   "table_configuration": {
     "scd_type": "SCD_TYPE_1",
-    "lookback_hours": "2",
-    "batch_size_days": "7"
+    "lookback_hours": "24",
+    "batch_size_days": "7",
+    "rate_limit_delay": "0.05"
   }
 }
 ```

@@ -164,15 +164,16 @@ def register_lakeflow_source(spark):
     ============================
     Provides access to Alberta Electric System Operator (AESO) pool price data.
 
-    This connector implements SCD Type 1 with a lookback window to handle late-arriving
-    data and settlement adjustments common in electricity market data.
+    This connector implements SCD Type 1 with a lookback window to capture:
+    - Frequent forecast price updates (AESO updates forecasts as settlement hours approach)
+    - Settlement adjustments to actual prices (finalized within 24-72 hours)
 
     Connection Configuration:
     - api_key (required): AESO API authentication key
 
     Table Configuration:
     - start_date (optional): Historical start date in YYYY-MM-DD format (default: 30 days ago)
-    - lookback_hours (optional): Hours to look back for CDC updates (default: 24)
+    - lookback_hours (optional): Hours to look back for backfill and forecast updates (default: 24, min: 24)
     - batch_size_days (optional): Number of days to fetch per API batch (default: 30)
     - rate_limit_delay (optional): Seconds to wait between API calls (default: 0.1)
     """
@@ -188,6 +189,7 @@ def register_lakeflow_source(spark):
     # ============================================================================
 
     SUPPORTED_TABLES = ["pool_price"]
+    MIN_LOOKBACK_HOURS = 24  # Minimum safe lookback to capture settlement adjustments
     DEFAULT_LOOKBACK_HOURS = 24
     DEFAULT_HISTORICAL_DAYS = 30
     MAX_BATCH_DAYS = 30
@@ -342,7 +344,7 @@ def register_lakeflow_source(spark):
                 start_offset: Dictionary containing high_watermark for incremental reads
                 table_options: Table-specific configuration:
                     - start_date (optional): Historical start date YYYY-MM-DD (default: 30 days ago)
-                    - lookback_hours (optional): CDC lookback window in hours (default: 24)
+                    - lookback_hours (optional): CDC lookback window in hours (default: 24, min: 24)
                     - batch_size_days (optional): Days per API batch (default: 30)
                     - rate_limit_delay (optional): Seconds between API calls (default: 0.1)
 
@@ -350,7 +352,7 @@ def register_lakeflow_source(spark):
                 Tuple of (record iterator, next offset dictionary)
 
             Raises:
-                ValueError: If table_name is not supported
+                ValueError: If table_name is not supported or lookback_hours < 24
             """
             self._validate_table_name(table_name)
 
@@ -367,6 +369,14 @@ def register_lakeflow_source(spark):
                         datetime.strptime(start_date, "%Y-%m-%d")
                     except ValueError:
                         raise ValueError("start_date must be in YYYY-MM-DD format")
+
+                # Validate lookback_hours minimum
+                if lookback_hours < MIN_LOOKBACK_HOURS:
+                    raise ValueError(
+                        f"lookback_hours must be at least {MIN_LOOKBACK_HOURS} hours "
+                        f"to safely capture settlement adjustments and late-arriving data. "
+                        f"Provided: {lookback_hours}"
+                    )
 
                 return self._read_pool_price_table(
                     start_offset, 
