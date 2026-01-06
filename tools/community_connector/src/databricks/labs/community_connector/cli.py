@@ -10,12 +10,14 @@ Configuration Precedence:
 
 import base64
 import json
+import traceback
 from pathlib import Path
 from typing import Optional
 
 import click
 import yaml
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.workspace import ImportFormat, Language
 
 from databricks.labs.community_connector import __version__
 from databricks.labs.community_connector.config import build_config
@@ -135,7 +137,6 @@ def _create_workspace_file(workspace_client, path: str, content: str) -> None:
         path: Workspace path where the file will be created.
         content: Content of the file.
     """
-    from databricks.sdk.service.workspace import ImportFormat, Language
 
     # Import the file to workspace using base64 encoding
     content_bytes = content.encode("utf-8")
@@ -251,6 +252,7 @@ def main(ctx: click.Context, debug: bool):
     help="Path to custom config file (overrides defaults)",
 )
 @click.pass_context
+# pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-branches
 def create_pipeline(
     ctx: click.Context,
     source_name: str,
@@ -660,7 +662,6 @@ def create_connection(ctx: click.Context, source_name: str, connection_name: str
         if hasattr(e, 'error_code'):
             error_msg = f"[{e.error_code}] {error_msg}"
         if debug:
-            import traceback
             click.echo(f"\n[DEBUG] Full exception: {traceback.format_exc()}", err=True)
         raise click.ClickException(f"Failed to create connection: {error_msg}")
 
@@ -755,10 +756,9 @@ def update_connection(ctx: click.Context, source_name: str, connection_name: str
         if hasattr(e, 'error_code'):
             error_msg = f"[{e.error_code}] {error_msg}"
         if debug:
-            import traceback
             click.echo(f"\n[DEBUG] Full exception: {traceback.format_exc()}", err=True)
         raise click.ClickException(f"Failed to update connection: {error_msg}")
 
 
 if __name__ == "__main__":
-    main()
+    main()  # pylint: disable=no-value-for-parameter
