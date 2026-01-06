@@ -25,7 +25,36 @@
             "destination_catalog": "main",
             "destination_schema": "energy",
             "destination_table": "aeso_pool_price",
-            "scd_type": "SCD_TYPE_1"
+            "table_configuration": {
+              "scd_type": "SCD_TYPE_1",
+              "start_date": "2024-01-01",
+              "lookback_hours": "24",
+              "batch_size_days": "30"
+            }
+          }
+        }
+      ]
+    }
+  },
+  
+  "with_custom_options": {
+    "_note": "For smaller memory footprint or API rate limiting",
+    "pipeline_spec": {
+      "connection_name": "aeso_connection",
+      "object": [
+        {
+          "table": {
+            "source_table": "pool_price",
+            "destination_catalog": "main",
+            "destination_schema": "energy",
+            "destination_table": "aeso_pool_price",
+            "table_configuration": {
+              "scd_type": "SCD_TYPE_1",
+              "start_date": "2024-01-01",
+              "lookback_hours": "24",
+              "batch_size_days": "7",
+              "rate_limit_delay": "0.5"
+            }
           }
         }
       ]
@@ -42,7 +71,10 @@
             "source_table": "pool_price",
             "destination_schema": "energy_realtime",
             "destination_table": "pool_price_live",
-            "scd_type": "SCD_TYPE_1"
+            "table_configuration": {
+              "scd_type": "SCD_TYPE_1",
+              "lookback_hours": "6"
+            }
           }
         }
       ]
@@ -50,7 +82,7 @@
   },
   
   "hourly": {
-    "_note": "For hourly schedule with 24-hour lookback",
+    "_note": "For hourly schedule with 24-hour lookback (default)",
     "pipeline_spec": {
       "connection_name": "aeso_hourly",
       "object": [
@@ -59,7 +91,9 @@
             "source_table": "pool_price",
             "destination_schema": "energy",
             "destination_table": "pool_price",
-            "scd_type": "SCD_TYPE_1"
+            "table_configuration": {
+              "scd_type": "SCD_TYPE_1"
+            }
           }
         }
       ]
@@ -76,7 +110,10 @@
             "source_table": "pool_price",
             "destination_schema": "energy_historical",
             "destination_table": "pool_price",
-            "scd_type": "SCD_TYPE_1"
+            "table_configuration": {
+              "scd_type": "SCD_TYPE_1",
+              "lookback_hours": "72"
+            }
           }
         }
       ]
@@ -86,7 +123,13 @@
   "_important_notes": {
     "sequence_by": "Auto-configured from connector metadata (ingestion_time) - no need to specify",
     "scd_type": "Use 'SCD_TYPE_1' for latest-value-wins behavior (recommended)",
-    "how_it_works": "Pipeline framework reads sequence_by from connector metadata automatically"
+    "how_it_works": "Pipeline framework reads sequence_by from connector metadata automatically",
+    "table_configuration_options": {
+      "start_date": "Optional. Default: 30 days ago. Format: YYYY-MM-DD. Used for initial load only.",
+      "lookback_hours": "Optional. Default: 24. Used for every incremental sync to recapture updates.",
+      "batch_size_days": "Optional. Default: 30. Smaller values reduce memory but increase API calls.",
+      "rate_limit_delay": "Optional. Default: 0.1 (seconds). Increase if hitting rate limits."
+    }
   }
 }
 

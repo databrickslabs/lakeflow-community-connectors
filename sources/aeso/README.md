@@ -18,27 +18,17 @@ The connector automatically configures `sequence_by: "ingestion_time"` for prope
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
 | `api_key` | Yes | - | AESO API key |
-| `start_date` | No | 30 days ago | Historical extraction start (YYYY-MM-DD) |
-| `lookback_hours` | No | 24 | CDC lookback window in hours |
 
-**Simple config:**
+**Connection config:**
 ```json
 {
   "api_key": "your-aeso-api-key"
 }
 ```
 
-**With customization:**
-```json
-{
-  "api_key": "your-aeso-api-key",
-  "start_date": "2024-01-01",
-  "lookback_hours": 24
-}
-```
-
 ### 2. Configure Pipeline
 
+**Basic configuration:**
 ```json
 {
   "pipeline_spec": {
@@ -58,6 +48,41 @@ The connector automatically configures `sequence_by: "ingestion_time"` for prope
 }
 ```
 
+**With table configuration:**
+```json
+{
+  "pipeline_spec": {
+    "connection_name": "my_aeso_connection",
+    "object": [
+      {
+        "table": {
+          "source_table": "pool_price",
+          "destination_catalog": "your_catalog",
+          "destination_schema": "your_schema",
+          "destination_table": "pool_price",
+          "table_configuration": {
+            "scd_type": "SCD_TYPE_1",
+            "start_date": "2024-01-01",
+            "lookback_hours": "24",
+            "batch_size_days": "7",
+            "rate_limit_delay": "0.5"
+          }
+        }
+      }
+    ]
+  }
+}
+```
+
+**Table Configuration Options:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `start_date` | 30 days ago | Historical extraction start date (YYYY-MM-DD). Used only for initial load. |
+| `lookback_hours` | 24 | CDC lookback window in hours. Used for every incremental sync to recapture updates. |
+| `batch_size_days` | 30 | Number of days to fetch per API batch. Smaller batches reduce memory usage but increase API calls. |
+| `rate_limit_delay` | 0.1 | Seconds to wait between API calls. Increase if hitting rate limits, decrease for faster fetching. |
+
 **Note**: The connector automatically configures `sequence_by: "ingestion_time"` for proper SCD Type 1 merges. You don't need to specify it unless you want to override the default behavior.
 
 ### 3. Schedule & Run
@@ -66,17 +91,19 @@ The connector automatically handles end dates and fetches up to "now" on every r
 
 ## Configuration Guide
 
-### Two Independent Parameters
+### Two Independent Table Parameters
 
-**`start_date`** - Historical extraction starting point
+**`start_date`** - Historical extraction starting point (table configuration)
 - Used: Initial load only
 - Purpose: Set where historical backfill begins
 - Examples: `"2024-01-01"`, `"2023-01-01"`, or omit for default (30 days ago)
+- Configured in: `table_configuration` section of pipeline spec
 
-**`lookback_hours`** - CDC lookback window
+**`lookback_hours`** - CDC lookback window (table configuration)
 - Used: Every incremental sync
 - Purpose: Recapture recent data to catch late-arriving updates
 - Recommendation: Match to your schedule frequency (see table below)
+- Configured in: `table_configuration` section of pipeline spec
 
 ### Scheduling Recommendations
 
