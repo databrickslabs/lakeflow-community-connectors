@@ -239,7 +239,7 @@ def register_lakeflow_source(spark):
             if table_name == "pool_price":
                 return {
                     "primary_keys": ["begin_datetime_utc"],
-                    "cursor_field": "begin_datetime_utc",
+                    "cursor_field": "ingestion_time",  # 🧪 TEST: Use ingestion_time for watermark tracking
                     "sequence_by": "ingestion_time",
                     "ingestion_type": "cdc"
                 }
@@ -338,7 +338,8 @@ def register_lakeflow_source(spark):
                 except Exception as e:
                     print(f"Error: {e}")
                     if all_records:
-                        latest_timestamp = max(r["begin_datetime_utc"] for r in all_records)
+                        # 🧪 TEST: Use ingestion_time for watermark
+                        latest_timestamp = max(r["ingestion_time"] for r in all_records)
                         next_offset = {"high_watermark": latest_timestamp.isoformat()}
                         print(f"Partial success: {len(all_records)} records, watermark: {next_offset['high_watermark']}")
                         return iter(all_records), next_offset
@@ -349,8 +350,9 @@ def register_lakeflow_source(spark):
                 current_date = (datetime.strptime(batch_end_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
 
             # Calculate new high watermark
+            # 🧪 TEST: Use ingestion_time for watermark to match cursor_field
             if all_records:
-                latest_timestamp = max(r["begin_datetime_utc"] for r in all_records)
+                latest_timestamp = max(r["ingestion_time"] for r in all_records)
                 next_high_watermark = latest_timestamp.isoformat()
             else:
                 next_high_watermark = high_watermark or datetime.strptime(fetch_end_date, "%Y-%m-%d").replace(
