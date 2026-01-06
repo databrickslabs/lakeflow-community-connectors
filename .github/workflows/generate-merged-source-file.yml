@@ -1,0 +1,145 @@
+name: Generate Merged Source File
+# This is needed because SDP does not support module imports for Python Data Source implementations.
+
+on:
+  pull_request:
+    paths:
+      - 'sources/**/*.py'
+      - 'libs/utils.py'
+      - 'pipeline/lakeflow_python_source.py'
+      - '!sources/**/test/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'sources/**/*.py'
+      - 'libs/utils.py'
+      - 'pipeline/lakeflow_python_source.py'
+      - '!sources/**/test/**'
+
+permissions:
+  contents: read
+
+jobs:
+  generate-merged-sources:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Get changed source files
+        id: changed-files
+        uses: tj-actions/changed-files@v46
+        with:
+          files: |
+            sources/**/*.py
+            libs/utils.py
+            pipeline/lakeflow_python_source.py
+          files_ignore: |
+            sources/**/_generated_*.py
+            sources/**/test/**
+
+      - name: Get changed generated files
+        id: changed-generated
+        uses: tj-actions/changed-files@v46
+        with:
+          files: |
+            sources/**/_generated_*.py
+
+      - name: Determine sources to regenerate
+        id: sources
+        run: |
+          SOURCES_TO_REGENERATE=""
+          
+          # Check if shared files changed (affects all sources)
+          SHARED_CHANGED="false"
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+            if [[ "$file" == "libs/utils.py" ]] || [[ "$file" == "pipeline/lakeflow_python_source.py" ]]; then
+              SHARED_CHANGED="true"
+              break
+            fi
+          done
+          
+          if [[ "$SHARED_CHANGED" == "true" ]]; then
+            # Regenerate all sources that have a main source file
+            for dir in sources/*/; do
+              source_name=$(basename "$dir")
+              # Skip interface directory and check if main source file exists
+              if [[ "$source_name" != "interface" ]] && [[ -f "sources/${source_name}/${source_name}.py" ]]; then
+                SOURCES_TO_REGENERATE="$SOURCES_TO_REGENERATE $source_name"
+              fi
+            done
+          else
+            # Check sources whose source files changed
+            for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+              if [[ "$file" == sources/*/[!_]*.py ]]; then
+                # Extract source name from path like sources/zendesk/zendesk.py
+                source_name=$(echo "$file" | cut -d'/' -f2)
+                # Check if main source file exists and it's not interface
+                if [[ "$source_name" != "interface" ]] && [[ -f "sources/${source_name}/${source_name}.py" ]]; then
+                  # Add to list if not already present
+                  if [[ ! " $SOURCES_TO_REGENERATE " =~ " $source_name " ]]; then
+                    SOURCES_TO_REGENERATE="$SOURCES_TO_REGENERATE $source_name"
+                  fi
+                fi
+              fi
+            done
+            
+            # Also check sources whose generated files changed
+            for file in ${{ steps.changed-generated.outputs.all_changed_files }}; do
+              # Extract source name from path like sources/zendesk/_generated_zendesk_python_source.py
+              source_name=$(echo "$file" | cut -d'/' -f2)
+              # Check if main source file exists and it's not interface
+              if [[ "$source_name" != "interface" ]] && [[ -f "sources/${source_name}/${source_name}.py" ]]; then
+                # Add to list if not already present
+                if [[ ! " $SOURCES_TO_REGENERATE " =~ " $source_name " ]]; then
+                  SOURCES_TO_REGENERATE="$SOURCES_TO_REGENERATE $source_name"
+                fi
+              fi
+            done
+          fi
+          
+          # Trim leading/trailing whitespace
+          SOURCES_TO_REGENERATE=$(echo "$SOURCES_TO_REGENERATE" | xargs)
+          echo "sources=$SOURCES_TO_REGENERATE" >> $GITHUB_OUTPUT
+          echo "Sources to regenerate: $SOURCES_TO_REGENERATE"
+
+      - name: Regenerate merged source files
+        if: steps.sources.outputs.sources != ''
+        run: |
+          for source_name in ${{ steps.sources.outputs.sources }}; do
+            echo "Regenerating merged source for: $source_name"
+            python tools/scripts/merge_python_source.py "$source_name"
+          done
+
+      - name: Check if generated files are up to date
+        if: steps.sources.outputs.sources != ''
+        run: |
+          # Check if there are any differences between the regenerated files and what's in the repo
+          if git diff --quiet sources/**/_generated_*.py 2>/dev/null; then
+            echo "✅ Generated source files are up to date. No changes needed."
+            exit 0
+          else
+            echo "❌ Generated source files are out of date!"
+            echo ""
+            echo "The following files need to be regenerated:"
+            git diff --name-only sources/**/_generated_*.py
+            echo ""
+            echo "Please run the following commands locally and commit the changes:"
+            echo ""
+            for source_name in ${{ steps.sources.outputs.sources }}; do
+              echo "  python tools/scripts/merge_python_source.py $source_name"
+            done
+            echo ""
+            echo "Then add the generated files to your commit:"
+            echo "  git add sources/**/_generated_*.py"
+            echo "  git commit --amend --no-edit"
+            echo "  git push --force-with-lease"
+            exit 1
+          fi
+
