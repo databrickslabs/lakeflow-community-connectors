@@ -1,4 +1,3 @@
 {
-  "api_key": "",
-  "_note": "start_date and lookback_hours are now configured per-table in table_configuration, not at connection level. See pipeline_spec_example.json for examples."
+  "api_key": ""
 }

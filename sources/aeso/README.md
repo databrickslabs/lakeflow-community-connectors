@@ -1,128 +1,77 @@
-# Lakeflow AESO Community Connector
+# AESO Connector for Databricks
 
-Extract Alberta electricity market data from AESO API into Databricks Delta lake. Supports incremental CDC synchronization for hourly pool price data.
+Ingest Alberta electricity market data (hourly pool prices) from the AESO API into your Databricks lakehouse with automatic incremental updates.
 
-## SCD Type 1 Automatic Configuration
+## What You Get
 
-The connector automatically configures `sequence_by: "ingestion_time"` for proper merge behavior. You can optionally override this in your pipeline specification if needed. See [PIPELINE_CONFIG.md](PIPELINE_CONFIG.md) for advanced configuration options.
-
-## Prerequisites
-
-- AESO API key from [AESO API Portal](https://api.aeso.ca)
-- Python environment with `aeso-python-api` package
+- ⚡ **Hourly pool price data** - Actual prices, forecasts, and 30-day averages
+- 🔄 **Automatic updates** - Captures late-arriving data with configurable lookback
+- 📊 **SCD Type 1** - Latest values always win (historical tracking not supported)
+- 🚀 **Sub-minute latency** - Optional continuous mode for real-time dashboards
 
 ## Quick Start
 
-### 1. Configure Connection
+### 1. Get Your API Key
 
-| Parameter | Required | Default | Description |
-|-----------|----------|---------|-------------|
-| `api_key` | Yes | - | AESO API key |
+Sign up at [AESO API Portal](https://api.aeso.ca) to get your API key.
 
-**Connection config:**
+### 2. Create Connection in Databricks
+
+Create a Unity Catalog connection with your API key:
+
 ```json
 {
   "api_key": "your-aeso-api-key"
 }
 ```
 
-### 2. Configure Pipeline
+### 3. Configure Your Pipeline
 
-**Basic configuration:**
+**Minimal setup (uses defaults):**
+
 ```json
 {
   "pipeline_spec": {
     "connection_name": "my_aeso_connection",
-    "object": [
-      {
-        "table": {
-          "source_table": "pool_price",
-          "destination_catalog": "your_catalog",
-          "destination_schema": "your_schema",
-          "destination_table": "pool_price",
+    "objects": [{
+      "table": {
+        "source_table": "pool_price",
+        "destination_catalog": "main",
+        "destination_schema": "energy",
+        "table_configuration": {
           "scd_type": "SCD_TYPE_1"
         }
       }
-    ]
+    }]
   }
 }
 ```
 
-**With table configuration:**
+**With custom options:**
+
 ```json
 {
   "pipeline_spec": {
     "connection_name": "my_aeso_connection",
-    "object": [
-      {
-        "table": {
-          "source_table": "pool_price",
-          "destination_catalog": "your_catalog",
-          "destination_schema": "your_schema",
-          "destination_table": "pool_price",
-          "table_configuration": {
-            "scd_type": "SCD_TYPE_1",
-            "start_date": "2024-01-01",
-            "lookback_hours": "24",
-            "batch_size_days": "7",
-            "rate_limit_delay": "0.5"
-          }
+    "objects": [{
+      "table": {
+        "source_table": "pool_price",
+        "destination_catalog": "main",
+        "destination_schema": "energy",
+        "table_configuration": {
+          "scd_type": "SCD_TYPE_1",
+          "start_date": "2024-01-01",
+          "lookback_hours": "24"
         }
       }
-    ]
+    }]
   }
 }
 ```
 
-**Table Configuration Options:**
+### 4. Schedule Your Pipeline
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `start_date` | 30 days ago | Historical extraction start date (YYYY-MM-DD). Used only for initial load. |
-| `lookback_hours` | 24 | CDC lookback window in hours. Used for every incremental sync to recapture updates. |
-| `batch_size_days` | 30 | Number of days to fetch per API batch. Smaller batches reduce memory usage but increase API calls. |
-| `rate_limit_delay` | 0.1 | Seconds to wait between API calls. Increase if hitting rate limits, decrease for faster fetching. |
-
-**Note**: The connector automatically configures `sequence_by: "ingestion_time"` for proper SCD Type 1 merges. You don't need to specify it unless you want to override the default behavior.
-
-### 3. Schedule & Run
-
-The connector automatically handles end dates and fetches up to "now" on every run.
-
-## Configuration Guide
-
-### Two Independent Table Parameters
-
-**`start_date`** - Historical extraction starting point (table configuration)
-- Used: Initial load only
-- Purpose: Set where historical backfill begins
-- Examples: `"2024-01-01"`, `"2023-01-01"`, or omit for default (30 days ago)
-- Configured in: `table_configuration` section of pipeline spec
-
-**`lookback_hours`** - CDC lookback window (table configuration)
-- Used: Every incremental sync
-- Purpose: Recapture recent data to catch late-arriving updates
-- Recommendation: Match to your schedule frequency (see table below)
-- Configured in: `table_configuration` section of pipeline spec
-
-### Scheduling Recommendations
-
-| Schedule | Runs/Day | Recommended `lookback_hours` | Use Case |
-|----------|----------|------------------------------|----------|
-| Every 15 min | 96 | 6 | Ultra-low latency dashboards |
-| Every 30 min | 48 | 12 | Near real-time |
-| **Hourly** | 24 | **24** | **Standard (recommended)** |
-| Every 4 hours | 6 | 48 | Regular updates |
-| Daily | 1 | 72 | Cost-optimized |
-
-**Cron examples:**
-```bash
-*/15 * * * *  # Every 15 minutes
-0 * * * *     # Hourly
-0 2 * * *     # Daily at 2 AM
-```
-
-**Databricks workflow:**
+**Standard (hourly):**
 ```json
 {
   "quartz_cron_expression": "0 * * * ?",
@@ -130,76 +79,125 @@ The connector automatically handles end dates and fetches up to "now" on every r
 }
 ```
 
-## Data Schema
+**Real-time (continuous):**
+```json
+{
+  "continuous": {
+    "pause_status": "UNPAUSED"
+  }
+}
+```
+
+## Configuration Options
+
+### Table Configuration
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `scd_type` | - | **Required.** Must be `"SCD_TYPE_1"` (only supported type) |
+| `start_date` | 30 days ago | Historical start date for initial load (YYYY-MM-DD) |
+| `lookback_hours` | 24 | Hours to look back on each sync to capture late updates |
+| `batch_size_days` | 30 | Days per API batch (reduce for memory constraints) |
+| `rate_limit_delay` | 0.1 | Seconds between API calls (increase if rate limited) |
+
+### Choosing Your Schedule
+
+| Schedule | `lookback_hours` | Best For |
+|----------|------------------|----------|
+| **Continuous** | 1-6 | Real-time dashboards, sub-minute latency |
+| Every 15 min | 6 | Ultra-low latency monitoring |
+| **Hourly (recommended)** | **24** | **Standard production use** |
+| Daily | 72 | Cost-optimized, non-time-sensitive |
+
+**Key insight:** `lookback_hours` should cover the window where AESO may update past records. Hourly data can be revised for settlement, so 24 hours captures most updates.
+
+## Output Schema
 
 ### pool_price Table
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `begin_datetime_utc` | timestamp | Settlement hour start (UTC) - Primary Key, natively UTC from source |
-| `pool_price` | double (nullable) | Actual pool price ($/MWh) - null for future hours |
-| `forecast_pool_price` | double (nullable) | Forecasted price ($/MWh) |
-| `rolling_30day_avg` | double (nullable) | 30-day rolling average ($/MWh) |
-| `ingestion_time` | timestamp | UTC timestamp when the row was last ingested/updated |
+| Column | Type | Description |
+|--------|------|-------------|
+| `begin_datetime_utc` | timestamp | Hour start in UTC (Primary Key) |
+| `pool_price` | double | Actual price $/MWh (null for future hours) |
+| `forecast_pool_price` | double | Forecasted price $/MWh |
+| `rolling_30day_avg` | double | 30-day rolling average $/MWh |
+| `ingestion_time` | timestamp | When this record was last updated |
 
-**Ingestion type:** CDC (SCD Type 1)
-- **Primary Key**: `begin_datetime_utc` (unique hour identifier)
-- **Cursor**: `begin_datetime_utc` (incremental progress tracking)
-- **Sequence By**: `ingestion_time` (determines latest record for merges)
+**Note:** The connector uses `ingestion_time` to determine which version of a record is latest during merges.
 
 ## How It Works
 
 ### Initial Load
-```
-Fetches: start_date (or 30 days ago) → today
-Result: High watermark = latest record timestamp
+Fetches from `start_date` (or last 30 days) to today, creating your baseline dataset.
+
+### Incremental Updates
+Each run fetches from `(last_watermark - lookback_hours)` to today, ensuring:
+- New hourly records are captured
+- Updated prices (settlements) are merged in
+- No data is missed even with late-arriving updates
+
+**Example (hourly schedule, 24h lookback):**
+- **Run 1:** Fetch Jan 1 → Jan 15 (initial load)
+- **Run 2:** Fetch Jan 14 → Jan 15 (1 day overlap to catch updates)
+- **Run 3:** Fetch Jan 15 → Jan 16 (1 day overlap to catch updates)
+
+## Common Scenarios
+
+### Starting Fresh with Historical Data
+
+```json
+"table_configuration": {
+  "scd_type": "SCD_TYPE_1",
+  "start_date": "2023-01-01"
+}
 ```
 
-### Incremental Sync (CDC with Lookback)
-```
-Fetches: (high_watermark - lookback_hours) → today
-Result: Updated watermark + recaptured late updates
+### High-Frequency Updates (15-minute refresh)
+
+```json
+"table_configuration": {
+  "scd_type": "SCD_TYPE_1",
+  "lookback_hours": "6"
+}
 ```
 
-**Example with hourly schedule:**
-```
-Day 1, 2pm: Fetches Jan 1 → Dec 23 (initial load)
-Day 2, 2pm: Fetches Dec 22 2pm → Dec 24 2pm (24h lookback)
-Day 3, 2pm: Fetches Dec 23 2pm → Dec 25 2pm (24h lookback)
+### Real-Time Dashboard (continuous)
+
+```json
+"table_configuration": {
+  "scd_type": "SCD_TYPE_1",
+  "lookback_hours": "2"
+}
 ```
 
-Late-arriving data within the lookback window is automatically captured and merged.
+**Pipeline schedule:**
+```json
+{
+  "continuous": {
+    "pause_status": "UNPAUSED"
+  }
+}
+```
 
 ## Troubleshooting
 
-**Authentication Errors (401)**
-- Verify API key is correct and active
-- Check key registration at AESO API Portal
+| Issue | Solution |
+|-------|----------|
+| **401 Authentication Error** | Verify API key at [AESO API Portal](https://api.aeso.ca) |
+| **Missing recent updates** | Increase `lookback_hours` to capture longer settlement windows |
+| **Rate limiting (429)** | Increase `rate_limit_delay` or reduce schedule frequency |
+| **High memory usage** | Reduce `batch_size_days` to fetch smaller batches |
 
-**Rate Limiting (429)**
-- Reduce `lookback_hours` for frequent schedules
-- Add delays between runs
-- Reduce schedule frequency
+## Important Notes
 
-**Missing Updates**
-- Increase `lookback_hours` if late data arrives beyond current window
-- Verify pipeline merge/upsert is configured correctly
+- ⚠️ **Only SCD Type 1** is supported. SCD Type 2 (historical tracking) is not available.
+- Prices can be **negative** during oversupply conditions (this is normal).
+- AESO publishes **hourly**, so frequent schedules (e.g., every 15 min) will often find no new data.
+- Always use `begin_datetime_utc` as your time dimension (DST-safe).
 
-**Frequent Runs (15-min) Showing "No New Records"**
-- Expected! AESO publishes hourly, so 75% of 15-min runs find no new complete hours
-- Purpose: Minimize latency and capture late updates quickly
+## Resources
 
-## Data Characteristics
-
-- **Hourly granularity**: One record per settlement hour
-- **CDC updates**: Records can be updated after initial publication
-- **No deletes**: Records are never deleted, only updated
-- **Prices**: Can be negative during oversupply conditions
-- **Timestamps**: Always use `begin_datetime_utc` as primary key (DST-safe)
-
-## References
-
-- Connector: `sources/aeso/aeso.py`
-- AESO Python API: https://github.com/guanjieshen/aeso-python-api
-- AESO Website: https://www.aeso.ca
-- API Portal: https://api.aeso.ca
+- **AESO Python API:** https://github.com/guanjieshen/aeso-python-api
+- **AESO Website:** https://www.aeso.ca
+- **API Portal:** https://api.aeso.ca
+- **Connector Code:** `sources/aeso/aeso.py`

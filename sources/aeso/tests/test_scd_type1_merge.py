@@ -34,8 +34,8 @@ def test_metadata_configuration():
     assert metadata["primary_keys"] == ["begin_datetime_utc"], \
         f"Expected primary_keys=['begin_datetime_utc'], got {metadata['primary_keys']}"
     
-    assert metadata["cursor_field"] == "begin_datetime_utc", \
-        f"Expected cursor_field='begin_datetime_utc', got {metadata['cursor_field']}"
+    assert metadata["cursor_field"] == "ingestion_time", \
+        f"Expected cursor_field='ingestion_time', got {metadata['cursor_field']}"
     
     assert metadata["sequence_by"] == "ingestion_time", \
         f"Expected sequence_by='ingestion_time', got {metadata['sequence_by']}"
@@ -85,7 +85,7 @@ if __name__ == "__main__":
         print()
         print("SCD Type 1 Configuration Summary:")
         print("  - Primary Key: begin_datetime_utc (identifies unique hour)")
-        print("  - Cursor: begin_datetime_utc (tracks progress)")
+        print("  - Cursor: ingestion_time (tracks progress)")
         print("  - Sequence By: ingestion_time (determines latest record)")
         print("  - Ingestion Type: CDC (change data capture)")
         print()
