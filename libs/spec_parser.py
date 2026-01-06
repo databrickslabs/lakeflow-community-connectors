@@ -61,6 +61,7 @@ class TableSpec(BaseModel):
         - Keys are coerced to strings.
         - Values that are dicts/lists are JSON-encoded.
         - Other values are stringified with str().
+        - Ellipsis values (...) are skipped as they're placeholders.
         """
         if v is None:
             return None
@@ -71,6 +72,10 @@ class TableSpec(BaseModel):
         normalized: Dict[str, str] = {}
         for key, value in v.items():
             str_key = str(key)
+
+            # Skip ellipsis objects (used as placeholders)
+            if value is ...:
+                continue
 
             if isinstance(value, (dict, list)):
                 normalized[str_key] = json.dumps(value)
