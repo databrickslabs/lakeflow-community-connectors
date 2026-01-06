@@ -1,19 +1,20 @@
 # AESO Connector for Databricks
 
-Ingest Alberta electricity market data (hourly pool prices) from the AESO API into your Databricks lakehouse with automatic incremental updates.
+Ingest Alberta electricity market data (hourly pool prices) from the AESO API into Databricks Unity Catalog with automatic incremental updates.
 
 ## What You Get
 
-- ⚡ **Hourly pool price data** - Actual prices, forecasts, and 30-day averages
-- 🔄 **Automatic forecast updates** - Captures frequently updated forecast prices with configurable lookback
-- 📊 **SCD Type 1** - Latest values always win (historical tracking not supported)
-- 🚀 **Sub-minute latency** - Optional continuous mode for real-time use cases
+- ⚡ **Pool price data** - Hourly actual prices, forecasts, and 30-day rolling averages
+- 🔄 **Automatic updates** - Captures late-arriving adjustments and forecast revisions
+- 🚀 **Sub-minute latency** - Supports continuous mode for near-real-time ingestion
+- 📊 **Historical backfill** - Load data from any start date with automatic merges
+- 🔁 **Automatic recovery** - Configurable lookback window handles pipeline downtime
 
 ## Quick Start
 
 ### 1. Get Your API Key
 
-Sign up at [AESO API Portal](https://api.aeso.ca) to get your API key.
+Sign up at [AESO API Portal](https://developer-apim.aeso.ca/) to get your API key.
 
 ### 2. Create Connection in Databricks
 
