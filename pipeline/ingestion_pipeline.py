@@ -86,11 +86,6 @@ def _create_cdc_table(
     # Add delete flow for SCD type 1 tables with hard_deletion_sync enabled (from second run onwards)
     if scd_type == "1" and hard_deletion_sync and not _is_first_run(spark, destination_table):
         delete_view_name = source_table + "_delete_staging"
-        delete_config = {
-            **table_config,
-            "isDeleteFlow": "true",
-            "destinationTable": destination_table,
-        }
 
         @sdp.view(name=delete_view_name)
         def delete_view():
@@ -98,7 +93,9 @@ def _create_cdc_table(
                 spark.readStream.format("lakeflow_connect")
                 .option("databricks.connection", connection_name)
                 .option("tableName", source_table)
-                .options(**delete_config)
+                .option("isDeleteFlow", "true")
+                .option("destinationTable", destination_table)
+                .options(**table_config)
                 .load()
             )
 
