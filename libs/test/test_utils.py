@@ -23,6 +23,7 @@ from pyspark.sql.types import (
     BooleanType,
     DateType,
     TimestampType,
+    BinaryType,
     DataType,
 )
 
@@ -272,6 +273,61 @@ class TestTimestampType:
     def test_invalid_timestamp_raises_error(self):
         with pytest.raises(ValueError):
             parse_value("not-a-timestamp", TimestampType())
+
+
+# =============================================================================
+# Tests for BinaryType
+# =============================================================================
+class TestBinaryType:
+    """Test BinaryType conversion."""
+
+    def test_bytes_passthrough(self):
+        data = b"\x00\x01\x02\x03"
+        result = parse_value(data, BinaryType())
+        assert result == data
+
+    def test_bytearray_to_bytes(self):
+        data = bytearray([0, 1, 2, 3])
+        result = parse_value(data, BinaryType())
+        assert result == b"\x00\x01\x02\x03"
+        assert isinstance(result, bytes)
+
+    def test_base64_string_decoding(self):
+        # "SGVsbG8gV29ybGQ=" is base64 for "Hello World"
+        result = parse_value("SGVsbG8gV29ybGQ=", BinaryType())
+        assert result == b"Hello World"
+
+    def test_hex_string_decoding(self):
+        # "48656c6c6f" is hex for "Hello"
+        result = parse_value("48656c6c6f", BinaryType())
+        assert result == b"Hello"
+
+    def test_utf8_fallback_for_plain_string(self):
+        # A string that's not valid base64 or hex should be UTF-8 encoded
+        result = parse_value("plain text!", BinaryType())
+        assert result == b"plain text!"
+
+    def test_list_of_integers_to_bytes(self):
+        data = [72, 101, 108, 108, 111]  # ASCII for "Hello"
+        result = parse_value(data, BinaryType())
+        assert result == b"Hello"
+
+    def test_empty_bytes(self):
+        result = parse_value(b"", BinaryType())
+        assert result == b""
+
+    def test_empty_list(self):
+        result = parse_value([], BinaryType())
+        assert result == b""
+
+    def test_other_type_encoded_as_utf8(self):
+        # Numbers and other types should be converted to string then UTF-8 encoded
+        result = parse_value(12345, BinaryType())
+        assert result == b"12345"
+
+    def test_none_returns_none(self):
+        result = parse_value(None, BinaryType())
+        assert result is None
 
 
 # =============================================================================
