@@ -18,6 +18,7 @@ from pydantic import (
 SCD_TYPE = "scd_type"
 PRIMARY_KEYS = "primary_keys"
 SEQUENCE_BY = "sequence_by"
+HARD_DELETION_SYNC = "hard_deletion_sync"
 
 # Valid SCD type values
 SCD_TYPE_1 = "SCD_TYPE_1"
@@ -190,7 +191,7 @@ class SpecParser:
         Returns:
             A dictionary containing the table configuration without special keys.
         """
-        special_keys = {SCD_TYPE, PRIMARY_KEYS, SEQUENCE_BY}
+        special_keys = {SCD_TYPE, PRIMARY_KEYS, SEQUENCE_BY, HARD_DELETION_SYNC}
         for obj in self._model.objects:
             if obj.table.source_table == table_name:
                 config = obj.table.table_configuration or {}
@@ -273,6 +274,25 @@ class SpecParser:
                 config = obj.table.table_configuration or {}
                 return config.get(SEQUENCE_BY)
         return None
+
+    def get_hard_deletion_sync(self, table_name: str) -> bool:
+        """
+        Return whether hard deletion sync is enabled for a specific table.
+
+        Args:
+            table_name: The name of the table.
+
+        Returns:
+            True if hard_deletion_sync is set to "true" (case-insensitive), False otherwise.
+        """
+        for obj in self._model.objects:
+            if obj.table.source_table == table_name:
+                config = obj.table.table_configuration or {}
+                value = config.get(HARD_DELETION_SYNC)
+                if value is None:
+                    return False
+                return value.lower() == "true"
+        return False
 
     def get_full_destination_table_name(self, table_name: str) -> str:
         """
