@@ -2,14 +2,16 @@
 Microsoft Teams Fully Automated Ingestion Sample
 
 This sample demonstrates the fully automated ingestion mode using fetch_all parameters.
-It automatically discovers and ingests all teams, channels, members, messages, and replies
-without requiring explicit IDs.
+It automatically discovers and ingests all teams, channels, members, messages, replies,
+and reactions without requiring explicit IDs.
 
 Features:
 - Auto-discovery of all teams
 - Auto-discovery of all channels per team
 - Auto-discovery of all messages per channel (for message_replies)
-- Incremental sync for messages with CDC
+- Incremental sync for messages/replies with Delta API
+- Slow-lane polling for message reactions
+- Parallel fetching with ThreadPoolExecutor
 - No manual configuration of team_id or channel_id needed
 
 Prerequisites:
@@ -164,6 +166,28 @@ pipeline_spec = {
                     "max_pages_per_batch": MAX_PAGES_PER_BATCH
                 }
             }
+        },
+
+        # 6. Message Reactions - Slow-lane polling for reactions
+        {
+            "table": {
+                "source_table": "message_reactions",
+                "destination_catalog": DESTINATION_CATALOG,
+                "destination_schema": DESTINATION_SCHEMA,
+                "destination_table": f"{TABLE_PREFIX}message_reactions",
+                "table_configuration": {
+                    "tenant_id": TENANT_ID,
+                    "client_id": CLIENT_ID,
+                    "client_secret": CLIENT_SECRET,
+                    "fetch_all_teams": "true",           # Auto-discover all teams
+                    "fetch_all_channels": "true",        # Auto-discover all channels per team
+                    "reaction_poll_window_days": "7",    # Poll messages from last 7 days
+                    "reaction_poll_batch_size": "100",   # Poll up to 100 messages per run
+                    "max_concurrent_threads": "10",      # Use 10 parallel threads
+                    "top": TOP,
+                    "max_pages_per_batch": MAX_PAGES_PER_BATCH
+                }
+            }
         }
     ]
 }
@@ -176,11 +200,12 @@ print("Microsoft Teams - Fully Automated Ingestion")
 print("=" * 80)
 print("\nMode: Automatic Discovery (fetch_all enabled)")
 print("\nTables to ingest:")
-print("  1. Teams           (snapshot) - all teams in organization")
-print("  2. Channels        (snapshot) - all channels in all teams")
-print("  3. Members         (snapshot) - all members in all teams")
-print("  4. Messages        (CDC)      - all messages in all channels (incremental)")
-print("  5. Message Replies (CDC)      - all replies to all messages (incremental)")
+print("  1. Teams             (snapshot) - all teams in organization")
+print("  2. Channels          (snapshot) - all channels in all teams")
+print("  3. Members           (snapshot) - all members in all teams")
+print("  4. Messages          (CDC)      - all messages in all channels (incremental)")
+print("  5. Message Replies   (CDC)      - all replies to all messages (incremental)")
+print("  6. Message Reactions (snapshot) - reactions to recent messages (slow-lane polling)")
 print("\nDestination:")
 print(f"  Catalog: {DESTINATION_CATALOG}")
 print(f"  Schema:  {DESTINATION_SCHEMA}")
@@ -201,6 +226,7 @@ print(f"  • {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}channels"
 print(f"  • {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}members")
 print(f"  • {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}messages")
 print(f"  • {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}message_replies")
+print(f"  • {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}message_reactions")
 print("\nSample queries:")
 print(f"  SELECT * FROM {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}teams")
 print(f"  SELECT * FROM {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}messages")

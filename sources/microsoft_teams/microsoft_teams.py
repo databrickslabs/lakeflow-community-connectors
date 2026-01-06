@@ -955,7 +955,177 @@ class LakeflowConnect:
         self, start_offset: dict, table_options: dict[str, str]
     ) -> Tuple[Iterator[dict], dict]:
         """
-        Read messages table (CDC mode with timestamp-based filtering).
+        Read messages table - routes to Delta API or legacy implementation.
+
+        Delta API (default): Server-side filtering, O(changed_messages)
+        Legacy: Client-side filtering, O(all_messages)
+
+        Args:
+            start_offset: Dictionary with cursor or deltaLink
+            table_options: Must include team_id OR fetch_all_teams, plus channel_id or fetch_all_channels
+
+        Returns:
+            Tuple of (iterator of message records, next_offset dict)
+
+        Configuration:
+            use_delta_api: "true" (default) or "false"
+        """
+        use_delta_api = table_options.get("use_delta_api", "true").lower() == "true"
+
+        if use_delta_api:
+            return self._read_messages_delta(start_offset, table_options)
+        else:
+            return self._read_messages_legacy(start_offset, table_options)
+
+    def _read_messages_delta(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> Tuple[Iterator[dict], dict]:
+        """
+        Read messages using Microsoft Graph Delta API (server-side filtering).
+
+        Delta API provides efficient incremental sync:
+        - Only returns new, modified, or deleted messages
+        - O(changed_messages) instead of O(all_messages)
+        - Handles deletions with @removed marker
+
+        Note: Delta API does NOT track reaction changes. Use message_reactions table.
+
+        Args:
+            start_offset: Dictionary with deltaLink from previous sync
+            table_options: Same as legacy mode
+
+        Returns:
+            Tuple of (iterator of message records, offset dict with deltaLink)
+        """
+        team_id = table_options.get("team_id")
+        channel_id = table_options.get("channel_id")
+        fetch_all_channels = table_options.get("fetch_all_channels", "").lower() == "true"
+        fetch_all_teams = table_options.get("fetch_all_teams", "").lower() == "true"
+
+        # Validate inputs
+        if not team_id and not fetch_all_teams:
+            raise ValueError(
+                "table_options for 'messages' must include either 'team_id' "
+                "or 'fetch_all_teams=true'"
+            )
+
+        if not channel_id and not fetch_all_channels:
+            raise ValueError(
+                "table_options for 'messages' must include either 'channel_id' "
+                "or 'fetch_all_channels=true'"
+            )
+
+        try:
+            max_pages = int(table_options.get("max_pages_per_batch", 100))
+        except (TypeError, ValueError):
+            max_pages = 100
+
+        # Determine which teams to process
+        if fetch_all_teams:
+            team_ids_to_process = self._fetch_all_team_ids(max_pages)
+        else:
+            team_ids_to_process = [team_id]
+
+        # Build team-channel pairs
+        all_team_channel_pairs = []
+        for current_team_id in team_ids_to_process:
+            if fetch_all_channels:
+                channel_ids_to_process = self._fetch_all_channel_ids(current_team_id, max_pages)
+                if not channel_ids_to_process:
+                    continue
+            else:
+                channel_ids_to_process = [channel_id]
+
+            for ch_id in channel_ids_to_process:
+                all_team_channel_pairs.append((current_team_id, ch_id))
+
+        # Fetch messages using Delta API for each channel
+        records = []
+        delta_links = {}
+
+        for current_team_id, current_channel_id in all_team_channel_pairs:
+            channel_key = f"{current_team_id}/{current_channel_id}"
+
+            # Get deltaLink from previous sync (if exists)
+            delta_link = None
+            if start_offset and isinstance(start_offset, dict):
+                delta_links_data = start_offset.get("deltaLinks", {})
+                delta_link = delta_links_data.get(channel_key)
+
+            if delta_link:
+                # Incremental sync - use saved deltaLink
+                url = delta_link
+            else:
+                # Initial sync - use delta endpoint
+                url = f"{self.base_url}/teams/{current_team_id}/channels/{current_channel_id}/messages/delta"
+
+            pages_fetched = 0
+            next_url = url
+
+            try:
+                while next_url and pages_fetched < max_pages:
+                    data = self._make_request_with_retry(next_url)
+                    messages = data.get("value", [])
+
+                    for msg in messages:
+                        # Handle deleted messages
+                        if "@removed" in msg:
+                            record = {
+                                "id": msg["id"],
+                                "team_id": current_team_id,
+                                "channel_id": current_channel_id,
+                                "_deleted": True,
+                                "lastModifiedDateTime": datetime.now().isoformat().replace("+00:00", "Z"),
+                            }
+                        else:
+                            # Normal message
+                            record = dict(msg)
+                            record["team_id"] = current_team_id
+                            record["channel_id"] = current_channel_id
+
+                            # Serialize complex objects
+                            if "policyViolation" in record and isinstance(record["policyViolation"], dict):
+                                record["policyViolation"] = json.dumps(record["policyViolation"])
+                            if "eventDetail" in record and isinstance(record["eventDetail"], dict):
+                                record["eventDetail"] = json.dumps(record["eventDetail"])
+                            if "messageHistory" in record and isinstance(record["messageHistory"], list):
+                                record["messageHistory"] = json.dumps(record["messageHistory"])
+
+                        records.append(record)
+
+                    # Check for deltaLink (end of sync) or nextLink (pagination)
+                    delta_link_new = data.get("@odata.deltaLink")
+                    next_link = data.get("@odata.nextLink")
+
+                    if delta_link_new:
+                        # Save deltaLink for next sync
+                        delta_links[channel_key] = delta_link_new
+                        break
+                    elif next_link:
+                        next_url = next_link
+                        pages_fetched += 1
+                        time.sleep(0.1)
+                    else:
+                        break
+
+            except Exception as e:
+                # Skip inaccessible channels
+                if "404" not in str(e) and "403" not in str(e):
+                    raise
+                continue
+
+        # Return deltaLinks for next sync
+        next_offset = {"deltaLinks": delta_links} if delta_links else {}
+        return iter(records), next_offset
+
+    def _read_messages_legacy(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> Tuple[Iterator[dict], dict]:
+        """
+        Read messages table (CDC mode with client-side timestamp filtering).
+
+        LEGACY MODE: Fetches all messages and filters client-side.
+        Use Delta API for better performance (O(changed) vs O(all)).
 
         Three modes:
         1. Specific channel: Requires team_id and channel_id
@@ -1123,7 +1293,205 @@ class LakeflowConnect:
         self, start_offset: dict, table_options: dict[str, str]
     ) -> Tuple[Iterator[dict], dict]:
         """
+        Read message replies (threads) for a specific message or auto-discover.
+
+        Routes to Delta API or legacy implementation based on use_delta_api option.
+
+        Args:
+            start_offset: Dictionary with cursor or deltaLinks
+            table_options: Must include use_delta_api option (default: "true")
+
+        Returns:
+            Tuple of (iterator of reply records, next_offset dict)
+
+        Raises:
+            ValueError: If required options are missing
+        """
+        use_delta_api = table_options.get("use_delta_api", "true").lower() == "true"
+
+        if use_delta_api:
+            return self._read_message_replies_delta(start_offset, table_options)
+        else:
+            return self._read_message_replies_legacy(start_offset, table_options)
+
+    def _read_message_replies_delta(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> Tuple[Iterator[dict], dict]:
+        """
+        Read message replies using Microsoft Graph Delta API (server-side filtering).
+
+        This method uses the Delta API for efficient incremental sync of replies.
+        Only changed/new/deleted replies are returned from the server.
+
+        Four modes:
+        1. Specific message: Requires team_id, channel_id, and message_id
+        2. Auto-discover messages: Requires team_id, channel_id, and fetch_all_messages="true"
+        3. Auto-discover channels: Requires team_id, fetch_all_channels="true", and fetch_all_messages="true"
+        4. Auto-discover everything: Requires fetch_all_teams="true", fetch_all_channels="true", and fetch_all_messages="true"
+
+        Args:
+            start_offset: Dictionary with deltaLinks (e.g., {"deltaLinks": {"team/channel/message": "deltaUrl"}})
+            table_options: See modes above for required options
+
+        Returns:
+            Tuple of (iterator of reply records, next_offset dict with updated deltaLinks)
+
+        Raises:
+            ValueError: If required options are missing
+        """
+        team_id = table_options.get("team_id")
+        channel_id = table_options.get("channel_id")
+        message_id = table_options.get("message_id")
+        fetch_all_messages = table_options.get("fetch_all_messages", "").lower() == "true"
+        fetch_all_channels = table_options.get("fetch_all_channels", "").lower() == "true"
+        fetch_all_teams = table_options.get("fetch_all_teams", "").lower() == "true"
+
+        # Validate inputs
+        if not team_id and not fetch_all_teams:
+            raise ValueError(
+                "table_options for 'message_replies' must include either 'team_id' "
+                "or 'fetch_all_teams=true'"
+            )
+
+        if not channel_id and not fetch_all_channels:
+            raise ValueError(
+                "table_options for 'message_replies' must include either 'channel_id' "
+                "or 'fetch_all_channels=true'"
+            )
+
+        if not message_id and not fetch_all_messages:
+            raise ValueError(
+                "table_options for 'message_replies' must include either 'message_id' "
+                "or 'fetch_all_messages=true'"
+            )
+
+        # Parse options
+        try:
+            max_pages = int(table_options.get("max_pages_per_batch", 100))
+        except (TypeError, ValueError):
+            max_pages = 100
+
+        # Determine which teams to process
+        if fetch_all_teams:
+            team_ids_to_process = self._fetch_all_team_ids(max_pages)
+        else:
+            team_ids_to_process = [team_id]
+
+        # Build team-channel pairs
+        all_team_channel_pairs = []
+        for current_team_id in team_ids_to_process:
+            if fetch_all_channels:
+                channel_ids_to_process = self._fetch_all_channel_ids(current_team_id, max_pages)
+                if not channel_ids_to_process:
+                    continue
+            else:
+                channel_ids_to_process = [channel_id]
+
+            for ch_id in channel_ids_to_process:
+                all_team_channel_pairs.append((current_team_id, ch_id))
+
+        # Build team-channel-message triples
+        all_team_channel_message_triples = []
+        for current_team_id, current_channel_id in all_team_channel_pairs:
+            if fetch_all_messages:
+                message_ids_to_process = self._fetch_all_message_ids(current_team_id, current_channel_id, max_pages)
+                if not message_ids_to_process:
+                    continue
+            else:
+                message_ids_to_process = [message_id]
+
+            for msg_id in message_ids_to_process:
+                all_team_channel_message_triples.append((current_team_id, current_channel_id, msg_id))
+
+        # Fetch replies using Delta API for each message
+        records: List[dict[str, Any]] = []
+        delta_links = {}
+
+        for current_team_id, current_channel_id, current_message_id in all_team_channel_message_triples:
+            message_key = f"{current_team_id}/{current_channel_id}/{current_message_id}"
+
+            # Get deltaLink from previous sync for this specific message
+            delta_link = start_offset.get("deltaLinks", {}).get(message_key) if start_offset else None
+
+            if delta_link:
+                # Incremental sync - use saved deltaLink
+                url = delta_link
+            else:
+                # Initial sync - use delta endpoint
+                url = f"{self.base_url}/teams/{current_team_id}/channels/{current_channel_id}/messages/{current_message_id}/replies/delta"
+
+            pages_fetched = 0
+
+            try:
+                while url and pages_fetched < max_pages:
+                    data = self._make_request_with_retry(url)
+                    replies = data.get("value", [])
+
+                    for reply in replies:
+                        # Check if reply was deleted
+                        if "@removed" in reply:
+                            # Handle deleted reply
+                            record = {
+                                "id": reply["id"],
+                                "parent_message_id": current_message_id,
+                                "team_id": current_team_id,
+                                "channel_id": current_channel_id,
+                                "_deleted": True,
+                                "lastModifiedDateTime": datetime.now().isoformat().replace("+00:00", "Z")
+                            }
+                        else:
+                            # Normal reply processing
+                            record: dict[str, Any] = dict(reply)
+                            record["parent_message_id"] = current_message_id
+                            record["team_id"] = current_team_id
+                            record["channel_id"] = current_channel_id
+
+                            # Serialize complex objects to JSON strings
+                            if "policyViolation" in record and isinstance(
+                                record["policyViolation"], dict
+                            ):
+                                record["policyViolation"] = json.dumps(record["policyViolation"])
+
+                            if "eventDetail" in record and isinstance(record["eventDetail"], dict):
+                                record["eventDetail"] = json.dumps(record["eventDetail"])
+
+                            if "messageHistory" in record and isinstance(
+                                record["messageHistory"], list
+                            ):
+                                record["messageHistory"] = json.dumps(record["messageHistory"])
+
+                        records.append(record)
+
+                    # Check for deltaLink (end of sync for this message)
+                    delta_link_new = data.get("@odata.deltaLink")
+                    if delta_link_new:
+                        delta_links[message_key] = delta_link_new
+                        break  # Delta sync complete for this message
+
+                    # Check for nextLink (more pages in this delta sync)
+                    url = data.get("@odata.nextLink")
+                    pages_fetched += 1
+
+                    if url:
+                        time.sleep(0.1)
+
+            except Exception as e:
+                # If message has no replies or is inaccessible, continue
+                if "404" not in str(e) and "403" not in str(e):
+                    raise
+                # Continue to next message on 404/403
+
+        next_offset = {"deltaLinks": delta_links} if delta_links else {}
+        return iter(records), next_offset
+
+    def _read_message_replies_legacy(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> Tuple[Iterator[dict], dict]:
+        """
         Read message replies (threads) for a specific message or auto-discover (CDC mode).
+
+        LEGACY MODE: Fetches all replies and filters client-side.
+        Use Delta API for better performance (O(changed) vs O(all)).
 
         Four modes:
         1. Specific message: Requires team_id, channel_id, and message_id
@@ -1229,75 +1597,46 @@ class LakeflowConnect:
             for msg_id in message_ids_to_process:
                 all_team_channel_message_triples.append((current_team_id, current_channel_id, msg_id))
 
-        # Now fetch replies for all discovered team-channel-message triples
+        # Parse max_concurrent_threads option
+        try:
+            max_workers = int(table_options.get("max_concurrent_threads", 10))
+        except (TypeError, ValueError):
+            max_workers = 10
+
+        # Now fetch replies for all discovered team-channel-message triples using ThreadPoolExecutor
         records: List[dict[str, Any]] = []
         max_modified: str | None = None
 
-        for current_team_id, current_channel_id, current_message_id in all_team_channel_message_triples:
-            # Build request URL for this message's replies
-            url = f"{self.base_url}/teams/{current_team_id}/channels/{current_channel_id}/messages/{current_message_id}/replies"
-            params = {"$top": top}
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(
+                    self._fetch_replies_for_message,
+                    team_id,
+                    channel_id,
+                    message_id,
+                    cursor,
+                    top,
+                    max_pages
+                ): (team_id, channel_id, message_id)
+                for team_id, channel_id, message_id in all_team_channel_message_triples
+            }
 
-            pages_fetched = 0
-            next_url: str | None = url
-
-            while next_url and pages_fetched < max_pages:
+            for future in as_completed(futures):
                 try:
-                    if pages_fetched == 0:
-                        data = self._make_request_with_retry(url, params=params)
-                    else:
-                        data = self._make_request_with_retry(next_url)
+                    reply_records, reply_max_modified = future.result()
+                    records.extend(reply_records)
 
-                    replies = data.get("value", [])
-
-                    for reply in replies:
-                        # Filter by cursor (client-side since API doesn't support $filter on /replies)
-                        last_modified = reply.get("lastModifiedDateTime")
-                        if cursor and last_modified and last_modified < cursor:
-                            continue  # Skip replies before cursor
-
-                        # Add connector-derived fields
-                        record: dict[str, Any] = dict(reply)
-                        record["parent_message_id"] = current_message_id
-                        record["team_id"] = current_team_id
-                        record["channel_id"] = current_channel_id
-
-                        # Serialize complex objects to JSON strings
-                        if "policyViolation" in record and isinstance(
-                            record["policyViolation"], dict
-                        ):
-                            record["policyViolation"] = json.dumps(record["policyViolation"])
-
-                        if "eventDetail" in record and isinstance(record["eventDetail"], dict):
-                            record["eventDetail"] = json.dumps(record["eventDetail"])
-
-                        if "messageHistory" in record and isinstance(
-                            record["messageHistory"], list
-                        ):
-                            record["messageHistory"] = json.dumps(record["messageHistory"])
-
-                        records.append(record)
-
-                        # Track max timestamp
-                        if last_modified:
-                            if max_modified is None or last_modified > max_modified:
-                                max_modified = last_modified
-
-                    # Handle pagination
-                    next_url = data.get("@odata.nextLink")
-                    pages_fetched += 1
-
-                    if next_url:
-                        time.sleep(0.1)
+                    # Track max timestamp across all messages
+                    if reply_max_modified:
+                        if max_modified is None or reply_max_modified > max_modified:
+                            max_modified = reply_max_modified
 
                 except Exception as e:
-                    # If a message has no replies or is inaccessible, log and continue
-                    # (some messages might be deleted or inaccessible)
-                    if "404" not in str(e):
-                        # Only raise if it's not a 404 (no replies)
+                    # Log but continue on errors from individual message fetches
+                    if "404" not in str(e) and "403" not in str(e):
+                        # Only raise if it's not a 404/403 (inaccessible message)
                         raise
-                    # Continue to next message on 404
-                    break
+                    # Continue to next message on 404/403
 
         # Compute next cursor with lookback window
         next_cursor = cursor
@@ -1313,6 +1652,92 @@ class LakeflowConnect:
 
         next_offset = {"cursor": next_cursor} if next_cursor else {}
         return iter(records), next_offset
+
+    def _fetch_replies_for_message(
+        self,
+        team_id: str,
+        channel_id: str,
+        message_id: str,
+        cursor: str | None,
+        top: int,
+        max_pages: int
+    ) -> Tuple[List[dict[str, Any]], str | None]:
+        """
+        Fetch replies for a single message (helper for parallel execution).
+
+        Args:
+            team_id: Team ID
+            channel_id: Channel ID
+            message_id: Message ID
+            cursor: Timestamp cursor for filtering
+            top: Page size
+            max_pages: Max pages to fetch
+
+        Returns:
+            Tuple of (list of reply records, max_modified timestamp)
+        """
+        records: List[dict[str, Any]] = []
+        max_modified: str | None = None
+
+        url = f"{self.base_url}/teams/{team_id}/channels/{channel_id}/messages/{message_id}/replies"
+        params = {"$top": top}
+
+        pages_fetched = 0
+        next_url: str | None = url
+
+        try:
+            while next_url and pages_fetched < max_pages:
+                if pages_fetched == 0:
+                    data = self._make_request_with_retry(url, params=params)
+                else:
+                    data = self._make_request_with_retry(next_url)
+
+                replies = data.get("value", [])
+
+                for reply in replies:
+                    # Filter by cursor (client-side since API doesn't support $filter on /replies)
+                    last_modified = reply.get("lastModifiedDateTime")
+                    if cursor and last_modified and last_modified < cursor:
+                        continue  # Skip replies before cursor
+
+                    # Add connector-derived fields
+                    record: dict[str, Any] = dict(reply)
+                    record["parent_message_id"] = message_id
+                    record["team_id"] = team_id
+                    record["channel_id"] = channel_id
+
+                    # Serialize complex objects to JSON strings
+                    if "policyViolation" in record and isinstance(record["policyViolation"], dict):
+                        record["policyViolation"] = json.dumps(record["policyViolation"])
+
+                    if "eventDetail" in record and isinstance(record["eventDetail"], dict):
+                        record["eventDetail"] = json.dumps(record["eventDetail"])
+
+                    if "messageHistory" in record and isinstance(record["messageHistory"], list):
+                        record["messageHistory"] = json.dumps(record["messageHistory"])
+
+                    records.append(record)
+
+                    # Track max timestamp
+                    if last_modified:
+                        if max_modified is None or last_modified > max_modified:
+                            max_modified = last_modified
+
+                # Handle pagination
+                next_url = data.get("@odata.nextLink")
+                pages_fetched += 1
+
+                if next_url:
+                    time.sleep(0.1)
+
+        except Exception as e:
+            # If a message has no replies or is inaccessible, return empty
+            if "404" not in str(e):
+                # Only raise if it's not a 404 (no replies)
+                raise
+            # Return empty on 404
+
+        return records, max_modified
 
     def _read_message_reactions(
         self, start_offset: dict, table_options: dict[str, str]
