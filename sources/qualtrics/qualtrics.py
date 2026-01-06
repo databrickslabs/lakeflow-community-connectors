@@ -43,7 +43,7 @@ class QualtricsConfig:
     REQUEST_TIMEOUT = 30  # seconds per HTTP request
 
     # Auto-consolidation configuration (when surveyId not provided)
-    MAX_SURVEYS_TO_CONSOLIDATE = 100  # Safety limit to prevent excessive API calls
+    DEFAULT_MAX_SURVEYS = 50  # Default limit for auto-consolidation
     CONSOLIDATION_DELAY_BETWEEN_SURVEYS = 0.5  # seconds (to respect rate limits)
 
 
@@ -56,6 +56,7 @@ class LakeflowConnect:
             options: Dictionary containing:
                 - api_token: Qualtrics API token
                 - datacenter_id: Datacenter identifier (e.g., 'fra1', 'ca1', 'yourdatacenterid')
+                - max_surveys: (Optional) Maximum number of surveys to consolidate when surveyId is not provided (default: 50)
         """
         self.api_token = options.get("api_token")
         self.datacenter_id = options.get("datacenter_id")
@@ -70,6 +71,14 @@ class LakeflowConnect:
             "X-API-TOKEN": self.api_token,
             "Content-Type": "application/json"
         }
+
+        # Auto-consolidation configuration
+        max_surveys_str = options.get("max_surveys", str(QualtricsConfig.DEFAULT_MAX_SURVEYS))
+        try:
+            self.max_surveys = int(max_surveys_str)
+        except ValueError:
+            logger.warning(f"Invalid max_surveys value '{max_surveys_str}', using default {QualtricsConfig.DEFAULT_MAX_SURVEYS}")
+            self.max_surveys = QualtricsConfig.DEFAULT_MAX_SURVEYS
 
         # Supported tables
         self.tables = ["surveys", "survey_definitions", "survey_responses", "distributions", "mailing_lists", "mailing_list_contacts", "directory_contacts", "directories"]
@@ -544,7 +553,7 @@ class LakeflowConnect:
 
         Args:
             start_offset: Dictionary with per-survey cursors {"surveys": {...}}
-            table_options: Options for survey filtering (only_active_surveys, max_surveys)
+            table_options: Passed to _get_all_survey_ids (currently not used)
             single_survey_reader: Function(survey_id, offset) -> (Iterator[dict], dict)
             cursor_field: Field name for global cursor (e.g., "lastModified")
             data_type: Data type name for logging (e.g., "definitions")
@@ -599,25 +608,15 @@ class LakeflowConnect:
         """
         Get all survey IDs for auto-consolidation.
 
+        Includes all surveys (both active and inactive) up to the max_surveys limit
+        configured at connection level.
+
         Args:
-            table_options: May contain filters like:
-                - only_active_surveys: "true" to filter only active surveys (default: true)
-                - max_surveys: Maximum number of surveys to process (default: 100)
+            table_options: Not used (kept for interface consistency)
 
         Returns:
             List of survey IDs
         """
-        # Check if we should only include active surveys (default: true)
-        only_active = table_options.get("only_active_surveys", "true").lower() == "true"
-
-        # Get max surveys limit
-        max_surveys_str = table_options.get("max_surveys", str(QualtricsConfig.MAX_SURVEYS_TO_CONSOLIDATE))
-        try:
-            max_surveys = int(max_surveys_str)
-        except ValueError:
-            logger.warning(f"Invalid max_surveys value '{max_surveys_str}', using default {QualtricsConfig.MAX_SURVEYS_TO_CONSOLIDATE}")
-            max_surveys = QualtricsConfig.MAX_SURVEYS_TO_CONSOLIDATE
-
         # Fetch all surveys
         surveys_iter, _ = self._read_surveys({})
         surveys = list(surveys_iter)
@@ -626,23 +625,19 @@ class LakeflowConnect:
             logger.warning("No surveys found")
             return []
 
-        # Filter surveys
+        # Get survey IDs up to max limit (includes all surveys - active and inactive)
         survey_ids = []
         for survey in surveys:
-            # Apply active filter
-            if only_active and not survey.get("is_active", False):
-                continue
-
             survey_id = survey.get("id")
             if survey_id:
                 survey_ids.append(survey_id)
 
             # Check max limit
-            if len(survey_ids) >= max_surveys:
-                logger.warning(f"Reached max_surveys limit of {max_surveys}. Consider increasing this limit in table_options if needed.")
+            if len(survey_ids) >= self.max_surveys:
+                logger.warning(f"Reached max_surveys limit of {self.max_surveys}. Consider increasing this limit in connection config if needed.")
                 break
 
-        logger.info(f"Found {len(survey_ids)} survey(s) to process (only_active={only_active}, max_surveys={max_surveys})")
+        logger.info(f"Found {len(survey_ids)} survey(s) to process (max_surveys={self.max_surveys})")
         return survey_ids
 
     def _make_request(
@@ -737,9 +732,6 @@ class LakeflowConnect:
             table_options: Optional 'surveyId' parameter
                 - If provided: Returns definition for that specific survey
                 - If not provided: Returns definitions for all surveys (auto-consolidation)
-                Additional options for auto-consolidation:
-                - only_active_surveys: "true" to filter only active surveys (default: true)
-                - max_surveys: Maximum number of surveys to process (default: 100)
 
         Returns:
             Tuple of (iterator of survey definition records, offset dict)
@@ -837,7 +829,7 @@ class LakeflowConnect:
 
         Args:
             start_offset: Dictionary containing per-survey cursor timestamps
-            table_options: Optional filters (only_active_surveys, max_surveys)
+            table_options: Not used for auto-consolidation
 
         Returns:
             Tuple of (iterator of all survey definition records, new offset dict with per-survey cursors)
@@ -869,9 +861,6 @@ class LakeflowConnect:
             table_options: Optional 'surveyId' parameter
                 - If provided: Returns responses for that specific survey
                 - If not provided: Returns responses for all surveys (auto-consolidation)
-                Additional options for auto-consolidation:
-                - only_active_surveys: "true" to filter only active surveys (default: true)
-                - max_surveys: Maximum number of surveys to process (default: 100)
 
         Returns:
             Tuple of (iterator of response records, new offset)
@@ -947,7 +936,7 @@ class LakeflowConnect:
 
         Args:
             start_offset: Dictionary containing per-survey cursor timestamps
-            table_options: Optional filters (only_active_surveys, max_surveys)
+            table_options: Not used for auto-consolidation
 
         Returns:
             Tuple of (iterator of all response records, new offset dict with per-survey cursors)
@@ -1192,9 +1181,6 @@ class LakeflowConnect:
             table_options: Optional 'surveyId' parameter
                 - If provided: Returns distributions for that specific survey
                 - If not provided: Returns distributions for all surveys (auto-consolidation)
-                Additional options for auto-consolidation:
-                - only_active_surveys: "true" to filter only active surveys (default: true)
-                - max_surveys: Maximum number of surveys to process (default: 100)
 
         Returns:
             Tuple of (iterator of distribution records, new offset)
@@ -1237,7 +1223,7 @@ class LakeflowConnect:
 
         Args:
             start_offset: Dictionary containing per-survey cursor timestamps
-            table_options: Optional filters (only_active_surveys, max_surveys)
+            table_options: Not used for auto-consolidation
 
         Returns:
             Tuple of (iterator of all distribution records, new offset dict with per-survey cursors)

@@ -25,10 +25,11 @@ Provide the following **connection-level** options when configuring the connecto
 |------|------|----------|-------------|---------|
 | `api_token` | string | yes | Qualtrics API token for authentication | `YOUR_QUALTRICS_API_TOKEN` |
 | `datacenter_id` | string | yes | Qualtrics datacenter identifier where your account is hosted | `fra1`, `ca1`, `yourdatacenterid` |
-| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names. This connector requires table-specific options for some tables. | `surveyId,mailingListId,directoryId,only_active_surveys,max_surveys` |
+| `max_surveys` | string | no | Maximum number of surveys to consolidate when `surveyId` is not provided (default: 50) | `100` |
+| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names. This connector requires table-specific options for some tables. | `surveyId,mailingListId,directoryId` |
 
 The full list of supported table-specific options for `externalOptionsAllowList` is:
-`surveyId,mailingListId,directoryId,only_active_surveys,max_surveys`
+`surveyId,mailingListId,directoryId`
 
 > **Note**: Table-specific options such as `surveyId` are **not** connection parameters. They are provided per-table via table options in the pipeline specification. The option name must be included in `externalOptionsAllowList` for the connection to allow it.
 
@@ -184,18 +185,17 @@ Table-specific options are passed via the pipeline spec under `table` in `object
 
 This eliminates the need to manually union data from multiple surveys in your downstream analytics.
 
-#### Auto-Consolidation Options
+#### Auto-Consolidation Behavior
 
-When using auto-consolidation (no `surveyId` specified), you can control the behavior with these additional table options:
+When using auto-consolidation (no `surveyId` specified):
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `only_active_surveys` | string | `"true"` | Set to `"true"` to only include active surveys, `"false"` to include all surveys |
-| `max_surveys` | string | `"100"` | Maximum number of surveys to process (safety limit to prevent excessive API calls) |
+- **Includes ALL surveys**: Both active and inactive surveys are included (ensures complete historical data)
+- **Limit controlled at connection level**: The `max_surveys` parameter (default: 50) is configured at the connection level
+- **Per-survey incremental sync**: For tables that support CDC mode, offsets are tracked per survey
 
 #### Auto-Consolidation Examples
 
-**Example 1: Consolidate responses from all active surveys**
+**Example 1: Consolidate responses from all surveys (default behavior)**
 ```json
 {
   "table": {
@@ -203,34 +203,25 @@ When using auto-consolidation (no `surveyId` specified), you can control the beh
   }
 }
 ```
+> This will consolidate up to 50 surveys (the default `max_surveys` limit). Configure `max_surveys` at the connection level to change this limit.
 
-**Example 2: Consolidate from all surveys (including inactive)**
-```json
-{
-  "table": {
-    "source_table": "survey_responses",
-    "only_active_surveys": "false"
-  }
-}
-```
-
-**Example 3: Consolidate from first 50 surveys only**
-```json
-{
-  "table": {
-    "source_table": "survey_responses",
-    "max_surveys": "50"
-  }
-}
-```
-
-**Example 4: Use specific survey (backward compatible)**
+**Example 2: Use specific survey (when you need only one)**
 ```json
 {
   "table": {
     "source_table": "survey_responses",
     "surveyId": "SV_abc123xyz"
   }
+}
+```
+
+**Example 3: Increase limit to 100 surveys (connection-level configuration)**
+```json
+{
+  "api_token": "YOUR_API_TOKEN",
+  "datacenter_id": "fra1",
+  "max_surveys": "100",
+  "externalOptionsAllowList": "surveyId,mailingListId,directoryId"
 }
 ```
 
@@ -242,7 +233,8 @@ When using auto-consolidation:
 - **Rate Limiting**: Built-in delays (0.5 seconds) between surveys to respect Qualtrics rate limits
 - **Incremental Sync**: For `survey_responses` and `distributions`, the connector tracks offsets per survey to support incremental updates
 - **Error Handling**: If one survey fails, the connector continues with others and logs warnings
-- **Recommended for**: Most use cases with <100 surveys. For larger deployments, consider filtering with `max_surveys` or using specific `surveyId` per table
+- **Default limit**: 50 surveys (conservative default for safety). Increase `max_surveys` at connection level if needed
+- **Recommended for**: Most use cases. For very large deployments (>100 surveys), consider using specific `surveyId` per table or increase `max_surveys`
 
 ### Schema Highlights
 
