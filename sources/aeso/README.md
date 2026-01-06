@@ -35,6 +35,15 @@ Create a Unity Catalog connection with your AESO API key:
 
 ### 3. Configure Your Pipeline
 
+**Important:** Add `aeso-python-api` as a Python package in your pipeline configuration:
+
+```python
+# In your pipeline settings, add:
+libraries = [
+    {"pypi": {"package": "aeso-python-api>=0.2.1"}}
+]
+```
+
 **Minimal setup (uses defaults):**
 
 ```python
