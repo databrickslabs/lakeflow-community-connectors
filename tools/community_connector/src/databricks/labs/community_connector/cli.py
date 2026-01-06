@@ -8,21 +8,26 @@ Configuration Precedence:
     CLI arguments → --config file → default_config.yaml → code defaults
 """
 
-import click
+import base64
+import json
+from pathlib import Path
 from typing import Optional
 
+import click
+import yaml
 from databricks.sdk import WorkspaceClient
 
 from databricks.labs.community_connector import __version__
 from databricks.labs.community_connector.config import build_config
-from databricks.labs.community_connector.repo_client import RepoClient
 from databricks.labs.community_connector.pipeline_client import PipelineClient
+from databricks.labs.community_connector.pipeline_spec_validator import (
+    PipelineSpecValidationError,
+    validate_pipeline_spec,
+)
+from databricks.labs.community_connector.repo_client import RepoClient
 
-from pathlib import Path
-import base64
 
-
-class OrderedGroup(click.Group):
+class OrderedGroup(click.Group):  # pylint: disable=too-few-public-methods
     """Custom Click group that preserves command order as defined in code."""
 
     def list_commands(self, ctx):
@@ -44,13 +49,6 @@ def _parse_pipeline_spec(spec_input: str, validate: bool = True) -> dict:
     Raises:
         click.ClickException: If parsing or validation fails.
     """
-    import json
-    import yaml
-    from databricks.labs.community_connector.pipeline_spec_validator import (
-        validate_pipeline_spec,
-        PipelineSpecValidationError,
-    )
-
     # Check if it's a file path
     if spec_input.endswith(('.yaml', '.yml', '.json')):
         try:
@@ -103,7 +101,10 @@ def _find_pipeline_by_name(workspace_client, pipeline_name: str) -> str:
         raise click.ClickException(f"Pipeline '{pipeline_name}' not found")
 
     if len(pipelines) > 1:
-        click.echo(f"Warning: Found {len(pipelines)} pipelines matching '{pipeline_name}', using first match")
+        click.echo(
+            f"Warning: Found {len(pipelines)} pipelines matching "
+            f"'{pipeline_name}', using first match"
+        )
 
     return pipelines[0].pipeline_id
 
@@ -149,7 +150,9 @@ def _create_workspace_file(workspace_client, path: str, content: str) -> None:
     )
 
 
-def _delete_workspace_files(workspace_client, base_path: str, files: list, debug: bool = False) -> None:
+def _delete_workspace_files(
+    workspace_client, base_path: str, files: list, debug: bool = False
+) -> None:
     """
     Delete files from the Databricks workspace.
 
@@ -188,7 +191,9 @@ def _replace_placeholder_in_value(value, placeholder: str, replacement: str):
         Value with placeholder replaced.
     """
     if isinstance(value, dict):
-        return {k: _replace_placeholder_in_value(v, placeholder, replacement) for k, v in value.items()}
+        return {
+            k: _replace_placeholder_in_value(v, placeholder, replacement) for k, v in value.items()
+        }
     elif isinstance(value, list):
         return [_replace_placeholder_in_value(item, placeholder, replacement) for item in value]
     elif isinstance(value, str):
@@ -221,7 +226,8 @@ def main(ctx: click.Context, debug: bool):
 @click.option(
     "--connection-name",
     "-n",
-    help="Name of the UC connection to use for the connector (required if --pipeline-spec not provided)",
+    help="Name of the UC connection to use for the connector "
+    "(required if --pipeline-spec not provided)",
 )
 @click.option(
     "--pipeline-spec",
@@ -274,10 +280,10 @@ def create_pipeline(
 
     \b
     Example:
-        community-connector create_pipeline github my_github_pipeline -n my_github_conn
-        community-connector create_pipeline stripe my_stripe_prod -n stripe_conn --catalog main --target my_schema
+        community-connector create_pipeline github my_github_pipeline -n my_conn
+        community-connector create_pipeline stripe my_stripe -n stripe_conn -c main
         community-connector create_pipeline github my_pipeline -ps spec.yaml
-        community-connector create_pipeline github my_pipeline -ps '{"connection_name": "my_conn", "objects": [{"table": {"source_table": "users"}}]}'
+        community-connector create_pipeline github my_pipeline -ps pipeline_spec.json
     """
     debug = ctx.obj.get("debug", False)
 
@@ -327,7 +333,9 @@ def create_pipeline(
 
     # Step 3: Replace {WORKSPACE_PATH} in pipeline.root_path
     if pipeline_config.root_path:
-        pipeline_config.root_path = pipeline_config.root_path.replace("{WORKSPACE_PATH}", workspace_path)
+        pipeline_config.root_path = pipeline_config.root_path.replace(
+            "{WORKSPACE_PATH}", workspace_path
+        )
 
     # Step 4: Replace {WORKSPACE_PATH} in libraries
     if pipeline_config.libraries:
@@ -398,7 +406,6 @@ def create_pipeline(
     try:
         if pipeline_spec_input:
             # Parse the provided pipeline spec (connection_name is always required in spec)
-            import json
             pipeline_spec = _parse_pipeline_spec(pipeline_spec_input)
 
             # If CLI connection_name provided, it overrides the spec
@@ -411,7 +418,8 @@ def create_pipeline(
             # Use the base template with pipeline_spec placeholder
             ingest_content = _load_ingest_template("ingest_template_base.py")
             ingest_content = ingest_content.replace("{SOURCE_NAME}", source_name)
-            ingest_content = ingest_content.replace("{PIPELINE_SPEC}", json.dumps(pipeline_spec, indent=4))
+            spec_json = json.dumps(pipeline_spec, indent=4)
+            ingest_content = ingest_content.replace("{PIPELINE_SPEC}", spec_json)
         else:
             # Use the full template with placeholders replaced
             # connection_name is required here (already validated above)
@@ -581,10 +589,9 @@ def create_connection(ctx: click.Context, source_name: str, connection_name: str
 
     \b
     Example:
-        community-connector create_connection github my_github_conn -o '{"host": "api.github.com", "externalOptionsAllowList": "repo,owner,startDate"}'
+        community-connector create_connection github my_github_conn \\
+            -o '{"host": "api.github.com", "externalOptionsAllowList": "..."}'
     """
-    import json
-
     debug = ctx.obj.get("debug", False)
 
     # Parse options JSON
@@ -603,14 +610,15 @@ def create_connection(ctx: click.Context, source_name: str, connection_name: str
     if "externalOptionsAllowList" not in options_dict:
         click.echo(
             "⚠️  Warning: 'externalOptionsAllowList' is not specified in the options. "
-            "This field is usually required to specify additional options needed for ingestion configuration in 'table_configuration'. "
-            "Please refer to the source connector documentation for the complete list of allowed options.",
+            "This field is usually required to specify additional options needed for "
+            "ingestion configuration in 'table_configuration'. "
+            "Please refer to the source connector documentation for allowed options.",
             err=True,
         )
 
     click.echo(f"Creating connection for source: {source_name}")
     click.echo(f"Connection name: {connection_name}")
-    click.echo(f"Connection type: GENERIC_LAKEFLOW_CONNECT")
+    click.echo("Connection type: GENERIC_LAKEFLOW_CONNECT")
 
     if debug:
         click.echo(f"[DEBUG] Options (with source_name): {options_dict}")
@@ -679,10 +687,9 @@ def update_connection(ctx: click.Context, source_name: str, connection_name: str
 
     \b
     Example:
-        community-connector update_connection github my_github_conn -o '{"host": "api.github.com", "externalOptionsAllowList": "repo,owner,startDate"}'
+        community-connector update_connection github my_github_conn \\
+            -o '{"host": "api.github.com", "externalOptionsAllowList": "..."}'
     """
-    import json
-
     debug = ctx.obj.get("debug", False)
 
     # Parse options JSON
@@ -701,8 +708,9 @@ def update_connection(ctx: click.Context, source_name: str, connection_name: str
     if "externalOptionsAllowList" not in options_dict:
         click.echo(
             "⚠️  Warning: 'externalOptionsAllowList' is not specified in the options. "
-            "This field is usually required to specify additional options needed for ingestion configuration in 'table_configuration'. "
-            "Please refer to the source connector documentation for the complete list of allowed options.",
+            "This field is usually required to specify additional options needed for "
+            "ingestion configuration in 'table_configuration'. "
+            "Please refer to the source connector documentation for allowed options.",
             err=True,
         )
 
