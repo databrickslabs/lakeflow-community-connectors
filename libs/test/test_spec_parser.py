@@ -1,5 +1,6 @@
 """Unit tests for the spec_parser module."""
 
+import json
 import pytest
 
 from libs.spec_parser import SpecParser
@@ -52,9 +53,6 @@ def test_spec_parser_valid_spec_parses_and_exposes_fields():
 
     # regular values are normalised to strings
     assert config["some_flag"] == "True"
-
-    # nested structures are JSON-encoded
-    import json
 
     nested_value = config["nested"]
     assert isinstance(nested_value, str)

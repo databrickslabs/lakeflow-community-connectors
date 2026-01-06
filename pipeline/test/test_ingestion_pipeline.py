@@ -5,10 +5,13 @@ Tests the ingest function with different spec configurations and verifies
 that the correct SDP calls are made with the correct parameters.
 """
 
+import json
 import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from pipeline.ingestion_pipeline import ingest
 
 # Mock pyspark modules before importing ingestion_pipeline
 mock_sdp = MagicMock()
@@ -24,7 +27,6 @@ sys.modules["pyspark.sql"] = mock_pyspark.sql
 sys.modules["pyspark.sql.functions"] = mock_pyspark.sql.functions
 
 # Now import the module under test
-from pipeline.ingestion_pipeline import ingest
 
 
 @pytest.fixture(autouse=True)
@@ -44,10 +46,12 @@ def mock_spark():
     """Create a mock Spark session with proper chaining."""
     spark = MagicMock()
     # Setup read chain
-    spark.read.format.return_value.option.return_value.option.return_value.option.return_value.options.return_value.load.return_value = MagicMock()
-    spark.read.format.return_value.option.return_value.option.return_value.options.return_value.load.return_value = MagicMock()
+    read_chain = spark.read.format.return_value.option.return_value.option.return_value
+    read_chain.option.return_value.options.return_value.load.return_value = MagicMock()
+    read_chain.options.return_value.load.return_value = MagicMock()
     # Setup readStream chain
-    spark.readStream.format.return_value.option.return_value.option.return_value.options.return_value.load.return_value = MagicMock()
+    stream_chain = spark.readStream.format.return_value.option.return_value.option.return_value
+    stream_chain.options.return_value.load.return_value = MagicMock()
     return spark
 
 
@@ -692,7 +696,6 @@ class TestGetTableMetadataOptions:
 
     def test_get_table_metadata_receives_all_table_configs_as_json(self):
         """Test that _get_table_metadata passes combined table_configs as JSON to Spark option."""
-        import json
 
         mock_spark = MagicMock()
 
@@ -714,7 +717,8 @@ class TestGetTableMetadataOptions:
         mock_df = MagicMock()
         mock_df.collect.return_value = [mock_row_users, mock_row_orders]
         # Chain: format().option().option().option().option().load()
-        mock_spark.read.format.return_value.option.return_value.option.return_value.option.return_value.option.return_value.load.return_value = mock_df
+        read_chain = mock_spark.read.format.return_value.option.return_value.option.return_value
+        read_chain.option.return_value.option.return_value.load.return_value = mock_df
 
         spec = {
             "connection_name": "test_connection",
@@ -725,7 +729,8 @@ class TestGetTableMetadataOptions:
                         "table_configuration": {
                             "custom_option_1": "value1",
                             "custom_option_2": "value2",
-                            "scd_type": "SCD_TYPE_1",  # special key, excluded by get_table_configurations
+                            # special key, excluded by get_table_configurations
+                            "scd_type": "SCD_TYPE_1",
                             "primary_keys": ["id"],  # special key, excluded
                         },
                     }
@@ -746,7 +751,8 @@ class TestGetTableMetadataOptions:
         # Verify the metadata read chain received the combined table_configs as JSON
         # The chain is: spark.read.format().option().option().option().option().load()
         # The 4th option call should be ("tableConfigs", json.dumps(table_configs))
-        fourth_option_call = mock_spark.read.format.return_value.option.return_value.option.return_value.option.return_value.option
+        opt_chain = mock_spark.read.format.return_value.option.return_value.option.return_value
+        fourth_option_call = opt_chain.option.return_value.option
         fourth_option_call.assert_called_once()
         call_args = fourth_option_call.call_args[0]
 
@@ -760,7 +766,6 @@ class TestGetTableMetadataOptions:
 
     def test_get_table_metadata_with_empty_table_configs_as_json(self):
         """Test that _get_table_metadata passes empty configs as JSON when tables have no configurations."""
-        import json
 
         mock_spark = MagicMock()
 
@@ -774,7 +779,8 @@ class TestGetTableMetadataOptions:
         mock_df = MagicMock()
         mock_df.collect.return_value = [mock_row]
         # Chain: format().option().option().option().option().load()
-        mock_spark.read.format.return_value.option.return_value.option.return_value.option.return_value.option.return_value.load.return_value = mock_df
+        read_chain = mock_spark.read.format.return_value.option.return_value.option.return_value
+        read_chain.option.return_value.option.return_value.load.return_value = mock_df
 
         spec = {
             "connection_name": "test_connection",
@@ -791,7 +797,8 @@ class TestGetTableMetadataOptions:
         ingest(mock_spark, spec)
 
         # Verify tableConfigs option was called with empty config as JSON
-        fourth_option_call = mock_spark.read.format.return_value.option.return_value.option.return_value.option.return_value.option
+        opt_chain = mock_spark.read.format.return_value.option.return_value.option.return_value
+        fourth_option_call = opt_chain.option.return_value.option
         fourth_option_call.assert_called_once()
         call_args = fourth_option_call.call_args[0]
 
@@ -853,7 +860,8 @@ class TestTableConfigFiltering:
             view_func()
 
             # Verify options() was called with filtered config (no reserved keys)
-            options_call = mock_spark.readStream.format.return_value.option.return_value.option.return_value.options
+            stream_chain = mock_spark.readStream.format.return_value.option.return_value
+            options_call = stream_chain.option.return_value.options
             options_call.assert_called_once()
             passed_options = options_call.call_args[1]
             assert passed_options == {
@@ -962,7 +970,8 @@ class TestTableConfigFiltering:
             flow_func()
 
             # Verify options() was called with filtered config
-            options_call = mock_spark.readStream.format.return_value.option.return_value.option.return_value.options
+            stream_chain = mock_spark.readStream.format.return_value.option.return_value
+            options_call = stream_chain.option.return_value.options
             options_call.assert_called_once()
             passed_options = options_call.call_args[1]
             assert passed_options == {"custom_setting": "enabled"}
