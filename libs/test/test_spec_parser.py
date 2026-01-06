@@ -418,6 +418,8 @@ def test_table_configuration_with_ellipsis_placeholder():
                         "valid_key": "valid_value",
                         "placeholder": ...,  # Ellipsis placeholder
                         "another_key": "another_value",
+                        "nested_with_ellipsis": {"key1": "value1", "key2": ...},  # Nested ellipsis
+                        "list_with_ellipsis": ["item1", ..., "item3"],  # List with ellipsis
                     },
                 }
             },
@@ -432,3 +434,11 @@ def test_table_configuration_with_ellipsis_placeholder():
     assert "another_key" in config
     assert config["another_key"] == "another_value"
     assert "placeholder" not in config  # Ellipsis was skipped
+    
+    # Nested structures should have ellipsis removed
+    import json
+    nested = json.loads(config["nested_with_ellipsis"])
+    assert nested == {"key1": "value1"}  # key2 with ellipsis removed
+    
+    list_val = json.loads(config["list_with_ellipsis"])
+    assert list_val == ["item1", "item3"]  # Ellipsis removed from list
