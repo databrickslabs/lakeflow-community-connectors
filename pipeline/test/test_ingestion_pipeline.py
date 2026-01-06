@@ -685,3 +685,173 @@ class TestDestinationTable:
             )
             call_kwargs = mock_sdp.apply_changes.call_args[1]
             assert call_kwargs["target"] == "`my_catalog`.`my_schema`.`users`"
+
+
+class TestTableConfigFiltering:
+    """Test that table_config excludes reserved keys when passed to Spark read options."""
+
+    def test_cdc_table_config_excludes_reserved_keys(self, base_metadata):
+        """Test that CDC view function receives filtered table_config."""
+        # Track decorated functions
+        captured_view_funcs = []
+
+        def capture_view(name):
+            def decorator(f):
+                captured_view_funcs.append((name, f))
+                return f
+
+            return decorator
+
+        mock_sdp.view = MagicMock(side_effect=capture_view)
+
+        # Create mock spark with trackable options call
+        mock_spark = MagicMock()
+
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "users",
+                        "table_configuration": {
+                            "scd_type": "SCD_TYPE_2",
+                            "sequence_by": "custom_field",
+                            "primary_keys": ["id", "tenant_id"],
+                            "regular_option": "value",
+                            "another_option": "value2",
+                        },
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=base_metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            # Execute the captured view function
+            assert len(captured_view_funcs) == 1
+            view_name, view_func = captured_view_funcs[0]
+            assert view_name == "users_staging"
+
+            # Call the view function to trigger spark.readStream calls
+            view_func()
+
+            # Verify options() was called with filtered config (no reserved keys)
+            options_call = mock_spark.readStream.format.return_value.option.return_value.option.return_value.options
+            options_call.assert_called_once()
+            passed_options = options_call.call_args[1]
+            assert passed_options == {
+                "regular_option": "value",
+                "another_option": "value2",
+            }
+            assert "scd_type" not in passed_options
+            assert "sequence_by" not in passed_options
+            assert "primary_keys" not in passed_options
+
+    def test_snapshot_table_config_excludes_reserved_keys(self, base_metadata):
+        """Test that snapshot view function receives filtered table_config."""
+        captured_view_funcs = []
+
+        def capture_view(name):
+            def decorator(f):
+                captured_view_funcs.append((name, f))
+                return f
+
+            return decorator
+
+        mock_sdp.view = MagicMock(side_effect=capture_view)
+
+        mock_spark = MagicMock()
+
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "orders",
+                        "table_configuration": {
+                            "scd_type": "SCD_TYPE_1",
+                            "primary_keys": ["order_id"],
+                            "batch_size": "1000",
+                        },
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=base_metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            assert len(captured_view_funcs) == 1
+            view_name, view_func = captured_view_funcs[0]
+            assert view_name == "orders_staging"
+
+            view_func()
+
+            # Verify options() was called with filtered config
+            options_call = (
+                mock_spark.read.format.return_value.option.return_value.option.return_value.options
+            )
+            options_call.assert_called_once()
+            passed_options = options_call.call_args[1]
+            assert passed_options == {"batch_size": "1000"}
+            assert "scd_type" not in passed_options
+            assert "primary_keys" not in passed_options
+
+    def test_append_table_config_excludes_reserved_keys(self, base_metadata):
+        """Test that append flow function receives filtered table_config."""
+        captured_flow_funcs = []
+
+        def capture_append_flow(name, target):
+            def decorator(f):
+                captured_flow_funcs.append((name, target, f))
+                return f
+
+            return decorator
+
+        mock_sdp.append_flow = MagicMock(side_effect=capture_append_flow)
+
+        mock_spark = MagicMock()
+
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "events",
+                        "table_configuration": {
+                            "scd_type": "APPEND_ONLY",
+                            "sequence_by": "timestamp",
+                            "custom_setting": "enabled",
+                        },
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=base_metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            assert len(captured_flow_funcs) == 1
+            flow_name, flow_target, flow_func = captured_flow_funcs[0]
+            assert flow_name == "events_staging"
+            assert flow_target == "events"
+
+            flow_func()
+
+            # Verify options() was called with filtered config
+            options_call = mock_spark.readStream.format.return_value.option.return_value.option.return_value.options
+            options_call.assert_called_once()
+            passed_options = options_call.call_args[1]
+            assert passed_options == {"custom_setting": "enabled"}
+            assert "scd_type" not in passed_options
+            assert "sequence_by" not in passed_options
