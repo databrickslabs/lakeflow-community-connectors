@@ -86,6 +86,7 @@ The Qualtrics connector exposes a **static list** of tables:
 - `survey_definitions` - Full survey structure including questions, blocks, and flow
 - `survey_responses` - Individual survey response data
 - `distributions` - Survey distribution records (email sends, SMS, anonymous links)
+- `mailing_lists` - Mailing list metadata (contact lists used for survey distribution)
 - `mailing_list_contacts` - Contact records within a specific mailing list
 - `directory_contacts` - All contact records across all mailing lists in a directory
 - `directories` - XM Directory instances (organizational containers for contacts and mailing lists)
@@ -98,6 +99,7 @@ The Qualtrics connector exposes a **static list** of tables:
 | `survey_definitions` | Full survey structure with questions, blocks, flow, and options | `cdc` | `survey_id` | `last_modified` |
 | `survey_responses` | Individual responses to surveys including all question answers | `append` | `response_id` | `recorded_date` |
 | `distributions` | Distribution records for survey invitations and sends | `cdc` | `id` | `modified_date` |
+| `mailing_lists` | Mailing list metadata (name, owner, contact count, dates) | `snapshot` | `mailing_list_id` | N/A (full refresh) |
 | `mailing_list_contacts` | Contact records within a specific mailing list | `snapshot` | `contact_id` | N/A (full refresh) |
 | `directory_contacts` | All contacts across all mailing lists in a directory | `snapshot` | `contact_id` | N/A (full refresh) |
 | `directories` | XM Directory instances (organizational structure) | `snapshot` | `directory_id` | N/A (full refresh) |
@@ -131,6 +133,19 @@ Table-specific options are passed via the pipeline spec under `table` in `object
   - Same format as survey_responses table
   - Retrieves all distributions (email sends, SMS, etc.) for the specified survey
   - **If not provided**: Auto-consolidates distributions from all surveys (see Auto-Consolidation below)
+
+#### `mailing_lists` table
+- **`directoryId`** (string, **required**): The Directory ID (also called Pool ID)
+  - Format: `POOL_...` (e.g., `POOL_abc123xyz`)
+  - Can be found in Qualtrics UI: Account Settings → Qualtrics IDs
+  - Identifies your XM Directory
+- Returns mailing list metadata including:
+  - Mailing list ID, name, and owner
+  - Creation and last modified dates (if available)
+  - Contact count (if available)
+  - Category and folder organization (if available)
+- Use the `id` field from this table as the `mailingListId` parameter for the `mailing_list_contacts` table
+- Only available for XM Directory users (not XM Directory Lite accounts)
 
 #### `mailing_list_contacts` table
 - **`directoryId`** (string, **required**): The Directory ID (also called Pool ID)
@@ -330,6 +345,16 @@ When using auto-consolidation:
   - `finished` (long): Number of surveys completed
   - `complaints` (long): Number of complaints
   - `blocked` (long): Number blocked
+
+#### `mailing_lists` table schema:
+- `mailing_list_id` (string): Unique mailing list identifier (primary key)
+- `name` (string): Mailing list name/title
+- `owner_id` (string): User ID of the mailing list owner
+- `creation_date` (long): Epoch timestamp (milliseconds) when created
+- `last_modified_date` (long): Epoch timestamp (milliseconds) of last modification
+- `contact_count` (long): Number of contacts in the mailing list
+
+**Note**: Schema validated against live API on 2026-01-06. Fields `library_id`, `category`, and `folder` that appear in some API documentation are NOT returned by the list endpoint.
 
 #### `mailing_list_contacts` and `directory_contacts` table schemas:
 - `contact_id` (string): Unique contact identifier (primary key)

@@ -214,7 +214,7 @@ def register_lakeflow_source(spark):
             }
 
             # Supported tables
-            self.tables = ["surveys", "survey_definitions", "survey_responses", "distributions", "mailing_list_contacts", "directory_contacts", "directories"]
+            self.tables = ["surveys", "survey_definitions", "survey_responses", "distributions", "mailing_lists", "mailing_list_contacts", "directory_contacts", "directories"]
 
         def list_tables(self) -> list[str]:
             """
@@ -255,6 +255,8 @@ def register_lakeflow_source(spark):
                 return self._get_survey_responses_schema()
             elif table_name == "distributions":
                 return self._get_distributions_schema()
+            elif table_name == "mailing_lists":
+                return self._get_mailing_lists_schema()
             elif table_name == "mailing_list_contacts":
                 return self._get_mailing_list_contacts_schema()
             elif table_name == "directory_contacts":
@@ -265,12 +267,7 @@ def register_lakeflow_source(spark):
                 raise ValueError(f"Unknown table: {table_name}")
 
         def _get_surveys_schema(self) -> StructType:
-            """Get schema for surveys table.
-
-            Note: Based on actual API response from GET /surveys endpoint.
-            Fields like brandId, brandBaseURL, organizationId, expiration are NOT
-            returned by the list surveys endpoint (they may be in GET /surveys/{id}).
-            """
+            """Get schema for surveys table."""
             return StructType([
                 StructField("id", StringType(), True),
                 StructField("name", StringType(), True),
@@ -283,13 +280,8 @@ def register_lakeflow_source(spark):
         def _get_survey_definitions_schema(self) -> StructType:
             """Get schema for survey_definitions table.
 
-            Note: Based on GET /survey-definitions/{surveyId} endpoint.
-            Returns full survey structure including questions, blocks, flow.
-
-            The Qualtrics API returns variable structures for nested fields (e.g., Blocks
-            can be a dict or array depending on the survey). To handle this variability,
-            we use a simplified schema that captures key metadata fields and stores
-            complex nested structures as flexible StringType (JSON strings).
+            Returns full survey structure including questions, blocks, and flow.
+            Complex nested structures are stored as JSON strings for flexibility.
             """
             return StructType([
                 # Survey identification - these are consistently typed
@@ -349,8 +341,7 @@ def register_lakeflow_source(spark):
         def _get_distributions_schema(self) -> StructType:
             """Get schema for distributions table.
 
-            Note: Based on actual API response from GET /distributions endpoint.
-            Schema includes nested structures for surveyLink, recipients, message, etc.
+            Includes nested structures for surveyLink, recipients, message, and stats.
             """
             return StructType([
                 StructField("id", StringType(), True),
@@ -397,13 +388,22 @@ def register_lakeflow_source(spark):
                 ]), True)
             ])
 
-        def _get_mailing_list_contacts_schema(self) -> StructType:
-            """Get schema for mailing_list_contacts table.
+        def _get_mailing_lists_schema(self) -> StructType:
+            """Get schema for mailing_lists table.
 
-            Note: Based on actual API response, the fields are:
-            contactId, firstName, lastName, email, phone, extRef, language,
-            unsubscribed, mailingListUnsubscribed, contactLookupId
+            Returns mailing list metadata including dates as epoch timestamps.
             """
+            return StructType([
+                StructField("mailing_list_id", StringType(), True),
+                StructField("name", StringType(), True),
+                StructField("owner_id", StringType(), True),
+                StructField("creation_date", LongType(), True),
+                StructField("last_modified_date", LongType(), True),
+                StructField("contact_count", LongType(), True)
+            ])
+
+        def _get_mailing_list_contacts_schema(self) -> StructType:
+            """Get schema for mailing_list_contacts table."""
             return StructType([
                 StructField("contact_id", StringType(), True),
                 StructField("first_name", StringType(), True),
@@ -420,18 +420,12 @@ def register_lakeflow_source(spark):
         def _get_directory_contacts_schema(self) -> StructType:
             """Get schema for directory_contacts table.
 
-            Note: Returns same schema as mailing_list_contacts since both endpoints
-            return the same contact structure. Directory contacts endpoint returns
-            all contacts across all mailing lists in a directory.
+            Returns same schema as mailing_list_contacts.
             """
             return self._get_mailing_list_contacts_schema()
 
         def _get_directories_schema(self) -> StructType:
-            """Get schema for directories table.
-
-            Note: Based on actual API response from GET /directories endpoint.
-            Schema verified against live API on 2026-01-05.
-            """
+            """Get schema for directories table."""
             return StructType([
                 StructField("directory_id", StringType(), True),
                 StructField("name", StringType(), True),
@@ -492,6 +486,12 @@ def register_lakeflow_source(spark):
                     "cursor_field": "modified_date",
                     "ingestion_type": "cdc"
                 }
+            elif table_name == "mailing_lists":
+                return {
+                    "primary_keys": ["mailing_list_id"],
+                    "cursor_field": None,
+                    "ingestion_type": "snapshot"
+                }
             elif table_name == "mailing_list_contacts":
                 return {
                     "primary_keys": ["contact_id"],
@@ -540,6 +540,8 @@ def register_lakeflow_source(spark):
                 return self._read_survey_responses(start_offset, table_options)
             elif table_name == "distributions":
                 return self._read_distributions(start_offset, table_options)
+            elif table_name == "mailing_lists":
+                return self._read_mailing_lists(start_offset, table_options)
             elif table_name == "mailing_list_contacts":
                 return self._read_mailing_list_contacts(start_offset, table_options)
             elif table_name == "directory_contacts":
@@ -1257,7 +1259,7 @@ def register_lakeflow_source(spark):
             # Add surveyId - API doesn't return this, but we know it from the query
             processed["surveyId"] = survey_id
 
-            # Special handling for responseId which might be _recordId in values
+                # Handle responseId field
             if not processed.get("responseId") and "_recordId" in values_map:
                 record_id_obj = values_map["_recordId"]
                 if isinstance(record_id_obj, dict):
@@ -1305,7 +1307,7 @@ def register_lakeflow_source(spark):
             processed["displayedFields"] = record.get("displayedFields")
             processed["displayedValues"] = record.get("displayedValues")
 
-            # Process embeddedData - might be top-level or nested
+                # Process embeddedData field
             embedded_data = record.get("embeddedData")
             if embedded_data is None and "embeddedData" in values_map:
                 # Try to get from values map
@@ -1455,6 +1457,34 @@ def register_lakeflow_source(spark):
             return self._fetch_paginated_list(endpoint, start_offset, cursor_field=None)
 
         # =========================================================================
+        # Table Readers: Mailing Lists
+        # =========================================================================
+
+        def _read_mailing_lists(
+            self, start_offset: dict, table_options: dict[str, str]
+        ) -> (Iterator[dict], dict):
+            """
+            Read mailing lists from Qualtrics API.
+
+            Uses snapshot mode (full refresh).
+
+            Args:
+                start_offset: Dictionary containing pagination token
+                table_options: Must contain 'directoryId' parameter
+
+            Returns:
+                Tuple of (iterator of mailing list records, offset dict)
+            """
+            directory_id = table_options.get("directoryId")
+            if not directory_id:
+                raise ValueError(
+                    "directoryId is required in table_options for mailing_lists table"
+                )
+
+            endpoint = f"/directories/{directory_id}/mailinglists"
+            return self._fetch_paginated_list(endpoint, start_offset, cursor_field=None)
+
+        # =========================================================================
         # Table Readers: Directories
         # =========================================================================
 
@@ -1462,14 +1492,13 @@ def register_lakeflow_source(spark):
             """
             Read directories (XM Directory pools) from Qualtrics API.
 
-            Note: Directories table uses snapshot mode (full refresh) as the API
-            does not return modification timestamps for incremental sync.
+            Uses snapshot mode (full refresh).
 
             Args:
-                start_offset: Dictionary containing pagination token (ignored for snapshot mode)
+                start_offset: Dictionary containing pagination token
 
             Returns:
-                Tuple of (iterator of directory records, empty offset dict)
+                Tuple of (iterator of directory records, offset dict)
             """
             return self._fetch_paginated_list("/directories", start_offset, cursor_field=None)
 
