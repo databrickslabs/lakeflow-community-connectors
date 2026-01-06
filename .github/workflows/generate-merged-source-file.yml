@@ -7,7 +7,6 @@ on:
       - 'sources/**/*.py'
       - 'libs/utils.py'
       - 'pipeline/lakeflow_python_source.py'
-      - '!sources/**/_generated_*.py'
       - '!sources/**/test/**'
   push:
     branches:
@@ -16,7 +15,6 @@ on:
       - 'sources/**/*.py'
       - 'libs/utils.py'
       - 'pipeline/lakeflow_python_source.py'
-      - '!sources/**/_generated_*.py'
       - '!sources/**/test/**'
 
 permissions:
@@ -34,7 +32,7 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Get changed files
+      - name: Get changed source files
         id: changed-files
         uses: tj-actions/changed-files@v44
         with:
@@ -45,6 +43,13 @@ jobs:
           files_ignore: |
             sources/**/_generated_*.py
             sources/**/test/**
+
+      - name: Get changed generated files
+        id: changed-generated
+        uses: tj-actions/changed-files@v44
+        with:
+          files: |
+            sources/**/_generated_*.py
 
       - name: Determine sources to regenerate
         id: sources
@@ -70,7 +75,7 @@ jobs:
               fi
             done
           else
-            # Only regenerate sources whose files changed
+            # Check sources whose source files changed
             for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
               if [[ "$file" == sources/*/[!_]*.py ]]; then
                 # Extract source name from path like sources/zendesk/zendesk.py
@@ -81,6 +86,19 @@ jobs:
                   if [[ ! " $SOURCES_TO_REGENERATE " =~ " $source_name " ]]; then
                     SOURCES_TO_REGENERATE="$SOURCES_TO_REGENERATE $source_name"
                   fi
+                fi
+              fi
+            done
+            
+            # Also check sources whose generated files changed
+            for file in ${{ steps.changed-generated.outputs.all_changed_files }}; do
+              # Extract source name from path like sources/zendesk/_generated_zendesk_python_source.py
+              source_name=$(echo "$file" | cut -d'/' -f2)
+              # Check if main source file exists and it's not interface
+              if [[ "$source_name" != "interface" ]] && [[ -f "sources/${source_name}/${source_name}.py" ]]; then
+                # Add to list if not already present
+                if [[ ! " $SOURCES_TO_REGENERATE " =~ " $source_name " ]]; then
+                  SOURCES_TO_REGENERATE="$SOURCES_TO_REGENERATE $source_name"
                 fi
               fi
             done
