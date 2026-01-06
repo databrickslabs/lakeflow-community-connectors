@@ -1450,32 +1450,18 @@ Field names are generally consistent between write and read operations for surve
 - Any assumptions are noted in the "Gaps and TBD items" section
 
 **Documentation completeness**:
-- ✅ Authentication method documented (API token + datacenter ID + directory ID)
-- ✅ Primary objects (surveys, responses) fully documented
-- ✅ Secondary objects (distributions, contacts) documented with correct endpoints
-- ✅ **survey_definitions** object fully documented with Questions/Blocks/Flow schema (2026-01-05)
-- ✅ Pagination mechanism described
-- ✅ Incremental sync strategy defined
-- ✅ Field schemas include all known fields
-- ✅ Rate limits documented
-- ✅ Response export workflow fully described
-- ✅ Write-back APIs documented for testing purposes (Step 5 complete)
-- ✅ Field transformations between write and read operations documented
-- ✅ Write-specific constraints and eventual consistency delays documented
-- ✅ Directory ID requirement for contacts endpoint documented (corrected 2024-12-31)
-- ✅ Survey ID requirement for distributions endpoint verified (2024-12-31)
-- ✅ **Schema validation completed against live API** (2024-12-31) - see section below
-- ✅ Mailing lists endpoint fully implemented and schema validated (2026-01-06)
-- ✅ Directories endpoint fully implemented and schema validated (2026-01-05)
-- ✅ survey_definitions schema validated against live API (2026-01-05)
+- ✅ All endpoints documented with authentication, pagination, rate limits, and incremental sync strategies
+- ✅ All tables (surveys, survey_definitions, survey_responses, distributions, directories, mailing_lists, contacts) fully implemented
+- ✅ Schemas validated against live API (2024-12-31 through 2026-01-06) - see validation section below
+- ✅ Write-back APIs documented for testing purposes
 - ⚠️ Sessions API availability may vary by Qualtrics license tier - requires verification
 
 ---
 
 ## **Schema Validation Against Live API**
 
-**Validation Date**: December 31, 2024
-**Method**: Called all connector APIs and compared actual responses with documented schemas
+**Validation Date**: January 6, 2026
+**Method**: Called all connector APIs and compared actual responses with initially documented schemas in this API doc
 
 ### Validation Results Summary
 
@@ -1643,11 +1629,11 @@ mailingListId, name, ownerId, creationDate, lastModifiedDate, contactCount
 
 ### Key Lessons Learned
 
-1. **Official API documentation may not match actual responses**: Several documented fields (organizationId, expiration, brandId, brandBaseURL) are not returned by list endpoints.
+1. **Initial schema assumptions must be validated**: Several initially documented fields (organizationId, expiration, brandId, brandBaseURL for surveys; libraryId, category, folder for mailing_lists) were not returned by the actual API.
 
-2. **Field name variations**: `sentDate` vs `sendDate` - always validate actual API responses.
+2. **Field name variations**: Always validate actual API responses - example: `sendDate` vs `sentDate` in distributions.
 
-3. **Nested structures**: The distributions endpoint returns much richer nested data than documented in some API references.
+3. **Nested structures**: The distributions endpoint returns richer nested data than initially documented.
 
 4. **MapType vs explicit fields**: Dynamic fields (question IDs, labels) are correctly handled with MapType - validation scripts may flag nested keys as "missing" but this is expected behavior.
 
