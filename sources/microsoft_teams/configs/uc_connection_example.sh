@@ -19,7 +19,7 @@ CONNECTION_NAME="microsoft_teams_connection"     # Choose your connection name
 
 # Note: externalOptionsAllowList is optional but recommended for future compatibility
 # Credentials should NEVER be stored in the connection - pass them via table_configuration
-EXTERNAL_OPTIONS_ALLOW_LIST="team_id,channel_id,message_id,start_date,top,max_pages_per_batch,lookback_seconds,fetch_all_teams,fetch_all_channels,fetch_all_messages"
+EXTERNAL_OPTIONS_ALLOW_LIST="team_id,channel_id,message_id,start_date,top,max_pages_per_batch,lookback_seconds,fetch_all_teams,fetch_all_channels,fetch_all_messages,use_delta_api,max_concurrent_threads,reaction_poll_window_days,reaction_poll_batch_size"
 
 # Create the UC connection
 databricks connections create \
