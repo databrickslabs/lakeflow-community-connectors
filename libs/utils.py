@@ -1,4 +1,5 @@
 """Utility functions for data type conversion and parsing."""
+
 import base64
 from decimal import Decimal
 from datetime import datetime
