@@ -121,6 +121,7 @@ class PipelineClient:
 
         return payload
 
+    # pylint: disable=too-many-branches
     def _build_libraries(self, libraries: List) -> List:
         """
         Build the libraries configuration for the pipeline.
