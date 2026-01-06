@@ -20,13 +20,13 @@ class LakeflowConnect:
         """
         Initialize Microsoft Teams connector with OAuth 2.0 credentials.
 
-        Required options (pass via table_configuration):
+        Required options (stored in UC Connection properties):
           - tenant_id: Azure AD tenant ID
           - client_id: Application (client) ID
           - client_secret: Client secret value
 
-        Note: Credentials should be passed via table_configuration in the pipeline spec,
-        not in the connection properties (which aren't accessible to the connector).
+        Credentials should be stored in the Unity Catalog Connection using the
+        {{secrets/scope/key}} format to reference Databricks Secrets.
 
         Authentication uses the Client Credentials Flow with Application Permissions.
         Requires admin consent for all permissions.
@@ -35,9 +35,9 @@ class LakeflowConnect:
         self.client_id = options.get("client_id")
         self.client_secret = options.get("client_secret")
 
-        # NOTE: We do NOT validate credentials here anymore.
+        # NOTE: We do NOT validate credentials here.
         # This allows the connector to initialize for metadata discovery (_lakeflow_metadata)
-        # where credentials might not be passed yet.
+        # where credentials are passed from the UC Connection properties.
         # Strict validation happens in _get_access_token() when we actually need to connect to Teams API.
 
         self.base_url = "https://graph.microsoft.com/v1.0"

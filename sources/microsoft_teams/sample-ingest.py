@@ -21,11 +21,10 @@ Prerequisites:
    - ChannelMessage.Read.All
    - TeamMember.Read.All
 2. Admin consent granted for all permissions
-3. Unity Catalog connection created
-4. Databricks Secrets configured with Azure AD credentials
+3. Unity Catalog connection created with credentials stored in connection properties
 
 Usage:
-1. Create Databricks Secrets scope 'microsoft_teams' with keys: tenant_id, client_id, client_secret
+1. Create Unity Catalog connection with credentials (see configs/uc_connection_example.sh)
 2. Update destination catalog and schema if needed
 3. Run this script as a Databricks notebook or pipeline
 """
@@ -37,19 +36,14 @@ from libs.source_loader import get_register_function
 # CONFIGURATION
 # ==============================================================================
 source_name = "microsoft_teams"
-connection_name = "microsoft_teams_connection"
-
-# Azure AD Application Credentials (from Databricks Secrets)
-TENANT_ID = dbutils.secrets.get("microsoft_teams", "tenant_id")
-CLIENT_ID = dbutils.secrets.get("microsoft_teams", "client_id")
-CLIENT_SECRET = dbutils.secrets.get("microsoft_teams", "client_secret")
+connection_name = "microsoft_teams_connection"  # Credentials stored in connection properties
 
 # Destination Configuration
 DESTINATION_CATALOG = "main"
 DESTINATION_SCHEMA = "teams_data"
 TABLE_PREFIX = "lakeflow_connector_"  # Tables: lakeflow_connector_teams, etc.
 
-# Ingestion Options
+# Ingestion Options (credentials come from connection properties)
 START_DATE = "2024-12-01T00:00:00Z"  # Start date for incremental sync (messages, message_replies)
 LOOKBACK_SECONDS = "3600"            # 1-hour lookback for late-arriving data (no duplicates - deduped by ID)
 TOP = "50"                           # Page size for API requests
@@ -79,9 +73,6 @@ pipeline_spec = {
                 "destination_schema": DESTINATION_SCHEMA,
                 "destination_table": f"{TABLE_PREFIX}teams",
                 "table_configuration": {
-                    "tenant_id": TENANT_ID,
-                    "client_id": CLIENT_ID,
-                    "client_secret": CLIENT_SECRET,
                     "top": TOP
                 }
             }
@@ -95,9 +86,6 @@ pipeline_spec = {
                 "destination_schema": DESTINATION_SCHEMA,
                 "destination_table": f"{TABLE_PREFIX}channels",
                 "table_configuration": {
-                    "tenant_id": TENANT_ID,
-                    "client_id": CLIENT_ID,
-                    "client_secret": CLIENT_SECRET,
                     "fetch_all_teams": "true",  # Auto-discover all teams
                     "top": TOP
                 }
@@ -112,9 +100,6 @@ pipeline_spec = {
                 "destination_schema": DESTINATION_SCHEMA,
                 "destination_table": f"{TABLE_PREFIX}members",
                 "table_configuration": {
-                    "tenant_id": TENANT_ID,
-                    "client_id": CLIENT_ID,
-                    "client_secret": CLIENT_SECRET,
                     "fetch_all_teams": "true",  # Auto-discover all teams
                     "top": TOP
                 }
@@ -133,9 +118,6 @@ pipeline_spec = {
                 "destination_schema": DESTINATION_SCHEMA,
                 "destination_table": f"{TABLE_PREFIX}messages",
                 "table_configuration": {
-                    "tenant_id": TENANT_ID,
-                    "client_id": CLIENT_ID,
-                    "client_secret": CLIENT_SECRET,
                     "fetch_all_teams": "true",     # Auto-discover all teams
                     "fetch_all_channels": "true",  # Auto-discover all channels per team
                     "start_date": START_DATE,
@@ -154,9 +136,6 @@ pipeline_spec = {
                 "destination_schema": DESTINATION_SCHEMA,
                 "destination_table": f"{TABLE_PREFIX}message_replies",
                 "table_configuration": {
-                    "tenant_id": TENANT_ID,
-                    "client_id": CLIENT_ID,
-                    "client_secret": CLIENT_SECRET,
                     "fetch_all_teams": "true",     # Auto-discover all teams
                     "fetch_all_channels": "true",  # Auto-discover all channels per team
                     "fetch_all_messages": "true",  # Auto-discover all messages per channel
@@ -176,9 +155,6 @@ pipeline_spec = {
                 "destination_schema": DESTINATION_SCHEMA,
                 "destination_table": f"{TABLE_PREFIX}message_reactions",
                 "table_configuration": {
-                    "tenant_id": TENANT_ID,
-                    "client_id": CLIENT_ID,
-                    "client_secret": CLIENT_SECRET,
                     "fetch_all_teams": "true",           # Auto-discover all teams
                     "fetch_all_channels": "true",        # Auto-discover all channels per team
                     "reaction_poll_window_days": "7",    # Poll messages from last 7 days
