@@ -239,14 +239,14 @@ prices = aeso.get_pool_price_report(
   - Uses a configurable `start_date` for historical backfill, or
   - Defaults to 30 days ago if no `start_date` is provided.
 - On subsequent runs:
-  - Uses the maximum `begin_datetime_utc` from the previous sync minus a configurable lookback window (default: 24 hours, minimum: 24 hours).
+  - Uses the maximum `begin_datetime_utc` from the previous sync minus a configurable lookback window (default 24 hours).
   - Fetches from `(high_watermark - lookback_hours)` to today.
   - Applies upserts based on `begin_datetime_utc`, with `ingestion_time` determining the newest record for SCD Type 1.
 
 **Handling updates**:
 - AESO updates pool prices as settlement calculations are finalized, typically within 24-72 hours.
 - The connector captures updates by:
-  - Fetching overlapping data via the lookback window on each run (minimum 24 hours enforced).
+  - Fetching overlapping data via the lookback window on each run.
   - Using `ingestion_time` (connector-generated) to determine which version is newest.
   - Upserting records with the latest `ingestion_time` for each `begin_datetime_utc`.
 

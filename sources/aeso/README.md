@@ -1,6 +1,6 @@
 # AESO Connector for Databricks
 
-Ingest Alberta electricity market data (hourly pool prices) from the AESO API into Databricks Unity Catalog with automatic incremental updates.
+Ingest Alberta electricity market data ([hourly pool prices](http://ets.aeso.ca/)) from the AESO API into Databricks Unity Catalog with automatic incremental updates.
 
 ## What You Get
 
@@ -18,58 +18,43 @@ Sign up at [AESO API Portal](https://developer-apim.aeso.ca/) to get your API ke
 
 ### 2. Create Connection in Databricks
 
-Create a Unity Catalog connection with your API key:
+Create a Unity Catalog connection with your AESO API key:
 
-```json
-{
-  "api_key": "your-aeso-api-key"
-}
-```
+
+
+![Connector Setup](img/connector_setup.png)
 
 ### 3. Configure Your Pipeline
 
 **Minimal setup (uses defaults):**
 
-```json
-{
-  "pipeline_spec": {
-    "connection_name": "my_aeso_connection",
-    "objects": [{
-      "table": {
-        "source_table": "pool_price",
-        "destination_catalog": "main",
-        "destination_schema": "energy",
-        "table_configuration": {
-          "scd_type": "SCD_TYPE_1"
+```python
+pipeline_spec = {
+    "connection_name": "aeso_connector",
+    "objects": [
+        {
+            "table": {
+                "source_table": "pool_price",
+                "destination_table": "pool_price",
+            }
         }
-      }
-    }]
-  }
+    ],
 }
 ```
 
 **With all table configuration options:**
 
-```json
-{
-  "pipeline_spec": {
-    "connection_name": "my_aeso_connection",
-    "objects": [{
-      "table": {
-        "source_table": "pool_price",
-        "destination_catalog": "main",
-        "destination_schema": "energy",
-        "destination_table": "pool_price",
-        "table_configuration": {
-          "scd_type": "SCD_TYPE_1",
-          "start_date": "2024-01-01",
-          "lookback_hours": "24",
-          "batch_size_days": "30",
-          "rate_limit_delay": "0.1"
+```python
+pipeline_spec = {
+    "connection_name": "aeso_connector",
+    "objects": [
+        {
+            "table": {
+                "source_table": "pool_price",
+                "destination_table": "pool_price",
+            }
         }
-      }
-    }]
-  }
+    ],
 }
 ```
 

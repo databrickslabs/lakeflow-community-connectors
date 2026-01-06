@@ -3,16 +3,15 @@ AESO Connector for LakeFlow
 ============================
 Provides access to Alberta Electric System Operator (AESO) pool price data.
 
-This connector implements SCD Type 1 with a lookback window to capture:
-- Frequent forecast price updates (AESO updates forecasts as settlement hours approach)
-- Settlement adjustments to actual prices (finalized within 24-72 hours)
+This connector implements SCD Type 1 with a lookback window to handle late-arriving
+data and settlement adjustments common in electricity market data.
 
 Connection Configuration:
 - api_key (required): AESO API authentication key
+- start_date (optional): Historical start date in YYYY-MM-DD format
+- lookback_hours (optional): Hours to look back for CDC updates (default: 24)
 
 Table Configuration:
-- start_date (optional): Historical start date in YYYY-MM-DD format (default: 30 days ago)
-- lookback_hours (optional): Hours to look back for backfill and forecast updates (default: 24, min: 24)
 - batch_size_days (optional): Number of days to fetch per API batch (default: 30)
 - rate_limit_delay (optional): Seconds to wait between API calls (default: 0.1)
 """
@@ -28,7 +27,6 @@ import time
 # ============================================================================
 
 SUPPORTED_TABLES = ["pool_price"]
-MIN_LOOKBACK_HOURS = 24  # Minimum safe lookback to capture settlement adjustments
 DEFAULT_LOOKBACK_HOURS = 24
 DEFAULT_HISTORICAL_DAYS = 30
 MAX_BATCH_DAYS = 30
@@ -54,6 +52,8 @@ class LakeflowConnect:
         Args:
             options: Configuration dictionary with the following keys:
                 - api_key (required): AESO API authentication key
+                - start_date (optional): Historical start date (YYYY-MM-DD)
+                - lookback_hours (optional): CDC lookback window in hours (default: 24)
         
         Raises:
             ValueError: If required options are missing or invalid
@@ -66,6 +66,15 @@ class LakeflowConnect:
         
         # Store configuration
         self.api_key = options["api_key"]
+        self.start_date = options.get("start_date")
+        self.lookback_hours = int(options.get("lookback_hours", DEFAULT_LOOKBACK_HOURS))
+        
+        # Validate start_date format if provided
+        if self.start_date:
+            try:
+                datetime.strptime(self.start_date, "%Y-%m-%d")
+            except ValueError:
+                raise ValueError("start_date must be in YYYY-MM-DD format")
         
         # Initialize the AESO API client
         self._initialize_api_client()
@@ -182,8 +191,6 @@ class LakeflowConnect:
             table_name: Name of the table to read
             start_offset: Dictionary containing high_watermark for incremental reads
             table_options: Table-specific configuration:
-                - start_date (optional): Historical start date YYYY-MM-DD (default: 30 days ago)
-                - lookback_hours (optional): CDC lookback window in hours (default: 24, min: 24)
                 - batch_size_days (optional): Days per API batch (default: 30)
                 - rate_limit_delay (optional): Seconds between API calls (default: 0.1)
         
@@ -191,39 +198,15 @@ class LakeflowConnect:
             Tuple of (record iterator, next offset dictionary)
         
         Raises:
-            ValueError: If table_name is not supported or lookback_hours < 24
+            ValueError: If table_name is not supported
         """
         self._validate_table_name(table_name)
         
         if table_name == "pool_price":
             # Extract table-specific configuration
-            start_date = table_options.get("start_date")
-            lookback_hours = int(table_options.get("lookback_hours", DEFAULT_LOOKBACK_HOURS))
             batch_size_days = int(table_options.get("batch_size_days", MAX_BATCH_DAYS))
             rate_limit_delay = float(table_options.get("rate_limit_delay", RATE_LIMIT_DELAY))
-            
-            # Validate start_date format if provided
-            if start_date:
-                try:
-                    datetime.strptime(start_date, "%Y-%m-%d")
-                except ValueError:
-                    raise ValueError("start_date must be in YYYY-MM-DD format")
-            
-            # Validate lookback_hours minimum
-            if lookback_hours < MIN_LOOKBACK_HOURS:
-                raise ValueError(
-                    f"lookback_hours must be at least {MIN_LOOKBACK_HOURS} hours "
-                    f"to safely capture settlement adjustments and late-arriving data. "
-                    f"Provided: {lookback_hours}"
-                )
-            
-            return self._read_pool_price_table(
-                start_offset, 
-                start_date,
-                lookback_hours,
-                batch_size_days, 
-                rate_limit_delay
-            )
+            return self._read_pool_price_table(start_offset, batch_size_days, rate_limit_delay)
         
         raise ValueError(f"Unknown table: {table_name}")
 
@@ -231,14 +214,7 @@ class LakeflowConnect:
     # Table-Specific Read Methods
     # ========================================================================
 
-    def _read_pool_price_table(
-        self, 
-        start_offset: dict, 
-        start_date: str,
-        lookback_hours: int,
-        batch_size_days: int, 
-        rate_limit_delay: float
-    ) -> (Iterator[dict], dict):
+    def _read_pool_price_table(self, start_offset: dict, batch_size_days: int, rate_limit_delay: float) -> (Iterator[dict], dict):
         """
         Read pool price data with CDC incremental loading.
         
@@ -252,8 +228,6 @@ class LakeflowConnect:
         
         Args:
             start_offset: Dictionary with optional high_watermark for incremental reads
-            start_date: Historical start date (YYYY-MM-DD) or None for default
-            lookback_hours: Hours to look back for CDC updates
             batch_size_days: Number of days to fetch per API batch
             rate_limit_delay: Seconds to wait between API calls
         
@@ -265,9 +239,9 @@ class LakeflowConnect:
         
         # Determine fetch start date based on mode
         if high_watermark:
-            fetch_start_date = self._calculate_incremental_start_date(high_watermark, lookback_hours)
+            fetch_start_date = self._calculate_incremental_start_date(high_watermark)
         else:
-            fetch_start_date = self._calculate_initial_start_date(start_date)
+            fetch_start_date = self._calculate_initial_start_date()
         
         # Always fetch through today for continuous ingestion
         fetch_end_date = datetime.now().strftime("%Y-%m-%d")
@@ -298,38 +272,34 @@ class LakeflowConnect:
                 f"Supported tables: {', '.join(SUPPORTED_TABLES)}"
             )
 
-    def _calculate_incremental_start_date(self, high_watermark: str, lookback_hours: int) -> str:
+    def _calculate_incremental_start_date(self, high_watermark: str) -> str:
         """
         Calculate start date for incremental load with lookback.
         
         Args:
             high_watermark: ISO format timestamp of last processed record
-            lookback_hours: Hours to look back for CDC updates
         
         Returns:
             Start date string in YYYY-MM-DD format
         """
         try:
             hwm_dt = datetime.fromisoformat(high_watermark.replace('Z', '+00:00'))
-            fetch_start_dt = hwm_dt - timedelta(hours=lookback_hours)
+            fetch_start_dt = hwm_dt - timedelta(hours=self.lookback_hours)
             fetch_start_date = fetch_start_dt.strftime("%Y-%m-%d")
-            print(f"Incremental: watermark={high_watermark}, lookback={lookback_hours}h, start={fetch_start_date}")
+            print(f"Incremental: watermark={high_watermark}, lookback={self.lookback_hours}h, start={fetch_start_date}")
             return fetch_start_date
         except (ValueError, AttributeError) as e:
             raise ValueError(f"Invalid high_watermark: {high_watermark}, error: {e}")
 
-    def _calculate_initial_start_date(self, start_date: str) -> str:
+    def _calculate_initial_start_date(self) -> str:
         """
         Calculate start date for initial load.
-        
-        Args:
-            start_date: Configured start date (YYYY-MM-DD) or None for default
         
         Returns:
             Start date string in YYYY-MM-DD format
         """
-        if start_date:
-            fetch_start_date = start_date
+        if self.start_date:
+            fetch_start_date = self.start_date
         else:
             fetch_start_date = (datetime.now() - timedelta(days=DEFAULT_HISTORICAL_DAYS)).strftime("%Y-%m-%d")
         
