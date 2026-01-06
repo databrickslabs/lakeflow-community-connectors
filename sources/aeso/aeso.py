@@ -141,7 +141,7 @@ class LakeflowConnect:
         # Capture ingestion timestamp once for this batch
         ingestion_timestamp = datetime.utcnow()
         
-        while current_date <= fetch_end_date:z
+        while current_date <= fetch_end_date:
             batch_end_dt = datetime.strptime(current_date, "%Y-%m-%d") + timedelta(days=max_batch_days - 1)
             batch_end_date = min(batch_end_dt.strftime("%Y-%m-%d"), fetch_end_date)
             
