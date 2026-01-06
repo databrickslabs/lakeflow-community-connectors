@@ -343,20 +343,23 @@ class LakeflowConnect:
         supported_tables = self.list_tables()
         if table_name not in supported_tables:
             raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
-        
+
+        # Check if this is a delete flow
+        is_delete_flow = table_options.get("isDeleteFlow") == "true"
+
         # Determine if this is an incremental read
         is_incremental = (
             start_offset is not None and start_offset.get("updatedAt") is not None
         )
 
-        if is_incremental:
-            return self._read_data(table_name, start_offset, incremental=True, table_options=table_options)
-        else:
-            return self._read_data(table_name, None, incremental=False, table_options=table_options)
+        return self._read_data(
+            table_name, start_offset, incremental=is_incremental,
+            table_options=table_options, is_delete_flow=is_delete_flow
+        )
 
     def _read_data(
         self, table_name: str, start_offset: dict = None, incremental: bool = False,
-        table_options: Dict[str, str] = None
+        table_options: Dict[str, str] = None, is_delete_flow: bool = False
     ):
         """Unified method to read data from HubSpot API"""
 
@@ -364,15 +367,17 @@ class LakeflowConnect:
         metadata = self.read_table_metadata(table_name, table_options)
         property_names = metadata.get("property_names", [])
         cursor_property_field = metadata.get("cursor_property_field")
-        associations = metadata.get("associations", [])
+        # Delete flow doesn't need associations
+        associations = [] if is_delete_flow else metadata.get("associations", [])
 
         all_records = []
         after = None
-        latest_updated = start_offset.get("updatedAt") if start_offset else None
+        checkpoint = start_offset.get("updatedAt") if start_offset else None
+        latest_updated = checkpoint
 
         while True:
-            if incremental:
-                # Use search API for incremental reads
+            if incremental and not is_delete_flow:
+                # Use search API for incremental reads (normal flow only)
                 records, after, updated_time = self._fetch_incremental_batch(
                     table_name,
                     property_names,
@@ -385,9 +390,9 @@ class LakeflowConnect:
                 ):
                     latest_updated = updated_time
             else:
-                # Use objects API for full refresh
+                # Use objects API for full refresh or delete flow
                 records, after = self._fetch_full_refresh_batch(
-                    table_name, property_names, associations, after
+                    table_name, property_names, associations, after, archived=is_delete_flow
                 )
 
             if not records:
@@ -395,16 +400,21 @@ class LakeflowConnect:
 
             # Transform records
             transformed_records = self._transform_records(records, table_name)
+
+            # For delete flow with incremental, filter client-side
+            if is_delete_flow and checkpoint:
+                transformed_records = [
+                    r for r in transformed_records
+                    if r.get("updatedAt", "") > checkpoint
+                ]
+
             all_records.extend(transformed_records)
 
-            # Update latest timestamp for full refresh
-            if not incremental:
-                for record in transformed_records:
-                    updated_at = record.get("updatedAt")
-                    if updated_at and (
-                        not latest_updated or updated_at > latest_updated
-                    ):
-                        latest_updated = updated_at
+            # Update latest timestamp
+            for record in transformed_records:
+                updated_at = record.get("updatedAt")
+                if updated_at and (not latest_updated or updated_at > latest_updated):
+                    latest_updated = updated_at
 
             if not after:
                 break
@@ -421,9 +431,11 @@ class LakeflowConnect:
         property_names: List[str],
         associations: List[str],
         after: str = None,
+        archived: bool = False,
     ):
         """Fetch a batch of records using full refresh API"""
-        url = f"{self.base_url}/crm/v3/objects/{table_name}?limit=100&archived=false"
+        archived_param = "true" if archived else "false"
+        url = f"{self.base_url}/crm/v3/objects/{table_name}?limit=100&archived={archived_param}"
 
         if after:
             url += f"&after={after}"

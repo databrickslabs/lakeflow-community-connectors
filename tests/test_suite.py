@@ -1118,6 +1118,7 @@ class LakeflowConnectTester:
     ) -> bool:
         """
         Verify that written rows are present in the returned results by comparing mapped column values.
+        Supports nested column paths using dot notation (e.g., 'properties.email').
         """
         if not written_rows or not column_mapping:
             return True
@@ -1146,8 +1147,10 @@ class LakeflowConnectTester:
             if isinstance(record, dict):
                 signature = {}
                 for written_col, returned_col in column_mapping.items():
-                    if returned_col in record:
-                        signature[written_col] = record[returned_col]
+                    # Handle nested paths (e.g., 'properties.email')
+                    value = self._get_nested_value(record, returned_col)
+                    if value is not None:
+                        signature[written_col] = value
 
                 print(f"\nreturned row: {signature}\n")
                 if signature:
@@ -1159,6 +1162,20 @@ class LakeflowConnectTester:
                 return False
 
         return True
+
+    def _get_nested_value(self, record: Dict, path: str) -> Any:
+        """
+        Get a value from a nested dictionary using dot notation path.
+        E.g., _get_nested_value({"properties": {"email": "x"}}, "properties.email") -> "x"
+        """
+        parts = path.split('.')
+        current = record
+        for part in parts:
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            else:
+                return None
+        return current
 
     def _add_result(self, result: TestResult):
         """Add a test result to the collection"""
