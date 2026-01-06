@@ -134,7 +134,7 @@ class LakeflowConnect:
         all_records = []
         current_date = fetch_start_date
         fetch_end_date = today
-        max_batch_days = 365  # Fetch in 7-day batches
+        max_batch_days = 30  # Fetch in 7-day batches
         
         print(f"Fetching: {fetch_start_date} to {fetch_end_date}")
         
