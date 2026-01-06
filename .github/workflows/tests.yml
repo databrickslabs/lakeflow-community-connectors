@@ -14,6 +14,7 @@ jobs:
       libs: ${{ steps.check.outputs.libs }}
       pipeline: ${{ steps.check.outputs.pipeline }}
       example: ${{ steps.check.outputs.example }}
+      community_connector: ${{ steps.check.outputs.community_connector }}
     steps:
       - uses: actions/checkout@v4
       # cannot use dorny because of ip allowlisting
@@ -65,6 +66,13 @@ jobs:
             echo "example=true" >> $GITHUB_OUTPUT
           else
             echo "example=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Check tools/community_connector
+          if echo "$CHANGED_FILES" | grep -q '^tools/community_connector/'; then
+            echo "community_connector=true" >> $GITHUB_OUTPUT
+          else
+            echo "community_connector=false" >> $GITHUB_OUTPUT
           fi
 
   # Test libs
@@ -132,3 +140,27 @@ jobs:
       - name: Run example tests
         run: |
           pytest sources/example/test/ -v
+
+  # Test community connector tool
+  test-community-connector:
+    needs: changes
+    if: ${{ needs.changes.outputs.community_connector == 'true' }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          cd tools/community_connector
+          pip install -e ".[dev]"
+      - name: Run community connector tests
+        run: |
+          cd tools/community_connector
+          pytest tests/ -v
