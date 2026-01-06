@@ -1,4 +1,17 @@
 {
-  "repositories": {}
+  "repositories": {},
+  "commits": {
+    "repository_id": "e39fba9d-6cf8-4cfb-a4b9-1714d52d160b"
+  },
+  "pullrequests": {
+    "repository_id": "e39fba9d-6cf8-4cfb-a4b9-1714d52d160b",
+    "status_filter": "all"
+  },
+  "refs": {
+    "repository_id": "e39fba9d-6cf8-4cfb-a4b9-1714d52d160b"
+  },
+  "pushes": {
+    "repository_id": "e39fba9d-6cf8-4cfb-a4b9-1714d52d160b"
+  }
 }
 

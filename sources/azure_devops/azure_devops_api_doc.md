@@ -46,14 +46,22 @@ The object list is **static** (defined by the connector), not discovered dynamic
 | Object Name | Description | Primary Endpoint | Ingestion Type |
 |------------|-------------|------------------|----------------|
 | `repositories` | Git repositories within a project | `GET /{organization}/{project}/_apis/git/repositories` | `snapshot` |
+| `commits` | Git commits across repositories | `GET /{organization}/{project}/_apis/git/repositories/{repositoryId}/commits` | `append` |
+| `pullrequests` | Pull requests across repositories | `GET /{organization}/{project}/_apis/git/repositories/{repositoryId}/pullrequests` | `cdc` |
+| `refs` | Git references (branches and tags) | `GET /{organization}/{project}/_apis/git/repositories/{repositoryId}/refs` | `snapshot` |
+| `pushes` | Git push events to repositories | `GET /{organization}/{project}/_apis/git/repositories/{repositoryId}/pushes` | `append` |
 
-**Connector scope for initial implementation**:
-- Step 1 focuses on the `repositories` object only, as requested.
-- This provides metadata about all Git repositories in an Azure DevOps project.
+**Connector scope**:
+- Supports 5 Git objects from Azure DevOps REST API v7.1.
+- All objects require `organization` and `project` connection parameters.
+- Objects except `repositories` require `repository_id` as a table option.
 
 High-level notes:
-- **Repositories**: Contains comprehensive metadata about Git repositories including name, ID, URLs, default branch, project information, and links to related resources (commits, refs, pull requests, items, pushes).
-- Additional objects (commits, pull requests, pushes, refs, items) can be added in future iterations but are out of scope for this initial documentation.
+- **Repositories**: Repository metadata including configuration, URLs, and project information.
+- **Commits**: Individual Git commits with author, committer, message, tree ID, and parent commits.
+- **Pull Requests**: Pull request metadata including source/target branches, status, reviewers, and completion details.
+- **Refs**: Git references (branches and tags) with names, commit IDs, and creators.
+- **Pushes**: Push events with pusher information, commit ranges, and ref updates.
 
 
 ## **Object Schema**
@@ -224,35 +232,282 @@ curl -u :{PERSONAL_ACCESS_TOKEN} \
 > If additional Azure DevOps repository fields are needed in the future, they must be added as new columns here so the documentation continues to reflect the full table schema.
 
 
+### `commits` object
+
+**Source endpoint**:  
+`GET https://dev.azure.com/{organization}/{project}/_apis/git/repositories/{repositoryId}/commits?api-version=7.1`
+
+**Key behavior**:
+- Returns commits from a specific repository.
+- Supports pagination using `top` and `skip` parameters.
+- Supports filtering by date range, author, and commit IDs.
+- Append-only ingestion using commit timestamps or skip-based pagination.
+
+**High-level schema (connector view)**:
+
+| Column Name | Type | Description |
+|------------|------|-------------|
+| `commitId` | string (SHA-1 hash) | Unique SHA-1 hash identifying the commit (40 hex characters). |
+| `author` | struct | Commit author information (see nested schema). |
+| `committer` | struct | Committer information (see nested schema). |
+| `comment` | string | Commit message. |
+| `commentTruncated` | boolean | Whether the commit message was truncated in the response. |
+| `changeCounts` | struct or null | Statistics on changes (Add, Edit, Delete counts). |
+| `url` | string | API URL for this commit resource. |
+| `remoteUrl` | string | Web URL for viewing the commit. |
+| `treeId` | string (SHA-1 hash) or null | Git tree ID for this commit. |
+| `parents` | array of strings | Array of parent commit IDs (SHA-1 hashes). |
+| `push` | struct or null | Information about the push that created this commit. |
+| `workItems` | array of structs or null | Work items linked to this commit. |
+| `organization` | string (connector-derived) | Organization name. |
+| `project_name` | string (connector-derived) | Project name. |
+| `repository_id` | string (connector-derived) | Repository ID this commit belongs to. |
+
+**Nested `author` and `committer` struct**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Display name of the author/committer. |
+| `email` | string | Email address. |
+| `date` | string (ISO 8601 datetime) | Timestamp when the commit was authored/committed. |
+
+**Nested `changeCounts` struct**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Add` | integer | Number of files added. |
+| `Edit` | integer | Number of files modified. |
+| `Delete` | integer | Number of files deleted. |
+
+**Example request** (list commits with pagination):
+
+```bash
+curl -u :{PERSONAL_ACCESS_TOKEN} \
+  -H "Accept: application/json" \
+  "https://dev.azure.com/fabrikam/Fabrikam-Fiber-Git/_apis/git/repositories/278d5cd2-584d-4b63-824a-2ba458937249/commits?api-version=7.1&$top=100"
+```
+
+**Table options**:
+- `repository_id` (string, required): Repository ID or name to fetch commits from.
+
+
+### `pullrequests` object
+
+**Source endpoint**:  
+`GET https://dev.azure.com/{organization}/{project}/_apis/git/repositories/{repositoryId}/pullrequests?api-version=7.1`
+
+**Key behavior**:
+- Returns pull requests from a specific repository.
+- Supports filtering by status (Active, Completed, Abandoned, All).
+- Supports filtering by creator, reviewer, source/target branch.
+- CDC ingestion using `lastMergeCommit.commitId` or `closedDate` as cursor.
+
+**High-level schema (connector view)**:
+
+| Column Name | Type | Description |
+|------------|------|-------------|
+| `pullRequestId` | integer | Unique identifier for the pull request. |
+| `codeReviewId` | integer | Associated code review ID. |
+| `status` | string | Pull request status: `active`, `completed`, `abandoned`. |
+| `createdBy` | struct | User who created the pull request (see nested identity schema). |
+| `creationDate` | string (ISO 8601 datetime) | When the pull request was created. |
+| `closedDate` | string (ISO 8601 datetime) or null | When the pull request was closed (completed or abandoned). |
+| `title` | string | Pull request title. |
+| `description` | string or null | Pull request description. |
+| `sourceRefName` | string | Source branch reference (e.g., `refs/heads/feature-branch`). |
+| `targetRefName` | string | Target branch reference (e.g., `refs/heads/main`). |
+| `mergeStatus` | string | Merge status: `succeeded`, `failed`, `conflicts`, `queued`, etc. |
+| `mergeId` | string (SHA-1 hash) or null | Merge commit ID if completed. |
+| `lastMergeSourceCommit` | struct or null | Source commit at time of last merge. |
+| `lastMergeTargetCommit` | struct or null | Target commit at time of last merge. |
+| `lastMergeCommit` | struct or null | The merge commit itself. |
+| `reviewers` | array of structs | List of reviewers with their vote status. |
+| `url` | string | API URL for this pull request. |
+| `supportsIterations` | boolean | Whether this PR supports iterations. |
+| `artifactId` | string or null | Artifact ID for the pull request. |
+| `organization` | string (connector-derived) | Organization name. |
+| `project_name` | string (connector-derived) | Project name. |
+| `repository_id` | string (connector-derived) | Repository ID. |
+
+**Nested identity struct** (for `createdBy`, reviewers, etc.):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string (UUID) | User ID. |
+| `displayName` | string | Display name. |
+| `uniqueName` | string | Unique name (usually email). |
+| `url` | string or null | API URL for the identity. |
+| `imageUrl` | string or null | Profile image URL. |
+
+**Nested commit reference struct**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `commitId` | string (SHA-1 hash) | Commit ID. |
+| `url` | string | API URL for the commit. |
+
+**Example request** (list active pull requests):
+
+```bash
+curl -u :{PERSONAL_ACCESS_TOKEN} \
+  -H "Accept: application/json" \
+  "https://dev.azure.com/fabrikam/Fabrikam-Fiber-Git/_apis/git/repositories/278d5cd2-584d-4b63-824a-2ba458937249/pullrequests?api-version=7.1&searchCriteria.status=active"
+```
+
+**Table options**:
+- `repository_id` (string, required): Repository ID or name.
+- `status_filter` (string, optional): Filter by status - `active`, `completed`, `abandoned`, or `all`. Default: `active`.
+
+
+### `refs` object
+
+**Source endpoint**:  
+`GET https://dev.azure.com/{organization}/{project}/_apis/git/repositories/{repositoryId}/refs?api-version=7.1`
+
+**Key behavior**:
+- Returns Git references (branches and tags) from a repository.
+- Supports filtering by ref name prefix (e.g., `heads/` for branches, `tags/` for tags).
+- No pagination typically needed (refs list is usually small).
+- Snapshot ingestion (refs can be created, updated, or deleted).
+
+**High-level schema (connector view)**:
+
+| Column Name | Type | Description |
+|------------|------|-------------|
+| `name` | string | Full reference name (e.g., `refs/heads/main`, `refs/tags/v1.0`). |
+| `objectId` | string (SHA-1 hash) | SHA-1 of the commit this ref points to. |
+| `creator` | struct or null | User who created the ref (see identity struct). |
+| `url` | string | API URL for this ref. |
+| `peeledObjectId` | string (SHA-1 hash) or null | For tags pointing to tag objects, the commit SHA-1. |
+| `statuses` | array of structs or null | Status checks associated with this ref. |
+| `organization` | string (connector-derived) | Organization name. |
+| `project_name` | string (connector-derived) | Project name. |
+| `repository_id` | string (connector-derived) | Repository ID. |
+
+**Example request** (list all refs):
+
+```bash
+curl -u :{PERSONAL_ACCESS_TOKEN} \
+  -H "Accept: application/json" \
+  "https://dev.azure.com/fabrikam/Fabrikam-Fiber-Git/_apis/git/repositories/278d5cd2-584d-4b63-824a-2ba458937249/refs?api-version=7.1"
+```
+
+**Table options**:
+- `repository_id` (string, required): Repository ID or name.
+- `filter` (string, optional): Ref name prefix filter (e.g., `heads/` for branches, `tags/` for tags).
+
+
+### `pushes` object
+
+**Source endpoint**:  
+`GET https://dev.azure.com/{organization}/{project}/_apis/git/repositories/{repositoryId}/pushes?api-version=7.1`
+
+**Key behavior**:
+- Returns push events to a repository.
+- Supports pagination using `top` and `skip` parameters.
+- Supports filtering by date range, pusher, and ref name.
+- Append-only ingestion using push ID or date.
+
+**High-level schema (connector view)**:
+
+| Column Name | Type | Description |
+|------------|------|-------------|
+| `pushId` | integer | Unique identifier for the push. |
+| `date` | string (ISO 8601 datetime) | Timestamp when the push occurred. |
+| `pushedBy` | struct | User who performed the push (see identity struct). |
+| `url` | string | API URL for this push. |
+| `refUpdates` | array of structs | List of ref updates in this push. |
+| `commits` | array of structs | Commits included in the push. |
+| `repository` | struct or null | Repository information. |
+| `organization` | string (connector-derived) | Organization name. |
+| `project_name` | string (connector-derived) | Project name. |
+| `repository_id` | string (connector-derived) | Repository ID. |
+
+**Nested `refUpdates` struct**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Reference name (e.g., `refs/heads/main`). |
+| `oldObjectId` | string (SHA-1 hash) | Previous commit ID. |
+| `newObjectId` | string (SHA-1 hash) | New commit ID after push. |
+
+**Example request** (list recent pushes):
+
+```bash
+curl -u :{PERSONAL_ACCESS_TOKEN} \
+  -H "Accept: application/json" \
+  "https://dev.azure.com/fabrikam/Fabrikam-Fiber-Git/_apis/git/repositories/278d5cd2-584d-4b63-824a-2ba458937249/pushes?api-version=7.1&$top=100"
+```
+
+**Table options**:
+- `repository_id` (string, required): Repository ID or name.
+
+
 ## **Get Object Primary Keys**
 
-There is no dedicated metadata endpoint to get the primary key for the `repositories` object.  
-Instead, the primary key is defined **statically** based on the resource schema.
+There is no dedicated metadata endpoint to get primary keys for Azure DevOps Git objects.  
+Instead, primary keys are defined **statically** based on resource schemas.
 
-- **Primary key for `repositories`**: `id`  
-  - Type: string (UUID/GUID format)  
-  - Property: Unique across all repositories in an Azure DevOps organization.
+| Object | Primary Key Field(s) | Type | Notes |
+|--------|---------------------|------|-------|
+| `repositories` | `id` | string (UUID) | Unique across all repositories in an organization. |
+| `commits` | `commitId`, `repository_id` | string (SHA-1), string (UUID) | Composite key: commits are unique within a repository but the same commit can exist across multiple repos (forks). |
+| `pullrequests` | `pullRequestId`, `repository_id` | integer, string (UUID) | Composite key: pull request IDs are unique within a repository. |
+| `refs` | `name`, `repository_id` | string, string (UUID) | Composite key: ref names (e.g., `refs/heads/main`) are unique within a repository. |
+| `pushes` | `pushId`, `repository_id` | integer, string (UUID) | Composite key: push IDs are unique within a repository. |
 
-The connector will:
-- Read the `id` field from each repository record returned by `GET /{organization}/{project}/_apis/git/repositories`.
-- Use it as the immutable primary key for identifying unique repositories.
+**Implementation notes**:
+- For `repositories`: Use `id` field directly from the API response.
+- For objects scoped to a repository (`commits`, `pullrequests`, `refs`, `pushes`): 
+  - The connector must add `repository_id` as a derived field based on the table options.
+  - Use composite keys combining the resource's unique identifier with `repository_id`.
+  
+Example showing primary keys in responses:
 
-Example showing primary key in response:
-
+**Repositories**:
 ```json
 {
   "id": "5febef5a-833d-4e14-b9c0-14cb638f91e6",
-  "name": "AnotherRepository",
-  "url": "https://dev.azure.com/fabrikam/_apis/git/repositories/5febef5a-833d-4e14-b9c0-14cb638f91e6",
-  "project": {
-    "id": "6ce954b1-ce1f-45d1-b94d-e6bf2464ba2c",
-    "name": "Fabrikam-Fiber-Git"
-  },
-  "defaultBranch": "refs/heads/master"
+  "name": "AnotherRepository"
 }
 ```
+Primary key: `id` = `"5febef5a-833d-4e14-b9c0-14cb638f91e6"`
 
-The `id` field (`"5febef5a-833d-4e14-b9c0-14cb638f91e6"`) is the primary key.
+**Commits**:
+```json
+{
+  "commitId": "be67f8871a4d2c75f13a51c1d3c30ac0d74d4ef4",
+  "author": { "name": "John Doe", "date": "2023-01-15T10:00:00Z" }
+}
+```
+Primary key: (`commitId`, `repository_id`) = (`"be67f8871a4d2c75f13a51c1d3c30ac0d74d4ef4"`, `"5febef5a-..."`)
+
+**Pull Requests**:
+```json
+{
+  "pullRequestId": 123,
+  "title": "Add feature X"
+}
+```
+Primary key: (`pullRequestId`, `repository_id`) = (`123`, `"5febef5a-..."`)
+
+**Refs**:
+```json
+{
+  "name": "refs/heads/main",
+  "objectId": "be67f8871a4d2c75f13a51c1d3c30ac0d74d4ef4"
+}
+```
+Primary key: (`name`, `repository_id`) = (`"refs/heads/main"`, `"5febef5a-..."`)
+
+**Pushes**:
+```json
+{
+  "pushId": 456,
+  "date": "2023-01-15T10:30:00Z"
+}
+```
+Primary key: (`pushId`, `repository_id`) = (`456`, `"5febef5a-..."`)
 
 
 ## **Object's ingestion type**
@@ -264,20 +519,56 @@ Supported ingestion types (framework-level definitions):
 
 Planned ingestion type for Azure DevOps Git objects:
 
-| Object | Ingestion Type | Rationale |
-|--------|----------------|-----------|
-| `repositories` | `snapshot` | Repository metadata changes infrequently (creation, name changes, project moves, deletion). There is no built-in incremental cursor or `updated_at` timestamp in the API response. The recommended approach is to perform a full snapshot of all repositories in a project on each sync and compare against the previous snapshot to detect additions, modifications, or removals. |
+| Object | Ingestion Type | Cursor Field | Rationale |
+|--------|----------------|--------------|-----------|
+| `repositories` | `snapshot` | None | Repository metadata changes infrequently. No built-in incremental cursor. Full snapshot approach recommended. |
+| `commits` | `append` | `author.date` or skip-based | Commits are immutable once created. Use author date for time-based incremental reads or skip-based pagination. |
+| `pullrequests` | `cdc` | `closedDate` or `lastMergeCommit.commitId` | Pull requests can be updated (status changes, new reviews, completion). Track by closed date or merge commit for incremental updates. |
+| `refs` | `snapshot` | None | Refs (branches/tags) can be created, updated (point to different commits), or deleted. Snapshot approach captures all changes. |
+| `pushes` | `append` | `pushId` or `date` | Push events are immutable historical records. Use push ID or date for incremental reads. |
 
-For `repositories`:
+**Detailed ingestion strategies**:
+
+**For `repositories` (snapshot)**:
 - **Primary key**: `id` (string UUID)
-- **Cursor field**: Not applicable (snapshot ingestion)
-- **Sort order**: Not applicable (API returns repositories in arbitrary order; connector can optionally sort by `id` or `name` for consistency)
-- **Deletes**: Deleted repositories will no longer appear in the list response. The connector should detect missing repositories by comparing the current snapshot with the previous snapshot and mark them as deleted in the target system, or use a full-refresh strategy.
+- **Cursor field**: Not applicable
+- **Strategy**: Full snapshot on each sync; compare with previous to detect changes
+- **Deletes**: Detect by absence from current snapshot
+
+**For `commits` (append)**:
+- **Primary key**: (`commitId`, `repository_id`)
+- **Cursor field**: `author.date` (timestamp)
+- **Strategy**: Query commits where `author.date` > last sync timestamp
+- **Query parameters**: `searchCriteria.fromDate`, `searchCriteria.toDate`
+- **Deletes**: Not applicable (commits are immutable)
+
+**For `pullrequests` (cdc)**:
+- **Primary key**: (`pullRequestId`, `repository_id`)
+- **Cursor field**: `closedDate` for completed/abandoned PRs
+- **Strategy**: 
+  - Fetch all active PRs on each sync
+  - For completed/abandoned PRs, use `closedDate` > last sync timestamp
+  - Track status changes and updates
+- **Query parameters**: `searchCriteria.status`, `searchCriteria.targetRefName`
+- **Updates**: PR status, reviewers, merge status can change
+
+**For `refs` (snapshot)**:
+- **Primary key**: (`name`, `repository_id`)
+- **Cursor field**: Not applicable
+- **Strategy**: Full snapshot of all refs; compare `objectId` to detect ref updates
+- **Deletes**: Detect by absence from current snapshot (deleted branches/tags)
+
+**For `pushes` (append)**:
+- **Primary key**: (`pushId`, `repository_id`)
+- **Cursor field**: `pushId` (integer, auto-incrementing) or `date`
+- **Strategy**: Query pushes where `pushId` > last sync max pushId
+- **Query parameters**: `searchCriteria.fromDate`, `searchCriteria.toDate`
+- **Deletes**: Not applicable (pushes are immutable historical events)
 
 
 ## **Read API for Data Retrieval**
 
-### Primary read endpoint for `repositories`
+### `repositories` read endpoint
 
 - **HTTP method**: `GET`
 - **Endpoint**: `/{organization}/{project}/_apis/git/repositories`
@@ -291,17 +582,14 @@ For `repositories`:
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `api-version` | string | yes | none | API version. Use `7.1` for this connector. |
-| `includeLinks` | boolean | no | false | Whether to include `_links` in the response. Recommended to set to `true` for complete metadata. |
-| `includeAllUrls` | boolean | no | false | Whether to include all remote URLs. Recommended to set to `true`. |
-| `includeHidden` | boolean | no | false | Whether to include hidden repositories (typically system or deleted repos). |
+| `api-version` | string | yes | none | API version. Use `7.1`. |
+| `includeLinks` | boolean | no | false | Include `_links` in response. Recommended: `true`. |
+| `includeAllUrls` | boolean | no | false | Include all remote URLs. Recommended: `true`. |
+| `includeHidden` | boolean | no | false | Include hidden repositories. |
 
-**No pagination required**:
-- The list repositories endpoint returns all repositories in a single response (no pagination).
-- For organizations with a very large number of repositories (hundreds or thousands), the API still returns all repositories in the `value` array.
-- There is no `continuationToken`, `top`, or `skip` parameter for this endpoint.
+**Pagination**: Not required (returns all repositories in single response).
 
-**Example request** (list all repositories in a project):
+**Example request**:
 
 ```bash
 curl -u :{PERSONAL_ACCESS_TOKEN} \
@@ -310,44 +598,183 @@ curl -u :{PERSONAL_ACCESS_TOKEN} \
 ```
 
 **Snapshot strategy**:
-- On each sync run, the connector should:
-  - Call `GET /{organization}/{project}/_apis/git/repositories?api-version=7.1` to retrieve the current list of all repositories.
-  - Store the full list as a snapshot.
-  - Compare with the previous snapshot (if any) to detect:
-    - **New repositories**: Repositories with `id` values not present in the previous snapshot.
-    - **Updated repositories**: Repositories with the same `id` but different field values (e.g., `name`, `defaultBranch`, `size`).
-    - **Deleted repositories**: Repositories present in the previous snapshot but missing from the current response.
-  - Alternatively, use a full-refresh strategy where the target table is fully replaced on each sync.
+- Fetch all repositories in each sync.
+- Compare with previous snapshot to detect additions, updates, and deletions.
+- Alternatively, use full-refresh strategy.
 
-**Handling deletes**:
-- Azure DevOps does not provide a dedicated API to list deleted repositories or a "soft delete" flag in the repository object.
-- The connector must detect deletions by:
-  - Tracking which `id` values were present in the previous sync.
-  - Identifying `id` values that are missing from the current sync.
-  - Marking those repositories as deleted in the target system, or removing them if using a full-refresh strategy.
 
-**Alternative API for single repository**:
-- To retrieve a single repository by ID or name:
-  - `GET /{organization}/{project}/_apis/git/repositories/{repositoryId}?api-version=7.1`
-  - Where `{repositoryId}` can be either the repository GUID or the repository name.
-- This is useful for validation or fetching details for a specific repository but is not recommended for bulk ingestion (use the list endpoint instead).
+### `commits` read endpoint
 
-**Example request** (get a single repository):
+- **HTTP method**: `GET`
+- **Endpoint**: `/{organization}/{project}/_apis/git/repositories/{repositoryId}/commits`
+
+**Path parameters**:
+- `organization` (string, required): Organization name.
+- `project` (string, required): Project name or ID.
+- `repositoryId` (string, required): Repository ID or name.
+
+**Query parameters**:
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `api-version` | string | yes | none | API version. Use `7.1`. |
+| `$top` | integer | no | 100 | Maximum number of commits to return (max 10,000). |
+| `$skip` | integer | no | 0 | Number of commits to skip for pagination. |
+| `searchCriteria.fromDate` | string (ISO 8601) | no | none | Include commits authored after this date. |
+| `searchCriteria.toDate` | string (ISO 8601) | no | none | Include commits authored before this date. |
+| `searchCriteria.author` | string | no | none | Filter by author name or email. |
+| `searchCriteria.itemPath` | string | no | none | Filter by file path. |
+| `searchCriteria.fromCommitId` | string (SHA-1) | no | none | Include commits after this commit. |
+| `searchCriteria.toCommitId` | string (SHA-1) | no | none | Include commits up to this commit. |
+
+**Pagination**: Use `$top` and `$skip` for pagination (required for large repositories).
+
+**Example request** (incremental read):
 
 ```bash
 curl -u :{PERSONAL_ACCESS_TOKEN} \
   -H "Accept: application/json" \
-  "https://dev.azure.com/fabrikam/Fabrikam-Fiber-Git/_apis/git/repositories/AnotherRepository?api-version=7.1"
+  "https://dev.azure.com/fabrikam/Fabrikam-Fiber-Git/_apis/git/repositories/278d5cd2-584d-4b63-824a-2ba458937249/commits?api-version=7.1&\$top=1000&searchCriteria.fromDate=2023-01-01T00:00:00Z"
 ```
 
+**Append strategy**:
+- First sync: Fetch all commits using pagination.
+- Subsequent syncs: Use `searchCriteria.fromDate` with last sync's max `author.date`.
+- Store `$skip` offset for resume capability if interrupted.
+
+
+### `pullrequests` read endpoint
+
+- **HTTP method**: `GET`
+- **Endpoint**: `/{organization}/{project}/_apis/git/repositories/{repositoryId}/pullrequests`
+
+**Path parameters**:
+- `organization` (string, required): Organization name.
+- `project` (string, required): Project name or ID.
+- `repositoryId` (string, required): Repository ID or name.
+
+**Query parameters**:
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `api-version` | string | yes | none | API version. Use `7.1`. |
+| `searchCriteria.status` | string | no | `active` | Filter by status: `active`, `completed`, `abandoned`, or `all`. |
+| `searchCriteria.creatorId` | string (UUID) | no | none | Filter by creator user ID. |
+| `searchCriteria.reviewerId` | string (UUID) | no | none | Filter by reviewer user ID. |
+| `searchCriteria.sourceRefName` | string | no | none | Filter by source branch name. |
+| `searchCriteria.targetRefName` | string | no | none | Filter by target branch name. |
+| `$top` | integer | no | none | Maximum number of PRs to return. |
+| `$skip` | integer | no | 0 | Number of PRs to skip for pagination. |
+
+**Pagination**: Optional (use `$top` and `$skip` if needed).
+
+**Example request** (fetch all PRs):
+
+```bash
+curl -u :{PERSONAL_ACCESS_TOKEN} \
+  -H "Accept: application/json" \
+  "https://dev.azure.com/fabrikam/Fabrikam-Fiber-Git/_apis/git/repositories/278d5cd2-584d-4b63-824a-2ba458937249/pullrequests?api-version=7.1&searchCriteria.status=all"
+```
+
+**CDC strategy**:
+- Fetch all active PRs on each sync (status changes tracked).
+- For completed/abandoned PRs, use time-based filtering if available.
+- Track `lastMergeCommit.commitId` or `closedDate` as cursor.
+- Detect status changes by comparing with previous state.
+
+
+### `refs` read endpoint
+
+- **HTTP method**: `GET`
+- **Endpoint**: `/{organization}/{project}/_apis/git/repositories/{repositoryId}/refs`
+
+**Path parameters**:
+- `organization` (string, required): Organization name.
+- `project` (string, required): Project name or ID.
+- `repositoryId` (string, required): Repository ID or name.
+
+**Query parameters**:
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `api-version` | string | yes | none | API version. Use `7.1`. |
+| `filter` | string | no | none | Filter by ref name prefix (e.g., `heads/` for branches, `tags/` for tags). |
+| `includeLinks` | boolean | no | false | Include `_links` in response. |
+| `includeStatuses` | boolean | no | false | Include status checks for refs. |
+| `peelTags` | boolean | no | false | For annotated tags, return the commit they point to. |
+
+**Pagination**: Not typically required (ref count is usually small).
+
+**Example request** (list all branches):
+
+```bash
+curl -u :{PERSONAL_ACCESS_TOKEN} \
+  -H "Accept: application/json" \
+  "https://dev.azure.com/fabrikam/Fabrikam-Fiber-Git/_apis/git/repositories/278d5cd2-584d-4b63-824a-2ba458937249/refs?api-version=7.1&filter=heads/"
+```
+
+**Snapshot strategy**:
+- Fetch all refs on each sync.
+- Compare `objectId` (commit SHA) to detect ref updates.
+- Detect deletions by absence from current snapshot.
+
+
+### `pushes` read endpoint
+
+- **HTTP method**: `GET`
+- **Endpoint**: `/{organization}/{project}/_apis/git/repositories/{repositoryId}/pushes`
+
+**Path parameters**:
+- `organization` (string, required): Organization name.
+- `project` (string, required): Project name or ID.
+- `repositoryId` (string, required): Repository ID or name.
+
+**Query parameters**:
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `api-version` | string | yes | none | API version. Use `7.1`. |
+| `$top` | integer | no | 100 | Maximum number of pushes to return. |
+| `$skip` | integer | no | 0 | Number of pushes to skip for pagination. |
+| `searchCriteria.fromDate` | string (ISO 8601) | no | none | Include pushes after this date. |
+| `searchCriteria.toDate` | string (ISO 8601) | no | none | Include pushes before this date. |
+| `searchCriteria.pusherId` | string (UUID) | no | none | Filter by pusher user ID. |
+| `searchCriteria.refName` | string | no | none | Filter by ref name. |
+| `searchCriteria.includeRefUpdates` | boolean | no | false | Include ref updates in response. |
+
+**Pagination**: Use `$top` and `$skip` for pagination.
+
+**Example request** (incremental read):
+
+```bash
+curl -u :{PERSONAL_ACCESS_TOKEN} \
+  -H "Accept: application/json" \
+  "https://dev.azure.com/fabrikam/Fabrikam-Fiber-Git/_apis/git/repositories/278d5cd2-584d-4b63-824a-2ba458937249/pushes?api-version=7.1&\$top=1000&searchCriteria.fromDate=2023-01-01T00:00:00Z"
+```
+
+**Append strategy**:
+- First sync: Fetch all pushes using pagination.
+- Subsequent syncs: Use `searchCriteria.fromDate` with last sync's max `date`.
+- Push IDs are auto-incrementing; can also use max pushId as cursor.
+
+
+### General rate limiting considerations
+
 **Rate limits**:
-- Azure DevOps Services applies rate limiting based on throughput units and request volume.
-- Typical limits: ~200 requests per user per minute for most APIs, though this can vary.
+- Azure DevOps Services applies rate limiting based on throughput units (TSTUs) and request volume.
+- Typical limits: ~200 requests per user per minute, though this varies by resource type.
 - The connector should:
-  - Respect `Retry-After` headers if a `429 Too Many Requests` response is received.
+  - Respect `Retry-After` headers on `429 Too Many Requests` responses.
   - Implement exponential backoff for retries.
-  - Avoid making excessive calls (e.g., fetching repositories individually in a loop when a bulk list endpoint is available).
+  - Use bulk endpoints where available (e.g., list all repositories vs. individual fetches).
+  - Batch requests efficiently during pagination.
 - Official documentation: https://learn.microsoft.com/en-us/azure/devops/integrate/concepts/rate-limits
+
+**Best practices**:
+- Use pagination parameters (`$top`, `$skip`) to control request size and avoid timeouts.
+- Leverage date-based filtering (`searchCriteria.fromDate`) for incremental syncs.
+- For objects requiring `repository_id`, consider syncing repositories first, then iterating.
+- Cache repository metadata to avoid redundant repository list calls.
 
 
 ## **Field Type Mapping**
@@ -356,33 +783,72 @@ curl -u :{PERSONAL_ACCESS_TOKEN} \
 
 | Azure DevOps JSON Type | Example Fields | Connector Logical Type | Notes |
 |------------------------|----------------|------------------------|-------|
-| string (UUID) | `id`, `project.id` | string | GUID/UUID format (e.g., `5febef5a-833d-4e14-b9c0-14cb638f91e6`). Should be stored as string, not parsed. |
-| string | `name`, `defaultBranch`, `remoteUrl`, `sshUrl`, `webUrl`, `url` | string | UTF-8 text. |
-| integer (64-bit) | `size`, `project.revision` | long / integer | Repository size in bytes. For Spark-based connectors, prefer 64-bit integer (`LongType`). |
-| boolean | `isDisabled`, `isInMaintenance`, `isFork` | boolean | Standard true/false. |
-| string (ISO 8601 datetime) | `project.lastUpdateTime` | timestamp with timezone | Stored as UTC timestamps; parsing must respect timezone `Z`. |
-| object | `project`, `parentRepository`, `_links` | struct | Represented as nested records instead of flattened columns. |
-| nullable fields | `defaultBranch`, `size`, `parentRepository`, `project.lastUpdateTime`, `project.visibility` | corresponding type + null | When fields are absent or null, the connector should surface `null`, not `{}`. |
+| string (UUID) | `id`, `project.id`, `createdBy.id` | string | GUID/UUID format (e.g., `5febef5a-833d-4e14-b9c0-14cb638f91e6`). Store as string. |
+| string (SHA-1 hash) | `commitId`, `objectId`, `treeId`, `newObjectId`, `oldObjectId` | string | 40-character hexadecimal Git SHA-1 hash. Store as string. |
+| string | `name`, `defaultBranch`, `remoteUrl`, `title`, `description`, `comment` | string | UTF-8 text. |
+| integer (32-bit) | `pullRequestId`, `pushId`, `codeReviewId` | integer | Standard 32-bit signed integer. |
+| integer (64-bit) | `size`, `project.revision` | long / integer | Large numeric values. Use 64-bit integer (`LongType` in Spark). |
+| boolean | `isDisabled`, `isInMaintenance`, `isFork`, `commentTruncated`, `supportsIterations` | boolean | Standard true/false. |
+| string (ISO 8601 datetime) | `date`, `creationDate`, `closedDate`, `author.date`, `committer.date` | timestamp with timezone | UTC timestamps (e.g., `"2023-01-15T10:30:00Z"`). |
+| object/struct | `project`, `author`, `committer`, `createdBy`, `pushedBy`, `changeCounts` | struct | Nested records; preserve structure rather than flattening. |
+| array | `parents`, `commits`, `refUpdates`, `reviewers`, `workItems`, `statuses` | array | Lists of values or nested objects. |
+| nullable fields | Most fields can be null | corresponding type + null | Surface `null` when fields are absent, not empty objects `{}`. |
+
+### Object-specific field types
+
+**Repositories**:
+- `id` (string UUID): Repository identifier.
+- `size` (long or null): Repository size in bytes; can be null for empty repos.
+- `defaultBranch` (string or null): Full Git ref name (e.g., `refs/heads/main`).
+
+**Commits**:
+- `commitId` (string SHA-1): Unique 40-character commit hash.
+- `parents` (array of strings): Array of parent commit SHA-1 hashes.
+- `author.date`, `committer.date` (ISO 8601 string): Timestamps with timezone.
+- `treeId` (string SHA-1 or null): Git tree object ID.
+- `changeCounts` (struct with `Add`, `Edit`, `Delete` as integers).
+
+**Pull Requests**:
+- `pullRequestId` (integer): Numeric PR identifier within repository.
+- `status` (string enum): `active`, `completed`, `abandoned`.
+- `mergeStatus` (string enum): `succeeded`, `failed`, `conflicts`, `queued`, `notSet`, etc.
+- `creationDate`, `closedDate` (ISO 8601 string): Timestamps; `closedDate` is null for active PRs.
+- `reviewers` (array of structs): Each reviewer has `id`, `displayName`, `vote` (integer).
+
+**Refs**:
+- `name` (string): Full Git reference name (e.g., `refs/heads/main`, `refs/tags/v1.0`).
+- `objectId` (string SHA-1): Commit SHA this ref points to.
+- `peeledObjectId` (string SHA-1 or null): For annotated tags, the underlying commit.
+
+**Pushes**:
+- `pushId` (integer): Numeric push identifier (auto-incrementing within repository).
+- `date` (ISO 8601 string): When the push occurred.
+- `refUpdates` (array of structs): Each has `name`, `oldObjectId`, `newObjectId`.
 
 ### Special behaviors and constraints
 
-- `id` fields (repository ID, project ID) are UUIDs/GUIDs and should be stored as **strings** in their canonical hyphenated format (e.g., `5febef5a-833d-4e14-b9c0-14cb638f91e6`). Do not parse or convert to numeric types.
-- `state` (project state) is effectively an enum but represented as a string; connector may choose to preserve as string for flexibility. Known values include `wellFormed`, `createPending`, `deleting`, `new`, `deleted`.
-- `visibility` (project visibility) is also an enum string, typically `private` or `public`.
-- Timestamp fields use ISO 8601 in UTC (e.g., `"2023-01-15T10:30:00Z"`); parsing must be robust to this format.
-- Nested structs (`project`, `parentRepository`, `_links`) should not be flattened in the connector implementation; instead, they should be represented as nested types.
-- The `_links` object contains HAL-style hypermedia links; each link is a struct with an `href` field (string URL).
-- `defaultBranch` uses Git ref naming format (e.g., `refs/heads/main`, `refs/heads/master`). It is a full reference path, not just a branch name.
-- `remoteUrl` and `sshUrl` are clone URLs that can be used with Git clients.
-- `size` is in bytes and can be null for empty or newly created repositories.
+- **UUIDs**: Store as strings in canonical hyphenated format. Do not parse or convert to numeric types.
+- **SHA-1 hashes**: Store as 40-character lowercase hexadecimal strings. These uniquely identify Git commits, trees, and blobs.
+- **Timestamps**: Use ISO 8601 format in UTC (e.g., `"2023-01-15T10:30:00Z"`). Ensure timezone handling is correct.
+- **Enums as strings**: Fields like `status`, `mergeStatus`, `state` are string enums. Store as strings for flexibility and forward compatibility.
+- **Nested structs**: Preserve as nested types rather than flattening. This maintains API structure and simplifies schema evolution.
+- **Arrays**: Use array types for multi-valued fields like `parents`, `reviewers`, `commits`.
+- **Null handling**: When fields are absent or explicitly null in API responses, surface as `null` rather than empty structures `{}` or empty arrays `[]` unless the field is genuinely an empty collection.
+- **Git reference names**: Full reference paths like `refs/heads/main` (branches) or `refs/tags/v1.0` (tags), not short names.
+- **Clone URLs**: `remoteUrl` (HTTPS) and `sshUrl` (SSH) are complete Git clone URLs.
+- **Identity objects**: User objects (`createdBy`, `author`, `pushedBy`) contain `id` (UUID), `displayName`, `uniqueName` (email), and optional `url`/`imageUrl`.
+- **Commit relationships**: `parents` array shows commit ancestry; empty array means initial commit, multiple parents indicate merge commit.
 
 
 ## **Sources and References**
 
-- **Official Azure DevOps REST API documentation** (highest confidence)
-  - Main API reference: https://learn.microsoft.com/en-us/rest/api/azure/devops/?view=azure-devops-rest-7.2
-  - Git Repositories - List: https://learn.microsoft.com/en-us/rest/api/azure/devops/git/repositories/list?view=azure-devops-rest-7.2
-  - Git Repositories - Get Repository: https://learn.microsoft.com/en-us/rest/api/azure/devops/git/repositories/get-repository?view=azure-devops-rest-7.2
+- **Official Azure DevOps REST API documentation v7.1** (highest confidence)
+  - Main API reference: https://learn.microsoft.com/en-us/rest/api/azure/devops/?view=azure-devops-rest-7.1
+  - Git Repositories API: https://learn.microsoft.com/en-us/rest/api/azure/devops/git/repositories?view=azure-devops-rest-7.1
+  - Git Commits API: https://learn.microsoft.com/en-us/rest/api/azure/devops/git/commits?view=azure-devops-rest-7.1
+  - Git Pull Requests API: https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-requests?view=azure-devops-rest-7.1
+  - Git Refs API: https://learn.microsoft.com/en-us/rest/api/azure/devops/git/refs?view=azure-devops-rest-7.1
+  - Git Pushes API: https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pushes?view=azure-devops-rest-7.1
   - Authentication: https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/authentication-guidance
   - Rate Limits: https://learn.microsoft.com/en-us/azure/devops/integrate/concepts/rate-limits
   - API versioning: https://learn.microsoft.com/en-us/azure/devops/integrate/concepts/rest-api-versioning
@@ -394,11 +860,13 @@ When conflicts arise, **official Azure DevOps documentation** is treated as the 
 
 | Source Type | URL | Accessed (UTC) | Confidence | What it confirmed |
 |------------|-----|----------------|------------|-------------------|
-| Official Docs | https://learn.microsoft.com/en-us/rest/api/azure/devops/?view=azure-devops-rest-7.1 | 2025-01-03 | High | Base URL structure, API version parameter, authentication methods. |
-| Official Docs | https://learn.microsoft.com/en-us/rest/api/azure/devops/git/repositories/list?view=azure-devops-rest-7.1 | 2025-01-03 | High | List repositories endpoint, query parameters, response schema, no pagination. |
-| Official Docs | https://learn.microsoft.com/en-us/rest/api/azure/devops/git/repositories/get-repository?view=azure-devops-rest-7.1 | 2025-01-03 | High | Get single repository endpoint, path parameters, response schema. |
-| Official Docs | https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/authentication-guidance | 2025-01-03 | High | Personal Access Token authentication, header format, Base64 encoding. |
-| Official Docs | https://learn.microsoft.com/en-us/azure/devops/integrate/concepts/rate-limits | 2025-01-03 | High | Rate limiting behavior, typical limits (~200 requests/user/minute), throttling strategy. |
-| Official Docs | https://learn.microsoft.com/en-us/azure/devops/integrate/concepts/rest-api-versioning | 2025-01-03 | High | API versioning scheme. Connector uses `api-version=7.1` (stable) instead of 7.2 to avoid preview version requirements. |
-| Web Search | Aggregated from multiple Azure DevOps REST API pages | 2025-01-03 | High | Repository object fields, project nested structure, `_links` HAL format, example requests/responses. |
+| Official Docs | https://learn.microsoft.com/en-us/rest/api/azure/devops/?view=azure-devops-rest-7.1 | 2025-01-06 | High | Base URL structure, API version parameter, authentication methods. |
+| Official Docs | https://learn.microsoft.com/en-us/rest/api/azure/devops/git/repositories?view=azure-devops-rest-7.1 | 2025-01-06 | High | Repositories API: List and Get endpoints, query parameters, response schemas, no pagination required. |
+| Official Docs | https://learn.microsoft.com/en-us/rest/api/azure/devops/git/commits?view=azure-devops-rest-7.1 | 2025-01-06 | High | Commits API: Get Commits endpoint, pagination with $top/$skip, searchCriteria parameters for date/author filtering, commit schema including author/committer/parents. |
+| Official Docs | https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-requests?view=azure-devops-rest-7.1 | 2025-01-06 | High | Pull Requests API: Get Pull Requests endpoint, searchCriteria for status/creator/reviewer filtering, PR schema including reviewers/status/merge details. |
+| Official Docs | https://learn.microsoft.com/en-us/rest/api/azure/devops/git/refs?view=azure-devops-rest-7.1 | 2025-01-06 | High | Refs API: List endpoint, filter parameter for branches/tags, ref schema including name/objectId/creator. |
+| Official Docs | https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pushes?view=azure-devops-rest-7.1 | 2025-01-06 | High | Pushes API: Get Pushes endpoint, pagination, searchCriteria for date/pusher filtering, push schema including refUpdates and commits. |
+| Official Docs | https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/authentication-guidance | 2025-01-06 | High | Personal Access Token authentication, header format, Base64 encoding. Required scope: Code (read). |
+| Official Docs | https://learn.microsoft.com/en-us/azure/devops/integrate/concepts/rate-limits | 2025-01-06 | High | Rate limiting behavior, typical limits (~200 requests/user/minute), throttling strategy, Retry-After headers. |
+| Official Docs | https://learn.microsoft.com/en-us/azure/devops/integrate/concepts/rest-api-versioning | 2025-01-06 | High | API versioning scheme. Connector uses `api-version=7.1` (stable) to avoid preview version requirements. |
 
