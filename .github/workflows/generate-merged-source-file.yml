@@ -20,8 +20,7 @@ on:
       - '!sources/**/test/**'
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   generate-merged-sources:
@@ -29,12 +28,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          # For PRs, checkout the PR head branch to allow pushing back
-          ref: ${{ github.head_ref || github.ref }}
-          fetch-depth: 0
-          # Use a token that can push to the PR branch
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -106,17 +99,29 @@ jobs:
             python tools/scripts/merge_python_source.py "$source_name"
           done
 
-      - name: Check for changes
-        id: git-check
+      - name: Check if generated files are up to date
+        if: steps.sources.outputs.sources != ''
         run: |
-          git diff --quiet sources/**/_generated_*.py || echo "has_changes=true" >> $GITHUB_OUTPUT
-
-      - name: Commit and push generated files
-        if: steps.git-check.outputs.has_changes == 'true'
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add sources/**/_generated_*.py
-          git commit -m "chore: auto-regenerate merged source files [skip ci]"
-          git push
+          # Check if there are any differences between the regenerated files and what's in the repo
+          if git diff --quiet sources/**/_generated_*.py 2>/dev/null; then
+            echo "✅ Generated source files are up to date. No changes needed."
+            exit 0
+          else
+            echo "❌ Generated source files are out of date!"
+            echo ""
+            echo "The following files need to be regenerated:"
+            git diff --name-only sources/**/_generated_*.py
+            echo ""
+            echo "Please run the following commands locally and commit the changes:"
+            echo ""
+            for source_name in ${{ steps.sources.outputs.sources }}; do
+              echo "  python tools/scripts/merge_python_source.py $source_name"
+            done
+            echo ""
+            echo "Then add the generated files to your commit:"
+            echo "  git add sources/**/_generated_*.py"
+            echo "  git commit --amend --no-edit"
+            echo "  git push --force-with-lease"
+            exit 1
+          fi
 
