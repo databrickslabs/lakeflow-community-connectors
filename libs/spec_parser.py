@@ -69,6 +69,17 @@ class TableSpec(BaseModel):
         if not isinstance(v, dict):
             raise ValueError("'table_configuration' must be a dictionary if provided")
 
+        def _clean_ellipsis(obj):
+            """Recursively remove ellipsis objects from nested structures."""
+            if obj is ...:
+                return None
+            elif isinstance(obj, dict):
+                return {k: _clean_ellipsis(val) for k, val in obj.items() if val is not ...}
+            elif isinstance(obj, list):
+                return [_clean_ellipsis(item) for item in obj if item is not ...]
+            else:
+                return obj
+
         normalized: Dict[str, str] = {}
         for key, value in v.items():
             str_key = str(key)
@@ -78,7 +89,9 @@ class TableSpec(BaseModel):
                 continue
 
             if isinstance(value, (dict, list)):
-                normalized[str_key] = json.dumps(value)
+                # Clean nested ellipsis before JSON encoding
+                cleaned_value = _clean_ellipsis(value)
+                normalized[str_key] = json.dumps(cleaned_value)
             else:
                 normalized[str_key] = str(value)
 
