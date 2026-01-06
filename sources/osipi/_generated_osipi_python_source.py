@@ -998,41 +998,12 @@ def register_lakeflow_source(spark):
                 print(f"🔍 Using UC Connection: {connection_name}")
 
             # Extract auth parameters from options
-            access_token = (
-                self.options.get("access_token")
-                or self.options.get("bearer_value_tmp")
-                or self.options.get("bearer_token")
-                # UC ConnectionType.DATABRICKS stores its secret as personalAccessToken
-                or self.options.get("personalAccessToken")
-            )
+            access_token = self.options.get("access_token")
             workspace_host = self.options.get("workspace_host")
             client_id = self.options.get("client_id")
-            client_secret = (
-                self.options.get("client_secret")
-                or self.options.get("client_value_tmp")
-                or self.options.get("client_credential")
-                or self.options.get("oauth_client_secret")
-                or self.options.get("sp_app_credential")
-            )
+            client_secret = self.options.get("client_secret")
             username = self.options.get("username")
-            password = self.options.get("password") or self.options.get("password_value")
-
-            if client_secret and not self.options.get("client_secret"):
-                workaround_key = next(
-                    (
-                        k
-                        for k in [
-                            "client_value_tmp",
-                            "client_credential",
-                            "oauth_client_secret",
-                            "sp_app_credential",
-                        ]
-                        if self.options.get(k)
-                    ),
-                    "unknown",
-                )
-                print(f"ℹ️  Using workaround property name: {workaround_key}")
-                print("   (UC bug strips client_secret - fix coming soon)")
+            password = self.options.get("password")
 
             # Opt-in: allow unauthenticated access (useful for debugging or public PI Web API endpoints).
             # NOTE: Default remains secure-by-default (no anonymous access unless explicitly enabled).
@@ -1089,46 +1060,9 @@ def register_lakeflow_source(spark):
                 self._auth_resolved = True
                 return
 
-            # Debug: show which auth-related keys the worker received (no values).
-            try:
-                keys = sorted(list(self.options.keys()))
-                def present(k: str) -> str:
-                    return 'PRESENT' if self.options.get(k) else 'MISSING'
-                summary = {
-                    'workspace_host': present('workspace_host'),
-                    'client_id': present('client_id'),
-                    'client_secret': present('client_secret'),
-                    'client_value_tmp': present('client_value_tmp'),
-                    'access_token': present('access_token'),
-                    'username': present('username'),
-                    'password': present('password'),
-                }
-                print(f'❌ AUTH OPTIONS SUMMARY: {summary}  option_keys={keys}')
-            except Exception:
-                pass
-
-            try:
-                keys = sorted(list(self.options.keys()))
-                def present(k: str) -> str:
-                    return "PRESENT" if self.options.get(k) else "MISSING"
-                summary = {
-                    "workspace_host": present("workspace_host"),
-                    "client_id": present("client_id"),
-                    "client_secret": present("client_secret"),
-                    "client_value_tmp": present("client_value_tmp"),
-                    "access_token": present("access_token"),
-                    "bearer_value_tmp": present("bearer_value_tmp"),
-                    "username": present("username"),
-                    "password": present("password"),
-                }
-            except Exception:
-                keys = []
-                summary = {}
-
             raise RuntimeError(
                 "No valid authentication credentials found in options. "
-                "Expected one of: access_token, OR (workspace_host + client_id + client_secret/client_value_tmp), OR (username + password). "
-                f"AUTH_OPTIONS_SUMMARY={summary} option_keys={keys}"
+                "Expected one of: access_token, OR (workspace_host + client_id + client_secret), OR (username + password)."
             )
 
         def _start_dt_from_offset(self, start_offset: dict) -> Optional[datetime]:
