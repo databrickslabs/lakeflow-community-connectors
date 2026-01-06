@@ -15,20 +15,24 @@ Developers only need to implement or modify the source connector logic, while co
 - `sources/` — Source connectors (e.g., `github/`, `zendesk/`, `stripe/`). The `interface/` subfolder defines the `LakeflowConnect` base interface.
 - `libs/` — Shared utilities for data type parsing, spec parsing, and module loading
 - `pipeline/` — Core ingestion logic: PySpark Data Source implementation and SDP orchestration
-- `scripts/` — Build tools for merging connectors into deployable files
+- `tools/` — Tools to build and deploy community connectors tools 
 - `tests/` — Generic test suites for validating connector implementations
 - `prompts/` — Templates for AI-assisted connector development
 
 ## Developing New Connectors
 
-Follow the instructions in [`prompts/vibe_coding_instruction.md`](prompts/vibe_coding_instruction.md) to create new connectors. The development workflow:
+Follow the instructions in [`prompts/README.md`](prompts/README.md) to create new connectors. The development workflow:
 
 1. **Understand the source** — Gather API specs, auth mechanisms, and schemas using the provided template
 2. **Implement the connector** — Implement the `LakeflowConnect` interface methods
 3. **Test & iterate** — Run the standard test suites against a real source system
    - *(Optional)* Implement write-back testing for end-to-end validation (write → read → verify cycle)
 4. **Generate documentation** — Create user-facing docs using the documentation template
-   - *(Temporary)* Run `scripts/merge_python_source.py` to generate the deployable file
+   - *(Temporary)* Run `tools/scripts/merge_python_source.py` to generate the deployable file
+
+### Claude Code
+Each step of the development is packaged as a SKILL under `.claude/skills`. 
+TODO: Add instructions and good practise of using Claude Code.
 
 ### API to Implement
 Connectors are built on the [Python Data Source API](https://spark.apache.org/docs/latest/api/python/tutorial/sql/python_data_source.html), with an abstraction layer (`LakeflowConnect`) that simplifies development. 
@@ -62,9 +66,9 @@ Each connector must include tests that run the **generic test suite** against a 
 - **Write-back testing** *(recommended)* — Use the provided test harness to write data, read it back, and verify incremental reads work correctly
 - **Unit tests** — Recommended for complex library code or connector-specific logic
 
-## Using Community Connectors
+## Using and Testing Community Connectors
 
-Each connector runs as a configurable SDP. Define a **pipeline spec** to specify which tables to ingest and where to store them. See more details in this [example](pipeline-spec/example_ingest.py).
+Each connector runs as a configurable SDP. Define a **pipeline spec** to specify which tables to ingest and where to store them. See more details in this [example](pipeline-spec/example_ingest.py). You don't need to manually create files below, as both UI and CLI tool will automatically generate these files when setting the connector.
 
 ```python
 from pipeline.ingestion_pipeline import ingest
@@ -84,6 +88,18 @@ register_lakeflow_source = get_register_function(source_name)
 register_lakeflow_source(spark)
 ingest(spark, pipeline_spec)
 ```
+
+There are two ways to set up and run the community connectors. By default, the source code from the main repository (databrickslabs/lakeflow-community-connectors) is used to run the community connector. However, both methods described below allow you to override this by using your own Git repository, which should be cloned from the main repository.
+
+### Databricks UI
+On Databricks main page, click **“+New”** -> **“Add or upload data”**, and then select the source under **“Community connectors”**.
+If you are using a custom connector from your own Git repository, select **"+ Add Community Connector"**.
+
+### CLI tool
+The **"community-connector"** CLI tool provides functionality equivalent to the UI. While access to a Databricks workspace is still required, this tool is particularly useful for validating and testing connectors during the development phase.
+
+See more details at [tools/community_connector](tools/community_connector/README.md)
+ 
 
 ### Pipeline Spec Reference
 

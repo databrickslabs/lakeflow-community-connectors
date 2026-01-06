@@ -1,3 +1,5 @@
+"""Unit tests for the spec_parser module."""
+
 import pytest
 
 from libs.spec_parser import SpecParser

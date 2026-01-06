@@ -1,11 +1,12 @@
+from typing import Iterator
 from pyspark.sql.types import *
 from pyspark.sql.datasource import (
     DataSource,
     SimpleDataSourceStreamReader,
     DataSourceReader,
 )
-from typing import Iterator
 from sources.interface.lakeflow_connect import LakeflowConnect
+from libs.utils import parse_value
 
 
 METADATA_TABLE = "_lakeflow_metadata"
@@ -115,4 +116,4 @@ class LakeflowSource(DataSource):
         return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
 
 
-spark.dataSource.register(LakeflowSource)
+spark.dataSource.register(LakeflowSource)  # pylint: disable=undefined-variable
