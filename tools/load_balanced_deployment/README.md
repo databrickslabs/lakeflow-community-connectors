@@ -161,6 +161,8 @@ python3 tools/load_balanced_deployment/generate_dab_yaml.py \
 
 **Output**: `databricks.yml` with multiple pipelines and optional scheduled jobs
 
+**See Example**: Check `examples/osipi/dabs/` for a complete reference DAB bundle
+
 ### Step 4: Deploy
 
 ```bash
