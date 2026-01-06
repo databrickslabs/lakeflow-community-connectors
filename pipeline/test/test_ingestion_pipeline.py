@@ -687,6 +687,119 @@ class TestDestinationTable:
             assert call_kwargs["target"] == "`my_catalog`.`my_schema`.`users`"
 
 
+class TestGetTableMetadataOptions:
+    """Test that _get_table_metadata receives table_configs and passes them to Spark."""
+
+    def test_get_table_metadata_receives_all_table_configs_as_json(self):
+        """Test that _get_table_metadata passes combined table_configs as JSON to Spark option."""
+        import json
+
+        mock_spark = MagicMock()
+
+        # Setup mock to return metadata DataFrame for both tables
+        mock_row_users = MagicMock()
+        mock_row_users.__getitem__ = lambda self, key: {
+            "tableName": "users",
+            "primary_keys": ["id"],
+            "cursor_field": "updated_at",
+            "ingestion_type": "cdc",
+        }.get(key)
+        mock_row_orders = MagicMock()
+        mock_row_orders.__getitem__ = lambda self, key: {
+            "tableName": "orders",
+            "primary_keys": ["order_id"],
+            "cursor_field": "modified_at",
+            "ingestion_type": "cdc",
+        }.get(key)
+        mock_df = MagicMock()
+        mock_df.collect.return_value = [mock_row_users, mock_row_orders]
+        # Chain: format().option().option().option().option().load()
+        mock_spark.read.format.return_value.option.return_value.option.return_value.option.return_value.option.return_value.load.return_value = mock_df
+
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "users",
+                        "table_configuration": {
+                            "custom_option_1": "value1",
+                            "custom_option_2": "value2",
+                            "scd_type": "SCD_TYPE_1",  # special key, excluded by get_table_configurations
+                            "primary_keys": ["id"],  # special key, excluded
+                        },
+                    }
+                },
+                {
+                    "table": {
+                        "source_table": "orders",
+                        "table_configuration": {
+                            "order_option": "order_value",
+                        },
+                    }
+                },
+            ],
+        }
+
+        ingest(mock_spark, spec)
+
+        # Verify the metadata read chain received the combined table_configs as JSON
+        # The chain is: spark.read.format().option().option().option().option().load()
+        # The 4th option call should be ("tableConfigs", json.dumps(table_configs))
+        fourth_option_call = mock_spark.read.format.return_value.option.return_value.option.return_value.option.return_value.option
+        fourth_option_call.assert_called_once()
+        call_args = fourth_option_call.call_args[0]
+
+        assert call_args[0] == "tableConfigs"
+        # Parse the JSON to verify content (excluding special keys via get_table_configurations)
+        passed_configs = json.loads(call_args[1])
+        assert passed_configs == {
+            "users": {"custom_option_1": "value1", "custom_option_2": "value2"},
+            "orders": {"order_option": "order_value"},
+        }
+
+    def test_get_table_metadata_with_empty_table_configs_as_json(self):
+        """Test that _get_table_metadata passes empty configs as JSON when tables have no configurations."""
+        import json
+
+        mock_spark = MagicMock()
+
+        mock_row = MagicMock()
+        mock_row.__getitem__ = lambda self, key: {
+            "tableName": "users",
+            "primary_keys": ["id"],
+            "cursor_field": "updated_at",
+            "ingestion_type": "cdc",
+        }.get(key)
+        mock_df = MagicMock()
+        mock_df.collect.return_value = [mock_row]
+        # Chain: format().option().option().option().option().load()
+        mock_spark.read.format.return_value.option.return_value.option.return_value.option.return_value.option.return_value.load.return_value = mock_df
+
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "users",
+                        # No table_configuration
+                    }
+                },
+            ],
+        }
+
+        ingest(mock_spark, spec)
+
+        # Verify tableConfigs option was called with empty config as JSON
+        fourth_option_call = mock_spark.read.format.return_value.option.return_value.option.return_value.option.return_value.option
+        fourth_option_call.assert_called_once()
+        call_args = fourth_option_call.call_args[0]
+
+        assert call_args[0] == "tableConfigs"
+        passed_configs = json.loads(call_args[1])
+        assert passed_configs == {"users": {}}
+
+
 class TestTableConfigFiltering:
     """Test that table_config excludes reserved keys when passed to Spark read options."""
 

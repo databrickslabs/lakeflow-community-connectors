@@ -1,4 +1,5 @@
 from typing import Iterator
+import json
 from pyspark.sql.types import *
 from pyspark.sql.datasource import (
     DataSource,
@@ -13,7 +14,7 @@ from libs.utils import parse_value
 METADATA_TABLE = "_lakeflow_metadata"
 TABLE_NAME = "tableName"
 TABLE_NAME_LIST = "tableNameList"
-TABLE_CONFIG = "tableConfig"
+TABLE_CONFIGS = "tableConfigs"
 
 
 class LakeflowStreamReader(SimpleDataSourceStreamReader):
@@ -81,9 +82,10 @@ class LakeflowBatchReader(DataSourceReader):
         table_name_list = self.options.get(TABLE_NAME_LIST, "")
         table_names = [o.strip() for o in table_name_list.split(",") if o.strip()]
         all_records = []
+        table_configs = json.loads(self.options.get(TABLE_CONFIGS, "{}"))
         for table in table_names:
             metadata = self.lakeflow_connect.read_table_metadata(
-                table, self.options.get(TABLE_CONFIG, {}).get(table, {})
+                table, table_configs.get(table, {})
             )
             all_records.append({TABLE_NAME: table, **metadata})
         return all_records

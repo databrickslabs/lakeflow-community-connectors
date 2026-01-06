@@ -1,4 +1,5 @@
 # pylint: disable=no-member
+import json
 from dataclasses import dataclass
 from typing import List
 from pyspark import pipelines as sdp
@@ -80,13 +81,16 @@ def _create_append_table(spark, connection_name: str, config: SdpTableConfig) ->
         )
 
 
-def _get_table_metadata(spark, connection_name: str, table_list: list[str]) -> dict:
+def _get_table_metadata(
+    spark, connection_name: str, table_list: list[str], table_configs: dict[str, str]
+) -> dict:
     """Get table metadata (primary_keys, cursor_field, ingestion_type etc.)"""
     df = (
         spark.read.format("lakeflow_connect")
         .option("databricks.connection", connection_name)
         .option("tableName", "_lakeflow_metadata")
         .option("tableNameList", ",".join(table_list))
+        .option("tableConfigs", json.dumps(table_configs))
         .load()
     )
     metadata = {}
@@ -110,7 +114,10 @@ def ingest(spark, pipeline_spec: dict) -> None:
     connection_name = spec.connection_name()
     table_list = spec.get_table_list()
 
-    metadata = _get_table_metadata(spark, connection_name, table_list)
+    # Get table_configurations for all tables. These are merged into one dict
+    # keyed by table name.
+    table_configs = spec.get_table_configurations()
+    metadata = _get_table_metadata(spark, connection_name, table_list, table_configs)
 
     def _ingest_table(table: str) -> None:
         """Helper function to ingest a single table"""
