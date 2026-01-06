@@ -21,6 +21,7 @@ class LakeflowConnect:
         Expected options:
             - token: Personal access token used for GitHub REST API authentication.
             - base_url (optional): Override for GitHub API base URL. Defaults to https://api.github.com.
+            test
         """
         token = options.get("token")
         if not token:
