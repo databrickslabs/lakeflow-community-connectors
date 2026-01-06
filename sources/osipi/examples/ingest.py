@@ -1,19 +1,9 @@
 # Databricks notebook source
-import sys
-
-# Add workspace repo root to Python path for imports
-workspace_root = "/Workspace/Users/pravin.varma@databricks.com/lakeflow-community-connectors"
-if workspace_root not in sys.path:
-    sys.path.insert(0, workspace_root)
-
-# Load and execute the merged OSIPI source file
-exec(open(f"{workspace_root}/sources/osipi/_generated_osipi_python_source.py").read())
-
-# Register the lakeflow source
-register_lakeflow_source(spark)
-
-# Import pipeline utilities
 from pipeline.ingestion_pipeline import ingest
+from libs.source_loader import get_register_function
+
+# Connector source name
+source_name = "osipi"
 
 # =============================================================================
 # INGESTION PIPELINE CONFIGURATION
@@ -52,6 +42,11 @@ pipeline_spec = {
         },
     ],
 }
+
+
+# Dynamically import and register the LakeFlow source
+register_lakeflow_source = get_register_function(source_name)
+register_lakeflow_source(spark)
 
 # Ingest the tables specified in the pipeline spec
 ingest(spark, pipeline_spec)
