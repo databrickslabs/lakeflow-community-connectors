@@ -39,10 +39,10 @@ The Qualtrics API provides access to various objects/resources. The object list 
 | `survey_definitions` | Full survey structure with questions, blocks, and flow | `GET /survey-definitions/{surveyId}` | `snapshot` (full refresh per survey) |
 | `survey_responses` | Individual responses to surveys | Response Export API (multi-step) | `append` (incremental based on `recordedDate`) |
 | `distributions` | Distribution records for survey invitations | `GET /distributions` | `cdc` (upserts based on `modifiedDate`) |
-| `mailing_lists` | Contact mailing lists | `GET /mailinglists` | `snapshot` |
-| `mailing_list_contacts` | Contacts within a specific mailing list | `GET /directories/{directoryId}/mailinglists/{mailingListId}/contacts` | `snapshot` (full refresh, no lastModifiedDate available) |
-| `directory_contacts` | All contacts across all mailing lists in a directory | `GET /directories/{directoryId}/contacts` | `snapshot` (full refresh, no lastModifiedDate available) |
 | `directories` | XM Directory folders and structure | `GET /directories` | `snapshot` |
+| `mailing_lists` | Contact mailing lists | `GET /directories/{directoryId}/mailinglists` | `snapshot` |
+| `mailing_list_contacts` | Contacts within a specific mailing list | `GET /directories/{directoryId}/mailinglists/{mailingListId}/contacts` | `snapshot` |
+| `directory_contacts` | All contacts across all mailing lists in a directory | `GET /directories/{directoryId}/contacts` | `snapshot` |
 
 **Connector scope for initial implementation**:
 - Step 1 focuses on the `surveys` and `survey_responses` objects in detail
@@ -53,10 +53,10 @@ The Qualtrics API provides access to various objects/resources. The object list 
 - **survey_definitions**: Complete survey structure including all questions, response choices, blocks, survey flow, and embedded data definitions. Provides the detailed schema needed to interpret survey responses.
 - **survey_responses**: Actual response data from survey participants; requires multi-step export process
 - **distributions**: Tracks how surveys were distributed (email, SMS, anonymous link, etc.)
+- **directories**: Organizational structure for managing contacts and other XM data
 - **mailing_lists**: Collections of contacts used for survey distribution
 - **mailing_list_contacts**: Individual contact records within a specific mailing list
 - **directory_contacts**: All contact records across all mailing lists in a directory
-- **directories**: Organizational structure for managing contacts and other XM data
 
 ## **Object Schema**
 
@@ -321,6 +321,89 @@ curl -X GET \
 - **Actual**: `sendDate` (not `sentDate`)
 - **Actual**: `surveyLink.surveyId` nested (not root-level `surveyId`)
 - **Actual**: headers does NOT include `subject` field
+
+### `mailing_lists` object
+
+**Source endpoint**:  
+`GET /directories/{directoryId}/mailinglists`
+
+**Key behavior**:
+- Returns metadata about mailing lists (contact lists) used for survey distribution within a specific directory
+- Mailing lists are collections of contacts organized for managing survey invitations
+- Requires `directoryId` as a path parameter (obtained from `directories` table or Qualtrics account settings)
+- Supports pagination using `skipToken` and `pageSize` parameters (similar to surveys endpoint)
+- List endpoint returns basic mailing list metadata
+- Individual mailing list details can be retrieved via `GET /mailinglists/{mailingListId}`
+- Only available for XM Directory users (not XM Directory Lite)
+
+**High-level schema (connector view - actual API response)**:
+
+| Column Name | Type | Description |
+|------------|------|-------------|
+| `mailingListId` | string | Unique mailing list identifier (e.g., `CG_abc123xyz`). Primary key. |
+| `name` | string | Mailing list name/title. |
+| `ownerId` | string | Qualtrics user ID of the mailing list owner. |
+| `creationDate` | long (epoch milliseconds) | Timestamp when the mailing list was created. |
+| `lastModifiedDate` | long (epoch milliseconds) | Last modification timestamp. |
+| `contactCount` | long | Number of contacts in the mailing list. |
+
+**✅ Schema Validation (2026-01-06)**: 
+- Schema validated against live API response
+- List endpoint returns 6 fields: mailingListId, name, ownerId, creationDate, lastModifiedDate, contactCount
+- Dates are returned as epoch timestamps in milliseconds (not ISO 8601 strings)
+- Fields `libraryId`, `category`, and `folder` mentioned in some documentation are NOT returned by the list endpoint
+- Using `snapshot` mode for ingestion (full refresh) as dataset is typically small
+
+**Example request (list all mailing lists in a directory)**:
+
+```bash
+curl -X GET \
+  -H "X-API-TOKEN: <YOUR_API_TOKEN>" \
+  -H "Content-Type: application/json" \
+  "https://yourdatacenterid.qualtrics.com/API/v3/directories/{directoryId}/mailinglists?pageSize=100"
+```
+
+**Example request (get specific mailing list)**:
+
+```bash
+curl -X GET \
+  -H "X-API-TOKEN: <YOUR_API_TOKEN>" \
+  -H "Content-Type: application/json" \
+  "https://yourdatacenterid.qualtrics.com/API/v3/mailinglists/{mailingListId}"
+```
+
+**Expected response structure (list endpoint)**:
+
+```json
+{
+  "result": {
+    "elements": [
+      {
+        "id": "CG_abc123xyz",
+        "name": "Customer Feedback Panel",
+        "ownerId": "UR_123abc",
+        "creationDate": 1705317000000,
+        "lastModifiedDate": 1734704553000,
+        "contactCount": 1500
+      }
+    ],
+    "nextPage": "https://yourdatacenterid.qualtrics.com/API/v3/directories/POOL_abc123/mailinglists?pageSize=100&skipToken=xyz789"
+  },
+  "meta": {
+    "httpStatus": "200 - OK"
+  }
+}
+```
+
+**Note on pagination**: 
+- Similar to surveys endpoint, uses `nextPage` URL for pagination
+- Extract `skipToken` from nextPage URL for subsequent requests
+- Typical page size: 100 mailing lists per request
+
+**Note on ingestion strategy**:
+- Uses `snapshot` mode (full refresh)
+- Mailing lists are typically relatively small datasets (hundreds to low thousands)
+- Although `lastModifiedDate` is available, snapshot mode is simpler and sufficient for this dataset size
 
 ### `mailing_list_contacts` object
 
@@ -675,10 +758,10 @@ Primary keys for each object are static and defined by the connector:
 | `survey_definitions` | `SurveyID` |
 | `survey_responses` | `responseId` |
 | `distributions` | `id` |
-| `mailing_lists` | `id` |
+| `directories` | `directoryId` |
+| `mailing_lists` | `mailingListId` |
 | `mailing_list_contacts` | `contactId` |
 | `directory_contacts` | `contactId` |
-| `directories` | `directoryId` |
 
 **Notes**:
 - All primary keys are string type
@@ -693,10 +776,10 @@ Primary keys for each object are static and defined by the connector:
 | `survey_definitions` | `snapshot` | N/A | Full refresh per survey; requires `surveyId` parameter. Contains complete survey structure. |
 | `survey_responses` | `append` | `recordedDate` | New responses are appended; existing responses are immutable once completed. |
 | `distributions` | `cdc` | `modifiedDate` | Distribution records can be updated (e.g., status changes). |
-| `mailing_lists` | `snapshot` | N/A | Full refresh; relatively small dataset. |
+| `directories` | `snapshot` | N/A | Full refresh; organizational structure. API does not return modification timestamps. |
+| `mailing_lists` | `snapshot` | N/A | Full refresh; relatively small dataset. Requires directoryId. |
 | `mailing_list_contacts` | `snapshot` | N/A | Full refresh; API does not return lastModifiedDate field. Requires directoryId and mailingListId. |
 | `directory_contacts` | `snapshot` | N/A | Full refresh; API does not return lastModifiedDate field. Requires only directoryId. |
-| `directories` | `snapshot` | N/A | Full refresh; organizational structure. API does not return modification timestamps. |
 
 **Incremental sync strategy**:
 - For `cdc` objects: Store the maximum cursor value from previous sync; on next sync, filter by `cursor_field >= last_max_value`
@@ -878,64 +961,6 @@ Primary keys for each object are static and defined by the connector:
 **Incremental retrieval**:
 - Filter by `modifiedDate >= last_sync_time` (client-side after retrieval)
 
-### `mailing_list_contacts` endpoint
-
-**Endpoint**: `GET /directories/{directoryId}/mailinglists/{mailingListId}/contacts`
-
-**Method**: GET
-
-**Path Parameters**:
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `directoryId` | string | Yes | Directory ID (from table configuration). |
-| `mailingListId` | string | Yes | Mailing List ID (from table configuration). |
-
-**Query Parameters**:
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `pageSize` | integer | No | Results per page (default: 100, max: 500). |
-| `skipToken` | string | No | Pagination token. |
-
-**Notes**:
-- Requires both `directoryId` and `mailingListId` as table-level parameters
-- Each mailing list is treated as a separate table of contacts
-- Only available for XM Directory users (not XM Directory Lite)
-
-**Incremental retrieval**:
-- Not supported - API does not return `lastModifiedDate` field
-- Use snapshot mode (full refresh on each run)
-
-### `directory_contacts` endpoint
-
-**Endpoint**: `GET /directories/{directoryId}/contacts`
-
-**Method**: GET
-
-**Path Parameters**:
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `directoryId` | string | Yes | Directory ID (from table configuration). |
-
-**Query Parameters**:
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `pageSize` | integer | No | Results per page (default: 100, max: 500). |
-| `skipToken` | string | No | Pagination token. |
-
-**Notes**:
-- Requires only `directoryId` as table-level parameter
-- Returns all contacts across all mailing lists in the directory
-- Only available for XM Directory users (not XM Directory Lite)
-- Use this endpoint when you want all contacts from a directory without filtering by mailing list
-
-**Incremental retrieval**:
-- Not supported - API does not return `lastModifiedDate` field
-- Use snapshot mode (full refresh on each run)
-
 ### `directories` endpoint
 
 **Endpoint**: `GET /directories`
@@ -1008,6 +1033,136 @@ curl -X GET \
 - Response schema verified against live Qualtrics API (fra1 datacenter) on 2026-01-05
 - All fields documented match actual API response
 - Field naming: `directoryId` (camelCase in API), normalized to `directory_id` (snake_case in connector)
+
+### `mailing_lists` endpoint
+
+**Endpoint**: `GET /directories/{directoryId}/mailinglists`
+
+**Method**: GET
+
+**Path Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `directoryId` | string | Yes | Directory ID (from table configuration or directories table). |
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `pageSize` | integer | No | Number of results per page (default: 100, max: 100). |
+| `skipToken` | string | No | Token for pagination (obtained from `nextPage` in response). |
+
+**Response structure**:
+
+```json
+{
+  "result": {
+    "elements": [
+      {
+        "id": "CG_abc123xyz",
+        "name": "Customer Feedback Panel",
+        "ownerId": "UR_123abc",
+        "creationDate": 1705317000000,
+        "lastModifiedDate": 1734704553000,
+        "contactCount": 1500
+      }
+    ],
+    "nextPage": "https://yourdatacenterid.qualtrics.com/API/v3/directories/POOL_abc123/mailinglists?pageSize=100&skipToken=xyz789"
+  },
+  "meta": {
+    "httpStatus": "200 - OK"
+  }
+}
+```
+
+**Pagination**:
+- Uses cursor-based pagination with `skipToken` (similar to surveys endpoint)
+- The `nextPage` URL in the response contains the full URL for the next page
+- When `nextPage` is absent, you've reached the last page
+
+**Get individual mailing list details**:
+
+**Endpoint**: `GET /mailinglists/{mailingListId}`
+
+**Method**: GET
+
+**Path Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `mailingListId` | string | Yes | The unique mailing list identifier (e.g., `CG_abc123xyz`). |
+
+**Notes**:
+- Requires `directoryId` as a table-level parameter (similar to `mailing_list_contacts`)
+- Detail endpoint may return additional fields not available in list endpoint
+- Use list endpoint for discovering all mailing lists within a directory
+- Use detail endpoint if you need comprehensive metadata for specific mailing lists
+- Only available for XM Directory users (not XM Directory Lite)
+- Use the `directories` table to get the `directoryId` needed for this endpoint
+
+**Incremental retrieval**:
+- Use snapshot mode (full refresh) for simplicity
+- Mailing lists are typically a relatively small dataset (hundreds to low thousands of lists per directory)
+- Although `lastModifiedDate` is available in the API response, snapshot mode is sufficient for this dataset size
+
+### `mailing_list_contacts` endpoint
+
+**Endpoint**: `GET /directories/{directoryId}/mailinglists/{mailingListId}/contacts`
+
+**Method**: GET
+
+**Path Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `directoryId` | string | Yes | Directory ID (from table configuration). |
+| `mailingListId` | string | Yes | Mailing List ID (from table configuration). |
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `pageSize` | integer | No | Results per page (default: 100, max: 500). |
+| `skipToken` | string | No | Pagination token. |
+
+**Notes**:
+- Requires both `directoryId` and `mailingListId` as table-level parameters
+- Each mailing list is treated as a separate table of contacts
+- Only available for XM Directory users (not XM Directory Lite)
+
+**Incremental retrieval**:
+- Not supported - API does not return `lastModifiedDate` field
+- Use snapshot mode (full refresh on each run)
+
+### `directory_contacts` endpoint
+
+**Endpoint**: `GET /directories/{directoryId}/contacts`
+
+**Method**: GET
+
+**Path Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `directoryId` | string | Yes | Directory ID (from table configuration). |
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `pageSize` | integer | No | Results per page (default: 100, max: 500). |
+| `skipToken` | string | No | Pagination token. |
+
+**Notes**:
+- Requires only `directoryId` as table-level parameter
+- Returns all contacts across all mailing lists in the directory
+- Only available for XM Directory users (not XM Directory Lite)
+- Use this endpoint when you want all contacts from a directory without filtering by mailing list
+
+**Incremental retrieval**:
+- Not supported - API does not return `lastModifiedDate` field
+- Use snapshot mode (full refresh on each run)
 
 ### Rate Limits
 
@@ -1261,6 +1416,9 @@ Field names are generally consistent between write and read operations for surve
 | Web Search | Multiple searches for Qualtrics directories API | 2026-01-05 | Medium | Confirmed GET /directories endpoint exists, authentication pattern, basic usage |
 | Official Docs | https://api.qualtrics.com/ | 2026-01-05 | Medium | Directories endpoint listed in general API reference |
 | Inference | Based on directoryId usage in other endpoints | 2026-01-05 | Medium | Directory ID format (POOL_*), role as container for contacts/mailing lists |
+| Official Docs | https://api.qualtrics.com/dd83f1535056c-list-mailing-lists | 2026-01-06 | High | Mailing lists endpoint (GET /mailinglists), authentication, pagination pattern |
+| Web Search | Multiple searches for Qualtrics mailing lists API | 2026-01-06 | Medium | Confirmed endpoint availability, basic usage, authentication method |
+| Inference | Based on patterns from surveys and distributions endpoints | 2026-01-06 | Medium | Expected schema fields (id, name, ownerId, dates, contactCount), pagination mechanism |
 
 ### Write Operations Research (Testing Only)
 
@@ -1282,7 +1440,8 @@ Field names are generally consistent between write and read operations for surve
 - Specific response status codes beyond 0 (in progress) and 1 (completed) need verification
 - Some nested structures in distributions and mailing lists may have additional fields not documented here
 - Exact behavior of delete detection may require testing
-- Mailing lists endpoint (`GET /directories/{directoryId}/mailinglists`) documented but not yet implemented
+- ⚠️ Mailing lists endpoint (`GET /mailinglists`) documented (2026-01-06) but not yet implemented - schema validation needed against live API
+- Mailing lists `lastModifiedDate` field availability needs confirmation to determine if `cdc` or `snapshot` mode should be used
 - ✅ Directories endpoint (`GET /directories`) fully implemented and schema validated against live API (2026-01-05)
 
 ## **Sources and References**
@@ -1327,7 +1486,7 @@ Field names are generally consistent between write and read operations for surve
 - ✅ Survey ID requirement for distributions endpoint verified (2024-12-31)
 - ✅ **Schema validation completed against live API** (2024-12-31) - see section below
 - ⚠️ Sessions API availability may vary by Qualtrics license tier - requires verification
-- ⚠️ Mailing lists endpoint documented but not yet implemented
+- ✅ Mailing lists endpoint (`GET /mailinglists`) documented (2026-01-06) - implementation and schema validation pending
 - ✅ Directories endpoint (`GET /directories`) fully implemented and schema validated against live API (2026-01-05)
 - ✅ survey_definitions schema validated against live API (2026-01-05)
 
