@@ -88,13 +88,7 @@ The Qualtrics API provides access to various objects/resources. The object list 
 | `creationDate` | string (ISO 8601 datetime) | When the survey was created. |
 | `lastModified` | string (ISO 8601 datetime) | Last modification timestamp. Used as incremental cursor. |
 
-**⚠️ Schema Validation Note**: The following fields are documented in some API references but are **NOT** returned by the `GET /surveys` list endpoint:
-- `organizationId`: Organization ID (not in list response)
-- `expiration`: Expiration date struct (not in list response)
-- `brandId`: Brand ID (not in list response)
-- `brandBaseURL`: Base URL (not in list response)
-
-These fields may be available via the `GET /surveys/{surveyId}` detail endpoint if needed.
+**Schema validated**: Verified against live API (2024-12-31).
 
 **Example request**:
 
@@ -317,10 +311,7 @@ curl -X GET \
 | `surveyLink` | struct | Survey link information (surveyId, expirationDate, linkType). |
 | `stats` | struct | Distribution statistics (sent, failed, started, bounced, opened, skipped, finished, complaints, blocked). |
 
-**⚠️ Schema Validation Note**: The following field names differ from some documentation:
-- **Actual**: `sendDate` (not `sentDate`)
-- **Actual**: `surveyLink.surveyId` nested (not root-level `surveyId`)
-- **Actual**: headers does NOT include `subject` field
+**Schema validated**: Verified against live API (2024-12-31).
 
 ### `mailing_lists` object
 
@@ -347,12 +338,7 @@ curl -X GET \
 | `lastModifiedDate` | long (epoch milliseconds) | Last modification timestamp. |
 | `contactCount` | long | Number of contacts in the mailing list. |
 
-**✅ Schema Validation (2026-01-06)**: 
-- Schema validated against live API response
-- List endpoint returns 6 fields: mailingListId, name, ownerId, creationDate, lastModifiedDate, contactCount
-- Dates are returned as epoch timestamps in milliseconds (not ISO 8601 strings)
-- Fields `libraryId`, `category`, and `folder` mentioned in some documentation are NOT returned by the list endpoint
-- Using `snapshot` mode for ingestion (full refresh) as dataset is typically small
+**Schema validated**: Verified against live API (2026-01-06).
 
 **Example request (list all mailing lists in a directory)**:
 
@@ -496,7 +482,7 @@ curl -X GET \
 | `externalDataReference` | boolean | Whether to deduplicate by external reference ID. |
 | `phone` | boolean | Whether to deduplicate by phone number. |
 
-**✅ Schema Validation**: Schema verified against live API on 2026-01-05. All fields match actual API response.
+**Schema validated**: Verified against live API (2026-01-05).
 
 **Note**: Use snapshot mode for ingestion since the API does not return modification timestamps.
 
@@ -1029,10 +1015,7 @@ curl -X GET \
   "https://yourdatacenterid.qualtrics.com/API/v3/directories?pageSize=100"
 ```
 
-**✅ Schema Verified**: 
-- Response schema verified against live Qualtrics API (fra1 datacenter) on 2026-01-05
-- All fields documented match actual API response
-- Field naming: `directoryId` (camelCase in API), normalized to `directory_id` (snake_case in connector)
+**Schema validated**: Verified against live API (2026-01-05).
 
 ### `mailing_lists` endpoint
 
@@ -1438,11 +1421,8 @@ Field names are generally consistent between write and read operations for surve
 
 **Gaps and TBD items**:
 - Specific response status codes beyond 0 (in progress) and 1 (completed) need verification
-- Some nested structures in distributions and mailing lists may have additional fields not documented here
+- Some nested structures in distributions may have additional fields not documented here
 - Exact behavior of delete detection may require testing
-- ⚠️ Mailing lists endpoint (`GET /mailinglists`) documented (2026-01-06) but not yet implemented - schema validation needed against live API
-- Mailing lists `lastModifiedDate` field availability needs confirmation to determine if `cdc` or `snapshot` mode should be used
-- ✅ Directories endpoint (`GET /directories`) fully implemented and schema validated against live API (2026-01-05)
 
 ## **Sources and References**
 
@@ -1485,10 +1465,10 @@ Field names are generally consistent between write and read operations for surve
 - ✅ Directory ID requirement for contacts endpoint documented (corrected 2024-12-31)
 - ✅ Survey ID requirement for distributions endpoint verified (2024-12-31)
 - ✅ **Schema validation completed against live API** (2024-12-31) - see section below
-- ⚠️ Sessions API availability may vary by Qualtrics license tier - requires verification
-- ✅ Mailing lists endpoint (`GET /mailinglists`) documented (2026-01-06) - implementation and schema validation pending
-- ✅ Directories endpoint (`GET /directories`) fully implemented and schema validated against live API (2026-01-05)
+- ✅ Mailing lists endpoint fully implemented and schema validated (2026-01-06)
+- ✅ Directories endpoint fully implemented and schema validated (2026-01-05)
 - ✅ survey_definitions schema validated against live API (2026-01-05)
+- ⚠️ Sessions API availability may vary by Qualtrics license tier - requires verification
 
 ---
 
@@ -1506,6 +1486,7 @@ Field names are generally consistent between write and read operations for surve
 | `distributions` | ✅ Fixed | 29 fields missing/incorrect | Schema completely updated |
 | `contacts` | ✅ Perfect Match | 0 | No changes needed |
 | `directories` | ✅ Perfect Match | 0 | Validated 2026-01-05 |
+| `mailing_lists` | ✅ Validated | 3 fields not in API | Removed libraryId, category, folder from schema (2026-01-06) |
 
 ### Detailed Findings
 
@@ -1611,6 +1592,33 @@ directory_id, name, contact_count, is_default, deduplication_criteria
   }
 }
 ```
+
+#### 6. mailing_lists Table (VALIDATED)
+
+**Validation Date**: 2026-01-06  
+**Status**: ✅ Schema validated and corrected
+
+**Fields documented but NOT in API response**:
+- `libraryId` (string): Not returned by list endpoint
+- `category` (string): Not returned by list endpoint
+- `folder` (string): Not returned by list endpoint
+
+**Fields in API response** (6 fields):
+```
+mailingListId, name, ownerId, creationDate, lastModifiedDate, contactCount
+```
+
+**Important Notes**:
+- **Date format**: `creationDate` and `lastModifiedDate` are returned as epoch milliseconds (LongType), not ISO 8601 strings
+- **Primary Key**: `mailingListId` (format: `CG_xxx`)
+- **Ingestion Type**: `snapshot` (full refresh)
+- **Required Parameter**: `directoryId` must be provided as a table-level parameter
+
+**Resolution**: Updated schema to 6 fields matching actual API response. Removed `libraryId`, `category`, and `folder` from schema.
+
+**Testing Environment**:
+- Datacenter: fra1
+- Endpoint: `GET https://fra1.qualtrics.com/API/v3/directories/{directoryId}/mailinglists`
 
 ### Validation Methodology
 
