@@ -748,17 +748,25 @@ def register_lakeflow_source(spark):
 
         def _get_all_survey_ids(self, table_options: dict[str, str]) -> list[str]:
             """
-            Get all survey IDs for auto-consolidation.
+            Get survey IDs for consolidation.
 
-            Includes all surveys (both active and inactive) up to the max_surveys limit
-            configured at connection level.
+            If surveyId is provided in table_options, uses that (supports comma-separated list).
+            Otherwise, fetches all surveys up to the max_surveys limit.
 
             Args:
-                table_options: Not used (kept for interface consistency)
+                table_options: May contain 'surveyId' parameter (single or comma-separated)
 
             Returns:
                 List of survey IDs
             """
+            # Check if specific survey IDs are provided
+            survey_id_input = table_options.get("surveyId")
+            if survey_id_input:
+                # Parse comma-separated list, strip whitespace
+                survey_ids = [sid.strip() for sid in survey_id_input.split(",") if sid.strip()]
+                logger.info(f"Using {len(survey_ids)} specified survey(s): {survey_ids}")
+                return survey_ids
+
             # Fetch all surveys
             surveys_iter, _ = self._read_surveys({})
             surveys = list(surveys_iter)
@@ -872,20 +880,24 @@ def register_lakeflow_source(spark):
                     - For single survey: {"lastModified": "2024-01-01T00:00:00Z"}
                     - For auto-consolidation: {"surveys": {"SV_123": {"lastModified": "..."}, ...}, "lastModified": "..."}
                 table_options: Optional 'surveyId' parameter
-                    - If provided: Returns definition for that specific survey
-                    - If not provided: Returns definitions for all surveys (auto-consolidation)
+                    - Single survey: "SV_123" - Returns definition for that specific survey
+                    - Multiple surveys: "SV_123, SV_456, SV_789" - Returns definitions for specified surveys (comma-separated)
+                    - All surveys: omit surveyId - Returns definitions for all surveys (auto-consolidation)
 
             Returns:
                 Tuple of (iterator of survey definition records, offset dict)
             """
-            survey_id = table_options.get("surveyId")
+            survey_id_input = table_options.get("surveyId")
 
-            # If surveyId is provided, fetch that specific survey (backward compatibility)
-            if survey_id:
-                return self._read_single_survey_definition(survey_id, start_offset)
+            # Single survey (no comma) - use simple offset structure for backward compatibility
+            if survey_id_input and "," not in survey_id_input:
+                return self._read_single_survey_definition(survey_id_input.strip(), start_offset)
 
-            # Otherwise, fetch all surveys and consolidate their definitions
-            logger.info("No surveyId provided, auto-consolidating definitions from all surveys")
+            # Multiple surveys (comma-separated) or all surveys - use consolidated path with per-survey offsets
+            if survey_id_input:
+                logger.info("Multiple surveyIds provided, auto-consolidating definitions from specified surveys")
+            else:
+                logger.info("No surveyId provided, auto-consolidating definitions from all surveys")
             return self._read_all_survey_definitions(start_offset, table_options)
 
         def _read_single_survey_definition(self, survey_id: str, start_offset: dict) -> (Iterator[dict], dict):
@@ -1001,20 +1013,24 @@ def register_lakeflow_source(spark):
             Args:
                 start_offset: Dictionary containing cursor timestamp(s)
                 table_options: Optional 'surveyId' parameter
-                    - If provided: Returns responses for that specific survey
-                    - If not provided: Returns responses for all surveys (auto-consolidation)
+                    - Single survey: "SV_123" - Returns responses for that specific survey
+                    - Multiple surveys: "SV_123, SV_456, SV_789" - Returns responses for specified surveys (comma-separated)
+                    - All surveys: omit surveyId - Returns responses for all surveys (auto-consolidation)
 
             Returns:
                 Tuple of (iterator of response records, new offset)
             """
-            survey_id = table_options.get("surveyId")
+            survey_id_input = table_options.get("surveyId")
 
-            # If surveyId is provided, fetch that specific survey (backward compatibility)
-            if survey_id:
-                return self._read_single_survey_responses(survey_id, start_offset)
+            # Single survey (no comma) - use simple offset structure for backward compatibility
+            if survey_id_input and "," not in survey_id_input:
+                return self._read_single_survey_responses(survey_id_input.strip(), start_offset)
 
-            # Otherwise, fetch all surveys and consolidate their responses
-            logger.info("No surveyId provided, auto-consolidating responses from all surveys")
+            # Multiple surveys (comma-separated) or all surveys - use consolidated path with per-survey offsets
+            if survey_id_input:
+                logger.info("Multiple surveyIds provided, consolidating responses from specified surveys")
+            else:
+                logger.info("No surveyId provided, auto-consolidating responses from all surveys")
             return self._read_all_survey_responses(start_offset, table_options)
 
         def _read_single_survey_responses(
@@ -1321,20 +1337,24 @@ def register_lakeflow_source(spark):
             Args:
                 start_offset: Dictionary containing pagination token and cursor timestamp(s)
                 table_options: Optional 'surveyId' parameter
-                    - If provided: Returns distributions for that specific survey
-                    - If not provided: Returns distributions for all surveys (auto-consolidation)
+                    - Single survey: "SV_123" - Returns distributions for that specific survey
+                    - Multiple surveys: "SV_123, SV_456, SV_789" - Returns distributions for specified surveys (comma-separated)
+                    - All surveys: omit surveyId - Returns distributions for all surveys (auto-consolidation)
 
             Returns:
                 Tuple of (iterator of distribution records, new offset)
             """
-            survey_id = table_options.get("surveyId")
+            survey_id_input = table_options.get("surveyId")
 
-            # If surveyId is provided, fetch that specific survey (backward compatibility)
-            if survey_id:
-                return self._read_single_survey_distributions(survey_id, start_offset)
+            # Single survey (no comma) - use simple offset structure for backward compatibility
+            if survey_id_input and "," not in survey_id_input:
+                return self._read_single_survey_distributions(survey_id_input.strip(), start_offset)
 
-            # Otherwise, fetch all surveys and consolidate their distributions
-            logger.info("No surveyId provided, auto-consolidating distributions from all surveys")
+            # Multiple surveys (comma-separated) or all surveys - use consolidated path with per-survey offsets
+            if survey_id_input:
+                logger.info("Multiple surveyIds provided, auto-consolidating distributions from specified surveys")
+            else:
+                logger.info("No surveyId provided, auto-consolidating distributions from all surveys")
             return self._read_all_survey_distributions(start_offset, table_options)
 
         def _read_single_survey_distributions(

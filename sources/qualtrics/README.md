@@ -115,25 +115,27 @@ Table-specific options are passed via the pipeline spec under `table` in `object
 - Supports incremental sync based on `lastModified` timestamp
 
 #### `survey_definitions` table
-- **`surveyId`** (string, **optional**): The Survey ID to retrieve the definition for
-  - Format: `SV_...` (e.g., `SV_abc123xyz`)
+- **`surveyId`** (string, **optional**): The Survey ID(s) to retrieve the definition for
+  - Single survey: `SV_abc123xyz`
+  - Multiple surveys: `SV_abc123xyz, SV_def456xyz` (comma-separated)
+  - All surveys: omit surveyId (auto-consolidation)
   - Returns the complete survey structure including all questions, choices, blocks, and flow
   - Useful for building data dictionaries to interpret survey response values
-  - **If not provided**: Auto-consolidates definitions from all surveys (see Auto-Consolidation below)
 
 #### `survey_responses` table
-- **`surveyId`** (string, **optional**): The Survey ID to export responses from
-  - Format: `SV_...` (e.g., `SV_abc123xyz`)
+- **`surveyId`** (string, **optional**): The Survey ID(s) to export responses from
+  - Single survey: `SV_abc123xyz`
+  - Multiple surveys: `SV_abc123xyz, SV_def456xyz` (comma-separated)
+  - All surveys: omit surveyId (auto-consolidation)
   - Can be found in Qualtrics UI under: Survey → Tools → Survey IDs
   - Or in the browser URL when editing a survey
-  - **If not provided**: Auto-consolidates responses from all surveys (see Auto-Consolidation below)
 
 #### `distributions` table
-- **`surveyId`** (string, **optional**): The Survey ID to retrieve distributions for
-  - Format: `SV_...` (e.g., `SV_abc123xyz`)
-  - Same format as survey_responses table
-  - Retrieves all distributions (email sends, SMS, etc.) for the specified survey
-  - **If not provided**: Auto-consolidates distributions from all surveys (see Auto-Consolidation below)
+- **`surveyId`** (string, **optional**): The Survey ID(s) to retrieve distributions for
+  - Single survey: `SV_abc123xyz`
+  - Multiple surveys: `SV_abc123xyz, SV_def456xyz` (comma-separated)
+  - All surveys: omit surveyId (auto-consolidation)
+  - Retrieves all distributions (email sends, SMS, etc.) for the specified survey(s)
 
 #### `mailing_lists` table
 - **`directoryId`** (string, **required**): The Directory ID (also called Pool ID)
@@ -215,7 +217,18 @@ When using auto-consolidation (no `surveyId` specified):
 }
 ```
 
-**Example 3: Increase limit to 100 surveys (connection-level configuration)**
+**Example 3: Consolidate specific surveys (comma-separated)**
+```json
+{
+  "table": {
+    "source_table": "survey_responses",
+    "surveyId": "SV_abc123xyz, SV_def456xyz, SV_ghi789xyz"
+  }
+}
+```
+> This will consolidate only the specified surveys, useful for testing or when you need specific surveys but not all.
+
+**Example 4: Increase limit to 100 surveys (connection-level configuration)**
 ```json
 {
   "api_token": "YOUR_API_TOKEN",
