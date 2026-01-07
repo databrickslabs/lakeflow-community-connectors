@@ -1,9 +1,0 @@
-connection_name,source_table,destination_catalog,destination_schema,destination_table,pipeline_group,schedule,table_options_json,weight
-osipi_connection,pi_dataservers,main,bronze,pi_dataservers,,0 0 * * *,{},1
-osipi_connection,pi_points,main,bronze,pi_points,,0 0 * * *,"{""nameFilter"": ""Sydney_*"", ""maxCount"": 1000}",1
-osipi_connection,pi_assetservers,main,bronze,pi_assetservers,,0 1 * * *,{},1
-osipi_connection,pi_af_hierarchy,main,bronze,pi_af_hierarchy,,0 1 * * *,{},1
-osipi_connection,pi_event_frames,main,bronze,pi_event_frames,,*/30 * * * *,"{""lookback_days"": 1, ""maxCount"": 200, ""searchMode"": ""Overlapped""}",5
-osipi_connection,pi_streamset_recorded,main,bronze,pi_streamset_recorded,,*/15 * * * *,"{""nameFilter"": ""Sydney_*"", ""lookback_minutes"": 10, ""maxCount"": 200, ""tags_per_request"": 25, ""window_seconds"": 300}",10
-osipi_connection,pi_streamset_interpolated,main,bronze,pi_streamset_interpolated,,*/30 * * * *,"{""nameFilter"": ""Sydney_*"", ""lookback_minutes"": 10, ""interval"": ""1m"", ""maxCount"": 200, ""tags_per_request"": 25}",8
-osipi_connection,pi_element_attributes,main,bronze,pi_element_attributes,,0 2 * * *,"{""default_elements"": 2, ""maxCount"": 200}",2
