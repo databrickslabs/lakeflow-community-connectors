@@ -55,8 +55,10 @@ class LakeflowConnect:
         Args:
             options: Dictionary containing:
                 - api_token: Qualtrics API token
-                - datacenter_id: Datacenter identifier (e.g., 'fra1', 'ca1', 'yourdatacenterid')
-                - max_surveys: (Optional) Maximum number of surveys to consolidate when surveyId is not provided (default: 50)
+                - datacenter_id: Datacenter identifier (e.g., 'fra1', 'ca1',
+                  'yourdatacenterid')
+                - max_surveys: (Optional) Maximum number of surveys to
+                  consolidate when surveyId is not provided (default: 50)
         """
         self.api_token = options.get("api_token")
         self.datacenter_id = options.get("datacenter_id")
@@ -73,16 +75,25 @@ class LakeflowConnect:
         }
 
         # Auto-consolidation configuration
-        max_surveys_str = options.get("max_surveys", str(QualtricsConfig.DEFAULT_MAX_SURVEYS))
+        max_surveys_str = options.get(
+            "max_surveys", str(QualtricsConfig.DEFAULT_MAX_SURVEYS)
+        )
         try:
             self.max_surveys = int(max_surveys_str)
         except ValueError:
-            logger.warning(f"Invalid max_surveys value '{max_surveys_str}', using default {QualtricsConfig.DEFAULT_MAX_SURVEYS}")
+            logger.warning(
+                f"Invalid max_surveys value '{max_surveys_str}', "
+                f"using default {QualtricsConfig.DEFAULT_MAX_SURVEYS}"
+            )
             self.max_surveys = QualtricsConfig.DEFAULT_MAX_SURVEYS
 
         # Supported tables
-        self.tables = ["surveys", "survey_definitions", "survey_responses", "distributions", "mailing_lists", "mailing_list_contacts", "directory_contacts", "directories"]
-    
+        self.tables = [
+            "surveys", "survey_definitions", "survey_responses",
+            "distributions", "mailing_lists", "mailing_list_contacts",
+            "directory_contacts", "directories"
+        ]
+
     def list_tables(self) -> list[str]:
         """
         List all available tables supported by this connector.
@@ -101,11 +112,11 @@ class LakeflowConnect:
     ) -> StructType:
         """
         Get the schema for the specified table.
-        
+
         Args:
             table_name: Name of the table
             table_options: Additional options (e.g., surveyId for survey_responses)
-            
+
         Returns:
             StructType representing the table schema
         """
@@ -113,7 +124,7 @@ class LakeflowConnect:
             raise ValueError(
                 f"Unsupported table: {table_name}. Supported tables are: {self.tables}"
             )
-        
+
         if table_name == "surveys":
             return self._get_surveys_schema()
         elif table_name == "survey_definitions":
@@ -132,7 +143,7 @@ class LakeflowConnect:
             return self._get_directories_schema()
         else:
             raise ValueError(f"Unknown table: {table_name}")
-    
+
     def _get_surveys_schema(self) -> StructType:
         """Get schema for surveys table."""
         return StructType([
@@ -146,7 +157,7 @@ class LakeflowConnect:
 
     def _get_survey_definitions_schema(self) -> StructType:
         """Get schema for survey_definitions table.
-        
+
         Returns full survey structure including questions, blocks, and flow.
         Complex nested structures are stored as JSON strings for flexibility.
         """
@@ -207,7 +218,7 @@ class LakeflowConnect:
 
     def _get_distributions_schema(self) -> StructType:
         """Get schema for distributions table.
-        
+
         Includes nested structures for surveyLink, recipients, message, and stats.
         """
         return StructType([
@@ -257,7 +268,7 @@ class LakeflowConnect:
 
     def _get_mailing_lists_schema(self) -> StructType:
         """Get schema for mailing_lists table.
-        
+
         Returns mailing list metadata including dates as epoch timestamps.
         """
         return StructType([
@@ -286,7 +297,7 @@ class LakeflowConnect:
 
     def _get_directory_contacts_schema(self) -> StructType:
         """Get schema for directory_contacts table.
-        
+
         Returns same schema as mailing_list_contacts.
         """
         return self._get_mailing_list_contacts_schema()
@@ -316,11 +327,11 @@ class LakeflowConnect:
     ) -> dict:
         """
         Get metadata for the specified table.
-        
+
         Args:
             table_name: Name of the table
             table_options: Additional options
-            
+
         Returns:
             Dictionary containing primary_keys, cursor_field, and ingestion_type
         """
@@ -328,7 +339,7 @@ class LakeflowConnect:
             raise ValueError(
                 f"Unsupported table: {table_name}. Supported tables are: {self.tables}"
             )
-        
+
         if table_name == "surveys":
             return {
                 "primary_keys": ["id"],
@@ -379,7 +390,7 @@ class LakeflowConnect:
             }
         else:
             raise ValueError(f"Unknown table: {table_name}")
-    
+
     def read_table(
         self, table_name: str, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
@@ -594,7 +605,10 @@ class LakeflowConnect:
                     new_per_survey_offsets[survey_id] = per_survey_offsets[survey_id]
                 continue
 
-        logger.info(f"Completed fetching {data_type}: {success_count} succeeded, {failure_count} failed, {len(all_records)} total records")
+        logger.info(
+            f"Completed fetching {data_type}: {success_count} succeeded, "
+            f"{failure_count} failed, {len(all_records)} total records"
+        )
 
         new_offset = {"surveys": new_per_survey_offsets}
         if all_records and cursor_field:
@@ -642,10 +656,16 @@ class LakeflowConnect:
 
             # Check max limit
             if len(survey_ids) >= self.max_surveys:
-                logger.warning(f"Reached max_surveys limit of {self.max_surveys}. Consider increasing this limit in connection config if needed.")
+                logger.warning(
+                    f"Reached max_surveys limit of {self.max_surveys}. "
+                    "Consider increasing this limit in connection config if needed."
+                )
                 break
 
-        logger.info(f"Found {len(survey_ids)} survey(s) to process (max_surveys={self.max_surveys})")
+        logger.info(
+            f"Found {len(survey_ids)} survey(s) to process "
+            f"(max_surveys={self.max_surveys})"
+        )
         return survey_ids
 
     def _make_request(
@@ -658,14 +678,14 @@ class LakeflowConnect:
     ) -> dict:
         """
         Make an HTTP request to Qualtrics API with retry logic.
-        
+
         Args:
             method: HTTP method (GET, POST, etc.)
             url: Full URL to request
             params: Query parameters
             json_body: JSON body for POST requests
             max_retries: Maximum number of retry attempts
-            
+
         Returns:
             Parsed JSON response
         """
@@ -677,10 +697,12 @@ class LakeflowConnect:
                     response = requests.post(url, headers=self.headers, json=json_body)
                 else:
                     raise ValueError(f"Unsupported HTTP method: {method}")
-                
+
                 # Handle rate limiting
                 if response.status_code == 429:
-                    retry_after = int(response.headers.get("Retry-After", QualtricsConfig.RATE_LIMIT_DEFAULT_WAIT))
+                    retry_after = int(response.headers.get(
+                        "Retry-After", QualtricsConfig.RATE_LIMIT_DEFAULT_WAIT
+                    ))
                     logger.warning(f"Rate limited. Waiting {retry_after} seconds...")
                     time.sleep(retry_after)
                     continue
@@ -692,19 +714,22 @@ class LakeflowConnect:
                         logger.error(f"API Error Response: {error_detail}")
                     except:
                         logger.error(f"API Error Response (raw): {response.text}")
-                
+
                 response.raise_for_status()
                 return response.json()
-                
+
             except requests.exceptions.RequestException as e:
                 if attempt == max_retries - 1:
                     raise Exception(f"Request failed after {max_retries} attempts: {e}")
-                
+
                 # Exponential backoff
                 wait_time = 2 ** attempt
-                logger.warning(f"Request failed, retrying in {wait_time} seconds... (attempt {attempt + 1}/{max_retries})")
+                logger.warning(
+                    f"Request failed, retrying in {wait_time} seconds... "
+                    f"(attempt {attempt + 1}/{max_retries})"
+                )
                 time.sleep(wait_time)
-        
+
         raise Exception("Request failed")
 
     # =========================================================================
@@ -736,11 +761,14 @@ class LakeflowConnect:
         Args:
             start_offset: Dictionary containing cursor timestamp
                 - For single survey: {"lastModified": "2024-01-01T00:00:00Z"}
-                - For auto-consolidation: {"surveys": {"SV_123": {"lastModified": "..."}, ...}, "lastModified": "..."}
+                - For auto-consolidation: {"surveys": {"SV_123":
+                  {"lastModified": "..."}, ...}, "lastModified": "..."}
             table_options: Optional 'surveyId' parameter
-                - Single survey: "SV_123" - Returns definition for that specific survey
-                - Multiple surveys: "SV_123, SV_456, SV_789" - Returns definitions for specified surveys (comma-separated)
-                - All surveys: omit surveyId - Returns definitions for all surveys (auto-consolidation)
+                - Single survey: "SV_123" - Returns definition for that survey
+                - Multiple surveys: "SV_123, SV_456, SV_789" - Returns
+                  definitions for specified surveys (comma-separated)
+                - All surveys: omit surveyId - Returns definitions for
+                  all surveys (auto-consolidation)
 
         Returns:
             Tuple of (iterator of survey definition records, offset dict)
@@ -751,14 +779,20 @@ class LakeflowConnect:
         if survey_id_input and "," not in survey_id_input:
             return self._read_single_survey_definition(survey_id_input.strip(), start_offset)
 
-        # Multiple surveys (comma-separated) or all surveys - use consolidated path with per-survey offsets
+        # Multiple surveys (comma-separated) or all surveys -
+        # use consolidated path with per-survey offsets
         if survey_id_input:
-            logger.info("Multiple surveyIds provided, auto-consolidating definitions from specified surveys")
+            logger.info(
+                "Multiple surveyIds provided, auto-consolidating "
+                "definitions from specified surveys"
+            )
         else:
             logger.info("No surveyId provided, auto-consolidating definitions from all surveys")
         return self._read_all_survey_definitions(start_offset, table_options)
 
-    def _read_single_survey_definition(self, survey_id: str, start_offset: dict) -> (Iterator[dict], dict):
+    def _read_single_survey_definition(
+        self, survey_id: str, start_offset: dict
+    ) -> (Iterator[dict], dict):
         """
         Read a single survey definition from Qualtrics API.
 
@@ -790,7 +824,10 @@ class LakeflowConnect:
             if last_modified_cursor and survey_last_modified:
                 if survey_last_modified <= last_modified_cursor:
                     # No changes since last sync, skip this definition
-                    logger.info(f"Survey {survey_id} not modified since {last_modified_cursor}, skipping")
+                    logger.info(
+                        f"Survey {survey_id} not modified since "
+                        f"{last_modified_cursor}, skipping"
+                    )
                     return iter([]), {"lastModified": last_modified_cursor}
 
             # Process the result to serialize complex nested fields as JSON strings
@@ -835,7 +872,9 @@ class LakeflowConnect:
             logger.error(f"Error fetching survey definition for {survey_id}: {e}", exc_info=True)
             raise
 
-    def _read_all_survey_definitions(self, start_offset: dict, table_options: dict[str, str]) -> (Iterator[dict], dict):
+    def _read_all_survey_definitions(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
         """
         Read survey definitions for all surveys from Qualtrics API.
 
@@ -844,7 +883,8 @@ class LakeflowConnect:
             table_options: Not used for auto-consolidation
 
         Returns:
-            Tuple of (iterator of all survey definition records, new offset dict with per-survey cursors)
+            Tuple of (iterator of all survey definition records,
+                  new offset dict with per-survey cursors)
         """
         return self._iterate_all_surveys(
             start_offset, table_options,
@@ -871,9 +911,11 @@ class LakeflowConnect:
         Args:
             start_offset: Dictionary containing cursor timestamp(s)
             table_options: Optional 'surveyId' parameter
-                - Single survey: "SV_123" - Returns responses for that specific survey
-                - Multiple surveys: "SV_123, SV_456, SV_789" - Returns responses for specified surveys (comma-separated)
-                - All surveys: omit surveyId - Returns responses for all surveys (auto-consolidation)
+                - Single survey: "SV_123" - Returns responses for that survey
+                - Multiple surveys: "SV_123, SV_456, SV_789" - Returns
+                  responses for specified surveys (comma-separated)
+                - All surveys: omit surveyId - Returns responses for
+                  all surveys (auto-consolidation)
 
         Returns:
             Tuple of (iterator of response records, new offset)
@@ -884,9 +926,13 @@ class LakeflowConnect:
         if survey_id_input and "," not in survey_id_input:
             return self._read_single_survey_responses(survey_id_input.strip(), start_offset)
 
-        # Multiple surveys (comma-separated) or all surveys - use consolidated path with per-survey offsets
+        # Multiple surveys (comma-separated) or all surveys -
+        # use consolidated path with per-survey offsets
         if survey_id_input:
-            logger.info("Multiple surveyIds provided, consolidating responses from specified surveys")
+            logger.info(
+                "Multiple surveyIds provided, consolidating "
+                "responses from specified surveys"
+            )
         else:
             logger.info("No surveyId provided, auto-consolidating responses from all surveys")
         return self._read_all_survey_responses(start_offset, table_options)
@@ -963,59 +1009,65 @@ class LakeflowConnect:
             cursor_field="recordedDate",
             data_type="responses"
         )
-    
+
     def _create_response_export(self, survey_id: str, export_body: dict) -> str:
         """
         Create a response export job.
-        
+
         Args:
             survey_id: Survey ID to export responses from
             export_body: Export configuration
-            
+
         Returns:
             Progress ID to track the export job
         """
         url = f"{self.base_url}/surveys/{survey_id}/export-responses"
-        
+
         try:
             response = self._make_request("POST", url, json_body=export_body)
             result = response.get("result", {})
             progress_id = result.get("progressId")
-            
+
             if not progress_id:
                 raise ValueError("Failed to create export: no progressId returned")
-            
+
             return progress_id
-            
+
         except Exception as e:
             error_msg = f"Failed to create response export for survey {survey_id}: {e}"
             logger.error(error_msg, exc_info=True)
-            logger.info("This survey might not have any responses yet, or the API token lacks response export permissions.")
+            logger.info(
+                "This survey might not have any responses yet, or the API "
+                "token lacks response export permissions."
+            )
             raise Exception(error_msg)
-    
+
     def _poll_export_progress(
-        self, survey_id: str, progress_id: str, max_attempts: int = QualtricsConfig.MAX_EXPORT_POLL_ATTEMPTS
+        self,
+        survey_id: str,
+        progress_id: str,
+        max_attempts: int = QualtricsConfig.MAX_EXPORT_POLL_ATTEMPTS
     ) -> str:
         """
         Poll the export progress until completion.
-        
+
         Args:
             survey_id: Survey ID
             progress_id: Progress ID from export creation
             max_attempts: Maximum number of polling attempts
-            
+
         Returns:
             File ID when export is complete
         """
         url = f"{self.base_url}/surveys/{survey_id}/export-responses/{progress_id}"
-        
+
         for attempt in range(max_attempts):
             try:
                 response = self._make_request("GET", url)
                 result = response.get("result", {})
                 status = result.get("status")
                 percent_complete = result.get("percentComplete", 0)
-                
+
                 if status == "complete":
                     file_id = result.get("fileId")
                     if not file_id:
@@ -1023,20 +1075,20 @@ class LakeflowConnect:
                     return file_id
                 elif status == "failed":
                     raise Exception("Export job failed")
-                
+
                 # Wait before next poll (adaptive based on progress)
                 if percent_complete < 50:
                     time.sleep(QualtricsConfig.EXPORT_POLL_INTERVAL_SLOW)
                 else:
                     time.sleep(QualtricsConfig.EXPORT_POLL_INTERVAL_FAST)
-                    
+
             except Exception as e:
                 if attempt == max_attempts - 1:
                     raise Exception(f"Export polling failed: {e}")
                 time.sleep(2)
-        
+
         raise Exception("Export did not complete within timeout period")
-    
+
     def _download_response_export(self, survey_id: str, file_id: str) -> list[dict]:
         """
         Download and parse the response export file.
@@ -1081,7 +1133,7 @@ class LakeflowConnect:
 
         except Exception as e:
             raise Exception(f"Failed to download response export: {e}")
-    
+
     def _process_response_record(self, record: dict, survey_id: str) -> dict:
         """
         Process a response record to ensure proper structure.
@@ -1121,7 +1173,7 @@ class LakeflowConnect:
 
         # Add surveyId - API doesn't return this, but we know it from the query
         processed["surveyId"] = survey_id
-        
+
             # Handle responseId field
         if not processed.get("responseId") and "_recordId" in values_map:
             record_id_obj = values_map["_recordId"]
@@ -1129,7 +1181,7 @@ class LakeflowConnect:
                 processed["responseId"] = record_id_obj.get("textEntry")
             else:
                 processed["responseId"] = record_id_obj
-        
+
         # Process values (question responses)
         # Filter out metadata fields that we've already extracted
         metadata_fields = {
@@ -1138,7 +1190,7 @@ class LakeflowConnect:
             "distributionChannel", "userLanguage", "locationLatitude", "locationLongitude",
             "_recordId"  # Internal field
         }
-        
+
         values = record.get("values", {})
         if values:
             processed_values = {}
@@ -1146,7 +1198,7 @@ class LakeflowConnect:
                 # Skip metadata fields - only keep actual question responses
                 if qid in metadata_fields:
                     continue
-                    
+
                 if isinstance(value_data, dict):
                     # Keep structure, set None for missing fields
                     processed_values[qid] = {
@@ -1164,12 +1216,12 @@ class LakeflowConnect:
             processed["values"] = processed_values if processed_values else None
         else:
             processed["values"] = None
-        
+
         # Process other map fields
         processed["labels"] = record.get("labels")
         processed["displayedFields"] = record.get("displayedFields")
         processed["displayedValues"] = record.get("displayedValues")
-        
+
             # Process embeddedData field
         embedded_data = record.get("embeddedData")
         if embedded_data is None and "embeddedData" in values_map:
@@ -1195,9 +1247,11 @@ class LakeflowConnect:
         Args:
             start_offset: Dictionary containing pagination token and cursor timestamp(s)
             table_options: Optional 'surveyId' parameter
-                - Single survey: "SV_123" - Returns distributions for that specific survey
-                - Multiple surveys: "SV_123, SV_456, SV_789" - Returns distributions for specified surveys (comma-separated)
-                - All surveys: omit surveyId - Returns distributions for all surveys (auto-consolidation)
+                - Single survey: "SV_123" - Returns distributions for that survey
+                - Multiple surveys: "SV_123, SV_456, SV_789" - Returns
+                  distributions for specified surveys (comma-separated)
+                - All surveys: omit surveyId - Returns distributions for
+                  all surveys (auto-consolidation)
 
         Returns:
             Tuple of (iterator of distribution records, new offset)
@@ -1208,9 +1262,13 @@ class LakeflowConnect:
         if survey_id_input and "," not in survey_id_input:
             return self._read_single_survey_distributions(survey_id_input.strip(), start_offset)
 
-        # Multiple surveys (comma-separated) or all surveys - use consolidated path with per-survey offsets
+        # Multiple surveys (comma-separated) or all surveys -
+        # use consolidated path with per-survey offsets
         if survey_id_input:
-            logger.info("Multiple surveyIds provided, auto-consolidating distributions from specified surveys")
+            logger.info(
+                "Multiple surveyIds provided, auto-consolidating "
+                "distributions from specified surveys"
+            )
         else:
             logger.info("No surveyId provided, auto-consolidating distributions from all surveys")
         return self._read_all_survey_distributions(start_offset, table_options)
@@ -1329,7 +1387,7 @@ class LakeflowConnect:
     ) -> (Iterator[dict], dict):
         """
         Read mailing lists from Qualtrics API.
-        
+
         Uses snapshot mode (full refresh).
 
         Args:
@@ -1355,7 +1413,7 @@ class LakeflowConnect:
     def _read_directories(self, start_offset: dict) -> (Iterator[dict], dict):
         """
         Read directories (XM Directory pools) from Qualtrics API.
-        
+
         Uses snapshot mode (full refresh).
 
         Args:
