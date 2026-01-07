@@ -49,6 +49,7 @@ import os
 import uuid
 
 USERNAME = spark.sql("SELECT current_user()").collect()[0][0]
+DATABRICKS_PROFILE = "dogfood"  # Change this to your Databricks CLI profile name
 
 # OUTPUT PATHS (using DBFS paths accessed via dbfs: scheme)
 # Note: Use dbfs:/ scheme for DBFS operations, /dbfs/ for local file access
@@ -64,7 +65,9 @@ EMIT_SCHEDULED_JOBS = True
 PAUSE_JOBS = True  # Create jobs in PAUSED state
 
 # Tool scripts workspace path - will be copied to DBFS in Step 1 for subprocess access
-TOOLS_DIR_WORKSPACE = "/Workspace/Users/pravin.varma@databricks.com/lakeflow-community-connectors/tools/load_balanced_deployment"
+TOOLS_DIR_WORKSPACE = f"/Workspace/Users/{USERNAME}/lakeflow-community-connectors/tools/load_balanced_deployment"
+# Connector source path in workspace - needed for discovery
+CONNECTOR_SOURCE_WORKSPACE = f"/Workspace/Users/{USERNAME}/lakeflow-community-connectors/sources/{CONNECTOR_NAME}/{CONNECTOR_NAME}.py"
 
 # COMMAND ----------
 
@@ -121,8 +124,21 @@ for script_name in script_files:
     except Exception as e:
         print(f"  ✗ Failed to copy {script_name}: {e}")
 
+# Copy connector source file to DBFS (needed for discovery)
+connector_dbfs_path = f"{SCRIPTS_DIR_DBFS}/{CONNECTOR_NAME}.py"
+print(f"Copying connector source to {connector_dbfs_path}...")
+try:
+    response = w.workspace.export(CONNECTOR_SOURCE_WORKSPACE, format=ExportFormat.SOURCE)
+    content = base64.b64decode(response.content).decode('utf-8')
+    dbutils.fs.put(connector_dbfs_path, content, overwrite=True)
+    print(f"  ✓ Copied {CONNECTOR_NAME}.py")
+except Exception as e:
+    print(f"  ✗ Failed to copy connector source: {e}")
+    print(f"  Note: Discovery will attempt to find connector at: {CONNECTOR_SOURCE_WORKSPACE}")
+
 # Point TOOLS_DIR to copied scripts for subprocess calls
 TOOLS_DIR = SCRIPTS_DIR
+CONNECTOR_PY_FILE = f"{SCRIPTS_DIR}/{CONNECTOR_NAME}.py"
 
 if not USE_PRESET:
     print(f"Discovering tables from {CONNECTOR_NAME} connector...")
@@ -131,6 +147,7 @@ if not USE_PRESET:
         "python3",
         f"{TOOLS_DIR}/discover_and_classify_tables.py",
         "--connector-name", CONNECTOR_NAME,
+        "--connector-python-file", CONNECTOR_PY_FILE,
         "--output-csv", CSV_PATH,
         "--connection-name", CONNECTION_NAME,
         "--dest-catalog", DEST_CATALOG,
@@ -327,7 +344,7 @@ os.chdir(bundle_dir)
 
 print("\nRunning: databricks bundle validate...")
 result = subprocess.run(
-    ["databricks", "bundle", "validate"],
+    ["databricks", "--profile", DATABRICKS_PROFILE, "bundle", "validate"],
     capture_output=True,
     text=True
 )
@@ -344,7 +361,7 @@ if result.returncode != 0:
 
 print("\nRunning: databricks bundle deploy...")
 result = subprocess.run(
-    ["databricks", "bundle", "deploy"],
+    ["databricks", "--profile", DATABRICKS_PROFILE, "bundle", "deploy"],
     capture_output=True,
     text=True
 )

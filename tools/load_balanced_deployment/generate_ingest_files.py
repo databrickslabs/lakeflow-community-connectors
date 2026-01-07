@@ -34,15 +34,15 @@ def _read_csv(path: Path) -> Dict[str, List[Tuple[str, Dict[str, str]]]]:
     out: Dict[str, List[Tuple[str, Dict[str, str]]]] = {}
     with path.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        required = {"source_table", "category"}
+        required = {"source_table", "pipeline_group"}
         missing = required - set(reader.fieldnames or [])
         if missing:
             raise ValueError(f"CSV missing required columns: {sorted(missing)}")
 
         for row in reader:
             source_table = (row.get("source_table") or "").strip()
-            category = (row.get("category") or "").strip() or "default"
-            cfg_raw = (row.get("table_configuration_json") or "").strip() or "{}"
+            category = (row.get("pipeline_group") or "").strip() or "default"
+            cfg_raw = (row.get("table_options_json") or "").strip() or "{}"
 
             if not source_table:
                 continue
