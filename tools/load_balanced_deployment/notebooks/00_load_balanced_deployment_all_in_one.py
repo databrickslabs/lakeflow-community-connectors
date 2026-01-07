@@ -238,6 +238,12 @@ for ingest_file in sorted(Path(INGEST_FILES_DIR).glob("ingest_*.py")):
         content = f.read()
         encoded_content = base64.b64encode(content.encode()).decode()
 
+    # Delete existing file if present to enable overwrite
+    try:
+        w.workspace.delete(target_path)
+    except Exception:
+        pass  # File may not exist yet
+
     w.workspace.import_(
         path=target_path,
         format=ImportFormat.SOURCE,
