@@ -6,13 +6,13 @@ using Click's CliRunner and mocks for Databricks SDK.
 """
 
 import json
-import pytest
-from unittest.mock import MagicMock, patch, create_autospec
-from pathlib import Path
-import tempfile
 import os
+import tempfile
+from pathlib import Path
+from unittest.mock import MagicMock, patch, create_autospec
 
 import click
+import pytest
 from click.testing import CliRunner
 
 from databricks.sdk import WorkspaceClient
@@ -30,7 +30,9 @@ class TestParsePipelineSpec:
 
     def test_parse_json_string(self):
         """Test parsing a valid JSON string."""
-        json_str = '{"connection_name": "my_conn", "objects": [{"table": {"source_table": "users"}}]}'
+        json_str = (
+            '{"connection_name": "my_conn", "objects": [{"table": {"source_table": "users"}}]}'
+        )
         result = _parse_pipeline_spec(json_str)
 
         assert result["connection_name"] == "my_conn"
@@ -273,6 +275,7 @@ class TestRunPipelineCommand:
         assert "not found" in result.output
 
 
+# pylint: disable=too-few-public-methods
 class TestShowPipelineCommand:
     """Tests for show_pipeline command."""
 
@@ -388,4 +391,3 @@ class TestVersionAndHelp:
         assert "--pipeline-spec" in result.output
         assert "--catalog" in result.output
         assert "--target" in result.output
-

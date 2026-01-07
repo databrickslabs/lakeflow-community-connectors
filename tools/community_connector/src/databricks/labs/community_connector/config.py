@@ -8,10 +8,11 @@ Configuration Precedence (highest to lowest):
     CLI arguments → user config file (--config) → default_config.yaml → code defaults
 """
 
-from dataclasses import dataclass, field
-from typing import Optional
-import yaml
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Optional
+
+import yaml
 
 
 @dataclass
@@ -37,6 +38,7 @@ class RepoConfig:
     """List of root-level files to delete after checkout (cone mode includes all root files)."""
 
 
+# pylint: disable=too-many-instance-attributes
 @dataclass
 class PipelineConfig:
     """Configuration for creating a Databricks pipeline."""
@@ -123,8 +125,6 @@ class ConnectorConfig:
         Args:
             path: Path where the YAML file will be saved.
         """
-        from dataclasses import asdict
-
         data = {
             "workspace_host": self.workspace_host,
             "repo": asdict(self.repo),
@@ -188,6 +188,7 @@ def deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
+# pylint: disable=too-many-arguments,too-many-positional-arguments
 def build_config(
     source_name: str,
     pipeline_name: str,
