@@ -254,7 +254,7 @@ Once the connection is created and the custom connector is registered, you can c
    - The pipeline will show your connection and ingestion setup
    - Click **Run now** or configure a schedule to start ingesting data
 
-**📝 Note**: For a complete example with all 5 tables, see [sample-ingest.py](sample-ingest.py).
+**📝 Note**: For a complete example with all 6 tables, see [sample-ingest.py](sample-ingest.py).
 
 ---
 
@@ -276,7 +276,7 @@ Once the connection is created and the custom connector is registered, you can c
 
 ## Supported Tables
 
-The Microsoft Teams connector supports **5 core tables** with two ingestion modes:
+The Microsoft Teams connector supports **6 core tables** with two ingestion modes:
 
 **Ingestion Modes:**
 - **Snapshot (Full Refresh)**: Fetches all data on every run. Recommended for small, infrequently changing datasets (teams, channels, members).
@@ -291,6 +291,7 @@ The Microsoft Teams connector supports **5 core tables** with two ingestion mode
 | messages | **CDC** | `lastModifiedDateTime` | `team_id`, `channel_id` OR `fetch_all_channels` | `fetch_all_channels=true` |
 | members | Snapshot | - | `team_id` OR `fetch_all_teams` | `fetch_all_teams=true` |
 | message_replies | **CDC** | `lastModifiedDateTime` | `team_id`, `channel_id`, `message_id` OR `fetch_all_messages` | `fetch_all_messages=true` |
+| message_reactions | Snapshot | - | `team_id`, `channel_id` OR `fetch_all_channels` | `fetch_all_channels=true` |
 
 **Auto-Discovery Modes**: Instead of manually specifying parent IDs, you can use `fetch_all` modes to automatically discover and ingest all resources. See the [Automatic Discovery (fetch_all Modes)](#automatic-discovery-fetch_all-modes) section below.
 
