@@ -330,7 +330,7 @@ print(f"\n✓ Uploaded {uploaded_count} ingest files to workspace")
 
 import yaml
 from databricks.sdk.service.pipelines import PipelineLibrary, NotebookLibrary, FileLibrary
-from databricks.sdk.service.jobs import Task, PipelineTask, JobSettings, CronSchedule
+from databricks.sdk.service.jobs import Task, PipelineTask, JobSettings, CronSchedule, PauseStatus
 
 # Read the generated DAB YAML to get configuration
 with open(DAB_YAML_PATH, 'r') as f:
@@ -482,7 +482,9 @@ if 'jobs' in dab_config.get('resources', {}) and EMIT_SCHEDULED_JOBS:
         schedule_config = job_config.get('schedule', {})
         cron_expr = schedule_config.get('quartz_cron_expression')
         timezone = schedule_config.get('timezone_id', 'UTC')
-        pause_status = schedule_config.get('pause_status', 'PAUSED')
+        pause_status_str = schedule_config.get('pause_status', 'PAUSED')
+        # Convert string to enum
+        pause_status = PauseStatus.PAUSED if pause_status_str == 'PAUSED' else PauseStatus.UNPAUSED
 
         try:
             if job_name in existing_jobs:
