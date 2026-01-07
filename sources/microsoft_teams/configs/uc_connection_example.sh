@@ -22,8 +22,10 @@ TENANT_ID="{{secrets/microsoft_teams/tenant_id}}"
 CLIENT_ID="{{secrets/microsoft_teams/client_id}}"
 CLIENT_SECRET="{{secrets/microsoft_teams/client_secret}}"
 
-# Optional: Whitelist of table-specific options users can pass
-EXTERNAL_OPTIONS_ALLOW_LIST="team_id,channel_id,message_id,start_date,top,max_pages_per_batch,lookback_seconds,fetch_all_teams,fetch_all_channels,fetch_all_messages,use_delta_api,max_concurrent_threads,reaction_poll_window_days,reaction_poll_batch_size"
+# REQUIRED: Whitelist of allowed options (framework + connector-specific)
+# Framework options: tableName, tableNameList, tableConfigs (required by ingestion pipeline)
+# Connector options: connector-specific table configuration options
+EXTERNAL_OPTIONS_ALLOW_LIST="tableName,tableNameList,tableConfigs,team_id,channel_id,message_id,start_date,top,max_pages_per_batch,lookback_seconds,fetch_all_teams,fetch_all_channels,fetch_all_messages,use_delta_api,max_concurrent_threads"
 
 # Create the UC connection
 databricks connections create \

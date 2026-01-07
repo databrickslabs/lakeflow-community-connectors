@@ -142,7 +142,15 @@ Alternatively, you can create secrets via the Databricks UI:
 
 #### Create a Unity Catalog Connection
 
-A Unity Catalog connection for this connector can be created via the Databricks UI:
+A Unity Catalog connection can be created in two ways:
+
+**Option 1: During Pipeline Creation (Recommended)**
+
+The easiest way is to create the connection while setting up your first ingestion pipeline. This flow is shown in the [Run Your First Pipeline](#run-your-first-pipeline) section below.
+
+**Option 2: Pre-create Connection via Catalog UI**
+
+You can also create the connection separately before creating a pipeline:
 
 1. **Navigate to Catalog → External Data**
    - In your Databricks workspace, click **Catalog** in the left sidebar
@@ -153,14 +161,10 @@ A Unity Catalog connection for this connector can be created via the Databricks 
    - Click **Create connection** button
    - This will open the connection setup wizard
 
-3. **Step 1: Connection Basics**
-   - **Connection name**: Enter a name for your connection (e.g., `LakeflowCommunityConnectorMSTeams`)
-   - **Connection type**: Select **Lakeflow Community Connector**
-   - **Comment** (optional): Add a description of the connection
-
-4. **Step 2: Connection Details**
-   - **Source name**: Enter `microsoft_teams` (this must match the connector source name)
-   - **Additional Options**: Configure the connection parameters as key-value pairs
+3. **Configure Connection**
+   - **Connection name**: Enter a name for your connection (e.g., `lakeflowcommunityconnectormsteams`)
+   - **Connection type**: Select the appropriate type for community connectors
+   - Configure credentials (see below)
 
    **Required Credentials** (reference Databricks Secrets):
 
@@ -169,12 +173,7 @@ A Unity Catalog connection for this connector can be created via the Databricks 
    | `tenant_id` | `{{secrets/microsoft_teams/tenant_id}}` | Azure AD tenant ID |
    | `client_id` | `{{secrets/microsoft_teams/client_id}}` | Application (client) ID |
    | `client_secret` | `{{secrets/microsoft_teams/client_secret}}` | Client secret value |
-
-   **Optional Parameters:**
-
-   | Key | Value | Description |
-   | --- | ----- | ----------- |
-   | `externalOptionsAllowList` | `team_id,channel_id,message_id,start_date,top,max_pages_per_batch,lookback_seconds,fetch_all_teams,fetch_all_channels,fetch_all_messages,use_delta_api,max_concurrent_threads` | (Optional) Comma-separated list of table-specific options users can pass. May not be enforced in current Databricks versions but recommended for future compatibility. |
+   | `externalOptionsAllowList` | `tableName,tableNameList,tableConfigs,team_id,channel_id,message_id,start_date,top,max_pages_per_batch,lookback_seconds,fetch_all_teams,fetch_all_channels,fetch_all_messages,use_delta_api,max_concurrent_threads` | **REQUIRED:** Comma-separated list of allowed options. Includes framework options (tableName, tableNameList, tableConfigs) and connector-specific table options. |
 
    **📝 Note on Credentials:**
    - Credentials are stored in the UC Connection using `{{secrets/scope/key}}` format
@@ -182,79 +181,73 @@ A Unity Catalog connection for this connector can be created via the Databricks 
    - Credentials are automatically injected into the connector by Databricks
    - No need to pass credentials in `table_configuration` - they come from the connection!
 
-5. **Create Connection**
+4. **Create Connection**
    - Click **Create** to save the connection
-   - The connection will now be available in the **Connections** list
+   - The connection will now be available when creating ingestion pipelines
 
 The connection can also be created programmatically using the Unity Catalog API or Databricks CLI.
 
-#### Add Custom Connector Source
-
-You need to register the connector source code from GitHub so Databricks can access it during ingestion:
-
-1. **Navigate to Catalog → Connections**
-   - In your Databricks workspace, click **Catalog** in the left sidebar
-   - Click **External Data** at the top
-   - Navigate to the **Connections** tab
-
-2. **Add Custom Connector**
-   - Click on your connection (e.g., `LakeflowCommunityConnectorMSTeams`)
-   - In the connection details page, look for the **Add custom connector** option or button
-   - This will open the "Add custom connector" dialog
-
-3. **Configure Connector Source**
-   - **Source name**: Enter `microsoft_teams` (must match the directory name in the repository)
-   - **Git Repository URL**: Enter the repository URL:
-     ```
-     https://github.com/eduardohl/lakeflow-community-connectors-teams
-     ```
-   - Click **Add Connector**
-
-4. **Verify Registration**
-   - The connector source will now appear in your connection details
-   - Databricks will fetch the connector code from GitHub when running ingestion pipelines
-
-**📝 Note**: The source name must exactly match the directory name containing the connector code in the repository (in this case: `microsoft_teams`).
+**Note:** The custom connector source code is registered during pipeline creation (see next section). You don't need to register it separately.
 
 #### Run Your First Pipeline
 
-Once the connection is created and the custom connector is registered, you can create an ingestion pipeline using the Databricks UI:
+Create an ingestion pipeline using the Databricks UI. This is the recommended approach as it guides you through all the necessary steps:
 
 1. **Navigate to Jobs & Pipelines**
    - In your Databricks workspace, click **Jobs & Pipelines** in the left sidebar
    - Click **Create new** dropdown
    - Select **Ingestion pipeline** (Ingest data from apps, databases and files)
 
-2. **Add Data Source**
+2. **Add Custom Connector**
    - In the "Add data" screen, scroll down to **Community connectors** section
-   - Click **Custom Connector**
+   - Click **Custom Connector** button
    - In the "Add custom connector" dialog:
-     - **Source name**: Enter `microsoft_teams`
+     - **Source name**: Enter `microsoft_teams` (must match the directory name in the repository)
      - **Git Repository URL**: Enter `https://github.com/eduardohl/lakeflow-community-connectors-teams`
      - Click **Add Connector**
+   - The connector will now appear in the Community connectors list
 
-3. **Select Connection (STEP 1)**
-   - The wizard will show "Ingest data from Microsoft_teams"
-   - Under "Connection to the source", select your connection from the dropdown
-   - Available connections will be listed (e.g., `lakeflowcommunityconnectormsteams`, `microsoft_teams_connection`)
+3. **Select Your Connector**
+   - After adding the custom connector, you'll return to the "Add data" screen
+   - Find and click on your **microsoft_teams** connector in the Community connectors section
+   - This will open the connection setup wizard
+
+4. **Configure Connection (STEP 1)**
+   - The wizard shows "Ingest data from Microsoft_teams"
+   - Under "Connection to the source":
+     - If you already created a connection (Option 2 above), select it from the dropdown
+     - If you haven't created a connection yet, click **Create connection** to create one now
+   - Example connection names: `lakeflowcommunityconnectormsteams`
    - Click to proceed to **STEP 2**
 
-4. **Configure Ingestion Setup (STEP 2)**
+5. **Configure Ingestion Setup (STEP 2)**
    - **Pipeline name**: Enter a descriptive name (e.g., `LakeflowCommunityConnectorMSTeams`)
    - **Event log location**:
-     - Select catalog (e.g., `users`)
-     - Select schema for event logs (or leave default)
+     - **Catalog**: Select a catalog (e.g., `eduardo_lomonaco` or your user catalog)
+     - **Schema**: Select or create a schema for event logs (e.g., `ms_teams_connector`)
    - **Root path**: Enter the path where connector assets will be stored
-     - Example: `/Users/eduardo.lomonaco@databricks.com/connectors/microsoft_teams`
-   - The system will create the ingestion pipeline
+     - Example: `/Users/eduardo.lomonaco@databricks.com/ms_teams_connector`
+     - This is where the pipeline will store metadata and checkpoint information
+   - Click **Create** to create the ingestion pipeline
 
-5. **View and Run Pipeline**
-   - Once created, you'll see your pipeline listed under **Jobs & Pipelines** → **Pipelines**
-   - Click on the pipeline name to view details
-   - The pipeline will show your connection and ingestion setup
-   - Click **Run now** or configure a schedule to start ingesting data
+6. **View and Run Pipeline**
+   - Once created, you'll be redirected to your pipeline details page
+   - Pipeline details shown on the right:
+     - Pipeline ID (e.g., `b17e7817-4152-4329-abc5-b0913208...`)
+     - Pipeline type: ETL pipeline
+     - Creator/Owner information
+     - Source code: 1 file (Open in Editor)
+   - The main view shows a message: "A graph will appear here after you run the pipeline"
+   - Click **Dry run** or **Run pipeline** to start ingesting data
+   - After the first run, you'll see a visual graph showing the ingestion flow
 
-**📝 Note**: For a complete example with all 5 tables, see [sample-ingest.py](sample-ingest.py).
+7. **Edit Pipeline Source Code (If Needed)**
+   - Click **Edit pipeline** or **Open in Editor** to view the generated source code
+   - The pipeline generates a Python file (e.g., `ingest.py`) in your workspace
+   - **IMPORTANT**: Update the `connection_name` variable to match your actual connection name
+   - Example: Change `connection_name = "microsoft_teams_connection"` to `connection_name = "lakeflowcommunityconnectormsteams"`
+   - Configure which tables to ingest and their options
+   - Save your changes
 
 ---
 
