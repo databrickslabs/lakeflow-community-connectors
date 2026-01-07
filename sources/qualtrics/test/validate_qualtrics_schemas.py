@@ -16,6 +16,7 @@ from sources.qualtrics.qualtrics import LakeflowConnect
 
 
 def main():
+    """Run schema validation for Qualtrics connector."""
     # Load config
     parent_dir = Path(__file__).parent.parent
     config_path = parent_dir / "configs" / "dev_config.json"

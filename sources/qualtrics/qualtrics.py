@@ -46,6 +46,20 @@ class QualtricsConfig:
     DEFAULT_MAX_SURVEYS = 50  # Default limit for auto-consolidation
     CONSOLIDATION_DELAY_BETWEEN_SURVEYS = 0.5  # seconds (to respect rate limits)
 
+    @staticmethod
+    def get_poll_interval(progress_percent: float) -> float:
+        """Get polling interval based on export progress."""
+        return (
+            QualtricsConfig.EXPORT_POLL_INTERVAL_FAST
+            if progress_percent >= 50
+            else QualtricsConfig.EXPORT_POLL_INTERVAL_SLOW
+        )
+
+    @staticmethod
+    def get_retry_wait(attempt: int) -> float:
+        """Calculate exponential backoff wait time for HTTP retries."""
+        return 2 ** attempt
+
 
 class LakeflowConnect:
     def __init__(self, options: dict[str, str]) -> None:
@@ -94,6 +108,74 @@ class LakeflowConnect:
             "directory_contacts", "directories"
         ]
 
+        # Schema method mappings
+        self._schema_methods = {
+            "surveys": self._get_surveys_schema,
+            "survey_definitions": self._get_survey_definitions_schema,
+            "survey_responses": self._get_survey_responses_schema,
+            "distributions": self._get_distributions_schema,
+            "mailing_lists": self._get_mailing_lists_schema,
+            "mailing_list_contacts": self._get_mailing_list_contacts_schema,
+            "directory_contacts": self._get_directory_contacts_schema,
+            "directories": self._get_directories_schema,
+        }
+
+        # Reader method mappings
+        self._reader_methods = {
+            "surveys": self._read_surveys,
+            "survey_definitions": self._read_survey_definitions,
+            "survey_responses": self._read_survey_responses,
+            "distributions": self._read_distributions,
+            "mailing_lists": self._read_mailing_lists,
+            "mailing_list_contacts": self._read_mailing_list_contacts,
+            "directory_contacts": self._read_directory_contacts,
+            "directories": self._read_directories,
+        }
+
+        # Table metadata mappings
+        self._table_metadata = {
+            "surveys": {
+                "primary_keys": ["id"],
+                "cursor_field": "last_modified",
+                "ingestion_type": "cdc"
+            },
+            "survey_definitions": {
+                "primary_keys": ["survey_id"],
+                "cursor_field": "last_modified",
+                "ingestion_type": "cdc"
+            },
+            "survey_responses": {
+                "primary_keys": ["response_id"],
+                "cursor_field": "recorded_date",
+                "ingestion_type": "append"
+            },
+            "distributions": {
+                "primary_keys": ["id"],
+                "cursor_field": "modified_date",
+                "ingestion_type": "cdc"
+            },
+            "mailing_lists": {
+                "primary_keys": ["mailing_list_id"],
+                "cursor_field": None,
+                "ingestion_type": "snapshot"
+            },
+            "mailing_list_contacts": {
+                "primary_keys": ["contact_id"],
+                "cursor_field": None,
+                "ingestion_type": "snapshot"
+            },
+            "directory_contacts": {
+                "primary_keys": ["contact_id"],
+                "cursor_field": None,
+                "ingestion_type": "snapshot"
+            },
+            "directories": {
+                "primary_keys": ["directory_id"],
+                "cursor_field": None,
+                "ingestion_type": "snapshot"
+            },
+        }
+
     def list_tables(self) -> list[str]:
         """
         List all available tables supported by this connector.
@@ -120,29 +202,12 @@ class LakeflowConnect:
         Returns:
             StructType representing the table schema
         """
-        if table_name not in self.tables:
+        if table_name not in self._schema_methods:
             raise ValueError(
                 f"Unsupported table: {table_name}. Supported tables are: {self.tables}"
             )
 
-        if table_name == "surveys":
-            return self._get_surveys_schema()
-        elif table_name == "survey_definitions":
-            return self._get_survey_definitions_schema()
-        elif table_name == "survey_responses":
-            return self._get_survey_responses_schema()
-        elif table_name == "distributions":
-            return self._get_distributions_schema()
-        elif table_name == "mailing_lists":
-            return self._get_mailing_lists_schema()
-        elif table_name == "mailing_list_contacts":
-            return self._get_mailing_list_contacts_schema()
-        elif table_name == "directory_contacts":
-            return self._get_directory_contacts_schema()
-        elif table_name == "directories":
-            return self._get_directories_schema()
-        else:
-            raise ValueError(f"Unknown table: {table_name}")
+        return self._schema_methods[table_name]()
 
     def _get_surveys_schema(self) -> StructType:
         """Get schema for surveys table."""
@@ -335,61 +400,12 @@ class LakeflowConnect:
         Returns:
             Dictionary containing primary_keys, cursor_field, and ingestion_type
         """
-        if table_name not in self.tables:
+        if table_name not in self._table_metadata:
             raise ValueError(
                 f"Unsupported table: {table_name}. Supported tables are: {self.tables}"
             )
 
-        if table_name == "surveys":
-            return {
-                "primary_keys": ["id"],
-                "cursor_field": "last_modified",
-                "ingestion_type": "cdc"
-            }
-        elif table_name == "survey_definitions":
-            return {
-                "primary_keys": ["survey_id"],
-                "cursor_field": "last_modified",
-                "ingestion_type": "cdc"
-            }
-        elif table_name == "survey_responses":
-            return {
-                "primary_keys": ["response_id"],
-                "cursor_field": "recorded_date",
-                "ingestion_type": "append"
-            }
-        elif table_name == "distributions":
-            return {
-                "primary_keys": ["id"],
-                "cursor_field": "modified_date",
-                "ingestion_type": "cdc"
-            }
-        elif table_name == "mailing_lists":
-            return {
-                "primary_keys": ["mailing_list_id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot"
-            }
-        elif table_name == "mailing_list_contacts":
-            return {
-                "primary_keys": ["contact_id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot"
-            }
-        elif table_name == "directory_contacts":
-            return {
-                "primary_keys": ["contact_id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot"
-            }
-        elif table_name == "directories":
-            return {
-                "primary_keys": ["directory_id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot"
-            }
-        else:
-            raise ValueError(f"Unknown table: {table_name}")
+        return self._table_metadata[table_name]
 
     def read_table(
         self, table_name: str, start_offset: dict, table_options: dict[str, str]
@@ -405,29 +421,18 @@ class LakeflowConnect:
         Returns:
             Tuple of (iterator of records, end offset)
         """
-        if table_name not in self.tables:
+        if table_name not in self._reader_methods:
             raise ValueError(
                 f"Unsupported table: {table_name}. Supported tables are: {self.tables}"
             )
 
-        if table_name == "surveys":
-            return self._read_surveys(start_offset)
-        elif table_name == "survey_definitions":
-            return self._read_survey_definitions(start_offset, table_options)
-        elif table_name == "survey_responses":
-            return self._read_survey_responses(start_offset, table_options)
-        elif table_name == "distributions":
-            return self._read_distributions(start_offset, table_options)
-        elif table_name == "mailing_lists":
-            return self._read_mailing_lists(start_offset, table_options)
-        elif table_name == "mailing_list_contacts":
-            return self._read_mailing_list_contacts(start_offset, table_options)
-        elif table_name == "directory_contacts":
-            return self._read_directory_contacts(start_offset, table_options)
-        elif table_name == "directories":
-            return self._read_directories(start_offset)
-        else:
-            raise ValueError(f"Unknown table: {table_name}")
+        reader_method = self._reader_methods[table_name]
+
+        # surveys and directories don't need table_options
+        if table_name in ("surveys", "directories"):
+            return reader_method(start_offset)
+
+        return reader_method(start_offset, table_options)
 
     # =========================================================================
     # Helpers
@@ -1108,17 +1113,16 @@ class LakeflowConnect:
             response.raise_for_status()
 
             # Extract JSON from ZIP
-            zip_content = zipfile.ZipFile(io.BytesIO(response.content))
+            with zipfile.ZipFile(io.BytesIO(response.content)) as zip_content:
+                # Find the JSON file in the ZIP
+                json_files = [f for f in zip_content.namelist() if f.endswith('.json')]
 
-            # Find the JSON file in the ZIP
-            json_files = [f for f in zip_content.namelist() if f.endswith('.json')]
+                if not json_files:
+                    raise ValueError("No JSON file found in export ZIP")
 
-            if not json_files:
-                raise ValueError("No JSON file found in export ZIP")
-
-            # Read the first JSON file
-            json_content = zip_content.read(json_files[0])
-            data = json.loads(json_content)
+                # Read the first JSON file
+                json_content = zip_content.read(json_files[0])
+                data = json.loads(json_content)
 
             # Extract responses array
             responses = data.get("responses", [])
@@ -1145,9 +1149,22 @@ class LakeflowConnect:
         Returns:
             Processed response record
         """
-        processed = {}
+        processed = self._extract_simple_fields(record)
+        processed["surveyId"] = survey_id
+        processed["values"] = self._process_question_values(record)
 
-        # Copy simple fields - try both top-level and from values map
+        # Process other map fields
+        processed["labels"] = record.get("labels")
+        processed["displayedFields"] = record.get("displayedFields")
+        processed["displayedValues"] = record.get("displayedValues")
+        processed["embeddedData"] = self._extract_embedded_data(record)
+
+        # Normalize all keys to snake_case before returning
+        return self._normalize_keys(processed)
+
+    def _extract_simple_fields(self, record: dict) -> dict:
+        """Extract simple metadata fields from response record."""
+        processed = {}
         simple_fields = [
             "responseId", "recordedDate", "startDate", "endDate",
             "status", "ipAddress", "progress", "duration", "finished",
@@ -1164,17 +1181,13 @@ class LakeflowConnect:
             elif field in values_map:
                 value_obj = values_map[field]
                 if isinstance(value_obj, dict):
-                    # Extract from textEntry if it's a dict
                     processed[field] = value_obj.get("textEntry")
                 else:
                     processed[field] = value_obj
             else:
                 processed[field] = None
 
-        # Add surveyId - API doesn't return this, but we know it from the query
-        processed["surveyId"] = survey_id
-
-            # Handle responseId field
+        # Handle responseId field
         if not processed.get("responseId") and "_recordId" in values_map:
             record_id_obj = values_map["_recordId"]
             if isinstance(record_id_obj, dict):
@@ -1182,57 +1195,54 @@ class LakeflowConnect:
             else:
                 processed["responseId"] = record_id_obj
 
-        # Process values (question responses)
-        # Filter out metadata fields that we've already extracted
+        return processed
+
+    def _process_question_values(self, record: dict) -> dict:
+        """Process question response values, filtering out metadata."""
         metadata_fields = {
             "responseId", "surveyId", "recordedDate", "startDate", "endDate",
             "status", "ipAddress", "progress", "duration", "finished",
             "distributionChannel", "userLanguage", "locationLatitude", "locationLongitude",
-            "_recordId"  # Internal field
+            "_recordId"
         }
 
         values = record.get("values", {})
-        if values:
-            processed_values = {}
-            for qid, value_data in values.items():
-                # Skip metadata fields - only keep actual question responses
-                if qid in metadata_fields:
-                    continue
+        if not values:
+            return None
 
-                if isinstance(value_data, dict):
-                    # Keep structure, set None for missing fields
-                    processed_values[qid] = {
-                        "choiceText": value_data.get("choiceText"),
-                        "choiceId": value_data.get("choiceId"),
-                        "textEntry": value_data.get("textEntry")
-                    }
-                else:
-                    # If value is not a dict, create minimal structure
-                    processed_values[qid] = {
-                        "choiceText": None,
-                        "choiceId": None,
-                        "textEntry": str(value_data) if value_data is not None else None
-                    }
-            processed["values"] = processed_values if processed_values else None
-        else:
-            processed["values"] = None
+        processed_values = {}
+        for qid, value_data in values.items():
+            # Skip metadata fields - only keep actual question responses
+            if qid in metadata_fields:
+                continue
 
-        # Process other map fields
-        processed["labels"] = record.get("labels")
-        processed["displayedFields"] = record.get("displayedFields")
-        processed["displayedValues"] = record.get("displayedValues")
+            if isinstance(value_data, dict):
+                # Keep structure, set None for missing fields
+                processed_values[qid] = {
+                    "choiceText": value_data.get("choiceText"),
+                    "choiceId": value_data.get("choiceId"),
+                    "textEntry": value_data.get("textEntry")
+                }
+            else:
+                # If value is not a dict, create minimal structure
+                processed_values[qid] = {
+                    "choiceText": None,
+                    "choiceId": None,
+                    "textEntry": str(value_data) if value_data is not None else None
+                }
 
-            # Process embeddedData field
+        return processed_values if processed_values else None
+
+    def _extract_embedded_data(self, record: dict) -> dict:
+        """Extract embeddedData field from record or values map."""
         embedded_data = record.get("embeddedData")
-        if embedded_data is None and "embeddedData" in values_map:
-            # Try to get from values map
-            ed_obj = values_map["embeddedData"]
-            if isinstance(ed_obj, dict):
-                embedded_data = ed_obj.get("textEntry")
-        processed["embeddedData"] = embedded_data
-
-        # Normalize all keys to snake_case before returning
-        return self._normalize_keys(processed)
+        if embedded_data is None:
+            values_map = record.get("values", {})
+            if "embeddedData" in values_map:
+                ed_obj = values_map["embeddedData"]
+                if isinstance(ed_obj, dict):
+                    embedded_data = ed_obj.get("textEntry")
+        return embedded_data
 
     # =========================================================================
     # Table Readers: Distributions
@@ -1423,4 +1433,3 @@ class LakeflowConnect:
             Tuple of (iterator of directory records, offset dict)
         """
         return self._fetch_paginated_list("/directories", start_offset, cursor_field=None)
-
