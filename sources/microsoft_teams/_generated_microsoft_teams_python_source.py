@@ -393,8 +393,13 @@ def register_lakeflow_source(spark):
             try:
                 response = requests.post(token_url, data=data, timeout=30)
                 if response.status_code != 200:
+                    # Redact sensitive info but show enough to debug
+                    tenant_preview = f"{self.tenant_id[:8]}..." if self.tenant_id and len(self.tenant_id) > 8 else "INVALID"
                     raise RuntimeError(
-                        f"Token acquisition failed: {response.status_code} {response.text}"
+                        f"Token acquisition failed: {response.status_code}\n"
+                        f"URL: {token_url}\n"
+                        f"Tenant ID (first 8 chars): {tenant_preview}\n"
+                        f"Response: {response.text[:500]}"  # First 500 chars
                     )
 
                 token_data = response.json()
