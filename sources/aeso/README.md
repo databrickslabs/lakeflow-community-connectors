@@ -13,7 +13,7 @@ Ingest Alberta electricity market data from the [AESO API](https://developer-api
 
 - ⚡ **Hourly market data** - Actual prices, forecasts, and 30-day rolling averages
 - 🔄 **Automatic updates** - Captures late-arriving settlement adjustments and forecast revisions
-- 🚀 **Sub-minute latency** - Supports continuous mode for near-real-time ingestion
+- 🚀 **Sub-minute latency** - Supports continuous mode for near-real-time ingestion (~10 second latency)
 - 📊 **Historical backfill** - Load data from any start date with automatic merges
 - 🔁 **Automatic recovery** - Configurable lookback window handles pipeline downtime
 
