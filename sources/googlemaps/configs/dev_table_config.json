@@ -1,0 +1,8 @@
+{
+    "places": {
+        "text_query": "restaurants in Seattle",
+        "language_code": "en",
+        "max_result_count": "5"
+    }
+}
+
