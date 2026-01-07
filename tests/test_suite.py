@@ -4,7 +4,7 @@
 import json
 import traceback
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime as dt
 from enum import Enum
 from typing import Any, Dict, List, Tuple, Iterator, Optional, Callable
 
@@ -1207,7 +1207,7 @@ class LakeflowConnectTester:
             passed_tests=passed,
             failed_tests=failed,
             error_tests=errors,
-            timestamp=datetime.now().isoformat(),
+            timestamp=dt.now().isoformat(),
         )
 
     def print_report(self, report: TestReport, show_details: bool = True):
