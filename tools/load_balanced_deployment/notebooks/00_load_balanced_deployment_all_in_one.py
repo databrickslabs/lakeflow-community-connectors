@@ -51,20 +51,18 @@ import uuid
 USERNAME = spark.sql("SELECT current_user()").collect()[0][0]
 DATABRICKS_PROFILE = "dogfood"  # Change this to your Databricks CLI profile name
 
-# OUTPUT PATHS (using DBFS paths accessed via dbfs: scheme)
-# Note: Use dbfs:/ scheme for DBFS operations, /dbfs/ for local file access
-WORK_DIR_DBFS = f"dbfs:/tmp/{USERNAME.replace('@', '_').replace('.', '_')}/load_balanced_deployment_{uuid.uuid4().hex[:8]}"
-WORK_DIR_LOCAL = WORK_DIR_DBFS.replace("dbfs:", "/dbfs")  # Local mount path for file operations
+# OUTPUT PATHS (using local /tmp directory to avoid DBFS I/O issues)
+WORK_DIR = f"/tmp/{USERNAME.replace('@', '_').replace('.', '_')}/load_balanced_deployment_{uuid.uuid4().hex[:8]}"
 
-CSV_PATH = f"{WORK_DIR_LOCAL}/{CONNECTOR_NAME}_tables.csv"
-INGEST_FILES_DIR = f"{WORK_DIR_LOCAL}/{CONNECTOR_NAME}_ingest_files"
-DAB_YAML_PATH = f"{WORK_DIR_LOCAL}/{CONNECTOR_NAME}_bundle/databricks.yml"
+CSV_PATH = f"{WORK_DIR}/{CONNECTOR_NAME}_tables.csv"
+INGEST_FILES_DIR = f"{WORK_DIR}/{CONNECTOR_NAME}_ingest_files"
+DAB_YAML_PATH = f"{WORK_DIR}/{CONNECTOR_NAME}_bundle/databricks.yml"
 WORKSPACE_INGEST_PATH = f"/Workspace/Users/{USERNAME}/{CONNECTOR_NAME}_ingest"
 CLUSTER_NUM_WORKERS = 2
 EMIT_SCHEDULED_JOBS = True
 PAUSE_JOBS = True  # Create jobs in PAUSED state
 
-# Tool scripts workspace path - will be copied to DBFS in Step 1 for subprocess access
+# Tool scripts workspace path - will be copied to local temp directory in Step 1 for subprocess access
 TOOLS_DIR_WORKSPACE = f"/Workspace/Users/{USERNAME}/lakeflow-community-connectors/tools/load_balanced_deployment"
 # Connector source path in workspace - needed for discovery
 CONNECTOR_SOURCE_WORKSPACE = f"/Workspace/Users/{USERNAME}/lakeflow-community-connectors/sources/{CONNECTOR_NAME}/{CONNECTOR_NAME}.py"
@@ -81,22 +79,21 @@ CONNECTOR_SOURCE_WORKSPACE = f"/Workspace/Users/{USERNAME}/lakeflow-community-co
 import subprocess
 import os
 import shutil
+import tempfile
 from pathlib import Path
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.workspace import ExportFormat
 import base64
 
-# Create work directories using dbutils.fs for DBFS
-dbutils.fs.mkdirs(WORK_DIR_DBFS)
-dbutils.fs.mkdirs(f"{WORK_DIR_DBFS}/{CONNECTOR_NAME}_ingest_files")
-dbutils.fs.mkdirs(f"{WORK_DIR_DBFS}/{CONNECTOR_NAME}_bundle")
-print(f"Using work directory: {WORK_DIR_LOCAL}")
+# Create work directories using standard Python (no DBFS needed)
+Path(WORK_DIR).mkdir(parents=True, exist_ok=True)
+Path(INGEST_FILES_DIR).mkdir(parents=True, exist_ok=True)
+Path(DAB_YAML_PATH).parent.mkdir(parents=True, exist_ok=True)
+print(f"Using work directory: {WORK_DIR}")
 
-# Copy tool scripts to DBFS work directory for subprocess access
-# The /Workspace/Repos/ path is not accessible from subprocess in notebooks
-SCRIPTS_DIR_DBFS = f"{WORK_DIR_DBFS}/scripts"
-SCRIPTS_DIR = f"{WORK_DIR_LOCAL}/scripts"
-dbutils.fs.mkdirs(SCRIPTS_DIR_DBFS)
+# Copy tool scripts to local temp directory for subprocess execution
+SCRIPTS_DIR = tempfile.mkdtemp(prefix="lakeflow_scripts_")
+print(f"Created local scripts directory: {SCRIPTS_DIR}")
 
 # Get the current notebook's directory to find scripts
 # Use workspace API to export scripts from Repos
@@ -108,37 +105,38 @@ script_files = [
     "utils.py"
 ]
 
-print(f"Copying tool scripts to {SCRIPTS_DIR_DBFS}...")
+print(f"Copying tool scripts to {SCRIPTS_DIR}...")
 for script_name in script_files:
     workspace_path = f"{TOOLS_DIR_WORKSPACE}/{script_name}"
-    dbfs_path = f"{SCRIPTS_DIR_DBFS}/{script_name}"
+    local_path = f"{SCRIPTS_DIR}/{script_name}"
 
     try:
         # Export from workspace
         response = w.workspace.export(workspace_path, format=ExportFormat.SOURCE)
         # Decode base64 content
         content = base64.b64decode(response.content).decode('utf-8')
-        # Write to DBFS using dbutils.fs.put (overwrites if exists)
-        dbutils.fs.put(dbfs_path, content, overwrite=True)
+        # Write to local temp directory using standard Python file I/O
+        with open(local_path, 'w', encoding='utf-8') as f:
+            f.write(content)
         print(f"  ✓ Copied {script_name}")
     except Exception as e:
         print(f"  ✗ Failed to copy {script_name}: {e}")
 
-# Copy connector source file to DBFS (needed for discovery)
-connector_dbfs_path = f"{SCRIPTS_DIR_DBFS}/{CONNECTOR_NAME}.py"
-print(f"Copying connector source to {connector_dbfs_path}...")
+# Copy connector source file to local temp directory (needed for discovery)
+CONNECTOR_PY_FILE = f"{SCRIPTS_DIR}/{CONNECTOR_NAME}.py"
+print(f"Copying connector source to {CONNECTOR_PY_FILE}...")
 try:
     response = w.workspace.export(CONNECTOR_SOURCE_WORKSPACE, format=ExportFormat.SOURCE)
     content = base64.b64decode(response.content).decode('utf-8')
-    dbutils.fs.put(connector_dbfs_path, content, overwrite=True)
+    with open(CONNECTOR_PY_FILE, 'w', encoding='utf-8') as f:
+        f.write(content)
     print(f"  ✓ Copied {CONNECTOR_NAME}.py")
 except Exception as e:
     print(f"  ✗ Failed to copy connector source: {e}")
-    print(f"  Note: Discovery will attempt to find connector at: {CONNECTOR_SOURCE_WORKSPACE}")
+    print(f"  Note: Discovery may fail without connector source file")
 
 # Point TOOLS_DIR to copied scripts for subprocess calls
 TOOLS_DIR = SCRIPTS_DIR
-CONNECTOR_PY_FILE = f"{SCRIPTS_DIR}/{CONNECTOR_NAME}.py"
 
 if not USE_PRESET:
     print(f"Discovering tables from {CONNECTOR_NAME} connector...")
