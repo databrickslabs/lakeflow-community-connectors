@@ -1,8 +1,8 @@
-import requests
 import base64
-from pyspark.sql.types import *
 from datetime import datetime
 from typing import Dict, List, Iterator
+import requests
+from pyspark.sql.types import *
 
 
 class LakeflowConnect:
@@ -372,8 +372,7 @@ class LakeflowConnect:
                         }
                         records.append(comment_record)
             event_time = self._parse_timestamp(event.get("created_at", ""))
-            if event_time > max_time:
-                max_time = event_time
+            max_time = max(max_time, event_time)
         return records, max_time
 
     def _extract_records_with_time(self, data: dict, response_key: str) -> tuple:
@@ -382,8 +381,7 @@ class LakeflowConnect:
         max_time = 0
         for record in records:
             record_time = self._parse_timestamp(record.get("updated_at", ""))
-            if record_time > max_time:
-                max_time = record_time
+            max_time = max(max_time, record_time)
         return records, max_time
 
     def _read_incremental(self, table_name: str, config: dict, start_offset: dict):
@@ -416,8 +414,7 @@ class LakeflowConnect:
                 records, max_time = self._extract_records_with_time(data, response_key)
 
             all_records.extend(records)
-            if max_time > last_time:
-                last_time = max_time
+            last_time = max(last_time, max_time)
 
             next_page = data.get("next_page")
             if data.get("end_of_stream", True) or not next_page:
