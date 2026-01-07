@@ -9,12 +9,15 @@
 # MAGIC 2. Generate multiple Python ingest files (`ingest_*.py`) - one per group
 # MAGIC 3. Generate Databricks Asset Bundle (DAB) YAML configuration
 # MAGIC 4. Upload ingest files to workspace
-# MAGIC 5. Deploy pipelines using DAB
+# MAGIC 5. Deploy pipelines and jobs using Databricks SDK
 # MAGIC
 # MAGIC **Prerequisites**:
-# MAGIC - UC Connection created: `community-connector create_connection <source> <conn_name> -o '{...}'`
-# MAGIC - Connector source code deployed to workspace
-# MAGIC - `databricks` CLI configured
+# MAGIC - **UC Connection created** with proper credentials:
+# MAGIC   ```bash
+# MAGIC   community-connector create_connection osipi osipi_connection_lakeflow \
+# MAGIC     -o '{"pi_base_url": "https://mock-osipi-server.example.com", "access_token": "your-token"}'
+# MAGIC   ```
+# MAGIC - Connector source code synced to workspace at `/Workspace/Users/{user}/lakeflow-community-connectors/`
 
 # COMMAND ----------
 
@@ -30,6 +33,13 @@ CONNECTOR_NAME = "osipi"  # Change to your connector: osipi, hubspot, github, et
 CONNECTION_NAME = "osipi_connection_lakeflow"  # UC Connection name
 DEST_CATALOG = "osipi"
 DEST_SCHEMA = "bronze"
+
+# CONNECTOR OPTIONS (for UC Connection creation/update)
+# These will be passed to the connector at runtime
+CONNECTOR_OPTIONS = {
+    "pi_base_url": "https://mock-osipi-server.example.com",  # Mock OSIPI server URL
+    "access_token": "<your-access-token-here>"  # Replace with your authentication token
+}
 
 # DISCOVERY OPTIONS (set USE_PRESET=True to skip discovery)
 USE_PRESET = False  # Set to True to use preset CSV instead of discovery
@@ -144,11 +154,16 @@ TOOLS_DIR = SCRIPTS_DIR
 if not USE_PRESET:
     print(f"Discovering tables from {CONNECTOR_NAME} connector...")
 
+    # Convert connector options to JSON for discovery
+    import json
+    connector_options_json = json.dumps(CONNECTOR_OPTIONS)
+
     cmd = [
         "python3",
         f"{TOOLS_DIR}/discover_and_classify_tables.py",
         "--connector-name", CONNECTOR_NAME,
         "--connector-python-file", CONNECTOR_PY_FILE,
+        "--init-options-json", connector_options_json,
         "--output-csv", CSV_PATH,
         "--connection-name", CONNECTION_NAME,
         "--dest-catalog", DEST_CATALOG,
