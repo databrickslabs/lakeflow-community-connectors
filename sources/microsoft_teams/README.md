@@ -174,7 +174,7 @@ A Unity Catalog connection for this connector can be created via the Databricks 
 
    | Key | Value | Description |
    | --- | ----- | ----------- |
-   | `externalOptionsAllowList` | `team_id,channel_id,message_id,start_date,top,max_pages_per_batch,lookback_seconds,fetch_all_teams,fetch_all_channels,fetch_all_messages,use_delta_api,max_concurrent_threads,reaction_poll_window_days,reaction_poll_batch_size` | (Optional) Comma-separated list of table-specific options users can pass. May not be enforced in current Databricks versions but recommended for future compatibility. |
+   | `externalOptionsAllowList` | `team_id,channel_id,message_id,start_date,top,max_pages_per_batch,lookback_seconds,fetch_all_teams,fetch_all_channels,fetch_all_messages,use_delta_api,max_concurrent_threads` | (Optional) Comma-separated list of table-specific options users can pass. May not be enforced in current Databricks versions but recommended for future compatibility. |
 
    **📝 Note on Credentials:**
    - Credentials are stored in the UC Connection using `{{secrets/scope/key}}` format
