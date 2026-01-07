@@ -351,6 +351,7 @@ class LakeflowConnect:
     def _parse_timestamp(self, timestamp_str: str) -> int:
         """Parse a Zendesk timestamp string to Unix timestamp."""
         try:
+            # pylint: disable=no-member
             return int(datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%SZ").timestamp())
         except (ValueError, TypeError):
             return 0
