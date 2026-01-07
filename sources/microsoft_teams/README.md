@@ -134,10 +134,11 @@ Alternatively, you can create secrets via the Databricks UI:
 2. Create a new scope named `microsoft_teams`
 3. Add secrets for `tenant_id`, `client_id`, and `client_secret`
 
-**⚠️ IMPORTANT**:
-- Credentials stored here will be referenced in your pipeline code using `dbutils.secrets.get()`
-- **Do NOT store credentials in the Unity Catalog Connection parameters**
-- The connection only needs `externalOptionsAllowList` configured (optional)
+**📝 Note:**
+
+- Credentials stored here will be referenced in the UC Connection using `{{secrets/scope/key}}` format
+- The UC Connection automatically injects these credentials into the connector
+- No need to use `dbutils.secrets.get()` in your pipeline code
 
 #### Create a Unity Catalog Connection
 
@@ -161,17 +162,25 @@ A Unity Catalog connection for this connector can be created via the Databricks 
    - **Source name**: Enter `microsoft_teams` (this must match the connector source name)
    - **Additional Options**: Configure the connection parameters as key-value pairs
 
+   **Required Credentials** (reference Databricks Secrets):
+
+   | Key | Value | Description |
+   | --- | ----- | ----------- |
+   | `tenant_id` | `{{secrets/microsoft_teams/tenant_id}}` | Azure AD tenant ID |
+   | `client_id` | `{{secrets/microsoft_teams/client_id}}` | Application (client) ID |
+   | `client_secret` | `{{secrets/microsoft_teams/client_secret}}` | Client secret value |
+
    **Optional Parameters:**
 
    | Key | Value | Description |
    | --- | ----- | ----------- |
-   | `externalOptionsAllowList` | `team_id,channel_id,message_id,start_date,top,max_pages_per_batch,lookback_seconds,fetch_all_teams,fetch_all_channels,fetch_all_messages` | (Optional) Comma-separated list of table-specific options users can pass. May not be enforced in current Databricks versions but recommended for future compatibility. |
+   | `externalOptionsAllowList` | `team_id,channel_id,message_id,start_date,top,max_pages_per_batch,lookback_seconds,fetch_all_teams,fetch_all_channels,fetch_all_messages,use_delta_api,max_concurrent_threads,reaction_poll_window_days,reaction_poll_batch_size` | (Optional) Comma-separated list of table-specific options users can pass. May not be enforced in current Databricks versions but recommended for future compatibility. |
 
-   **⚠️ IMPORTANT - Credentials:**
-   - **Do NOT store credentials (tenant_id, client_id, client_secret) in the connection**
-   - Due to Python Data Source API limitations, connection-level credentials are not accessible to the connector
-   - All credentials must be passed via `table_configuration` in your pipeline spec using `dbutils.secrets.get()`
-   - See the configuration examples below for the correct pattern
+   **📝 Note on Credentials:**
+   - Credentials are stored in the UC Connection using `{{secrets/scope/key}}` format
+   - This references Databricks Secrets you created earlier
+   - Credentials are automatically injected into the connector by Databricks
+   - No need to pass credentials in `table_configuration` - they come from the connection!
 
 5. **Create Connection**
    - Click **Create** to save the connection
@@ -206,21 +215,6 @@ You need to register the connector source code from GitHub so Databricks can acc
    - Databricks will fetch the connector code from GitHub when running ingestion pipelines
 
 **📝 Note**: The source name must exactly match the directory name containing the connector code in the repository (in this case: `microsoft_teams`).
-
-#### Architecture Note: Credential Flow
-
-Due to Python Data Source API limitations in Databricks:
-
-1. **Unity Catalog Connection** serves as a reference and defines:
-   - Connection name for pipeline specs
-   - `externalOptionsAllowList` (optional table-specific options whitelist)
-
-2. **Credentials flow** happens through pipeline code:
-   - Retrieved from Databricks Secrets via `dbutils.secrets.get()`
-   - Passed in `table_configuration` for each table
-   - Received by connector in the `options` dictionary
-
-This pattern differs from managed Databricks connectors where credentials can be stored at the connection level. Custom Python Data Source connectors require explicit credential passing through table configuration.
 
 #### Run Your First Pipeline
 
