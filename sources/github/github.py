@@ -1,7 +1,8 @@
-import requests
+# pylint: disable=too-many-lines
 from datetime import datetime, timedelta
 from typing import Iterator, Any
 
+import requests
 from pyspark.sql.types import (
     StructType,
     StructField,
@@ -576,7 +577,7 @@ class LakeflowConnect:
             raise ValueError(f"Unsupported table: {table_name!r}")
         return reader_map[table_name](start_offset, table_options)
 
-    def _read_issues(
+    def _read_issues(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """Internal implementation for reading the `issues` table."""
@@ -686,7 +687,7 @@ class LakeflowConnect:
 
         return iter(records), next_offset
 
-    def _read_repositories(
+    def _read_repositories(  # pylint: disable=too-many-locals
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
@@ -780,7 +781,7 @@ class LakeflowConnect:
 
         return iter(records), {}
 
-    def _read_pull_requests(
+    def _read_pull_requests(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
@@ -888,7 +889,7 @@ class LakeflowConnect:
 
         return iter(records), next_offset
 
-    def _read_comments(
+    def _read_comments(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
@@ -989,7 +990,7 @@ class LakeflowConnect:
 
         return iter(records), next_offset
 
-    def _read_commits(
+    def _read_commits(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
@@ -1097,7 +1098,7 @@ class LakeflowConnect:
 
         return iter(records), next_offset
 
-    def _read_assignees(
+    def _read_assignees(  # pylint: disable=too-many-locals
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
@@ -1166,7 +1167,7 @@ class LakeflowConnect:
 
         return iter(records), {}
 
-    def _read_branches(
+    def _read_branches(  # pylint: disable=too-many-locals
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
@@ -1234,7 +1235,7 @@ class LakeflowConnect:
 
         return iter(records), {}
 
-    def _read_collaborators(
+    def _read_collaborators(  # pylint: disable=too-many-locals
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
@@ -1304,7 +1305,7 @@ class LakeflowConnect:
 
         return iter(records), {}
 
-    def _read_organizations(
+    def _read_organizations(  # pylint: disable=too-many-locals
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
@@ -1389,7 +1390,7 @@ class LakeflowConnect:
         # Snapshot table – no incremental cursor at the moment.
         return iter(records), {}
 
-    def _read_teams(
+    def _read_teams(  # pylint: disable=too-many-locals
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
@@ -1505,7 +1506,7 @@ class LakeflowConnect:
         record: dict[str, Any] = dict(user_obj)
         return iter([record]), {}
 
-    def _read_reviews(
+    def _read_reviews(  # pylint: disable=too-many-locals,too-many-statements
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
