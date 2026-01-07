@@ -23,7 +23,7 @@ class TestValidPipelineSpec:
             ],
         }
         warnings = validate_pipeline_spec(spec)
-        assert warnings == []
+        assert not warnings
 
     def test_full_valid_spec(self):
         """Test fully populated valid spec."""
@@ -45,7 +45,7 @@ class TestValidPipelineSpec:
             ],
         }
         warnings = validate_pipeline_spec(spec)
-        assert warnings == []
+        assert not warnings
 
     def test_multiple_objects(self):
         """Test spec with multiple objects."""
@@ -58,7 +58,7 @@ class TestValidPipelineSpec:
             ],
         }
         warnings = validate_pipeline_spec(spec)
-        assert warnings == []
+        assert not warnings
 
     def test_all_valid_scd_types(self):
         """Test all valid SCD types."""
@@ -75,7 +75,7 @@ class TestValidPipelineSpec:
                 ],
             }
             warnings = validate_pipeline_spec(spec)
-            assert warnings == []
+            assert not warnings
 
 
 class TestMissingRequiredFields:
@@ -414,4 +414,3 @@ class TestErrorPaths:
             validate_pipeline_spec(spec)
         assert "table_configuration" in str(exc_info.value)
         assert "scd_type" in str(exc_info.value)
-

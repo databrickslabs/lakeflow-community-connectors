@@ -5,9 +5,9 @@ These tests use mocking to test the client logic without making
 actual API calls to Databricks.
 """
 
-import pytest
 from unittest.mock import MagicMock, create_autospec
 
+import pytest
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.workspace import RepoInfo
 from databricks.sdk.service.pipelines import CreatePipelineResponse, StartUpdateResponse
@@ -170,6 +170,6 @@ class TestConfigDefaults:
         assert config.continuous is None
         assert config.development is None
         assert config.serverless is None
-        assert config.libraries == []
-        assert config.clusters == []
-        assert config.configuration == {}
+        assert not config.libraries
+        assert not config.clusters
+        assert not config.configuration
