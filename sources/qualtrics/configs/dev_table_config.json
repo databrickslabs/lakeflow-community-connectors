@@ -1,21 +1,21 @@
 {
     "survey_definitions": {
-        "surveyId": "YOUR_SURVEY_ID"
+        "surveyId": "your_survey_id"
     },
     "survey_responses": {
-        "surveyId": "YOUR_SURVEY_ID"
+        "surveyId": "your_survey_id"
     },
     "distributions": {
-        "surveyId": "YOUR_SURVEY_ID"
+        "surveyId": "your_survey_id"
     },
     "mailing_lists": {
-        "directoryId": "YOUR_DIRECTORY_ID"
+        "directoryId": "your_directory_id"
     },
     "mailing_list_contacts": {
-        "directoryId": "YOUR_DIRECTORY_ID",
-        "mailingListId": "YOUR_MAILING_LIST_ID"
+        "directoryId": "your_directory_id",
+        "mailingListId": "your_mailing_list_id"
     },
     "directory_contacts": {
-        "directoryId": "YOUR_DIRECTORY_ID"
+        "directoryId": "your_directory_id"
     }
 }

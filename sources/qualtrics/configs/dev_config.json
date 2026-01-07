@@ -1,5 +1,5 @@
 {
-  "api_token": "YOUR_API_TOKEN",
-  "datacenter_id": "YOUR_DATACENTER_ID"
+  "api_token": "your_qualtrics_api_token",
+  "datacenter_id": "your_datacenter_id"
 }
 
