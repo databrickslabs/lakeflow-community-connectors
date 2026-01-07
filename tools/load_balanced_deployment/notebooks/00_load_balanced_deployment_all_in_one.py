@@ -47,8 +47,10 @@ SCHEDULE_UNKNOWN = ""                # No schedule
 # DEPLOYMENT SETTINGS
 USERNAME = spark.sql("SELECT current_user()").collect()[0][0]
 
-# OUTPUT PATHS (using DBFS for work files, workspace for code)
-WORK_DIR = f"/dbfs/tmp/{USERNAME}/load_balanced_deployment"
+# OUTPUT PATHS (using local /tmp with user-specific subdirectory)
+import tempfile
+import os
+WORK_DIR = tempfile.mkdtemp(prefix=f"load_balanced_deployment_{USERNAME.replace('@', '_').replace('.', '_')}_")
 CSV_PATH = f"{WORK_DIR}/{CONNECTOR_NAME}_tables.csv"
 INGEST_FILES_DIR = f"{WORK_DIR}/{CONNECTOR_NAME}_ingest_files"
 DAB_YAML_PATH = f"{WORK_DIR}/{CONNECTOR_NAME}_bundle/databricks.yml"
