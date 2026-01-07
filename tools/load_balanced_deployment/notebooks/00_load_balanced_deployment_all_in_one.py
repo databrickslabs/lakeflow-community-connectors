@@ -47,10 +47,8 @@ SCHEDULE_UNKNOWN = ""                # No schedule
 # DEPLOYMENT SETTINGS
 USERNAME = spark.sql("SELECT current_user()").collect()[0][0]
 
-# OUTPUT PATHS (use unique directory per user to avoid permission issues)
-import os
-USER_UID = os.getuid()
-WORK_DIR = f"/tmp/load_balanced_deployment_{USER_UID}"
+# OUTPUT PATHS (using DBFS for work files, workspace for code)
+WORK_DIR = f"/dbfs/tmp/{USERNAME}/load_balanced_deployment"
 CSV_PATH = f"{WORK_DIR}/{CONNECTOR_NAME}_tables.csv"
 INGEST_FILES_DIR = f"{WORK_DIR}/{CONNECTOR_NAME}_ingest_files"
 DAB_YAML_PATH = f"{WORK_DIR}/{CONNECTOR_NAME}_bundle/databricks.yml"
@@ -58,6 +56,9 @@ WORKSPACE_INGEST_PATH = f"/Workspace/Users/{USERNAME}/{CONNECTOR_NAME}_ingest"
 CLUSTER_NUM_WORKERS = 2
 EMIT_SCHEDULED_JOBS = True
 PAUSE_JOBS = True  # Create jobs in PAUSED state
+
+# Tool scripts path (in repository)
+TOOLS_DIR = "/Workspace/Repos/pravin.varma@databricks.com/lakeflow-community-connectors/tools/load_balanced_deployment"
 
 # COMMAND ----------
 
@@ -83,7 +84,7 @@ if not USE_PRESET:
 
     cmd = [
         "python3",
-        "../discover_and_classify_tables.py",
+        f"{TOOLS_DIR}/discover_and_classify_tables.py",
         "--connector-name", CONNECTOR_NAME,
         "--output-csv", CSV_PATH,
         "--connection-name", CONNECTION_NAME,
@@ -135,7 +136,7 @@ print(f"Generating ingest files from {CSV_PATH}...")
 
 cmd = [
     "python3",
-    "../generate_ingest_files.py",
+    f"{TOOLS_DIR}/generate_ingest_files.py",
     "--csv", CSV_PATH,
     "--output-dir", INGEST_FILES_DIR,
     "--source-name", CONNECTOR_NAME,
@@ -173,7 +174,7 @@ print(f"Generating DAB YAML to {DAB_YAML_PATH}...")
 
 cmd = [
     "python3",
-    "../generate_dab_yaml.py",
+    f"{TOOLS_DIR}/generate_dab_yaml.py",
     "--connector-name", CONNECTOR_NAME,
     "--input-csv", CSV_PATH,
     "--output-yaml", DAB_YAML_PATH,
