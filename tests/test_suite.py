@@ -84,8 +84,10 @@ class LakeflowConnectTester:
             # Test write functionality if connector_test_utils is available
             if hasattr(self, "connector_test_utils") and self.connector_test_utils is not None:
                 self.test_list_insertable_tables()
+                self.test_list_deletable_tables()
                 self.test_write_to_source()
                 self.test_incremental_after_write()
+                self.test_delete_and_read_deletes()
 
         return self._generate_report()
 
@@ -865,6 +867,108 @@ class LakeflowConnectTester:
                 )
             )
 
+    def test_list_deletable_tables(self):
+        """Test that list_deletable_tables returns valid tables with cdc_with_deletes ingestion type"""
+        # Skip if connector test utils doesn't implement list_deletable_tables
+        if not hasattr(self.connector_test_utils, "list_deletable_tables"):
+            self._add_result(
+                TestResult(
+                    test_name="test_list_deletable_tables",
+                    status=TestStatus.PASSED,
+                    message="Skipped: connector_test_utils does not implement list_deletable_tables",
+                )
+            )
+            return
+
+        try:
+            deletable_tables = self.connector_test_utils.list_deletable_tables()
+            all_tables = self.connector.list_tables()
+
+            # Validate return type
+            if not isinstance(deletable_tables, list):
+                self._add_result(
+                    TestResult(
+                        test_name="test_list_deletable_tables",
+                        status=TestStatus.FAILED,
+                        message=f"Expected list, got {type(deletable_tables).__name__}",
+                    )
+                )
+                return
+
+            # If no deletable tables, that's fine
+            if not deletable_tables:
+                self._add_result(
+                    TestResult(
+                        test_name="test_list_deletable_tables",
+                        status=TestStatus.PASSED,
+                        message="No deletable tables configured",
+                    )
+                )
+                return
+
+            # Check that deletable tables is a subset of all tables
+            deletable_set = set(deletable_tables)
+            all_tables_set = set(all_tables)
+
+            if not deletable_set.issubset(all_tables_set):
+                invalid_tables = deletable_set - all_tables_set
+                self._add_result(
+                    TestResult(
+                        test_name="test_list_deletable_tables",
+                        status=TestStatus.FAILED,
+                        message=f"Deletable tables not subset of all tables: {invalid_tables}",
+                    )
+                )
+                return
+
+            # Verify each deletable table has ingestion_type 'cdc_with_deletes'
+            invalid_ingestion_tables = []
+            for table_name in deletable_tables:
+                try:
+                    metadata = self.connector.read_table_metadata(
+                        table_name, self._get_table_options(table_name)
+                    )
+                    ingestion_type = metadata.get("ingestion_type")
+                    if ingestion_type != "cdc_with_deletes":
+                        invalid_ingestion_tables.append(
+                            {"table": table_name, "ingestion_type": ingestion_type}
+                        )
+                except Exception as e:
+                    invalid_ingestion_tables.append(
+                        {"table": table_name, "error": str(e)}
+                    )
+
+            if invalid_ingestion_tables:
+                self._add_result(
+                    TestResult(
+                        test_name="test_list_deletable_tables",
+                        status=TestStatus.FAILED,
+                        message="Deletable tables must have ingestion_type 'cdc_with_deletes'",
+                        details={"invalid_tables": invalid_ingestion_tables},
+                    )
+                )
+                return
+
+            self._add_result(
+                TestResult(
+                    test_name="test_list_deletable_tables",
+                    status=TestStatus.PASSED,
+                    message=f"Deletable tables ({len(deletable_tables)}) validated successfully",
+                    details={"deletable_tables": deletable_tables},
+                )
+            )
+
+        except Exception as e:
+            self._add_result(
+                TestResult(
+                    test_name="test_list_deletable_tables",
+                    status=TestStatus.ERROR,
+                    message=f"list_deletable_tables failed: {str(e)}",
+                    exception=e,
+                    traceback_str=traceback.format_exc(),
+                )
+            )
+
     def test_write_to_source(self):  # pylint: disable=too-many-locals,too-many-branches
         """Test WriteToSource generate_rows_and_write method"""
         try:
@@ -1222,6 +1326,149 @@ class LakeflowConnectTester:
                 details=details,
             )
         )
+
+    def test_delete_and_read_deletes(self):
+        """Test delete functionality and verify deleted rows appear in read_table_deletes."""
+        # Skip if connector test utils doesn't implement delete_rows
+        if not hasattr(self.connector_test_utils, "delete_rows"):
+            self._add_result(
+                TestResult(
+                    test_name="test_delete_and_read_deletes",
+                    status=TestStatus.PASSED,
+                    message="Skipped: connector_test_utils does not implement delete_rows",
+                )
+            )
+            return
+
+        # Skip if connector doesn't implement read_table_deletes
+        if not hasattr(self.connector, "read_table_deletes"):
+            self._add_result(
+                TestResult(
+                    test_name="test_delete_and_read_deletes",
+                    status=TestStatus.PASSED,
+                    message="Skipped: connector does not implement read_table_deletes",
+                )
+            )
+            return
+
+        try:
+            deletable_tables = self.connector_test_utils.list_deletable_tables()
+            if not deletable_tables:
+                self._add_result(
+                    TestResult(
+                        test_name="test_delete_and_read_deletes",
+                        status=TestStatus.PASSED,
+                        message="Skipped: No deletable tables configured",
+                    )
+                )
+                return
+        except Exception:
+            self._add_result(
+                TestResult(
+                    test_name="test_delete_and_read_deletes",
+                    status=TestStatus.FAILED,
+                    message="Could not get deletable tables",
+                )
+            )
+            return
+
+        # Test one deletable table
+        test_table = deletable_tables[0]
+        try:
+            # Step 1: Delete 1 row
+            delete_result = self.connector_test_utils.delete_rows(test_table, 1)
+
+            if not isinstance(delete_result, tuple) or len(delete_result) != 3:
+                self._add_result(
+                    TestResult(
+                        test_name="test_delete_and_read_deletes",
+                        status=TestStatus.FAILED,
+                        message=f"delete_rows returned invalid format: {type(delete_result)}",
+                    )
+                )
+                return
+
+            success, deleted_rows, column_mapping = delete_result
+
+            if not success:
+                self._add_result(
+                    TestResult(
+                        test_name="test_delete_and_read_deletes",
+                        status=TestStatus.FAILED,
+                        message="delete_rows was not successful",
+                    )
+                )
+                return
+
+            if not deleted_rows:
+                self._add_result(
+                    TestResult(
+                        test_name="test_delete_and_read_deletes",
+                        status=TestStatus.FAILED,
+                        message="delete_rows returned empty deleted_rows",
+                    )
+                )
+                return
+
+            # Step 2: Call read_table_deletes to verify deleted row appears
+            read_result = self.connector.read_table_deletes(  # pylint: disable=no-member
+                test_table, {}, self._get_table_options(test_table)
+            )
+
+            if not isinstance(read_result, tuple) or len(read_result) != 2:
+                self._add_result(
+                    TestResult(
+                        test_name="test_delete_and_read_deletes",
+                        status=TestStatus.FAILED,
+                        message=f"read_table_deletes returned invalid format: {type(read_result)}",
+                    )
+                )
+                return
+
+            iterator, _ = read_result
+
+            # Collect all deleted records
+            deleted_records = list(iterator)
+
+            # Verify the deleted row is present
+            if not self._verify_written_rows_present(deleted_rows, deleted_records, column_mapping):
+                self._add_result(
+                    TestResult(
+                        test_name="test_delete_and_read_deletes",
+                        status=TestStatus.FAILED,
+                        message="Deleted row not found in read_table_deletes results",
+                        details={
+                            "table": test_table,
+                            "deleted_rows": deleted_rows,
+                            "deleted_records_count": len(deleted_records),
+                        },
+                    )
+                )
+                return
+
+            self._add_result(
+                TestResult(
+                    test_name="test_delete_and_read_deletes",
+                    status=TestStatus.PASSED,
+                    message=f"Successfully verified delete flow on table '{test_table}'",
+                    details={
+                        "table": test_table,
+                        "deleted_rows": deleted_rows,
+                        "deleted_records_count": len(deleted_records),
+                    },
+                )
+            )
+
+        except Exception as e:
+            self._add_result(
+                TestResult(
+                    test_name="test_delete_and_read_deletes",
+                    status=TestStatus.ERROR,
+                    message=f"test_delete_and_read_deletes failed: {str(e)}",
+                    exception=e,
+                    traceback_str=traceback.format_exc(),
+                )
+            )
 
     def _verify_written_rows_present(
         self,

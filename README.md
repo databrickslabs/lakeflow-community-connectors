@@ -66,7 +66,7 @@ class LakeflowConnect:
 Each connector must include tests that run the **generic test suite** against a live source environment. These tests validate API usage, data parsing, and successful data retrieval.
 
 - **Generic test suite** — Connects to a real source using provided credentials to verify end-to-end functionality
-- **Write-back testing** *(recommended)* — Use the provided test harness to write data, read it back, and verify incremental reads work correctly
+- **Write-back testing** *(recommended)* — Use the provided test harness to write data, read it back, and verify incremental reads and deletes(only for tables with ingestion type `cdc_with_deletes`) work correctly.
 - **Unit tests** — Recommended for complex library code or connector-specific logic
 
 ## Using and Testing Community Connectors
