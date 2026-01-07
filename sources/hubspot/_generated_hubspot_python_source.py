@@ -229,66 +229,77 @@ def register_lakeflow_source(spark):
             self._metadata_cache = {}
 
             # Centralized object metadata configuration
+            # supports_deletes: HubSpot only supports archived/deleted queries for core CRM objects
             self._object_config = {
                 "contacts": {
                     "primary_keys": ["id"],
                     "cursor_field": "updatedAt",
                     "cursor_property_field": "lastmodifieddate",
                     "associations": ["companies"],
+                    "supports_deletes": True,
                 },
                 "companies": {
                     "primary_keys": ["id"],
                     "cursor_field": "updatedAt",
                     "cursor_property_field": "hs_lastmodifieddate",
                     "associations": ["contacts"],
+                    "supports_deletes": True,
                 },
                 "deals": {
                     "primary_keys": ["id"],
                     "cursor_field": "updatedAt",
                     "cursor_property_field": "hs_lastmodifieddate",
                     "associations": ["contacts", "companies", "tickets"],
+                    "supports_deletes": True,
                 },
                 "tickets": {
                     "primary_keys": ["id"],
                     "cursor_field": "updatedAt",
                     "cursor_property_field": "hs_lastmodifieddate",
                     "associations": ["contacts", "companies", "deals"],
+                    "supports_deletes": True,
                 },
                 "calls": {
                     "primary_keys": ["id"],
                     "cursor_field": "updatedAt",
                     "cursor_property_field": "hs_lastmodifieddate",
                     "associations": ["contacts", "companies", "deals", "tickets"],
+                    "supports_deletes": False,  # HubSpot doesn't support archived queries for calls
                 },
                 "emails": {
                     "primary_keys": ["id"],
                     "cursor_field": "updatedAt",
                     "cursor_property_field": "hs_lastmodifieddate",
                     "associations": ["contacts", "companies", "deals", "tickets"],
+                    "supports_deletes": True,
                 },
                 "meetings": {
                     "primary_keys": ["id"],
                     "cursor_field": "updatedAt",
                     "cursor_property_field": "hs_lastmodifieddate",
                     "associations": ["contacts", "companies", "deals", "tickets"],
+                    "supports_deletes": False,  # HubSpot doesn't support archived queries for meetings
                 },
                 "tasks": {
                     "primary_keys": ["id"],
                     "cursor_field": "updatedAt",
                     "cursor_property_field": "hs_lastmodifieddate",
                     "associations": ["contacts", "companies", "deals", "tickets"],
+                    "supports_deletes": True,
                 },
                 "notes": {
                     "primary_keys": ["id"],
                     "cursor_field": "updatedAt",
                     "cursor_property_field": "hs_lastmodifieddate",
                     "associations": ["contacts", "companies", "deals", "tickets"],
+                    "supports_deletes": True,
                 },
                 "deal_split": {
                     "primary_keys": ["id"],
                     "cursor_field": "updatedAt",
                     "cursor_property_field": "hs_lastmodifieddate",
                     "associations": [],
+                    "supports_deletes": False,
                 },
             }
 
@@ -298,6 +309,7 @@ def register_lakeflow_source(spark):
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": [],
+                "supports_deletes": False,  # Custom objects don't support archived queries by default
             }
 
         def list_tables(self) -> list[str]:
@@ -443,13 +455,17 @@ def register_lakeflow_source(spark):
             properties = self._get_object_properties(table_name)
             property_names = [prop["name"] for prop in properties]
 
+            # Use cdc_with_deletes only for tables that support archived queries
+            supports_deletes = config.get("supports_deletes", False)
+            ingestion_type = "cdc_with_deletes" if supports_deletes else "cdc"
+
             return {
                 "primary_keys": config["primary_keys"],
                 "cursor_field": config["cursor_field"],
                 "cursor_property_field": config["cursor_property_field"],
                 "property_names": property_names,
                 "associations": config.get("associations", []),
-                "ingestion_type": "cdc",
+                "ingestion_type": ingestion_type,
             }
 
         def _discover_crm_object_schema(self, table_name: str) -> StructType:
@@ -539,11 +555,12 @@ def register_lakeflow_source(spark):
             self, table_name: str, start_offset: dict, table_options: Dict[str, str]
         ) -> (Iterator[dict], dict):
             """
-            Read data from HubSpot API using unified approach.
+            Read data from HubSpot API.
 
             Args:
                 table_name: Name of the table to read
                 start_offset: Dictionary containing cursor information for incremental reads
+                table_options: Additional options for reading
 
             Returns:
                 Tuple of (records, new_offset)
@@ -557,16 +574,84 @@ def register_lakeflow_source(spark):
                 start_offset is not None and start_offset.get("updatedAt") is not None
             )
 
-            if is_incremental:
-                return self._read_data(table_name, start_offset, incremental=True, table_options=table_options)
-            else:
-                return self._read_data(table_name, None, incremental=False, table_options=table_options)
+            return self._read_data(table_name, start_offset, incremental=is_incremental, table_options=table_options)
+
+        def read_table_deletes(
+            self, table_name: str, start_offset: dict, table_options: Dict[str, str]
+        ) -> (Iterator[dict], dict):
+            """
+            Read deleted (archived) records from HubSpot API.
+
+            HubSpot uses "archived" status to represent deleted records. This method
+            fetches all archived records and filters them client-side for incremental reads.
+
+            Internally uses archivedAt for filtering, but copies it to updatedAt in the
+            output records and offset for consistency with the normal read flow cursor.
+
+            Args:
+                table_name: Name of the table to read deleted records from
+                start_offset: Dictionary containing cursor information for incremental reads
+                             (uses 'updatedAt' key, which stores archivedAt values)
+                table_options: Additional options for reading
+
+            Returns:
+                Tuple of (deleted_records, new_offset) where updatedAt contains archivedAt value
+            """
+            supported_tables = self.list_tables()
+            if table_name not in supported_tables:
+                raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
+
+            # Get discovered properties (no associations needed for deletes)
+            metadata = self.read_table_metadata(table_name, table_options)
+            property_names = metadata.get("property_names", [])
+
+            all_records = []
+            after = None
+            # Use updatedAt from offset (which stores archivedAt values for delete flow)
+            checkpoint = start_offset.get("updatedAt") if start_offset else None
+            latest_archived = checkpoint
+
+            while True:
+                # Fetch archived records using the Objects API with archived=true
+                records, after = self._fetch_full_refresh_batch(
+                    table_name, property_names, associations=[], after=after, archived=True
+                )
+
+                if not records:
+                    break
+
+                # Filter client-side for incremental deletes based on archivedAt (from raw records)
+                if checkpoint:
+                    records = [r for r in records if r.get("archivedAt", "") > checkpoint]
+
+                # Transform records
+                transformed_records = self._transform_records(records, table_name)
+
+                # Copy archivedAt to updatedAt for consistency with normal flow cursor
+                for i, transformed in enumerate(transformed_records):
+                    archived_at = records[i].get("archivedAt")
+                    if archived_at:
+                        transformed["updatedAt"] = archived_at
+                        if not latest_archived or archived_at > latest_archived:
+                            latest_archived = archived_at
+
+                all_records.extend(transformed_records)
+
+                if not after:
+                    break
+
+                # Rate limiting
+                time.sleep(0.1)
+
+            # Return offset with updatedAt key for consistency with normal flow
+            offset = {"updatedAt": latest_archived} if latest_archived else {}
+            return all_records, offset
 
         def _read_data(
             self, table_name: str, start_offset: dict = None, incremental: bool = False,
             table_options: Dict[str, str] = None
         ):
-            """Unified method to read data from HubSpot API"""
+            """Read active (non-archived) data from HubSpot API"""
 
             # Get discovered properties and object configuration
             metadata = self.read_table_metadata(table_name, table_options)
@@ -576,7 +661,8 @@ def register_lakeflow_source(spark):
 
             all_records = []
             after = None
-            latest_updated = start_offset.get("updatedAt") if start_offset else None
+            checkpoint = start_offset.get("updatedAt") if start_offset else None
+            latest_updated = checkpoint
 
             while True:
                 if incremental:
@@ -595,7 +681,7 @@ def register_lakeflow_source(spark):
                 else:
                     # Use objects API for full refresh
                     records, after = self._fetch_full_refresh_batch(
-                        table_name, property_names, associations, after
+                        table_name, property_names, associations, after, archived=False
                     )
 
                 if not records:
@@ -605,14 +691,11 @@ def register_lakeflow_source(spark):
                 transformed_records = self._transform_records(records, table_name)
                 all_records.extend(transformed_records)
 
-                # Update latest timestamp for full refresh
-                if not incremental:
-                    for record in transformed_records:
-                        updated_at = record.get("updatedAt")
-                        if updated_at and (
-                            not latest_updated or updated_at > latest_updated
-                        ):
-                            latest_updated = updated_at
+                # Update latest timestamp
+                for record in transformed_records:
+                    updated_at = record.get("updatedAt")
+                    if updated_at and (not latest_updated or updated_at > latest_updated):
+                        latest_updated = updated_at
 
                 if not after:
                     break
@@ -629,9 +712,11 @@ def register_lakeflow_source(spark):
             property_names: List[str],
             associations: List[str],
             after: str = None,
+            archived: bool = False,
         ):
             """Fetch a batch of records using full refresh API"""
-            url = f"{self.base_url}/crm/v3/objects/{table_name}?limit=100&archived=false"
+            archived_param = "true" if archived else "false"
+            url = f"{self.base_url}/crm/v3/objects/{table_name}?limit=100&archived={archived_param}"
 
             if after:
                 url += f"&after={after}"
@@ -783,6 +868,7 @@ def register_lakeflow_source(spark):
     TABLE_NAME = "tableName"
     TABLE_NAME_LIST = "tableNameList"
     TABLE_CONFIGS = "tableConfigs"
+    IS_DELETE_FLOW = "isDeleteFlow"
 
 
     class LakeflowStreamReader(SimpleDataSourceStreamReader):
@@ -807,9 +893,20 @@ def register_lakeflow_source(spark):
             return {}
 
         def read(self, start: dict) -> (Iterator[tuple], dict):
-            records, offset = self.lakeflow_connect.read_table(
-                self.options[TABLE_NAME], start, self.options
-            )
+            is_delete_flow = self.options.get(IS_DELETE_FLOW) == "true"
+            # Strip delete flow options before passing to connector
+            table_options = {
+                k: v for k, v in self.options.items() if k != IS_DELETE_FLOW
+            }
+
+            if is_delete_flow:
+                records, offset = self.lakeflow_connect.read_table_deletes(
+                    self.options[TABLE_NAME], start, table_options
+                )
+            else:
+                records, offset = self.lakeflow_connect.read_table(
+                    self.options[TABLE_NAME], start, table_options
+                )
             rows = map(lambda x: parse_value(x, self.schema), records)
             return rows, offset
 

@@ -35,6 +35,7 @@ The connection can also be created using the standard Unity Catalog API.
 <If only a static list of objects is supported, list all of them. Otherwise, describe the supported objects by category or provide a general description>
 <Describe the primary key columns of each object, if available>
 <Describe the incremental ingestion strategy and cursor field for objects that support incremental reads>
+<If the connector supports delete synchronization (cdc_with_deletes), list which objects support it and explain how deleted records are detected (e.g., archived flag, soft delete endpoint)>
 <Describe the required and optional configurations needed for each object>
 <You don't need to describe the full schema, but highlight any special columns that require attention.>
 

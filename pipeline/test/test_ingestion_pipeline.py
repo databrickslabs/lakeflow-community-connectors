@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """
 Tests for ingestion_pipeline module.
 
@@ -18,6 +19,7 @@ mock_pyspark.pipelines = mock_sdp
 mock_pyspark.sql = MagicMock()
 mock_pyspark.sql.functions = MagicMock()
 mock_pyspark.sql.functions.col = MagicMock(side_effect=lambda x: f"col({x})")
+mock_pyspark.sql.functions.expr = MagicMock(side_effect=lambda x: f"expr({x})")
 
 sys.modules["pyspark"] = mock_pyspark
 sys.modules["pyspark.pipelines"] = mock_sdp
@@ -73,6 +75,11 @@ def base_metadata():
             "primary_keys": ["event_id"],
             "cursor_field": "timestamp",
             "ingestion_type": "append",
+        },
+        "contacts": {
+            "primary_keys": ["contact_id"],
+            "cursor_field": "updated_at",
+            "ingestion_type": "cdc_with_deletes",
         },
     }
 
@@ -193,6 +200,146 @@ class TestIngestCDC:
             # Verify custom primary_keys is used
             call_kwargs = mock_sdp.apply_changes.call_args[1]
             assert call_kwargs["keys"] == ["id", "tenant_id"]
+
+
+class TestIngestCDCWithDeletes:
+    """Test CDC with deletes ingestion scenarios."""
+
+    def test_cdc_with_deletes_creates_both_flows(self, mock_spark, base_metadata):
+        """Test that cdc_with_deletes creates both normal and delete flows."""
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "contacts",
+                        "table_configuration": {},
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=base_metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            # Verify streaming table was created once
+            mock_sdp.create_streaming_table.assert_called_once_with(name="contacts")
+
+            # Verify two views were created: normal and delete staging
+            assert mock_sdp.view.call_count == 2
+            view_calls = [call[1]["name"] for call in mock_sdp.view.call_args_list]
+            assert "contacts_staging" in view_calls
+            assert "contacts_delete_staging" in view_calls
+
+            # Verify apply_changes was called twice (normal + delete flow)
+            assert mock_sdp.apply_changes.call_count == 2
+
+    def test_cdc_with_deletes_delete_flow_parameters(self, mock_spark, base_metadata):
+        """Test delete flow has correct apply_changes parameters."""
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "contacts",
+                        "table_configuration": {},
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=base_metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            # Find the delete flow apply_changes call
+            apply_changes_calls = mock_sdp.apply_changes.call_args_list
+            delete_flow_call = None
+            normal_flow_call = None
+
+            for call in apply_changes_calls:
+                kwargs = call[1]
+                if "apply_as_deletes" in kwargs:
+                    delete_flow_call = kwargs
+                else:
+                    normal_flow_call = kwargs
+
+            # Verify normal flow parameters
+            assert normal_flow_call is not None
+            assert normal_flow_call["target"] == "contacts"
+            assert normal_flow_call["source"] == "contacts_staging"
+            assert normal_flow_call["keys"] == ["contact_id"]
+            assert normal_flow_call["sequence_by"] == "col(updated_at)"
+            assert normal_flow_call["stored_as_scd_type"] == "1"
+
+            # Verify delete flow parameters
+            assert delete_flow_call is not None
+            assert delete_flow_call["target"] == "contacts"
+            assert delete_flow_call["source"] == "contacts_delete_staging"
+            assert delete_flow_call["keys"] == ["contact_id"]
+            assert delete_flow_call["apply_as_deletes"] == "expr(true)"
+            assert delete_flow_call["name"] == "contacts_delete_staging_delete_flow"
+
+    def test_cdc_with_deletes_with_scd_type_2(self, mock_spark, base_metadata):
+        """Test cdc_with_deletes with SCD Type 2."""
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "contacts",
+                        "table_configuration": {
+                            "scd_type": "SCD_TYPE_2",
+                        },
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=base_metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            # Verify both apply_changes calls have SCD type 2
+            for call in mock_sdp.apply_changes.call_args_list:
+                kwargs = call[1]
+                assert kwargs["stored_as_scd_type"] == "2"
+
+    def test_cdc_with_deletes_custom_primary_keys_and_cursor(self, mock_spark, base_metadata):
+        """Test cdc_with_deletes with custom primary_keys and sequence_by from spec."""
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "contacts",
+                        "table_configuration": {
+                            "primary_keys": ["id", "tenant_id"],
+                            "sequence_by": "modified_at",
+                        },
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=base_metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            # Verify both flows use custom primary keys and sequence_by
+            for call in mock_sdp.apply_changes.call_args_list:
+                kwargs = call[1]
+                assert kwargs["keys"] == ["id", "tenant_id"]
+                assert kwargs["sequence_by"] == "col(modified_at)"
 
 
 class TestIngestSnapshot:
@@ -345,6 +492,12 @@ class TestIngestMultipleTables:
                         "table_configuration": {},
                     }
                 },
+                {
+                    "table": {
+                        "source_table": "contacts",
+                        "table_configuration": {},
+                    }
+                },
             ],
         }
 
@@ -354,15 +507,16 @@ class TestIngestMultipleTables:
         ):
             ingest(mock_spark, spec)
 
-            # Verify streaming tables were created for all
-            assert mock_sdp.create_streaming_table.call_count == 3
+            # Verify streaming tables were created for all 4 tables
+            assert mock_sdp.create_streaming_table.call_count == 4
             create_calls = mock_sdp.create_streaming_table.call_args_list
             table_names = [c[1]["name"] for c in create_calls]
-            assert set(table_names) == {"users", "orders", "events"}
+            assert set(table_names) == {"users", "orders", "events", "contacts"}
 
-            # Verify CDC was called for users
-            mock_sdp.apply_changes.assert_called_once()
-            assert mock_sdp.apply_changes.call_args[1]["target"] == "users"
+            # Verify apply_changes called 3 times:
+            # - 1 for users (cdc)
+            # - 2 for contacts (cdc_with_deletes: normal + delete flow)
+            assert mock_sdp.apply_changes.call_count == 3
 
             # Verify snapshot was called for orders
             mock_sdp.apply_changes_from_snapshot.assert_called_once()

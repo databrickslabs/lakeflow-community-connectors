@@ -79,6 +79,7 @@ class LakeflowConnectTester:
             self.test_get_table_schema()
             self.test_read_table_metadata()
             self.test_read_table()
+            self.test_read_table_deletes()
 
             # Test write functionality if connector_test_utils is available
             if hasattr(self, "connector_test_utils") and self.connector_test_utils is not None:
@@ -408,6 +409,18 @@ class LakeflowConnectTester:
                             "cursor_field": metadata["cursor_field"],
                         }
                     )
+                elif (
+                    metadata.get("ingestion_type") == "cdc_with_deletes"
+                    and not hasattr(self.connector, "read_table_deletes")
+                ):
+                    failed_tables.append(
+                        {
+                            "table": table_name,
+                            "reason": "ingestion_type is 'cdc_with_deletes' but "
+                            "connector does not implement read_table_deletes()",
+                            "ingestion_type": metadata.get("ingestion_type"),
+                        }
+                    )
                 else:
                     passed_tables.append(
                         {
@@ -479,41 +492,29 @@ class LakeflowConnectTester:
                 )
             )
 
-    def test_read_table(self):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
-        """Test read_table method on all available tables"""
-        # Get all tables to test with
-        try:
-            tables = self.connector.list_tables()
-            if not tables:
-                self._add_result(
-                    TestResult(
-                        test_name="test_read_table",
-                        status=TestStatus.FAILED,
-                        message="No tables available to test read_table",
-                    )
-                )
-                return
+    def _test_read_method(  # pylint: disable=too-many-locals,too-many-branches
+        self,
+        test_name: str,
+        read_fn: Callable,
+        tables: List[str],
+        success_message: str,
+    ):
+        """
+        Shared helper to test read_table or read_table_deletes methods.
 
-        except Exception:
-            self._add_result(
-                TestResult(
-                    test_name="test_read_table",
-                    status=TestStatus.FAILED,
-                    message="Could not get tables for testing read_table",
-                )
-            )
-            return
-
-        # Test each table
+        Args:
+            test_name: Name of the test for reporting
+            read_fn: The read function to call (e.g., connector.read_table)
+            tables: List of table names to test
+            success_message: Message to show on success
+        """
         passed_tables = []
         failed_tables = []
         error_tables = []
 
         for table_name in tables:
             try:
-                result = self.connector.read_table(
-                    table_name, {}, self._get_table_options(table_name)
-                )
+                result = read_fn(table_name, {}, self._get_table_options(table_name))
 
                 # Validate return type is tuple
                 if not isinstance(result, tuple) or len(result) != 2:
@@ -568,14 +569,13 @@ class LakeflowConnectTester:
                         sample_records.append(record)
 
                     # Add to passed_tables if we didn't fail validation
-                    # (check if table is not in failed_tables)
                     if not any(f["table"] == table_name for f in failed_tables):
                         passed_tables.append(
                             {
                                 "table": table_name,
                                 "records_sampled": record_count,
                                 "offset_keys": list(offset.keys()),
-                                "sample_records": sample_records[:2],  # Show first 2 records
+                                "sample_records": sample_records[:2],
                             }
                         )
                 except Exception as iter_e:
@@ -587,8 +587,8 @@ class LakeflowConnectTester:
                     )
                     continue
 
+                # Validate records can be parsed with schema
                 try:
-                    # Pass table_options to get_table_schema to match the LakeflowConnect interface
                     schema = self.connector.get_table_schema(
                         table_name, self._get_table_options(table_name)
                     )
@@ -620,10 +620,9 @@ class LakeflowConnectTester:
         error_count = len(error_tables)
 
         if error_count > 0:
-            # If any tables had errors, mark as ERROR
             self._add_result(
                 TestResult(
-                    test_name="test_read_table",
+                    test_name=test_name,
                     status=TestStatus.ERROR,
                     message=f"Tested {total_tables} tables: {passed_count} passed, "
                     f"{failed_count} failed, {error_count} errors",
@@ -636,10 +635,9 @@ class LakeflowConnectTester:
                 )
             )
         elif failed_count > 0:
-            # If any tables failed validation, mark as FAILED
             self._add_result(
                 TestResult(
-                    test_name="test_read_table",
+                    test_name=test_name,
                     status=TestStatus.FAILED,
                     message=f"Tested {total_tables} tables: {passed_count} passed, "
                     f"{failed_count} failed",
@@ -652,12 +650,11 @@ class LakeflowConnectTester:
                 )
             )
         else:
-            # All tables passed
             self._add_result(
                 TestResult(
-                    test_name="test_read_table",
+                    test_name=test_name,
                     status=TestStatus.PASSED,
-                    message=f"Successfully read all {total_tables} tables",
+                    message=success_message.format(total_tables=total_tables),
                     details={
                         "total_tables": total_tables,
                         "passed_tables": passed_tables,
@@ -666,6 +663,100 @@ class LakeflowConnectTester:
                     },
                 )
             )
+
+    def test_read_table(self):
+        """Test read_table method on all available tables"""
+        try:
+            tables = self.connector.list_tables()
+            if not tables:
+                self._add_result(
+                    TestResult(
+                        test_name="test_read_table",
+                        status=TestStatus.FAILED,
+                        message="No tables available to test read_table",
+                    )
+                )
+                return
+        except Exception:
+            self._add_result(
+                TestResult(
+                    test_name="test_read_table",
+                    status=TestStatus.FAILED,
+                    message="Could not get tables for testing read_table",
+                )
+            )
+            return
+
+        self._test_read_method(
+            test_name="test_read_table",
+            read_fn=self.connector.read_table,
+            tables=tables,
+            success_message="Successfully read all {total_tables} tables",
+        )
+
+    def test_read_table_deletes(self):
+        """Test read_table_deletes method on tables with ingestion_type 'cdc_with_deletes'"""
+        # Skip if connector doesn't implement read_table_deletes
+        if not hasattr(self.connector, "read_table_deletes"):
+            self._add_result(
+                TestResult(
+                    test_name="test_read_table_deletes",
+                    status=TestStatus.PASSED,
+                    message="Skipped: connector does not implement read_table_deletes",
+                )
+            )
+            return
+
+        # Get tables with ingestion_type 'cdc_with_deletes'
+        try:
+            all_tables = self.connector.list_tables()
+            if not all_tables:
+                self._add_result(
+                    TestResult(
+                        test_name="test_read_table_deletes",
+                        status=TestStatus.PASSED,
+                        message="Skipped: No tables available",
+                    )
+                )
+                return
+        except Exception:
+            self._add_result(
+                TestResult(
+                    test_name="test_read_table_deletes",
+                    status=TestStatus.FAILED,
+                    message="Could not get tables for testing read_table_deletes",
+                )
+            )
+            return
+
+        # Filter to only tables with ingestion_type 'cdc_with_deletes'
+        tables_with_deletes = []
+        for table_name in all_tables:
+            try:
+                metadata = self.connector.read_table_metadata(
+                    table_name, self._get_table_options(table_name)
+                )
+                if metadata.get("ingestion_type") == "cdc_with_deletes":
+                    tables_with_deletes.append(table_name)
+            except Exception:
+                pass  # Skip tables we can't get metadata for
+
+        if not tables_with_deletes:
+            self._add_result(
+                TestResult(
+                    test_name="test_read_table_deletes",
+                    status=TestStatus.PASSED,
+                    message="Skipped: No tables with ingestion_type 'cdc_with_deletes'",
+                )
+            )
+            return
+
+        self._test_read_method(
+            test_name="test_read_table_deletes",
+            read_fn=self.connector.read_table_deletes,  # pylint: disable=no-member
+            tables=tables_with_deletes,
+            success_message="Successfully tested read_table_deletes on {total_tables} tables",
+        )
 
     def _field_exists_in_schema(self, field_path: str, schema) -> bool:
         """
@@ -1035,7 +1126,7 @@ class LakeflowConnectTester:
                 ingestion_type = metadata.get("ingestion_type", "cdc")
                 actual_count = len(after_write_records)
 
-                if ingestion_type in ["cdc", "append"]:
+                if ingestion_type in ["cdc", "cdc_with_deletes", "append"]:
                     # CDC/Append: should return at least 1 record (allows for concurrent writes)
                     if actual_count < 1:
                         failed_tables.append(
@@ -1082,7 +1173,7 @@ class LakeflowConnectTester:
 
                 expected_display = (
                     "≥ 1"
-                    if ingestion_type in ["cdc", "append"]
+                    if ingestion_type in ["cdc", "cdc_with_deletes", "append"]
                     else str(initial_record_count + 1)
                 )
                 passed_tables.append(
@@ -1138,9 +1229,10 @@ class LakeflowConnectTester:
         returned_records: List[Dict],
         column_mapping: Dict[str, str],
     ) -> bool:
-        """Verify written rows are present in returned results.
-
-        Compares mapped column values.
+        """
+        Verify that written rows are present in the returned results.
+        Compares mapped column values. Supports nested column paths using
+        dot notation (e.g., 'properties.email').
         """
         if not written_rows or not column_mapping:
             return True
@@ -1169,8 +1261,10 @@ class LakeflowConnectTester:
             if isinstance(record, dict):
                 signature = {}
                 for written_col, returned_col in column_mapping.items():
-                    if returned_col in record:
-                        signature[written_col] = record[returned_col]
+                    # Handle nested paths (e.g., 'properties.email')
+                    value = self._get_nested_value(record, returned_col)
+                    if value is not None:
+                        signature[written_col] = value
 
                 print(f"\nreturned row: {signature}\n")
                 if signature:
@@ -1182,6 +1276,20 @@ class LakeflowConnectTester:
                 return False
 
         return True
+
+    def _get_nested_value(self, record: Dict, path: str) -> Any:
+        """
+        Get a value from a nested dictionary using dot notation path.
+        E.g., _get_nested_value({"properties": {"email": "x"}}, "properties.email") -> "x"
+        """
+        parts = path.split('.')
+        current = record
+        for part in parts:
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            else:
+                return None
+        return current
 
     def _add_result(self, result: TestResult):
         """Add a test result to the collection"""
