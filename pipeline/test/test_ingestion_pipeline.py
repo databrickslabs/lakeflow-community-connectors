@@ -11,8 +11,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pipeline.ingestion_pipeline import ingest
-
 # Mock pyspark modules before importing ingestion_pipeline
 mock_sdp = MagicMock()
 mock_pyspark = MagicMock()
@@ -27,6 +25,7 @@ sys.modules["pyspark.sql"] = mock_pyspark.sql
 sys.modules["pyspark.sql.functions"] = mock_pyspark.sql.functions
 
 # Now import the module under test
+from pipeline.ingestion_pipeline import ingest  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
