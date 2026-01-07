@@ -105,19 +105,18 @@ script_files = [
     "utils.py"
 ]
 
-print(f"Copying tool scripts to {SCRIPTS_DIR}...")
+print(f"Copying tool scripts to {SCRIPTS_DIR_DBFS}...")
 for script_name in script_files:
     workspace_path = f"{TOOLS_DIR_WORKSPACE}/{script_name}"
-    local_path = f"{SCRIPTS_DIR}/{script_name}"
+    dbfs_path = f"{SCRIPTS_DIR_DBFS}/{script_name}"
 
     try:
         # Export from workspace
         response = w.workspace.export(workspace_path, format=ExportFormat.SOURCE)
         # Decode base64 content
         content = base64.b64decode(response.content).decode('utf-8')
-        # Write to local DBFS path
-        with open(local_path, 'w') as f:
-            f.write(content)
+        # Write to DBFS using dbutils.fs.put (overwrites if exists)
+        dbutils.fs.put(dbfs_path, content, overwrite=True)
         print(f"  ✓ Copied {script_name}")
     except Exception as e:
         print(f"  ✗ Failed to copy {script_name}: {e}")
