@@ -214,7 +214,7 @@ with open(DAB_YAML_PATH, 'r') as f:
 # COMMAND ----------
 
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.workspace import ImportFormat
+from databricks.sdk.service.workspace import ImportFormat, Language
 import base64
 
 w = WorkspaceClient()
@@ -238,8 +238,8 @@ for ingest_file in sorted(Path(INGEST_FILES_DIR).glob("ingest_*.py")):
     w.workspace.import_(
         path=target_path,
         format=ImportFormat.SOURCE,
-        content=encoded_content,
-        overwrite=True
+        language=Language.PYTHON,
+        content=encoded_content
     )
 
     print(f"  ✓ Uploaded {ingest_file.name} -> {target_path}")
