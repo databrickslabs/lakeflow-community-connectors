@@ -21,66 +21,77 @@ class LakeflowConnect:
         self._metadata_cache = {}
 
         # Centralized object metadata configuration
+        # supports_deletes: HubSpot only supports archived/deleted queries for core CRM objects
         self._object_config = {
             "contacts": {
                 "primary_keys": ["id"],
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "lastmodifieddate",
                 "associations": ["companies"],
+                "supports_deletes": True,
             },
             "companies": {
                 "primary_keys": ["id"],
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": ["contacts"],
+                "supports_deletes": True,
             },
             "deals": {
                 "primary_keys": ["id"],
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": ["contacts", "companies", "tickets"],
+                "supports_deletes": True,
             },
             "tickets": {
                 "primary_keys": ["id"],
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": ["contacts", "companies", "deals"],
+                "supports_deletes": True,
             },
             "calls": {
                 "primary_keys": ["id"],
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": ["contacts", "companies", "deals", "tickets"],
+                "supports_deletes": False,  # HubSpot doesn't support archived queries for calls
             },
             "emails": {
                 "primary_keys": ["id"],
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": ["contacts", "companies", "deals", "tickets"],
+                "supports_deletes": True,
             },
             "meetings": {
                 "primary_keys": ["id"],
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": ["contacts", "companies", "deals", "tickets"],
+                "supports_deletes": False,  # HubSpot doesn't support archived queries for meetings
             },
             "tasks": {
                 "primary_keys": ["id"],
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": ["contacts", "companies", "deals", "tickets"],
+                "supports_deletes": True,
             },
             "notes": {
                 "primary_keys": ["id"],
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": ["contacts", "companies", "deals", "tickets"],
+                "supports_deletes": True,
             },
             "deal_split": {
                 "primary_keys": ["id"],
                 "cursor_field": "updatedAt",
                 "cursor_property_field": "hs_lastmodifieddate",
                 "associations": [],
+                "supports_deletes": False,
             },
         }
 
@@ -90,6 +101,7 @@ class LakeflowConnect:
             "cursor_field": "updatedAt",
             "cursor_property_field": "hs_lastmodifieddate",
             "associations": [],
+            "supports_deletes": False,  # Custom objects don't support archived queries by default
         }
 
     def list_tables(self) -> list[str]:
@@ -235,13 +247,17 @@ class LakeflowConnect:
         properties = self._get_object_properties(table_name)
         property_names = [prop["name"] for prop in properties]
 
+        # Use cdc_with_deletes only for tables that support archived queries
+        supports_deletes = config.get("supports_deletes", False)
+        ingestion_type = "cdc_with_deletes" if supports_deletes else "cdc"
+
         return {
             "primary_keys": config["primary_keys"],
             "cursor_field": config["cursor_field"],
             "cursor_property_field": config["cursor_property_field"],
             "property_names": property_names,
             "associations": config.get("associations", []),
-            "ingestion_type": "cdc",
+            "ingestion_type": ingestion_type,
         }
 
     def _discover_crm_object_schema(self, table_name: str) -> StructType:
@@ -331,11 +347,12 @@ class LakeflowConnect:
         self, table_name: str, start_offset: dict, table_options: Dict[str, str]
     ) -> (Iterator[dict], dict):
         """
-        Read data from HubSpot API using unified approach.
+        Read data from HubSpot API.
 
         Args:
             table_name: Name of the table to read
             start_offset: Dictionary containing cursor information for incremental reads
+            table_options: Additional options for reading
 
         Returns:
             Tuple of (records, new_offset)
@@ -344,31 +361,37 @@ class LakeflowConnect:
         if table_name not in supported_tables:
             raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
 
-        # Check if this is a delete flow
-        is_delete_flow = table_options.get("isDeleteFlow") == "true"
-
         # Determine if this is an incremental read
         is_incremental = (
             start_offset is not None and start_offset.get("updatedAt") is not None
         )
 
-        return self._read_data(
-            table_name, start_offset, incremental=is_incremental,
-            table_options=table_options, is_delete_flow=is_delete_flow
-        )
+        return self._read_data(table_name, start_offset, incremental=is_incremental, table_options=table_options)
 
-    def _read_data(
-        self, table_name: str, start_offset: dict = None, incremental: bool = False,
-        table_options: Dict[str, str] = None, is_delete_flow: bool = False
-    ):
-        """Unified method to read data from HubSpot API"""
+    def read_table_deletes(
+        self, table_name: str, start_offset: dict, table_options: Dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read deleted (archived) records from HubSpot API.
 
-        # Get discovered properties and object configuration
+        HubSpot uses "archived" status to represent deleted records. This method
+        fetches all archived records and filters them client-side for incremental reads.
+
+        Args:
+            table_name: Name of the table to read deleted records from
+            start_offset: Dictionary containing cursor information for incremental reads
+            table_options: Additional options for reading
+
+        Returns:
+            Tuple of (deleted_records, new_offset)
+        """
+        supported_tables = self.list_tables()
+        if table_name not in supported_tables:
+            raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
+
+        # Get discovered properties (no associations needed for deletes)
         metadata = self.read_table_metadata(table_name, table_options)
         property_names = metadata.get("property_names", [])
-        cursor_property_field = metadata.get("cursor_property_field")
-        # Delete flow doesn't need associations
-        associations = [] if is_delete_flow else metadata.get("associations", [])
 
         all_records = []
         after = None
@@ -376,8 +399,61 @@ class LakeflowConnect:
         latest_updated = checkpoint
 
         while True:
-            if incremental and not is_delete_flow:
-                # Use search API for incremental reads (normal flow only)
+            # Fetch archived records using the Objects API with archived=true
+            records, after = self._fetch_full_refresh_batch(
+                table_name, property_names, associations=[], after=after, archived=True
+            )
+
+            if not records:
+                break
+
+            # Transform records
+            transformed_records = self._transform_records(records, table_name)
+
+            # Filter client-side for incremental deletes
+            if checkpoint:
+                transformed_records = [
+                    r for r in transformed_records
+                    if r.get("updatedAt", "") > checkpoint
+                ]
+
+            all_records.extend(transformed_records)
+
+            # Update latest timestamp
+            for record in transformed_records:
+                updated_at = record.get("updatedAt")
+                if updated_at and (not latest_updated or updated_at > latest_updated):
+                    latest_updated = updated_at
+
+            if not after:
+                break
+
+            # Rate limiting
+            time.sleep(0.1)
+
+        offset = {"updatedAt": latest_updated} if latest_updated else {}
+        return all_records, offset
+
+    def _read_data(
+        self, table_name: str, start_offset: dict = None, incremental: bool = False,
+        table_options: Dict[str, str] = None
+    ):
+        """Read active (non-archived) data from HubSpot API"""
+
+        # Get discovered properties and object configuration
+        metadata = self.read_table_metadata(table_name, table_options)
+        property_names = metadata.get("property_names", [])
+        cursor_property_field = metadata.get("cursor_property_field")
+        associations = metadata.get("associations", [])
+
+        all_records = []
+        after = None
+        checkpoint = start_offset.get("updatedAt") if start_offset else None
+        latest_updated = checkpoint
+
+        while True:
+            if incremental:
+                # Use search API for incremental reads
                 records, after, updated_time = self._fetch_incremental_batch(
                     table_name,
                     property_names,
@@ -390,9 +466,9 @@ class LakeflowConnect:
                 ):
                     latest_updated = updated_time
             else:
-                # Use objects API for full refresh or delete flow
+                # Use objects API for full refresh
                 records, after = self._fetch_full_refresh_batch(
-                    table_name, property_names, associations, after, archived=is_delete_flow
+                    table_name, property_names, associations, after, archived=False
                 )
 
             if not records:
@@ -400,14 +476,6 @@ class LakeflowConnect:
 
             # Transform records
             transformed_records = self._transform_records(records, table_name)
-
-            # For delete flow with incremental, filter client-side
-            if is_delete_flow and checkpoint:
-                transformed_records = [
-                    r for r in transformed_records
-                    if r.get("updatedAt", "") > checkpoint
-                ]
-
             all_records.extend(transformed_records)
 
             # Update latest timestamp

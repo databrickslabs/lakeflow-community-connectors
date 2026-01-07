@@ -62,8 +62,10 @@ class LakeflowConnect:
                 - ingestion_type: The type of ingestion to use for the table. It
                     should be one of the following values:
                     - "snapshot": For snapshot loading.
-                    - "cdc": capture incremental changes
-                    - "append": incremental append
+                    - "cdc": Capture incremental changes (no delete support).
+                    - "cdc_with_deletes": Capture incremental changes with delete
+                        support. Requires implementing read_table_deletes().
+                    - "append": Incremental append.
         """
 
     def read_table(
@@ -95,4 +97,25 @@ class LakeflowConnect:
             `read_table`.
             records: An iterator of records in JSON format.
             offset: An offset in dict.
+        """
+
+    def read_table_deletes(
+        self, table_name: str, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read deleted records from a table for CDC delete synchronization.
+        This method is called when ingestion_type is "cdc_with_deletes" to fetch
+        records that have been deleted from the source system.
+
+        The returned records should have at minimum the primary key fields and
+        cursor field populated. Other fields can be null.
+
+        Args:
+            table_name: The name of the table to read deleted records from.
+            start_offset: The offset to start reading from (same format as read_table).
+            table_options: A dictionary of options for accessing the table.
+        Returns:
+            An iterator of deleted records in JSON format and an offset.
+            records: An iterator of deleted records (must include primary keys and cursor).
+            offset: An offset in dict (same format as read_table).
         """

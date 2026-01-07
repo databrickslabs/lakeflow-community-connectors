@@ -5,51 +5,6 @@ from pyspark.sql.functions import col, expr
 from libs.spec_parser import SpecParser
 
 
-def _is_first_run(spark, destination_table: str) -> bool:
-    """
-    Check if this is the first run by verifying the destination table doesn't exist.
-
-    Args:
-        spark: SparkSession
-        destination_table: Destination table name. Can be:
-            - Fully qualified: `catalog`.`schema`.`table`
-            - Just table name: `table` (uses pipeline config for catalog/schema)
-
-    Returns:
-        True if destination table doesn't exist (first run), False otherwise
-
-    Raises:
-        ValueError: If table name format is invalid or pipeline config is missing
-    """
-    # Clean up the table name - remove backticks
-    clean_name = destination_table.replace("`", "")
-    parts = clean_name.split(".")
-
-    table_name = parts[-1]  # Last part is always the table name
-
-    if len(parts) == 3:
-        # Fully qualified: catalog.schema.table
-        catalog, schema, _ = parts
-    elif len(parts) == 1:
-        # Just table name - get catalog/schema from pipeline config
-        catalog = spark.conf.get("pipelines.catalog", None)
-        schema = spark.conf.get("pipelines.schema", None)
-        if not catalog or not schema:
-            raise ValueError(
-                f"Cannot determine catalog/schema for table '{table_name}'. "
-                "Pipeline config 'pipelines.catalog' and 'pipelines.schema' must be set."
-            )
-    else:
-        # len(parts) == 2 is not a valid format
-        raise ValueError(
-            f"Invalid destination table format: '{destination_table}'. "
-            "Expected 'catalog.schema.table' or 'table' (with pipeline catalog/schema configured)."
-        )
-
-    query = f"SHOW TABLES IN `{catalog}`.`{schema}` LIKE '{table_name}'"
-    return spark.sql(query).count() == 0
-
-
 def _create_cdc_table(
     spark,
     connection_name: str,
@@ -60,9 +15,14 @@ def _create_cdc_table(
     scd_type: str,
     view_name: str,
     table_config: dict[str, str],
-    deletion_sync: bool = False,
+    with_deletes: bool = False,
 ) -> None:
-    """Create CDC table using streaming and apply_changes"""
+    """Create CDC table using streaming and apply_changes
+
+    Args:
+        with_deletes: If True, creates an additional delete flow to handle
+                      deleted records from the source.
+    """
 
     @sdp.view(name=view_name)
     def v():
@@ -83,8 +43,8 @@ def _create_cdc_table(
         stored_as_scd_type=scd_type,
     )
 
-    # Add delete flow for SCD type 1 tables with deletion_sync enabled (from second run onwards)
-    if scd_type == "1" and deletion_sync and not _is_first_run(spark, destination_table):
+    # Delete flow - only enabled for cdc_with_deletes ingestion type
+    if with_deletes:
         delete_view_name = source_table + "_delete_staging"
 
         @sdp.view(name=delete_view_name)
@@ -94,7 +54,6 @@ def _create_cdc_table(
                 .option("databricks.connection", connection_name)
                 .option("tableName", source_table)
                 .option("isDeleteFlow", "true")
-                .option("destinationTable", destination_table)
                 .options(**table_config)
                 .load()
             )
@@ -104,9 +63,8 @@ def _create_cdc_table(
             source=delete_view_name,
             keys=primary_keys,
             sequence_by=col(sequence_by),
-            stored_as_scd_type="1",
+            stored_as_scd_type=scd_type,
             delete_condition=expr("true"),
-            ignore_null_updates=True,
         )
 
 
@@ -212,9 +170,8 @@ def ingest(spark, pipeline_spec: dict) -> None:
         if scd_type_raw == "APPEND_ONLY":
             ingestion_type = "append"
         scd_type = "2" if scd_type_raw == "SCD_TYPE_2" else "1"
-        deletion_sync = spec.get_deletion_sync(table)
 
-        if ingestion_type == "cdc":
+        if ingestion_type in ("cdc", "cdc_with_deletes"):
             _create_cdc_table(
                 spark,
                 connection_name,
@@ -225,7 +182,7 @@ def ingest(spark, pipeline_spec: dict) -> None:
                 scd_type,
                 view_name,
                 table_config,
-                deletion_sync,
+                with_deletes=(ingestion_type == "cdc_with_deletes"),
             )
         elif ingestion_type == "snapshot":
             _create_snapshot_table(
