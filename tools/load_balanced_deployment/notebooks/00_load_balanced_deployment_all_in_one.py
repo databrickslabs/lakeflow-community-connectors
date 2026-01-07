@@ -28,52 +28,74 @@
 
 # COMMAND ----------
 
-# CONNECTOR SETTINGS
-CONNECTOR_NAME = "osipi"  # Change to your connector: osipi, hubspot, github, etc.
-CONNECTION_NAME = "osipi_connection_lakeflow"  # UC Connection name (must exist)
-DEST_CATALOG = "osipi"
-DEST_SCHEMA = "bronze"
+# ============================================================================
+# QUICK START CONFIGURATION - Edit these 3 lines for your connector
+# ============================================================================
 
-# DISCOVERY OPTIONS (set USE_PRESET=True to skip discovery)
-USE_PRESET = False  # Set to True to use preset CSV instead of discovery
-# PRESET_CSV_PATH will be set after USERNAME is defined (see below)
+CONNECTOR_NAME = "osipi"                                    # Your connector name (osipi, hubspot, github, zendesk, etc.)
+CONNECTION_NAME = f"{CONNECTOR_NAME}_connection_lakeflow"   # UC Connection name (auto-generated from connector name)
+USE_PRESET = True                                           # True = use preset CSV, False = run discovery
 
-# GROUPING STRATEGY (only used if USE_PRESET=False)
-GROUP_BY = "category_and_ingestion_type"  # Options: category_and_ingestion_type, ingestion_type, category, none
+# ============================================================================
+# DESTINATION CONFIGURATION (Optional - uses smart defaults)
+# ============================================================================
 
-# SCHEDULES (cron expressions, leave empty for no scheduled jobs)
-SCHEDULE_SNAPSHOT = "0 0 * * *"      # Daily at midnight
-SCHEDULE_APPEND = "*/15 * * * *"     # Every 15 minutes
-SCHEDULE_CDC = "*/5 * * * *"         # Every 5 minutes
-SCHEDULE_UNKNOWN = ""                # No schedule
+DEST_CATALOG = CONNECTOR_NAME    # Destination catalog (defaults to connector name)
+DEST_SCHEMA = "bronze"            # Destination schema
 
-# DEPLOYMENT SETTINGS
+# ============================================================================
+# ADVANCED CONFIGURATION (Optional - sensible defaults provided)
+# ============================================================================
+
+# Discovery settings (only used if USE_PRESET=False)
+GROUP_BY = "category_and_ingestion_type"     # How to group tables into pipelines
+SECRETS_SCOPE = f"sp-{CONNECTOR_NAME}"       # Databricks secrets scope for credentials
+SECRETS_TOKEN_KEY = "mock-bearer-token-plain"  # Secret key for access token
+MOCK_API_URL = None                          # Override API URL (None = use connector default)
+
+# Schedules (cron expressions, empty = no scheduled jobs)
+SCHEDULE_SNAPSHOT = "0 0 * * *"       # Daily at midnight
+SCHEDULE_APPEND = "*/15 * * * *"      # Every 15 minutes
+SCHEDULE_CDC = "*/5 * * * *"          # Every 5 minutes
+SCHEDULE_UNKNOWN = ""                 # No schedule for unknown types
+
+# Deployment settings
+CLUSTER_NUM_WORKERS = 2               # Number of workers for pipelines
+EMIT_SCHEDULED_JOBS = True            # Create scheduled jobs
+PAUSE_JOBS = True                     # Create jobs in PAUSED state
+
+# ============================================================================
+# AUTO-GENERATED PATHS (Do not edit - automatically configured)
+# ============================================================================
+
 import os
-import uuid
-from datetime import datetime
-
 USERNAME = spark.sql("SELECT current_user()").collect()[0][0]
-DATABRICKS_PROFILE = "dogfood"  # Change this to your Databricks CLI profile name
+DATABRICKS_PROFILE = "dogfood"  # CLI profile for SDK operations
 
-# OUTPUT PATHS (using local /tmp directory to avoid DBFS I/O issues)
-# Files are overwritable - same location each time for easy iteration
+# Local temp paths
 WORK_DIR = f"/tmp/{USERNAME.replace('@', '_').replace('.', '_')}/load_balanced_deployment_{CONNECTOR_NAME}"
-
 CSV_PATH = f"{WORK_DIR}/{CONNECTOR_NAME}_tables.csv"
 INGEST_FILES_DIR = f"{WORK_DIR}/{CONNECTOR_NAME}_ingest_files"
 DAB_YAML_PATH = f"{WORK_DIR}/{CONNECTOR_NAME}_bundle/databricks.yml"
-# Upload ingest files to repo directory so they can import from pipeline/ and libs/
-WORKSPACE_INGEST_PATH = f"/Workspace/Users/{USERNAME}/lakeflow-community-connectors/ingest/{CONNECTOR_NAME}"
-CLUSTER_NUM_WORKERS = 2
-EMIT_SCHEDULED_JOBS = True
-PAUSE_JOBS = True  # Create jobs in PAUSED state
 
-# Tool scripts workspace path - will be copied to local temp directory in Step 1 for subprocess access
+# Workspace paths (automatically constructed from USERNAME and CONNECTOR_NAME)
+WORKSPACE_INGEST_PATH = f"/Workspace/Users/{USERNAME}/lakeflow-community-connectors/ingest/{CONNECTOR_NAME}"
 TOOLS_DIR_WORKSPACE = f"/Workspace/Users/{USERNAME}/lakeflow-community-connectors/tools/load_balanced_deployment"
-# Connector source path in workspace - needed for discovery
 CONNECTOR_SOURCE_WORKSPACE = f"/Workspace/Users/{USERNAME}/lakeflow-community-connectors/sources/{CONNECTOR_NAME}/{CONNECTOR_NAME}.py"
-# Preset CSV path (workspace location)
 PRESET_CSV_PATH = f"/Workspace/Users/{USERNAME}/lakeflow-community-connectors/tools/load_balanced_deployment/examples/{CONNECTOR_NAME}/preset_by_category_and_ingestion.csv"
+
+# Print configuration summary
+print("="*70)
+print("CONFIGURATION SUMMARY")
+print("="*70)
+print(f"Connector:        {CONNECTOR_NAME}")
+print(f"Connection:       {CONNECTION_NAME}")
+print(f"Discovery Mode:   {'Preset CSV' if USE_PRESET else 'Auto-Discovery'}")
+print(f"Destination:      {DEST_CATALOG}.{DEST_SCHEMA}")
+print(f"User:             {USERNAME}")
+if not USE_PRESET:
+    print(f"Secrets Scope:    {SECRETS_SCOPE}")
+print("="*70)
 
 # COMMAND ----------
 
