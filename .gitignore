@@ -26,6 +26,7 @@ tools/ingestion_dab_generator/dab_template/resources/*_ingestion_pipelines.yml
 
 # Build artifacts / generated outputs (do not commit)
 sources/**/_generated_*_python_source.py
+!sources/osipi/_generated_osipi_python_source.py
 tools/ingestion_dab_generator/dab_template/.databricks/
 tools/ingestion_dab_generator/dab_template/resources/*_pipelines.yml
 dlt_notebooks/
