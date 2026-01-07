@@ -4,7 +4,8 @@ Schema validation script for example connector.
 Compares actual API responses with documented schemas.
 
 This is a template - copy to your connector and customize:
-    cp sources/example/test/validate_example_schemas.py sources/{source_name}/test/validate_{source_name}_schemas.py
+    cp sources/example/test/validate_example_schemas.py \\
+       sources/{source_name}/test/validate_{source_name}_schemas.py
 
 Usage:
     python sources/example/test/validate_example_schemas.py
@@ -19,6 +20,7 @@ from sources.example.example import LakeflowConnect
 
 
 def main():
+    """Run schema validation for example connector."""
     # Load config
     parent_dir = Path(__file__).parent.parent
     config_path = parent_dir / "configs" / "dev_config.json"

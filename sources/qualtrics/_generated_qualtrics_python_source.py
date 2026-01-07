@@ -239,6 +239,20 @@ def register_lakeflow_source(spark):
         DEFAULT_MAX_SURVEYS = 50  # Default limit for auto-consolidation
         CONSOLIDATION_DELAY_BETWEEN_SURVEYS = 0.5  # seconds (to respect rate limits)
 
+        @staticmethod
+        def get_poll_interval(progress_percent: float) -> float:
+            """Get polling interval based on export progress."""
+            return (
+                QualtricsConfig.EXPORT_POLL_INTERVAL_FAST
+                if progress_percent >= 50
+                else QualtricsConfig.EXPORT_POLL_INTERVAL_SLOW
+            )
+
+        @staticmethod
+        def get_retry_wait(attempt: int) -> float:
+            """Calculate exponential backoff wait time for HTTP retries."""
+            return 2 ** attempt
+
 
     class LakeflowConnect:
         def __init__(self, options: dict[str, str]) -> None:
@@ -248,8 +262,10 @@ def register_lakeflow_source(spark):
             Args:
                 options: Dictionary containing:
                     - api_token: Qualtrics API token
-                    - datacenter_id: Datacenter identifier (e.g., 'fra1', 'ca1', 'yourdatacenterid')
-                    - max_surveys: (Optional) Maximum number of surveys to consolidate when surveyId is not provided (default: 50)
+                    - datacenter_id: Datacenter identifier (e.g., 'fra1', 'ca1',
+                      'yourdatacenterid')
+                    - max_surveys: (Optional) Maximum number of surveys to
+                      consolidate when surveyId is not provided (default: 50)
             """
             self.api_token = options.get("api_token")
             self.datacenter_id = options.get("datacenter_id")
@@ -266,15 +282,92 @@ def register_lakeflow_source(spark):
             }
 
             # Auto-consolidation configuration
-            max_surveys_str = options.get("max_surveys", str(QualtricsConfig.DEFAULT_MAX_SURVEYS))
+            max_surveys_str = options.get(
+                "max_surveys", str(QualtricsConfig.DEFAULT_MAX_SURVEYS)
+            )
             try:
                 self.max_surveys = int(max_surveys_str)
             except ValueError:
-                logger.warning(f"Invalid max_surveys value '{max_surveys_str}', using default {QualtricsConfig.DEFAULT_MAX_SURVEYS}")
+                logger.warning(
+                    f"Invalid max_surveys value '{max_surveys_str}', "
+                    f"using default {QualtricsConfig.DEFAULT_MAX_SURVEYS}"
+                )
                 self.max_surveys = QualtricsConfig.DEFAULT_MAX_SURVEYS
 
             # Supported tables
-            self.tables = ["surveys", "survey_definitions", "survey_responses", "distributions", "mailing_lists", "mailing_list_contacts", "directory_contacts", "directories"]
+            self.tables = [
+                "surveys", "survey_definitions", "survey_responses",
+                "distributions", "mailing_lists", "mailing_list_contacts",
+                "directory_contacts", "directories"
+            ]
+
+            # Schema method mappings
+            self._schema_methods = {
+                "surveys": self._get_surveys_schema,
+                "survey_definitions": self._get_survey_definitions_schema,
+                "survey_responses": self._get_survey_responses_schema,
+                "distributions": self._get_distributions_schema,
+                "mailing_lists": self._get_mailing_lists_schema,
+                "mailing_list_contacts": self._get_mailing_list_contacts_schema,
+                "directory_contacts": self._get_directory_contacts_schema,
+                "directories": self._get_directories_schema,
+            }
+
+            # Reader method mappings
+            self._reader_methods = {
+                "surveys": self._read_surveys,
+                "survey_definitions": self._read_survey_definitions,
+                "survey_responses": self._read_survey_responses,
+                "distributions": self._read_distributions,
+                "mailing_lists": self._read_mailing_lists,
+                "mailing_list_contacts": self._read_mailing_list_contacts,
+                "directory_contacts": self._read_directory_contacts,
+                "directories": self._read_directories,
+            }
+
+            # Table metadata mappings
+            self._table_metadata = {
+                "surveys": {
+                    "primary_keys": ["id"],
+                    "cursor_field": "last_modified",
+                    "ingestion_type": "cdc"
+                },
+                "survey_definitions": {
+                    "primary_keys": ["survey_id"],
+                    "cursor_field": "last_modified",
+                    "ingestion_type": "cdc"
+                },
+                "survey_responses": {
+                    "primary_keys": ["response_id"],
+                    "cursor_field": "recorded_date",
+                    "ingestion_type": "append"
+                },
+                "distributions": {
+                    "primary_keys": ["id"],
+                    "cursor_field": "modified_date",
+                    "ingestion_type": "cdc"
+                },
+                "mailing_lists": {
+                    "primary_keys": ["mailing_list_id"],
+                    "cursor_field": None,
+                    "ingestion_type": "snapshot"
+                },
+                "mailing_list_contacts": {
+                    "primary_keys": ["contact_id"],
+                    "cursor_field": None,
+                    "ingestion_type": "snapshot"
+                },
+                "directory_contacts": {
+                    "primary_keys": ["contact_id"],
+                    "cursor_field": None,
+                    "ingestion_type": "snapshot"
+                },
+                "directories": {
+                    "primary_keys": ["directory_id"],
+                    "cursor_field": None,
+                    "ingestion_type": "snapshot"
+                },
+            }
 
         def list_tables(self) -> list[str]:
             """
@@ -302,29 +395,12 @@ def register_lakeflow_source(spark):
             Returns:
                 StructType representing the table schema
             """
-            if table_name not in self.tables:
+            if table_name not in self._schema_methods:
                 raise ValueError(
                     f"Unsupported table: {table_name}. Supported tables are: {self.tables}"
                 )
 
-            if table_name == "surveys":
-                return self._get_surveys_schema()
-            elif table_name == "survey_definitions":
-                return self._get_survey_definitions_schema()
-            elif table_name == "survey_responses":
-                return self._get_survey_responses_schema()
-            elif table_name == "distributions":
-                return self._get_distributions_schema()
-            elif table_name == "mailing_lists":
-                return self._get_mailing_lists_schema()
-            elif table_name == "mailing_list_contacts":
-                return self._get_mailing_list_contacts_schema()
-            elif table_name == "directory_contacts":
-                return self._get_directory_contacts_schema()
-            elif table_name == "directories":
-                return self._get_directories_schema()
-            else:
-                raise ValueError(f"Unknown table: {table_name}")
+            return self._schema_methods[table_name]()
 
         def _get_surveys_schema(self) -> StructType:
             """Get schema for surveys table."""
@@ -517,61 +593,12 @@ def register_lakeflow_source(spark):
             Returns:
                 Dictionary containing primary_keys, cursor_field, and ingestion_type
             """
-            if table_name not in self.tables:
+            if table_name not in self._table_metadata:
                 raise ValueError(
                     f"Unsupported table: {table_name}. Supported tables are: {self.tables}"
                 )
 
-            if table_name == "surveys":
-                return {
-                    "primary_keys": ["id"],
-                    "cursor_field": "last_modified",
-                    "ingestion_type": "cdc"
-                }
-            elif table_name == "survey_definitions":
-                return {
-                    "primary_keys": ["survey_id"],
-                    "cursor_field": "last_modified",
-                    "ingestion_type": "cdc"
-                }
-            elif table_name == "survey_responses":
-                return {
-                    "primary_keys": ["response_id"],
-                    "cursor_field": "recorded_date",
-                    "ingestion_type": "append"
-                }
-            elif table_name == "distributions":
-                return {
-                    "primary_keys": ["id"],
-                    "cursor_field": "modified_date",
-                    "ingestion_type": "cdc"
-                }
-            elif table_name == "mailing_lists":
-                return {
-                    "primary_keys": ["mailing_list_id"],
-                    "cursor_field": None,
-                    "ingestion_type": "snapshot"
-                }
-            elif table_name == "mailing_list_contacts":
-                return {
-                    "primary_keys": ["contact_id"],
-                    "cursor_field": None,
-                    "ingestion_type": "snapshot"
-                }
-            elif table_name == "directory_contacts":
-                return {
-                    "primary_keys": ["contact_id"],
-                    "cursor_field": None,
-                    "ingestion_type": "snapshot"
-                }
-            elif table_name == "directories":
-                return {
-                    "primary_keys": ["directory_id"],
-                    "cursor_field": None,
-                    "ingestion_type": "snapshot"
-                }
-            else:
-                raise ValueError(f"Unknown table: {table_name}")
+            return self._table_metadata[table_name]
 
         def read_table(
             self, table_name: str, start_offset: dict, table_options: dict[str, str]
@@ -587,29 +614,18 @@ def register_lakeflow_source(spark):
             Returns:
                 Tuple of (iterator of records, end offset)
             """
-            if table_name not in self.tables:
+            if table_name not in self._reader_methods:
                 raise ValueError(
                     f"Unsupported table: {table_name}. Supported tables are: {self.tables}"
                 )
 
-            if table_name == "surveys":
-                return self._read_surveys(start_offset)
-            elif table_name == "survey_definitions":
-                return self._read_survey_definitions(start_offset, table_options)
-            elif table_name == "survey_responses":
-                return self._read_survey_responses(start_offset, table_options)
-            elif table_name == "distributions":
-                return self._read_distributions(start_offset, table_options)
-            elif table_name == "mailing_lists":
-                return self._read_mailing_lists(start_offset, table_options)
-            elif table_name == "mailing_list_contacts":
-                return self._read_mailing_list_contacts(start_offset, table_options)
-            elif table_name == "directory_contacts":
-                return self._read_directory_contacts(start_offset, table_options)
-            elif table_name == "directories":
-                return self._read_directories(start_offset)
-            else:
-                raise ValueError(f"Unknown table: {table_name}")
+            reader_method = self._reader_methods[table_name]
+
+            # surveys and directories don't need table_options
+            if table_name in ("surveys", "directories"):
+                return reader_method(start_offset)
+
+            return reader_method(start_offset, table_options)
 
         # =========================================================================
         # Helpers
@@ -787,7 +803,10 @@ def register_lakeflow_source(spark):
                         new_per_survey_offsets[survey_id] = per_survey_offsets[survey_id]
                     continue
 
-            logger.info(f"Completed fetching {data_type}: {success_count} succeeded, {failure_count} failed, {len(all_records)} total records")
+            logger.info(
+                f"Completed fetching {data_type}: {success_count} succeeded, "
+                f"{failure_count} failed, {len(all_records)} total records"
+            )
 
             new_offset = {"surveys": new_per_survey_offsets}
             if all_records and cursor_field:
@@ -835,10 +854,16 @@ def register_lakeflow_source(spark):
 
                 # Check max limit
                 if len(survey_ids) >= self.max_surveys:
-                    logger.warning(f"Reached max_surveys limit of {self.max_surveys}. Consider increasing this limit in connection config if needed.")
+                    logger.warning(
+                        f"Reached max_surveys limit of {self.max_surveys}. "
+                        "Consider increasing this limit in connection config if needed."
+                    )
                     break
 
-            logger.info(f"Found {len(survey_ids)} survey(s) to process (max_surveys={self.max_surveys})")
+            logger.info(
+                f"Found {len(survey_ids)} survey(s) to process "
+                f"(max_surveys={self.max_surveys})"
+            )
             return survey_ids
 
         def _make_request(
@@ -873,7 +898,9 @@ def register_lakeflow_source(spark):
 
                     # Handle rate limiting
                     if response.status_code == 429:
-                        retry_after = int(response.headers.get("Retry-After", QualtricsConfig.RATE_LIMIT_DEFAULT_WAIT))
+                        retry_after = int(response.headers.get(
+                            "Retry-After", QualtricsConfig.RATE_LIMIT_DEFAULT_WAIT
+                        ))
                         logger.warning(f"Rate limited. Waiting {retry_after} seconds...")
                         time.sleep(retry_after)
                         continue
@@ -895,7 +922,10 @@ def register_lakeflow_source(spark):
 
                     # Exponential backoff
                     wait_time = 2 ** attempt
-                    logger.warning(f"Request failed, retrying in {wait_time} seconds... (attempt {attempt + 1}/{max_retries})")
+                    logger.warning(
+                        f"Request failed, retrying in {wait_time} seconds... "
+                        f"(attempt {attempt + 1}/{max_retries})"
+                    )
                     time.sleep(wait_time)
 
             raise Exception("Request failed")
@@ -929,11 +959,14 @@ def register_lakeflow_source(spark):
             Args:
                 start_offset: Dictionary containing cursor timestamp
                     - For single survey: {"lastModified": "2024-01-01T00:00:00Z"}
-                    - For auto-consolidation: {"surveys": {"SV_123": {"lastModified": "..."}, ...}, "lastModified": "..."}
+                    - For auto-consolidation: {"surveys": {"SV_123":
+                      {"lastModified": "..."}, ...}, "lastModified": "..."}
                 table_options: Optional 'surveyId' parameter
-                    - Single survey: "SV_123" - Returns definition for that specific survey
-                    - Multiple surveys: "SV_123, SV_456, SV_789" - Returns definitions for specified surveys (comma-separated)
-                    - All surveys: omit surveyId - Returns definitions for all surveys (auto-consolidation)
+                    - Single survey: "SV_123" - Returns definition for that survey
+                    - Multiple surveys: "SV_123, SV_456, SV_789" - Returns
+                      definitions for specified surveys (comma-separated)
+                    - All surveys: omit surveyId - Returns definitions for
+                      all surveys (auto-consolidation)
 
             Returns:
                 Tuple of (iterator of survey definition records, offset dict)
@@ -944,14 +977,20 @@ def register_lakeflow_source(spark):
             if survey_id_input and "," not in survey_id_input:
                 return self._read_single_survey_definition(survey_id_input.strip(), start_offset)
 
-            # Multiple surveys (comma-separated) or all surveys - use consolidated path with per-survey offsets
+            # Multiple surveys (comma-separated) or all surveys -
+            # use consolidated path with per-survey offsets
             if survey_id_input:
-                logger.info("Multiple surveyIds provided, auto-consolidating definitions from specified surveys")
+                logger.info(
+                    "Multiple surveyIds provided, auto-consolidating "
+                    "definitions from specified surveys"
+                )
             else:
                 logger.info("No surveyId provided, auto-consolidating definitions from all surveys")
             return self._read_all_survey_definitions(start_offset, table_options)
 
-        def _read_single_survey_definition(self, survey_id: str, start_offset: dict) -> (Iterator[dict], dict):
+        def _read_single_survey_definition(
+            self, survey_id: str, start_offset: dict
+        ) -> (Iterator[dict], dict):
             """
             Read a single survey definition from Qualtrics API.
 
@@ -983,7 +1022,10 @@ def register_lakeflow_source(spark):
                 if last_modified_cursor and survey_last_modified:
                     if survey_last_modified <= last_modified_cursor:
                         # No changes since last sync, skip this definition
-                        logger.info(f"Survey {survey_id} not modified since {last_modified_cursor}, skipping")
+                        logger.info(
+                            f"Survey {survey_id} not modified since "
+                            f"{last_modified_cursor}, skipping"
+                        )
                         return iter([]), {"lastModified": last_modified_cursor}
 
                 # Process the result to serialize complex nested fields as JSON strings
@@ -1028,7 +1070,9 @@ def register_lakeflow_source(spark):
                 logger.error(f"Error fetching survey definition for {survey_id}: {e}", exc_info=True)
                 raise
 
-        def _read_all_survey_definitions(self, start_offset: dict, table_options: dict[str, str]) -> (Iterator[dict], dict):
+        def _read_all_survey_definitions(
+            self, start_offset: dict, table_options: dict[str, str]
+        ) -> (Iterator[dict], dict):
             """
             Read survey definitions for all surveys from Qualtrics API.
 
@@ -1037,7 +1081,8 @@ def register_lakeflow_source(spark):
                 table_options: Not used for auto-consolidation
 
             Returns:
-                Tuple of (iterator of all survey definition records, new offset dict with per-survey cursors)
+                Tuple of (iterator of all survey definition records,
+                      new offset dict with per-survey cursors)
             """
             return self._iterate_all_surveys(
                 start_offset, table_options,
@@ -1064,9 +1109,11 @@ def register_lakeflow_source(spark):
             Args:
                 start_offset: Dictionary containing cursor timestamp(s)
                 table_options: Optional 'surveyId' parameter
-                    - Single survey: "SV_123" - Returns responses for that specific survey
-                    - Multiple surveys: "SV_123, SV_456, SV_789" - Returns responses for specified surveys (comma-separated)
-                    - All surveys: omit surveyId - Returns responses for all surveys (auto-consolidation)
+                    - Single survey: "SV_123" - Returns responses for that survey
+                    - Multiple surveys: "SV_123, SV_456, SV_789" - Returns
+                      responses for specified surveys (comma-separated)
+                    - All surveys: omit surveyId - Returns responses for
+                      all surveys (auto-consolidation)
 
             Returns:
                 Tuple of (iterator of response records, new offset)
@@ -1077,9 +1124,13 @@ def register_lakeflow_source(spark):
             if survey_id_input and "," not in survey_id_input:
                 return self._read_single_survey_responses(survey_id_input.strip(), start_offset)
 
-            # Multiple surveys (comma-separated) or all surveys - use consolidated path with per-survey offsets
+            # Multiple surveys (comma-separated) or all surveys -
+            # use consolidated path with per-survey offsets
             if survey_id_input:
-                logger.info("Multiple surveyIds provided, consolidating responses from specified surveys")
+                logger.info(
+                    "Multiple surveyIds provided, consolidating "
+                    "responses from specified surveys"
+                )
             else:
                 logger.info("No surveyId provided, auto-consolidating responses from all surveys")
             return self._read_all_survey_responses(start_offset, table_options)
@@ -1183,11 +1234,17 @@ def register_lakeflow_source(spark):
             except Exception as e:
                 error_msg = f"Failed to create response export for survey {survey_id}: {e}"
                 logger.error(error_msg, exc_info=True)
-                logger.info("This survey might not have any responses yet, or the API token lacks response export permissions.")
+                logger.info(
+                    "This survey might not have any responses yet, or the API "
+                    "token lacks response export permissions."
+                )
                 raise Exception(error_msg)
 
         def _poll_export_progress(
-            self, survey_id: str, progress_id: str, max_attempts: int = QualtricsConfig.MAX_EXPORT_POLL_ATTEMPTS
+            self,
+            survey_id: str,
+            progress_id: str,
+            max_attempts: int = QualtricsConfig.MAX_EXPORT_POLL_ATTEMPTS
         ) -> str:
             """
             Poll the export progress until completion.
@@ -1249,17 +1306,16 @@ def register_lakeflow_source(spark):
                 response.raise_for_status()
 
                 # Extract JSON from ZIP
-                zip_content = zipfile.ZipFile(io.BytesIO(response.content))
+                with zipfile.ZipFile(io.BytesIO(response.content)) as zip_content:
+                    # Find the JSON file in the ZIP
+                    json_files = [f for f in zip_content.namelist() if f.endswith('.json')]
 
-                # Find the JSON file in the ZIP
-                json_files = [f for f in zip_content.namelist() if f.endswith('.json')]
+                    if not json_files:
+                        raise ValueError("No JSON file found in export ZIP")
 
-                if not json_files:
-                    raise ValueError("No JSON file found in export ZIP")
-
-                # Read the first JSON file
-                json_content = zip_content.read(json_files[0])
-                data = json.loads(json_content)
+                    # Read the first JSON file
+                    json_content = zip_content.read(json_files[0])
+                    data = json.loads(json_content)
 
                 # Extract responses array
                 responses = data.get("responses", [])
@@ -1286,9 +1342,22 @@ def register_lakeflow_source(spark):
             Returns:
                 Processed response record
             """
-            processed = {}
+            processed = self._extract_simple_fields(record)
+            processed["surveyId"] = survey_id
+            processed["values"] = self._process_question_values(record)
 
-            # Copy simple fields - try both top-level and from values map
+            # Process other map fields
+            processed["labels"] = record.get("labels")
+            processed["displayedFields"] = record.get("displayedFields")
+            processed["displayedValues"] = record.get("displayedValues")
+            processed["embeddedData"] = self._extract_embedded_data(record)
+
+            # Normalize all keys to snake_case before returning
+            return self._normalize_keys(processed)
+
+        def _extract_simple_fields(self, record: dict) -> dict:
+            """Extract simple metadata fields from response record."""
+            processed = {}
             simple_fields = [
                 "responseId", "recordedDate", "startDate", "endDate",
                 "status", "ipAddress", "progress", "duration", "finished",
@@ -1305,17 +1374,13 @@ def register_lakeflow_source(spark):
                 elif field in values_map:
                     value_obj = values_map[field]
                     if isinstance(value_obj, dict):
-                        # Extract from textEntry if it's a dict
                         processed[field] = value_obj.get("textEntry")
                     else:
                         processed[field] = value_obj
                 else:
                     processed[field] = None
 
-            # Add surveyId - API doesn't return this, but we know it from the query
-            processed["surveyId"] = survey_id
-
-                # Handle responseId field
+            # Handle responseId field
             if not processed.get("responseId") and "_recordId" in values_map:
                 record_id_obj = values_map["_recordId"]
                 if isinstance(record_id_obj, dict):
@@ -1323,57 +1388,54 @@ def register_lakeflow_source(spark):
                 else:
                     processed["responseId"] = record_id_obj
 
-            # Process values (question responses)
-            # Filter out metadata fields that we've already extracted
+            return processed
+
+        def _process_question_values(self, record: dict) -> dict:
+            """Process question response values, filtering out metadata."""
             metadata_fields = {
                 "responseId", "surveyId", "recordedDate", "startDate", "endDate",
                 "status", "ipAddress", "progress", "duration", "finished",
                 "distributionChannel", "userLanguage", "locationLatitude", "locationLongitude",
-                "_recordId"  # Internal field
+                "_recordId"
             }
 
             values = record.get("values", {})
-            if values:
-                processed_values = {}
-                for qid, value_data in values.items():
-                    # Skip metadata fields - only keep actual question responses
-                    if qid in metadata_fields:
-                        continue
+            if not values:
+                return None
 
-                    if isinstance(value_data, dict):
-                        # Keep structure, set None for missing fields
-                        processed_values[qid] = {
-                            "choiceText": value_data.get("choiceText"),
-                            "choiceId": value_data.get("choiceId"),
-                            "textEntry": value_data.get("textEntry")
-                        }
-                    else:
-                        # If value is not a dict, create minimal structure
-                        processed_values[qid] = {
-                            "choiceText": None,
-                            "choiceId": None,
-                            "textEntry": str(value_data) if value_data is not None else None
-                        }
-                processed["values"] = processed_values if processed_values else None
-            else:
-                processed["values"] = None
+            processed_values = {}
+            for qid, value_data in values.items():
+                # Skip metadata fields - only keep actual question responses
+                if qid in metadata_fields:
+                    continue
 
-            # Process other map fields
-            processed["labels"] = record.get("labels")
-            processed["displayedFields"] = record.get("displayedFields")
-            processed["displayedValues"] = record.get("displayedValues")
+                if isinstance(value_data, dict):
+                    # Keep structure, set None for missing fields
+                    processed_values[qid] = {
+                        "choiceText": value_data.get("choiceText"),
+                        "choiceId": value_data.get("choiceId"),
+                        "textEntry": value_data.get("textEntry")
+                    }
+                else:
+                    # If value is not a dict, create minimal structure
+                    processed_values[qid] = {
+                        "choiceText": None,
+                        "choiceId": None,
+                        "textEntry": str(value_data) if value_data is not None else None
+                    }
 
-                # Process embeddedData field
+            return processed_values if processed_values else None
+
+        def _extract_embedded_data(self, record: dict) -> dict:
+            """Extract embeddedData field from record or values map."""
             embedded_data = record.get("embeddedData")
-            if embedded_data is None and "embeddedData" in values_map:
-                # Try to get from values map
-                ed_obj = values_map["embeddedData"]
-                if isinstance(ed_obj, dict):
-                    embedded_data = ed_obj.get("textEntry")
-            processed["embeddedData"] = embedded_data
-
-            # Normalize all keys to snake_case before returning
-            return self._normalize_keys(processed)
+            if embedded_data is None:
+                values_map = record.get("values", {})
+                if "embeddedData" in values_map:
+                    ed_obj = values_map["embeddedData"]
+                    if isinstance(ed_obj, dict):
+                        embedded_data = ed_obj.get("textEntry")
+            return embedded_data
 
         # =========================================================================
         # Table Readers: Distributions
@@ -1388,9 +1450,11 @@ def register_lakeflow_source(spark):
             Args:
                 start_offset: Dictionary containing pagination token and cursor timestamp(s)
                 table_options: Optional 'surveyId' parameter
-                    - Single survey: "SV_123" - Returns distributions for that specific survey
-                    - Multiple surveys: "SV_123, SV_456, SV_789" - Returns distributions for specified surveys (comma-separated)
-                    - All surveys: omit surveyId - Returns distributions for all surveys (auto-consolidation)
+                    - Single survey: "SV_123" - Returns distributions for that survey
+                    - Multiple surveys: "SV_123, SV_456, SV_789" - Returns
+                      distributions for specified surveys (comma-separated)
+                    - All surveys: omit surveyId - Returns distributions for
+                      all surveys (auto-consolidation)
 
             Returns:
                 Tuple of (iterator of distribution records, new offset)
@@ -1401,9 +1465,13 @@ def register_lakeflow_source(spark):
             if survey_id_input and "," not in survey_id_input:
                 return self._read_single_survey_distributions(survey_id_input.strip(), start_offset)
 
-            # Multiple surveys (comma-separated) or all surveys - use consolidated path with per-survey offsets
+            # Multiple surveys (comma-separated) or all surveys -
+            # use consolidated path with per-survey offsets
             if survey_id_input:
-                logger.info("Multiple surveyIds provided, auto-consolidating distributions from specified surveys")
+                logger.info(
+                    "Multiple surveyIds provided, auto-consolidating "
+                    "distributions from specified surveys"
+                )
             else:
                 logger.info("No surveyId provided, auto-consolidating distributions from all surveys")
             return self._read_all_survey_distributions(start_offset, table_options)
