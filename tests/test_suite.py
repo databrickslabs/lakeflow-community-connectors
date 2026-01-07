@@ -753,7 +753,7 @@ class LakeflowConnectTester:
 
         self._test_read_method(
             test_name="test_read_table_deletes",
-            read_fn=self.connector.read_table_deletes,
+            read_fn=self.connector.read_table_deletes,  # pylint: disable=no-member
             tables=tables_with_deletes,
             success_message="Successfully tested read_table_deletes on {total_tables} tables",
         )

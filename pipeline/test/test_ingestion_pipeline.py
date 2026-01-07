@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """
 Tests for ingestion_pipeline module.
 
