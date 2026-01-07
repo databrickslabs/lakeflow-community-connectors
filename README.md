@@ -57,9 +57,8 @@ class LakeflowConnect:
     def read_table(self, table_name: str, start_offset: dict, table_options: dict[str, str]) -> (Iterator[dict], dict):
         """Yield records as JSON dicts and return the next offset for incremental reads."""
 
-    # Optional - only required if ingestion_type is "cdc_with_deletes"
     def read_table_deletes(self, table_name: str, start_offset: dict, table_options: dict[str, str]) -> (Iterator[dict], dict):
-        """Yield deleted records (with primary keys and cursor) for delete synchronization."""
+        """Optional: Yield deleted records for delete synchronization. Only required if ingestion_type is 'cdc_with_deletes'."""
 ```
 
 ### Tests

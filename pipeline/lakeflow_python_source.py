@@ -43,7 +43,7 @@ class LakeflowStreamReader(SimpleDataSourceStreamReader):
         is_delete_flow = self.options.get(IS_DELETE_FLOW) == "true"
         # Strip delete flow options before passing to connector
         table_options = {
-            k: v for k, v in self.options.items() if k not in (IS_DELETE_FLOW)
+            k: v for k, v in self.options.items() if k != IS_DELETE_FLOW
         }
 
         if is_delete_flow:

@@ -18,16 +18,14 @@ class SdpTableConfig:
     primary_keys: List[str]
     sequence_by: str
     scd_type: str
+    with_deletes: bool = False
 
 
 def _create_cdc_table(
-    spark, connection_name: str, config: SdpTableConfig, with_deletes: bool = False
+    spark, connection_name: str, config: SdpTableConfig
 ) -> None:
     """Create CDC table using streaming and apply_changes
 
-    Args:
-        with_deletes: If True, creates an additional delete flow to handle
-                      deleted records from the source.
     """
 
     @sdp.view(name=config.view_name)
@@ -50,7 +48,7 @@ def _create_cdc_table(
     )
 
     # Delete flow - only enabled for cdc_with_deletes ingestion type
-    if with_deletes:
+    if config.with_deletes:
         delete_view_name = config.source_table + "_delete_staging"
 
         @sdp.view(name=delete_view_name)
@@ -176,14 +174,14 @@ def ingest(spark, pipeline_spec: dict) -> None:
             primary_keys=primary_keys,
             sequence_by=sequence_by,
             scd_type=scd_type,
+            with_deletes=(ingestion_type == "cdc_with_deletes"),
         )
 
         if ingestion_type in ("cdc", "cdc_with_deletes"):
             _create_cdc_table(
                 spark,
                 connection_name,
-                config,
-                with_deletes=(ingestion_type == "cdc_with_deletes"),
+                config
             )
         elif ingestion_type == "snapshot":
             _create_snapshot_table(spark, connection_name, config)
