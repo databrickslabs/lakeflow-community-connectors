@@ -87,14 +87,6 @@ class LakeflowConnect:
                 # Required permission: ChannelMessage.Read.All (Application) - same as messages
                 # Supports fetch_all_messages=true to auto-discover all messages in channel
             },
-            "message_reactions": {
-                "primary_keys": ["message_id", "reaction_type", "user_id", "polled_at"],
-                "ingestion_type": "snapshot",
-                "endpoint": "teams/{team_id}/channels/{channel_id}/messages/{message_id}",
-                "requires_parent": ["team_id", "channel_id"],
-                # Required permission: ChannelMessage.Read.All (Application)
-                # Slow-lane polling approach: periodically fetch messages to detect reaction changes
-            },
         }
 
         # Reusable nested schemas (following Stripe pattern)
@@ -453,6 +445,8 @@ class LakeflowConnect:
         Note: Chats table is not supported because the Microsoft Graph API /chats endpoint
         does not support Application Permissions (only Delegated Permissions with user context).
 
+        Reaction tracking is not implemented due to scalability concerns. See README for details.
+
         Returns:
             list[str]: Static list of table names
         """
@@ -462,7 +456,6 @@ class LakeflowConnect:
             "messages",
             "members",
             "message_replies",
-            "message_reactions",
         ]
 
     def get_table_schema(
@@ -617,24 +610,6 @@ class LakeflowConnect:
                 ]
             )
 
-        elif table_name == "message_reactions":
-            # Separate reactions table for slow-lane polling
-            return StructType(
-                [
-                    StructField("message_id", StringType(), False),
-                    StructField("team_id", StringType(), False),
-                    StructField("channel_id", StringType(), False),
-                    StructField("reaction_type", StringType(), False),
-                    StructField("display_name", StringType(), True),
-                    StructField("reaction_content_url", StringType(), True),
-                    StructField("created_datetime", StringType(), True),
-                    StructField("user_id", StringType(), True),
-                    StructField("user_display_name", StringType(), True),
-                    StructField("user_identity_type", StringType(), True),
-                    StructField("polled_at", StringType(), False),
-                ]
-            )
-
     def read_table_metadata(
         self, table_name: str, table_options: dict[str, str]
     ) -> dict:
@@ -701,8 +676,6 @@ class LakeflowConnect:
             return self._read_members(start_offset, table_options)
         elif table_name == "message_replies":
             return self._read_message_replies(start_offset, table_options)
-        elif table_name == "message_reactions":
-            return self._read_message_reactions(start_offset, table_options)
 
     def _read_teams(
         self, start_offset: dict, table_options: dict[str, str]
@@ -988,7 +961,7 @@ class LakeflowConnect:
         - O(changed_messages) instead of O(all_messages)
         - Handles deletions with @removed marker
 
-        Note: Delta API does NOT track reaction changes. Use message_reactions table.
+        Note: Delta API does NOT track reaction changes. Reactions are not tracked by this connector.
 
         Args:
             start_offset: Dictionary with deltaLink from previous sync
@@ -1738,215 +1711,6 @@ class LakeflowConnect:
             # Return empty on 404
 
         return records, max_modified
-
-    def _read_message_reactions(
-        self, start_offset: dict, table_options: dict[str, str]
-    ) -> Tuple[Iterator[dict], dict]:
-        """
-        Read message_reactions table using slow-lane polling.
-
-        This method periodically polls recent messages to detect reaction changes.
-        Since Delta API doesn't track reactions, we need to fetch individual messages.
-
-        Args:
-            start_offset: Not used for snapshot tables
-            table_options: Must include team_id and channel_id, or fetch_all flags
-
-        Configuration options:
-            - reaction_poll_window_days: Number of days of messages to poll (default: 7)
-            - reaction_poll_batch_size: Max messages to poll per run (default: 100)
-            - max_concurrent_threads: Parallel threads for polling (default: 10)
-
-        Returns:
-            Tuple of (iterator of reaction records, empty offset dict)
-        """
-        team_id = table_options.get("team_id")
-        channel_id = table_options.get("channel_id")
-        fetch_all_channels = table_options.get("fetch_all_channels", "").lower() == "true"
-        fetch_all_teams = table_options.get("fetch_all_teams", "").lower() == "true"
-
-        # Validate inputs
-        if not team_id and not fetch_all_teams:
-            raise ValueError(
-                "table_options for 'message_reactions' must include either 'team_id' "
-                "or 'fetch_all_teams=true'"
-            )
-
-        if not channel_id and not fetch_all_channels:
-            raise ValueError(
-                "table_options for 'message_reactions' must include either 'channel_id' "
-                "or 'fetch_all_channels=true'"
-            )
-
-        # Parse options
-        try:
-            poll_window_days = int(table_options.get("reaction_poll_window_days", 7))
-        except (TypeError, ValueError):
-            poll_window_days = 7
-
-        try:
-            poll_batch_size = int(table_options.get("reaction_poll_batch_size", 100))
-        except (TypeError, ValueError):
-            poll_batch_size = 100
-
-        try:
-            max_workers = int(table_options.get("max_concurrent_threads", 10))
-        except (TypeError, ValueError):
-            max_workers = 10
-
-        try:
-            max_pages = int(table_options.get("max_pages_per_batch", 100))
-        except (TypeError, ValueError):
-            max_pages = 100
-
-        # Determine which teams to process
-        if fetch_all_teams:
-            team_ids_to_process = self._fetch_all_team_ids(max_pages)
-        else:
-            team_ids_to_process = [team_id]
-
-        # Build team-channel pairs
-        all_team_channel_pairs = []
-        for current_team_id in team_ids_to_process:
-            if fetch_all_channels:
-                channel_ids_to_process = self._fetch_all_channel_ids(current_team_id, max_pages)
-                if not channel_ids_to_process:
-                    continue
-            else:
-                channel_ids_to_process = [channel_id]
-
-            for ch_id in channel_ids_to_process:
-                all_team_channel_pairs.append((current_team_id, ch_id))
-
-        # Get recent message IDs to poll
-        recent_message_ids = []
-        for current_team_id, current_channel_id in all_team_channel_pairs:
-            message_ids = self._fetch_recent_message_ids(
-                current_team_id,
-                current_channel_id,
-                days=poll_window_days,
-                limit=poll_batch_size
-            )
-            for msg_id in message_ids:
-                recent_message_ids.append((current_team_id, current_channel_id, msg_id))
-
-        # Poll messages in parallel to get reactions
-        records = []
-        polled_at = datetime.now().isoformat().replace("+00:00", "Z")
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(
-                    self._fetch_message_reactions,
-                    team_id,
-                    channel_id,
-                    message_id
-                ): (team_id, channel_id, message_id)
-                for team_id, channel_id, message_id in recent_message_ids
-            }
-
-            for future in as_completed(futures):
-                team_id, channel_id, message_id = futures[future]
-                try:
-                    reactions = future.result()
-
-                    for reaction in reactions:
-                        user_info = reaction.get("user", {}).get("user", {})
-                        records.append({
-                            "message_id": message_id,
-                            "team_id": team_id,
-                            "channel_id": channel_id,
-                            "reaction_type": reaction.get("reactionType"),
-                            "display_name": reaction.get("displayName"),
-                            "reaction_content_url": reaction.get("reactionContentUrl"),
-                            "created_datetime": reaction.get("createdDateTime"),
-                            "user_id": user_info.get("id"),
-                            "user_display_name": user_info.get("displayName"),
-                            "user_identity_type": user_info.get("userIdentityType"),
-                            "polled_at": polled_at,
-                        })
-                except Exception as e:
-                    # Skip inaccessible messages
-                    if "404" not in str(e) and "403" not in str(e):
-                        # Log other errors but continue
-                        pass
-
-        return iter(records), {}
-
-    def _fetch_recent_message_ids(
-        self, team_id: str, channel_id: str, days: int = 7, limit: int = 100
-    ) -> List[str]:
-        """
-        Fetch message IDs from the last N days (for slow-lane polling).
-
-        Args:
-            team_id: Team GUID
-            channel_id: Channel GUID
-            days: Number of days to look back (default: 7)
-            limit: Maximum number of message IDs to return (default: 100)
-
-        Returns:
-            List of message GUIDs (most recent first)
-        """
-        cutoff_date = (datetime.now() - timedelta(days=days)).isoformat().replace("+00:00", "Z")
-        url = f"{self.base_url}/teams/{team_id}/channels/{channel_id}/messages"
-        params = {"$top": 50}  # API max for messages
-
-        message_ids = []
-        pages_fetched = 0
-        max_pages = (limit // 50) + 1
-
-        try:
-            next_url = url
-            while next_url and pages_fetched < max_pages and len(message_ids) < limit:
-                if pages_fetched == 0:
-                    data = self._make_request_with_retry(url, params=params)
-                else:
-                    data = self._make_request_with_retry(next_url)
-
-                messages = data.get("value", [])
-                for msg in messages:
-                    # Stop if message is older than cutoff
-                    last_modified = msg.get("lastModifiedDateTime", "")
-                    if last_modified < cutoff_date:
-                        return message_ids
-
-                    message_ids.append(msg["id"])
-                    if len(message_ids) >= limit:
-                        return message_ids
-
-                next_url = data.get("@odata.nextLink")
-                pages_fetched += 1
-
-                if next_url:
-                    time.sleep(0.1)
-        except Exception as e:
-            # Return what we have if channel is inaccessible
-            if "404" in str(e) or "403" in str(e):
-                return message_ids
-            raise
-
-        return message_ids
-
-    def _fetch_message_reactions(
-        self, team_id: str, channel_id: str, message_id: str
-    ) -> List[dict]:
-        """
-        Fetch reactions for a single message.
-
-        Args:
-            team_id: Team GUID
-            channel_id: Channel GUID
-            message_id: Message GUID
-
-        Returns:
-            List of reaction dictionaries from Graph API
-        """
-        url = f"{self.base_url}/teams/{team_id}/channels/{channel_id}/messages/{message_id}"
-        params = {"$select": "id,reactions"}
-
-        data = self._make_request_with_retry(url, params=params)
-        return data.get("reactions", [])
 
 
 def register_lakeflow_source(spark):

@@ -145,25 +145,6 @@ pipeline_spec = {
                     "max_pages_per_batch": MAX_PAGES_PER_BATCH
                 }
             }
-        },
-
-        # 6. Message Reactions - Slow-lane polling for reactions
-        {
-            "table": {
-                "source_table": "message_reactions",
-                "destination_catalog": DESTINATION_CATALOG,
-                "destination_schema": DESTINATION_SCHEMA,
-                "destination_table": f"{TABLE_PREFIX}message_reactions",
-                "table_configuration": {
-                    "fetch_all_teams": "true",           # Auto-discover all teams
-                    "fetch_all_channels": "true",        # Auto-discover all channels per team
-                    "reaction_poll_window_days": "7",    # Poll messages from last 7 days
-                    "reaction_poll_batch_size": "100",   # Poll up to 100 messages per run
-                    "max_concurrent_threads": "10",      # Use 10 parallel threads
-                    "top": TOP,
-                    "max_pages_per_batch": MAX_PAGES_PER_BATCH
-                }
-            }
         }
     ]
 }
@@ -202,7 +183,6 @@ print(f"  • {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}channels"
 print(f"  • {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}members")
 print(f"  • {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}messages")
 print(f"  • {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}message_replies")
-print(f"  • {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}message_reactions")
 print("\nSample queries:")
 print(f"  SELECT * FROM {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}teams")
 print(f"  SELECT * FROM {DESTINATION_CATALOG}.{DESTINATION_SCHEMA}.{TABLE_PREFIX}messages")

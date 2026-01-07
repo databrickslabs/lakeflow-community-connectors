@@ -254,7 +254,7 @@ Once the connection is created and the custom connector is registered, you can c
    - The pipeline will show your connection and ingestion setup
    - Click **Run now** or configure a schedule to start ingesting data
 
-**📝 Note**: For a complete example with all 6 tables, see [sample-ingest.py](sample-ingest.py).
+**📝 Note**: For a complete example with all 5 tables, see [sample-ingest.py](sample-ingest.py).
 
 ---
 
@@ -276,7 +276,7 @@ Once the connection is created and the custom connector is registered, you can c
 
 ## Supported Tables
 
-The Microsoft Teams connector supports **6 core tables** with two ingestion modes:
+The Microsoft Teams connector supports **5 core tables** with two ingestion modes:
 
 **Ingestion Modes:**
 - **Snapshot (Full Refresh)**: Fetches all data on every run. Recommended for small, infrequently changing datasets (teams, channels, members).
@@ -291,7 +291,6 @@ The Microsoft Teams connector supports **6 core tables** with two ingestion mode
 | messages | **CDC** | `lastModifiedDateTime` | `team_id`, `channel_id` OR `fetch_all_channels` | `fetch_all_channels=true` |
 | members | Snapshot | - | `team_id` OR `fetch_all_teams` | `fetch_all_teams=true` |
 | message_replies | **CDC** | `lastModifiedDateTime` | `team_id`, `channel_id`, `message_id` OR `fetch_all_messages` | `fetch_all_messages=true` |
-| message_reactions | Snapshot | - | `team_id`, `channel_id` OR `fetch_all_channels` | `fetch_all_channels=true` |
 
 **Auto-Discovery Modes**: Instead of manually specifying parent IDs, you can use `fetch_all` modes to automatically discover and ingest all resources. See the [Automatic Discovery (fetch_all Modes)](#automatic-discovery-fetch_all-modes) section below.
 
@@ -433,70 +432,6 @@ Threaded message replies within channels.
   4. Add those message IDs to your pipeline configuration
 - The `parent_message_id` field enables joining replies back to parent messages
 - Same schema as messages table for consistency
-
----
-
-### 6. message_reactions (Snapshot - Slow-Lane Polling)
-
-Emoji reactions to messages, tracked separately via slow-lane polling.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| message_id | String | Parent message ID |
-| team_id | String | Team ID (connector-derived) |
-| channel_id | String | Channel ID (connector-derived) |
-| reaction_type | String | Emoji or reaction type (👍, ❤️, etc.) |
-| display_name | String | Human-readable reaction name |
-| reaction_content_url | String | URL to reaction asset |
-| created_datetime | String | When reaction was added |
-| user_id | String | User who reacted |
-| user_display_name | String | User's display name |
-| user_identity_type | String | User identity type |
-| polled_at | String | When we polled this message (snapshot timestamp) |
-
-**Ingestion Type:** Snapshot (append-only with polling timestamp)
-**Primary Key:** `["message_id", "reaction_type", "user_id", "polled_at"]`
-**Required Table Options:** `team_id`, `channel_id` (or use `fetch_all_teams`/`fetch_all_channels`)
-**Graph API Endpoint:** `GET /teams/{id}/channels/{id}/messages/{id}` (includes reactions in response)
-
-**Performance Tuning Options:**
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `reaction_poll_window_days` | 7 | Days of messages to poll for reactions |
-| `reaction_poll_batch_size` | 100 | Max messages to poll per run |
-| `max_concurrent_threads` | 10 | Parallel threads for polling |
-
-**Usage Notes:**
-
-- **Why a separate table?** Delta API doesn't track reaction changes, so we poll recent messages periodically
-- **Append-only design:** Each poll creates new records with `polled_at` timestamp - no MERGE/UPDATE needed
-- **Slow-lane polling:** Only polls messages from the last N days (configurable via `reaction_poll_window_days`)
-- **Parallel execution:** Uses ThreadPoolExecutor to poll multiple messages concurrently
-- **Auto-discovery support:** Works with `fetch_all_teams` and `fetch_all_channels` to automatically poll all messages
-- To track reaction history over time, query by `polled_at` to see reaction state at different times
-- To see current reactions, use the most recent `polled_at` value per message
-
-**Example Configuration:**
-
-```python
-{
-    "table": {
-        "source_table": "message_reactions",
-        "destination_catalog": "main",
-        "destination_schema": "teams_data",
-        "destination_table": "lakeflow_connector_message_reactions",
-        "table_configuration": {
-            **creds,  # tenant_id, client_id, client_secret
-            "fetch_all_teams": "true",
-            "fetch_all_channels": "true",
-            "reaction_poll_window_days": "7",  # Poll last 7 days
-            "reaction_poll_batch_size": "100",  # 100 messages per run
-            "max_concurrent_threads": "10",  # 10 parallel threads
-        }
-    }
-}
-```
 
 ---
 
@@ -696,12 +631,11 @@ pytest sources/microsoft_teams/test/test_microsoft_teams.py -v
 
 This demonstrates:
 
-- All 6 tables (teams, channels, members, messages, message_replies, message_reactions)
+- All 5 tables (teams, channels, members, messages, message_replies)
 - Full auto-discovery (no manual IDs needed)
 - Credentials from UC Connection (automatically injected)
 - Delta API for fast incremental sync
 - Parallel fetching with ThreadPoolExecutor
-- Slow-lane reaction polling
 
 ### Simple Example
 
@@ -816,8 +750,8 @@ The `lookback_seconds` parameter determines how far back from the current checkp
 
 | Option | Type | Default | Tables | Description |
 |--------|------|---------|--------|-------------|
-| `fetch_all_teams` | String (boolean) | `false` | channels, members, messages, message_reactions | Set to `"true"` to automatically discover and fetch from all teams |
-| `fetch_all_channels` | String (boolean) | `false` | messages, message_reactions | Set to `"true"` to automatically discover and fetch from all channels in the specified team |
+| `fetch_all_teams` | String (boolean) | `false` | channels, members, messages | Set to `"true"` to automatically discover and fetch from all teams |
+| `fetch_all_channels` | String (boolean) | `false` | messages | Set to `"true"` to automatically discover and fetch from all channels in the specified team |
 | `fetch_all_messages` | String (boolean) | `false` | message_replies | Set to `"true"` to automatically discover and fetch replies from all messages in the specified channel |
 
 **Note:** When using `fetch_all` modes, you don't need to specify the corresponding parent ID. For example, if `fetch_all_teams="true"`, you don't need to provide `team_id`.
@@ -827,27 +761,44 @@ The `lookback_seconds` parameter determines how far back from the current checkp
 | Option | Type | Default | Tables | Description |
 |--------|------|---------|--------|-------------|
 | `use_delta_api` | String (boolean) | `true` | messages, message_replies | Use Microsoft Graph Delta API for server-side filtering (O(changed) vs O(all)) |
-| `max_concurrent_threads` | String (integer) | `10` | message_replies (legacy mode), message_reactions | Number of parallel threads for fetching replies/reactions |
-| `reaction_poll_window_days` | String (integer) | `7` | message_reactions | Number of days of messages to poll for reactions |
-| `reaction_poll_batch_size` | String (integer) | `100` | message_reactions | Maximum number of messages to poll per run |
+| `max_concurrent_threads` | String (integer) | `10` | message_replies (legacy mode) | Number of parallel threads for fetching replies |
 
 **Delta API (`use_delta_api`):**
 - **Enabled by default** for messages and message_replies tables
 - Provides up to **1000x performance improvement** for large channels with few changes
 - Tracks message/reply changes server-side (only changed items returned)
-- Does NOT track reaction changes (use `message_reactions` table for reactions)
+- Does NOT track reaction changes (reactions are not supported by this connector)
 - Set to `"false"` to use legacy client-side filtering mode
 
 **Concurrent Threads (`max_concurrent_threads`):**
-- Controls parallelism for reply/reaction fetching
+
+- Controls parallelism for reply fetching
 - Higher values = faster ingestion, but more API calls
 - Adjust based on your API rate limits
 - Typical range: 5-20 threads
 
-**Reaction Polling (`message_reactions` table only):**
-- `reaction_poll_window_days`: Only poll messages from last N days (reduces API calls)
-- `reaction_poll_batch_size`: Limit messages polled per run (controls runtime)
-- Append-only design with `polled_at` timestamp (no MERGE/UPDATE operations)
+---
+
+## Limitations
+
+### Reactions Not Supported
+
+**Message reactions (emoji reactions like 👍, ❤️, etc.) are not tracked by this connector.**
+
+**Why?**
+
+- Microsoft Graph Delta API does not track reaction changes
+- Tracking reactions requires polling individual messages periodically
+- This approach does not scale well for large organizations with millions of messages
+- The polling-based implementation would generate excessive API calls and data volume over time
+
+**Workaround:**
+
+If you need reaction data for specific use cases:
+
+1. Query the `reactions` field in the `messages` or `message_replies` tables (reactions are included as an array field in message records)
+2. Implement custom polling logic outside of this connector for specific high-value messages/channels
+3. Use the Microsoft Graph API directly for targeted reaction queries
 
 ---
 
@@ -890,194 +841,6 @@ The `lookback_seconds` parameter determines how far back from the current checkp
 
 ---
 
-## Troubleshooting
-
-### Authentication Failures (401)
-
-**Error:** `RuntimeError: Token acquisition failed: 401`
-
-**Possible Causes:**
-- Incorrect `tenant_id`, `client_id`, or `client_secret`
-- Client secret has expired
-- App registration doesn't exist in specified tenant
-
-**Solutions:**
-- Verify credentials in Azure Portal → App registrations
-- Regenerate client secret if expired
-- Ensure tenant_id matches the tenant where app is registered
-
----
-
-### Permission Denied (403)
-
-**Error:** `RuntimeError: Forbidden (403). Please verify the app has required permissions`
-
-**Possible Causes:**
-- Missing API permissions
-- Admin consent not granted
-- App registration doesn't have application permissions configured
-
-**Solutions:**
-- Navigate to Azure Portal → App registrations → API permissions
-- Verify all required permissions are listed with type "Application"
-- Click "Grant admin consent for [Your Organization]"
-- Wait 5-10 minutes for permission changes to propagate
-
----
-
-### Resource Not Found (404)
-
-**Error:** `RuntimeError: Resource not found (404). Please verify team_id/channel_id`
-
-**Possible Causes:**
-- Invalid `team_id` or `channel_id`
-- App doesn't have access to the specified team
-- Team or channel has been deleted
-
-**Solutions:**
-- Use Microsoft Graph Explorer to verify IDs exist
-- Ensure app has `Team.ReadBasic.All` permission
-- Check if team is archived (archived teams may have limited access)
-
----
-
-### Rate Limiting (429)
-
-**Symptom:** Pipeline slows down or fails intermittently
-
-**Cause:** Exceeded Microsoft Graph API rate limits
-
-**Solutions:**
-- Connector automatically handles 429 with retry logic
-- Reduce `top` value to make smaller requests
-- Increase `max_pages_per_batch` to spread load over time
-- Avoid running multiple pipelines concurrently
-- Contact Microsoft support to request higher rate limits (enterprise only)
-
----
-
-## Performance Considerations
-
-### Performance Optimizations
-
-The connector implements several optimizations for efficient incremental sync:
-
-#### 1. Delta API (Fast-Lane) 🚀
-
-**What it is:** Microsoft Graph Delta API provides server-side filtering for messages and replies. Only changed/new/deleted items are returned.
-
-**Performance impact:** **O(changed_messages)** instead of **O(all_messages)** - up to **1000x faster** for large channels with few changes.
-
-**How it works:**
-- Initial sync: Fetches all items and returns a `deltaLink`
-- Subsequent syncs: Uses `deltaLink` to fetch only changes since last sync
-- Handles deletions: Items with `@removed` marker are flagged as deleted
-
-**Configuration:**
-- **Default:** Enabled (`use_delta_api="true"`)
-- **To disable:** Set `use_delta_api="false"` in table configuration
-- **Applies to:** `messages` and `message_replies` tables
-
-**Limitations:**
-- Delta API does NOT track reaction changes (use `message_reactions` table for reactions)
-
-**Example performance:**
-- Channel with 10,000 messages, 10 changed: Fetches **10 messages** instead of 10,000
-
-#### 2. Concurrent Thread Fetching ⚡
-
-**What it is:** ThreadPoolExecutor for parallel fetching of message replies and reactions.
-
-**Performance impact:** **10x faster** for channels with many threaded discussions.
-
-**How it works:**
-- Replies fetching: Polls multiple parent messages concurrently
-- Reactions polling: Polls multiple messages for reactions in parallel
-- Configurable thread count: Adjust based on your API rate limits
-
-**Configuration:**
-- **Option:** `max_concurrent_threads` (default: 10)
-- **Applies to:** `message_replies` (legacy mode) and `message_reactions` tables
-
-**Example:**
-```python
-table_configuration = {
-    **creds,
-    "max_concurrent_threads": "20",  # 20 parallel threads
-}
-```
-
-#### 3. Slow-Lane Polling for Reactions 🐢
-
-**What it is:** Separate `message_reactions` table polls recent messages to detect reaction changes.
-
-**Why needed:** Delta API doesn't track reaction changes, so we poll individual messages periodically.
-
-**Performance impact:** **10x faster** than re-fetching all messages - only polls recent messages.
-
-**How it works:**
-- Polls only messages from the last N days (configurable)
-- Uses append-only design (no MERGE/UPDATE operations)
-- Records snapshot with `polled_at` timestamp
-
-**Configuration:**
-- **Window:** `reaction_poll_window_days` (default: 7 days)
-- **Batch size:** `reaction_poll_batch_size` (default: 100 messages per run)
-- **Threads:** `max_concurrent_threads` (default: 10)
-
-**Example:**
-```python
-table_configuration = {
-    **creds,
-    "reaction_poll_window_days": "14",  # Poll last 2 weeks
-    "reaction_poll_batch_size": "200",  # 200 messages per run
-    "max_concurrent_threads": "15",  # 15 parallel threads
-}
-```
-
-### Performance Comparison
-
-| Scenario | Without Optimizations | With Optimizations | Speedup |
-|----------|----------------------|-------------------|---------|
-| Large channel (10K messages, 10 changed) | Fetch 10,000 | Fetch 10 | **1000x** |
-| Threaded channel (100 messages with replies) | Sequential | Parallel (10 threads) | **10x** |
-| Reaction tracking (1000 recent messages) | Re-fetch all | Poll 1000 | **10x** |
-
-### Expected Throughput
-
-Typical ingestion rates (approximate):
-
-- **Teams:** 100-500 teams/minute
-- **Channels:** 500-1,000 channels/minute
-- **Messages (Delta API):** 5,000-20,000 messages/minute (changed messages only)
-- **Messages (Legacy):** 1,000-5,000 messages/minute (all messages)
-- **Members:** 500-2,000 members/minute
-- **Message Replies (Delta API):** 5,000-20,000 replies/minute (changed replies only)
-- **Message Replies (Parallel):** 3,000-10,000 replies/minute (10 threads)
-- **Message Reactions:** 1,000-5,000 messages polled/minute (10 threads)
-
-**Factors affecting performance:**
-
-- API rate limits (primary bottleneck)
-- Network latency
-- Complexity of nested data (messages/replies with many attachments/reactions)
-- Concurrent pipeline runs
-- Thread count configuration
-
-### Optimizing for Large Datasets
-
-For organizations with millions of messages:
-
-1. **Use Delta API (enabled by default):** Dramatically reduces data transfer
-2. **Tune thread count:** Increase `max_concurrent_threads` based on your API rate limits
-3. **Partition by team/channel:** Run separate pipelines per team to parallelize across pipelines
-4. **Configure reaction polling window:** Reduce `reaction_poll_window_days` if you don't need historical reactions
-5. **Use CDC aggressively:** Always specify `start_date` to avoid full backfills
-6. **Schedule off-peak:** Run during low-activity hours
-7. **Monitor costs:** Graph API calls may incur costs for high-volume usage
-
----
-
 ## References
 
 ### Connector Documentation
@@ -1097,21 +860,6 @@ For organizations with millions of messages:
 ### Tools
 - [Microsoft Graph Explorer](https://developer.microsoft.com/en-us/graph/graph-explorer) - Test API calls
 - [Azure Portal](https://portal.azure.com) - Manage app registrations
-
----
-
-## Support
-
-For issues or questions:
-1. Check the troubleshooting section above
-2. Review the [Prerequisites](#prerequisites) and [Configuration Examples](#configuration-examples) sections
-3. Review the [Microsoft Graph API documentation](https://learn.microsoft.com/en-us/graph/api/resources/teams-api-overview)
-4. Verify Azure AD app configuration and permissions
-5. File an issue in the GitHub repository with:
-   - Connector version
-   - Error message and stack trace
-   - Pipeline specification (redact credentials)
-   - Steps to reproduce
 
 ---
 
