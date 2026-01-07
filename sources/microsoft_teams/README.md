@@ -113,33 +113,6 @@ Microsoft Graph
 
 After registering your Azure AD application and granting permissions, you need to configure the connector in your Databricks workspace.
 
-#### Store Credentials Securely
-
-**Before creating the connection**, store your Azure AD credentials in Databricks Secrets:
-
-```bash
-# Create a secret scope (one-time setup)
-databricks secrets create-scope microsoft_teams
-
-# Store your credentials using the Databricks CLI
-# You'll need to provide the secret value via string-value flag or it will open an editor
-databricks secrets put microsoft_teams tenant_id --string-value "your-tenant-id-here"
-databricks secrets put microsoft_teams client_id --string-value "your-client-id-here"
-databricks secrets put microsoft_teams client_secret --string-value "your-client-secret-here"
-```
-
-Alternatively, you can create secrets via the Databricks UI:
-
-1. Navigate to **Settings** → **Secrets** (or use the URL: `https://<your-workspace>/#secrets/createScope`)
-2. Create a new scope named `microsoft_teams`
-3. Add secrets for `tenant_id`, `client_id`, and `client_secret`
-
-**📝 Note:**
-
-- Credentials stored here will be referenced in the UC Connection using `{{secrets/scope/key}}` format
-- The UC Connection automatically injects these credentials into the connector
-- No need to use `dbutils.secrets.get()` in your pipeline code
-
 #### Create a Unity Catalog Connection
 
 A Unity Catalog connection can be created in two ways:
@@ -166,19 +139,19 @@ You can also create the connection separately before creating a pipeline:
    - **Connection type**: Select the appropriate type for community connectors
    - Configure credentials (see below)
 
-   **Required Credentials** (reference Databricks Secrets):
+   **Required Credentials:**
 
    | Key | Value | Description |
    | --- | ----- | ----------- |
-   | `tenant_id` | `{{secrets/microsoft_teams/tenant_id}}` | Azure AD tenant ID |
-   | `client_id` | `{{secrets/microsoft_teams/client_id}}` | Application (client) ID |
-   | `client_secret` | `{{secrets/microsoft_teams/client_secret}}` | Client secret value |
+   | `tenant_id` | `a1b2c3d4-e5f6-7890-abcd-ef1234567890` | Azure AD tenant ID (GUID format) |
+   | `client_id` | `f9e8d7c6-b5a4-3210-9876-543210fedcba` | Application (client) ID (GUID format) |
+   | `client_secret` | `abc123~xyz789.aBcDeFgHiJkLmNoPqRsTuVwXyZ` | Client secret value (from Azure Portal) |
    | `externalOptionsAllowList` | `tableName,tableNameList,tableConfigs,team_id,channel_id,message_id,start_date,top,max_pages_per_batch,lookback_seconds,fetch_all_teams,fetch_all_channels,fetch_all_messages,use_delta_api,max_concurrent_threads` | **REQUIRED:** Comma-separated list of allowed options. Includes framework options (tableName, tableNameList, tableConfigs) and connector-specific table options. |
 
    **📝 Note on Credentials:**
-   - Credentials are stored in the UC Connection using `{{secrets/scope/key}}` format
-   - This references Databricks Secrets you created earlier
-   - Credentials are automatically injected into the connector by Databricks
+   - Enter your actual Azure AD credentials directly in the connection
+   - Use the tenant ID, client ID, and client secret from Step 1
+   - Credentials are stored securely in the Unity Catalog Connection
    - No need to pass credentials in `table_configuration` - they come from the connection!
 
 4. **Create Connection**

@@ -6,11 +6,10 @@
 # Prerequisites:
 # 1. Install Databricks CLI: pip install databricks-cli
 # 2. Configure authentication: databricks configure --token
-# 3. Create a Databricks Secret Scope with your Azure AD credentials:
-#    databricks secrets create-scope microsoft_teams
-#    databricks secrets put microsoft_teams tenant_id --string-value "your-tenant-id"
-#    databricks secrets put microsoft_teams client_id --string-value "your-client-id"
-#    databricks secrets put microsoft_teams client_secret --string-value "your-client-secret"
+# 3. Get your Azure AD credentials from Step 1 of the README:
+#    - Tenant ID (from Azure Portal → App Registration → Overview)
+#    - Client ID (from Azure Portal → App Registration → Overview)
+#    - Client Secret (from Azure Portal → App Registration → Certificates & secrets)
 #
 # Usage:
 #   chmod +x uc_connection_example.sh
@@ -18,9 +17,9 @@
 
 # Configuration variables
 CONNECTION_NAME="microsoft_teams_connection"     # Choose your connection name
-TENANT_ID="{{secrets/microsoft_teams/tenant_id}}"
-CLIENT_ID="{{secrets/microsoft_teams/client_id}}"
-CLIENT_SECRET="{{secrets/microsoft_teams/client_secret}}"
+TENANT_ID="your-tenant-id-here"                  # Replace with your Azure AD tenant ID (GUID)
+CLIENT_ID="your-client-id-here"                  # Replace with your application client ID (GUID)
+CLIENT_SECRET="your-client-secret-here"          # Replace with your client secret value
 
 # REQUIRED: Whitelist of allowed options (framework + connector-specific)
 # Framework options: tableName, tableNameList, tableConfigs (required by ingestion pipeline)
