@@ -875,7 +875,7 @@ class LakeflowConnectTester:
                 TestResult(
                     test_name="test_list_deletable_tables",
                     status=TestStatus.PASSED,
-                    message="Skipped: connector_test_utils does not implement list_deletable_tables",
+                    message="Skipped: test utils does not implement list_deletable_tables",
                 )
             )
             return
@@ -1327,7 +1327,7 @@ class LakeflowConnectTester:
             )
         )
 
-    def test_delete_and_read_deletes(self):
+    def test_delete_and_read_deletes(self):  # pylint: disable=too-many-return-statements
         """Test delete functionality and verify deleted rows appear in read_table_deletes."""
         # Skip if connector test utils doesn't implement delete_rows
         if not hasattr(self.connector_test_utils, "delete_rows"):
@@ -1335,7 +1335,7 @@ class LakeflowConnectTester:
                 TestResult(
                     test_name="test_delete_and_read_deletes",
                     status=TestStatus.PASSED,
-                    message="Skipped: connector_test_utils does not implement delete_rows",
+                    message="Skipped: test utils does not implement delete_rows",
                 )
             )
             return
@@ -1374,6 +1374,10 @@ class LakeflowConnectTester:
 
         # Test one deletable table
         test_table = deletable_tables[0]
+        self._run_delete_test_for_table(test_table)
+
+    def _run_delete_test_for_table(self, test_table: str):
+        """Helper to run delete test for a single table."""
         try:
             # Step 1: Delete 1 row
             delete_result = self.connector_test_utils.delete_rows(test_table, 1)
@@ -1390,22 +1394,12 @@ class LakeflowConnectTester:
 
             success, deleted_rows, column_mapping = delete_result
 
-            if not success:
+            if not success or not deleted_rows:
                 self._add_result(
                     TestResult(
                         test_name="test_delete_and_read_deletes",
                         status=TestStatus.FAILED,
-                        message="delete_rows was not successful",
-                    )
-                )
-                return
-
-            if not deleted_rows:
-                self._add_result(
-                    TestResult(
-                        test_name="test_delete_and_read_deletes",
-                        status=TestStatus.FAILED,
-                        message="delete_rows returned empty deleted_rows",
+                        message="delete_rows failed or returned empty deleted_rows",
                     )
                 )
                 return
