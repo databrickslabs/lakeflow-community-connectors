@@ -726,15 +726,16 @@ The `lookback_seconds` parameter determines how far back from the current checkp
 
 | Option | Type | Default | Tables | Description |
 |--------|------|---------|--------|-------------|
-| `use_delta_api` | String (boolean) | `true` | messages, message_replies | Use Microsoft Graph Delta API for server-side filtering (O(changed) vs O(all)) |
-| `max_concurrent_threads` | String (integer) | `10` | message_replies (legacy mode) | Number of parallel threads for fetching replies |
+| `use_delta_api` | String (boolean) | `true` (messages), `false` (message_replies) | messages | Use Microsoft Graph Delta API for server-side filtering (O(changed) vs O(all)). **NOT supported for message_replies** - will fail with 400 error if enabled. |
+| `max_concurrent_threads` | String (integer) | `10` | message_replies | Number of parallel threads for fetching replies |
 
 **Delta API (`use_delta_api`):**
-- **Enabled by default** for messages and message_replies tables
-- Provides up to **1000x performance improvement** for large channels with few changes
-- Tracks message/reply changes server-side (only changed items returned)
+- **Enabled by default for messages table only**
+- **NOT supported for message_replies** - Microsoft Graph returns `400 BadRequest: "Change tracking is not supported against 'microsoft.graph.chatMessage'"` for the replies endpoint
+- Provides up to **1000x performance improvement** for large channels with few changes (messages only)
+- Tracks message changes server-side (only changed items returned)
 - Does NOT track reaction changes (reactions are not supported by this connector)
-- Set to `"false"` to use legacy client-side filtering mode
+- For message_replies, the connector automatically uses legacy client-side filtering mode
 
 **Concurrent Threads (`max_concurrent_threads`):**
 

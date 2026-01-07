@@ -1285,7 +1285,10 @@ class LakeflowConnect:
         Raises:
             ValueError: If required options are missing
         """
-        use_delta_api = table_options.get("use_delta_api", "true").lower() == "true"
+        # Delta API is NOT supported for message replies endpoint
+        # Microsoft Graph returns 400: "Change tracking is not supported against 'microsoft.graph.chatMessage'"
+        # Default to legacy mode (false) for message_replies
+        use_delta_api = table_options.get("use_delta_api", "false").lower() == "true"
 
         if use_delta_api:
             return self._read_message_replies_delta(start_offset, table_options)
