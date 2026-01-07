@@ -24,7 +24,7 @@ To integrate with the Spark Declarative Pipeline (SDP) used by Lakeflow Communit
 #  primary_keys ARRAY<STRING>, 
 #  cursor_field STRING,
 #  ingestion_type STRING
-# ingestion_type: snapshot, cdc, append
+# ingestion_type: snapshot, cdc, cdc_with_deletes, append
 
 spark.read.format("lakeflow_connect")
      .option("databricks.connection", connection_name)
@@ -51,10 +51,21 @@ spark.read.format("lakeflow_connect")
      .load()
 
 # API to streaming read
-# required if the table supports cdc or append ingestion type
+# required if the table supports cdc, cdc_with_deletes, or append ingestion type
 spark.readStream.format("lakeflow_connect")
      .option("databricks.connection", connection_name)
      .option("tableName", source_table)
+     .options(<other custom options>)
+     .load()
+
+# API to streaming read for delete flow
+# required if the table supports cdc_with_deletes ingestion type
+# The isDeleteFlow option triggers the connector to return deleted records
+# which are then applied as deletes to the destination table
+spark.readStream.format("lakeflow_connect")
+     .option("databricks.connection", connection_name)
+     .option("tableName", source_table)
+     .option("isDeleteFlow", "true")
      .options(<other custom options>)
      .load()
 ```

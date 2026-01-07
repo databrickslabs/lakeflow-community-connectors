@@ -30,9 +30,10 @@
 
 ## **Object's ingestion type**
 - Get information about whether a given object is to be incrementally ingested or not.
-- There are 3 types: `cdc`, `snapshot`, `append`.
-- `cdc` means the object can be read incrementally with upserts and/or deletes.
-- `snapshot`means the object can only be read with a snapshot, no incremental read.
+- There are 4 types: `cdc`, `cdc_with_deletes`, `snapshot`, `append`.
+- `cdc` means the object can be read incrementally with upserts only.
+- `cdc_with_deletes` means the object can be read incrementally with upserts AND supports fetching deleted records for delete synchronization.
+- `snapshot` means the object can only be read with a snapshot, no incremental read.
 - `append` means the object can be read incrementally but only new data, no change feeds. 
 
 ## **Read API for Data Retrieval**
