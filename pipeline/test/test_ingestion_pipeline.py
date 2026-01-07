@@ -25,6 +25,7 @@ sys.modules["pyspark.sql"] = mock_pyspark.sql
 sys.modules["pyspark.sql.functions"] = mock_pyspark.sql.functions
 
 # Now import the module under test
+# pylint: disable=wrong-import-position
 from pipeline.ingestion_pipeline import ingest  # noqa: E402
 
 
