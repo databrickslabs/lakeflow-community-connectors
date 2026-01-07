@@ -416,7 +416,8 @@ class LakeflowConnectTester:
                     failed_tables.append(
                         {
                             "table": table_name,
-                            "reason": "ingestion_type is 'cdc_with_deletes' but connector does not implement read_table_deletes()",
+                            "reason": "ingestion_type is 'cdc_with_deletes' but "
+                            "connector does not implement read_table_deletes()",
                             "ingestion_type": metadata.get("ingestion_type"),
                         }
                     )
@@ -491,7 +492,7 @@ class LakeflowConnectTester:
                 )
             )
 
-    def _test_read_method(
+    def _test_read_method(  # pylint: disable=too-many-locals,too-many-branches
         self,
         test_name: str,
         read_fn: Callable,
@@ -1229,8 +1230,9 @@ class LakeflowConnectTester:
         column_mapping: Dict[str, str],
     ) -> bool:
         """
-        Verify that written rows are present in the returned results by comparing mapped column values.
-        Supports nested column paths using dot notation (e.g., 'properties.email').
+        Verify that written rows are present in the returned results.
+        Compares mapped column values. Supports nested column paths using
+        dot notation (e.g., 'properties.email').
         """
         if not written_rows or not column_mapping:
             return True
