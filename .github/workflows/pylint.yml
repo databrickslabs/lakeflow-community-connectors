@@ -27,10 +27,10 @@ jobs:
         --max-line-length=100 \
         --disable=W,C0114,C0115,R0801,R1705 \
         --ignore-long-lines='^\s*(#|f?".*"|f?'\''.*'\'')$' \
-        $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py' | grep -v 'tools/scripts/merge_python_source.py' | grep -v 'community_connector/templates/ingest_template' | grep -v 'sources/github/' | grep -v 'sources/hubspot/' | grep -v 'sources/stripe/' | grep -v 'sources/mixpanel/' | grep -v 'test_')
+        $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py' | grep -v 'tools/scripts/merge_python_source.py' | grep -v 'community_connector/templates/ingest_template' | grep -v 'sources/hubspot/' | grep -v 'sources/stripe/' | grep -v 'sources/mixpanel/' | grep -v 'test_')
         # Lint test files with C0115,C0116 disabled
         pylint \
         --max-line-length=100 \
         --disable=W,C0114,C0115,R0801,R1705,C0115,C0116 \
         --ignore-long-lines='^\s*(#|f?".*"|f?'\''.*'\'')$' \
-        $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py' | grep -v 'tools/scripts/merge_python_source.py' | grep -v 'community_connector/templates/ingest_template' | grep -v 'sources/github/' | grep -v 'sources/hubspot/' | grep -v 'sources/stripe/' | grep -v 'sources/mixpanel/' | grep 'test_')
+        $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py' | grep -v 'tools/scripts/merge_python_source.py' | grep -v 'community_connector/templates/ingest_template' | grep -v 'sources/hubspot/' | grep -v 'sources/stripe/' | grep -v 'sources/mixpanel/' | grep 'test_')
