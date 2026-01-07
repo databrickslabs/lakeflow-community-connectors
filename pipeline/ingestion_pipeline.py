@@ -64,7 +64,8 @@ def _create_cdc_table(
             keys=primary_keys,
             sequence_by=col(sequence_by),
             stored_as_scd_type=scd_type,
-            delete_condition=expr("true"),
+            apply_as_deletes=expr("true"),
+            name=delete_view_name + "_delete_flow"
         )
 
 

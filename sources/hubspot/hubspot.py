@@ -376,14 +376,18 @@ class LakeflowConnect:
 
         HubSpot uses "archived" status to represent deleted records. This method
         fetches all archived records and filters them client-side for incremental reads.
+        
+        Internally uses archivedAt for filtering, but copies it to updatedAt in the
+        output records and offset for consistency with the normal read flow cursor.
 
         Args:
             table_name: Name of the table to read deleted records from
             start_offset: Dictionary containing cursor information for incremental reads
+                         (uses 'updatedAt' key, which stores archivedAt values)
             table_options: Additional options for reading
 
         Returns:
-            Tuple of (deleted_records, new_offset)
+            Tuple of (deleted_records, new_offset) where updatedAt contains archivedAt value
         """
         supported_tables = self.list_tables()
         if table_name not in supported_tables:
@@ -395,8 +399,9 @@ class LakeflowConnect:
 
         all_records = []
         after = None
+        # Use updatedAt from offset (which stores archivedAt values for delete flow)
         checkpoint = start_offset.get("updatedAt") if start_offset else None
-        latest_updated = checkpoint
+        latest_archived = checkpoint
 
         while True:
             # Fetch archived records using the Objects API with archived=true
@@ -407,23 +412,22 @@ class LakeflowConnect:
             if not records:
                 break
 
+            # Filter client-side for incremental deletes based on archivedAt (from raw records)
+            if checkpoint:
+                records = [r for r in records if r.get("archivedAt", "") > checkpoint]
+
             # Transform records
             transformed_records = self._transform_records(records, table_name)
 
-            # Filter client-side for incremental deletes
-            if checkpoint:
-                transformed_records = [
-                    r for r in transformed_records
-                    if r.get("updatedAt", "") > checkpoint
-                ]
+            # Copy archivedAt to updatedAt for consistency with normal flow cursor
+            for i, transformed in enumerate(transformed_records):
+                archived_at = records[i].get("archivedAt")
+                if archived_at:
+                    transformed["updatedAt"] = archived_at
+                    if not latest_archived or archived_at > latest_archived:
+                        latest_archived = archived_at
 
             all_records.extend(transformed_records)
-
-            # Update latest timestamp
-            for record in transformed_records:
-                updated_at = record.get("updatedAt")
-                if updated_at and (not latest_updated or updated_at > latest_updated):
-                    latest_updated = updated_at
 
             if not after:
                 break
@@ -431,7 +435,8 @@ class LakeflowConnect:
             # Rate limiting
             time.sleep(0.1)
 
-        offset = {"updatedAt": latest_updated} if latest_updated else {}
+        # Return offset with updatedAt key for consistency with normal flow
+        offset = {"updatedAt": latest_archived} if latest_archived else {}
         return all_records, offset
 
     def _read_data(

@@ -48,6 +48,8 @@ class LakeflowStreamReader(SimpleDataSourceStreamReader):
             records, offset = self.lakeflow_connect.read_table(
                 self.options["tableName"], start, table_options
             )
+        if is_delete_flow:
+            assert False, "records: %s, offset: %s" % (records, offset)
         rows = map(lambda x: parse_value(x, self.schema), records)
         return rows, offset
 
