@@ -701,119 +701,45 @@ pytest sources/microsoft_teams/test/test_microsoft_teams.py -v
 
 ---
 
-## Configuration Examples
+## Usage Example
 
-### Example 1: Configuration-Based Ingestion (Recommended)
+**For a complete, production-ready example, see [`sample-ingest.py`](sample-ingest.py).**
 
-The recommended approach uses Python configuration lists for a DLT-compatible, incremental workflow.
+This demonstrates:
 
-See the complete template in [`pipeline-spec/example_microsoft_teams_ingest.py`](../../pipeline-spec/example_microsoft_teams_ingest.py).
+- All 6 tables (teams, channels, members, messages, message_replies, message_reactions)
+- Full auto-discovery (no manual IDs needed)
+- Credentials from UC Connection (automatically injected)
+- Delta API for fast incremental sync
+- Parallel fetching with ThreadPoolExecutor
+- Slow-lane reaction polling
 
-```python
-# Configure credentials using Databricks Secrets
-TENANT_ID = dbutils.secrets.get("microsoft_teams", "tenant_id")
-CLIENT_ID = dbutils.secrets.get("microsoft_teams", "client_id")
-CLIENT_SECRET = dbutils.secrets.get("microsoft_teams", "client_secret")
-
-# Add team IDs to ingest
-TEAM_IDS = ["team-guid-1", "team-guid-2"]
-
-# Add specific channels for messages (optional)
-CHANNEL_IDS = [
-    {"team_id": "team-guid-1", "channel_id": "channel-guid-1"},
-]
-
-# Add specific messages for replies/threads (optional)
-REPLY_CONFIGS = [
-    {"team_id": "team-guid-1", "channel_id": "channel-guid-1", "message_id": "message-guid-1"},
-]
-
-# Run pipeline
-ingest(spark, pipeline_spec)
-```
-
-**Incremental Workflow:**
-1. Run with `TEAM_IDS = []` to ingest teams table
-2. Query teams table, copy IDs to `TEAM_IDS` list
-3. Run again to ingest channels and members for those teams
-4. Query channels table, copy IDs to `CHANNEL_IDS` list
-5. Run again to ingest messages from those channels
-6. Query messages table to identify threads, copy to `REPLY_CONFIGS` list
-7. Run again to ingest message_replies from those threads
-
----
-
-### Example 2: Simple Teams-Only Ingestion
-
-For getting started, ingest just the teams table:
-
-See [`pipeline-spec/example_microsoft_teams_simple_ingest.py`](../../pipeline-spec/example_microsoft_teams_simple_ingest.py).
+### Simple Example
 
 ```python
+from pipeline.ingestion_pipeline import ingest
+from libs.source_loader import get_register_function
+
+# Setup
+source_name = "microsoft_teams"
+connection_name = "microsoft_teams_connection"  # Credentials from UC Connection
+
+# Register connector
+register_lakeflow_source = get_register_function(source_name)
+register_lakeflow_source(spark)
+
+# Pipeline spec - credentials automatically injected from connection
 pipeline_spec = {
-    "connection_name": "microsoft_teams_connection",
+    "connection_name": connection_name,
     "objects": [
         {
             "table": {
                 "source_table": "teams",
                 "destination_catalog": "main",
                 "destination_schema": "teams_data",
-                "table_configuration": {
-                    "tenant_id": dbutils.secrets.get("microsoft_teams", "tenant_id"),
-                    "client_id": dbutils.secrets.get("microsoft_teams", "client_id"),
-                    "client_secret": dbutils.secrets.get("microsoft_teams", "client_secret")
-                }
-            }
-        }
-    ]
-}
-
-ingest(spark, pipeline_spec)
-```
-
----
-
-### Example 3: Fully Automated Ingestion (Zero Configuration)
-
-For the fastest setup, use the fully automated mode that discovers all resources without manual configuration:
-
-See [`sample-ingest.py`](sample-ingest.py) for a complete working example.
-
-```python
-# Credentials from Databricks Secrets - connector auto-discovers everything!
-creds = {
-    "tenant_id": dbutils.secrets.get("microsoft_teams", "tenant_id"),
-    "client_id": dbutils.secrets.get("microsoft_teams", "client_id"),
-    "client_secret": dbutils.secrets.get("microsoft_teams", "client_secret")
-}
-
-pipeline_spec = {
-    "connection_name": "microsoft_teams_connection",
-    "objects": [
-        # Teams (auto-discovers all teams)
-        {
-            "table": {
-                "source_table": "teams",
-                "destination_catalog": "main",
-                "destination_schema": "teams_data",
-                "destination_table": "lakeflow_connector_teams",
-                "table_configuration": creds
+                "destination_table": "lakeflow_connector_teams"
             }
         },
-        # Channels (auto-discovers all teams, then all channels)
-        {
-            "table": {
-                "source_table": "channels",
-                "destination_catalog": "main",
-                "destination_schema": "teams_data",
-                "destination_table": "lakeflow_connector_channels",
-                "table_configuration": {
-                    **creds,
-                    "fetch_all_teams": "true"  # Auto-discover all teams
-                }
-            }
-        },
-        # Messages (auto-discovers all teams, channels, then messages)
         {
             "table": {
                 "source_table": "messages",
@@ -821,25 +747,8 @@ pipeline_spec = {
                 "destination_schema": "teams_data",
                 "destination_table": "lakeflow_connector_messages",
                 "table_configuration": {
-                    **creds,
-                    "fetch_all_teams": "true",     # Auto-discover all teams
-                    "fetch_all_channels": "true",  # Auto-discover all channels
-                    "start_date": "2024-12-01T00:00:00Z"
-                }
-            }
-        },
-        # Message Replies (auto-discovers teams, channels, messages, then replies)
-        {
-            "table": {
-                "source_table": "message_replies",
-                "destination_catalog": "main",
-                "destination_schema": "teams_data",
-                "destination_table": "lakeflow_connector_message_replies",
-                "table_configuration": {
-                    **creds,
-                    "fetch_all_teams": "true",     # Auto-discover all teams
-                    "fetch_all_channels": "true",  # Auto-discover all channels
-                    "fetch_all_messages": "true",  # Auto-discover all messages
+                    "fetch_all_teams": "true",
+                    "fetch_all_channels": "true",
                     "start_date": "2024-12-01T00:00:00Z"
                 }
             }
@@ -847,79 +756,11 @@ pipeline_spec = {
     ]
 }
 
+# Run ingestion
 ingest(spark, pipeline_spec)
 ```
 
-**Benefits:**
-
-- No manual ID configuration required
-- Single pipeline run ingests all data
-- Perfect for initial setup or complete organization sync
-- Automatically handles new teams/channels as they're created
-
-**Use this when:**
-
-- You want to ingest all Teams data from your organization
-- You don't want to manually configure team/channel IDs
-- You're setting up for the first time and want a quick win
-
-**Consider the incremental approach (Example 1) when:**
-
-- You have many teams and want to start with a subset
-- You need fine-grained control over which teams/channels to ingest
-- You want to minimize API usage and ingestion time
-
----
-
-### Example 4: Message Replies (Threaded Conversations)
-
-To ingest threaded message replies, you need to specify which parent messages to track:
-
-```python
-pipeline_spec = {
-    "connection_name": "microsoft_teams_connection",
-    "objects": [
-        {
-            "table": {
-                "source_table": "message_replies",
-                "destination_catalog": "main",
-                "destination_schema": "teams_data",
-                "destination_table": "message_replies",
-                "table_configuration": {
-                    "tenant_id": dbutils.secrets.get("microsoft_teams", "tenant_id"),
-                    "client_id": dbutils.secrets.get("microsoft_teams", "client_id"),
-                    "client_secret": dbutils.secrets.get("microsoft_teams", "client_secret"),
-                    "team_id": "team-guid-1",
-                    "channel_id": "channel-guid-1",
-                    "message_id": "message-guid-1",  # Parent message with replies
-                    "start_date": "2025-01-01T00:00:00Z",  # Optional: initial cursor
-                    "top": "50",
-                    "max_pages_per_batch": "100"
-                }
-            }
-        }
-    ]
-}
-
-ingest(spark, pipeline_spec)
-```
-
-**How to find message IDs with replies:**
-
-1. First, ingest messages and query for potential threaded messages:
-
-```sql
-SELECT id, team_id, channel_id, subject, createdDateTime
-FROM main.teams_data.messages
-WHERE subject IS NOT NULL  -- Messages with subjects often have replies
-ORDER BY createdDateTime DESC
-LIMIT 100;
-```
-
-2. Query the messages table to find messages that likely have replies (e.g., filter by subject, recent dates)
-3. Add confirmed message IDs to your pipeline configuration
-
-**Multiple threads:** To track multiple threaded messages, add multiple objects with different `message_id` values. The connector will merge all replies into a single `message_replies` table.
+**Note:** Credentials are automatically injected from the UC Connection. No need to pass `tenant_id`, `client_id`, or `client_secret` in `table_configuration`.
 
 ---
 
