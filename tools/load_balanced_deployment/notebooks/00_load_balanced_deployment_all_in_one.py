@@ -52,16 +52,14 @@ from datetime import datetime
 USERNAME = spark.sql("SELECT current_user()").collect()[0][0]
 DATABRICKS_PROFILE = "dogfood"  # Change this to your Databricks CLI profile name
 
-# Unique run ID to prevent overwrites across multiple runs
-RUN_ID = datetime.now().strftime("%Y%m%d_%H%M%S")
-
 # OUTPUT PATHS (using local /tmp directory to avoid DBFS I/O issues)
-WORK_DIR = f"/tmp/{USERNAME.replace('@', '_').replace('.', '_')}/load_balanced_deployment_{RUN_ID}"
+# Files are overwritable - same location each time for easy iteration
+WORK_DIR = f"/tmp/{USERNAME.replace('@', '_').replace('.', '_')}/load_balanced_deployment_{CONNECTOR_NAME}"
 
 CSV_PATH = f"{WORK_DIR}/{CONNECTOR_NAME}_tables.csv"
 INGEST_FILES_DIR = f"{WORK_DIR}/{CONNECTOR_NAME}_ingest_files"
 DAB_YAML_PATH = f"{WORK_DIR}/{CONNECTOR_NAME}_bundle/databricks.yml"
-WORKSPACE_INGEST_PATH = f"/Workspace/Users/{USERNAME}/{CONNECTOR_NAME}_ingest_{RUN_ID}"
+WORKSPACE_INGEST_PATH = f"/Workspace/Users/{USERNAME}/{CONNECTOR_NAME}_ingest"
 CLUSTER_NUM_WORKERS = 2
 EMIT_SCHEDULED_JOBS = True
 PAUSE_JOBS = True  # Create jobs in PAUSED state
@@ -247,7 +245,6 @@ cmd = [
     "--catalog", DEST_CATALOG,
     "--schema", DEST_SCHEMA,
     "--num-workers", str(CLUSTER_NUM_WORKERS),
-    "--bundle-suffix", RUN_ID,
 ]
 
 if EMIT_SCHEDULED_JOBS:
@@ -352,7 +349,27 @@ schema = variables.get('schema', {}).get('default', DEST_SCHEMA)
 connection_name = variables.get('connection_name', {}).get('default', CONNECTION_NAME)
 ingest_files_path = variables.get('ingest_files_path', {}).get('default', WORKSPACE_INGEST_PATH)
 
-# Deploy pipelines
+# Check for existing pipelines
+print("\n" + "="*60)
+print("CHECKING FOR EXISTING PIPELINES")
+print("="*60)
+
+pipeline_names_to_deploy = {spec['name']: key for key, spec in dab_config['resources']['pipelines'].items()}
+existing_pipelines = {}
+
+try:
+    all_pipelines = list(w.pipelines.list_pipelines())
+    for p in all_pipelines:
+        if p.name in pipeline_names_to_deploy:
+            existing_pipelines[p.name] = p.pipeline_id
+            print(f"  ✓ Found existing: {p.name} (ID: {p.pipeline_id})")
+except Exception as e:
+    print(f"  ! Error listing pipelines: {e}")
+
+if not existing_pipelines:
+    print("  No existing pipelines found - will create new ones")
+
+# Deploy pipelines (create or update)
 deployed_pipelines = {}
 print("\n" + "="*60)
 print("DEPLOYING PIPELINES")
@@ -360,7 +377,6 @@ print("="*60)
 
 for pipeline_key, pipeline_config in dab_config['resources']['pipelines'].items():
     pipeline_name = pipeline_config['name']
-    print(f"\nCreating pipeline: {pipeline_name}")
 
     # Extract library path from config
     library_config = pipeline_config['libraries'][0]
@@ -368,30 +384,73 @@ for pipeline_key, pipeline_config in dab_config['resources']['pipelines'].items(
     # Replace variable placeholders
     file_path = file_path.replace('${var.ingest_files_path}', ingest_files_path)
 
-    try:
-        pipeline = w.pipelines.create(
-            name=pipeline_name,
-            catalog=catalog,
-            target=schema,
-            channel=pipeline_config.get('channel', 'PREVIEW'),
-            serverless=pipeline_config.get('serverless', True),
-            development=pipeline_config.get('development', True),
-            continuous=pipeline_config.get('continuous', False),
-            libraries=[
-                PipelineLibrary(
-                    file=FileLibrary(path=file_path)
-                )
-            ]
-        )
+    # Prepare library configuration
+    libraries = [PipelineLibrary(file=FileLibrary(path=file_path))]
 
-        deployed_pipelines[pipeline_key] = pipeline.pipeline_id
-        print(f"  ✓ Created pipeline: {pipeline_name}")
-        print(f"    ID: {pipeline.pipeline_id}")
+    try:
+        if pipeline_name in existing_pipelines:
+            # Update existing pipeline
+            pipeline_id = existing_pipelines[pipeline_name]
+            print(f"\n  Updating: {pipeline_name}")
+
+            w.pipelines.update(
+                pipeline_id=pipeline_id,
+                name=pipeline_name,
+                catalog=catalog,
+                target=schema,
+                channel=pipeline_config.get('channel', 'PREVIEW'),
+                serverless=pipeline_config.get('serverless', True),
+                development=pipeline_config.get('development', True),
+                continuous=pipeline_config.get('continuous', False),
+                libraries=libraries
+            )
+
+            deployed_pipelines[pipeline_key] = pipeline_id
+            print(f"    ✓ Updated successfully")
+            print(f"    ID: {pipeline_id}")
+        else:
+            # Create new pipeline
+            print(f"\n  Creating: {pipeline_name}")
+
+            pipeline = w.pipelines.create(
+                name=pipeline_name,
+                catalog=catalog,
+                target=schema,
+                channel=pipeline_config.get('channel', 'PREVIEW'),
+                serverless=pipeline_config.get('serverless', True),
+                development=pipeline_config.get('development', True),
+                continuous=pipeline_config.get('continuous', False),
+                libraries=libraries
+            )
+
+            deployed_pipelines[pipeline_key] = pipeline.pipeline_id
+            print(f"    ✓ Created successfully")
+            print(f"    ID: {pipeline.pipeline_id}")
     except Exception as e:
-        print(f"  ✗ Failed to create pipeline: {e}")
+        print(f"    ✗ Failed: {e}")
 
 # Deploy jobs (if any)
 if 'jobs' in dab_config.get('resources', {}) and EMIT_SCHEDULED_JOBS:
+    # Check for existing jobs
+    print("\n" + "="*60)
+    print("CHECKING FOR EXISTING JOBS")
+    print("="*60)
+
+    job_names_to_deploy = {spec['name']: key for key, spec in dab_config['resources']['jobs'].items()}
+    existing_jobs = {}
+
+    try:
+        all_jobs = list(w.jobs.list())
+        for j in all_jobs:
+            if j.settings and j.settings.name in job_names_to_deploy:
+                existing_jobs[j.settings.name] = j.job_id
+                print(f"  ✓ Found existing: {j.settings.name} (ID: {j.job_id})")
+    except Exception as e:
+        print(f"  ! Error listing jobs: {e}")
+
+    if not existing_jobs:
+        print("  No existing jobs found - will create new ones")
+
     deployed_jobs = {}
     print("\n" + "="*60)
     print("DEPLOYING SCHEDULED JOBS")
@@ -399,23 +458,22 @@ if 'jobs' in dab_config.get('resources', {}) and EMIT_SCHEDULED_JOBS:
 
     for job_key, job_config in dab_config['resources']['jobs'].items():
         job_name = job_config['name']
-        print(f"\nCreating job: {job_name}")
 
         # Get the pipeline reference
         task_config = job_config['tasks'][0]
         pipeline_task_config = task_config['pipeline_task']
         pipeline_ref = pipeline_task_config['pipeline_id']
 
-        # Extract pipeline key from reference like "${resources.pipelines.osipi_snapshot_20260107_135911.id}"
+        # Extract pipeline key from reference like "${resources.pipelines.osipi_snapshot.id}"
         import re
         match = re.search(r'resources\.pipelines\.([^.]+)\.id', pipeline_ref)
         if not match:
-            print(f"  ✗ Could not parse pipeline reference: {pipeline_ref}")
+            print(f"\n  ✗ Could not parse pipeline reference: {pipeline_ref}")
             continue
 
         referenced_pipeline_key = match.group(1)
         if referenced_pipeline_key not in deployed_pipelines:
-            print(f"  ✗ Referenced pipeline not found: {referenced_pipeline_key}")
+            print(f"\n  ✗ Referenced pipeline not found: {referenced_pipeline_key}")
             continue
 
         pipeline_id = deployed_pipelines[referenced_pipeline_key]
@@ -427,27 +485,58 @@ if 'jobs' in dab_config.get('resources', {}) and EMIT_SCHEDULED_JOBS:
         pause_status = schedule_config.get('pause_status', 'PAUSED')
 
         try:
-            job = w.jobs.create(
-                name=job_name,
-                tasks=[
-                    Task(
-                        task_key=task_config['task_key'],
-                        pipeline_task=PipelineTask(pipeline_id=pipeline_id)
-                    )
-                ],
-                schedule=CronSchedule(
-                    quartz_cron_expression=cron_expr,
-                    timezone_id=timezone,
-                    pause_status=pause_status
-                )
-            )
+            if job_name in existing_jobs:
+                # Update existing job
+                job_id = existing_jobs[job_name]
+                print(f"\n  Updating: {job_name}")
 
-            deployed_jobs[job_key] = job.job_id
-            print(f"  ✓ Created job: {job_name}")
-            print(f"    ID: {job.job_id}")
-            print(f"    Schedule: {cron_expr} ({pause_status})")
+                w.jobs.update(
+                    job_id=job_id,
+                    new_settings=JobSettings(
+                        name=job_name,
+                        tasks=[
+                            Task(
+                                task_key=task_config['task_key'],
+                                pipeline_task=PipelineTask(pipeline_id=pipeline_id)
+                            )
+                        ],
+                        schedule=CronSchedule(
+                            quartz_cron_expression=cron_expr,
+                            timezone_id=timezone,
+                            pause_status=pause_status
+                        )
+                    )
+                )
+
+                deployed_jobs[job_key] = job_id
+                print(f"    ✓ Updated successfully")
+                print(f"    ID: {job_id}")
+                print(f"    Schedule: {cron_expr} ({pause_status})")
+            else:
+                # Create new job
+                print(f"\n  Creating: {job_name}")
+
+                job = w.jobs.create(
+                    name=job_name,
+                    tasks=[
+                        Task(
+                            task_key=task_config['task_key'],
+                            pipeline_task=PipelineTask(pipeline_id=pipeline_id)
+                        )
+                    ],
+                    schedule=CronSchedule(
+                        quartz_cron_expression=cron_expr,
+                        timezone_id=timezone,
+                        pause_status=pause_status
+                    )
+                )
+
+                deployed_jobs[job_key] = job.job_id
+                print(f"    ✓ Created successfully")
+                print(f"    ID: {job.job_id}")
+                print(f"    Schedule: {cron_expr} ({pause_status})")
         except Exception as e:
-            print(f"  ✗ Failed to create job: {e}")
+            print(f"    ✗ Failed: {e}")
 
 print("\n" + "="*60)
 print("DEPLOYMENT SUMMARY")
@@ -542,11 +631,16 @@ print("="*60)
 print("DEPLOYMENT COMPLETE")
 print("="*60)
 print(f"\nConnector: {CONNECTOR_NAME}")
-print(f"Run ID: {RUN_ID}")
 print(f"Pipelines deployed: {len(deployed_pipelines)}")
 if EMIT_SCHEDULED_JOBS and 'deployed_jobs' in locals():
-    print(f"Scheduled jobs created: {len(deployed_jobs)}")
-print(f"\nIngest files location: {WORKSPACE_INGEST_PATH}")
-print(f"DAB config: {DAB_YAML_PATH}")
+    print(f"Scheduled jobs deployed: {len(deployed_jobs)}")
+print(f"\nGenerated files (overwritable):")
+print(f"  CSV: {CSV_PATH}")
+print(f"  Ingest files: {INGEST_FILES_DIR}")
+print(f"  DAB YAML: {DAB_YAML_PATH}")
+print(f"  Workspace: {WORKSPACE_INGEST_PATH}")
+print(f"\nRe-running this notebook will:")
+print(f"  ✓ Overwrite CSV/YAML/ingest files with latest")
+print(f"  ✓ Update existing pipelines and jobs (no duplicates)")
 print(f"\nTo trigger a pipeline update:")
 print(f"  w.pipelines.start_update(pipeline_id='<pipeline_id>', full_refresh=False)")
