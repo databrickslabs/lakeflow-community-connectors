@@ -68,12 +68,20 @@ PAUSE_JOBS = True  # Create jobs in PAUSED state
 
 import subprocess
 import os
+import shutil
 from pathlib import Path
 
-# Create work directories
+# Clean up and create work directories
+# Remove existing directory if it exists (handles permission issues from previous runs)
+if Path(WORK_DIR).exists():
+    print(f"Removing existing work directory: {WORK_DIR}")
+    shutil.rmtree(WORK_DIR, ignore_errors=True)
+
+# Create fresh work directories
 Path(WORK_DIR).mkdir(parents=True, exist_ok=True)
 Path(INGEST_FILES_DIR).mkdir(parents=True, exist_ok=True)
 Path(DAB_YAML_PATH).parent.mkdir(parents=True, exist_ok=True)
+print(f"Created work directories in: {WORK_DIR}")
 
 if not USE_PRESET:
     print(f"Discovering tables from {CONNECTOR_NAME} connector...")
