@@ -1,4 +1,3 @@
-import pytest
 from pathlib import Path
 
 from tests import test_suite
