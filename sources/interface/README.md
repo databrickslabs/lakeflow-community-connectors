@@ -24,7 +24,7 @@ To integrate with the Spark Declarative Pipeline (SDP) used by Lakeflow Communit
 #  primary_keys ARRAY<STRING>, 
 #  cursor_field STRING,
 #  ingestion_type STRING
-# ingestion_type: snapshot, cdc, append
+# ingestion_type: snapshot, cdc, cdc_with_deletes, append
 
 spark.read.format("lakeflow_connect")
      .option("databricks.connection", connection_name)

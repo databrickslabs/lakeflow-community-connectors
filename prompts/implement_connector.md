@@ -10,7 +10,8 @@ Implement the Python connector for **{{source_name}}** that conforms exactly to 
 - When returning the schema in the `get_table_schema` function, prefer using StructType over MapType to enforce explicit typing of sub-columns.
 - Avoid flattening nested fields when parsing JSON data.
 - Prefer using `LongType` over `IntegerType` to avoid overflow.
-- If `ingestion_type` returned from `read_table_metadata` is `cdc`, then `primary_keys` and `cursor_field` are both required.
+- If `ingestion_type` returned from `read_table_metadata` is `cdc` or `cdc_with_deletes`, then `primary_keys` and `cursor_field` are both required.
+- If `ingestion_type` is `cdc_with_deletes`, you must also implement `read_table_deletes()` to fetch deleted records. This method should return records with at minimum the primary key fields and cursor field populated. Refer to `hubspot/hubspot.py` for an example implementation.
 - In logic of processing records, if a StructType field is absent in the response, assign None as the default value instead of an empty dictionary {}.
 - Avoid creating mock objects in the implementation.
 - Do not add an extra main function - only implement the defined functions within the LakeflowConnect class.

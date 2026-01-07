@@ -37,10 +37,14 @@ class LakeflowConnect:
         """Return the Spark schema for a table."""
 
     def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
-        """Return metadata: primary_keys, cursor_field, ingestion_type (snapshot|cdc|append)."""
+        """Return metadata: primary_keys, cursor_field, ingestion_type (snapshot|cdc|cdc_with_deletes|append)."""
 
     def read_table(self, table_name: str, start_offset: dict, table_options: dict[str, str]) -> (Iterator[dict], dict):
         """Yield records as JSON dicts and return the next offset for incremental reads."""
+
+    # Optional - only required if ingestion_type is "cdc_with_deletes"
+    def read_table_deletes(self, table_name: str, start_offset: dict, table_options: dict[str, str]) -> (Iterator[dict], dict):
+        """Yield deleted records (with primary keys and cursor) for delete synchronization."""
 ```
 
 ## Build & Test Commands
