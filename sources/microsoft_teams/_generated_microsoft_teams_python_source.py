@@ -7,13 +7,7 @@
 
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import (
-    Any,
-    Dict,
-    Iterator,
-    List,
-    Tuple,
-)
+from typing import Any, Iterator
 import json
 import time
 
@@ -225,11 +219,9 @@ def register_lakeflow_source(spark):
               - client_id: Application (client) ID
               - client_secret: Client secret value
 
-            Credentials should be stored in the Unity Catalog Connection using the
-            {{secrets/scope/key}} format to reference Databricks Secrets.
-
-            Authentication uses the Client Credentials Flow with Application Permissions.
-            Requires admin consent for all permissions.
+            Credentials should be provided directly in the Unity Catalog Connection
+            configuration. Authentication uses the OAuth 2.0 Client Credentials Flow
+            with Application Permissions. Requires admin consent for all permissions.
             """
             self.tenant_id = options.get("tenant_id")
             self.client_id = options.get("client_id")
@@ -510,7 +502,7 @@ def register_lakeflow_source(spark):
         # Helper Methods for Auto-Discovery
         # =========================================================================
 
-        def _fetch_all_team_ids(self, max_pages: int) -> List[str]:
+        def _fetch_all_team_ids(self, max_pages: int) -> list[str]:
             """
             Fetch all team IDs from the organization.
 
@@ -518,7 +510,7 @@ def register_lakeflow_source(spark):
                 max_pages: Maximum number of pages to fetch
 
             Returns:
-                List of team ID strings (GUIDs)
+                list of team ID strings (GUIDs)
             """
             teams_url = f"{self.base_url}/groups?$filter=resourceProvisioningOptions/Any(x:x eq 'Team')"
             teams_params = {"$select": "id"}
@@ -546,7 +538,7 @@ def register_lakeflow_source(spark):
 
             return team_ids
 
-        def _fetch_all_channel_ids(self, team_id: str, max_pages: int) -> List[str]:
+        def _fetch_all_channel_ids(self, team_id: str, max_pages: int) -> list[str]:
             """
             Fetch all channel IDs for a specific team.
 
@@ -555,7 +547,7 @@ def register_lakeflow_source(spark):
                 max_pages: Maximum number of pages to fetch
 
             Returns:
-                List of channel ID strings (GUIDs)
+                list of channel ID strings (GUIDs)
 
             Note:
                 Returns empty list if team is inaccessible (404/403)
@@ -592,7 +584,7 @@ def register_lakeflow_source(spark):
 
             return channel_ids
 
-        def _fetch_all_message_ids(self, team_id: str, channel_id: str, max_pages: int) -> List[str]:
+        def _fetch_all_message_ids(self, team_id: str, channel_id: str, max_pages: int) -> list[str]:
             """
             Fetch all message IDs for a specific channel.
 
@@ -602,7 +594,7 @@ def register_lakeflow_source(spark):
                 max_pages: Maximum number of pages to fetch
 
             Returns:
-                List of message ID strings
+                list of message ID strings
 
             Note:
                 Returns empty list if channel is inaccessible (404/403)
@@ -850,7 +842,7 @@ def register_lakeflow_source(spark):
 
         def read_table(
             self, table_name: str, start_offset: dict, table_options: dict[str, str]
-        ) -> Tuple[Iterator[dict], dict]:
+        ) -> tuple[Iterator[dict], dict]:
             """
             Read data from a Microsoft Teams table.
 
@@ -884,7 +876,7 @@ def register_lakeflow_source(spark):
 
         def _read_teams(
             self, start_offset: dict, table_options: dict[str, str]
-        ) -> Tuple[Iterator[dict], dict]:
+        ) -> tuple[Iterator[dict], dict]:
             """
             Read teams table (snapshot mode).
 
@@ -912,7 +904,7 @@ def register_lakeflow_source(spark):
             url = f"{self.base_url}/{endpoint}"
             params = {"$top": top}
 
-            records: List[dict[str, Any]] = []
+            records: list[dict[str, Any]] = []
             pages_fetched = 0
             next_url: str | None = url
 
@@ -965,7 +957,7 @@ def register_lakeflow_source(spark):
 
         def _read_channels(
             self, start_offset: dict, table_options: dict[str, str]
-        ) -> Tuple[Iterator[dict], dict]:
+        ) -> tuple[Iterator[dict], dict]:
             """
             Read channels table (snapshot mode).
 
@@ -1006,7 +998,7 @@ def register_lakeflow_source(spark):
                 team_ids_to_process = [team_id]
 
             # Now fetch channels for all discovered teams
-            records: List[dict[str, Any]] = []
+            records: list[dict[str, Any]] = []
 
             for current_team_id in team_ids_to_process:
                 # Build request for this team's channels
@@ -1049,7 +1041,7 @@ def register_lakeflow_source(spark):
 
         def _read_members(
             self, start_offset: dict, table_options: dict[str, str]
-        ) -> Tuple[Iterator[dict], dict]:
+        ) -> tuple[Iterator[dict], dict]:
             """
             Read members table (snapshot mode).
 
@@ -1089,7 +1081,7 @@ def register_lakeflow_source(spark):
                 team_ids_to_process = [team_id]
 
             # Now fetch members for all discovered teams
-            records: List[dict[str, Any]] = []
+            records: list[dict[str, Any]] = []
 
             for current_team_id in team_ids_to_process:
                 # Note: /teams/{id}/members endpoint does NOT support $top parameter
@@ -1131,7 +1123,7 @@ def register_lakeflow_source(spark):
 
         def _read_messages(
             self, start_offset: dict, table_options: dict[str, str]
-        ) -> Tuple[Iterator[dict], dict]:
+        ) -> tuple[Iterator[dict], dict]:
             """
             Read messages table - routes to Delta API or legacy implementation.
 
@@ -1157,7 +1149,7 @@ def register_lakeflow_source(spark):
 
         def _read_messages_delta(
             self, start_offset: dict, table_options: dict[str, str]
-        ) -> Tuple[Iterator[dict], dict]:
+        ) -> tuple[Iterator[dict], dict]:
             """
             Read messages using Microsoft Graph Delta API (server-side filtering).
 
@@ -1298,7 +1290,7 @@ def register_lakeflow_source(spark):
 
         def _read_messages_legacy(
             self, start_offset: dict, table_options: dict[str, str]
-        ) -> Tuple[Iterator[dict], dict]:
+        ) -> tuple[Iterator[dict], dict]:
             """
             Read messages table (CDC mode with client-side timestamp filtering).
 
@@ -1385,7 +1377,7 @@ def register_lakeflow_source(spark):
                     all_team_channel_pairs.append((current_team_id, ch_id))
 
             # Now fetch messages for all discovered team-channel pairs
-            records: List[dict[str, Any]] = []
+            records: list[dict[str, Any]] = []
             max_modified: str | None = None
 
             for current_team_id, current_channel_id in all_team_channel_pairs:
@@ -1469,7 +1461,7 @@ def register_lakeflow_source(spark):
 
         def _read_message_replies(
             self, start_offset: dict, table_options: dict[str, str]
-        ) -> Tuple[Iterator[dict], dict]:
+        ) -> tuple[Iterator[dict], dict]:
             """
             Read message replies (threads) for a specific message or auto-discover.
 
@@ -1497,7 +1489,7 @@ def register_lakeflow_source(spark):
 
         def _read_message_replies_delta(
             self, start_offset: dict, table_options: dict[str, str]
-        ) -> Tuple[Iterator[dict], dict]:
+        ) -> tuple[Iterator[dict], dict]:
             """
             Read message replies using Microsoft Graph Delta API (server-side filtering).
 
@@ -1585,7 +1577,7 @@ def register_lakeflow_source(spark):
                     all_team_channel_message_triples.append((current_team_id, current_channel_id, msg_id))
 
             # Fetch replies using Delta API for each message
-            records: List[dict[str, Any]] = []
+            records: list[dict[str, Any]] = []
             delta_links = {}
 
             for current_team_id, current_channel_id, current_message_id in all_team_channel_message_triples:
@@ -1667,7 +1659,7 @@ def register_lakeflow_source(spark):
 
         def _read_message_replies_legacy(
             self, start_offset: dict, table_options: dict[str, str]
-        ) -> Tuple[Iterator[dict], dict]:
+        ) -> tuple[Iterator[dict], dict]:
             """
             Read message replies (threads) for a specific message or auto-discover (CDC mode).
 
@@ -1785,7 +1777,7 @@ def register_lakeflow_source(spark):
                 max_workers = 10
 
             # Now fetch replies for all discovered team-channel-message triples using ThreadPoolExecutor
-            records: List[dict[str, Any]] = []
+            records: list[dict[str, Any]] = []
             max_modified: str | None = None
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -1842,7 +1834,7 @@ def register_lakeflow_source(spark):
             cursor: str | None,
             top: int,
             max_pages: int
-        ) -> Tuple[List[dict[str, Any]], str | None]:
+        ) -> tuple[list[dict[str, Any]], str | None]:
             """
             Fetch replies for a single message (helper for parallel execution).
 
@@ -1857,7 +1849,7 @@ def register_lakeflow_source(spark):
             Returns:
                 Tuple of (list of reply records, max_modified timestamp)
             """
-            records: List[dict[str, Any]] = []
+            records: list[dict[str, Any]] = []
             max_modified: str | None = None
 
             url = f"{self.base_url}/teams/{team_id}/channels/{channel_id}/messages/{message_id}/replies"

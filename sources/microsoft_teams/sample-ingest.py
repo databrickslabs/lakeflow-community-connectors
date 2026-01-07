@@ -2,15 +2,14 @@
 Microsoft Teams Fully Automated Ingestion Sample
 
 This sample demonstrates the fully automated ingestion mode using fetch_all parameters.
-It automatically discovers and ingests all teams, channels, members, messages, replies,
-and reactions without requiring explicit IDs.
+It automatically discovers and ingests all teams, channels, members, messages, and replies
+without requiring explicit IDs.
 
 Features:
 - Auto-discovery of all teams
 - Auto-discovery of all channels per team
 - Auto-discovery of all messages per channel (for message_replies)
-- Incremental sync for messages/replies with Delta API
-- Slow-lane polling for message reactions
+- Incremental sync for messages/replies (messages use Delta API, replies use client-side filtering)
 - Parallel fetching with ThreadPoolExecutor
 - No manual configuration of team_id or channel_id needed
 
@@ -160,9 +159,8 @@ print("\nTables to ingest:")
 print("  1. Teams             (snapshot) - all teams in organization")
 print("  2. Channels          (snapshot) - all channels in all teams")
 print("  3. Members           (snapshot) - all members in all teams")
-print("  4. Messages          (CDC)      - all messages in all channels (incremental)")
-print("  5. Message Replies   (CDC)      - all replies to all messages (incremental)")
-print("  6. Message Reactions (snapshot) - reactions to recent messages (slow-lane polling)")
+print("  4. Messages          (CDC)      - all messages in all channels (incremental with Delta API)")
+print("  5. Message Replies   (CDC)      - all replies to all messages (incremental with client-side filtering)")
 print("\nDestination:")
 print(f"  Catalog: {DESTINATION_CATALOG}")
 print(f"  Schema:  {DESTINATION_SCHEMA}")
