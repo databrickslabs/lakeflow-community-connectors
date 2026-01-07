@@ -8,7 +8,7 @@ from libs.spec_parser import SpecParser
 
 
 @dataclass
-class SdpTableConfig:
+class SdpTableConfig:  # pylint: disable=too-many-instance-attributes
     """SDP configuration to ingest a table."""
 
     source_table: str
