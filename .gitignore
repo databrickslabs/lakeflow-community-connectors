@@ -30,7 +30,6 @@ tools/ingestion_dab_generator/dab_template/.databricks/
 tools/ingestion_dab_generator/dab_template/resources/*_pipelines.yml
 dlt_notebooks/
 tools/ingestion_dab_generator/dlt_notebooks/
-!sources/osipi/_generated_osipi_python_source.py
 tools/community_connector/src/*.egg-info/
 
 # Generated ingest files from load_balanced_deployment (do not commit)
