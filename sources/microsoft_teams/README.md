@@ -531,12 +531,9 @@ CHANNEL_IDS = [
 
 **After (Automatic Discovery):**
 ```python
-# Just credentials from secrets - connector discovers everything automatically
+# Just fetch_all - credentials from UC Connection
 {
-    "tenant_id": dbutils.secrets.get("microsoft_teams", "tenant_id"),
-    "client_id": dbutils.secrets.get("microsoft_teams", "client_id"),
-    "client_secret": dbutils.secrets.get("microsoft_teams", "client_secret"),
-    "fetch_all_teams": "true"  # ← That's it!
+    "fetch_all_teams": "true"  # ← That's it! Connector discovers everything
 }
 ```
 
@@ -545,24 +542,17 @@ CHANNEL_IDS = [
 The simplest possible configuration - ingest all teams, channels, and members without any manual ID configuration:
 
 ```python
-# Your credentials from Databricks Secrets
-creds = {
-    "tenant_id": dbutils.secrets.get("microsoft_teams", "tenant_id"),
-    "client_id": dbutils.secrets.get("microsoft_teams", "client_id"),
-    "client_secret": dbutils.secrets.get("microsoft_teams", "client_secret")
-}
-
+# Credentials automatically injected from UC Connection
 pipeline_spec = {
     "connection_name": "microsoft_teams_connection",
     "objects": [
-        # 1. Teams (no fetch_all needed - already fetches all)
+        # 1. Teams (fetches all teams)
         {
             "table": {
                 "source_table": "teams",
                 "destination_catalog": "main",
                 "destination_schema": "teams_data",
-                "destination_table": "teams",
-                "table_configuration": creds
+                "destination_table": "teams"
             }
         },
         # 2. Channels (auto-discover ALL teams)
@@ -573,8 +563,7 @@ pipeline_spec = {
                 "destination_schema": "teams_data",
                 "destination_table": "channels",
                 "table_configuration": {
-                    **creds,
-                    "fetch_all_teams": "true"  # ← Automatic discovery!
+                    "fetch_all_teams": "true"  # Auto-discover all teams
                 }
             }
         },
@@ -586,8 +575,7 @@ pipeline_spec = {
                 "destination_schema": "teams_data",
                 "destination_table": "members",
                 "table_configuration": {
-                    **creds,
-                    "fetch_all_teams": "true"  # ← Automatic discovery!
+                    "fetch_all_teams": "true"  # Auto-discover all teams
                 }
             }
         }
@@ -595,7 +583,7 @@ pipeline_spec = {
 }
 ```
 
-**Result:** Single pipeline run ingests all teams, all channels across all teams, and all members across all teams - zero manual configuration.
+**Result:** Single pipeline run ingests all teams, all channels across all teams, and all members across all teams - zero manual configuration. Credentials automatically injected from UC Connection.
 
 ### Example: Auto-Discover All Channels for Messages
 
