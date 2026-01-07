@@ -154,7 +154,8 @@ class LakeflowConnectTester:
                         TestResult(
                             test_name="test_list_tables",
                             status=TestStatus.FAILED,
-                            message=f"Table name at index {i} is not a string: {type(table).__name__}",
+                            message=f"Table name at index {i} is not a string: "
+                            f"{type(table).__name__}",
                             details={
                                 "table_index": i,
                                 "table_type": str(type(table)),
@@ -194,7 +195,8 @@ class LakeflowConnectTester:
                     TestResult(
                         test_name="test_get_table_schema",
                         status=TestStatus.FAILED,
-                        message="No tables available to test because list_tables returned an empty list",
+                        message="No tables available to test "
+                        "because list_tables returned an empty list",
                     )
                 )
                 return
@@ -236,7 +238,8 @@ class LakeflowConnectTester:
                         failed_tables.append(
                             {
                                 "table": table_name,
-                                "reason": f"Schema field {field.name} is IntegerType, please always use LongType instead.",
+                                "reason": f"Schema field {field.name} is IntegerType, "
+                                "please always use LongType instead.",
                             }
                         )
                         break
@@ -269,7 +272,8 @@ class LakeflowConnectTester:
                 TestResult(
                     test_name="test_get_table_schema",
                     status=TestStatus.ERROR,
-                    message=f"Tested {total_tables} tables: {passed_count} passed, {failed_count} failed, {error_count} errors",
+                    message=f"Tested {total_tables} tables: {passed_count} passed, "
+                    f"{failed_count} failed, {error_count} errors",
                     details={
                         "total_tables": total_tables,
                         "passed_tables": passed_tables,
@@ -284,7 +288,8 @@ class LakeflowConnectTester:
                 TestResult(
                     test_name="test_get_table_schema",
                     status=TestStatus.FAILED,
-                    message=f"Tested {total_tables} tables: {passed_count} passed, {failed_count} failed",
+                    message=f"Tested {total_tables} tables: {passed_count} passed, "
+                    f"{failed_count} failed",
                     details={
                         "total_tables": total_tables,
                         "passed_tables": passed_tables,
@@ -319,7 +324,8 @@ class LakeflowConnectTester:
                     TestResult(
                         test_name="test_read_table_metadata",
                         status=TestStatus.FAILED,
-                        message="No tables available to test because list_tables returned an empty list",
+                        message="No tables available to test "
+                        "because list_tables returned an empty list",
                     )
                 )
                 return
@@ -386,7 +392,8 @@ class LakeflowConnectTester:
                     failed_tables.append(
                         {
                             "table": table_name,
-                            "reason": f"Primary key columns {metadata['primary_keys']} not found in schema",
+                            "reason": f"Primary key columns "
+                            f"{metadata['primary_keys']} not found in schema",
                             "primary_keys": metadata["primary_keys"],
                         }
                     )
@@ -397,7 +404,8 @@ class LakeflowConnectTester:
                     failed_tables.append(
                         {
                             "table": table_name,
-                            "reason": f"Cursor field {metadata['cursor_field']} not found in schema",
+                            "reason": f"Cursor field {metadata['cursor_field']} "
+                            "not found in schema",
                             "cursor_field": metadata["cursor_field"],
                         }
                     )
@@ -430,7 +438,8 @@ class LakeflowConnectTester:
                 TestResult(
                     test_name="test_read_table_metadata",
                     status=TestStatus.ERROR,
-                    message=f"Tested {total_tables} tables: {passed_count} passed, {failed_count} failed, {error_count} errors",
+                    message=f"Tested {total_tables} tables: {passed_count} passed, "
+                    f"{failed_count} failed, {error_count} errors",
                     details={
                         "total_tables": total_tables,
                         "passed_tables": passed_tables,
@@ -445,7 +454,8 @@ class LakeflowConnectTester:
                 TestResult(
                     test_name="test_read_table_metadata",
                     status=TestStatus.FAILED,
-                    message=f"Tested {total_tables} tables: {passed_count} passed, {failed_count} failed",
+                    message=f"Tested {total_tables} tables: {passed_count} passed, "
+                    f"{failed_count} failed",
                     details={
                         "total_tables": total_tables,
                         "passed_tables": passed_tables,
@@ -523,7 +533,8 @@ class LakeflowConnectTester:
                     failed_tables.append(
                         {
                             "table": table_name,
-                            "reason": f"First element should be an iterator, got {type(iterator).__name__}",
+                            "reason": f"First element should be an iterator, "
+                            f"got {type(iterator).__name__}",
                         }
                     )
                     continue
@@ -556,7 +567,7 @@ class LakeflowConnectTester:
                             break
                         record_count += 1
                         sample_records.append(record)
-                    
+
                     # Add to passed_tables if we didn't fail validation
                     # (check if table is not in failed_tables)
                     if not any(f["table"] == table_name for f in failed_tables):
@@ -565,9 +576,7 @@ class LakeflowConnectTester:
                                 "table": table_name,
                                 "records_sampled": record_count,
                                 "offset_keys": list(offset.keys()),
-                                "sample_records": sample_records[
-                                    :2
-                                ],  # Show first 2 records
+                                "sample_records": sample_records[:2],  # Show first 2 records
                             }
                         )
                 except Exception as iter_e:
@@ -590,7 +599,8 @@ class LakeflowConnectTester:
                     failed_tables.append(
                         {
                             "table": table_name,
-                            "reason": f"Failed to parse record with the schema for table: {str(parse_e)}",
+                            "reason": f"Failed to parse record with the schema "
+                            f"for table: {str(parse_e)}",
                         }
                     )
                     continue
@@ -616,7 +626,8 @@ class LakeflowConnectTester:
                 TestResult(
                     test_name="test_read_table",
                     status=TestStatus.ERROR,
-                    message=f"Tested {total_tables} tables: {passed_count} passed, {failed_count} failed, {error_count} errors",
+                    message=f"Tested {total_tables} tables: {passed_count} passed, "
+                    f"{failed_count} failed, {error_count} errors",
                     details={
                         "total_tables": total_tables,
                         "passed_tables": passed_tables,
@@ -631,7 +642,8 @@ class LakeflowConnectTester:
                 TestResult(
                     test_name="test_read_table",
                     status=TestStatus.FAILED,
-                    message=f"Tested {total_tables} tables: {passed_count} passed, {failed_count} failed",
+                    message=f"Tested {total_tables} tables: {passed_count} passed, "
+                    f"{failed_count} failed",
                     details={
                         "total_tables": total_tables,
                         "passed_tables": passed_tables,
@@ -662,26 +674,27 @@ class LakeflowConnectTester:
         Supports both top-level fields and nested fields (e.g., "properties.time").
         """
         # Handle simple field names without dots
-        if '.' not in field_path:
+        if "." not in field_path:
             return field_path in schema.fieldNames()
-        
+
         # Handle nested paths
         parts = field_path.split('.', 1)
         field_name = parts[0]
         remaining_path = parts[1]
-        
+
         if field_name not in schema.fieldNames():
             return False
-        
+
         # Get the field type
         field = schema[field_name]
         field_type = field.dataType
-        
+
         # If it's a StructType, recursively check the remaining path
         from pyspark.sql.types import StructType
+
         if isinstance(field_type, StructType):
             return self._field_exists_in_schema(remaining_path, field_type)
-        
+
         # Field exists but can't traverse further (not a struct)
         return False
 
@@ -749,7 +762,8 @@ class LakeflowConnectTester:
                 TestResult(
                     test_name="test_list_insertable_tables",
                     status=TestStatus.PASSED,
-                    message=f"Insertable tables ({len(insertable_tables)}) is subset of all tables ({len(all_tables)})",
+                    message=f"Insertable tables ({len(insertable_tables)}) "
+                    f"is subset of all tables ({len(all_tables)})",
                 )
             )
 
@@ -821,7 +835,10 @@ class LakeflowConnectTester:
                     failed_tables.append(
                         {
                             "table": test_table,
-                            "reason": f"Invalid return types: success={type(success).__name__}, rows={type(rows).__name__}, column_mapping={type(column_names).__name__}",
+                            "reason": f"Invalid return types: "
+                            f"success={type(success).__name__}, "
+                            f"rows={type(rows).__name__}, "
+                            f"column_mapping={type(column_names).__name__}",
                         }
                     )
                     continue
@@ -832,7 +849,8 @@ class LakeflowConnectTester:
                         failed_tables.append(
                             {
                                 "table": test_table,
-                                "reason": f"Expected {test_row_count} rows when successful, got {len(rows)}",
+                                "reason": f"Expected {test_row_count} rows "
+                                f"when successful, got {len(rows)}",
                             }
                         )
                         continue
@@ -890,7 +908,8 @@ class LakeflowConnectTester:
             else TestStatus.PASSED
         )
         message = (
-            f"Tested {total_tables} insertable tables: {len(passed_tables)} passed, {failed_count} failed, {error_count} errors"
+            f"Tested {total_tables} insertable tables: {len(passed_tables)} passed, "
+            f"{failed_count} failed, {error_count} errors"
             if error_count > 0 or failed_count > 0
             else f"Successfully tested write functionality on all {total_tables} insertable tables"
         )
@@ -911,7 +930,10 @@ class LakeflowConnectTester:
         )
 
     def test_incremental_after_write(self):
-        """Test incremental ingestion after writing a row - should return 1 row if ingestion_type is incremental"""
+        """Test incremental ingestion after writing a row.
+
+        Should return 1 row if ingestion_type is incremental.
+        """
         try:
             insertable_tables = self.connector_test_utils.list_insertable_tables()
             if not insertable_tables:
@@ -1023,7 +1045,8 @@ class LakeflowConnectTester:
                         failed_tables.append(
                             {
                                 "table": test_table,
-                                "reason": f"Expected at least 1 record for {ingestion_type}, got {actual_count}",
+                                "reason": f"Expected at least 1 record "
+                                f"for {ingestion_type}, got {actual_count}",
                                 "ingestion_type": ingestion_type,
                                 "expected_count": "≥ 1",
                                 "actual_count": actual_count,
@@ -1037,7 +1060,8 @@ class LakeflowConnectTester:
                         failed_tables.append(
                             {
                                 "table": test_table,
-                                "reason": f"Expected exactly {expected_count} records for {ingestion_type}, got {actual_count}",
+                                "reason": f"Expected exactly {expected_count} records "
+                                f"for {ingestion_type}, got {actual_count}",
                                 "ingestion_type": ingestion_type,
                                 "expected_count": expected_count,
                                 "actual_count": actual_count,
@@ -1090,9 +1114,11 @@ class LakeflowConnectTester:
             else TestStatus.PASSED
         )
         message = (
-            f"Tested {total_tables} insertable tables: {len(passed_tables)} passed, {failed_count} failed, {error_count} errors"
+            f"Tested {total_tables} insertable tables: {len(passed_tables)} passed, "
+            f"{failed_count} failed, {error_count} errors"
             if error_count > 0 or failed_count > 0
-            else f"Successfully verified incremental ingestion on all {total_tables} insertable tables"
+            else f"Successfully verified incremental ingestion "
+            f"on all {total_tables} insertable tables"
         )
 
         details = {"passed_tables": passed_tables}
@@ -1116,8 +1142,9 @@ class LakeflowConnectTester:
         returned_records: List[Dict],
         column_mapping: Dict[str, str],
     ) -> bool:
-        """
-        Verify that written rows are present in the returned results by comparing mapped column values.
+        """Verify written rows are present in returned results.
+
+        Compares mapped column values.
         """
         if not written_rows or not column_mapping:
             return True
@@ -1243,5 +1270,8 @@ class LakeflowConnectTester:
                 error_parts.append(f"Failed tests: {', '.join(failed_tests)}")
             if error_tests:
                 error_parts.append(f"Error tests: {', '.join(error_tests)}")
-            error_message = f"Test suite failed with {report.failed_tests} failures and {report.error_tests} errors. {' | '.join(error_parts)}"
+            error_message = (
+                f"Test suite failed with {report.failed_tests} failures "
+                f"and {report.error_tests} errors. {' | '.join(error_parts)}"
+            )
             raise TestFailedException(error_message, report)
