@@ -1,165 +1,101 @@
-# Pipeline Configuration Notes
+# Pipeline Configuration for Community Connectors
 
-## Upstream CLI vs Load-Balanced Deployment
+## CRITICAL: Community Connectors REQUIRE Serverless + PREVIEW
 
-### Upstream CLI Defaults
+**Community connectors ONLY work with:**
+- `channel: PREVIEW` (required for PySpark Data Source API support)
+- `serverless: true` (required for community connector runtime)
 
-From `tools/community_connector/default_config.yaml` (before deletion):
+**Using classic clusters or CURRENT channel WILL NOT WORK.**
+
+## Upstream CLI Configuration
+
+From `tools/community_connector/default_config.yaml`:
 ```yaml
 pipeline:
-  channel: PREVIEW          # PREVIEW channel (latest features)
+  channel: PREVIEW          # REQUIRED for community connectors
   continuous: false
   development: true
-  serverless: true          # Serverless compute (auto-scaling)
+  serverless: true          # REQUIRED for community connectors
 ```
 
-### Load-Balanced Deployment Current Settings
+## Load-Balanced Deployment Configuration
 
-The load-balanced deployment toolkit currently does NOT explicitly set channel or serverless in the DAB YAML. When these are not specified, Databricks uses the following defaults:
-- `channel`: defaults to `CURRENT` (stable releases)
-- `serverless`: defaults to `false` (requires explicit cluster configuration)
-
-The toolkit provides classic cluster configuration:
-```yaml
-clusters:
-  - label: default
-    num_workers: 1  # or configurable via --num-workers
-```
-
-## Testing Results
-
-### Serverless Testing (January 2026)
-
-**Result**: ❌ Serverless compute DOES NOT currently work with community connectors
-
-**Test Configuration**:
-- `channel: PREVIEW`
-- `serverless: true`
-- No clusters configuration
-
-**Issues Encountered**:
-- Pipelines fail to start or execute properly with serverless compute
-- Classic clusters with `channel: CURRENT` work reliably
-
-### Working Configuration
-
-**Result**: ✅ Classic clusters work correctly
-
-**Working Configuration**:
-- `channel: CURRENT` (or default)
-- `serverless: false` (or omit serverless field)
-- Classic cluster with `node_type_id: i3.xlarge` or similar
-
-## Recommendations
-
-### For Now (January 2026)
-
-**DO NOT** blindly adopt upstream CLI defaults. While the upstream CLI uses `serverless: true`, this configuration does not currently work with community connectors in practice.
-
-**KEEP** using classic clusters:
-```python
-clusters = [
-    PipelineCluster(
-        label="default",
-        node_type_id="i3.xlarge",
-        autoscale=PipelineClusterAutoscale(
-            min_workers=1,
-            max_workers=5,
-            mode=PipelineClusterAutoscaleMode.ENHANCED
-        )
-    )
-]
-```
-
-### Future Investigation
-
-When serverless support is fixed or improved:
-
-1. **Test again** with:
-   - `channel: PREVIEW`
-   - `serverless: true`
-   - No clusters configuration
-
-2. **Benefits of serverless** (when it works):
-   - Auto-scaling based on workload
-   - No need to specify node_type_id
-   - Cost efficiency (pay only for actual usage)
-   - Latest DLT features in PREVIEW channel
-
-3. **Monitor** Databricks release notes for:
-   - Serverless compute improvements for DLT
-   - Community connector compatibility updates
-   - PySpark Data Source API enhancements
-
-### Channel Choice
-
-**CURRENT vs PREVIEW**:
-- `CURRENT`: Stable releases, recommended for production
-- `PREVIEW`: Latest features, may have bugs, good for development/testing
-
-For production deployments, `CURRENT` channel is safer even if serverless becomes available.
-
-## Implementation in Load-Balanced Toolkit
-
-### Current Approach
-
-The toolkit generates DAB YAML without explicit channel/serverless settings:
+The load-balanced deployment toolkit MUST use the same settings:
 
 ```yaml
-# generate_dab_yaml.py output
 resources:
   pipelines:
     my_pipeline:
       name: "Pipeline Name"
       catalog: "${var.catalog}"
       target: "${var.schema}"
+      channel: PREVIEW        # REQUIRED
+      serverless: true        # REQUIRED
       development: true
       continuous: false
       libraries: [...]
-      clusters:  # Explicit cluster config
-        - label: default
-          num_workers: 1
+      # NO clusters configuration when using serverless
 ```
 
-This approach works because:
-1. Defaults to `CURRENT` channel (stable)
-2. Requires explicit cluster config (classic clusters)
-3. Avoids serverless compatibility issues
+## Why These Settings Are Required
 
-### If Serverless Works in Future
+### PREVIEW Channel
+- Community connectors use the **PySpark Data Source API**
+- This API requires the PREVIEW channel for full support
+- CURRENT channel lacks necessary runtime features
 
-Update `generate_dab_yaml.py` to add conditional serverless support:
+### Serverless Compute
+- Community connectors require serverless compute runtime
+- Classic clusters lack the necessary PySpark Data Source integration
+- Serverless provides automatic platform credential injection for UC Connections
+
+## Implementation in Load-Balanced Toolkit
+
+### Current generate_dab_yaml.py (CORRECT)
 
 ```python
-def generate_dab_yaml(..., use_serverless=False, channel="CURRENT"):
+def generate_dab_yaml(...):
     pipeline_def = {
         "name": f"...",
         "catalog": "${var.catalog}",
         "target": "${var.schema}",
-        "channel": channel,  # Add explicit channel
+        "channel": "PREVIEW",      # Required for community connectors
+        "serverless": True,         # Required for community connectors
         "development": True,
         "continuous": False,
         "libraries": [...]
+        # NO clusters configuration
     }
-
-    if use_serverless:
-        pipeline_def["serverless"] = True
-        # No clusters configuration needed
-    else:
-        pipeline_def["clusters"] = [{
-            "label": "default",
-            **cluster_config
-        }]
 ```
 
-## Related Issues
+### What NOT to Do (INCORRECT)
 
-- Community connectors require PySpark Data Source API support
-- Serverless compute may have limitations with custom Python data sources
-- UC Connections injection may behave differently in serverless vs classic
+```python
+# ❌ WRONG - This will NOT work for community connectors
+pipeline_def = {
+    "channel": "CURRENT",  # Wrong - lacks PySpark Data Source API support
+    "serverless": False,   # Wrong - community connectors need serverless
+    "clusters": [          # Wrong - no clusters when using serverless
+        {
+            "label": "default",
+            "node_type_id": "i3.xlarge",
+            "num_workers": 1
+        }
+    ]
+}
+```
 
-## References
+## Benefits of Serverless + PREVIEW
 
-- Upstream CLI default config: `tools/community_connector/default_config.yaml` (commit a81d32e)
+1. **Auto-scaling** - Compute scales based on workload automatically
+2. **No cluster management** - No need to specify node_type_id or workers
+3. **Cost efficiency** - Pay only for actual usage
+4. **Latest features** - Access to newest DLT and PySpark Data Source capabilities
+5. **Platform credential injection** - UC Connection credentials injected automatically
+
+## Related References
+
+- Upstream CLI default config: `tools/community_connector/default_config.yaml`
 - Upstream CLI adoption notes: `tools/load_balanced_deployment/UPSTREAM_CLI_ADOPTION.md`
-- Testing history: This document records testing as of January 2026
+- PySpark Data Source API documentation: Databricks docs

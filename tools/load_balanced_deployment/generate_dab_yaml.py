@@ -112,10 +112,13 @@ def generate_dab_yaml(
         ingest_file = f"${{var.ingest_files_path}}/ingest_{group}.py"
 
         # Pipeline definition
+        # CRITICAL: Community connectors REQUIRE channel: PREVIEW and serverless: true
         pipeline_def = {
             "name": f"{connector_name.upper()} Load Balanced - {group.replace('_', ' ').title()} ({table_count} tables)",
             "catalog": "${var.catalog}",
             "target": "${var.schema}",
+            "channel": "PREVIEW",       # Required for PySpark Data Source API support
+            "serverless": True,         # Required for community connectors
             "development": True,
             "continuous": False,
             "libraries": [
@@ -124,13 +127,8 @@ def generate_dab_yaml(
                         "path": ingest_file  # Python file, NOT notebook!
                     }
                 }
-            ],
-            "clusters": [
-                {
-                    "label": "default",
-                    **cluster_config
-                }
             ]
+            # NO clusters configuration when using serverless
         }
 
         dab["resources"]["pipelines"][pipeline_key] = pipeline_def
