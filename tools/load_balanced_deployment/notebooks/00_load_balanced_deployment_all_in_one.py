@@ -78,9 +78,95 @@ PRESET_CSV_PATH = f"/Workspace/Users/{USERNAME}/lakeflow-community-connectors/to
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 1: Discover and Classify Tables (Optional)
+# MAGIC ## Step 1a: Quick CSV Generator (No Connector Required)
 # MAGIC
-# MAGIC **Skip this step** if you're using a preset CSV.
+# MAGIC **Use this if you just want to provide a list of table names** without running the connector's discovery.
+# MAGIC
+# MAGIC Generates a CSV with default values. You can manually edit the CSV afterwards to:
+# MAGIC - Set ingestion_type (snapshot/append/cdc)
+# MAGIC - Assign pipeline_group
+# MAGIC - Set primary_keys and cursor_field
+
+# COMMAND ----------
+
+# Set ENABLE_QUICK_CSV = True to generate CSV from table list
+ENABLE_QUICK_CSV = False
+
+# Provide your table names here (or set to None to skip)
+QUICK_TABLE_LIST = [
+    "pi_dataservers",
+    "pi_points",
+    "pi_timeseries",
+    "pi_assetservers",
+    "pi_af_databases",
+    # Add more tables...
+]
+
+if ENABLE_QUICK_CSV and QUICK_TABLE_LIST:
+    import csv
+    from pathlib import Path
+
+    print("="*60)
+    print("QUICK CSV GENERATOR")
+    print("="*60)
+    print(f"Generating CSV for {len(QUICK_TABLE_LIST)} tables...")
+
+    Path(WORK_DIR).mkdir(parents=True, exist_ok=True)
+
+    with open(CSV_PATH, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            "connection_name", "source_table", "destination_catalog", "destination_schema",
+            "destination_table", "pipeline_group", "schedule", "table_options_json",
+            "weight", "ingestion_type", "primary_keys", "cursor_field", "category"
+        ])
+        writer.writeheader()
+
+        for table in QUICK_TABLE_LIST:
+            # Extract category from table name prefix (e.g., "pi_af_databases" -> "af")
+            parts = table.split('_')
+            category = parts[1] if len(parts) > 1 else "default"
+
+            writer.writerow({
+                "connection_name": CONNECTION_NAME,
+                "source_table": table,
+                "destination_catalog": DEST_CATALOG,
+                "destination_schema": DEST_SCHEMA,
+                "destination_table": table,
+                "pipeline_group": f"{category}_snapshot",  # Default grouping
+                "schedule": SCHEDULE_SNAPSHOT,             # Default schedule
+                "table_options_json": "{}",
+                "weight": "1",                              # Default weight
+                "ingestion_type": "snapshot",               # Default to snapshot
+                "primary_keys": "",                         # Will be inferred by connector
+                "cursor_field": "",                         # Will be inferred by connector
+                "category": category
+            })
+
+    print(f"✓ Generated CSV: {CSV_PATH}")
+    print(f"\nNext steps:")
+    print(f"  1. Review/edit CSV if needed (change ingestion_type, pipeline_group, etc.)")
+    print(f"  2. Set USE_PRESET = False (or skip discovery step)")
+    print(f"  3. Continue to Step 2 (Generate Ingest Files)")
+
+    # Preview
+    with open(CSV_PATH, 'r') as f:
+        lines = f.readlines()
+        print(f"\nPreview (first 5 rows):")
+        print("".join(lines[:6]))
+elif ENABLE_QUICK_CSV:
+    print("Quick CSV generation skipped: QUICK_TABLE_LIST is empty")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Step 1b: Full Discovery with Connector (Requires Credentials)
+# MAGIC
+# MAGIC **Skip this if you used Quick CSV Generator or preset CSV.**
+# MAGIC
+# MAGIC This calls the connector's `list_tables()` and `read_table_metadata()` to automatically detect:
+# MAGIC - All available tables
+# MAGIC - Ingestion type (snapshot/append/cdc)
+# MAGIC - Primary keys and cursor fields
 
 # COMMAND ----------
 
