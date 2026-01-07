@@ -230,4 +230,3 @@ def validate_and_report(spec: dict) -> Optional[str]:
         return None
     except PipelineSpecValidationError as e:
         return str(e)
-

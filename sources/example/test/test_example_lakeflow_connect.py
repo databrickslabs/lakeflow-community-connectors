@@ -1,10 +1,9 @@
-import pytest
 from pathlib import Path
 
+from sources.example.example import LakeflowConnect
 from tests import test_suite
 from tests.test_suite import LakeflowConnectTester
 from tests.test_utils import load_config
-from sources.example.example import LakeflowConnect
 
 
 def test_example_connector():

@@ -8,21 +8,28 @@ Configuration Precedence:
     CLI arguments → --config file → default_config.yaml → code defaults
 """
 
-import click
+import base64
+import json
+import traceback
+from pathlib import Path
 from typing import Optional
 
+import click
+import yaml
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.workspace import ImportFormat, Language
 
 from databricks.labs.community_connector import __version__
 from databricks.labs.community_connector.config import build_config
-from databricks.labs.community_connector.repo_client import RepoClient
 from databricks.labs.community_connector.pipeline_client import PipelineClient
+from databricks.labs.community_connector.pipeline_spec_validator import (
+    PipelineSpecValidationError,
+    validate_pipeline_spec,
+)
+from databricks.labs.community_connector.repo_client import RepoClient
 
-from pathlib import Path
-import base64
 
-
-class OrderedGroup(click.Group):
+class OrderedGroup(click.Group):  # pylint: disable=too-few-public-methods
     """Custom Click group that preserves command order as defined in code."""
 
     def list_commands(self, ctx):
@@ -44,13 +51,6 @@ def _parse_pipeline_spec(spec_input: str, validate: bool = True) -> dict:
     Raises:
         click.ClickException: If parsing or validation fails.
     """
-    import json
-    import yaml
-    from databricks.labs.community_connector.pipeline_spec_validator import (
-        validate_pipeline_spec,
-        PipelineSpecValidationError,
-    )
-
     # Check if it's a file path
     if spec_input.endswith(('.yaml', '.yml', '.json')):
         try:
@@ -103,7 +103,10 @@ def _find_pipeline_by_name(workspace_client, pipeline_name: str) -> str:
         raise click.ClickException(f"Pipeline '{pipeline_name}' not found")
 
     if len(pipelines) > 1:
-        click.echo(f"Warning: Found {len(pipelines)} pipelines matching '{pipeline_name}', using first match")
+        click.echo(
+            f"Warning: Found {len(pipelines)} pipelines matching "
+            f"'{pipeline_name}', using first match"
+        )
 
     return pipelines[0].pipeline_id
 
@@ -134,7 +137,6 @@ def _create_workspace_file(workspace_client, path: str, content: str) -> None:
         path: Workspace path where the file will be created.
         content: Content of the file.
     """
-    from databricks.sdk.service.workspace import ImportFormat, Language
 
     # Import the file to workspace using base64 encoding
     content_bytes = content.encode("utf-8")
@@ -149,7 +151,9 @@ def _create_workspace_file(workspace_client, path: str, content: str) -> None:
     )
 
 
-def _delete_workspace_files(workspace_client, base_path: str, files: list, debug: bool = False) -> None:
+def _delete_workspace_files(
+    workspace_client, base_path: str, files: list, debug: bool = False
+) -> None:
     """
     Delete files from the Databricks workspace.
 
@@ -188,13 +192,224 @@ def _replace_placeholder_in_value(value, placeholder: str, replacement: str):
         Value with placeholder replaced.
     """
     if isinstance(value, dict):
-        return {k: _replace_placeholder_in_value(v, placeholder, replacement) for k, v in value.items()}
+        return {
+            k: _replace_placeholder_in_value(v, placeholder, replacement) for k, v in value.items()
+        }
     elif isinstance(value, list):
         return [_replace_placeholder_in_value(item, placeholder, replacement) for item in value]
     elif isinstance(value, str):
         return value.replace(placeholder, replacement)
     else:
         return value
+
+
+def _resolve_workspace_paths(
+    workspace_path: str, repo_config, pipeline_config, current_user_name: str
+):
+    """
+    Resolve placeholders in workspace paths and config objects.
+
+    Args:
+        workspace_path: The workspace path with potential {CURRENT_USER} placeholder.
+        repo_config: The repo configuration object.
+        pipeline_config: The pipeline configuration object.
+        current_user_name: The current user's name.
+
+    Returns:
+        Resolved workspace_path string.
+    """
+    # Replace {CURRENT_USER} in workspace_path
+    if workspace_path and "{CURRENT_USER}" in workspace_path:
+        workspace_path = workspace_path.replace("{CURRENT_USER}", current_user_name)
+
+    # Replace {WORKSPACE_PATH} in repo.path
+    if repo_config.path:
+        repo_config.path = repo_config.path.replace("{WORKSPACE_PATH}", workspace_path)
+
+    # Replace {WORKSPACE_PATH} in pipeline.root_path
+    if pipeline_config.root_path:
+        pipeline_config.root_path = pipeline_config.root_path.replace(
+            "{WORKSPACE_PATH}", workspace_path
+        )
+
+    # Replace {WORKSPACE_PATH} in libraries
+    if pipeline_config.libraries:
+        pipeline_config.libraries = _replace_placeholder_in_value(
+            pipeline_config.libraries, "{WORKSPACE_PATH}", workspace_path
+        )
+
+    return workspace_path
+
+
+def _ensure_parent_directory(workspace_client, workspace_path: str) -> None:
+    """
+    Ensure the parent workspace directory exists.
+
+    Args:
+        workspace_client: The WorkspaceClient instance.
+        workspace_path: The full workspace path.
+
+    Raises:
+        click.ClickException: If directory creation fails.
+    """
+    parent_path = "/".join(workspace_path.rstrip("/").split("/")[:-1])
+    if parent_path:
+        click.echo(f"\nEnsuring workspace directory exists: {parent_path}")
+        try:
+            workspace_client.workspace.mkdirs(parent_path)
+            click.echo("  ✓ Directory ready")
+        except Exception as e:
+            if "RESOURCE_ALREADY_EXISTS" in str(e):
+                click.echo("  ✓ Directory already exists")
+            else:
+                raise click.ClickException(f"Failed to create workspace directory: {e}")
+
+
+def _create_repo_and_cleanup(workspace_client, repo_config, debug: bool) -> str:
+    """
+    Create the repo and clean up excluded files.
+
+    Args:
+        workspace_client: The WorkspaceClient instance.
+        repo_config: The repo configuration object.
+        debug: Whether to print debug output.
+
+    Returns:
+        The repo workspace path.
+
+    Raises:
+        click.ClickException: If repo creation fails.
+    """
+    click.echo("\nStep 1: Creating repo...")
+    repo_client = RepoClient(workspace_client)
+
+    try:
+        repo_info = repo_client.create(repo_config)
+        repo_workspace_path = repo_client.get_repo_path(repo_info)
+
+        if not repo_workspace_path:
+            repo_workspace_path = repo_config.path
+            click.echo(f"  ✓ Repo created (using configured path: {repo_workspace_path})")
+        else:
+            click.echo(f"  ✓ Repo created at: {repo_workspace_path}")
+
+        if debug:
+            click.echo(f"  [DEBUG] Repo ID: {repo_info.id if repo_info else 'N/A'}")
+    except Exception as e:
+        raise click.ClickException(f"Failed to create repo: {e}")
+
+    # Clean up excluded root files (cone mode includes all root files)
+    if repo_config.exclude_root_files:
+        click.echo("\n  Cleaning up excluded root files...")
+        _delete_workspace_files(
+            workspace_client,
+            repo_workspace_path,
+            repo_config.exclude_root_files,
+            debug=debug,
+        )
+        click.echo(f"  ✓ Cleaned up {len(repo_config.exclude_root_files)} excluded files")
+
+    return repo_workspace_path
+
+
+# pylint: disable=too-many-arguments,too-many-positional-arguments
+def _create_ingest_file(
+    workspace_client,
+    workspace_path: str,
+    source_name: str,
+    connection_name: Optional[str],
+    pipeline_spec_input: Optional[str],
+    debug: bool,
+) -> None:
+    """
+    Create the ingest.py file in the workspace.
+
+    Args:
+        workspace_client: The WorkspaceClient instance.
+        workspace_path: The workspace path where ingest.py will be created.
+        source_name: The connector source name.
+        connection_name: The connection name (optional if pipeline_spec_input provided).
+        pipeline_spec_input: The pipeline spec input (optional).
+        debug: Whether to print debug output.
+
+    Raises:
+        click.ClickException: If file creation fails.
+    """
+    click.echo("\nStep 2: Creating ingest.py...")
+    ingest_path = f"{workspace_path}/ingest.py"
+    try:
+        if pipeline_spec_input:
+            pipeline_spec = _parse_pipeline_spec(pipeline_spec_input)
+            if connection_name:
+                pipeline_spec["connection_name"] = connection_name
+
+            if debug:
+                click.echo(f"  [DEBUG] Using provided pipeline spec: {pipeline_spec}")
+
+            ingest_content = _load_ingest_template("ingest_template_base.py")
+            ingest_content = ingest_content.replace("{SOURCE_NAME}", source_name)
+            spec_json = json.dumps(pipeline_spec, indent=4)
+            ingest_content = ingest_content.replace("{PIPELINE_SPEC}", spec_json)
+        else:
+            ingest_content = _load_ingest_template()
+            ingest_content = ingest_content.replace("{SOURCE_NAME}", source_name)
+            ingest_content = ingest_content.replace("{CONNECTION_NAME}", connection_name)
+
+        _create_workspace_file(workspace_client, ingest_path, ingest_content)
+        click.echo(f"  ✓ Created: {ingest_path}")
+    except click.ClickException:
+        raise
+    except Exception as e:
+        raise click.ClickException(f"Failed to create ingest.py: {e}")
+
+
+def _create_and_show_pipeline(
+    workspace_client,
+    pipeline_config,
+    repo_workspace_path: str,
+    source_name: str,
+    debug: bool,
+) -> None:
+    """
+    Create the pipeline and display results.
+
+    Args:
+        workspace_client: The WorkspaceClient instance.
+        pipeline_config: The pipeline configuration object.
+        repo_workspace_path: The repo workspace path.
+        source_name: The connector source name.
+        debug: Whether to print debug output.
+
+    Raises:
+        click.ClickException: If pipeline creation fails.
+    """
+    click.echo(f"\nStep 3: Creating pipeline '{pipeline_config.name}'...")
+    pipeline_client = PipelineClient(workspace_client)
+
+    try:
+        pipeline_response = pipeline_client.create(
+            pipeline_config,
+            repo_path=repo_workspace_path,
+            source_name=source_name,
+        )
+        pipeline_id = pipeline_response.pipeline_id
+
+        workspace_host = workspace_client.config.host
+        if workspace_host and workspace_host.endswith("/"):
+            workspace_host = workspace_host[:-1]
+        pipeline_url = f"{workspace_host}/pipelines/{pipeline_id}"
+
+        click.echo("  ✓ Pipeline created!")
+        click.echo(f"\n{'=' * 60}")
+        click.echo(f"Pipeline URL: {pipeline_url}")
+        click.echo(f"Pipeline ID:  {pipeline_id}")
+        click.echo(f"{'=' * 60}")
+
+        if debug:
+            click.echo(f"\n[DEBUG] Full pipeline response: {pipeline_response}")
+
+    except Exception as e:
+        raise click.ClickException(f"Failed to create pipeline: {e}")
 
 
 @click.group(cls=OrderedGroup)
@@ -221,7 +436,8 @@ def main(ctx: click.Context, debug: bool):
 @click.option(
     "--connection-name",
     "-n",
-    help="Name of the UC connection to use for the connector (required if --pipeline-spec not provided)",
+    help="Name of the UC connection to use for the connector "
+    "(required if --pipeline-spec not provided)",
 )
 @click.option(
     "--pipeline-spec",
@@ -245,6 +461,7 @@ def main(ctx: click.Context, debug: bool):
     help="Path to custom config file (overrides defaults)",
 )
 @click.pass_context
+# pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
 def create_pipeline(
     ctx: click.Context,
     source_name: str,
@@ -274,10 +491,10 @@ def create_pipeline(
 
     \b
     Example:
-        community-connector create_pipeline github my_github_pipeline -n my_github_conn
-        community-connector create_pipeline stripe my_stripe_prod -n stripe_conn --catalog main --target my_schema
+        community-connector create_pipeline github my_github_pipeline -n my_conn
+        community-connector create_pipeline stripe my_stripe -n stripe_conn -c main
         community-connector create_pipeline github my_pipeline -ps spec.yaml
-        community-connector create_pipeline github my_pipeline -ps '{"connection_name": "my_conn", "objects": [{"table": {"source_table": "users"}}]}'
+        community-connector create_pipeline github my_pipeline -ps pipeline_spec.json
     """
     debug = ctx.obj.get("debug", False)
 
@@ -313,27 +530,11 @@ def create_pipeline(
     # Create the workspace client
     workspace_client = WorkspaceClient()
 
-    # Get current user from workspace
+    # Get current user from workspace and resolve paths
     current_user = workspace_client.current_user.me()
-    current_user_name = current_user.user_name
-
-    # Step 1: Replace {CURRENT_USER} in workspace_path
-    if workspace_path and "{CURRENT_USER}" in workspace_path:
-        workspace_path = workspace_path.replace("{CURRENT_USER}", current_user_name)
-
-    # Step 2: Replace {WORKSPACE_PATH} in repo.path
-    if repo_config.path:
-        repo_config.path = repo_config.path.replace("{WORKSPACE_PATH}", workspace_path)
-
-    # Step 3: Replace {WORKSPACE_PATH} in pipeline.root_path
-    if pipeline_config.root_path:
-        pipeline_config.root_path = pipeline_config.root_path.replace("{WORKSPACE_PATH}", workspace_path)
-
-    # Step 4: Replace {WORKSPACE_PATH} in libraries
-    if pipeline_config.libraries:
-        pipeline_config.libraries = _replace_placeholder_in_value(
-            pipeline_config.libraries, "{WORKSPACE_PATH}", workspace_path
-        )
+    workspace_path = _resolve_workspace_paths(
+        workspace_path, repo_config, pipeline_config, current_user.user_name
+    )
 
     if debug:
         click.echo(f"[DEBUG] Resolved workspace_path: {workspace_path}")
@@ -341,117 +542,30 @@ def create_pipeline(
         click.echo(f"[DEBUG] Resolved root_path: {pipeline_config.root_path}")
         click.echo(f"[DEBUG] Resolved libraries: {pipeline_config.libraries}")
 
-    # Get workspace host for building pipeline URL
-    workspace_host = workspace_client.config.host
-    if workspace_host and workspace_host.endswith("/"):
-        workspace_host = workspace_host[:-1]
-
     # Ensure the parent workspace directory exists
-    # Extract parent path (e.g., /Users/user/.lakeflow_community_connectors)
-    parent_path = "/".join(workspace_path.rstrip("/").split("/")[:-1])
-    if parent_path:
-        click.echo(f"\nEnsuring workspace directory exists: {parent_path}")
-        try:
-            workspace_client.workspace.mkdirs(parent_path)
-            click.echo("  ✓ Directory ready")
-        except Exception as e:
-            # RESOURCE_ALREADY_EXISTS is fine - directory already exists
-            if "RESOURCE_ALREADY_EXISTS" in str(e):
-                click.echo("  ✓ Directory already exists")
-            else:
-                raise click.ClickException(f"Failed to create workspace directory: {e}")
+    _ensure_parent_directory(workspace_client, workspace_path)
 
-    # Step 1: Create the repo
-    click.echo("\nStep 1: Creating repo...")
-    repo_client = RepoClient(workspace_client)
-
-    try:
-        repo_info = repo_client.create(repo_config)
-        repo_workspace_path = repo_client.get_repo_path(repo_info)
-
-        if not repo_workspace_path:
-            # Fallback to the configured path if API doesn't return it
-            repo_workspace_path = repo_config.path
-            click.echo(f"  ✓ Repo created (using configured path: {repo_workspace_path})")
-        else:
-            click.echo(f"  ✓ Repo created at: {repo_workspace_path}")
-
-        if debug:
-            click.echo(f"  [DEBUG] Repo ID: {repo_info.id if repo_info else 'N/A'}")
-    except Exception as e:
-        raise click.ClickException(f"Failed to create repo: {e}")
-
-    # Step 1b: Clean up excluded root files (cone mode includes all root files)
-    if repo_config.exclude_root_files:
-        click.echo("\n  Cleaning up excluded root files...")
-        _delete_workspace_files(
-            workspace_client,
-            repo_workspace_path,
-            repo_config.exclude_root_files,
-            debug=debug,
-        )
-        click.echo(f"  ✓ Cleaned up {len(repo_config.exclude_root_files)} excluded files")
+    # Step 1: Create the repo and clean up excluded files
+    repo_workspace_path = _create_repo_and_cleanup(workspace_client, repo_config, debug)
 
     # Step 2: Create ingest.py in the workspace
-    click.echo("\nStep 2: Creating ingest.py...")
-    ingest_path = f"{workspace_path}/ingest.py"
-    try:
-        if pipeline_spec_input:
-            # Parse the provided pipeline spec (connection_name is always required in spec)
-            import json
-            pipeline_spec = _parse_pipeline_spec(pipeline_spec_input)
-
-            # If CLI connection_name provided, it overrides the spec
-            if connection_name:
-                pipeline_spec["connection_name"] = connection_name
-
-            if debug:
-                click.echo(f"  [DEBUG] Using provided pipeline spec: {pipeline_spec}")
-
-            # Use the base template with pipeline_spec placeholder
-            ingest_content = _load_ingest_template("ingest_template_base.py")
-            ingest_content = ingest_content.replace("{SOURCE_NAME}", source_name)
-            ingest_content = ingest_content.replace("{PIPELINE_SPEC}", json.dumps(pipeline_spec, indent=4))
-        else:
-            # Use the full template with placeholders replaced
-            # connection_name is required here (already validated above)
-            ingest_content = _load_ingest_template()
-            ingest_content = ingest_content.replace("{SOURCE_NAME}", source_name)
-            ingest_content = ingest_content.replace("{CONNECTION_NAME}", connection_name)
-
-        _create_workspace_file(workspace_client, ingest_path, ingest_content)
-        click.echo(f"  ✓ Created: {ingest_path}")
-    except click.ClickException:
-        raise
-    except Exception as e:
-        raise click.ClickException(f"Failed to create ingest.py: {e}")
+    _create_ingest_file(
+        workspace_client,
+        workspace_path,
+        source_name,
+        connection_name,
+        pipeline_spec_input,
+        debug,
+    )
 
     # Step 3: Create the pipeline
-    click.echo(f"\nStep 3: Creating pipeline '{pipeline_config.name}'...")
-    pipeline_client = PipelineClient(workspace_client)
-
-    try:
-        pipeline_response = pipeline_client.create(
-            pipeline_config,
-            repo_path=repo_workspace_path,
-            source_name=source_name,
-        )
-        pipeline_id = pipeline_response.pipeline_id
-
-        # Build the pipeline URL
-        pipeline_url = f"{workspace_host}/pipelines/{pipeline_id}"
-
-        click.echo("  ✓ Pipeline created!")
-        click.echo(f"\n{'=' * 60}")
-        click.echo(f"Pipeline URL: {pipeline_url}")
-        click.echo(f"Pipeline ID:  {pipeline_id}")
-        click.echo(f"{'=' * 60}")
-
-        if debug:
-            click.echo(f"\n[DEBUG] Full pipeline response: {pipeline_response}")
-
-    except Exception as e:
-        raise click.ClickException(f"Failed to create pipeline: {e}")
+    _create_and_show_pipeline(
+        workspace_client,
+        pipeline_config,
+        repo_workspace_path,
+        source_name,
+        debug,
+    )
 
 
 @main.command("run_pipeline")
@@ -581,10 +695,9 @@ def create_connection(ctx: click.Context, source_name: str, connection_name: str
 
     \b
     Example:
-        community-connector create_connection github my_github_conn -o '{"host": "api.github.com", "externalOptionsAllowList": "repo,owner,startDate"}'
+        community-connector create_connection github my_github_conn \\
+            -o '{"host": "api.github.com", "externalOptionsAllowList": "..."}'
     """
-    import json
-
     debug = ctx.obj.get("debug", False)
 
     # Parse options JSON
@@ -603,14 +716,15 @@ def create_connection(ctx: click.Context, source_name: str, connection_name: str
     if "externalOptionsAllowList" not in options_dict:
         click.echo(
             "⚠️  Warning: 'externalOptionsAllowList' is not specified in the options. "
-            "This field is usually required to specify additional options needed for ingestion configuration in 'table_configuration'. "
-            "Please refer to the source connector documentation for the complete list of allowed options.",
+            "This field is usually required to specify additional options needed for "
+            "ingestion configuration in 'table_configuration'. "
+            "Please refer to the source connector documentation for allowed options.",
             err=True,
         )
 
     click.echo(f"Creating connection for source: {source_name}")
     click.echo(f"Connection name: {connection_name}")
-    click.echo(f"Connection type: GENERIC_LAKEFLOW_CONNECT")
+    click.echo("Connection type: GENERIC_LAKEFLOW_CONNECT")
 
     if debug:
         click.echo(f"[DEBUG] Options (with source_name): {options_dict}")
@@ -652,7 +766,6 @@ def create_connection(ctx: click.Context, source_name: str, connection_name: str
         if hasattr(e, 'error_code'):
             error_msg = f"[{e.error_code}] {error_msg}"
         if debug:
-            import traceback
             click.echo(f"\n[DEBUG] Full exception: {traceback.format_exc()}", err=True)
         raise click.ClickException(f"Failed to create connection: {error_msg}")
 
@@ -679,10 +792,9 @@ def update_connection(ctx: click.Context, source_name: str, connection_name: str
 
     \b
     Example:
-        community-connector update_connection github my_github_conn -o '{"host": "api.github.com", "externalOptionsAllowList": "repo,owner,startDate"}'
+        community-connector update_connection github my_github_conn \\
+            -o '{"host": "api.github.com", "externalOptionsAllowList": "..."}'
     """
-    import json
-
     debug = ctx.obj.get("debug", False)
 
     # Parse options JSON
@@ -701,8 +813,9 @@ def update_connection(ctx: click.Context, source_name: str, connection_name: str
     if "externalOptionsAllowList" not in options_dict:
         click.echo(
             "⚠️  Warning: 'externalOptionsAllowList' is not specified in the options. "
-            "This field is usually required to specify additional options needed for ingestion configuration in 'table_configuration'. "
-            "Please refer to the source connector documentation for the complete list of allowed options.",
+            "This field is usually required to specify additional options needed for "
+            "ingestion configuration in 'table_configuration'. "
+            "Please refer to the source connector documentation for allowed options.",
             err=True,
         )
 
@@ -747,10 +860,9 @@ def update_connection(ctx: click.Context, source_name: str, connection_name: str
         if hasattr(e, 'error_code'):
             error_msg = f"[{e.error_code}] {error_msg}"
         if debug:
-            import traceback
             click.echo(f"\n[DEBUG] Full exception: {traceback.format_exc()}", err=True)
         raise click.ClickException(f"Failed to update connection: {error_msg}")
 
 
 if __name__ == "__main__":
-    main()
+    main()  # pylint: disable=no-value-for-parameter

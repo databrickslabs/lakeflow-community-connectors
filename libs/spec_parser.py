@@ -180,6 +180,19 @@ class SpecParser:
         """
         return [obj.table.source_table for obj in self._model.objects]
 
+    def get_table_configurations(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Return the configurations for all tables.
+
+        Returns:
+            A dictionary mapping each source table name to its configuration.
+            Each configuration excludes special keys: scd_type, primary_keys, sequence_by.
+        """
+        return {
+            table_name: self.get_table_configuration(table_name)
+            for table_name in self.get_table_list()
+        }
+
     def get_table_configuration(self, table_name: str) -> Dict[str, Any]:
         """
         Return the configuration for a specific table.
