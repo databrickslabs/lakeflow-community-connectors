@@ -12,65 +12,96 @@
 # MAGIC 5. Deploy pipelines and jobs using Databricks SDK
 # MAGIC
 # MAGIC **Prerequisites**:
-# MAGIC - **UC Connection created** with proper credentials:
-# MAGIC   ```bash
-# MAGIC   community-connector create_connection osipi osipi_connection_lakeflow \
-# MAGIC     -o '{"pi_base_url": "https://mock-osipi-server.example.com", "access_token": "your-token"}'
-# MAGIC   ```
+# MAGIC - **UC Connection created** with proper credentials
 # MAGIC - Connector source code synced to workspace at `/Workspace/Users/{user}/lakeflow-community-connectors/`
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Configuration
+# MAGIC ## Configuration - Part 1: Basic Settings
 # MAGIC
-# MAGIC Set your configuration parameters below.
+# MAGIC Configure connector name and connection.
 
 # COMMAND ----------
 
-# ============================================================================
-# QUICK START CONFIGURATION - Edit these 3 lines for your connector
-# ============================================================================
+dbutils.widgets.text("connector_name", "osipi", "Connector Name")
+dbutils.widgets.text("connection_name", "osipi_connection_lakeflow", "UC Connection Name")
+dbutils.widgets.dropdown("use_preset", "true", ["true", "false"], "Use Preset CSV")
 
-CONNECTOR_NAME = "osipi"                                    # Your connector name (osipi, hubspot, github, zendesk, etc.)
-CONNECTION_NAME = f"{CONNECTOR_NAME}_connection_lakeflow"   # UC Connection name (auto-generated from connector name)
-USE_PRESET = True                                           # True = use preset CSV, False = run discovery
+CONNECTOR_NAME = dbutils.widgets.get("connector_name")
+CONNECTION_NAME = dbutils.widgets.get("connection_name")
+USE_PRESET = dbutils.widgets.get("use_preset") == "true"
 
-# ============================================================================
-# DESTINATION CONFIGURATION (Optional - uses smart defaults)
-# ============================================================================
+print(f"Connector: {CONNECTOR_NAME}")
+print(f"Connection: {CONNECTION_NAME}")
+print(f"Mode: {'Preset CSV' if USE_PRESET else 'Auto-Discovery'}")
 
-DEST_CATALOG = CONNECTOR_NAME    # Destination catalog (defaults to connector name)
-DEST_SCHEMA = "bronze"            # Destination schema
+# COMMAND ----------
 
-# ============================================================================
-# ADVANCED CONFIGURATION (Optional - sensible defaults provided)
-# ============================================================================
+# MAGIC %md
+# MAGIC ## Configuration - Part 2: Destination
 
-# Discovery settings (only used if USE_PRESET=False)
-GROUP_BY = "category_and_ingestion_type"     # How to group tables into pipelines
-SECRETS_SCOPE = f"sp-{CONNECTOR_NAME}"       # Databricks secrets scope for credentials
-SECRETS_TOKEN_KEY = "mock-bearer-token-plain"  # Secret key for access token
-MOCK_API_URL = None                          # Override API URL (None = use connector default)
+# COMMAND ----------
 
-# Schedules (cron expressions, empty = no scheduled jobs)
-SCHEDULE_SNAPSHOT = "0 0 * * *"       # Daily at midnight
-SCHEDULE_APPEND = "*/15 * * * *"      # Every 15 minutes
-SCHEDULE_CDC = "*/5 * * * *"          # Every 5 minutes
-SCHEDULE_UNKNOWN = ""                 # No schedule for unknown types
+dbutils.widgets.text("dest_catalog", "osipi", "Destination Catalog")
+dbutils.widgets.text("dest_schema", "bronze", "Destination Schema")
 
-# Deployment settings
-CLUSTER_NUM_WORKERS = 2               # Number of workers for pipelines
-EMIT_SCHEDULED_JOBS = True            # Create scheduled jobs
-PAUSE_JOBS = True                     # Create jobs in PAUSED state
+DEST_CATALOG = dbutils.widgets.get("dest_catalog")
+DEST_SCHEMA = dbutils.widgets.get("dest_schema")
 
-# ============================================================================
-# AUTO-GENERATED PATHS (Do not edit - automatically configured)
-# ============================================================================
+print(f"Destination: {DEST_CATALOG}.{DEST_SCHEMA}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Configuration - Part 3: Schedules
+
+# COMMAND ----------
+
+dbutils.widgets.text("schedule_snapshot", "0 0 * * *", "Schedule: Snapshot (cron)")
+dbutils.widgets.text("schedule_append", "*/15 * * * *", "Schedule: Append (cron)")
+dbutils.widgets.text("schedule_cdc", "*/5 * * * *", "Schedule: CDC (cron)")
+dbutils.widgets.text("schedule_unknown", "", "Schedule: Unknown (cron)")
+
+SCHEDULE_SNAPSHOT = dbutils.widgets.get("schedule_snapshot")
+SCHEDULE_APPEND = dbutils.widgets.get("schedule_append")
+SCHEDULE_CDC = dbutils.widgets.get("schedule_cdc")
+SCHEDULE_UNKNOWN = dbutils.widgets.get("schedule_unknown")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Configuration - Part 4: Advanced Settings
+
+# COMMAND ----------
+
+dbutils.widgets.dropdown("group_by", "category_and_ingestion_type",
+                        ["category_and_ingestion_type", "ingestion_type", "category", "none"],
+                        "Group Tables By")
+dbutils.widgets.text("secrets_scope", "sp-osipi", "Secrets Scope (for discovery)")
+dbutils.widgets.text("secrets_token_key", "access-token", "Secret Key Name")
+dbutils.widgets.text("cluster_num_workers", "2", "Cluster Workers")
+dbutils.widgets.dropdown("emit_scheduled_jobs", "true", ["true", "false"], "Create Scheduled Jobs")
+dbutils.widgets.dropdown("pause_jobs", "true", ["true", "false"], "Pause Jobs Initially")
+
+GROUP_BY = dbutils.widgets.get("group_by")
+SECRETS_SCOPE = dbutils.widgets.get("secrets_scope")
+SECRETS_TOKEN_KEY = dbutils.widgets.get("secrets_token_key")
+CLUSTER_NUM_WORKERS = int(dbutils.widgets.get("cluster_num_workers"))
+EMIT_SCHEDULED_JOBS = dbutils.widgets.get("emit_scheduled_jobs") == "true"
+PAUSE_JOBS = dbutils.widgets.get("pause_jobs") == "true"
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Configuration - Part 5: Paths (Auto-Generated)
+
+# COMMAND ----------
 
 import os
+
 USERNAME = spark.sql("SELECT current_user()").collect()[0][0]
-DATABRICKS_PROFILE = "dogfood"  # CLI profile for SDK operations
+DATABRICKS_PROFILE = "dogfood"
 
 # Local temp paths
 WORK_DIR = f"/tmp/{USERNAME.replace('@', '_').replace('.', '_')}/load_balanced_deployment_{CONNECTOR_NAME}"
@@ -78,21 +109,21 @@ CSV_PATH = f"{WORK_DIR}/{CONNECTOR_NAME}_tables.csv"
 INGEST_FILES_DIR = f"{WORK_DIR}/{CONNECTOR_NAME}_ingest_files"
 DAB_YAML_PATH = f"{WORK_DIR}/{CONNECTOR_NAME}_bundle/databricks.yml"
 
-# Workspace paths (automatically constructed from USERNAME and CONNECTOR_NAME)
+# Workspace paths
 WORKSPACE_INGEST_PATH = f"/Workspace/Users/{USERNAME}/lakeflow-community-connectors/ingest/{CONNECTOR_NAME}"
 TOOLS_DIR_WORKSPACE = f"/Workspace/Users/{USERNAME}/lakeflow-community-connectors/tools/load_balanced_deployment"
 CONNECTOR_SOURCE_WORKSPACE = f"/Workspace/Users/{USERNAME}/lakeflow-community-connectors/sources/{CONNECTOR_NAME}/{CONNECTOR_NAME}.py"
 PRESET_CSV_PATH = f"/Workspace/Users/{USERNAME}/lakeflow-community-connectors/tools/load_balanced_deployment/examples/{CONNECTOR_NAME}/preset_by_category_and_ingestion.csv"
 
-# Print configuration summary
 print("="*70)
-print("CONFIGURATION SUMMARY")
+print("CONFIGURATION COMPLETE")
 print("="*70)
 print(f"Connector:        {CONNECTOR_NAME}")
 print(f"Connection:       {CONNECTION_NAME}")
 print(f"Discovery Mode:   {'Preset CSV' if USE_PRESET else 'Auto-Discovery'}")
 print(f"Destination:      {DEST_CATALOG}.{DEST_SCHEMA}")
 print(f"User:             {USERNAME}")
+print(f"Work Directory:   {WORK_DIR}")
 if not USE_PRESET:
     print(f"Secrets Scope:    {SECRETS_SCOPE}")
 print("="*70)
@@ -109,7 +140,7 @@ print("="*70)
 # MAGIC - Ingestion type (snapshot/append/cdc)
 # MAGIC - Primary keys and cursor fields
 # MAGIC
-# MAGIC **Credentials:** Loaded from Databricks secrets scope `sp-osipi`
+# MAGIC **Credentials:** Loaded from Databricks secrets scope configured in widgets
 
 # COMMAND ----------
 
@@ -182,17 +213,14 @@ if not USE_PRESET:
     # Load credentials from dbutils.secrets
     import json
     try:
-        # For MockPI testing
-        access_token = dbutils.secrets.get("sp-osipi", "mock-bearer-token-plain")
-        pi_base_url = "https://mock-piwebapi-912141448724.us-central1.run.app"
+        access_token = dbutils.secrets.get(SECRETS_SCOPE, SECRETS_TOKEN_KEY)
 
+        # Build init_options - connector-specific, adjust as needed
         init_options = {
-            "pi_base_url": pi_base_url,
-            "access_token": f"Bearer {access_token}" if not access_token.startswith("Bearer ") else access_token
+            "access_token": access_token
         }
         init_options_json = json.dumps(init_options)
-        print(f"  ✓ Loaded credentials from sp-osipi scope")
-        print(f"  ✓ Using MockPI URL: {pi_base_url}")
+        print(f"  ✓ Loaded credentials from {SECRETS_SCOPE}/{SECRETS_TOKEN_KEY}")
 
     except Exception as e:
         print(f"  ✗ Failed to load credentials: {e}")
