@@ -20,7 +20,13 @@
 # MAGIC %md
 # MAGIC ## Configuration - Part 1: Basic Settings
 # MAGIC
-# MAGIC Configure connector name and connection.
+# MAGIC **Connector Name**: The name of your connector (e.g., `osipi`, `zendesk`, `github`, `stripe`).
+# MAGIC
+# MAGIC **UC Connection Name**: The Unity Catalog connection that contains credentials for the source system. This connection must exist before running the notebook.
+# MAGIC
+# MAGIC **Use Preset CSV**:
+# MAGIC - `true`: Use a pre-generated CSV file with table metadata (skips auto-discovery)
+# MAGIC - `false`: Auto-discover tables by calling the connector's `list_tables()` and `read_table_metadata()` methods
 
 # COMMAND ----------
 
@@ -40,6 +46,10 @@ print(f"Mode: {'Preset CSV' if USE_PRESET else 'Auto-Discovery'}")
 
 # MAGIC %md
 # MAGIC ## Configuration - Part 2: Destination
+# MAGIC
+# MAGIC **Destination Catalog**: Unity Catalog catalog where ingested data will be stored. This catalog must exist and you must have CREATE TABLE permissions.
+# MAGIC
+# MAGIC **Destination Schema**: Schema (database) within the catalog where tables will be created. Will be created automatically if it doesn't exist.
 
 # COMMAND ----------
 
@@ -55,6 +65,16 @@ print(f"Destination: {DEST_CATALOG}.{DEST_SCHEMA}")
 
 # MAGIC %md
 # MAGIC ## Configuration - Part 3: Schedules
+# MAGIC
+# MAGIC Configure cron expressions for scheduled pipeline runs based on ingestion type. Leave empty to skip job creation for that type.
+# MAGIC
+# MAGIC **Schedule: Snapshot** - For full table snapshots (e.g., `0 0 * * *` = daily at midnight)
+# MAGIC
+# MAGIC **Schedule: Append** - For incremental append-only tables (e.g., `*/15 * * * *` = every 15 minutes)
+# MAGIC
+# MAGIC **Schedule: CDC** - For change-data-capture tables (e.g., `*/5 * * * *` = every 5 minutes)
+# MAGIC
+# MAGIC **Schedule: Unknown** - For tables with unclassified ingestion type (typically left empty)
 
 # COMMAND ----------
 
@@ -72,6 +92,37 @@ SCHEDULE_UNKNOWN = dbutils.widgets.get("schedule_unknown")
 
 # MAGIC %md
 # MAGIC ## Configuration - Part 4: Advanced Settings
+# MAGIC
+# MAGIC ### Group Tables By
+# MAGIC Determines how tables are grouped into separate pipelines:
+# MAGIC - `category_and_ingestion_type`: Group by both category (e.g., time_series) and ingestion type (e.g., append) - most granular
+# MAGIC - `ingestion_type`: Group by ingestion type only (snapshot, append, cdc)
+# MAGIC - `category`: Group by table category only (time_series, asset_framework, etc.)
+# MAGIC - `none`: All tables in a single pipeline
+# MAGIC
+# MAGIC ### Secrets Scope (for Auto-Discovery)
+# MAGIC Databricks secrets scope containing credentials for connector authentication. Only used when `Use Preset CSV = false`.
+# MAGIC
+# MAGIC ### Secret Keys Mapping (JSON)
+# MAGIC Maps connector init option names to secret key names in the configured scope. Format: `{"init_option": "secret_key"}`
+# MAGIC
+# MAGIC **Examples:**
+# MAGIC - **Token Authentication**: `{"access_token": "access_token"}`
+# MAGIC - **Basic Authentication**: `{"username": "db_username", "password": "db_password"}`
+# MAGIC - **OAuth 2.0**: `{"client_id": "sp_client_id", "client_secret": "sp_client_secret"}`
+# MAGIC - **API Key + URL**: `{"api_key": "api_key", "api_url": "api_url"}`
+# MAGIC - **Multiple Credentials**: `{"host": "db_host", "port": "db_port", "username": "db_user", "password": "db_pass"}`
+# MAGIC
+# MAGIC The notebook will loop through this mapping and load each secret value from the scope, building the `init_options` dictionary that gets passed to the connector's `__init__()` method.
+# MAGIC
+# MAGIC ### Cluster Workers
+# MAGIC Number of worker nodes for pipeline clusters (default: 2)
+# MAGIC
+# MAGIC ### Create Scheduled Jobs
+# MAGIC Whether to create Databricks Jobs with schedules for automatic pipeline execution
+# MAGIC
+# MAGIC ### Pause Jobs Initially
+# MAGIC Create jobs in PAUSED state (recommended for initial deployment)
 
 # COMMAND ----------
 
@@ -95,6 +146,12 @@ PAUSE_JOBS = dbutils.widgets.get("pause_jobs") == "true"
 
 # MAGIC %md
 # MAGIC ## Configuration - Part 5: Paths (Auto-Generated)
+# MAGIC
+# MAGIC All paths are automatically constructed based on your username and connector name. Do not edit this cell.
+# MAGIC
+# MAGIC **Local temp paths**: Used for temporary files during notebook execution (in `/tmp`)
+# MAGIC
+# MAGIC **Workspace paths**: Locations in your Databricks workspace where connector code and generated files are stored
 
 # COMMAND ----------
 
