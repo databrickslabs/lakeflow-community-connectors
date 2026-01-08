@@ -87,24 +87,54 @@ community-connector show_pipeline my_github_pipeline
 
 Create a Unity Catalog connection for Lakeflow connectors.
 
+The CLI validates connection options against the connector spec (`connector_spec.yaml`) and automatically configures the `externalOptionsAllowList` based on:
+1. Source-specific options from the connector spec
+2. Common options from the CLI's default config
+
 ```bash
+# Basic usage - options are validated and externalOptionsAllowList is auto-configured
 community-connector create_connection github my_github_conn \
-  -o '{"host": "api.github.com", "externalOptionsAllowList": "repo,owner,startDate"}'
+  -o '{"token": "ghp_xxxx"}'
+
+# With a local connector spec file
+community-connector create_connection github my_github_conn \
+  -o '{"token": "ghp_xxxx"}' --spec ./my_connector_spec.yaml
+
+# With a custom GitHub repo (fetches spec from sources/{source}/connector_spec.yaml)
+community-connector create_connection github my_github_conn \
+  -o '{"token": "ghp_xxxx"}' --spec https://github.com/myorg/my-connectors
 ```
 
 **Options:**
 | Option | Short | Description |
 |--------|-------|-------------|
 | `--options` | `-o` | Connection options as JSON string (required) |
+| `--spec` | `-s` | Optional: local path to connector_spec.yaml, or a GitHub repo URL |
+
+**Validation:**
+- Required connection parameters (from spec) must be provided
+- Unknown parameters generate a warning
+- `externalOptionsAllowList` is automatically set if not provided
 
 ### `update_connection`
 
 Update an existing Unity Catalog connection.
 
 ```bash
+# Basic usage - same validation and auto-configuration as create
 community-connector update_connection github my_github_conn \
-  -o '{"host": "api.github.com", "externalOptionsAllowList": "repo,owner,startDate,endDate"}'
+  -o '{"token": "ghp_new_token"}'
+
+# With custom spec
+community-connector update_connection github my_github_conn \
+  -o '{"token": "ghp_xxxx"}' --spec ./my_connector_spec.yaml
 ```
+
+**Options:**
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--options` | `-o` | Connection options as JSON string (required) |
+| `--spec` | `-s` | Optional: local path to connector_spec.yaml, or a GitHub repo URL |
 
 ## Pipeline Spec Format
 
@@ -161,6 +191,7 @@ The bundled defaults include:
 - Sparse checkout patterns for connector source files
 - Serverless mode enabled
 - Development mode enabled
+- Connection external options allowlist: Common table config options (e.g., `tableName`, `tableNameList`, `isDeleteFlow`)
 
 ### Custom Config File
 
@@ -171,11 +202,16 @@ Override defaults with a custom YAML file:
 workspace_path: "/Shared/connectors/{PIPELINE_NAME}"
 
 repo:
+  url: https://github.com/myorg/my-connectors.git
   branch: develop
 
 pipeline:
   serverless: false
   development: false
+
+connection:
+  # Additional options to include in externalOptionsAllowList for all connectors
+  external_options_allowlist: "tableName,tableNameList,isDeleteFlow,customOption"
 ```
 
 Use with:
