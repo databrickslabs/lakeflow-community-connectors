@@ -25,8 +25,13 @@ class LakeflowConnect:
         Args:
             options: Dictionary containing:
                 - connection_uri: MongoDB connection string (required)
-                  Format: mongodb://[username:password@]host[:port][/[database][?options]]
-                  Example: mongodb://user:pass@localhost:27017/mydb
+                  Formats supported:
+                    - Standard: mongodb://[username:password@]host[:port][/[database][?options]]
+                    - Atlas SRV: mongodb+srv://username:password@cluster.mongodb.net/database
+                  Examples:
+                    - mongodb://user:pass@localhost:27017/mydb
+                    - mongodb+srv://user:pass@cluster0.mongodb.net/mydb
+                  Note: SRV URIs require dnspython package to be installed
         """
         connection_uri = options.get("connection_uri")
         if not connection_uri:
