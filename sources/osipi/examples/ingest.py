@@ -16,6 +16,8 @@ Prerequisites:
 1. Unity Catalog connection created with PI Web API credentials:
    - pi_base_url: PI Web API endpoint
    - Authentication: OIDC client credentials (recommended), Bearer token, or Basic auth
+   - Must include 'tableConfigs' in externalOptionsAllowList (required for table_configuration options)
+     Use: python3 tools/add_tableconfigs_to_connection.py <connection_name> --profile <profile>
 2. Destination catalog and schema configured
 3. Network connectivity to PI Web API from Databricks
 
