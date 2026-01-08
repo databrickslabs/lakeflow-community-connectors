@@ -735,6 +735,8 @@ def register_lakeflow_source(spark):
             """
             self._validate_table_name(table_name)
 
+            print(f"Reading table '{table_name}' with options: {table_options}")
+
             if table_name == "accounts":
                 return self._read_accounts(start_offset, table_options)
             elif table_name == "campaigns":
