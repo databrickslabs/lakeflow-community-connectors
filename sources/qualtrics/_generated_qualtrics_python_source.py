@@ -292,6 +292,9 @@ def register_lakeflow_source(spark):
                 "Content-Type": "application/json"
             })
 
+            # Validate credentials on initialization
+            self._validate_credentials()
+
             # Auto-consolidation configuration
             max_surveys_str = options.get(
                 "max_surveys", str(QualtricsConfig.DEFAULT_MAX_SURVEYS)
@@ -379,6 +382,49 @@ def register_lakeflow_source(spark):
                     "ingestion_type": "snapshot"
                 },
             }
+
+        def _validate_credentials(self) -> None:
+            """
+            Validate API credentials by making a lightweight API call.
+
+            Raises:
+                ValueError: If the API returns an error response
+            """
+            url = f"{self.base_url}/surveys?pageSize=1"
+            try:
+                response = self._session.get(url, timeout=QualtricsConfig.REQUEST_TIMEOUT)
+
+                if not response.ok:
+                    # Extract Qualtrics error message from response
+                    error_message = f"HTTP {response.status_code}"
+                    try:
+                        error_json = response.json()
+                        meta = error_json.get("meta", {})
+                        http_status = meta.get("httpStatus", "")
+                        error_info = meta.get("error", {})
+                        error_detail = error_info.get("errorMessage", "")
+                        if error_detail:
+                            error_message = f"{http_status}: {error_detail}"
+                        elif http_status:
+                            error_message = http_status
+                    except Exception:
+                        pass
+
+                    raise ValueError(
+                        f"Qualtrics API credential validation failed. {error_message}"
+                    )
+
+                logger.info("Qualtrics API credentials validated successfully")
+
+            except requests.exceptions.ConnectionError as e:
+                raise ValueError(
+                    f"Cannot connect to Qualtrics API at {self.base_url}. "
+                    f"Verify datacenter_id '{self.datacenter_id}' is correct."
+                ) from e
+            except requests.exceptions.Timeout:
+                raise ValueError(
+                    f"Connection to Qualtrics API timed out at {self.base_url}."
+                )
 
         def list_tables(self) -> list[str]:
             """
