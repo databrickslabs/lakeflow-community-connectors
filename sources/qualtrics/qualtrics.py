@@ -120,7 +120,7 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
         self.tables = [
             "surveys", "survey_definitions", "survey_responses",
             "distributions", "mailing_lists", "mailing_list_contacts",
-            "directory_contacts", "directories"
+            "directory_contacts", "directories", "users"
         ]
 
         # Schema method mappings
@@ -133,6 +133,7 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
             "mailing_list_contacts": self._get_mailing_list_contacts_schema,
             "directory_contacts": self._get_directory_contacts_schema,
             "directories": self._get_directories_schema,
+            "users": self._get_users_schema,
         }
 
         # Reader method mappings
@@ -145,6 +146,7 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
             "mailing_list_contacts": self._read_mailing_list_contacts,
             "directory_contacts": self._read_directory_contacts,
             "directories": self._read_directories,
+            "users": self._read_users,
         }
 
         # Table metadata mappings
@@ -186,6 +188,11 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
             },
             "directories": {
                 "primary_keys": ["directory_id"],
+                "cursor_field": None,
+                "ingestion_type": "snapshot"
+            },
+            "users": {
+                "primary_keys": ["id"],
                 "cursor_field": None,
                 "ingestion_type": "snapshot"
             },
@@ -448,6 +455,19 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
             ]), True)
         ])
 
+    def _get_users_schema(self) -> StructType:
+        """Get schema for users table."""
+        return StructType([
+            StructField("id", StringType(), True),
+            StructField("username", StringType(), True),
+            StructField("email", StringType(), True),
+            StructField("first_name", StringType(), True),
+            StructField("last_name", StringType(), True),
+            StructField("user_type", StringType(), True),
+            StructField("division_id", StringType(), True),
+            StructField("account_status", StringType(), True),
+        ])
+
     # =========================================================================
     # Table Metadata and Routing
     # =========================================================================
@@ -493,8 +513,8 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
 
         reader_method = self._reader_methods[table_name]
 
-        # surveys and directories don't need table_options
-        if table_name in ("surveys", "directories"):
+        # surveys, directories, and users don't need table_options
+        if table_name in ("surveys", "directories", "users"):
             return reader_method(start_offset)
 
         return reader_method(start_offset, table_options)
@@ -1540,3 +1560,21 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
             Tuple of (iterator of directory records, offset dict)
         """
         return self._fetch_paginated_list("/directories", start_offset, cursor_field=None)
+
+    # =========================================================================
+    # Table Readers: Users
+    # =========================================================================
+
+    def _read_users(self, start_offset: dict) -> (Iterator[dict], dict):
+        """
+        Read users from Qualtrics API.
+
+        Uses snapshot mode (full refresh) - retrieves all users in the organization.
+
+        Args:
+            start_offset: Dictionary containing pagination token
+
+        Returns:
+            Tuple of (iterator of user records, offset dict)
+        """
+        return self._fetch_paginated_list("/users", start_offset, cursor_field=None)
