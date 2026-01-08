@@ -970,7 +970,8 @@ def register_lakeflow_source(spark):
             logger.info(debug_msg1)
 
             # Check if specific survey IDs are provided
-            survey_id_input = table_options.get("surveyId")
+            # Note: Databricks lowercases option keys, so check both cases
+            survey_id_input = table_options.get("surveyId") or table_options.get("surveyid")
             debug_msg3 = f"DEBUG _get_all_survey_ids: survey_id_input={survey_id_input}"
             print(debug_msg3)
             sys.stderr.write(debug_msg3 + "\n")
@@ -1123,7 +1124,8 @@ def register_lakeflow_source(spark):
             Returns:
                 Tuple of (iterator of survey definition records, offset dict)
             """
-            survey_id_input = table_options.get("surveyId")
+            # Note: Databricks lowercases option keys, so check both cases
+            survey_id_input = table_options.get("surveyId") or table_options.get("surveyid")
 
             # Single survey (no comma) - use simple offset structure for backward compatibility
             if survey_id_input and "," not in survey_id_input:
@@ -1270,7 +1272,8 @@ def register_lakeflow_source(spark):
             Returns:
                 Tuple of (iterator of response records, new offset)
             """
-            survey_id_input = table_options.get("surveyId")
+            # Note: Databricks lowercases option keys, so check both cases
+            survey_id_input = table_options.get("surveyId") or table_options.get("surveyid")
 
             # Single survey (no comma) - use simple offset structure for backward compatibility
             if survey_id_input and "," not in survey_id_input:
@@ -1614,7 +1617,8 @@ def register_lakeflow_source(spark):
             Returns:
                 Tuple of (iterator of distribution records, new offset)
             """
-            survey_id_input = table_options.get("surveyId")
+            # Note: Databricks lowercases option keys, so check both cases
+            survey_id_input = table_options.get("surveyId") or table_options.get("surveyid")
 
             # Single survey (no comma) - use simple offset structure for backward compatibility
             if survey_id_input and "," not in survey_id_input:
@@ -1691,13 +1695,15 @@ def register_lakeflow_source(spark):
             Returns:
                 Tuple of (iterator of contact records, empty offset dict)
             """
-            directory_id = table_options.get("directoryId")
+            # Note: Databricks lowercases option keys, so check both cases
+            directory_id = table_options.get("directoryId") or table_options.get("directoryid")
             if not directory_id:
                 raise ValueError(
                     "directoryId is required in table_options for mailing_list_contacts table"
                 )
 
-            mailing_list_id = table_options.get("mailingListId")
+            # Note: Databricks lowercases option keys, so check both cases
+            mailing_list_id = table_options.get("mailingListId") or table_options.get("mailinglistid")
             if not mailing_list_id:
                 raise ValueError(
                     "mailingListId is required in table_options for mailing_list_contacts table"
@@ -1727,7 +1733,8 @@ def register_lakeflow_source(spark):
             Returns:
                 Tuple of (iterator of contact records, empty offset dict)
             """
-            directory_id = table_options.get("directoryId")
+            # Note: Databricks lowercases option keys, so check both cases
+            directory_id = table_options.get("directoryId") or table_options.get("directoryid")
             if not directory_id:
                 raise ValueError(
                     "directoryId is required in table_options for directory_contacts table"
@@ -1756,7 +1763,8 @@ def register_lakeflow_source(spark):
             Returns:
                 Tuple of (iterator of mailing list records, offset dict)
             """
-            directory_id = table_options.get("directoryId")
+            # Note: Databricks lowercases option keys, so check both cases
+            directory_id = table_options.get("directoryId") or table_options.get("directoryid")
             if not directory_id:
                 raise ValueError(
                     "directoryId is required in table_options for mailing_lists table"
