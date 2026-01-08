@@ -226,7 +226,9 @@ When using auto-consolidation (no `surveyId` specified):
 {
   "table": {
     "source_table": "survey_responses",
-    "surveyId": "SV_abc123xyz"
+    "table_configuration": {
+      "surveyId": "SV_abc123xyz"
+    }
   }
 }
 ```
@@ -236,7 +238,9 @@ When using auto-consolidation (no `surveyId` specified):
 {
   "table": {
     "source_table": "survey_responses",
-    "surveyId": "SV_abc123xyz, SV_def456xyz, SV_ghi789xyz"
+    "table_configuration": {
+      "surveyId": "SV_abc123xyz, SV_def456xyz, SV_ghi789xyz"
+    }
   }
 }
 ```
@@ -479,14 +483,18 @@ Example `pipeline_spec` with auto-consolidation (recommended):
       {
         "table": {
           "source_table": "mailing_list_contacts",
-          "directoryId": "POOL_abc123xyz",
-          "mailingListId": "CG_def456xyz"
+          "table_configuration": {
+            "directoryId": "POOL_abc123xyz",
+            "mailingListId": "CG_def456xyz"
+          }
         }
       },
       {
         "table": {
           "source_table": "directory_contacts",
-          "directoryId": "POOL_abc123xyz"
+          "table_configuration": {
+            "directoryId": "POOL_abc123xyz"
+          }
         }
       },
       {
@@ -504,7 +512,7 @@ Example `pipeline_spec` with auto-consolidation (recommended):
 }
 ```
 
-Example `pipeline_spec` with specific surveys (backward compatible):
+Example `pipeline_spec` with specific surveys:
 
 ```json
 {
@@ -519,32 +527,42 @@ Example `pipeline_spec` with specific surveys (backward compatible):
       {
         "table": {
           "source_table": "survey_definitions",
-          "surveyId": "SV_abc123xyz"
+          "table_configuration": {
+            "surveyId": "SV_abc123xyz"
+          }
         }
       },
       {
         "table": {
           "source_table": "survey_responses",
-          "surveyId": "SV_abc123xyz"
+          "table_configuration": {
+            "surveyId": "SV_abc123xyz"
+          }
         }
       },
       {
         "table": {
           "source_table": "distributions",
-          "surveyId": "SV_abc123xyz"
+          "table_configuration": {
+            "surveyId": "SV_abc123xyz"
+          }
         }
       },
       {
         "table": {
           "source_table": "mailing_list_contacts",
-          "directoryId": "POOL_abc123xyz",
-          "mailingListId": "CG_def456xyz"
+          "table_configuration": {
+            "directoryId": "POOL_abc123xyz",
+            "mailingListId": "CG_def456xyz"
+          }
         }
       },
       {
         "table": {
           "source_table": "directory_contacts",
-          "directoryId": "POOL_abc123xyz"
+          "table_configuration": {
+            "directoryId": "POOL_abc123xyz"
+          }
         }
       },
       {
