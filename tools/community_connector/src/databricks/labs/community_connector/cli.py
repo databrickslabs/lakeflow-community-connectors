@@ -47,15 +47,7 @@ _merge_external_options_allowlist = merge_external_options_allowlist
 
 
 def _get_default_repo_raw_url() -> str:
-    """
-    Get the default repository raw URL from the default config.
-
-    Reads the repo.url and repo.branch from default_config.yaml and converts
-    to a raw.githubusercontent.com URL.
-
-    Returns:
-        Raw GitHub URL for the default repository.
-    """
+    """Get the default repository raw URL from default_config.yaml."""
     config = load_default_config()
     repo_config = config.get("repo", {})
     repo_url = repo_config.get(
@@ -67,19 +59,7 @@ def _get_default_repo_raw_url() -> str:
 
 
 def _load_connector_spec(source_name: str, spec_path: Optional[str] = None) -> Optional[dict]:
-    """
-    Load the connector_spec.yaml for a given source.
-
-    This is a CLI wrapper around connector_spec.load_connector_spec that provides
-    warning output via click.echo.
-
-    Args:
-        source_name: Name of the connector source (e.g., 'github', 'stripe').
-        spec_path: Optional path to a local spec file, or a GitHub repo URL.
-
-    Returns:
-        Parsed connector spec as a dictionary, or None if not found.
-    """
+    """Load connector_spec.yaml for a source. CLI wrapper with warning output."""
     return load_connector_spec(
         source_name=source_name,
         spec_path=spec_path,
@@ -90,38 +70,16 @@ def _load_connector_spec(source_name: str, spec_path: Optional[str] = None) -> O
 
 
 def _get_constant_external_options_allowlist() -> str:
-    """
-    Get the constant external options allowlist from the default config.
-
-    This allowlist contains common table configuration options that all connectors support
-    and is appended to the source-specific allowlist.
-
-    Returns:
-        Comma-separated string of constant allowlist options.
-    """
+    """Get constant external options allowlist from default config."""
     config = load_default_config()
     connection_config = config.get("connection", {})
     return connection_config.get("external_options_allowlist", "")
 
 
 def _validate_connection_options_with_spec(
-    source_name: str,
-    options_dict: dict,
-    parsed_spec: ParsedConnectorSpec,
+    source_name: str, options_dict: dict, parsed_spec: ParsedConnectorSpec
 ) -> List[str]:
-    """
-    Validate connection options against the parsed connector spec.
-
-    This is a CLI wrapper that handles output via click.echo.
-
-    Args:
-        source_name: Name of the connector source.
-        options_dict: The connection options dictionary.
-        parsed_spec: The parsed connector spec.
-
-    Returns:
-        List of validation error messages.
-    """
+    """Validate connection options against spec. Returns list of error messages."""
     result = validate_connection_options(source_name, options_dict, parsed_spec)
 
     # Print detected auth method
@@ -136,25 +94,9 @@ def _validate_connection_options_with_spec(
 
 
 def _validate_connection_options(
-    source_name: str,
-    options_dict: dict,
-    required_params: Set[str],
-    optional_params: Set[str],
+    source_name: str, options_dict: dict, required_params: Set[str], optional_params: Set[str]
 ) -> List[str]:
-    """
-    Legacy validation function for backward compatibility.
-
-    This is a CLI wrapper that handles output via click.echo.
-
-    Args:
-        source_name: Name of the connector source.
-        options_dict: The connection options dictionary.
-        required_params: Set of required parameter names.
-        optional_params: Set of optional parameter names.
-
-    Returns:
-        List of validation error messages.
-    """
+    """Legacy validation function. Returns list of error messages."""
     result = validate_connection_options_legacy(
         source_name, options_dict, required_params, optional_params
     )
@@ -166,6 +108,96 @@ def _validate_connection_options(
     return result.errors
 
 
+def _prepare_connection_options(
+    source_name: str, options: str, spec_path: Optional[str], debug: bool
+) -> dict:
+    """Parse, validate, and enrich connection options. Raises ClickException on failure."""
+    # Parse options JSON
+    try:
+        options_dict = json.loads(options)
+    except json.JSONDecodeError as e:
+        raise click.ClickException(f"Invalid JSON for --options: {e}")
+
+    if not isinstance(options_dict, dict):
+        raise click.ClickException("--options must be a JSON object (key-value pairs)")
+
+    # Get constant allowlist and load spec
+    constant_allowlist = _get_constant_external_options_allowlist()
+    connector_spec = _load_connector_spec(source_name, spec_path)
+
+    if connector_spec:
+        parsed_spec = _parse_connector_spec(connector_spec)
+        _debug_print_spec(parsed_spec, constant_allowlist, debug)
+
+        # Validate connection options
+        errors = _validate_connection_options_with_spec(source_name, options_dict, parsed_spec)
+        if errors:
+            raise click.ClickException("\n".join(errors))
+
+        # Auto-add externalOptionsAllowList
+        _add_external_options_allowlist(
+            options_dict, parsed_spec.external_options_allowlist, constant_allowlist
+        )
+    else:
+        click.echo(
+            f"⚠️  Warning: Could not load connector spec for '{source_name}'. "
+            "Skipping parameter validation.",
+            err=True,
+        )
+        if "externalOptionsAllowList" not in options_dict and constant_allowlist:
+            options_dict["externalOptionsAllowList"] = constant_allowlist
+            click.echo(f"  ✓ Auto-added constant externalOptionsAllowList: {constant_allowlist}")
+
+    options_dict["sourceName"] = source_name
+
+    if debug:
+        click.echo(f"[DEBUG] Options (with source_name): {options_dict}")
+
+    return options_dict
+
+
+def _debug_print_spec(
+    parsed_spec: ParsedConnectorSpec, constant_allowlist: str, debug: bool
+) -> None:
+    """Print debug information about the connector spec."""
+    if not debug:
+        return
+    if parsed_spec.has_auth_methods():
+        click.echo(f"[DEBUG] Auth methods: {[m.name for m in parsed_spec.auth_methods]}")
+        click.echo(f"[DEBUG] Common required: {parsed_spec.common_required_params}")
+        click.echo(f"[DEBUG] Common optional: {parsed_spec.common_optional_params}")
+    else:
+        click.echo(f"[DEBUG] Required params: {parsed_spec.required_params}")
+        click.echo(f"[DEBUG] Optional params: {parsed_spec.optional_params}")
+    click.echo(f"[DEBUG] Source allowlist: {parsed_spec.external_options_allowlist}")
+    click.echo(f"[DEBUG] Constant allowlist: {constant_allowlist}")
+
+
+def _add_external_options_allowlist(
+    options_dict: dict, source_allowlist: str, constant_allowlist: str
+) -> None:
+    """Add external options allowlist to options if not already present."""
+    if "externalOptionsAllowList" not in options_dict:
+        merged_allowlist = _merge_external_options_allowlist(source_allowlist, constant_allowlist)
+        options_dict["externalOptionsAllowList"] = merged_allowlist
+        if merged_allowlist:
+            click.echo(f"  ✓ Auto-added externalOptionsAllowList: {merged_allowlist}")
+        else:
+            click.echo("  ✓ Set externalOptionsAllowList to empty (no table-specific options)")
+
+
+def _handle_api_error(e: Exception, operation: str, debug: bool) -> None:
+    """Handle API errors with detailed output."""
+    error_msg = str(e)
+    if hasattr(e, "message"):
+        error_msg = e.message
+    if hasattr(e, "error_code"):
+        error_msg = f"[{e.error_code}] {error_msg}"
+    if debug:
+        click.echo(f"\n[DEBUG] Full exception: {traceback.format_exc()}", err=True)
+    raise click.ClickException(f"Failed to {operation} connection: {error_msg}")
+
+
 class OrderedGroup(click.Group):  # pylint: disable=too-few-public-methods
     """Custom Click group that preserves command order as defined in code."""
 
@@ -175,19 +207,7 @@ class OrderedGroup(click.Group):  # pylint: disable=too-few-public-methods
 
 
 def _parse_pipeline_spec(spec_input: str, validate: bool = True) -> dict:
-    """
-    Parse pipeline spec from JSON string, YAML file, or JSON file.
-
-    Args:
-        spec_input: JSON string, or path to .yaml/.yml/.json file.
-        validate: Whether to validate the parsed spec.
-
-    Returns:
-        Parsed dictionary containing the pipeline spec.
-
-    Raises:
-        click.ClickException: If parsing or validation fails.
-    """
+    """Parse pipeline spec from JSON string or YAML/JSON file."""
     # Check if it's a file path
     if spec_input.endswith(('.yaml', '.yml', '.json')):
         try:
@@ -220,19 +240,7 @@ def _parse_pipeline_spec(spec_input: str, validate: bool = True) -> dict:
 
 
 def _find_pipeline_by_name(workspace_client, pipeline_name: str) -> str:
-    """
-    Find a pipeline by name and return its ID.
-
-    Args:
-        workspace_client: The WorkspaceClient instance.
-        pipeline_name: Name of the pipeline to find.
-
-    Returns:
-        The pipeline ID.
-
-    Raises:
-        click.ClickException: If the pipeline is not found.
-    """
+    """Find a pipeline by name and return its ID."""
     filter_str = f"name LIKE '{pipeline_name}'"
     pipelines = list(workspace_client.pipelines.list_pipelines(filter=filter_str))
 
@@ -249,32 +257,14 @@ def _find_pipeline_by_name(workspace_client, pipeline_name: str) -> str:
 
 
 def _load_ingest_template(template_name: str = "ingest_template.py") -> str:
-    """
-    Load an ingest template from the bundled templates.
-
-    Args:
-        template_name: Name of the template file to load.
-            - "ingest_template.py": Full template with examples (default)
-            - "ingest_template_base.py": Base template for --pipeline-spec
-
-    Returns:
-        Content of the template file.
-    """
+    """Load an ingest template from bundled templates."""
     template_path = Path(__file__).parent / "templates" / template_name
     with open(template_path, "r") as f:
         return f.read()
 
 
 def _create_workspace_file(workspace_client, path: str, content: str) -> None:
-    """
-    Create a file in the Databricks workspace.
-
-    Args:
-        workspace_client: The WorkspaceClient instance.
-        path: Workspace path where the file will be created.
-        content: Content of the file.
-    """
-
+    """Create a file in the Databricks workspace."""
     # Import the file to workspace using base64 encoding
     content_bytes = content.encode("utf-8")
     content_base64 = base64.b64encode(content_bytes).decode("utf-8")
@@ -867,105 +857,32 @@ def create_connection(
     click.echo(f"Connection name: {connection_name}")
     click.echo("Connection type: GENERIC_LAKEFLOW_CONNECT")
 
-    # Parse options JSON
-    try:
-        options_dict = json.loads(options)
-    except json.JSONDecodeError as e:
-        raise click.ClickException(f"Invalid JSON for --options: {e}")
-
-    if not isinstance(options_dict, dict):
-        raise click.ClickException("--options must be a JSON object (key-value pairs)")
-
-    # Get constant allowlist from config (always appended)
-    constant_allowlist = _get_constant_external_options_allowlist()
-
-    # Load and validate against connector spec
-    connector_spec = _load_connector_spec(source_name, spec_path)
-    if connector_spec:
-        parsed_spec = _parse_connector_spec(connector_spec)
-
-        if debug:
-            if parsed_spec.has_auth_methods():
-                click.echo(f"[DEBUG] Auth methods: {[m.name for m in parsed_spec.auth_methods]}")
-                click.echo(f"[DEBUG] Common required: {parsed_spec.common_required_params}")
-                click.echo(f"[DEBUG] Common optional: {parsed_spec.common_optional_params}")
-            else:
-                click.echo(f"[DEBUG] Required params: {parsed_spec.required_params}")
-                click.echo(f"[DEBUG] Optional params: {parsed_spec.optional_params}")
-            click.echo(f"[DEBUG] Source allowlist: {parsed_spec.external_options_allowlist}")
-            click.echo(f"[DEBUG] Constant allowlist: {constant_allowlist}")
-
-        # Validate connection options
-        errors = _validate_connection_options_with_spec(source_name, options_dict, parsed_spec)
-        if errors:
-            raise click.ClickException("\n".join(errors))
-
-        # Auto-add externalOptionsAllowList (merged source + constant) if not provided
-        if "externalOptionsAllowList" not in options_dict:
-            merged_allowlist = _merge_external_options_allowlist(
-                parsed_spec.external_options_allowlist, constant_allowlist
-            )
-            options_dict["externalOptionsAllowList"] = merged_allowlist
-            if merged_allowlist:
-                click.echo(f"  ✓ Auto-added externalOptionsAllowList: {merged_allowlist}")
-            else:
-                click.echo("  ✓ Set externalOptionsAllowList to empty (no table-specific options)")
-    else:
-        click.echo(
-            f"⚠️  Warning: Could not load connector spec for '{source_name}'. "
-            "Skipping parameter validation.",
-            err=True,
-        )
-        # Still add constant allowlist if user didn't provide externalOptionsAllowList
-        if "externalOptionsAllowList" not in options_dict and constant_allowlist:
-            options_dict["externalOptionsAllowList"] = constant_allowlist
-            click.echo(f"  ✓ Auto-added constant externalOptionsAllowList: {constant_allowlist}")
-
-    # Merge source_name into options (API expects camelCase: sourceName)
-    options_dict["sourceName"] = source_name
-
-    if debug:
-        click.echo(f"[DEBUG] Options (with source_name): {options_dict}")
+    options_dict = _prepare_connection_options(source_name, options, spec_path, debug)
 
     workspace_client = WorkspaceClient()
+    body = {
+        "name": connection_name,
+        "connection_type": "GENERIC_LAKEFLOW_CONNECT",
+        "options": options_dict,
+        "comment": "created by lakeflow community-connector CLI tool",
+    }
+
+    if debug:
+        click.echo(f"[DEBUG] API request body: {body}")
 
     try:
-        # Use raw API call since GENERIC_LAKEFLOW_CONNECT may not be in SDK's enum yet
-        body = {
-            "name": connection_name,
-            "connection_type": "GENERIC_LAKEFLOW_CONNECT",
-            "options": options_dict,
-            "comment": "created by lakeflow community-connector CLI tool",
-        }
-
-        if debug:
-            click.echo(f"[DEBUG] API request body: {body}")
-
         connection_info = workspace_client.api_client.do(
-            "POST",
-            "/api/2.1/unity-catalog/connections",
-            body=body,
+            "POST", "/api/2.1/unity-catalog/connections", body=body
         )
-
         click.echo("  ✓ Connection created!")
         click.echo(f"\n{'=' * 60}")
         click.echo(f"Connection Name: {connection_info.get('name', connection_name)}")
         click.echo(f"Connection ID:   {connection_info.get('connection_id', 'N/A')}")
         click.echo(f"{'=' * 60}")
-
         if debug:
             click.echo(f"\n[DEBUG] Full connection info: {connection_info}")
-
     except Exception as e:
-        # Show more detailed error information
-        error_msg = str(e)
-        if hasattr(e, 'message'):
-            error_msg = e.message
-        if hasattr(e, 'error_code'):
-            error_msg = f"[{e.error_code}] {error_msg}"
-        if debug:
-            click.echo(f"\n[DEBUG] Full exception: {traceback.format_exc()}", err=True)
-        raise click.ClickException(f"Failed to create connection: {error_msg}")
+        _handle_api_error(e, "create", debug)
 
 
 @main.command("update_connection")
@@ -1024,103 +941,27 @@ def update_connection(
     click.echo(f"Updating connection for source: {source_name}")
     click.echo(f"Connection name: {connection_name}")
 
-    # Parse options JSON
-    try:
-        options_dict = json.loads(options)
-    except json.JSONDecodeError as e:
-        raise click.ClickException(f"Invalid JSON for --options: {e}")
-
-    if not isinstance(options_dict, dict):
-        raise click.ClickException("--options must be a JSON object (key-value pairs)")
-
-    # Get constant allowlist from config (always appended)
-    constant_allowlist = _get_constant_external_options_allowlist()
-
-    # Load and validate against connector spec
-    connector_spec = _load_connector_spec(source_name, spec_path)
-    if connector_spec:
-        parsed_spec = _parse_connector_spec(connector_spec)
-
-        if debug:
-            if parsed_spec.has_auth_methods():
-                click.echo(f"[DEBUG] Auth methods: {[m.name for m in parsed_spec.auth_methods]}")
-                click.echo(f"[DEBUG] Common required: {parsed_spec.common_required_params}")
-                click.echo(f"[DEBUG] Common optional: {parsed_spec.common_optional_params}")
-            else:
-                click.echo(f"[DEBUG] Required params: {parsed_spec.required_params}")
-                click.echo(f"[DEBUG] Optional params: {parsed_spec.optional_params}")
-            click.echo(f"[DEBUG] Source allowlist: {parsed_spec.external_options_allowlist}")
-            click.echo(f"[DEBUG] Constant allowlist: {constant_allowlist}")
-
-        # Validate connection options
-        errors = _validate_connection_options_with_spec(source_name, options_dict, parsed_spec)
-        if errors:
-            raise click.ClickException("\n".join(errors))
-
-        # Auto-add externalOptionsAllowList (merged source + constant) if not provided
-        if "externalOptionsAllowList" not in options_dict:
-            merged_allowlist = _merge_external_options_allowlist(
-                parsed_spec.external_options_allowlist, constant_allowlist
-            )
-            options_dict["externalOptionsAllowList"] = merged_allowlist
-            if merged_allowlist:
-                click.echo(f"  ✓ Auto-added externalOptionsAllowList: {merged_allowlist}")
-            else:
-                click.echo("  ✓ Set externalOptionsAllowList to empty (no table-specific options)")
-    else:
-        click.echo(
-            f"⚠️  Warning: Could not load connector spec for '{source_name}'. "
-            "Skipping parameter validation.",
-            err=True,
-        )
-        # Still add constant allowlist if user didn't provide externalOptionsAllowList
-        if "externalOptionsAllowList" not in options_dict and constant_allowlist:
-            options_dict["externalOptionsAllowList"] = constant_allowlist
-            click.echo(f"  ✓ Auto-added constant externalOptionsAllowList: {constant_allowlist}")
-
-    # Merge source_name into options (API expects camelCase: sourceName)
-    options_dict["sourceName"] = source_name
-
-    if debug:
-        click.echo(f"[DEBUG] Options (with source_name): {options_dict}")
+    options_dict = _prepare_connection_options(source_name, options, spec_path, debug)
 
     workspace_client = WorkspaceClient()
+    body = {"name": connection_name, "options": options_dict}
+
+    if debug:
+        click.echo(f"[DEBUG] API request body: {body}")
 
     try:
-        # Use raw API call - note: connection_type cannot be updated
-        body = {
-            "name": connection_name,
-            "options": options_dict,
-        }
-
-        if debug:
-            click.echo(f"[DEBUG] API request body: {body}")
-
         connection_info = workspace_client.api_client.do(
-            "PATCH",
-            f"/api/2.1/unity-catalog/connections/{connection_name}",
-            body=body,
+            "PATCH", f"/api/2.1/unity-catalog/connections/{connection_name}", body=body
         )
-
         click.echo("  ✓ Connection updated!")
         click.echo(f"\n{'=' * 60}")
         click.echo(f"Connection Name: {connection_info.get('name', connection_name)}")
         click.echo(f"Connection ID:   {connection_info.get('connection_id', 'N/A')}")
         click.echo(f"{'=' * 60}")
-
         if debug:
             click.echo(f"\n[DEBUG] Full connection info: {connection_info}")
-
     except Exception as e:
-        # Show more detailed error information
-        error_msg = str(e)
-        if hasattr(e, 'message'):
-            error_msg = e.message
-        if hasattr(e, 'error_code'):
-            error_msg = f"[{e.error_code}] {error_msg}"
-        if debug:
-            click.echo(f"\n[DEBUG] Full exception: {traceback.format_exc()}", err=True)
-        raise click.ClickException(f"Failed to update connection: {error_msg}")
+        _handle_api_error(e, "update", debug)
 
 
 if __name__ == "__main__":
