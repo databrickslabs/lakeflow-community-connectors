@@ -1,19 +1,17 @@
-"""
-Particle.io REST API connector for Lakeflow.
+# Particle.io REST API connector for Lakeflow.
+#
+# This connector provides access to Particle Device Cloud data including:
+# - Devices (user-owned and product devices)
+# - Products
+# - SIM cards and data usage
+# - Device diagnostics/vitals
+# - User information
+# - OAuth clients
+#
+# Authentication: Bearer token via Particle access token.
+# Base URL: https://api.particle.io
 
-This connector provides access to Particle Device Cloud data including:
-- Devices (user-owned and product devices)
-- Products
-- SIM cards and data usage
-- Device diagnostics/vitals
-- User information
-- OAuth clients
-
-Authentication: Bearer token via Particle access token.
-Base URL: https://api.particle.io
-"""
-
-from datetime import datetime
+import os
 from typing import Iterator, Any, Dict, List
 
 import requests
