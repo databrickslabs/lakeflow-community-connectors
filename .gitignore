@@ -1,0 +1,4 @@
+__pycache__/
+spotify/
+dev_config.json
+candidate_connectors.md
