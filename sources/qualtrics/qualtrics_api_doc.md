@@ -59,6 +59,7 @@ The Qualtrics API provides access to various objects/resources. The object list 
 | `mailing_lists` | Contact mailing lists | `GET /directories/{directoryId}/mailinglists` | `snapshot` |
 | `mailing_list_contacts` | Contacts within a specific mailing list | `GET /directories/{directoryId}/mailinglists/{mailingListId}/contacts` | `snapshot` |
 | `directory_contacts` | All contacts across all mailing lists in a directory | `GET /directories/{directoryId}/contacts` | `snapshot` |
+| `users` | Organization users (admins, survey creators) | `GET /users` | `snapshot` |
 
 **Connector scope for initial implementation**:
 - Step 1 focuses on the `surveys` and `survey_responses` objects in detail
@@ -73,6 +74,7 @@ The Qualtrics API provides access to various objects/resources. The object list 
 - **mailing_lists**: Collections of contacts used for survey distribution
 - **mailing_list_contacts**: Individual contact records within a specific mailing list
 - **directory_contacts**: All contact records across all mailing lists in a directory
+- **users**: Organization users including brand admins and survey creators; useful for joining with survey owner data
 
 ## Object Schema
 
@@ -473,6 +475,72 @@ curl -X GET \
 | `lastName` | boolean | Whether to deduplicate by last name. |
 | `externalDataReference` | boolean | Whether to deduplicate by external reference ID. |
 | `phone` | boolean | Whether to deduplicate by phone number. |
+
+### `users` object
+
+**Source endpoint**:  
+`GET /users`
+
+**Key behavior**:
+- Returns a list of users in the organization accessible to the authenticated user
+- Includes brand administrators, survey creators, and other user types
+- Supports pagination using `skipToken` and `pageSize` parameters
+- Read-only endpoint for listing users
+
+**High-level schema (actual API response)**:
+
+| Column Name | Type | Description |
+|------------|------|-------------|
+| `id` | string | Unique user identifier (e.g., `UR_abc123xyz`). Primary key. |
+| `username` | string | Username (typically email address). |
+| `email` | string | User's email address. |
+| `firstName` | string | User's first name. |
+| `lastName` | string | User's last name. |
+| `userType` | string | User type code (e.g., `UT_BRANDADMIN` for brand administrators). |
+| `divisionId` | string or null | Division identifier if user belongs to a specific division. |
+| `accountStatus` | string | Account status (e.g., `active`, `disabled`). |
+
+**User Type values**:
+
+| User Type Code | Description |
+|----------------|-------------|
+| `UT_BRANDADMIN` | Brand Administrator - full administrative access |
+| `UT_PARTICIPANT` | Participant - limited survey-taking access |
+| `UT_FULLUSER` | Full User - standard user with survey creation privileges |
+
+**Example request**:
+
+```bash
+curl -X GET \
+  -H "X-API-TOKEN: <YOUR_API_TOKEN>" \
+  -H "Content-Type: application/json" \
+  "https://yourdatacenterid.qualtrics.com/API/v3/users?pageSize=100"
+```
+
+**Example response**:
+
+```json
+{
+  "result": {
+    "elements": [
+      {
+        "id": "UR_abc123xyz",
+        "username": "admin@company.com",
+        "email": "admin@company.com",
+        "firstName": "John",
+        "lastName": "Admin",
+        "userType": "UT_BRANDADMIN",
+        "divisionId": null,
+        "accountStatus": "active"
+      }
+    ],
+    "nextPage": "https://...?skipToken=xyz"
+  },
+  "meta": {
+    "httpStatus": "200 - OK"
+  }
+}
+```
 
 ### `survey_definitions` object
 
@@ -974,6 +1042,61 @@ curl -X GET \
   "https://yourdatacenterid.qualtrics.com/API/v3/directories?pageSize=100"
 ```
 
+### `users` endpoint
+
+**Endpoint**: `GET /users`
+
+**Method**: GET
+
+**Path Parameters**: None
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `pageSize` | integer | No | Number of results per page (default: 100). |
+| `skipToken` | string | No | Token for pagination (obtained from `nextPage` in response). |
+
+**Response structure**:
+
+```json
+{
+  "result": {
+    "elements": [
+      {
+        "id": "UR_5178684143e64cc",
+        "divisionId": null,
+        "username": "admin@company.com",
+        "firstName": "John",
+        "lastName": "Admin",
+        "userType": "UT_BRANDADMIN",
+        "email": "admin@company.com",
+        "accountStatus": "active"
+      }
+    ],
+    "nextPage": "https://...?skipToken=xyz"
+  },
+  "meta": {
+    "httpStatus": "200 - OK"
+  }
+}
+```
+
+**Pagination**:
+- Uses cursor-based pagination with `skipToken`
+- The `nextPage` URL in the response contains the full URL for the next page
+- When `nextPage` is absent, you've reached the last page
+- Same pagination pattern as surveys endpoint
+
+**Example request**:
+
+```bash
+curl -X GET \
+  -H "X-API-TOKEN: <YOUR_API_TOKEN>" \
+  -H "Content-Type: application/json" \
+  "https://yourdatacenterid.qualtrics.com/API/v3/users?pageSize=100"
+```
+
 ### `mailing_lists` endpoint
 
 **Endpoint**: `GET /directories/{directoryId}/mailinglists`
@@ -1239,6 +1362,7 @@ Field names are generally consistent between write and read operations for surve
 | API Reference | Stoplight API docs | 2024-12-31 | High | Full endpoint paths for contacts |
 | Python Lib | qualtricsapi-pydocs.com | 2024-12-31 | High | Distributions, contacts endpoint structure |
 | Community | Qualtrics Community | 2024-12-31 | Medium | DirectoryId requirements |
+| Live API Test | Direct API call | 2026-01-08 | High | Users endpoint schema (8 fields verified) |
 
 **Research approach**: Primary source is official Qualtrics API documentation. Secondary sources include developer community posts and reference implementations. All schemas validated against live API.
 
@@ -1266,6 +1390,7 @@ All schemas validated against live API (2024-12-31 through 2026-01-08).
 | `mailing_list_contacts` | ✅ Perfect Match | No changes |
 | `directory_contacts` | ✅ Fixed | Added embeddedData, removed 2 fields |
 | `directories` | ✅ Perfect Match | No changes |
+| `users` | ✅ Validated | Schema matches live API (8 fields) |
 
 **Validation script**: `sources/qualtrics/test/validate_qualtrics_schemas.py`
 
