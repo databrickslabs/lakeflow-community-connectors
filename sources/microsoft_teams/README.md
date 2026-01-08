@@ -203,24 +203,30 @@ Create an ingestion pipeline using the Databricks UI. This is the recommended ap
      - This is where the pipeline will store metadata and checkpoint information
    - Click **Create** to create the ingestion pipeline
 
-6. **View and Run Pipeline**
+6. **Configure Pipeline Source Code** ⚠️ **REQUIRED STEP**
    - Once created, you'll be redirected to your pipeline details page
-   - Pipeline details shown on the right:
-     - Pipeline ID (e.g., `b17e7817-4152-4329-abc5-b0913208...`)
-     - Pipeline type: ETL pipeline
-     - Creator/Owner information
-     - Source code: 1 file (Open in Editor)
-   - The main view shows a message: "A graph will appear here after you run the pipeline"
-   - Click **Dry run** or **Run pipeline** to start ingesting data
-   - After the first run, you'll see a visual graph showing the ingestion flow
+   - Click **Open in Editor** to edit the generated source code
+   - The pipeline generates a skeleton Python file (e.g., `ingest.py`) in your workspace
+   - **You MUST replace the auto-generated code with actual pipeline configuration**
 
-7. **Edit Pipeline Source Code (If Needed)**
-   - Click **Edit pipeline** or **Open in Editor** to view the generated source code
-   - The pipeline generates a Python file (e.g., `ingest.py`) in your workspace
-   - **IMPORTANT**: Update the `connection_name` variable to match your actual connection name
+   **Option A: Use the sample code** (recommended for getting started)
+   - Copy the contents of [`sample-ingest.py`](sample-ingest.py) into your `ingest.py` file
+   - Update the `connection_name` variable to match your actual connection name
    - Example: Change `connection_name = "microsoft_teams_connection"` to `connection_name = "lakeflowcommunityconnectormsteams"`
+   - Adjust `DESTINATION_CATALOG`, `DESTINATION_SCHEMA`, and `START_DATE` as needed
+   - Save your changes
+
+   **Option B: Write custom pipeline specification**
+   - Define your own pipeline spec following the pattern in `sample-ingest.py`
+   - See [Usage Example](#usage-example) section below for details
    - Configure which tables to ingest and their options
    - Save your changes
+
+7. **Run Pipeline**
+   - After saving your code, return to the pipeline details page
+   - Click **Dry run** to test the configuration (recommended first)
+   - Click **Run pipeline** to start ingesting data
+   - After the first run, you'll see a visual graph showing the ingestion flow
 
 ---
 
