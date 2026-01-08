@@ -261,7 +261,7 @@ def register_lakeflow_source(spark):
             return 2 ** attempt
 
 
-    class LakeflowConnect:
+    class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
         def __init__(self, options: dict[str, str]) -> None:
             """
             Initialize the Qualtrics source connector with authentication parameters.
@@ -687,7 +687,7 @@ def register_lakeflow_source(spark):
 
             return normalized
 
-        def _fetch_paginated_list(
+        def _fetch_paginated_list(  # pylint: disable=too-many-locals,too-many-branches
             self,
             endpoint: str,
             start_offset: dict,
@@ -760,7 +760,7 @@ def register_lakeflow_source(spark):
             normalized = (self._normalize_keys(item) for item in all_items)
             return normalized, new_offset
 
-        def _iterate_all_surveys(
+        def _iterate_all_surveys(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
             self,
             start_offset: dict,
             table_options: dict[str, str],
@@ -907,7 +907,7 @@ def register_lakeflow_source(spark):
             )
             return survey_ids
 
-        def _make_request(
+        def _make_request(  # pylint: disable=too-many-arguments,too-many-positional-arguments
             self,
             method: str,
             url: str,
@@ -1033,7 +1033,7 @@ def register_lakeflow_source(spark):
                 logger.info("No surveyId provided, auto-consolidating definitions from all surveys")
             return self._read_all_survey_definitions(start_offset, table_options)
 
-        def _read_single_survey_definition(
+        def _read_single_survey_definition(  # pylint: disable=too-many-locals
             self, survey_id: str, start_offset: dict
         ) -> (Iterator[dict], dict):
             """
