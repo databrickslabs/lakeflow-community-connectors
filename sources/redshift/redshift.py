@@ -42,6 +42,7 @@ class LakeflowConnect:
             - database (required): Database name
             - access_key_id (optional): AWS access key ID (uses default credentials if omitted)
             - secret_access_key (optional): AWS secret access key
+            - session_token (optional): AWS session token (required for temporary credentials)
             - cluster_identifier (conditional): Redshift cluster identifier (for provisioned)
             - workgroup_name (conditional): Serverless workgroup name (for serverless)
             - db_user (optional): Database user for cluster (uses IAM if omitted)
@@ -86,10 +87,13 @@ class LakeflowConnect:
         
         access_key_id = options.get("access_key_id")
         secret_access_key = options.get("secret_access_key")
+        session_token = options.get("session_token")
         
         if access_key_id and secret_access_key:
             client_kwargs["aws_access_key_id"] = access_key_id
             client_kwargs["aws_secret_access_key"] = secret_access_key
+            if session_token:
+                client_kwargs["aws_session_token"] = session_token
 
         self.client = boto3.client("redshift-data", **client_kwargs)
 
