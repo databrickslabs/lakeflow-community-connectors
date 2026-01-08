@@ -21,18 +21,13 @@ from pyspark.sql.types import (
     StructType,
 )
 
-# Configure logging for DLT/Lakeflow compatibility
+# Configure logging for DLT/Lakeflow compatibility (stderr works best in Databricks)
 logger = logging.getLogger("QualtricsConnector")
 logger.setLevel(logging.INFO)
-# Add stdout handler
-_stdout_handler = logging.StreamHandler(sys.stdout)
-_stdout_handler.setFormatter(logging.Formatter("QUALTRICS_LOG - %(levelname)s - %(message)s"))
-# Add stderr handler (more visible in Databricks)
-_stderr_handler = logging.StreamHandler(sys.stderr)
-_stderr_handler.setFormatter(logging.Formatter("QUALTRICS_LOG - %(levelname)s - %(message)s"))
 if not logger.handlers:
-    logger.addHandler(_stdout_handler)
-    logger.addHandler(_stderr_handler)
+    _handler = logging.StreamHandler(sys.stderr)
+    _handler.setFormatter(logging.Formatter("%(asctime)s - QUALTRICS - %(levelname)s - %(message)s"))
+    logger.addHandler(_handler)
 
 
 class QualtricsConfig:
@@ -517,13 +512,6 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
         Returns:
             Tuple of (iterator of records, end offset)
         """
-        # DEBUG: Multiple output methods for visibility
-        debug_msg = f"DEBUG read_table: table={table_name}, keys={list(table_options.keys()) if table_options else 'None'}, surveyId={table_options.get('surveyId') if table_options else 'N/A'}"
-        print(debug_msg)
-        sys.stdout.write(debug_msg + "\n")
-        sys.stderr.write(debug_msg + "\n")
-        logger.info(debug_msg)
-
         if table_name not in self._reader_methods:
             raise ValueError(
                 f"Unsupported table: {table_name}. Supported tables are: {self.tables}"
@@ -770,23 +758,7 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
         Returns:
             List of survey IDs
         """
-        # DEBUG: Multiple output methods for visibility
-        debug_msg1 = f"DEBUG _get_all_survey_ids: table_options={table_options}"
-        debug_msg2 = f"DEBUG _get_all_survey_ids: survey_id_input will be checked"
-        print(debug_msg1)
-        sys.stderr.write(debug_msg1 + "\n")
-        logger.info(debug_msg1)
-
-        # Check if specific survey IDs are provided
-        # Note: Databricks lowercases option keys, so check both cases
-        survey_id_camel = table_options.get("surveyId")
-        survey_id_lower = table_options.get("surveyid")
-        survey_id_input = survey_id_camel or survey_id_lower
-        case_used = "surveyId (camelCase)" if survey_id_camel else ("surveyid (lowercase)" if survey_id_lower else "NOT FOUND")
-        debug_msg3 = f"DEBUG _get_all_survey_ids: surveyId={survey_id_camel}, surveyid={survey_id_lower}, using={case_used}, final={survey_id_input}"
-        print(debug_msg3)
-        sys.stderr.write(debug_msg3 + "\n")
-        logger.info(debug_msg3)
+        survey_id_input = table_options.get("surveyId") or table_options.get("surveyid")
         if survey_id_input:
             # Parse comma-separated list, strip whitespace
             survey_ids = [sid.strip() for sid in survey_id_input.split(",") if sid.strip()]
@@ -935,7 +907,6 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
         Returns:
             Tuple of (iterator of survey definition records, offset dict)
         """
-        # Note: Databricks lowercases option keys, so check both cases
         survey_id_input = table_options.get("surveyId") or table_options.get("surveyid")
 
         # Single survey (no comma) - use simple offset structure for backward compatibility
@@ -1083,7 +1054,6 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
         Returns:
             Tuple of (iterator of response records, new offset)
         """
-        # Note: Databricks lowercases option keys, so check both cases
         survey_id_input = table_options.get("surveyId") or table_options.get("surveyid")
 
         # Single survey (no comma) - use simple offset structure for backward compatibility
@@ -1428,7 +1398,6 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
         Returns:
             Tuple of (iterator of distribution records, new offset)
         """
-        # Note: Databricks lowercases option keys, so check both cases
         survey_id_input = table_options.get("surveyId") or table_options.get("surveyid")
 
         # Single survey (no comma) - use simple offset structure for backward compatibility
@@ -1506,25 +1475,13 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
         Returns:
             Tuple of (iterator of contact records, empty offset dict)
         """
-        # Note: Databricks lowercases option keys, so check both cases
-        dir_camel = table_options.get("directoryId")
-        dir_lower = table_options.get("directoryid")
-        directory_id = dir_camel or dir_lower
-        debug_dir = f"DEBUG mailing_list_contacts: directoryId={dir_camel}, directoryid={dir_lower}, using={'camelCase' if dir_camel else ('lowercase' if dir_lower else 'NOT FOUND')}"
-        print(debug_dir)
-        sys.stderr.write(debug_dir + "\n")
+        directory_id = table_options.get("directoryId") or table_options.get("directoryid")
         if not directory_id:
             raise ValueError(
                 "directoryId is required in table_options for mailing_list_contacts table"
             )
 
-        # Note: Databricks lowercases option keys, so check both cases
-        ml_camel = table_options.get("mailingListId")
-        ml_lower = table_options.get("mailinglistid")
-        mailing_list_id = ml_camel or ml_lower
-        debug_ml = f"DEBUG mailing_list_contacts: mailingListId={ml_camel}, mailinglistid={ml_lower}, using={'camelCase' if ml_camel else ('lowercase' if ml_lower else 'NOT FOUND')}"
-        print(debug_ml)
-        sys.stderr.write(debug_ml + "\n")
+        mailing_list_id = table_options.get("mailingListId") or table_options.get("mailinglistid")
         if not mailing_list_id:
             raise ValueError(
                 "mailingListId is required in table_options for mailing_list_contacts table"
@@ -1554,13 +1511,7 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
         Returns:
             Tuple of (iterator of contact records, empty offset dict)
         """
-        # Note: Databricks lowercases option keys, so check both cases
-        dir_camel = table_options.get("directoryId")
-        dir_lower = table_options.get("directoryid")
-        directory_id = dir_camel or dir_lower
-        debug_dir = f"DEBUG directory_contacts: directoryId={dir_camel}, directoryid={dir_lower}, using={'camelCase' if dir_camel else ('lowercase' if dir_lower else 'NOT FOUND')}"
-        print(debug_dir)
-        sys.stderr.write(debug_dir + "\n")
+        directory_id = table_options.get("directoryId") or table_options.get("directoryid")
         if not directory_id:
             raise ValueError(
                 "directoryId is required in table_options for directory_contacts table"
@@ -1589,13 +1540,7 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
         Returns:
             Tuple of (iterator of mailing list records, offset dict)
         """
-        # Note: Databricks lowercases option keys, so check both cases
-        dir_camel = table_options.get("directoryId")
-        dir_lower = table_options.get("directoryid")
-        directory_id = dir_camel or dir_lower
-        debug_dir = f"DEBUG mailing_lists: directoryId={dir_camel}, directoryid={dir_lower}, using={'camelCase' if dir_camel else ('lowercase' if dir_lower else 'NOT FOUND')}"
-        print(debug_dir)
-        sys.stderr.write(debug_dir + "\n")
+        directory_id = table_options.get("directoryId") or table_options.get("directoryid")
         if not directory_id:
             raise ValueError(
                 "directoryId is required in table_options for mailing_lists table"
