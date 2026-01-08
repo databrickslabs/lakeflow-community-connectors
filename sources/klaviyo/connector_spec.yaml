@@ -22,4 +22,4 @@ connection:
 # Use a comma-separated string of option names.
 # If no table-specific options are needed, set to empty string or omit.
 # ============================================================================
-external_options_allowlist: "tableconfigs"
+external_options_allowlist: "tableConfigs"
