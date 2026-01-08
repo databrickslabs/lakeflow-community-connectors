@@ -60,4 +60,4 @@ connection:
 # Use a comma-separated string of option names.
 # If no table-specific options are needed, set to empty string or omit.
 # ============================================================================
-external_options_allowlist: "product_id_or_slug,device_id,iccid,groups,device_name,serial_number,sort_attr,sort_dir,per_page,max_pages,start_date,end_date"
+external_options_allowlist: "product_id_or_slug,device_id,iccid,groups,device_name,serial_number,sort_attr,sort_dir,per_page,max_pages,start_date,end_date,tableConfigs"
