@@ -399,14 +399,14 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
     def _get_mailing_lists_schema(self) -> StructType:
         """Get schema for mailing_lists table.
 
-        Returns mailing list metadata including dates as epoch timestamps.
+        Returns mailing list metadata with dates as ISO 8601 strings (consistent with surveys).
         """
         return StructType([
             StructField("mailing_list_id", StringType(), True),
             StructField("name", StringType(), True),
             StructField("owner_id", StringType(), True),
-            StructField("creation_date", LongType(), True),
-            StructField("last_modified_date", LongType(), True),
+            StructField("creation_date", StringType(), True),
+            StructField("last_modified_date", StringType(), True),
             StructField("contact_count", LongType(), True)
         ])
 
@@ -1525,7 +1525,8 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
         """
         Read mailing lists from Qualtrics API.
 
-        Uses snapshot mode (full refresh).
+        Uses snapshot mode (full refresh). Converts epoch timestamps to ISO 8601
+        for consistency with other tables (surveys, etc.).
 
         Args:
             start_offset: Dictionary containing pagination token
@@ -1541,7 +1542,21 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
             )
 
         endpoint = f"/directories/{directory_id}/mailinglists"
-        return self._fetch_paginated_list(endpoint, start_offset, cursor_field=None)
+        raw_iter, offset = self._fetch_paginated_list(endpoint, start_offset, cursor_field=None)
+
+        def convert_timestamps(record):
+            """Convert epoch ms to ISO 8601 for consistency with surveys table."""
+            for field in ["creation_date", "last_modified_date"]:
+                if field in record and record[field] is not None:
+                    try:
+                        record[field] = datetime.utcfromtimestamp(
+                            record[field] / 1000
+                        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    except (ValueError, TypeError, OSError):
+                        record[field] = None
+            return record
+
+        return (convert_timestamps(r) for r in raw_iter), offset
 
     # =========================================================================
     # Table Readers: Directories
