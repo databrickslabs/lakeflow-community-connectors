@@ -492,7 +492,7 @@ class LakeflowConnectTester:
                 )
             )
 
-    def _test_read_method(  # pylint: disable=too-many-locals,too-many-branches
+    def _test_read_method(  # pylint: disable=too-many-locals,too-many-branches,too-many-nested-blocks,too-many-statements
         self,
         test_name: str,
         read_fn: Callable,
