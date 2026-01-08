@@ -1,0 +1,8 @@
+{
+  "host": "https://prd-p-gur5l.splunkcloud.com",
+  "port": 8089,
+  "username": "sc_admin",
+  "password": "ATsplunk2025!",
+  "verify_ssl": false
+}
+
