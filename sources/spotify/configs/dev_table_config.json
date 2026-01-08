@@ -1,0 +1,15 @@
+{
+  "tracks": {},
+  "albums": {},
+  "playlists": {},
+  "artists": {},
+  "top_tracks": {
+    "time_range": "medium_term"
+  },
+  "top_artists": {
+    "time_range": "medium_term"
+  },
+  "recently_played": {},
+  "user_profile": {}
+}
+

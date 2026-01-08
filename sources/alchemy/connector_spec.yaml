@@ -1,0 +1,29 @@
+# Alchemy Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+connection:
+  parameters:
+    - name: api_key
+      type: string
+      required: true
+      description: >
+        Alchemy API key obtained from the Alchemy Dashboard.
+
+    - name: network
+      type: string
+      required: false
+      description: >
+        Default blockchain network (e.g., 'eth-mainnet', 'polygon-mainnet').
+        Can be overridden per table if needed. Defaults to 'eth-mainnet'.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# ============================================================================
+external_options_allowlist: "network,contract_address,owner_address,token_id,with_metadata,page_size,start_time,end_time,symbols,tokens,contract_addresses,addresses,token_uri_timeout_in_ms,refresh_cache,include_native_tokens,include_erc20_tokens,from_block,to_block,from_timestamp,to_timestamp,category,order,page_key,webhook_id,limit,after"
