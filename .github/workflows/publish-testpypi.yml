@@ -30,8 +30,8 @@ jobs:
 
       - name: Build release distributions
         run: |
-          # NOTE: put your own distribution build steps here.
           python -m pip install build
+          cd tools/community_connector
           python -m build
 
       - name: Publish to TestPyPI
@@ -39,5 +39,4 @@ jobs:
         with:
           password: ${{ secrets.TEST_PYPI_API_TOKEN }}
           repository-url: https://test.pypi.org/legacy/
-        with:
-          packages-dir: dist/
+          packages-dir: tools/community_connector/dist/
