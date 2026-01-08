@@ -79,7 +79,7 @@ dbutils.widgets.dropdown("group_by", "category_and_ingestion_type",
                         ["category_and_ingestion_type", "ingestion_type", "category", "none"],
                         "Group Tables By")
 dbutils.widgets.text("secrets_scope", "sp-osipi", "Secrets Scope (for discovery)")
-dbutils.widgets.text("secrets_token_key", "access-token", "Secret Key Name")
+dbutils.widgets.text("secrets_token_key", "access_token", "Secret Key Name")
 dbutils.widgets.text("cluster_num_workers", "2", "Cluster Workers")
 dbutils.widgets.dropdown("emit_scheduled_jobs", "true", ["true", "false"], "Create Scheduled Jobs")
 dbutils.widgets.dropdown("pause_jobs", "true", ["true", "false"], "Pause Jobs Initially")
