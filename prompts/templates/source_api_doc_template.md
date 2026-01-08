@@ -45,6 +45,7 @@
 - Include example API requests and responses for data retrieval.
 - Compare different API options for reading the same data (if applicable).
 - Include the extra parameters needed to read the table.
+- Highlight the rate limits of the API. Source shouldn't exceed this limit.
 
 
 ## **Field Type Mapping**
@@ -53,13 +54,7 @@
 - Explain special field behaviors such as auto-generated values, enumerations, or relationships.
 - Highlight any constraints or validation rules associated with fields.
 
-## **Write API**
-- Describe how to insert or update data using the API.
-- Explain how to perform data writes (e.g., using POST or PUT).
-- Provide clear guidance on how the updated data can be validated or read using the read API.
-- Include example API requests and responses.
-
-## **10. Sources and References**
+## Sources and References**
 - Document all sources used to create this API documentation.
 - Include URLs to official API documentation.
 - List existing connector implementations referenced (e.g., Airbyte, Singer, dlthub).

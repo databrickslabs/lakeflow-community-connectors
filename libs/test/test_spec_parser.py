@@ -1,3 +1,6 @@
+"""Unit tests for the spec_parser module."""
+
+import json
 import pytest
 
 from libs.spec_parser import SpecParser
@@ -51,15 +54,19 @@ def test_spec_parser_valid_spec_parses_and_exposes_fields():
     # regular values are normalised to strings
     assert config["some_flag"] == "True"
 
-    # nested structures are JSON-encoded
-    import json
-
     nested_value = config["nested"]
     assert isinstance(nested_value, str)
     assert json.loads(nested_value) == {"key": "value"}
 
     # unknown table returns empty dict
     assert parser.get_table_configuration("unknown_table") == {}
+
+    # get_table_configurations returns all tables' configurations
+    all_configs = parser.get_table_configurations()
+    assert isinstance(all_configs, dict)
+    assert set(all_configs.keys()) == {"table_one", "table_two"}
+    assert all_configs["table_one"] == {}
+    assert all_configs["table_two"] == config  # same as individual table config
 
     # Special keys are accessible via dedicated methods
     assert parser.get_scd_type("table_two") == "SCD_TYPE_2"
@@ -151,6 +158,55 @@ def test_spec_parser_invalid_specs_raise_value_error(spec):
         # pydantic validation errors are wrapped in ValueError
         with pytest.raises(ValueError, match="Invalid pipeline spec"):
             SpecParser(spec)
+
+
+def test_get_table_configurations_returns_all_table_configs():
+    """Test that get_table_configurations returns configs for all tables."""
+    spec = {
+        "connection_name": "test_conn",
+        "objects": [
+            {
+                "table": {
+                    "source_table": "table_a",
+                }
+            },
+            {
+                "table": {
+                    "source_table": "table_b",
+                    "table_configuration": {
+                        "custom_option": "value_b",
+                        "scd_type": "SCD_TYPE_1",  # should be excluded
+                    },
+                }
+            },
+            {
+                "table": {
+                    "source_table": "table_c",
+                    "table_configuration": {
+                        "option_1": "val1",
+                        "option_2": "val2",
+                        "primary_keys": ["id"],  # should be excluded
+                        "sequence_by": "ts",  # should be excluded
+                    },
+                }
+            },
+        ],
+    }
+    parser = SpecParser(spec)
+
+    all_configs = parser.get_table_configurations()
+
+    # Should have all three tables
+    assert set(all_configs.keys()) == {"table_a", "table_b", "table_c"}
+
+    # table_a has no configuration
+    assert all_configs["table_a"] == {}
+
+    # table_b has custom_option but not scd_type (special key)
+    assert all_configs["table_b"] == {"custom_option": "value_b"}
+
+    # table_c has options but not primary_keys/sequence_by (special keys)
+    assert all_configs["table_c"] == {"option_1": "val1", "option_2": "val2"}
 
 
 def test_scd_type_validation_case_insensitive():

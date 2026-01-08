@@ -1,0 +1,4 @@
+Reference,Deadline,Priority,Customer,Color
+ORD-0001,2026-01-10 17:00:00,High,Contoso,Red
+ORD-0002,2026-01-11 12:00:00,Normal,Fabrikam,Blue
+ORD-0003,2026-01-15,Low,Northwind,Green

@@ -1,0 +1,129 @@
+# Implement Write-Back Testing
+
+## Prerequisites
+**⚠️ You must complete "document-write-back-api" first!** This step requires the write-back API documentation.
+
+If you skipped "document-write-back-api", then this step can also be skipped.
+
+## Goal
+Implement test utilities that write test data to the source system, then validate your connector correctly reads and ingests that data. This creates a comprehensive end-to-end validation cycle.
+
+**⚠️ IMPORTANT: Only test against non-production environments. Write operations create real data in the source system.**
+
+## What This Step Validates
+
+This step creates a complete validation cycle:
+1. **Write**: Test utils generate and insert test data into the source system
+2. **Read**: Connector reads back the data using normal ingestion flow
+3. **Verify**: Test suite confirms the written data was correctly ingested
+
+This ensures:
+- ✅ Incremental sync picks up newly created records
+- ✅ Schema correctly captures all written fields
+- ✅ Field mappings and transformations work correctly (use the mapping from the write-back API documentation)
+- ✅ Cursor field updates and ordering work as expected
+- ✅ End-to-end data integrity from write → read → parse
+
+---
+
+## Implementation Steps
+
+### Step 1: Create Test Utils File
+
+Create `sources/{source_name}/{source_name}_test_utils.py` implementing the interface defined in [lakeflow_connect_test_utils.py](../tests/lakeflow_connect_test_utils.py).
+
+**Use the write-back API documentation as your implementation guide:**
+- Write endpoints and payload structure from the "Write-Back APIs" section
+- Field name transformations from the mapping table
+- Required delays from the "Write-Specific Constraints" section
+- Required fields from the endpoint documentation
+
+**Key Methods to Implement:**
+- `get_source_name()`: Return the connector name
+- `list_insertable_tables()`: List tables that support write operations (only those documented in the write-back API section)
+- `generate_rows_and_write()`: Generate test data and write to source system using documented endpoints
+
+**Reference Implementation:** See `sources/hubspot/hubspot_test_utils.py` for a complete working example.
+
+**Implementation Tips:**
+- Initialize API client for write operations in `__init__`
+- Use the write endpoints and payload structure from the write-back API documentation
+- Apply field name mappings when comparing written vs. read data
+- Generate unique test data with timestamps/UUIDs to avoid collisions
+- Use identifiable prefixes (e.g., `test_`, `generated_`) in test data
+- Add delays after writes based on "Required Delays" (e.g., `time.sleep(5-10)`)
+
+### Step 2: Update Test File
+
+Modify `sources/{source_name}/test/test_{source_name}_lakeflow_connect.py` to import test utils:
+
+```python
+# Add this import
+from sources.{source_name}.{source_name}_test_utils import LakeflowConnectTestUtils
+
+def test_{source_name}_connector():
+    test_suite.LakeflowConnect = LakeflowConnect
+    test_suite.LakeflowConnectTestUtils = LakeflowConnectTestUtils  # Add this line
+    
+    # Rest remains the same...
+```
+**Reference Implementation:** See `sources/hubspot/test/test_hubspot_lakeflow_connect.py` for an example implementation.
+
+### Step 3: Run Tests with Write Validation
+
+```bash
+pytest sources/{source_name}/test/test_{source_name}_lakeflow_connect.py -v
+```
+
+**Additional Tests Now Executed:**
+- ✅ `test_list_insertable_tables`: Validates insertable tables list
+- ✅ `test_write_to_source`: Writes test data and validates success
+- ✅ `test_incremental_after_write`: Validates incremental sync picks up new data
+
+**Expected Output:**
+```
+test_list_insertable_tables PASSED - Found 2 insertable tables
+test_write_to_source PASSED - Successfully wrote to 2 tables
+test_incremental_after_write PASSED - Incremental sync captured new records
+```
+
+## Common Issues & Debugging
+
+**Issue 1: Write Operation Fails (400/403)**
+- **Cause**: Insufficient permissions or missing required fields
+- **Fix**: 
+  - Verify API credentials have write permissions
+  - Check source API docs for required fields
+  - Validate generated data matches schema requirements
+
+**Issue 2: Incremental Sync Doesn't Pick Up New Data**
+- **Cause**: Cursor timestamp mismatch or eventual consistency delay
+- **Fix**:
+  - Add `time.sleep(5-60)` after write to allow commit
+  - Verify cursor field in new records is newer than existing data
+  - Check that cursor field is correctly set in generated data
+
+**Issue 3: Column Mapping Errors**
+- **Cause**: Source API transforms field names during write/read
+- **Fix**:
+  - Compare written field names vs. read field names
+  - Update `column_mapping` return value to reflect transformations
+  - Example: `{"email": "properties_email"}` if source adds prefix
+
+**Issue 4: Test Data Conflicts**
+- **Cause**: Duplicate IDs or unique constraint violations
+- **Fix**:
+  - Use timestamps or UUIDs in generated IDs
+  - Add random suffixes: `f"test_{time.time()}_{random.randint(1000,9999)}"`
+  - Prefix all test data fields with identifiable markers
+
+## Best Practices
+
+1. **Use Test/Sandbox Environment**: Never run write tests against production
+2. **Unique Test Data**: Include timestamps/UUIDs to avoid collisions
+3. **Identifiable Prefixes**: Use `test_`, `generated_`, etc. in data for easy identification
+4. **Minimal Data**: Generate only required fields, keep test data simple
+5. **Cleanup Consideration**: Some sources may require manual cleanup of test data
+6. **Rate Limiting**: Add delays between writes if source API has rate limits
+
+
