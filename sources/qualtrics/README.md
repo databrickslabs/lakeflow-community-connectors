@@ -594,7 +594,7 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 **For `survey_responses` table (Append)**:
 - **First run**: Exports all responses for the specified survey
 - **Subsequent runs**: Only exports responses recorded since last sync (based on `recorded_date` field)
-- New responses are appended; existing responses are immutable
+- New responses are appended; edits to existing responses in the Qualtrics UI will not be detected (API does not expose a modification timestamp for responses)
 - Export process uses Qualtrics 3-step workflow:
   1. Create export job
   2. Poll for completion
