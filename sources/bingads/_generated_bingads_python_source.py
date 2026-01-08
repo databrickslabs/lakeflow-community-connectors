@@ -211,6 +211,10 @@ def register_lakeflow_source(spark):
     # sources/bingads/bingads.py
     ########################################################
 
+    log4jLogger = spark._jvm.org.apache.log4j
+    logger = log4jLogger.LogManager.getLogger(__name__)
+
+
     class SoapFieldType(Enum):
         """Types of SOAP field serialization."""
 
@@ -569,6 +573,9 @@ def register_lakeflow_source(spark):
                     - account_id: Target account ID (optional, can be provided in table_options)
                     - env: Environment to use ("production" or "sandbox"), defaults to "production"
             """
+
+            logger.warning(f"Initializing Bing Ads connector with options: {options}")
+
             self.client_id = options.get("client_id")
             self.client_secret = options.get("client_secret")
             self.refresh_token = options.get("refresh_token")
@@ -809,7 +816,7 @@ def register_lakeflow_source(spark):
                         records.append(record)
                     except Exception as e:
                         # Log but continue processing other accounts
-                        print(f"Warning: Failed to get account {account_info.Id}: {e}")
+                        logger.warning(f"Warning: Failed to get account {account_info.Id}: {e}")
 
             except Exception as e:
                 raise RuntimeError(f"Failed to read accounts: {e}")
@@ -927,6 +934,9 @@ def register_lakeflow_source(spark):
 
             if extra:
                 result.update(extra)
+
+            print("_serialize_soap_object", result)
+            logger.warning(f"_serialize_soap_object: {result}")
 
             return result
 

@@ -747,6 +747,7 @@ class LakeflowConnect:
             result.update(extra)
 
         print("_serialize_soap_object", result)
+        logger.warning(f"_serialize_soap_object: {result}")
 
         return result
 
