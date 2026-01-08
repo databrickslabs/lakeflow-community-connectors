@@ -11,6 +11,7 @@ requires-python = ">=3.10"
 dependencies = [
     "pyspark>=3.5.0",
     "pydantic>=2.0.0",
+    "bingads>=13.0.7",
 ]
 
 [project.optional-dependencies]
