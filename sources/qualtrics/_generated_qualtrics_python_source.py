@@ -613,9 +613,21 @@ def register_lakeflow_source(spark):
         def _get_directory_contacts_schema(self) -> StructType:
             """Get schema for directory_contacts table.
 
-            Returns same schema as mailing_list_contacts.
+            Note: This schema differs from mailing_list_contacts:
+            - Has embedded_data field (custom contact attributes)
+            - Does NOT have mailing_list_unsubscribed or contact_lookup_id fields
             """
-            return self._get_mailing_list_contacts_schema()
+            return StructType([
+                StructField("contact_id", StringType(), True),
+                StructField("first_name", StringType(), True),
+                StructField("last_name", StringType(), True),
+                StructField("email", StringType(), True),
+                StructField("phone", StringType(), True),
+                StructField("ext_ref", StringType(), True),
+                StructField("language", StringType(), True),
+                StructField("unsubscribed", BooleanType(), True),
+                StructField("embedded_data", MapType(StringType(), StringType()), True)
+            ])
 
         def _get_directories_schema(self) -> StructType:
             """Get schema for directories table."""
