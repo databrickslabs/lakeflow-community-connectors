@@ -105,6 +105,17 @@ def convert_github_url_to_raw(url: str, branch: str = "master") -> str:
     return url
 
 
+def _load_yaml_file(path: Path) -> Optional[dict]:
+    """Load a YAML file from disk, returning None on any error."""
+    if not path.exists():
+        return None
+    try:
+        with open(path, "r") as f:
+            return yaml.safe_load(f)
+    except Exception:
+        return None
+
+
 def load_connector_spec(
     source_name: str,
     spec_path: Optional[str] = None,
@@ -137,18 +148,11 @@ def load_connector_spec(
             warn_callback(msg)
 
     # 1. If spec_path is provided and is a local file, use it directly
-    if spec_path and not spec_path.startswith("http://") and not spec_path.startswith("https://"):
-        local_path = Path(spec_path)
-        if local_path.exists():
-            try:
-                with open(local_path, "r") as f:
-                    return yaml.safe_load(f)
-            except Exception as e:
-                warn(f"Could not read spec file: {spec_path} ({e})")
-                return None
-        else:
-            warn(f"Spec file not found: {spec_path}")
-            return None
+    if spec_path and not spec_path.startswith(("http://", "https://")):
+        result = _load_yaml_file(Path(spec_path))
+        if result is None:
+            warn(f"Spec file not found or could not be read: {spec_path}")
+        return result
 
     # 2. Try local paths (for development within the repo)
     local_paths = []
@@ -168,12 +172,9 @@ def load_connector_spec(
     local_paths.append(Path.cwd().parent.parent / "sources" / source_name / "connector_spec.yaml")
 
     for local_path in local_paths:
-        if local_path.exists():
-            try:
-                with open(local_path, "r") as f:
-                    return yaml.safe_load(f)
-            except Exception:
-                continue
+        result = _load_yaml_file(local_path)
+        if result is not None:
+            return result
 
     # 3. Determine the repo URL to use (custom URL or default from config)
     if spec_path:
@@ -182,7 +183,9 @@ def load_connector_spec(
     elif get_default_repo_url:
         repo_raw_url = get_default_repo_url()
     else:
-        repo_raw_url = "https://raw.githubusercontent.com/databrickslabs/lakeflow-community-connectors/master"
+        repo_raw_url = (
+            "https://raw.githubusercontent.com/databrickslabs/lakeflow-community-connectors/master"
+        )
 
     # Remove trailing slash if present
     repo_raw_url = repo_raw_url.rstrip("/")
@@ -192,11 +195,8 @@ def load_connector_spec(
         with urllib.request.urlopen(spec_url, timeout=10) as response:
             content = response.read().decode("utf-8")
             return yaml.safe_load(content)
-    except (urllib.error.URLError, urllib.error.HTTPError) as e:
-        warn(f"Could not fetch connector spec from: {spec_url} ({e})")
-        return None
     except Exception as e:
-        warn(f"Unexpected error fetching connector spec from {spec_url}: {e}")
+        warn(f"Could not fetch connector spec from: {spec_url} ({e})")
         return None
 
 
@@ -504,4 +504,3 @@ def validate_connection_options_legacy(
         )
 
     return result
-
