@@ -366,8 +366,8 @@ Question IDs (e.g., `QID1`, `QID2`) are survey-specific. The `values` field uses
 - `mailing_list_id` (string): Unique mailing list identifier (primary key)
 - `name` (string): Mailing list name/title
 - `owner_id` (string): User ID of the mailing list owner
-- `creation_date` (long): Epoch timestamp (milliseconds) when created
-- `last_modified_date` (long): Epoch timestamp (milliseconds) of last modification
+- `creation_date` (string): ISO 8601 timestamp when created
+- `last_modified_date` (string): ISO 8601 timestamp of last modification
 - `contact_count` (long): Number of contacts in the mailing list
 
 #### `mailing_list_contacts` table schema:
