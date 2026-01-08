@@ -12,7 +12,7 @@ import base64
 import json
 import traceback
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Set
 
 import click
 import yaml
@@ -20,13 +20,150 @@ from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.workspace import ImportFormat, Language
 
 from databricks.labs.community_connector import __version__
-from databricks.labs.community_connector.config import build_config
+from databricks.labs.community_connector.config import build_config, load_default_config
 from databricks.labs.community_connector.pipeline_client import PipelineClient
 from databricks.labs.community_connector.pipeline_spec_validator import (
     PipelineSpecValidationError,
     validate_pipeline_spec,
 )
 from databricks.labs.community_connector.repo_client import RepoClient
+from databricks.labs.community_connector.connector_spec import (
+    ParsedConnectorSpec,
+    convert_github_url_to_raw,
+    load_connector_spec,
+    parse_connector_spec,
+    parse_connector_spec_legacy,
+    merge_external_options_allowlist,
+    validate_connection_options,
+    validate_connection_options_legacy,
+)
+
+
+# Re-export for backward compatibility with tests
+_convert_github_url_to_raw = convert_github_url_to_raw
+_parse_connector_spec = parse_connector_spec
+_parse_connector_spec_legacy = parse_connector_spec_legacy
+_merge_external_options_allowlist = merge_external_options_allowlist
+
+
+def _get_default_repo_raw_url() -> str:
+    """
+    Get the default repository raw URL from the default config.
+
+    Reads the repo.url and repo.branch from default_config.yaml and converts
+    to a raw.githubusercontent.com URL.
+
+    Returns:
+        Raw GitHub URL for the default repository.
+    """
+    config = load_default_config()
+    repo_config = config.get("repo", {})
+    repo_url = repo_config.get(
+        "url", "https://github.com/databrickslabs/lakeflow-community-connectors"
+    )
+    branch = repo_config.get("branch", "master")
+
+    return convert_github_url_to_raw(repo_url, branch)
+
+
+def _load_connector_spec(source_name: str, spec_path: Optional[str] = None) -> Optional[dict]:
+    """
+    Load the connector_spec.yaml for a given source.
+
+    This is a CLI wrapper around connector_spec.load_connector_spec that provides
+    warning output via click.echo.
+
+    Args:
+        source_name: Name of the connector source (e.g., 'github', 'stripe').
+        spec_path: Optional path to a local spec file, or a GitHub repo URL.
+
+    Returns:
+        Parsed connector spec as a dictionary, or None if not found.
+    """
+    return load_connector_spec(
+        source_name=source_name,
+        spec_path=spec_path,
+        get_default_repo_url=_get_default_repo_raw_url,
+        cli_file_path=__file__,
+        warn_callback=lambda msg: click.echo(f"⚠️  Warning: {msg}", err=True),
+    )
+
+
+def _get_constant_external_options_allowlist() -> str:
+    """
+    Get the constant external options allowlist from the default config.
+
+    This allowlist contains common table configuration options that all connectors support
+    and is appended to the source-specific allowlist.
+
+    Returns:
+        Comma-separated string of constant allowlist options.
+    """
+    config = load_default_config()
+    connection_config = config.get("connection", {})
+    return connection_config.get("external_options_allowlist", "")
+
+
+def _validate_connection_options_with_spec(
+    source_name: str,
+    options_dict: dict,
+    parsed_spec: ParsedConnectorSpec,
+) -> List[str]:
+    """
+    Validate connection options against the parsed connector spec.
+
+    This is a CLI wrapper that handles output via click.echo.
+
+    Args:
+        source_name: Name of the connector source.
+        options_dict: The connection options dictionary.
+        parsed_spec: The parsed connector spec.
+
+    Returns:
+        List of validation error messages.
+    """
+    result = validate_connection_options(source_name, options_dict, parsed_spec)
+
+    # Print detected auth method
+    if result.detected_auth_method:
+        click.echo(f"  ✓ Detected auth method: {result.detected_auth_method}")
+
+    # Print warnings
+    for warning in result.warnings:
+        click.echo(f"⚠️  Warning: {warning}", err=True)
+
+    return result.errors
+
+
+def _validate_connection_options(
+    source_name: str,
+    options_dict: dict,
+    required_params: Set[str],
+    optional_params: Set[str],
+) -> List[str]:
+    """
+    Legacy validation function for backward compatibility.
+
+    This is a CLI wrapper that handles output via click.echo.
+
+    Args:
+        source_name: Name of the connector source.
+        options_dict: The connection options dictionary.
+        required_params: Set of required parameter names.
+        optional_params: Set of optional parameter names.
+
+    Returns:
+        List of validation error messages.
+    """
+    result = validate_connection_options_legacy(
+        source_name, options_dict, required_params, optional_params
+    )
+
+    # Print warnings
+    for warning in result.warnings:
+        click.echo(f"⚠️  Warning: {warning}", err=True)
+
+    return result.errors
 
 
 class OrderedGroup(click.Group):  # pylint: disable=too-few-public-methods
@@ -682,8 +819,23 @@ def show_pipeline(ctx: click.Context, pipeline_name: str):
     required=True,
     help='Connection options as JSON string (e.g., \'{"key": "value"}\')',
 )
+@click.option(
+    "--spec",
+    "-s",
+    "spec_path",
+    default=None,
+    help="Optional: local path to connector_spec.yaml, or a GitHub repo URL "
+    "(e.g., https://github.com/myorg/myrepo). "
+    "If a URL, the spec is fetched from sources/{source_name}/connector_spec.yaml in that repo.",
+)
 @click.pass_context
-def create_connection(ctx: click.Context, source_name: str, connection_name: str, options: str):
+def create_connection(
+    ctx: click.Context,
+    source_name: str,
+    connection_name: str,
+    options: str,
+    spec_path: Optional[str],
+):
     """
     Create a UC connection for community connectors.
 
@@ -693,12 +845,27 @@ def create_connection(ctx: click.Context, source_name: str, connection_name: str
 
     The connection type is set to GENERIC_LAKEFLOW_CONNECT.
 
+    Connection options are validated against the connector spec (connector_spec.yaml).
+    The externalOptionsAllowList is automatically added from the spec.
+
     \b
     Example:
         community-connector create_connection github my_github_conn \\
-            -o '{"host": "api.github.com", "externalOptionsAllowList": "..."}'
+            -o '{"token": "ghp_xxxx"}'
+
+        # With custom spec file:
+        community-connector create_connection github my_github_conn \\
+            -o '{"token": "ghp_xxxx"}' --spec ./my_connector_spec.yaml
+
+        # With custom GitHub repo (fetches from sources/github/connector_spec.yaml in that repo):
+        community-connector create_connection github my_github_conn \\
+            -o '{"token": "ghp_xxxx"}' --spec https://github.com/myorg/myrepo
     """
     debug = ctx.obj.get("debug", False)
+
+    click.echo(f"Creating connection for source: {source_name}")
+    click.echo(f"Connection name: {connection_name}")
+    click.echo("Connection type: GENERIC_LAKEFLOW_CONNECT")
 
     # Parse options JSON
     try:
@@ -709,22 +876,53 @@ def create_connection(ctx: click.Context, source_name: str, connection_name: str
     if not isinstance(options_dict, dict):
         raise click.ClickException("--options must be a JSON object (key-value pairs)")
 
-    # Merge source_name into options (API expects camelCase: sourceName)
-    options_dict["sourceName"] = source_name
+    # Get constant allowlist from config (always appended)
+    constant_allowlist = _get_constant_external_options_allowlist()
 
-    # Warn if externalOptionsAllowList is not provided
-    if "externalOptionsAllowList" not in options_dict:
+    # Load and validate against connector spec
+    connector_spec = _load_connector_spec(source_name, spec_path)
+    if connector_spec:
+        parsed_spec = _parse_connector_spec(connector_spec)
+
+        if debug:
+            if parsed_spec.has_auth_methods():
+                click.echo(f"[DEBUG] Auth methods: {[m.name for m in parsed_spec.auth_methods]}")
+                click.echo(f"[DEBUG] Common required: {parsed_spec.common_required_params}")
+                click.echo(f"[DEBUG] Common optional: {parsed_spec.common_optional_params}")
+            else:
+                click.echo(f"[DEBUG] Required params: {parsed_spec.required_params}")
+                click.echo(f"[DEBUG] Optional params: {parsed_spec.optional_params}")
+            click.echo(f"[DEBUG] Source allowlist: {parsed_spec.external_options_allowlist}")
+            click.echo(f"[DEBUG] Constant allowlist: {constant_allowlist}")
+
+        # Validate connection options
+        errors = _validate_connection_options_with_spec(source_name, options_dict, parsed_spec)
+        if errors:
+            raise click.ClickException("\n".join(errors))
+
+        # Auto-add externalOptionsAllowList (merged source + constant) if not provided
+        if "externalOptionsAllowList" not in options_dict:
+            merged_allowlist = _merge_external_options_allowlist(
+                parsed_spec.external_options_allowlist, constant_allowlist
+            )
+            options_dict["externalOptionsAllowList"] = merged_allowlist
+            if merged_allowlist:
+                click.echo(f"  ✓ Auto-added externalOptionsAllowList: {merged_allowlist}")
+            else:
+                click.echo("  ✓ Set externalOptionsAllowList to empty (no table-specific options)")
+    else:
         click.echo(
-            "⚠️  Warning: 'externalOptionsAllowList' is not specified in the options. "
-            "This field is usually required to specify additional options needed for "
-            "ingestion configuration in 'table_configuration'. "
-            "Please refer to the source connector documentation for allowed options.",
+            f"⚠️  Warning: Could not load connector spec for '{source_name}'. "
+            "Skipping parameter validation.",
             err=True,
         )
+        # Still add constant allowlist if user didn't provide externalOptionsAllowList
+        if "externalOptionsAllowList" not in options_dict and constant_allowlist:
+            options_dict["externalOptionsAllowList"] = constant_allowlist
+            click.echo(f"  ✓ Auto-added constant externalOptionsAllowList: {constant_allowlist}")
 
-    click.echo(f"Creating connection for source: {source_name}")
-    click.echo(f"Connection name: {connection_name}")
-    click.echo("Connection type: GENERIC_LAKEFLOW_CONNECT")
+    # Merge source_name into options (API expects camelCase: sourceName)
+    options_dict["sourceName"] = source_name
 
     if debug:
         click.echo(f"[DEBUG] Options (with source_name): {options_dict}")
@@ -779,8 +977,23 @@ def create_connection(ctx: click.Context, source_name: str, connection_name: str
     required=True,
     help='Connection options as JSON string (e.g., \'{"key": "value"}\')',
 )
+@click.option(
+    "--spec",
+    "-s",
+    "spec_path",
+    default=None,
+    help="Optional: local path to connector_spec.yaml, or a GitHub repo URL "
+    "(e.g., https://github.com/myorg/myrepo). "
+    "If a URL, the spec is fetched from sources/{source_name}/connector_spec.yaml in that repo.",
+)
 @click.pass_context
-def update_connection(ctx: click.Context, source_name: str, connection_name: str, options: str):
+def update_connection(
+    ctx: click.Context,
+    source_name: str,
+    connection_name: str,
+    options: str,
+    spec_path: Optional[str],
+):
     """
     Update a UC connection for community connectors.
 
@@ -790,12 +1003,26 @@ def update_connection(ctx: click.Context, source_name: str, connection_name: str
 
     The connection type is set to GENERIC_LAKEFLOW_CONNECT.
 
+    Connection options are validated against the connector spec (connector_spec.yaml).
+    The externalOptionsAllowList is automatically added from the spec.
+
     \b
     Example:
         community-connector update_connection github my_github_conn \\
-            -o '{"host": "api.github.com", "externalOptionsAllowList": "..."}'
+            -o '{"token": "ghp_xxxx"}'
+
+        # With custom spec file:
+        community-connector update_connection github my_github_conn \\
+            -o '{"token": "ghp_xxxx"}' --spec ./my_connector_spec.yaml
+
+        # With custom GitHub repo (fetches from sources/github/connector_spec.yaml in that repo):
+        community-connector update_connection github my_github_conn \\
+            -o '{"token": "ghp_xxxx"}' --spec https://github.com/myorg/myrepo
     """
     debug = ctx.obj.get("debug", False)
+
+    click.echo(f"Updating connection for source: {source_name}")
+    click.echo(f"Connection name: {connection_name}")
 
     # Parse options JSON
     try:
@@ -806,21 +1033,53 @@ def update_connection(ctx: click.Context, source_name: str, connection_name: str
     if not isinstance(options_dict, dict):
         raise click.ClickException("--options must be a JSON object (key-value pairs)")
 
-    # Merge source_name into options (API expects camelCase: sourceName)
-    options_dict["sourceName"] = source_name
+    # Get constant allowlist from config (always appended)
+    constant_allowlist = _get_constant_external_options_allowlist()
 
-    # Warn if externalOptionsAllowList is not provided
-    if "externalOptionsAllowList" not in options_dict:
+    # Load and validate against connector spec
+    connector_spec = _load_connector_spec(source_name, spec_path)
+    if connector_spec:
+        parsed_spec = _parse_connector_spec(connector_spec)
+
+        if debug:
+            if parsed_spec.has_auth_methods():
+                click.echo(f"[DEBUG] Auth methods: {[m.name for m in parsed_spec.auth_methods]}")
+                click.echo(f"[DEBUG] Common required: {parsed_spec.common_required_params}")
+                click.echo(f"[DEBUG] Common optional: {parsed_spec.common_optional_params}")
+            else:
+                click.echo(f"[DEBUG] Required params: {parsed_spec.required_params}")
+                click.echo(f"[DEBUG] Optional params: {parsed_spec.optional_params}")
+            click.echo(f"[DEBUG] Source allowlist: {parsed_spec.external_options_allowlist}")
+            click.echo(f"[DEBUG] Constant allowlist: {constant_allowlist}")
+
+        # Validate connection options
+        errors = _validate_connection_options_with_spec(source_name, options_dict, parsed_spec)
+        if errors:
+            raise click.ClickException("\n".join(errors))
+
+        # Auto-add externalOptionsAllowList (merged source + constant) if not provided
+        if "externalOptionsAllowList" not in options_dict:
+            merged_allowlist = _merge_external_options_allowlist(
+                parsed_spec.external_options_allowlist, constant_allowlist
+            )
+            options_dict["externalOptionsAllowList"] = merged_allowlist
+            if merged_allowlist:
+                click.echo(f"  ✓ Auto-added externalOptionsAllowList: {merged_allowlist}")
+            else:
+                click.echo("  ✓ Set externalOptionsAllowList to empty (no table-specific options)")
+    else:
         click.echo(
-            "⚠️  Warning: 'externalOptionsAllowList' is not specified in the options. "
-            "This field is usually required to specify additional options needed for "
-            "ingestion configuration in 'table_configuration'. "
-            "Please refer to the source connector documentation for allowed options.",
+            f"⚠️  Warning: Could not load connector spec for '{source_name}'. "
+            "Skipping parameter validation.",
             err=True,
         )
+        # Still add constant allowlist if user didn't provide externalOptionsAllowList
+        if "externalOptionsAllowList" not in options_dict and constant_allowlist:
+            options_dict["externalOptionsAllowList"] = constant_allowlist
+            click.echo(f"  ✓ Auto-added constant externalOptionsAllowList: {constant_allowlist}")
 
-    click.echo(f"Updating connection for source: {source_name}")
-    click.echo(f"Connection name: {connection_name}")
+    # Merge source_name into options (API expects camelCase: sourceName)
+    options_dict["sourceName"] = source_name
 
     if debug:
         click.echo(f"[DEBUG] Options (with source_name): {options_dict}")
