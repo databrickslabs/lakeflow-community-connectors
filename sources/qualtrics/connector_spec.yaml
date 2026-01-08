@@ -1,0 +1,38 @@
+# Qualtrics Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+connection:
+  parameters:
+    - name: api_token
+      type: string
+      required: true
+      description: >
+        Qualtrics API token for authentication. Generate from
+        Account Settings > Qualtrics IDs > API section.
+
+    - name: datacenter_id
+      type: string
+      required: true
+      description: >
+        Qualtrics datacenter identifier where your account is hosted.
+        Found in Account Settings > Qualtrics IDs (e.g., 'fra1', 'ca1', 'syd1').
+
+    - name: max_surveys
+      type: string
+      required: false
+      description: >
+        Maximum number of surveys to consolidate when surveyId is not provided.
+        Defaults to 50. Used for auto-consolidation of survey data.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# ============================================================================
+external_options_allowlist: "tableName,tableNameList,tableConfigs,surveyId,mailingListId,directoryId"
