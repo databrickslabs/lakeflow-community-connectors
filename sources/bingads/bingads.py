@@ -1,10 +1,3 @@
-"""Bing Ads (Microsoft Advertising) connector for Lakeflow Connect.
-
-This connector uses the Bing Ads Python SDK to fetch data from the Microsoft
-Advertising API. It supports Campaign Management entities (campaigns, ad groups,
-ads, keywords, accounts) and Reporting API for performance reports.
-"""
-
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -17,7 +10,6 @@ from bingads.authorization import (
     OAuthWebAuthCodeGrant,
 )
 from bingads.service_client import ServiceClient
-from bingads.v13.reporting import ReportingServiceManager
 from pyspark.sql.types import (
     ArrayType,
     DataType,

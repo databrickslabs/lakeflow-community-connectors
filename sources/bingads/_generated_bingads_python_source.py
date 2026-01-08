@@ -5,11 +5,16 @@
 # Do not edit manually. Make changes to the source files instead.
 # ==============================================================================
 
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any, Iterator
+from enum import Enum
+from typing import Any, Iterator, Optional
 import json
+import time
 
+from bingads.authorization import AuthorizationData, OAuthDesktopMobileAuthCodeGrant, OAuthWebAuthCodeGrant
+from bingads.service_client import ServiceClient
 from pyspark.sql import Row
 from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
 from pyspark.sql.types import *
@@ -205,35 +210,6 @@ def register_lakeflow_source(spark):
     ########################################################
     # sources/bingads/bingads.py
     ########################################################
-
-    This connector uses the Bing Ads Python SDK to fetch data from the Microsoft
-    Advertising API. It supports Campaign Management entities (campaigns, ad groups,
-    ads, keywords, accounts) and Reporting API for performance reports.
-    """
-
-    import time
-    from dataclasses import dataclass
-    from datetime import datetime, timedelta
-    from enum import Enum
-    from typing import Any, Iterator, Optional
-
-    from bingads.authorization import (
-        AuthorizationData,
-        OAuthDesktopMobileAuthCodeGrant,
-        OAuthWebAuthCodeGrant,
-    )
-    from bingads.service_client import ServiceClient
-    from bingads.v13.reporting import ReportingServiceManager
-    from pyspark.sql.types import (
-        ArrayType,
-        DataType,
-        DoubleType,
-        LongType,
-        StringType,
-        StructField,
-        StructType,
-    )
-
 
     class SoapFieldType(Enum):
         """Types of SOAP field serialization."""
