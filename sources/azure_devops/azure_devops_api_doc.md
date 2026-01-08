@@ -54,7 +54,9 @@ The object list is **static** (defined by the connector), not discovered dynamic
 **Connector scope**:
 - Supports 5 Git objects from Azure DevOps REST API v7.1.
 - All objects require `organization` and `project` connection parameters.
-- Objects except `repositories` require `repository_id` as a table option.
+- Objects except `repositories` support `repository_id` as an **optional** table option:
+  - **If provided**: Fetches data from specific repository only
+  - **If omitted**: Auto-fetches data from ALL repositories in the project
 
 High-level notes:
 - **Repositories**: Repository metadata including configuration, URLs, and project information.
@@ -288,7 +290,9 @@ curl -u :{PERSONAL_ACCESS_TOKEN} \
 ```
 
 **Table options**:
-- `repository_id` (string, required): Repository ID or name to fetch commits from.
+- `repository_id` (string, **optional**): Repository ID or name to fetch commits from.
+  - If provided: Fetches commits from the specified repository only.
+  - If omitted: Auto-fetches commits from ALL repositories in the project.
 
 
 ### `pullrequests` object
@@ -355,7 +359,9 @@ curl -u :{PERSONAL_ACCESS_TOKEN} \
 ```
 
 **Table options**:
-- `repository_id` (string, required): Repository ID or name.
+- `repository_id` (string, **optional**): Repository ID or name.
+  - If provided: Fetches pull requests from the specified repository only.
+  - If omitted: Auto-fetches pull requests from ALL repositories in the project.
 - `status_filter` (string, optional): Filter by status - `active`, `completed`, `abandoned`, or `all`. Default: `active`.
 
 
@@ -393,7 +399,9 @@ curl -u :{PERSONAL_ACCESS_TOKEN} \
 ```
 
 **Table options**:
-- `repository_id` (string, required): Repository ID or name.
+- `repository_id` (string, **optional**): Repository ID or name.
+  - If provided: Fetches refs from the specified repository only.
+  - If omitted: Auto-fetches refs from ALL repositories in the project.
 - `filter` (string, optional): Ref name prefix filter (e.g., `heads/` for branches, `tags/` for tags).
 
 
@@ -440,7 +448,9 @@ curl -u :{PERSONAL_ACCESS_TOKEN} \
 ```
 
 **Table options**:
-- `repository_id` (string, required): Repository ID or name.
+- `repository_id` (string, **optional**): Repository ID or name.
+  - If provided: Fetches pushes from the specified repository only.
+  - If omitted: Auto-fetches pushes from ALL repositories in the project.
 
 
 ## **Get Object Primary Keys**
@@ -773,7 +783,10 @@ curl -u :{PERSONAL_ACCESS_TOKEN} \
 **Best practices**:
 - Use pagination parameters (`$top`, `$skip`) to control request size and avoid timeouts.
 - Leverage date-based filtering (`searchCriteria.fromDate`) for incremental syncs.
-- For objects requiring `repository_id`, consider syncing repositories first, then iterating.
+- For tables with optional `repository_id`:
+  - **Omit `repository_id`** for comprehensive data collection across all repositories (auto-fetch mode)
+  - **Provide `repository_id`** for targeted, efficient queries on specific repositories
+  - In auto-fetch mode, the connector fetches all repositories first, then iterates
 - Cache repository metadata to avoid redundant repository list calls.
 
 

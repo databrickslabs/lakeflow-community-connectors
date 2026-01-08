@@ -423,16 +423,17 @@ class LakeflowConnect:
         """
         Read the `commits` append table.
 
-        Requires table_options:
-        - repository_id: Repository ID or name to fetch commits from.
+        Table options:
+        - repository_id (optional): Repository ID or name to fetch commits from.
+          If not provided, fetches commits from ALL repositories in the project.
 
         Supports pagination using $skip offset from start_offset.
         """
         repository_id = table_options.get("repository_id")
+        
+        # If repository_id not provided, fetch from all repositories
         if not repository_id:
-            raise ValueError(
-                "commits table requires 'repository_id' in table_options"
-            )
+            return self._read_commits_all_repos(start_offset, table_options)
 
         url = f"{self.base_url}/{self.project}/_apis/git/repositories/{repository_id}/commits"
         
@@ -489,23 +490,66 @@ class LakeflowConnect:
         
         return iter(records), new_offset
 
+    def _read_commits_all_repos(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read commits from ALL repositories in the project.
+        
+        This method:
+        1. Fetches all repositories
+        2. For each repository, fetches commits
+        3. Combines all commits into a single result set
+        """
+        # First, get all repositories
+        repos_iterator, _ = self._read_repositories({}, {})
+        repositories = list(repos_iterator)
+        
+        if not repositories:
+            # No repositories found, return empty
+            return iter([]), {}
+        
+        all_commits = []
+        
+        # For each repository, fetch commits
+        for repo in repositories:
+            repo_id = repo.get("id")
+            if not repo_id:
+                continue
+                
+            # Create modified table_options with this repository_id
+            repo_table_options = dict(table_options)
+            repo_table_options["repository_id"] = repo_id
+            
+            # Fetch commits for this repository
+            try:
+                commits_iterator, _ = self._read_commits(start_offset, repo_table_options)
+                commits = list(commits_iterator)
+                all_commits.extend(commits)
+            except Exception:
+                # If a repository fails, continue with others
+                # (e.g., empty repo, permissions issue)
+                continue
+        
+        # Return all commits combined
+        return iter(all_commits), {}
+
     def _read_pullrequests(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
         Read the `pullrequests` CDC table.
 
-        Requires table_options:
-        - repository_id: Repository ID or name to fetch pull requests from.
-
-        Optional table_options:
-        - status_filter: Filter by status (active, completed, abandoned, all). Default: all.
+        Table options:
+        - repository_id (optional): Repository ID or name to fetch pull requests from.
+          If not provided, fetches pull requests from ALL repositories in the project.
+        - status_filter (optional): Filter by status (active, completed, abandoned, all). Default: all.
         """
         repository_id = table_options.get("repository_id")
+        
+        # If repository_id not provided, fetch from all repositories
         if not repository_id:
-            raise ValueError(
-                "pullrequests table requires 'repository_id' in table_options"
-            )
+            return self._read_pullrequests_all_repos(start_offset, table_options)
 
         url = f"{self.base_url}/{self.project}/_apis/git/repositories/{repository_id}/pullrequests"
         
@@ -556,23 +600,65 @@ class LakeflowConnect:
         # CDC ingestion: return empty offset (full fetch each time)
         return iter(records), {}
 
+    def _read_pullrequests_all_repos(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read pull requests from ALL repositories in the project.
+        
+        This method:
+        1. Fetches all repositories
+        2. For each repository, fetches pull requests
+        3. Combines all PRs into a single result set
+        """
+        # First, get all repositories
+        repos_iterator, _ = self._read_repositories({}, {})
+        repositories = list(repos_iterator)
+        
+        if not repositories:
+            # No repositories found, return empty
+            return iter([]), {}
+        
+        all_prs = []
+        
+        # For each repository, fetch pull requests
+        for repo in repositories:
+            repo_id = repo.get("id")
+            if not repo_id:
+                continue
+                
+            # Create modified table_options with this repository_id
+            repo_table_options = dict(table_options)
+            repo_table_options["repository_id"] = repo_id
+            
+            # Fetch PRs for this repository
+            try:
+                prs_iterator, _ = self._read_pullrequests(start_offset, repo_table_options)
+                prs = list(prs_iterator)
+                all_prs.extend(prs)
+            except Exception:
+                # If a repository fails, continue with others
+                continue
+        
+        # Return all PRs combined
+        return iter(all_prs), {}
+
     def _read_refs(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
         Read the `refs` snapshot table.
 
-        Requires table_options:
-        - repository_id: Repository ID or name to fetch refs from.
-
-        Optional table_options:
-        - filter: Ref name prefix filter (e.g., 'heads/' for branches, 'tags/' for tags).
+        Table options:
+        - repository_id (optional): Repository ID or name to fetch refs from.
+          If not provided, fetches refs from ALL repositories in the project.
+        - filter (optional): Ref name prefix filter (e.g., 'heads/' for branches, 'tags/' for tags).
         """
         repository_id = table_options.get("repository_id")
+        
+        # If repository_id not provided, fetch from all repositories
         if not repository_id:
-            raise ValueError(
-                "refs table requires 'repository_id' in table_options"
-            )
+            return self._read_refs_all_repos(start_offset, table_options)
 
         url = f"{self.base_url}/{self.project}/_apis/git/repositories/{repository_id}/refs"
         
@@ -619,22 +705,66 @@ class LakeflowConnect:
         # Snapshot ingestion: return empty offset
         return iter(records), {}
 
+    def _read_refs_all_repos(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read refs from ALL repositories in the project.
+        
+        This method:
+        1. Fetches all repositories
+        2. For each repository, fetches refs
+        3. Combines all refs into a single result set
+        """
+        # First, get all repositories
+        repos_iterator, _ = self._read_repositories({}, {})
+        repositories = list(repos_iterator)
+        
+        if not repositories:
+            # No repositories found, return empty
+            return iter([]), {}
+        
+        all_refs = []
+        
+        # For each repository, fetch refs
+        for repo in repositories:
+            repo_id = repo.get("id")
+            if not repo_id:
+                continue
+                
+            # Create modified table_options with this repository_id
+            repo_table_options = dict(table_options)
+            repo_table_options["repository_id"] = repo_id
+            
+            # Fetch refs for this repository
+            try:
+                refs_iterator, _ = self._read_refs(start_offset, repo_table_options)
+                refs = list(refs_iterator)
+                all_refs.extend(refs)
+            except Exception:
+                # If a repository fails, continue with others
+                continue
+        
+        # Return all refs combined
+        return iter(all_refs), {}
+
     def _read_pushes(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
         Read the `pushes` append table.
 
-        Requires table_options:
-        - repository_id: Repository ID or name to fetch pushes from.
+        Table options:
+        - repository_id (optional): Repository ID or name to fetch pushes from.
+          If not provided, fetches pushes from ALL repositories in the project.
 
         Supports pagination using $skip offset from start_offset.
         """
         repository_id = table_options.get("repository_id")
+        
+        # If repository_id not provided, fetch from all repositories
         if not repository_id:
-            raise ValueError(
-                "pushes table requires 'repository_id' in table_options"
-            )
+            return self._read_pushes_all_repos(start_offset, table_options)
 
         url = f"{self.base_url}/{self.project}/_apis/git/repositories/{repository_id}/pushes"
         
@@ -686,4 +816,47 @@ class LakeflowConnect:
             new_offset["skip"] = skip + top
         
         return iter(records), new_offset
+
+    def _read_pushes_all_repos(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """
+        Read pushes from ALL repositories in the project.
+        
+        This method:
+        1. Fetches all repositories
+        2. For each repository, fetches pushes
+        3. Combines all pushes into a single result set
+        """
+        # First, get all repositories
+        repos_iterator, _ = self._read_repositories({}, {})
+        repositories = list(repos_iterator)
+        
+        if not repositories:
+            # No repositories found, return empty
+            return iter([]), {}
+        
+        all_pushes = []
+        
+        # For each repository, fetch pushes
+        for repo in repositories:
+            repo_id = repo.get("id")
+            if not repo_id:
+                continue
+                
+            # Create modified table_options with this repository_id
+            repo_table_options = dict(table_options)
+            repo_table_options["repository_id"] = repo_id
+            
+            # Fetch pushes for this repository
+            try:
+                pushes_iterator, _ = self._read_pushes(start_offset, repo_table_options)
+                pushes = list(pushes_iterator)
+                all_pushes.extend(pushes)
+            except Exception:
+                # If a repository fails, continue with others
+                continue
+        
+        # Return all pushes combined
+        return iter(all_pushes), {}
 

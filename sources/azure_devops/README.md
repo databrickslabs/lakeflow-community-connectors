@@ -90,12 +90,15 @@ Each table has different configuration requirements:
 | Table          | Required Options | Optional Options | Notes |
 |----------------|------------------|------------------|-------|
 | `repositories` | None             | None             | Uses connection-level `organization` and `project` |
-| `commits`      | `repository_id`  | None             | Fetches commits for a specific repository; supports pagination |
-| `pullrequests` | `repository_id`  | `status_filter`  | `status_filter` can be: `active`, `completed`, `abandoned`, or `all` (default: `all`) |
-| `refs`         | `repository_id`  | `filter`         | `filter` can be used to limit refs, e.g., `heads/` for branches only, `tags/` for tags only |
-| `pushes`       | `repository_id`  | None             | Fetches push events for a specific repository; supports pagination |
+| `commits`      | None             | `repository_id`  | If `repository_id` omitted: auto-fetches from ALL repos; if provided: fetches from specific repo only |
+| `pullrequests` | None             | `repository_id`, `status_filter` | If `repository_id` omitted: auto-fetches from ALL repos; `status_filter`: `active`, `completed`, `abandoned`, or `all` (default: `all`) |
+| `refs`         | None             | `repository_id`, `filter` | If `repository_id` omitted: auto-fetches from ALL repos; `filter` for branches (`heads/`) or tags (`tags/`) |
+| `pushes`       | None             | `repository_id`  | If `repository_id` omitted: auto-fetches from ALL repos; if provided: fetches from specific repo only |
 
-**Note**: For tables requiring `repository_id`, you can obtain this by first querying the `repositories` table. The `repository_id` is the UUID value in the `id` field.
+**Important Notes**:
+- **Auto-fetch mode** (repository_id omitted): Connector automatically fetches data from ALL repositories in the project. The `repository_id` field is populated as a foreign key for each record.
+- **Targeted mode** (repository_id provided): Connector fetches data only from the specified repository. More efficient for large projects with many repositories.
+- To obtain `repository_id` values, first query the `repositories` table and use the `id` field.
 
 ### Schema highlights
 
@@ -204,7 +207,29 @@ In your pipeline code (e.g., `ingestion_pipeline.py` or a similar entrypoint), c
 }
 ```
 
-#### Example 2: Ingest commits from a specific repository
+#### Example 2a: Ingest commits from ALL repositories (auto-fetch)
+
+```json
+{
+  "pipeline_spec": {
+    "connection_name": "azure_devops_connection",
+    "object": [
+      {
+        "table": {
+          "source_table": "commits"
+        }
+      }
+    ]
+  }
+}
+```
+
+**What happens**: The connector automatically:
+1. Fetches all repositories in the project
+2. For each repository, fetches commits
+3. Combines all commits with `repository_id` populated
+
+#### Example 2b: Ingest commits from a specific repository (targeted)
 
 ```json
 {
@@ -221,6 +246,8 @@ In your pipeline code (e.g., `ingestion_pipeline.py` or a similar entrypoint), c
   }
 }
 ```
+
+**What happens**: The connector fetches commits only from the specified repository.
 
 #### Example 3: Ingest pull requests with status filter
 
@@ -304,7 +331,10 @@ In your pipeline code (e.g., `ingestion_pipeline.py` or a similar entrypoint), c
 
 **Configuration notes**:
 - `connection_name` must point to the Unity Catalog connection with your `organization`, `project`, `personal_access_token`, and `externalOptionsAllowList` configured.
-- For `commits`, `pullrequests`, `refs`, and `pushes` tables, the `repository_id` is **required**. Obtain this UUID from the `repositories` table's `id` field.
+- For `commits`, `pullrequests`, `refs`, and `pushes` tables, `repository_id` is **optional**:
+  - **Omit `repository_id`** to auto-fetch from ALL repositories (convenient, comprehensive)
+  - **Provide `repository_id`** to fetch from a specific repository (efficient, targeted)
+  - Obtain `repository_id` UUID from the `repositories` table's `id` field
 - The `status_filter` option for `pullrequests` accepts: `active`, `completed`, `abandoned`, or `all` (default).
 - The `filter` option for `refs` can be `heads/` (branches only), `tags/` (tags only), or omitted (all refs).
 
@@ -326,7 +356,8 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 
 - **Start small**: 
   - Begin with the `repositories` table to discover available repository IDs.
-  - Test with a single repository before scaling to multiple repositories.
+  - For initial testing, use **targeted mode** (provide `repository_id`) with a single repository.
+  - Once validated, switch to **auto-fetch mode** (omit `repository_id`) for comprehensive data collection.
   - Consider using a test project before syncing production data.
   
 - **Schedule appropriately based on ingestion type**:
@@ -334,10 +365,16 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
   - **Append tables** (`commits`, `pushes`): Can be run more frequently (hourly or daily) to capture new commits and pushes without re-fetching historical data.
   - **CDC tables** (`pullrequests`): Run frequently (hourly or multiple times daily) to capture PR status changes efficiently using the cursor field.
   
-- **Optimize for multiple repositories**:
-  - If syncing data from multiple repositories, create separate pipeline objects for each repository.
-  - Consider staggering sync schedules across repositories to distribute API load.
-  - For large numbers of repositories, implement orchestration logic to dynamically generate pipeline configurations.
+- **Choose the right mode for multiple repositories**:
+  - **Auto-fetch mode** (omit `repository_id`): Best for syncing ALL repositories in a project
+    - Single configuration per table
+    - Automatically discovers new repositories
+    - Makes N+1 API calls (1 for repos + 1 per repo for child data)
+  - **Targeted mode** (provide `repository_id`): Best for selective repository syncing
+    - Create separate pipeline objects for specific repositories
+    - More control over sync schedules per repository
+    - Consider staggering sync schedules to distribute API load
+    - More efficient when you only need specific repositories
   
 - **Monitor API usage**: 
   - Azure DevOps enforces rate limiting based on requests per user and Throughput Units (TSTUs).
@@ -368,10 +405,11 @@ Common issues and how to address them:
   - The connector uses API version `7.1` (stable) to avoid preview version requirements.
   - If you encounter version-related errors, verify that your Azure DevOps instance supports API version 7.1.
 
-- **Missing `repository_id` errors**:
-  - Tables `commits`, `pullrequests`, `refs`, and `pushes` require the `repository_id` table option.
-  - First query the `repositories` table to obtain repository IDs, then use the `id` field value as the `repository_id`.
-  - Ensure `externalOptionsAllowList` is configured in your connection to allow table-specific options.
+- **Empty results when using auto-fetch mode**:
+  - If tables like `commits`, `pullrequests`, `refs`, or `pushes` return no data in auto-fetch mode (no `repository_id` provided):
+    - Check that repositories exist in the project by querying the `repositories` table first.
+    - Some repositories may be empty or have no data for specific tables (e.g., no commits, no PRs).
+    - Use targeted mode with a known `repository_id` to verify data exists.
 
 - **`externalOptionsAllowList` configuration errors**:
   - If you receive errors about disallowed table options, ensure the connection parameter `externalOptionsAllowList` is set to: `repository_id,status_filter,filter`
