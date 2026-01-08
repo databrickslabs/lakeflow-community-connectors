@@ -216,11 +216,15 @@ def register_lakeflow_source(spark):
 
     logger = logging.getLogger("QualtricsConnector")
     logger.setLevel(logging.INFO)
-    _handler = logging.StreamHandler(sys.stdout)
-    _formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-    _handler.setFormatter(_formatter)
+    # Add stdout handler
+    _stdout_handler = logging.StreamHandler(sys.stdout)
+    _stdout_handler.setFormatter(logging.Formatter("QUALTRICS_LOG - %(levelname)s - %(message)s"))
+    # Add stderr handler (more visible in Databricks)
+    _stderr_handler = logging.StreamHandler(sys.stderr)
+    _stderr_handler.setFormatter(logging.Formatter("QUALTRICS_LOG - %(levelname)s - %(message)s"))
     if not logger.handlers:
-        logger.addHandler(_handler)
+        logger.addHandler(_stdout_handler)
+        logger.addHandler(_stderr_handler)
 
 
     class QualtricsConfig:
@@ -705,9 +709,12 @@ def register_lakeflow_source(spark):
             Returns:
                 Tuple of (iterator of records, end offset)
             """
-            # DEBUG: Log received options
-            logger.info(f"DEBUG read_table: table={table_name}, table_options keys={list(table_options.keys()) if table_options else 'None'}")
-            logger.info(f"DEBUG read_table: surveyId={table_options.get('surveyId') if table_options else 'N/A'}")
+            # DEBUG: Multiple output methods for visibility
+            debug_msg = f"DEBUG read_table: table={table_name}, keys={list(table_options.keys()) if table_options else 'None'}, surveyId={table_options.get('surveyId') if table_options else 'N/A'}"
+            print(debug_msg)
+            sys.stdout.write(debug_msg + "\n")
+            sys.stderr.write(debug_msg + "\n")
+            logger.info(debug_msg)
 
             if table_name not in self._reader_methods:
                 raise ValueError(
@@ -955,12 +962,19 @@ def register_lakeflow_source(spark):
             Returns:
                 List of survey IDs
             """
-            # DEBUG: Log what we received
-            logger.info(f"DEBUG _get_all_survey_ids: table_options={table_options}")
+            # DEBUG: Multiple output methods for visibility
+            debug_msg1 = f"DEBUG _get_all_survey_ids: table_options={table_options}"
+            debug_msg2 = f"DEBUG _get_all_survey_ids: survey_id_input will be checked"
+            print(debug_msg1)
+            sys.stderr.write(debug_msg1 + "\n")
+            logger.info(debug_msg1)
 
             # Check if specific survey IDs are provided
             survey_id_input = table_options.get("surveyId")
-            logger.info(f"DEBUG _get_all_survey_ids: survey_id_input={survey_id_input}")
+            debug_msg3 = f"DEBUG _get_all_survey_ids: survey_id_input={survey_id_input}"
+            print(debug_msg3)
+            sys.stderr.write(debug_msg3 + "\n")
+            logger.info(debug_msg3)
             if survey_id_input:
                 # Parse comma-separated list, strip whitespace
                 survey_ids = [sid.strip() for sid in survey_id_input.split(",") if sid.strip()]
