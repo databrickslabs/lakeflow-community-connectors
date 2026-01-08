@@ -611,11 +611,18 @@ def register_lakeflow_source(spark):
             ])
 
         def _get_directory_contacts_schema(self) -> StructType:
-            """Get schema for directory_contacts table.
-
-            Returns same schema as mailing_list_contacts.
-            """
-            return self._get_mailing_list_contacts_schema()
+            """Get schema for directory_contacts table."""
+            return StructType([
+                StructField("contact_id", StringType(), True),
+                StructField("first_name", StringType(), True),
+                StructField("last_name", StringType(), True),
+                StructField("email", StringType(), True),
+                StructField("phone", StringType(), True),
+                StructField("ext_ref", StringType(), True),
+                StructField("language", StringType(), True),
+                StructField("unsubscribed", BooleanType(), True),
+                StructField("embedded_data", MapType(StringType(), StringType()), True)
+            ])
 
         def _get_directories_schema(self) -> StructType:
             """Get schema for directories table."""
@@ -908,7 +915,8 @@ def register_lakeflow_source(spark):
             Get survey IDs for consolidation.
 
             If surveyId is provided in table_options, uses that (supports comma-separated list).
-            Otherwise, fetches all surveys up to the max_surveys limit.
+            Otherwise, fetches all surveys up to the max_surveys limit, sorted by lastModified
+            date (newest first) to prioritize recently updated surveys.
 
             Args:
                 table_options: May contain 'surveyId' parameter (single or comma-separated)
@@ -932,6 +940,10 @@ def register_lakeflow_source(spark):
                 logger.warning("No surveys found")
                 return []
 
+            # Sort surveys by lastModified date (newest first) to prioritize recent surveys
+            # when max_surveys limit is applied
+            surveys.sort(key=lambda s: s.get("lastModified", ""), reverse=True)
+
             # Get survey IDs up to max limit (includes all surveys - active and inactive)
             survey_ids = []
             for survey in surveys:
@@ -949,7 +961,7 @@ def register_lakeflow_source(spark):
 
             logger.info(
                 f"Found {len(survey_ids)} survey(s) to process "
-                f"(max_surveys={self.max_surveys})"
+                f"(max_surveys={self.max_surveys}), sorted by lastModified (newest first)"
             )
             return survey_ids
 

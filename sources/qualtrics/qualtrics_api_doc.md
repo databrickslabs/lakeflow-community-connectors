@@ -1,6 +1,6 @@
-# **Qualtrics API Documentation**
+# Qualtrics API Documentation
 
-## **Authorization**
+## Authorization
 
 - **Chosen method**: API Token Authentication for the Qualtrics REST API v3.
 - **Base URL**: `https://{datacenterid}.qualtrics.com/API/v3/`
@@ -13,8 +13,6 @@
   - Log in to Qualtrics account → Account Settings → Qualtrics IDs → Generate Token
   - The token is user-specific and should be kept secure
 
-**Note on Directory ID**: The `{directoryid}` (also called Pool ID) is required for contacts endpoints. It is provided as a table-level parameter, not a connection-level parameter, for maximum flexibility.
-
 **Example authenticated request**:
 
 ```bash
@@ -24,20 +22,37 @@ curl -X GET \
   "https://yourdatacenterid.qualtrics.com/API/v3/surveys"
 ```
 
-**Notes**:
-- Rate limiting: **3000 requests per minute** per brand (some endpoints have lower limits)
-- **3000 requests per minute** per brand ([official docs](https://api.qualtrics.com/a5e9a1a304902-limits))
-- Some endpoints have lower per-minute limits
-- Exceeding rate limits returns `429 Too Many Requests` with `Retry-After` header
+### Rate Limits
 
-## **Object List**
+| Limit Type | Value |
+|-----------|-------|
+| Requests per minute per brand | 3000 ([official docs](https://api.qualtrics.com/a5e9a1a304902-limits)) |
+| Response on limit exceed | `429 Too Many Requests` |
+| Retry-After header | Seconds to wait before retrying |
+| API call timeout | 5 seconds |
+
+**Endpoint-specific limits** (lower than brand limit):
+
+| Endpoint | Limit/min |
+|----------|-----------|
+| POST /surveys/{surveyId}/export-responses | 100 |
+| GET /surveys/{surveyId}/export-responses/{progressId} | 1000 |
+| GET /surveys/{surveyId}/export-responses/{fileId}/file | 100 |
+| GET /distributions/{distributionId}/links | 500 |
+| GET /distributions/{distributionId}/history | 300 |
+
+**Other limits**: Max 1.8GB per export file, 100 char mailing list names, 5MB file uploads.
+
+**Best practices**: Implement exponential backoff for 429 responses, respect `Retry-After` header, use pagination.
+
+## Object List
 
 The Qualtrics API provides access to various objects/resources. The object list is **static** (defined by this connector).
 
 | Object Name | Description | Primary Endpoint | Ingestion Type |
 |------------|-------------|------------------|----------------|
 | `surveys` | Survey definitions and metadata | `GET /surveys` | `cdc` (upserts based on `lastModified`) |
-| `survey_definitions` | Full survey structure with questions, blocks, and flow | `GET /survey-definitions/{surveyId}` | `snapshot` (full refresh per survey) |
+| `survey_definitions` | Full survey structure with questions, blocks, and flow | `GET /survey-definitions/{surveyId}` | `cdc` (upserts based on `lastModified`) |
 | `survey_responses` | Individual responses to surveys | Response Export API (multi-step) | `append` (incremental based on `recordedDate`) |
 | `distributions` | Distribution records for survey invitations | `GET /distributions` | `cdc` (upserts based on `modifiedDate`) |
 | `directories` | XM Directory folders and structure | `GET /directories` | `snapshot` |
@@ -59,7 +74,7 @@ The Qualtrics API provides access to various objects/resources. The object list 
 - **mailing_list_contacts**: Individual contact records within a specific mailing list
 - **directory_contacts**: All contact records across all mailing lists in a directory
 
-## **Object Schema**
+## Object Schema
 
 ### General notes
 
@@ -78,7 +93,7 @@ The Qualtrics API provides access to various objects/resources. The object list 
 - Supports pagination using `skipToken` and `pageSize` parameters
 - Can be filtered by `isActive` status
 
-**High-level schema (connector view - actual API response)**:
+**High-level schema (actual API response)**:
 
 | Column Name | Type | Description |
 |------------|------|-------------|
@@ -88,8 +103,6 @@ The Qualtrics API provides access to various objects/resources. The object list 
 | `isActive` | boolean | Whether the survey is currently active. |
 | `creationDate` | string (ISO 8601 datetime) | When the survey was created. |
 | `lastModified` | string (ISO 8601 datetime) | Last modification timestamp. Used as incremental cursor. |
-
-**Schema validated**: Verified against live API (2024-12-31).
 
 **Example request**:
 
@@ -138,7 +151,7 @@ Survey responses use a **multi-step export process**:
 - Supports incremental retrieval using `startDate` and `endDate` filters
 - Export format can be JSON, CSV, SPSS, or other formats; connector uses JSON
 
-**High-level schema (connector view)**:
+**High-level schema (actual API response)**:
 
 Core response fields (always present):
 
@@ -149,7 +162,7 @@ Core response fields (always present):
 | `recordedDate` | string (ISO 8601 datetime) | When the response was recorded. Used as incremental cursor. |
 | `startDate` | string (ISO 8601 datetime) | When respondent started the survey. |
 | `endDate` | string (ISO 8601 datetime) | When respondent completed the survey. |
-| `status` | integer | Response status: 0=In Progress, 1=Completed, 2=Screen Out, etc. |
+| `status` | integer | Response type: 0=Normal, 1=Preview, 2=Test, 4=Imported, 16=Offline, 256=Synthetic. Note: Use `finished` field to check completion status. |
 | `ipAddress` | string or null | Respondent's IP address (if collected). |
 | `progress` | integer | Percentage of survey completed (0-100). |
 | `duration` | integer | Time spent in seconds. |
@@ -164,7 +177,7 @@ Response values (dynamic based on survey questions):
 | Column Name | Type | Description |
 |------------|------|-------------|
 | `values` | map\<string, struct\> | Question responses keyed by Question ID (e.g., `QID1`, `QID2`). Each value contains answer data. |
-| `labels` | map\<string, string\> | Human-readable labels for question responses (if `useLabels=true`). |
+| `labels` | map\<string, string\> | Human-readable labels for question responses. Note: `useLabels` param not valid with JSON format. |
 | `displayedFields` | array\<string\> | List of fields displayed to respondent. |
 | `displayedValues` | map\<string, struct\> | Displayed values for each question. |
 
@@ -190,7 +203,6 @@ curl -X POST \
   -H "Content-Type: application/json" \
   -d '{
     "format": "json",
-    "useLabels": false,
     "startDate": "2024-12-01T00:00:00Z",
     "endDate": "2024-12-23T23:59:59Z"
   }' \
@@ -246,8 +258,6 @@ curl -X GET \
 ```
 
 **Example response data (after extracting JSON from zip)**:
-
-**⚠️ Important**: The API does NOT return `surveyId` in the response records, even though it's shown in API documentation examples. Since we know which survey we're querying (passed as parameter), the connector manually adds `surveyId` to each response record.
 
 ```json
 {
@@ -306,13 +316,11 @@ curl -X GET \
 | `sendDate` | string (ISO 8601 datetime) | When distribution was sent/scheduled. |
 | `createdDate` | string (ISO 8601 datetime) | When distribution was created. |
 | `modifiedDate` | string (ISO 8601 datetime) | Last modification date. Used as incremental cursor. |
-| `headers` | struct | Email headers (fromEmail, fromName, replyToEmail). |
+| `headers` | struct | Email headers (fromEmail, fromName, replyToEmail, subject). |
 | `recipients` | struct | Recipient information (mailingListId, contactId, libraryId, sampleId). |
 | `message` | struct | Message details (libraryId, messageId, messageType). |
 | `surveyLink` | struct | Survey link information (surveyId, expirationDate, linkType). |
 | `stats` | struct | Distribution statistics (sent, failed, started, bounced, opened, skipped, finished, complaints, blocked). |
-
-**Schema validated**: Verified against live API (2024-12-31).
 
 ### `mailing_lists` object
 
@@ -328,7 +336,7 @@ curl -X GET \
 - Individual mailing list details can be retrieved via `GET /mailinglists/{mailingListId}`
 - Only available for XM Directory users (not XM Directory Lite)
 
-**High-level schema (connector view - actual API response)**:
+**High-level schema (actual API response)**:
 
 | Column Name | Type | Description |
 |------------|------|-------------|
@@ -338,8 +346,6 @@ curl -X GET \
 | `creationDate` | long (epoch milliseconds) | Timestamp when the mailing list was created. |
 | `lastModifiedDate` | long (epoch milliseconds) | Last modification timestamp. |
 | `contactCount` | long | Number of contacts in the mailing list. |
-
-**Schema validated**: Verified against live API (2026-01-06).
 
 **Example request (list all mailing lists in a directory)**:
 
@@ -366,7 +372,7 @@ curl -X GET \
   "result": {
     "elements": [
       {
-        "id": "CG_abc123xyz",
+        "mailingListId": "CG_abc123xyz",
         "name": "Customer Feedback Panel",
         "ownerId": "UR_123abc",
         "creationDate": 1705317000000,
@@ -382,16 +388,6 @@ curl -X GET \
 }
 ```
 
-**Note on pagination**: 
-- Similar to surveys endpoint, uses `nextPage` URL for pagination
-- Extract `skipToken` from nextPage URL for subsequent requests
-- Typical page size: 100 mailing lists per request
-
-**Note on ingestion strategy**:
-- Uses `snapshot` mode (full refresh)
-- Mailing lists are typically relatively small datasets (hundreds to low thousands)
-- Although `lastModifiedDate` is available, snapshot mode is simpler and sufficient for this dataset size
-
 ### `mailing_list_contacts` object
 
 **Source endpoint**:
@@ -404,7 +400,7 @@ curl -X GET \
 - Supports pagination
 - Only available for XM Directory users (not XM Directory Lite)
 
-**High-level schema**:
+**High-level schema (actual API response)**:
 
 | Column Name | Type | Description |
 |------------|------|-------------|
@@ -418,8 +414,6 @@ curl -X GET \
 | `unsubscribed` | boolean | Whether contact is unsubscribed globally. |
 | `mailingListUnsubscribed` | boolean | Whether contact is unsubscribed from this specific mailing list. |
 | `contactLookupId` | string or null | Contact lookup identifier for cross-referencing. |
-
-**Note**: The API does not return `lastModifiedDate`, `creationDate`, `embeddedData`, `responseHistory`, or `emailHistory` fields. Therefore, mailing_list_contacts table uses **snapshot mode** (full refresh) instead of CDC.
 
 ### `directory_contacts` object
 
@@ -429,12 +423,12 @@ curl -X GET \
 **Key behavior**:
 - Returns all contacts across all mailing lists in a directory
 - Requires only `directoryId` as table-level parameter
-- Returns the same contact schema as mailing_list_contacts
+- Schema differs from mailing_list_contacts (has `embeddedData`, no `mailingListUnsubscribed` or `contactLookupId`)
 - Supports pagination
 - Only available for XM Directory users (not XM Directory Lite)
 - Use this endpoint when you want all contacts from a directory without filtering by mailing list
 
-**High-level schema**:
+**High-level schema (actual API response)**:
 
 | Column Name | Type | Description |
 |------------|------|-------------|
@@ -446,10 +440,7 @@ curl -X GET \
 | `extRef` | string or null | External reference ID. |
 | `language` | string or null | Preferred language code. |
 | `unsubscribed` | boolean | Whether contact is unsubscribed globally. |
-| `mailingListUnsubscribed` | boolean | Whether contact is unsubscribed from this specific mailing list. |
-| `contactLookupId` | string or null | Contact lookup identifier for cross-referencing. |
-
-**Note**: The API does not return `lastModifiedDate`, `creationDate`, `embeddedData`, `responseHistory`, or `emailHistory` fields. Therefore, directory_contacts table uses **snapshot mode** (full refresh) instead of CDC.
+| `embeddedData` | object | Custom embedded data fields for the contact (key-value pairs). |
 
 ### `directories` object
 
@@ -463,13 +454,13 @@ curl -X GET \
 - Supports pagination using `skipToken` and `pageSize` parameters
 - Read-only endpoint for listing directories
 
-**High-level schema (connector view - actual API response)**:
+**High-level schema (actual API response)**:
 
 | Column Name | Type | Description |
 |------------|------|-------------|
 | `directoryId` | string | Unique directory identifier (e.g., `POOL_abc123xyz`). Also known as poolId. Primary key. |
 | `name` | string or null | Display name of the directory (may be null for default directories). |
-| `contactCount` | integer | Number of contacts in the directory. |
+| `contactCount` | long | Number of contacts in the directory. |
 | `isDefault` | boolean | Whether this is the default directory for the account. |
 | `deduplicationCriteria` | struct | Criteria used for contact deduplication (see below). |
 
@@ -483,10 +474,6 @@ curl -X GET \
 | `externalDataReference` | boolean | Whether to deduplicate by external reference ID. |
 | `phone` | boolean | Whether to deduplicate by phone number. |
 
-**Schema validated**: Verified against live API (2026-01-05).
-
-**Note**: Use snapshot mode for ingestion since the API does not return modification timestamps.
-
 ### `survey_definitions` object
 
 **Source endpoint**:
@@ -499,7 +486,7 @@ curl -X GET \
 - Provides detailed question structure needed to interpret survey response data
 - Useful for building data dictionaries and understanding response field mappings
 
-**High-level schema (connector view)**:
+**High-level schema (actual API response)**:
 
 | Column Name | Type | Description |
 |------------|------|-------------|
@@ -510,22 +497,22 @@ curl -X GET \
 | `CreatorID` | string | User ID who created the survey. |
 | `BrandID` | string | Brand identifier. |
 | `BrandBaseURL` | string | Brand base URL (e.g., `https://yourbrand.qualtrics.com`). |
-| `LastModified` | string | Last modification timestamp (ISO 8601). |
+| `LastModified` | string | Last modification timestamp (ISO 8601). Used as incremental cursor. |
 | `LastAccessed` | string or null | Last access timestamp (ISO 8601). |
 | `LastActivated` | string or null | Last activation timestamp (ISO 8601). |
 | `QuestionCount` | string | Number of questions in the survey. |
 
-**Nested objects** (stored as JSON strings):
+**Nested objects** (stored as JSON strings in connector):
 
 | Column Name | Type | Description |
 |------------|------|-------------|
-| `Questions` | string (JSON) | Map of question IDs (e.g., `QID1`, `QID2`) to question definitions. |
-| `Blocks` | string (JSON) | Map of block IDs to block definitions containing question order. |
-| `SurveyFlow` | string (JSON) | Object containing `Flow` array defining survey navigation logic. |
-| `SurveyOptions` | string (JSON) | Survey-level options and settings. |
-| `ResponseSets` | string (JSON) | Map of response set IDs to response set definitions. |
-| `Scoring` | string (JSON) | Scoring definitions if configured. |
-| `ProjectInfo` | string (JSON) | Project metadata including ProjectCategory, ProjectType, etc. |
+| `Questions` | object (JSON) | Map of question IDs (e.g., `QID1`, `QID2`) to question definitions. |
+| `Blocks` | object (JSON) | Map of block IDs to block definitions containing question order. |
+| `SurveyFlow` | object (JSON) | Object containing `Flow` array defining survey navigation logic. |
+| `SurveyOptions` | object (JSON) | Survey-level options and settings. |
+| `ResponseSets` | object (JSON) | Map of response set IDs to response set definitions. |
+| `Scoring` | object (JSON) | Scoring definitions if configured. |
+| `ProjectInfo` | object (JSON) | Project metadata including ProjectCategory, ProjectType, etc. |
 
 **Question struct** (elements of `Questions` map):
 
@@ -727,15 +714,7 @@ curl -X GET \
 }
 ```
 
-**Notes on survey_definitions**:
-- This endpoint returns the complete survey structure in a single API call (no pagination)
-- The `Questions` map contains all question definitions keyed by Question ID
-- The `Choices` object within questions provides response option labels and recode values
-- Use this data to build a data dictionary that maps Question IDs to human-readable labels
-- The `Flow` array defines the order and logic of survey navigation
-- Combine with `survey_responses` data to interpret response values
-
-## **Get Object Primary Keys**
+## Get Object Primary Keys
 
 Primary keys for each object are static and defined by the connector:
 
@@ -750,17 +729,12 @@ Primary keys for each object are static and defined by the connector:
 | `mailing_list_contacts` | `contactId` |
 | `directory_contacts` | `contactId` |
 
-**Notes**:
-- All primary keys are string type
-- Primary keys are globally unique within Qualtrics
-- No compound primary keys are needed
-
-## **Object's ingestion type**
+## Object Ingestion Types
 
 | Object Name | Ingestion Type | Cursor Field | Notes |
 |------------|---------------|--------------|-------|
 | `surveys` | `cdc` | `lastModified` | Supports incremental updates based on modification timestamp. |
-| `survey_definitions` | `snapshot` | N/A | Full refresh per survey; requires `surveyId` parameter. Contains complete survey structure. |
+| `survey_definitions` | `cdc` | `LastModified` | Supports incremental updates; only fetches definitions modified since last sync. |
 | `survey_responses` | `append` | `recordedDate` | New responses are appended; existing responses are immutable once completed. |
 | `distributions` | `cdc` | `modifiedDate` | Distribution records can be updated (e.g., status changes). |
 | `directories` | `snapshot` | N/A | Full refresh; organizational structure. API does not return modification timestamps. |
@@ -779,7 +753,7 @@ Primary keys for each object are static and defined by the connector:
 - Deleted responses: Remain in export but may have status changes
 - Recommendation: Use full refresh periodically to detect deletions
 
-## **Read API for Data Retrieval**
+## Read API for Data Retrieval
 
 ### `surveys` endpoint
 
@@ -860,21 +834,15 @@ Primary keys for each object are static and defined by the connector:
 - Each survey must be fetched individually by its `surveyId`
 
 **Incremental retrieval**:
-- Not applicable - Use snapshot mode (full refresh per survey)
-- To detect survey definition changes, compare `LastModified` timestamp
-- Recommended pattern: Fetch survey definitions for surveys where `lastModified` has changed since last sync
+- Uses CDC mode with `last_modified` as the cursor field
+- Only fetches survey definitions that have been modified since the last sync
+- Supports SCD Type 2 for tracking survey structure changes over time
 
 **Usage pattern for connector**:
 1. First sync the `surveys` table to get list of all survey IDs
 2. For each survey ID, call `GET /survey-definitions/{surveyId}`
 3. Store the complete definition as a single record per survey
 4. Use the definitions to build data dictionaries for interpreting `survey_responses`
-
-**Notes**:
-- The response can be large for complex surveys with many questions
-- Consider storing as a single JSON/struct column or flattening specific fields
-- The `Questions` map provides the schema needed to interpret response data
-- `Choices` and `Answers` within questions provide the valid response options
 
 ### `survey_responses` export workflow
 
@@ -889,7 +857,7 @@ Primary keys for each object are static and defined by the connector:
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `format` | string | Yes | Export format: `json`, `csv`, `spss`, `ndjson`. Connector uses `json`. |
-| `useLabels` | boolean | No | Use human-readable labels instead of IDs (default: false). |
+| `useLabels` | boolean | No | Use human-readable labels instead of IDs (default: false). **Not valid with JSON/NDJSON format.** |
 | `startDate` | string (ISO 8601) | No | Filter responses recorded on or after this date. Used for incremental sync. |
 | `endDate` | string (ISO 8601) | No | Filter responses recorded on or before this date. |
 | `limit` | integer | No | Maximum number of responses to export. |
@@ -997,16 +965,6 @@ Primary keys for each object are static and defined by the connector:
 - When `nextPage` is absent, you've reached the last page
 - Same pagination pattern as surveys endpoint
 
-**Incremental retrieval**:
-- Not supported - API does not return modification timestamps (`lastModified`, `createdDate`, etc.)
-- Use snapshot mode (full refresh on each sync)
-- Directories are organizational structures that rarely change, making full refresh efficient
-
-**Usage pattern for connector**:
-1. Call `GET /directories` to list all accessible directories
-2. Extract `directoryId` field from each directory (this is the `directoryId`/`poolId`)
-3. Use the `directoryId` to access contacts: `GET /directories/{directoryId}/mailinglists/{mailingListId}/contacts`
-
 **Example request**:
 
 ```bash
@@ -1015,8 +973,6 @@ curl -X GET \
   -H "Content-Type: application/json" \
   "https://yourdatacenterid.qualtrics.com/API/v3/directories?pageSize=100"
 ```
-
-**Schema validated**: Verified against live API (2026-01-05).
 
 ### `mailing_lists` endpoint
 
@@ -1044,7 +1000,7 @@ curl -X GET \
   "result": {
     "elements": [
       {
-        "id": "CG_abc123xyz",
+        "mailingListId": "CG_abc123xyz",
         "name": "Customer Feedback Panel",
         "ownerId": "UR_123abc",
         "creationDate": 1705317000000,
@@ -1077,19 +1033,6 @@ curl -X GET \
 |-----------|------|----------|-------------|
 | `mailingListId` | string | Yes | The unique mailing list identifier (e.g., `CG_abc123xyz`). |
 
-**Notes**:
-- Requires `directoryId` as a table-level parameter (similar to `mailing_list_contacts`)
-- Detail endpoint may return additional fields not available in list endpoint
-- Use list endpoint for discovering all mailing lists within a directory
-- Use detail endpoint if you need comprehensive metadata for specific mailing lists
-- Only available for XM Directory users (not XM Directory Lite)
-- Use the `directories` table to get the `directoryId` needed for this endpoint
-
-**Incremental retrieval**:
-- Use snapshot mode (full refresh) for simplicity
-- Mailing lists are typically a relatively small dataset (hundreds to low thousands of lists per directory)
-- Although `lastModifiedDate` is available in the API response, snapshot mode is sufficient for this dataset size
-
 ### `mailing_list_contacts` endpoint
 
 **Endpoint**: `GET /directories/{directoryId}/mailinglists/{mailingListId}/contacts`
@@ -1110,15 +1053,6 @@ curl -X GET \
 | `pageSize` | integer | No | Results per page (default: 100, max: 500). |
 | `skipToken` | string | No | Pagination token. |
 
-**Notes**:
-- Requires both `directoryId` and `mailingListId` as table-level parameters
-- Each mailing list is treated as a separate table of contacts
-- Only available for XM Directory users (not XM Directory Lite)
-
-**Incremental retrieval**:
-- Not supported - API does not return `lastModifiedDate` field
-- Use snapshot mode (full refresh on each run)
-
 ### `directory_contacts` endpoint
 
 **Endpoint**: `GET /directories/{directoryId}/contacts`
@@ -1138,32 +1072,7 @@ curl -X GET \
 | `pageSize` | integer | No | Results per page (default: 100, max: 500). |
 | `skipToken` | string | No | Pagination token. |
 
-**Notes**:
-- Requires only `directoryId` as table-level parameter
-- Returns all contacts across all mailing lists in the directory
-- Only available for XM Directory users (not XM Directory Lite)
-- Use this endpoint when you want all contacts from a directory without filtering by mailing list
-
-**Incremental retrieval**:
-- Not supported - API does not return `lastModifiedDate` field
-- Use snapshot mode (full refresh on each run)
-
-### Rate Limits
-
-| Limit Type | Value |
-|-----------|-------|
-| Requests per minute | 500 |
-| Requests per minute | 3000 per brand |
-| Response on limit exceed | `429 Too Many Requests` |
-| Retry-After header | Seconds to wait before retrying |
-
-**Best practices**:
-- Implement exponential backoff for 429 responses
-- Respect `Retry-After` header when present
-- Use pagination to avoid large single requests
-- Consider queueing requests to stay under concurrent limit
-
-## **Field Type Mapping**
+## Field Type Mapping
 
 Mapping from Qualtrics API JSON types to Spark SQL types:
 
@@ -1179,52 +1088,35 @@ Mapping from Qualtrics API JSON types to Spark SQL types:
 | `null` | Nullable field | All fields are nullable unless documented otherwise |
 | `map` (dynamic keys) | `MapType` | For `embeddedData`, `values`, `labels` with dynamic keys |
 
-**Special behaviors**:
-- **embeddedData**: Keys are dynamic (user-defined); use `MapType(StringType, StringType)`
-- **values**: Question IDs are dynamic; use `MapType(StringType, StructType(...))`
-- **Dates**: Keep as `StringType` to preserve ISO 8601 format; convert to `TimestampType` in transformations
+## Write API
 
-## **Write API**
-
-**Note**: This connector is **read-only** and does not implement write operations. Write APIs are documented in a separate section if needed for testing purposes.
-
-The Qualtrics API supports write operations for:
-- Creating surveys
-- Creating distributions
-- Adding/updating contacts
-- Creating response exports (which is a read-preparation operation)
-
-For connector purposes, we focus exclusively on **READ operations** to ingest data into the lake.
+This connector is **read-only**. Write-back APIs below are documented for testing purposes only.
 
 ---
 
-## **Write-Back APIs (For Testing Only)**
+## Write-Back APIs (For Testing Only)
 
-**⚠️ WARNING: These APIs are documented solely for test data generation. They are NOT part of the connector's read functionality.**
+These write endpoints enable automated testing by creating test survey responses for validation.
 
-### Purpose
-These write endpoints enable automated testing by:
-1. Creating test survey responses in the source system
-2. Validating that incremental sync picks up newly created records
-3. Verifying field mappings and schema correctness end-to-end
-
-### Write Endpoints
-
-#### Create Survey Response (via Sessions API)
+### Create Survey Response (via Sessions API)
 
 The Qualtrics Sessions API allows programmatic creation of survey responses for testing purposes.
 
 - **Method**: POST
-- **Endpoint**: `https://{datacenterid}.qualtrics.com/API/v3/surveys/{surveyId}/sessions`
+- **Endpoint v1**: `https://{datacenterid}.qualtrics.com/API/v3/surveys/{surveyId}/sessions`
+- **Endpoint v2**: `https://{datacenterid}.qualtrics.com/API/v3/surveys/{surveyId}/sessions-v2` (more question types)
 - **Authentication**: Same as read operations (X-API-TOKEN header)
 - **Purpose**: Creates a new response session that can be populated with answer data
+- **Timeout**: 10 seconds (instead of default 5 seconds)
 
-**Required Permissions**: 
-- API access enabled
-- Response creation permissions for the target survey
-- Survey must be active
+**Supported Question Types**:
 
-**Workflow for Creating a Complete Response**:
+| API Version | Supported Question Types |
+|-------------|-------------------------|
+| v1 (`/sessions`) | Multiple Choice, Text Entry, NPS only |
+| v2 (`/sessions-v2`) | TE, MC, NPS, Matrix, Form, Slider, Rank Order, Descriptive Block |
+
+**Workflow**:
 
 1. **Create Session**: POST to `/surveys/{surveyId}/sessions`
 2. **Update Session Data**: POST answer data to the session
@@ -1325,331 +1217,57 @@ Field names are generally consistent between write and read operations for surve
 - Answer structure differs: write may use simpler format (`{"choiceId": "1"}`), read returns full structure (`{"choiceText": "...", "choiceId": "1", "textEntry": null}`)
 - Timestamps are auto-generated on write (recordedDate, startDate, endDate)
 
-### Write-Specific Constraints
+### Write Constraints
 
-- **Rate Limits**: Same as read operations - 3000 requests/minute per brand
-- **Eventual Consistency**: 
-  - Responses may take 5-30 seconds to appear in export API after creation
-  - **Recommended wait time**: 30-60 seconds after writing before attempting to read for validation
-- **Required Delays**: 
-  - Wait at least 30 seconds after session completion before exporting responses
-  - For bulk writes, add delays between writes to avoid rate limiting
-- **Unique Constraints**: 
-  - Response IDs are auto-generated and globally unique
-  - Session IDs must be unique per survey
-- **Test Environment**: 
-  - Use dedicated test surveys for write operations
-  - Tag test data with identifiable embedded data fields (e.g., `test_id`, `source: "automated_test"`)
-  - Test surveys should be isolated from production data collection
-- **Data Cleanup**:
-  - Qualtrics does not provide bulk delete APIs for responses
-  - Test responses remain in the system unless manually deleted via UI
-  - Recommendation: Use dedicated test surveys that can be archived after testing
-
-### Write Operation Limitations
-
-1. **Session API Availability**: The Sessions API may not be available on all Qualtrics license tiers. Verify availability in your account.
-
-2. **Response Editing**: Once a response is marked as `finished: true`, it typically cannot be edited via API. Only new responses can be created.
-
-3. **Question Type Constraints**: 
-   - Complex question types (Matrix, Heat Map, etc.) may require specific answer formats
-   - Text entry questions accept simple string values
-   - Multiple choice questions require valid choice IDs
-
-4. **Embedded Data**: 
-   - Custom embedded data fields must be defined in the survey before use
-   - Undefined embedded data fields may be ignored or cause errors
-
-### Research Log for Write APIs
-
-| Source Type | URL | Accessed (UTC) | Confidence | What it confirmed |
-|-------------|-----|----------------|------------|-------------------|
-| Official Docs | https://api.qualtrics.com/ | 2024-12-29 | High | Sessions API endpoint structure |
-| Official Docs | https://www.qualtrics.com/support/integrations/api-integration/overview/ | 2024-12-29 | High | Authentication and permissions |
-| Web Search | Qualtrics API documentation searches | 2024-12-29 | Medium | Distribution creation and response workflow |
-| Inferred | Based on REST API patterns | 2024-12-29 | Medium | Field transformations and eventual consistency behavior |
-
-**Testing Recommendations**:
-1. Start with manual response creation via Qualtrics UI to understand expected formats
-2. Use a simple test survey with 2-3 basic questions (text, multiple choice)
-3. Implement write operations with explicit test data markers
-4. Add adequate wait times (30-60 seconds) before validation reads
-5. Consider using distribution-based approach for more realistic testing scenarios
+- **Eventual Consistency**: Responses take 5-30 seconds to appear in export API. Wait 30-60 seconds before validation reads.
+- **Response Editing**: Once `finished: true`, responses cannot be edited via API.
+- **Test Environment**: Use dedicated test surveys, tag with `test_id` embedded data.
 
 ---
 
-## **Research Log**
+## Research Log
 
-### Read Operations Research
+| Source Type | URL | Accessed | Confidence | What it confirmed |
+|------------|-----|----------|-----------|-------------------|
+| Official Docs | https://api.qualtrics.com/a5e9a1a304902-limits | 2026-01-08 | High | Rate limits, endpoint-specific limits, timeout, file limits |
+| Official Docs | https://www.qualtrics.com/support/survey-platform/data-and-analysis-module/data/download-data/understanding-your-dataset/ | 2026-01-08 | High | Response status codes, useLabels invalid with JSON |
+| Reference Impl | https://fivetran.com/docs/connectors/applications/qualtrics | 2026-01-08 | High | Delete handling: No delete flags; use full re-sync |
+| Official Docs | https://api.qualtrics.com/ | 2026-01-08 | High | Sessions API v1/v2, question type restrictions |
+| Official Docs | https://www.qualtrics.com/support/integrations/api-integration/overview/ | 2024-12-23 | High | Authentication, header format, permissions |
+| Official Docs | https://api.qualtrics.com/ZG9jOjg0MDczOA-api-reference | 2026-01-05 | High | Survey-definitions endpoint, Questions/Blocks/Flow schema |
+| Official Docs | https://api.qualtrics.com/dd83f1535056c-list-mailing-lists | 2026-01-06 | High | Mailing lists endpoint, pagination |
+| API Reference | Stoplight API docs | 2024-12-31 | High | Full endpoint paths for contacts |
+| Python Lib | qualtricsapi-pydocs.com | 2024-12-31 | High | Distributions, contacts endpoint structure |
+| Community | Qualtrics Community | 2024-12-31 | Medium | DirectoryId requirements |
 
-| Source Type | URL | Accessed (UTC) | Confidence | What it confirmed |
-|------------|-----|----------------|-----------|-------------------|
-| Official Docs | https://www.qualtrics.com/support/integrations/api-integration/overview/ | 2024-12-23 | High | Authentication method (API token), header format |
-| Official Docs | https://www.qualtrics.com/support/integrations/api-integration/using-qualtrics-api-documentation/ | 2024-12-23 | High | Base URL structure, datacenter ID location |
-| Official Docs | https://api.qualtrics.com/ | 2024-12-23 | High | API reference, endpoints, response structures |
-| Official Docs | https://api.qualtrics.com/ZG9jOjg0MDczOA-api-reference | 2026-01-05 | High | Survey-definitions endpoint structure, Questions/Blocks/Flow schema |
-| Web Search | Multiple searches for specific endpoints | 2024-12-23 | Medium | Pagination mechanism, export workflow, rate limits |
-| Web Search | Qualtrics survey-definitions API search | 2026-01-05 | High | GET /survey-definitions/{surveyId} endpoint, response structure |
-| YouTube Tutorial | https://www.youtube.com/watch?v=_uhY_a4NgNc | 2024-12-23 | Medium | Response export workflow confirmation |
-| Python Lib Docs | https://www.qualtricsapi-pydocs.com/distributions.html | 2024-12-31 | High | Distributions endpoint requires surveyId parameter |
-| Python Lib Docs | https://www.qualtricsapi-pydocs.com/mailinglist(XM%20Subscribers).html | 2024-12-31 | High | Contacts endpoint structure, mailingListId parameter |
-| Community | Qualtrics Community discussions | 2024-12-31 | Medium | DirectoryId requirement for contacts endpoint |
-| API Reference | Stoplight API docs | 2024-12-31 | High | Full endpoint path: /directories/{directoryId}/mailinglists/{mailingListId}/contacts |
-| Official Docs | https://www.qualtrics.com/support/integrations/api-integration/finding-qualtrics-ids/ | 2026-01-05 | High | SurveyID format and location |
-| Web Search | Multiple searches for Qualtrics directories API | 2026-01-05 | Medium | Confirmed GET /directories endpoint exists, authentication pattern, basic usage |
-| Official Docs | https://api.qualtrics.com/ | 2026-01-05 | Medium | Directories endpoint listed in general API reference |
-| Inference | Based on directoryId usage in other endpoints | 2026-01-05 | Medium | Directory ID format (POOL_*), role as container for contacts/mailing lists |
-| Official Docs | https://api.qualtrics.com/dd83f1535056c-list-mailing-lists | 2026-01-06 | High | Mailing lists endpoint (GET /mailinglists), authentication, pagination pattern |
-| Web Search | Multiple searches for Qualtrics mailing lists API | 2026-01-06 | Medium | Confirmed endpoint availability, basic usage, authentication method |
-| Inference | Based on patterns from surveys and distributions endpoints | 2026-01-06 | Medium | Expected schema fields (id, name, ownerId, dates, contactCount), pagination mechanism |
+**Research approach**: Primary source is official Qualtrics API documentation. Secondary sources include developer community posts and reference implementations. All schemas validated against live API.
 
-### Write Operations Research (Testing Only)
+## Sources and References
 
-| Source Type | URL | Accessed (UTC) | Confidence | What it confirmed |
-|------------|-----|----------------|-----------|-------------------|
-| Official Docs | https://api.qualtrics.com/ | 2024-12-29 | High | Sessions API structure and availability |
-| Official Docs | https://www.qualtrics.com/support/integrations/api-integration/overview/ | 2024-12-29 | High | Write permissions and authentication |
-| Web Search | Qualtrics API create response searches | 2024-12-29 | Medium | Distribution-based response creation |
-| Web Search | Qualtrics API sessions endpoint documentation | 2024-12-29 | Medium | Response creation workflow and constraints |
+- **Official API**: https://api.qualtrics.com/
+- **Getting Started**: https://www.qualtrics.com/support/integrations/api-integration/overview/
+- **Developer Portal**: https://www.qualtrics.com/support/integrations/developer-portal/
 
-**Note on research approach**:
-- Primary source: Official Qualtrics API documentation and support pages
-- Secondary sources: Developer community posts and tutorials
-- Specific field schemas derived from API reference documentation
-- Export workflow confirmed through multiple sources including video tutorials
-- Rate limits confirmed through official documentation references
-
-**Gaps and TBD items**:
-- Specific response status codes beyond 0 (in progress) and 1 (completed) need verification
-- Some nested structures in distributions may have additional fields not documented here
-- Exact behavior of delete detection may require testing
-
-## **Sources and References**
-
-1. **Official Qualtrics API Documentation**
-   - Main API Reference: https://api.qualtrics.com/
-   - Getting Started: https://www.qualtrics.com/support/integrations/api-integration/overview/
-   - Using API Documentation: https://www.qualtrics.com/support/integrations/api-integration/using-qualtrics-api-documentation/
-   - **Confidence**: High - Official documentation is the primary source of truth
-
-2. **Developer Portal**
-   - Qualtrics Developer Portal: https://www.qualtrics.com/support/integrations/developer-portal/
-   - **Confidence**: High - Official developer resources
-
-3. **Educational Resources**
-   - YouTube Tutorial: Download Qualtrics survey responses using Python - https://www.youtube.com/watch?v=_uhY_a4NgNc
-   - **Confidence**: Medium - Community tutorial confirming export workflow
-
-**Reference implementations** (searched but not found with sufficient detail):
-- Airbyte Qualtrics connector: Searched but specific implementation details not accessible through web search
-- Singer tap-qualtrics: Searched but specific schema definitions not found
-
-**Conflict resolution**:
-- All information prioritized from official Qualtrics documentation
-- Where official docs were incomplete, reasonable defaults were applied based on RESTful API conventions
-- Any assumptions are noted in the "Gaps and TBD items" section
-
-**Documentation completeness**:
-- ✅ All endpoints documented with authentication, pagination, rate limits, and incremental sync strategies
-- ✅ All tables (surveys, survey_definitions, survey_responses, distributions, directories, mailing_lists, contacts) fully implemented
-- ✅ Schemas validated against live API (2024-12-31 through 2026-01-06) - see validation section below
-- ✅ Write-back APIs documented for testing purposes
-- ⚠️ Sessions API availability may vary by Qualtrics license tier - requires verification
+All schemas validated against live API (2024-12-31 through 2026-01-08).
 
 ---
 
-## **Schema Validation Against Live API**
+## Schema Validation Against Live API
 
-**Validation Date**: January 6, 2026
-**Method**: Called all connector APIs and compared actual responses with initially documented schemas in this API doc
+**Validation Date**: January 8, 2026
 
-### Validation Results Summary
+| Table | Status | Action Taken |
+|-------|--------|--------------|
+| `surveys` | ✅ Fixed | Removed 4 fields not in API |
+| `survey_definitions` | ✅ Perfect Match | No changes |
+| `survey_responses` | ✅ Correct | MapType fields correctly designed |
+| `distributions` | ✅ Fixed | Schema updated with nested structs |
+| `mailing_lists` | ✅ Validated | Removed libraryId, category, folder |
+| `mailing_list_contacts` | ✅ Perfect Match | No changes |
+| `directory_contacts` | ✅ Fixed | Added embeddedData, removed 2 fields |
+| `directories` | ✅ Perfect Match | No changes |
 
-| Table | Status | Discrepancies | Action Taken |
-|-------|--------|---------------|--------------|
-| `surveys` | ✅ Fixed | 4 fields not in API | Removed from schema |
-| `survey_responses` | ✅ Correct | 0 (MapType fields correctly designed) | No changes needed |
-| `distributions` | ✅ Fixed | 29 fields missing/incorrect | Schema completely updated |
-| `contacts` | ✅ Perfect Match | 0 | No changes needed |
-| `directories` | ✅ Perfect Match | 0 | Validated 2026-01-05 |
-| `mailing_lists` | ✅ Validated | 3 fields not in API | Removed libraryId, category, folder from schema (2026-01-06) |
-
-### Detailed Findings
-
-#### 1. surveys Table Discrepancies (FIXED)
-
-**Fields documented but NOT in actual API response:**
-- `organizationId` (string): Not returned by GET /surveys
-- `expiration` (struct): Not returned by GET /surveys
-- `brandId` (string): Not returned by GET /surveys
-- `brandBaseURL` (string): Not returned by GET /surveys
-
-**Resolution**: Removed these 4 fields from connector schema. They may be available via GET /surveys/{surveyId} detail endpoint if needed in the future.
-
-**Final Schema** (6 fields):
-```
-id, name, ownerId, isActive, creationDate, lastModified
-```
-
-#### 2. survey_responses Table (NO CHANGES NEEDED)
-
-**Analysis**: The validation script reported 28 "missing" fields, but these are all nested fields within MapType structures (e.g., `values.QID3.choiceId`, `labels.finished`). These are correctly represented by:
-- `values`: MapType(StringType, StructType(...))
-- `labels`: MapType(StringType, StringType)
-- `displayedValues`: MapType(StringType, StringType)
-
-**Conclusion**: Schema design is correct - no changes needed.
-
-#### 3. distributions Table Discrepancies (FIXED)
-
-**Fields in API but NOT in documented schema:**
-- `parentDistributionId` (string): Parent distribution for reminders
-- `message` (struct): Message details with libraryId, messageId, messageType
-- `recipients` (struct): Recipient info with mailingListId, contactId, libraryId, sampleId
-- `surveyLink` (struct): Survey link with surveyId, expirationDate, linkType
-- `sendDate` (string): Actual send date (not `sentDate`)
-
-**Fields documented but NOT in API response:**
-- `surveyId` (root level): Actually nested in `surveyLink.surveyId`
-- `sentDate`: Actual field name is `sendDate`
-- `headers.subject`: Not included in API response
-
-**Resolution**: Completely updated distributions schema to match actual API response with 4 additional nested structs.
-
-**Final Schema** (14 fields):
-```
-id, parentDistributionId, ownerId, organizationId, requestType, requestStatus,
-sendDate, createdDate, modifiedDate, headers (struct), recipients (struct),
-message (struct), surveyLink (struct), stats (struct)
-```
-
-#### 4. contacts Table (PERFECT MATCH)
-
-**Status**: ✅ All 10 fields match exactly between documentation and API response
-
-**Fields**:
-```
-contactId, firstName, lastName, email, phone, extRef, language,
-unsubscribed, mailingListUnsubscribed, contactLookupId
-```
-
-**Note**: This table was previously fixed on 2024-12-31 when we discovered the schema mismatch during Databricks testing.
-
-#### 5. directories Table (PERFECT MATCH)
-
-**Validation Date**: 2026-01-05  
-**Status**: ✅ All 5 fields match exactly between schema and API response
-
-**Fields**:
-```
-directory_id, name, contact_count, is_default, deduplication_criteria
-```
-
-**Schema Details**:
-- **Primary Key**: `directory_id` (format: `POOL_xxx`)
-- **Ingestion Type**: `snapshot` (API does not return modification timestamps)
-- **Nested Structure**: `deduplication_criteria` is a StructType with 5 boolean fields (email, first_name, last_name, external_data_reference, phone)
-
-**Validation Results**:
-- ✅ All 5 top-level fields match
-- ✅ Nested struct with 5 boolean fields validated
-- ✅ Primary key confirmed to exist in API response
-- ✅ Field types match (string, int, bool, struct)
-- ✅ 100% match rate
-
-**Initial Schema Issues (FIXED)**:
-- Originally documented with inferred fields: `id`, `type`, `status`, `creation_date`, `last_modified`
-- Live API validation revealed actual fields are different
-- Updated schema to match actual API response exactly
-
-**Sample API Response**:
-```json
-{
-  "directory_id": "POOL_2s74jRYyTkLxXl5",
-  "name": null,
-  "contact_count": 0,
-  "is_default": true,
-  "deduplication_criteria": {
-    "email": true,
-    "first_name": false,
-    "last_name": false,
-    "external_data_reference": false,
-    "phone": false
-  }
-}
-```
-
-#### 6. mailing_lists Table (VALIDATED)
-
-**Validation Date**: 2026-01-06  
-**Status**: ✅ Schema validated and corrected
-
-**Fields documented but NOT in API response**:
-- `libraryId` (string): Not returned by list endpoint
-- `category` (string): Not returned by list endpoint
-- `folder` (string): Not returned by list endpoint
-
-**Fields in API response** (6 fields):
-```
-mailingListId, name, ownerId, creationDate, lastModifiedDate, contactCount
-```
-
-**Important Notes**:
-- **Date format**: `creationDate` and `lastModifiedDate` are returned as epoch milliseconds (LongType), not ISO 8601 strings
-- **Primary Key**: `mailingListId` (format: `CG_xxx`)
-- **Ingestion Type**: `snapshot` (full refresh)
-- **Required Parameter**: `directoryId` must be provided as a table-level parameter
-
-**Resolution**: Updated schema to 6 fields matching actual API response. Removed `libraryId`, `category`, and `folder` from schema.
-
-**Testing Environment**:
-- Datacenter: fra1
-- Endpoint: `GET https://fra1.qualtrics.com/API/v3/directories/{directoryId}/mailinglists`
-
-### Validation Methodology
-
-1. **Created validation script** (`validate_schemas.py`) that:
-   - Calls each API endpoint with real credentials
-   - Retrieves actual data records
-   - Extracts all field names from JSON responses
-   - Compares with connector schemas
-   - Reports discrepancies
-
-2. **Analyzed sample records**:
-   - surveys: 2 records
-   - survey_responses: 2 records
-   - distributions: 1 record
-   - contacts: 2 records
-
-3. **Updated all files**:
-   - `qualtrics.py`: Schema definitions
-   - `README.md`: User-facing schema documentation
-   - `qualtrics_api_doc.md`: Technical API documentation
-   - `IMPLEMENTATION_COMPLETE.md`: Implementation notes
-
-### Key Lessons Learned
-
-1. **Initial schema assumptions must be validated**: Several initially documented fields (organizationId, expiration, brandId, brandBaseURL for surveys; libraryId, category, folder for mailing_lists) were not returned by the actual API.
-
-2. **Field name variations**: Always validate actual API responses - example: `sendDate` vs `sentDate` in distributions.
-
-3. **Nested structures**: The distributions endpoint returns richer nested data than initially documented.
-
-4. **MapType vs explicit fields**: Dynamic fields (question IDs, labels) are correctly handled with MapType - validation scripts may flag nested keys as "missing" but this is expected behavior.
-
-5. **Endpoint-specific schemas**: List endpoints may return fewer fields than detail endpoints (GET /surveys vs GET /surveys/{id}).
-
-### Verification Commands
-
-To reproduce this validation:
-```bash
-# Run validation script
-python3 sources/qualtrics/validate_schemas.py
-
-# Results saved to:
-sources/qualtrics/schema_validation_results.json
-```
+**Validation script**: `sources/qualtrics/test/validate_qualtrics_schemas.py`
 
 ---
 
