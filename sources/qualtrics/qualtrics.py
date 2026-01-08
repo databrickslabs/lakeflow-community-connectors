@@ -26,7 +26,9 @@ logger = logging.getLogger("QualtricsConnector")
 logger.setLevel(logging.INFO)
 if not logger.handlers:
     _handler = logging.StreamHandler(sys.stderr)
-    _handler.setFormatter(logging.Formatter("%(asctime)s - QUALTRICS - %(levelname)s - %(message)s"))
+    _handler.setFormatter(
+        logging.Formatter("%(asctime)s - QUALTRICS - %(levelname)s - %(message)s")
+    )
     logger.addHandler(_handler)
 
 
