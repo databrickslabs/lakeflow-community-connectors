@@ -26,12 +26,18 @@ Provide the following **connection-level** options when configuring the connecto
 | `api_token` | string | yes | Qualtrics API token for authentication | `YOUR_QUALTRICS_API_TOKEN` |
 | `datacenter_id` | string | yes | Qualtrics datacenter identifier where your account is hosted | `fra1`, `ca1`, `yourdatacenterid` |
 | `max_surveys` | string | no | Maximum number of surveys to consolidate when `surveyId` is not provided (default: 50) | `100` |
-| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names. This connector requires table-specific options for some tables. | `surveyId,mailingListId,directoryId` |
+| `externalOptionsAllowList` | string | yes | Comma-separated list of allowed options that can be passed externally to the connector | See below |
 
-The full list of supported table-specific options for `externalOptionsAllowList` is:
-`surveyId,mailingListId,directoryId`
+**Required `externalOptionsAllowList` value:**
+```
+tableName,tableNameList,tableConfigs,surveyId,mailingListId,directoryId
+```
 
-> **Note**: Table-specific options such as `surveyId` are **not** connection parameters. They are provided per-table via table options in the pipeline specification. The option name must be included in `externalOptionsAllowList` for the connection to allow it.
+This list includes:
+- **Framework options** (required by the Lakeflow pipeline): `tableName`, `tableNameList`, `tableConfigs`
+- **Table-specific options** (used by Qualtrics tables): `surveyId`, `mailingListId`, `directoryId`
+
+> **Note**: Table-specific options such as `surveyId` are **not** connection parameters. They are provided per-table via the `table_configuration` section in the pipeline specification. The option name must be included in `externalOptionsAllowList` for the connection to allow it.
 
 ### Obtaining the Required Parameters
 
