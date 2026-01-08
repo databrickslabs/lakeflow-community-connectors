@@ -83,10 +83,14 @@ class LakeflowConnect:
             raise ValueError("datacenter_id is required")
 
         self.base_url = f"https://{self.datacenter_id}.qualtrics.com/API/v3"
-        self.headers = {
+
+        # Configure a session with proper headers for connection pooling
+        # This improves performance by reusing TCP connections across requests
+        self._session = requests.Session()
+        self._session.headers.update({
             "X-API-TOKEN": self.api_token,
             "Content-Type": "application/json"
-        }
+        })
 
         # Auto-consolidation configuration
         max_surveys_str = options.get(
@@ -697,9 +701,13 @@ class LakeflowConnect:
         for attempt in range(max_retries):
             try:
                 if method == "GET":
-                    response = requests.get(url, headers=self.headers, params=params)
+                    response = self._session.get(
+                        url, params=params, timeout=QualtricsConfig.REQUEST_TIMEOUT
+                    )
                 elif method == "POST":
-                    response = requests.post(url, headers=self.headers, json=json_body)
+                    response = self._session.post(
+                        url, json=json_body, timeout=QualtricsConfig.REQUEST_TIMEOUT
+                    )
                 else:
                     raise ValueError(f"Unsupported HTTP method: {method}")
 
@@ -1108,8 +1116,11 @@ class LakeflowConnect:
         url = f"{self.base_url}/surveys/{survey_id}/export-responses/{file_id}/file"
 
         try:
-            # Download ZIP file
-            response = requests.get(url, headers=self.headers)
+            # Download ZIP file with extended timeout for large exports
+            # Use 5x the standard timeout since exports can be large files
+            response = self._session.get(
+                url, timeout=QualtricsConfig.REQUEST_TIMEOUT * 5
+            )
             response.raise_for_status()
 
             # Extract JSON from ZIP
