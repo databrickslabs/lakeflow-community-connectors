@@ -971,8 +971,11 @@ def register_lakeflow_source(spark):
 
             # Check if specific survey IDs are provided
             # Note: Databricks lowercases option keys, so check both cases
-            survey_id_input = table_options.get("surveyId") or table_options.get("surveyid")
-            debug_msg3 = f"DEBUG _get_all_survey_ids: survey_id_input={survey_id_input}"
+            survey_id_camel = table_options.get("surveyId")
+            survey_id_lower = table_options.get("surveyid")
+            survey_id_input = survey_id_camel or survey_id_lower
+            case_used = "surveyId (camelCase)" if survey_id_camel else ("surveyid (lowercase)" if survey_id_lower else "NOT FOUND")
+            debug_msg3 = f"DEBUG _get_all_survey_ids: surveyId={survey_id_camel}, surveyid={survey_id_lower}, using={case_used}, final={survey_id_input}"
             print(debug_msg3)
             sys.stderr.write(debug_msg3 + "\n")
             logger.info(debug_msg3)
@@ -1696,14 +1699,24 @@ def register_lakeflow_source(spark):
                 Tuple of (iterator of contact records, empty offset dict)
             """
             # Note: Databricks lowercases option keys, so check both cases
-            directory_id = table_options.get("directoryId") or table_options.get("directoryid")
+            dir_camel = table_options.get("directoryId")
+            dir_lower = table_options.get("directoryid")
+            directory_id = dir_camel or dir_lower
+            debug_dir = f"DEBUG mailing_list_contacts: directoryId={dir_camel}, directoryid={dir_lower}, using={'camelCase' if dir_camel else ('lowercase' if dir_lower else 'NOT FOUND')}"
+            print(debug_dir)
+            sys.stderr.write(debug_dir + "\n")
             if not directory_id:
                 raise ValueError(
                     "directoryId is required in table_options for mailing_list_contacts table"
                 )
 
             # Note: Databricks lowercases option keys, so check both cases
-            mailing_list_id = table_options.get("mailingListId") or table_options.get("mailinglistid")
+            ml_camel = table_options.get("mailingListId")
+            ml_lower = table_options.get("mailinglistid")
+            mailing_list_id = ml_camel or ml_lower
+            debug_ml = f"DEBUG mailing_list_contacts: mailingListId={ml_camel}, mailinglistid={ml_lower}, using={'camelCase' if ml_camel else ('lowercase' if ml_lower else 'NOT FOUND')}"
+            print(debug_ml)
+            sys.stderr.write(debug_ml + "\n")
             if not mailing_list_id:
                 raise ValueError(
                     "mailingListId is required in table_options for mailing_list_contacts table"
@@ -1734,7 +1747,12 @@ def register_lakeflow_source(spark):
                 Tuple of (iterator of contact records, empty offset dict)
             """
             # Note: Databricks lowercases option keys, so check both cases
-            directory_id = table_options.get("directoryId") or table_options.get("directoryid")
+            dir_camel = table_options.get("directoryId")
+            dir_lower = table_options.get("directoryid")
+            directory_id = dir_camel or dir_lower
+            debug_dir = f"DEBUG directory_contacts: directoryId={dir_camel}, directoryid={dir_lower}, using={'camelCase' if dir_camel else ('lowercase' if dir_lower else 'NOT FOUND')}"
+            print(debug_dir)
+            sys.stderr.write(debug_dir + "\n")
             if not directory_id:
                 raise ValueError(
                     "directoryId is required in table_options for directory_contacts table"
@@ -1764,7 +1782,12 @@ def register_lakeflow_source(spark):
                 Tuple of (iterator of mailing list records, offset dict)
             """
             # Note: Databricks lowercases option keys, so check both cases
-            directory_id = table_options.get("directoryId") or table_options.get("directoryid")
+            dir_camel = table_options.get("directoryId")
+            dir_lower = table_options.get("directoryid")
+            directory_id = dir_camel or dir_lower
+            debug_dir = f"DEBUG mailing_lists: directoryId={dir_camel}, directoryid={dir_lower}, using={'camelCase' if dir_camel else ('lowercase' if dir_lower else 'NOT FOUND')}"
+            print(debug_dir)
+            sys.stderr.write(debug_dir + "\n")
             if not directory_id:
                 raise ValueError(
                     "directoryId is required in table_options for mailing_lists table"
