@@ -34,11 +34,11 @@ The Microsoft Teams connector enables you to:
    - **Application (client) ID**: Found on the Overview page
    - **Directory (tenant) ID**: Found on the Overview page
 
-   Example values:
+   Example values (these are sample GUIDs, not valid credentials):
 
    ```text
-   Tenant ID:  a1b2c3d4-e5f6-7890-abcd-ef1234567890
-   Client ID:  f9e8d7c6-b5a4-3210-9876-543210fedcba
+   Tenant ID:  a1b2c3d4-e5f6-7890-abcd-ef1234567890  (example only)
+   Client ID:  f9e8d7c6-b5a4-3210-9876-543210fedcba  (example only)
    ```
 
 4. **Create Client Secret**
@@ -49,10 +49,10 @@ The Microsoft Teams connector enables you to:
    - Click **Add**
    - **⚠️ IMPORTANT**: Copy the **Value** immediately (it won't be shown again)
 
-   Example secret value:
+   Example secret value (this is a sample format, not a valid secret):
 
    ```text
-   Client Secret: abc123~xyz789.aBcDeFgHiJkLmNoPqRsTuVwXyZ
+   Client Secret: abc123~xyz789.aBcDeFgHiJkLmNoPqRsTuVwXyZ  (example only)
    ```
 
 ### Step 2: Configure API Permissions
@@ -135,17 +135,17 @@ You can also create the connection separately before creating a pipeline:
    - This will open the connection setup wizard
 
 3. **Configure Connection**
-   - **Connection name**: Enter a name for your connection (e.g., `lakeflowcommunityconnectormsteams`)
+   - **Connection name**: Enter a name for your connection (e.g., `microsoft_teams_connection`)
    - **Connection type**: Select the appropriate type for community connectors
    - Configure credentials (see below)
 
-   **Required Credentials:**
+   **Required Credentials** (use your actual values from Azure Portal - examples shown are NOT valid):
 
    | Key | Value | Description |
    | --- | ----- | ----------- |
-   | `tenant_id` | `a1b2c3d4-e5f6-7890-abcd-ef1234567890` | Azure AD tenant ID (GUID format) |
-   | `client_id` | `f9e8d7c6-b5a4-3210-9876-543210fedcba` | Application (client) ID (GUID format) |
-   | `client_secret` | `abc123~xyz789.aBcDeFgHiJkLmNoPqRsTuVwXyZ` | Client secret value (from Azure Portal) |
+   | `tenant_id` | `a1b2c3d4-e5f6-7890-abcd-ef1234567890` (example) | Azure AD tenant ID (GUID format) |
+   | `client_id` | `f9e8d7c6-b5a4-3210-9876-543210fedcba` (example) | Application (client) ID (GUID format) |
+   | `client_secret` | `abc123~xyz789.aBcDeFgHiJkLmNoPqRsTuVwXyZ` (example) | Client secret value (from Azure Portal) |
    | `externalOptionsAllowList` | `tableName,tableNameList,tableConfigs,team_id,channel_id,message_id,start_date,top,max_pages_per_batch,lookback_seconds,fetch_all_teams,fetch_all_channels,fetch_all_messages,use_delta_api,max_concurrent_threads` | **REQUIRED:** Comma-separated list of allowed options. Includes framework options (tableName, tableNameList, tableConfigs) and connector-specific table options. |
 
    **📝 Note on Credentials:**
