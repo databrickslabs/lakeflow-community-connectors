@@ -561,7 +561,7 @@ class TestValidateConnectionOptions:
         assert "Unknown connection parameters" in errors[0]
         assert "unknown_option" in errors[0]
 
-    def test_validate_allows_sourceName_and_externalOptionsAllowList(self):
+    def test_validate_always_allowed_params(self):
         """Test that sourceName and externalOptionsAllowList are always allowed."""
         options = {
             "token": "abc123",
@@ -763,28 +763,28 @@ class TestConvertGithubUrlToRaw:
         """Test converting a standard HTTPS GitHub URL."""
         url = "https://github.com/databrickslabs/lakeflow-community-connectors"
         result = _convert_github_url_to_raw(url)
-        assert (
-            result
-            == "https://raw.githubusercontent.com/databrickslabs/lakeflow-community-connectors/master"
+        expected = (
+            "https://raw.githubusercontent.com/databrickslabs/lakeflow-community-connectors/master"
         )
+        assert result == expected
 
     def test_convert_https_github_url_with_git_suffix(self):
         """Test converting a GitHub URL with .git suffix."""
         url = "https://github.com/databrickslabs/lakeflow-community-connectors.git"
         result = _convert_github_url_to_raw(url)
-        assert (
-            result
-            == "https://raw.githubusercontent.com/databrickslabs/lakeflow-community-connectors/master"
+        expected = (
+            "https://raw.githubusercontent.com/databrickslabs/lakeflow-community-connectors/master"
         )
+        assert result == expected
 
     def test_convert_https_github_url_with_trailing_slash(self):
         """Test converting a GitHub URL with trailing slash."""
         url = "https://github.com/databrickslabs/lakeflow-community-connectors/"
         result = _convert_github_url_to_raw(url)
-        assert (
-            result
-            == "https://raw.githubusercontent.com/databrickslabs/lakeflow-community-connectors/master"
+        expected = (
+            "https://raw.githubusercontent.com/databrickslabs/lakeflow-community-connectors/master"
         )
+        assert result == expected
 
     def test_convert_with_custom_branch(self):
         """Test converting with a custom branch."""

@@ -28,31 +28,46 @@ class TestConvertGithubUrlToRaw:
         """Test converting HTTPS GitHub URL."""
         url = "https://github.com/databrickslabs/lakeflow-community-connectors"
         result = convert_github_url_to_raw(url)
-        assert result == "https://raw.githubusercontent.com/databrickslabs/lakeflow-community-connectors/master"
+        expected = (
+            "https://raw.githubusercontent.com/databrickslabs/lakeflow-community-connectors/master"
+        )
+        assert result == expected
 
     def test_https_url_with_git_suffix(self):
         """Test converting HTTPS GitHub URL with .git suffix."""
         url = "https://github.com/databrickslabs/lakeflow-community-connectors.git"
         result = convert_github_url_to_raw(url)
-        assert result == "https://raw.githubusercontent.com/databrickslabs/lakeflow-community-connectors/master"
+        expected = (
+            "https://raw.githubusercontent.com/databrickslabs/lakeflow-community-connectors/master"
+        )
+        assert result == expected
 
     def test_https_url_with_trailing_slash(self):
         """Test converting HTTPS GitHub URL with trailing slash."""
         url = "https://github.com/databrickslabs/lakeflow-community-connectors/"
         result = convert_github_url_to_raw(url)
-        assert result == "https://raw.githubusercontent.com/databrickslabs/lakeflow-community-connectors/master"
+        expected = (
+            "https://raw.githubusercontent.com/databrickslabs/lakeflow-community-connectors/master"
+        )
+        assert result == expected
 
     def test_custom_branch(self):
         """Test converting with custom branch."""
         url = "https://github.com/databrickslabs/lakeflow-community-connectors"
         result = convert_github_url_to_raw(url, branch="develop")
-        assert result == "https://raw.githubusercontent.com/databrickslabs/lakeflow-community-connectors/develop"
+        expected = (
+            "https://raw.githubusercontent.com/databrickslabs/lakeflow-community-connectors/develop"
+        )
+        assert result == expected
 
     def test_ssh_url(self):
         """Test converting SSH GitHub URL."""
         url = "git@github.com:databrickslabs/lakeflow-community-connectors"
         result = convert_github_url_to_raw(url)
-        assert result == "https://raw.githubusercontent.com/databrickslabs/lakeflow-community-connectors/master"
+        expected = (
+            "https://raw.githubusercontent.com/databrickslabs/lakeflow-community-connectors/master"
+        )
+        assert result == expected
 
     def test_already_raw_url(self):
         """Test that raw URLs are returned as-is."""
@@ -576,4 +591,3 @@ class TestValidationResult:
         """Test is_valid returns True with only warnings."""
         result = ValidationResult(warnings=["Warning 1"])
         assert result.is_valid()
-
