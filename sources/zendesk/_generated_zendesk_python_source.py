@@ -13,6 +13,7 @@ from typing import (
     Iterator,
     List,
 )
+import json
 
 from pyspark.sql import Row
 from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
@@ -226,6 +227,7 @@ def register_lakeflow_source(spark):
             }
 
         def list_tables(self) -> List[str]:
+            """Return the list of available Zendesk tables."""
             return [
                 "tickets",
                 "organizations",
@@ -493,6 +495,7 @@ def register_lakeflow_source(spark):
         def read_table(
             self, table_name: str, start_offset: dict, table_options: Dict[str, str]
         ) -> (Iterator[dict], dict):
+            """Read data from the specified Zendesk table with incremental support."""
             # Map table names to their API endpoints and response keys
             api_config = {
                 "tickets": {
@@ -552,12 +555,46 @@ def register_lakeflow_source(spark):
             else:
                 return self._read_paginated(table_name, config, start_offset)
 
-        def _read_incremental(self, table_name: str, config: dict, start_offset: dict):
-            """Read data from incremental API endpoints"""
-            start_time = 0
-            if start_offset and "start_time" in start_offset:
-                start_time = start_offset["start_time"]
+        def _parse_timestamp(self, timestamp_str: str) -> int:
+            """Parse a Zendesk timestamp string to Unix timestamp."""
+            try:
+                # pylint: disable=no-member
+                return int(datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%SZ").timestamp())
+            except (ValueError, TypeError):
+                return 0
 
+        def _extract_ticket_comments(self, data: dict) -> tuple:
+            """Extract comment records from ticket events data."""
+            records = []
+            max_time = 0
+            for event in data.get("ticket_events", []):
+                if "child_events" in event:
+                    for child in event["child_events"]:
+                        if child.get("event_type") == "Comment":
+                            comment_record = {
+                                "id": event.get("id"),
+                                "ticket_id": event.get("ticket_id"),
+                                "created_at": event.get("created_at"),
+                                "updated_at": event.get("updated_at"),
+                                **child,
+                            }
+                            records.append(comment_record)
+                event_time = self._parse_timestamp(event.get("created_at", ""))
+                max_time = max(max_time, event_time)
+            return records, max_time
+
+        def _extract_records_with_time(self, data: dict, response_key: str) -> tuple:
+            """Extract records and find the max updated_at time."""
+            records = data.get(response_key, [])
+            max_time = 0
+            for record in records:
+                record_time = self._parse_timestamp(record.get("updated_at", ""))
+                max_time = max(max_time, record_time)
+            return records, max_time
+
+        def _read_incremental(self, table_name: str, config: dict, start_offset: dict):
+            """Read data from incremental API endpoints."""
+            start_time = start_offset.get("start_time", 0) if start_offset else 0
             endpoint = config["endpoint"]
             response_key = config["response_key"]
 
@@ -579,55 +616,16 @@ def register_lakeflow_source(spark):
 
                 data = resp.json()
 
-                # Handle ticket_comments specially
                 if table_name == "ticket_comments":
-                    # Extract comments from ticket events
-                    ticket_events = data.get("ticket_events", [])
-                    for event in ticket_events:
-                        # Create a record that combines ticket info with comments
-                        if "child_events" in event:
-                            for child in event["child_events"]:
-                                if child.get("event_type") == "Comment":
-                                    comment_record = {
-                                        "id": event.get("id"),
-                                        "ticket_id": event.get("ticket_id"),
-                                        "created_at": event.get("created_at"),
-                                        "updated_at": event.get("updated_at"),
-                                        **child,
-                                    }
-                                    all_records.append(comment_record)
-                        # Update last_time
-                        try:
-                            event_time = int(
-                                datetime.strptime(
-                                    event.get("created_at", ""), "%Y-%m-%dT%H:%M:%SZ"
-                                ).timestamp()
-                            )
-                            if event_time > last_time:
-                                last_time = event_time
-                        except Exception:
-                            pass
+                    records, max_time = self._extract_ticket_comments(data)
                 else:
-                    records = data.get(response_key, [])
-                    all_records.extend(records)
+                    records, max_time = self._extract_records_with_time(data, response_key)
 
-                    # Update last_time based on updated_at field
-                    for record in records:
-                        try:
-                            record_time = int(
-                                datetime.strptime(
-                                    record.get("updated_at", ""), "%Y-%m-%dT%H:%M:%SZ"
-                                ).timestamp()
-                            )
-                            if record_time > last_time:
-                                last_time = record_time
-                        except Exception:
-                            pass
+                all_records.extend(records)
+                last_time = max(last_time, max_time)
 
                 next_page = data.get("next_page")
-                end_of_stream = data.get("end_of_stream", True)
-
-                if end_of_stream or not next_page:
+                if data.get("end_of_stream", True) or not next_page:
                     break
 
             return all_records, {"start_time": last_time}
@@ -688,6 +686,8 @@ def register_lakeflow_source(spark):
     METADATA_TABLE = "_lakeflow_metadata"
     TABLE_NAME = "tableName"
     TABLE_NAME_LIST = "tableNameList"
+    TABLE_CONFIGS = "tableConfigs"
+    IS_DELETE_FLOW = "isDeleteFlow"
 
 
     class LakeflowStreamReader(SimpleDataSourceStreamReader):
@@ -712,9 +712,20 @@ def register_lakeflow_source(spark):
             return {}
 
         def read(self, start: dict) -> (Iterator[tuple], dict):
-            records, offset = self.lakeflow_connect.read_table(
-                self.options["tableName"], start, self.options
-            )
+            is_delete_flow = self.options.get(IS_DELETE_FLOW) == "true"
+            # Strip delete flow options before passing to connector
+            table_options = {
+                k: v for k, v in self.options.items() if k != IS_DELETE_FLOW
+            }
+
+            if is_delete_flow:
+                records, offset = self.lakeflow_connect.read_table_deletes(
+                    self.options[TABLE_NAME], start, table_options
+                )
+            else:
+                records, offset = self.lakeflow_connect.read_table(
+                    self.options[TABLE_NAME], start, table_options
+                )
             rows = map(lambda x: parse_value(x, self.schema), records)
             return rows, offset
 
@@ -755,9 +766,12 @@ def register_lakeflow_source(spark):
             table_name_list = self.options.get(TABLE_NAME_LIST, "")
             table_names = [o.strip() for o in table_name_list.split(",") if o.strip()]
             all_records = []
+            table_configs = json.loads(self.options.get(TABLE_CONFIGS, "{}"))
             for table in table_names:
-                metadata = self.lakeflow_connect.read_table_metadata(table, self.options)
-                all_records.append({"tableName": table, **metadata})
+                metadata = self.lakeflow_connect.read_table_metadata(
+                    table, table_configs.get(table, {})
+                )
+                all_records.append({TABLE_NAME: table, **metadata})
             return all_records
 
 
@@ -771,11 +785,11 @@ def register_lakeflow_source(spark):
             return "lakeflow_connect"
 
         def schema(self):
-            table = self.options["tableName"]
+            table = self.options[TABLE_NAME]
             if table == METADATA_TABLE:
                 return StructType(
                     [
-                        StructField("tableName", StringType(), False),
+                        StructField(TABLE_NAME, StringType(), False),
                         StructField("primary_keys", ArrayType(StringType()), True),
                         StructField("cursor_field", StringType(), True),
                         StructField("ingestion_type", StringType(), True),

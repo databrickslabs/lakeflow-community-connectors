@@ -7,11 +7,15 @@ in a Databricks workspace using the Databricks SDK.
 API Reference: https://docs.databricks.com/api/workspace/pipelines/create
 """
 
-from typing import Optional
+from typing import List, Optional
+
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.pipelines import (
     CreatePipelineResponse,
+    FileLibrary,
     GetPipelineResponse,
+    NotebookLibrary,
+    PipelineLibrary,
     StartUpdateResponse,
 )
 
@@ -117,7 +121,8 @@ class PipelineClient:
 
         return payload
 
-    def _build_libraries(self, libraries: list) -> list:
+    # pylint: disable=too-many-branches
+    def _build_libraries(self, libraries: List) -> List:
         """
         Build the libraries configuration for the pipeline.
 
@@ -130,23 +135,31 @@ class PipelineClient:
         Returns:
             List of PipelineLibrary objects.
         """
-        from databricks.sdk.service.pipelines import PipelineLibrary, NotebookLibrary, FileLibrary
 
         result = []
         for lib in libraries:
             if isinstance(lib, dict):
                 if "notebook" in lib:
                     notebook_config = lib["notebook"]
-                    path = notebook_config.get("path") if isinstance(notebook_config, dict) else notebook_config
+                    if isinstance(notebook_config, dict):
+                        path = notebook_config.get("path")
+                    else:
+                        path = notebook_config
                     result.append(PipelineLibrary(notebook=NotebookLibrary(path=path)))
                 elif "file" in lib:
                     file_config = lib["file"]
-                    path = file_config.get("path") if isinstance(file_config, dict) else file_config
+                    if isinstance(file_config, dict):
+                        path = file_config.get("path")
+                    else:
+                        path = file_config
                     result.append(PipelineLibrary(file=FileLibrary(path=path)))
                 elif "glob" in lib:
                     # Convert glob.include to file library
                     glob_config = lib["glob"]
-                    path = glob_config.get("include") if isinstance(glob_config, dict) else glob_config
+                    if isinstance(glob_config, dict):
+                        path = glob_config.get("include")
+                    else:
+                        path = glob_config
                     result.append(PipelineLibrary(file=FileLibrary(path=path)))
                 else:
                     # Unknown format - skip with warning (could log this)
@@ -197,4 +210,3 @@ class PipelineClient:
             Iterator of PipelineStateInfo objects.
         """
         return self._client.pipelines.list_pipelines(filter=filter, max_results=max_results)
-

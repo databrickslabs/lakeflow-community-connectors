@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """
 Tests for ingestion_pipeline module.
 
@@ -5,6 +6,7 @@ Tests the ingest function with different spec configurations and verifies
 that the correct SDP calls are made with the correct parameters.
 """
 
+import json
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -17,6 +19,7 @@ mock_pyspark.pipelines = mock_sdp
 mock_pyspark.sql = MagicMock()
 mock_pyspark.sql.functions = MagicMock()
 mock_pyspark.sql.functions.col = MagicMock(side_effect=lambda x: f"col({x})")
+mock_pyspark.sql.functions.expr = MagicMock(side_effect=lambda x: f"expr({x})")
 
 sys.modules["pyspark"] = mock_pyspark
 sys.modules["pyspark.pipelines"] = mock_sdp
@@ -24,7 +27,8 @@ sys.modules["pyspark.sql"] = mock_pyspark.sql
 sys.modules["pyspark.sql.functions"] = mock_pyspark.sql.functions
 
 # Now import the module under test
-from pipeline.ingestion_pipeline import ingest
+# pylint: disable=wrong-import-position
+from pipeline.ingestion_pipeline import ingest  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -44,10 +48,12 @@ def mock_spark():
     """Create a mock Spark session with proper chaining."""
     spark = MagicMock()
     # Setup read chain
-    spark.read.format.return_value.option.return_value.option.return_value.option.return_value.options.return_value.load.return_value = MagicMock()
-    spark.read.format.return_value.option.return_value.option.return_value.options.return_value.load.return_value = MagicMock()
+    read_chain = spark.read.format.return_value.option.return_value.option.return_value
+    read_chain.option.return_value.options.return_value.load.return_value = MagicMock()
+    read_chain.options.return_value.load.return_value = MagicMock()
     # Setup readStream chain
-    spark.readStream.format.return_value.option.return_value.option.return_value.options.return_value.load.return_value = MagicMock()
+    stream_chain = spark.readStream.format.return_value.option.return_value.option.return_value
+    stream_chain.options.return_value.load.return_value = MagicMock()
     return spark
 
 
@@ -69,6 +75,11 @@ def base_metadata():
             "primary_keys": ["event_id"],
             "cursor_field": "timestamp",
             "ingestion_type": "append",
+        },
+        "contacts": {
+            "primary_keys": ["contact_id"],
+            "cursor_field": "updated_at",
+            "ingestion_type": "cdc_with_deletes",
         },
     }
 
@@ -189,6 +200,146 @@ class TestIngestCDC:
             # Verify custom primary_keys is used
             call_kwargs = mock_sdp.apply_changes.call_args[1]
             assert call_kwargs["keys"] == ["id", "tenant_id"]
+
+
+class TestIngestCDCWithDeletes:
+    """Test CDC with deletes ingestion scenarios."""
+
+    def test_cdc_with_deletes_creates_both_flows(self, mock_spark, base_metadata):
+        """Test that cdc_with_deletes creates both normal and delete flows."""
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "contacts",
+                        "table_configuration": {},
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=base_metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            # Verify streaming table was created once
+            mock_sdp.create_streaming_table.assert_called_once_with(name="contacts")
+
+            # Verify two views were created: normal and delete staging
+            assert mock_sdp.view.call_count == 2
+            view_calls = [call[1]["name"] for call in mock_sdp.view.call_args_list]
+            assert "contacts_staging" in view_calls
+            assert "contacts_delete_staging" in view_calls
+
+            # Verify apply_changes was called twice (normal + delete flow)
+            assert mock_sdp.apply_changes.call_count == 2
+
+    def test_cdc_with_deletes_delete_flow_parameters(self, mock_spark, base_metadata):
+        """Test delete flow has correct apply_changes parameters."""
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "contacts",
+                        "table_configuration": {},
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=base_metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            # Find the delete flow apply_changes call
+            apply_changes_calls = mock_sdp.apply_changes.call_args_list
+            delete_flow_call = None
+            normal_flow_call = None
+
+            for call in apply_changes_calls:
+                kwargs = call[1]
+                if "apply_as_deletes" in kwargs:
+                    delete_flow_call = kwargs
+                else:
+                    normal_flow_call = kwargs
+
+            # Verify normal flow parameters
+            assert normal_flow_call is not None
+            assert normal_flow_call["target"] == "contacts"
+            assert normal_flow_call["source"] == "contacts_staging"
+            assert normal_flow_call["keys"] == ["contact_id"]
+            assert normal_flow_call["sequence_by"] == "col(updated_at)"
+            assert normal_flow_call["stored_as_scd_type"] == "1"
+
+            # Verify delete flow parameters
+            assert delete_flow_call is not None
+            assert delete_flow_call["target"] == "contacts"
+            assert delete_flow_call["source"] == "contacts_delete_staging"
+            assert delete_flow_call["keys"] == ["contact_id"]
+            assert delete_flow_call["apply_as_deletes"] == "expr(true)"
+            assert delete_flow_call["name"] == "contacts_delete_staging_delete_flow"
+
+    def test_cdc_with_deletes_with_scd_type_2(self, mock_spark, base_metadata):
+        """Test cdc_with_deletes with SCD Type 2."""
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "contacts",
+                        "table_configuration": {
+                            "scd_type": "SCD_TYPE_2",
+                        },
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=base_metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            # Verify both apply_changes calls have SCD type 2
+            for call in mock_sdp.apply_changes.call_args_list:
+                kwargs = call[1]
+                assert kwargs["stored_as_scd_type"] == "2"
+
+    def test_cdc_with_deletes_custom_primary_keys_and_cursor(self, mock_spark, base_metadata):
+        """Test cdc_with_deletes with custom primary_keys and sequence_by from spec."""
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "contacts",
+                        "table_configuration": {
+                            "primary_keys": ["id", "tenant_id"],
+                            "sequence_by": "modified_at",
+                        },
+                    }
+                }
+            ],
+        }
+
+        with patch(
+            "pipeline.ingestion_pipeline._get_table_metadata",
+            return_value=base_metadata,
+        ):
+            ingest(mock_spark, spec)
+
+            # Verify both flows use custom primary keys and sequence_by
+            for call in mock_sdp.apply_changes.call_args_list:
+                kwargs = call[1]
+                assert kwargs["keys"] == ["id", "tenant_id"]
+                assert kwargs["sequence_by"] == "col(modified_at)"
 
 
 class TestIngestSnapshot:
@@ -341,6 +492,12 @@ class TestIngestMultipleTables:
                         "table_configuration": {},
                     }
                 },
+                {
+                    "table": {
+                        "source_table": "contacts",
+                        "table_configuration": {},
+                    }
+                },
             ],
         }
 
@@ -350,15 +507,16 @@ class TestIngestMultipleTables:
         ):
             ingest(mock_spark, spec)
 
-            # Verify streaming tables were created for all
-            assert mock_sdp.create_streaming_table.call_count == 3
+            # Verify streaming tables were created for all 4 tables
+            assert mock_sdp.create_streaming_table.call_count == 4
             create_calls = mock_sdp.create_streaming_table.call_args_list
             table_names = [c[1]["name"] for c in create_calls]
-            assert set(table_names) == {"users", "orders", "events"}
+            assert set(table_names) == {"users", "orders", "events", "contacts"}
 
-            # Verify CDC was called for users
-            mock_sdp.apply_changes.assert_called_once()
-            assert mock_sdp.apply_changes.call_args[1]["target"] == "users"
+            # Verify apply_changes called 3 times:
+            # - 1 for users (cdc)
+            # - 2 for contacts (cdc_with_deletes: normal + delete flow)
+            assert mock_sdp.apply_changes.call_count == 3
 
             # Verify snapshot was called for orders
             mock_sdp.apply_changes_from_snapshot.assert_called_once()
@@ -687,6 +845,122 @@ class TestDestinationTable:
             assert call_kwargs["target"] == "`my_catalog`.`my_schema`.`users`"
 
 
+class TestGetTableMetadataOptions:
+    """Test that _get_table_metadata receives table_configs and passes them to Spark."""
+
+    def test_get_table_metadata_receives_all_table_configs_as_json(self):
+        """Test that _get_table_metadata passes combined table_configs as JSON to Spark option."""
+
+        mock_spark = MagicMock()
+
+        # Setup mock to return metadata DataFrame for both tables
+        mock_row_users = MagicMock()
+        mock_row_users.__getitem__ = lambda self, key: {
+            "tableName": "users",
+            "primary_keys": ["id"],
+            "cursor_field": "updated_at",
+            "ingestion_type": "cdc",
+        }.get(key)
+        mock_row_orders = MagicMock()
+        mock_row_orders.__getitem__ = lambda self, key: {
+            "tableName": "orders",
+            "primary_keys": ["order_id"],
+            "cursor_field": "modified_at",
+            "ingestion_type": "cdc",
+        }.get(key)
+        mock_df = MagicMock()
+        mock_df.collect.return_value = [mock_row_users, mock_row_orders]
+        # Chain: format().option().option().option().option().load()
+        read_chain = mock_spark.read.format.return_value.option.return_value.option.return_value
+        read_chain.option.return_value.option.return_value.load.return_value = mock_df
+
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "users",
+                        "table_configuration": {
+                            "custom_option_1": "value1",
+                            "custom_option_2": "value2",
+                            # special key, excluded by get_table_configurations
+                            "scd_type": "SCD_TYPE_1",
+                            "primary_keys": ["id"],  # special key, excluded
+                        },
+                    }
+                },
+                {
+                    "table": {
+                        "source_table": "orders",
+                        "table_configuration": {
+                            "order_option": "order_value",
+                        },
+                    }
+                },
+            ],
+        }
+
+        ingest(mock_spark, spec)
+
+        # Verify the metadata read chain received the combined table_configs as JSON
+        # The chain is: spark.read.format().option().option().option().option().load()
+        # The 4th option call should be ("tableConfigs", json.dumps(table_configs))
+        opt_chain = mock_spark.read.format.return_value.option.return_value.option.return_value
+        fourth_option_call = opt_chain.option.return_value.option
+        fourth_option_call.assert_called_once()
+        call_args = fourth_option_call.call_args[0]
+
+        assert call_args[0] == "tableConfigs"
+        # Parse the JSON to verify content (excluding special keys via get_table_configurations)
+        passed_configs = json.loads(call_args[1])
+        assert passed_configs == {
+            "users": {"custom_option_1": "value1", "custom_option_2": "value2"},
+            "orders": {"order_option": "order_value"},
+        }
+
+    def test_get_table_metadata_with_empty_table_configs_as_json(self):
+        """Test that _get_table_metadata passes empty configs as JSON when tables have no configurations."""
+
+        mock_spark = MagicMock()
+
+        mock_row = MagicMock()
+        mock_row.__getitem__ = lambda self, key: {
+            "tableName": "users",
+            "primary_keys": ["id"],
+            "cursor_field": "updated_at",
+            "ingestion_type": "cdc",
+        }.get(key)
+        mock_df = MagicMock()
+        mock_df.collect.return_value = [mock_row]
+        # Chain: format().option().option().option().option().load()
+        read_chain = mock_spark.read.format.return_value.option.return_value.option.return_value
+        read_chain.option.return_value.option.return_value.load.return_value = mock_df
+
+        spec = {
+            "connection_name": "test_connection",
+            "objects": [
+                {
+                    "table": {
+                        "source_table": "users",
+                        # No table_configuration
+                    }
+                },
+            ],
+        }
+
+        ingest(mock_spark, spec)
+
+        # Verify tableConfigs option was called with empty config as JSON
+        opt_chain = mock_spark.read.format.return_value.option.return_value.option.return_value
+        fourth_option_call = opt_chain.option.return_value.option
+        fourth_option_call.assert_called_once()
+        call_args = fourth_option_call.call_args[0]
+
+        assert call_args[0] == "tableConfigs"
+        passed_configs = json.loads(call_args[1])
+        assert passed_configs == {"users": {}}
+
+
 class TestTableConfigFiltering:
     """Test that table_config excludes reserved keys when passed to Spark read options."""
 
@@ -740,7 +1014,8 @@ class TestTableConfigFiltering:
             view_func()
 
             # Verify options() was called with filtered config (no reserved keys)
-            options_call = mock_spark.readStream.format.return_value.option.return_value.option.return_value.options
+            stream_chain = mock_spark.readStream.format.return_value.option.return_value
+            options_call = stream_chain.option.return_value.options
             options_call.assert_called_once()
             passed_options = options_call.call_args[1]
             assert passed_options == {
@@ -849,7 +1124,8 @@ class TestTableConfigFiltering:
             flow_func()
 
             # Verify options() was called with filtered config
-            options_call = mock_spark.readStream.format.return_value.option.return_value.option.return_value.options
+            stream_chain = mock_spark.readStream.format.return_value.option.return_value
+            options_call = stream_chain.option.return_value.options
             options_call.assert_called_once()
             passed_options = options_call.call_args[1]
             assert passed_options == {"custom_setting": "enabled"}

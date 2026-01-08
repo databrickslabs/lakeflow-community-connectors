@@ -1,13 +1,14 @@
 # pylint: disable=no-member
+import json
 from dataclasses import dataclass
 from typing import List
 from pyspark import pipelines as sdp
-from pyspark.sql.functions import col
+from pyspark.sql.functions import col, expr
 from libs.spec_parser import SpecParser
 
 
 @dataclass
-class SdpTableConfig:
+class SdpTableConfig:  # pylint: disable=too-many-instance-attributes
     """SDP configuration to ingest a table."""
 
     source_table: str
@@ -17,10 +18,15 @@ class SdpTableConfig:
     primary_keys: List[str]
     sequence_by: str
     scd_type: str
+    with_deletes: bool = False
 
 
-def _create_cdc_table(spark, connection_name: str, config: SdpTableConfig) -> None:
-    """Create CDC table using streaming and apply_changes"""
+def _create_cdc_table(
+    spark, connection_name: str, config: SdpTableConfig
+) -> None:
+    """Create CDC table using streaming and apply_changes
+
+    """
 
     @sdp.view(name=config.view_name)
     def v():
@@ -40,6 +46,31 @@ def _create_cdc_table(spark, connection_name: str, config: SdpTableConfig) -> No
         sequence_by=col(config.sequence_by),
         stored_as_scd_type=config.scd_type,
     )
+
+    # Delete flow - only enabled for cdc_with_deletes ingestion type
+    if config.with_deletes:
+        delete_view_name = config.source_table + "_delete_staging"
+
+        @sdp.view(name=delete_view_name)
+        def delete_view():
+            return (
+                spark.readStream.format("lakeflow_connect")
+                .option("databricks.connection", connection_name)
+                .option("tableName", config.source_table)
+                .option("isDeleteFlow", "true")
+                .options(**config.table_config)
+                .load()
+            )
+
+        sdp.apply_changes(
+            target=config.destination_table,
+            source=delete_view_name,
+            keys=config.primary_keys,
+            sequence_by=col(config.sequence_by),
+            stored_as_scd_type=config.scd_type,
+            apply_as_deletes=expr("true"),
+            name=delete_view_name + "_delete_flow",
+        )
 
 
 def _create_snapshot_table(spark, connection_name: str, config: SdpTableConfig) -> None:
@@ -80,13 +111,16 @@ def _create_append_table(spark, connection_name: str, config: SdpTableConfig) ->
         )
 
 
-def _get_table_metadata(spark, connection_name: str, table_list: list[str]) -> dict:
+def _get_table_metadata(
+    spark, connection_name: str, table_list: list[str], table_configs: dict[str, str]
+) -> dict:
     """Get table metadata (primary_keys, cursor_field, ingestion_type etc.)"""
     df = (
         spark.read.format("lakeflow_connect")
         .option("databricks.connection", connection_name)
         .option("tableName", "_lakeflow_metadata")
         .option("tableNameList", ",".join(table_list))
+        .option("tableConfigs", json.dumps(table_configs))
         .load()
     )
     metadata = {}
@@ -110,7 +144,10 @@ def ingest(spark, pipeline_spec: dict) -> None:
     connection_name = spec.connection_name()
     table_list = spec.get_table_list()
 
-    metadata = _get_table_metadata(spark, connection_name, table_list)
+    # Get table_configurations for all tables. These are merged into one dict
+    # keyed by table name.
+    table_configs = spec.get_table_configurations()
+    metadata = _get_table_metadata(spark, connection_name, table_list, table_configs)
 
     def _ingest_table(table: str) -> None:
         """Helper function to ingest a single table"""
@@ -137,10 +174,15 @@ def ingest(spark, pipeline_spec: dict) -> None:
             primary_keys=primary_keys,
             sequence_by=sequence_by,
             scd_type=scd_type,
+            with_deletes=(ingestion_type == "cdc_with_deletes"),
         )
 
-        if ingestion_type == "cdc":
-            _create_cdc_table(spark, connection_name, config)
+        if ingestion_type in ("cdc", "cdc_with_deletes"):
+            _create_cdc_table(
+                spark,
+                connection_name,
+                config
+            )
         elif ingestion_type == "snapshot":
             _create_snapshot_table(spark, connection_name, config)
         elif ingestion_type == "append":

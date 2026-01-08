@@ -33,7 +33,7 @@ from libs.utils import parse_value
 # =============================================================================
 # Tests for None values
 # =============================================================================
-class TestNoneValue:
+class TestNoneValue:  # pylint: disable=too-few-public-methods
     """Test handling of None values for various field types."""
 
     @pytest.mark.parametrize(
