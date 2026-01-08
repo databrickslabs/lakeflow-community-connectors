@@ -3,6 +3,7 @@ import io
 import json
 import logging
 import re
+import sys
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -20,8 +21,14 @@ from pyspark.sql.types import (
     StructType,
 )
 
-# Configure logging
-logger = logging.getLogger(__name__)
+# Configure logging for DLT/Lakeflow compatibility
+logger = logging.getLogger("QualtricsConnector")
+logger.setLevel(logging.INFO)
+_handler = logging.StreamHandler(sys.stdout)
+_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+_handler.setFormatter(_formatter)
+if not logger.handlers:
+    logger.addHandler(_handler)
 
 
 class QualtricsConfig:
@@ -506,6 +513,10 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
         Returns:
             Tuple of (iterator of records, end offset)
         """
+        # DEBUG: Log received options
+        logger.info(f"DEBUG read_table: table={table_name}, table_options keys={list(table_options.keys()) if table_options else 'None'}")
+        logger.info(f"DEBUG read_table: surveyId={table_options.get('surveyId') if table_options else 'N/A'}")
+
         if table_name not in self._reader_methods:
             raise ValueError(
                 f"Unsupported table: {table_name}. Supported tables are: {self.tables}"
@@ -752,8 +763,12 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
         Returns:
             List of survey IDs
         """
+        # DEBUG: Log what we received
+        logger.info(f"DEBUG _get_all_survey_ids: table_options={table_options}")
+
         # Check if specific survey IDs are provided
         survey_id_input = table_options.get("surveyId")
+        logger.info(f"DEBUG _get_all_survey_ids: survey_id_input={survey_id_input}")
         if survey_id_input:
             # Parse comma-separated list, strip whitespace
             survey_ids = [sid.strip() for sid in survey_id_input.split(",") if sid.strip()]

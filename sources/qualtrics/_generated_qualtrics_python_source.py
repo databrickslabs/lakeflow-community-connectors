@@ -11,6 +11,7 @@ from typing import Any, Iterator
 import io
 import json
 import re
+import sys
 import time
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -213,7 +214,13 @@ def register_lakeflow_source(spark):
     # sources/qualtrics/qualtrics.py
     ########################################################
 
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger("QualtricsConnector")
+    logger.setLevel(logging.INFO)
+    _handler = logging.StreamHandler(sys.stdout)
+    _formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    _handler.setFormatter(_formatter)
+    if not logger.handlers:
+        logger.addHandler(_handler)
 
 
     class QualtricsConfig:
@@ -698,6 +705,10 @@ def register_lakeflow_source(spark):
             Returns:
                 Tuple of (iterator of records, end offset)
             """
+            # DEBUG: Log received options
+            logger.info(f"DEBUG read_table: table={table_name}, table_options keys={list(table_options.keys()) if table_options else 'None'}")
+            logger.info(f"DEBUG read_table: surveyId={table_options.get('surveyId') if table_options else 'N/A'}")
+
             if table_name not in self._reader_methods:
                 raise ValueError(
                     f"Unsupported table: {table_name}. Supported tables are: {self.tables}"
@@ -944,8 +955,12 @@ def register_lakeflow_source(spark):
             Returns:
                 List of survey IDs
             """
+            # DEBUG: Log what we received
+            logger.info(f"DEBUG _get_all_survey_ids: table_options={table_options}")
+
             # Check if specific survey IDs are provided
             survey_id_input = table_options.get("surveyId")
+            logger.info(f"DEBUG _get_all_survey_ids: survey_id_input={survey_id_input}")
             if survey_id_input:
                 # Parse comma-separated list, strip whitespace
                 survey_ids = [sid.strip() for sid in survey_id_input.split(",") if sid.strip()]
