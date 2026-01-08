@@ -12,7 +12,7 @@ def test_qualtrics_connector():
     # Inject the Qualtrics LakeflowConnect class into the shared test_suite namespace
     # so that LakeflowConnectTester can instantiate it.
     test_suite.LakeflowConnect = LakeflowConnect
-    
+
     # Inject the Qualtrics test utils for write-back testing
     test_suite.LakeflowConnectTestUtils = LakeflowConnectTestUtils
 
@@ -37,4 +37,3 @@ def test_qualtrics_connector():
         f"Test suite had failures: {report.failed_tests} failed, "
         f"{report.error_tests} errors"
     )
-

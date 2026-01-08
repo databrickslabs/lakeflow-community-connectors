@@ -146,7 +146,7 @@ class LakeflowConnectTestUtils:
             # Wait for eventual consistency (responses need time to be available in export)
             # Qualtrics can take 60-90 seconds for new responses to appear in exports
             wait_seconds = 75
-            print(f"\nWaiting {wait_seconds} seconds for responses to be available in export API...")
+            print(f"\nWaiting {wait_seconds}s for responses to be available in export...")
             print("(Qualtrics needs time to process and make responses available for export)")
             time.sleep(wait_seconds)
 
