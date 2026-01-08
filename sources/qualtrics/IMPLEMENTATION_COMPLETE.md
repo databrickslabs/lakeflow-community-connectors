@@ -39,7 +39,7 @@ Successfully implemented a **production-ready** Qualtrics connector for Lakeflow
 - Comprehensive documentation of surveys and survey_responses endpoints
 - Field schemas with all attributes documented
 - Pagination mechanisms (cursor-based with skipToken)
-- Rate limiting details (500 req/min, 20 concurrent)
+- Rate limiting details (3000 req/min per brand)
 - 3-step export workflow for responses fully documented
 - Research log with official sources cited
 - Incremental sync strategies defined
@@ -235,8 +235,8 @@ Successfully implemented a **production-ready** Qualtrics connector for Lakeflow
 
 ### Rate Limiting
 
-- **Limit**: 500 requests per minute
-- **Concurrent**: 20 simultaneous requests maximum
+- **Limit**: 3000 requests per minute per brand
+- **Per Brand**: 3000 requests per minute
 - **Handling**: Automatic retry with exponential backoff
 - **Status Code**: 429 Too Many Requests with Retry-After header
 

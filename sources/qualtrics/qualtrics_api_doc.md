@@ -25,8 +25,9 @@ curl -X GET \
 ```
 
 **Notes**:
-- Rate limiting: **500 requests per minute** for most endpoints
-- **20 concurrent requests** maximum per API token
+- Rate limiting: **3000 requests per minute** per brand (some endpoints have lower limits)
+- **3000 requests per minute** per brand ([official docs](https://api.qualtrics.com/a5e9a1a304902-limits))
+- Some endpoints have lower per-minute limits
 - Exceeding rate limits returns `429 Too Many Requests` with `Retry-After` header
 
 ## **Object List**
@@ -1152,7 +1153,7 @@ curl -X GET \
 | Limit Type | Value |
 |-----------|-------|
 | Requests per minute | 500 |
-| Concurrent requests | 20 |
+| Requests per minute | 3000 per brand |
 | Response on limit exceed | `429 Too Many Requests` |
 | Retry-After header | Seconds to wait before retrying |
 
@@ -1326,7 +1327,7 @@ Field names are generally consistent between write and read operations for surve
 
 ### Write-Specific Constraints
 
-- **Rate Limits**: Same as read operations - 500 requests per minute, 20 concurrent requests
+- **Rate Limits**: Same as read operations - 3000 requests/minute per brand
 - **Eventual Consistency**: 
   - Responses may take 5-30 seconds to appear in export API after creation
   - **Recommended wait time**: 30-60 seconds after writing before attempting to read for validation

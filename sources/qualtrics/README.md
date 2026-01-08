@@ -590,7 +590,7 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 - **Use incremental sync**: Both tables support incremental patterns to minimize API calls and export time
 - **Monitor response export times**: Large surveys (>10,000 responses) may take several minutes to export
 - **Respect rate limits**: 
-  - Qualtrics enforces **500 requests per minute** and **20 concurrent requests** maximum
+  - Qualtrics enforces **3000 requests per minute** per brand ([official docs](https://api.qualtrics.com/a5e9a1a304902-limits))
   - The connector implements automatic retry with exponential backoff for rate limiting
 - **Handle eventual consistency**: 
   - New survey responses may take 30-60 seconds to become available in exports
@@ -627,7 +627,7 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
   - Check survey distribution settings
 
 **Rate Limiting (`429 Too Many Requests`)**:
-- **Cause**: Exceeded 500 requests/minute or 20 concurrent requests
+- **Cause**: Exceeded 3000 requests/minute per brand (or endpoint-specific limit)
 - **Solution**:
   - The connector automatically retries with backoff
   - Reduce pipeline concurrency if running multiple surveys in parallel
