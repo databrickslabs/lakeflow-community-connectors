@@ -357,54 +357,48 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
         merged_lines.append("")
         merged_lines.append("")
 
-    # Section 1: libs/utils.py code (module level)
-    merged_lines.append("#" * 78)
-    merged_lines.append("# libs/utils.py")
-    merged_lines.append("#" * 78)
-    merged_lines.append("")
-    merged_lines.append(utils_code.strip())
-    merged_lines.append("")
-    merged_lines.append("")
-
-    # Section 2: sources/{source_name}/{source_name}.py code (module level)
-    merged_lines.append("#" * 78)
-    merged_lines.append(f"# sources/{source_name}/{source_name}.py")
-    merged_lines.append("#" * 78)
-    merged_lines.append("")
-    merged_lines.append(source_code.strip())
-    merged_lines.append("")
-    merged_lines.append("")
-
-    # Section 3: pipeline/lakeflow_python_source.py code (module level)
-    # Split into class definitions and registration
-    merged_lines.append("#" * 78)
-    merged_lines.append("# pipeline/lakeflow_python_source.py")
-    merged_lines.append("#" * 78)
-    merged_lines.append("")
-    
-    # Extract the registration line
-    lakeflow_lines = lakeflow_code.strip().split("\n")
-    class_code_lines = []
-    registration_lines = []
-    
-    for line in lakeflow_lines:
-        if line.strip().startswith("spark.dataSource.register"):
-            registration_lines.append(line)
-        else:
-            class_code_lines.append(line)
-    
-    # Add class definitions at module level (not indented)
-    merged_lines.append("\n".join(class_code_lines))
-    merged_lines.append("")
-    merged_lines.append("")
-
-    # Now create the register function that only does registration
-    merged_lines.append("")
+    # Start the register_lakeflow_source function
     merged_lines.append("def register_lakeflow_source(spark):")
     merged_lines.append('    """Register the Lakeflow Python source with Spark."""')
-    merged_lines.append("    # Classes are defined at module level to avoid closure serialization")
-    for line in registration_lines:
-        merged_lines.append("    " + line.strip())
+    merged_lines.append("")
+
+    # Section 1: libs/utils.py code
+    merged_lines.append("    " + "#" * 56)
+    merged_lines.append("    # libs/utils.py")
+    merged_lines.append("    " + "#" * 56)
+    merged_lines.append("")
+    # Indent the code
+    for line in utils_code.strip().split("\n"):
+        if line.strip():  # Only indent non-empty lines
+            merged_lines.append("    " + line)
+        else:
+            merged_lines.append("")
+    merged_lines.append("")
+    merged_lines.append("")
+
+    # Section 2: sources/{source_name}/{source_name}.py code
+    merged_lines.append("    " + "#" * 56)
+    merged_lines.append(f"    # sources/{source_name}/{source_name}.py")
+    merged_lines.append("    " + "#" * 56)
+    merged_lines.append("")
+    for line in source_code.strip().split("\n"):
+        if line.strip():
+            merged_lines.append("    " + line)
+        else:
+            merged_lines.append("")
+    merged_lines.append("")
+    merged_lines.append("")
+
+    # Section 3: pipeline/lakeflow_python_source.py code
+    merged_lines.append("    " + "#" * 56)
+    merged_lines.append("    # pipeline/lakeflow_python_source.py")
+    merged_lines.append("    " + "#" * 56)
+    merged_lines.append("")
+    for line in lakeflow_code.strip().split("\n"):
+        if line.strip():
+            merged_lines.append("    " + line)
+        else:
+            merged_lines.append("")
     merged_lines.append("")
 
     merged_content = "\n".join(merged_lines)
