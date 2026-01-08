@@ -97,6 +97,7 @@ The Qualtrics connector exposes a **static list** of tables:
 - `mailing_list_contacts` - Contact records within a specific mailing list
 - `directory_contacts` - All contact records across all mailing lists in a directory
 - `directories` - XM Directory instances (organizational containers for contacts and mailing lists)
+- `users` - Organization users (brand admins, survey creators)
 
 ### Object Summary, Primary Keys, and Ingestion Mode
 
@@ -110,6 +111,7 @@ The Qualtrics connector exposes a **static list** of tables:
 | `mailing_list_contacts` | Contact records within a specific mailing list | `snapshot` | `contact_id` | N/A (full refresh) |
 | `directory_contacts` | All contacts across all mailing lists in a directory | `snapshot` | `contact_id` | N/A (full refresh) |
 | `directories` | XM Directory instances (organizational structure) | `snapshot` | `directory_id` | N/A (full refresh) |
+| `users` | Organization users (brand admins, survey creators) | `snapshot` | `id` | N/A (full refresh) |
 
 ### Required and Optional Table Options
 
@@ -181,6 +183,12 @@ Requires XM Directory (not available for XM Directory Lite).
 - **No table options required**: This table lists all accessible XM Directory instances
 - Returns organizational containers for contacts and mailing lists
 - Use the `directory_id` from this table as input for the `mailing_list_contacts` or `directory_contacts` table's `directoryId` option
+
+#### `users` table
+- **No table options required**: This table lists all users in the organization
+- Returns user accounts including brand administrators and survey creators
+- Useful for joining with survey owner data (`owner_id` field in surveys table)
+- Use for access control analysis and user activity tracking
 
 ### Auto-Consolidation Feature
 
@@ -397,6 +405,16 @@ Question IDs (e.g., `QID1`, `QID2`) are survey-specific. The `values` field uses
   - `external_data_reference` (boolean): Deduplicate by external reference
   - `phone` (boolean): Deduplicate by phone number
 
+#### `users` table schema:
+- `id` (string): Unique user identifier (primary key) - Format: `UR_...`
+- `username` (string): Username (typically email address)
+- `email` (string): User's email address
+- `first_name` (string): User's first name
+- `last_name` (string): User's last name
+- `user_type` (string): User type code (e.g., `UT_BRANDADMIN`, `UT_FULLUSER`, `UT_PARTICIPANT`)
+- `division_id` (string): Division identifier if user belongs to a specific division (may be null)
+- `account_status` (string): Account status (e.g., `active`, `disabled`)
+
 ## Data Type Mapping
 
 Qualtrics JSON fields are mapped to Spark types as follows:
@@ -475,6 +493,11 @@ Example `pipeline_spec` with auto-consolidation (recommended):
         "table": {
           "source_table": "directories"
         }
+      },
+      {
+        "table": {
+          "source_table": "users"
+        }
       }
     ]
   }
@@ -527,6 +550,11 @@ Example `pipeline_spec` with specific surveys (backward compatible):
       {
         "table": {
           "source_table": "directories"
+        }
+      },
+      {
+        "table": {
+          "source_table": "users"
         }
       }
     ]
@@ -587,6 +615,11 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 - **Note**: The Qualtrics API does not return `last_modified_date` for contacts, so incremental sync is not supported
 - Requires XM Directory (not available for XM Directory Lite)
 - Use this when you want all contacts from a directory without filtering by mailing list
+
+**For `users` table (Snapshot)**:
+- **All runs**: Performs full refresh of all users in the organization
+- Returns all user accounts including brand admins, full users, and participants
+- Useful for joining with `owner_id` fields in other tables
 
 Survey response exports take 30-90 seconds depending on response count. The connector handles polling automatically.
 
