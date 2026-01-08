@@ -803,7 +803,7 @@ Primary keys for each object are static and defined by the connector:
 |------------|---------------|--------------|-------|
 | `surveys` | `cdc` | `lastModified` | Supports incremental updates based on modification timestamp. |
 | `survey_definitions` | `cdc` | `LastModified` | Supports incremental updates; only fetches definitions modified since last sync. |
-| `survey_responses` | `append` | `recordedDate` | New responses are appended; existing responses are immutable once completed. |
+| `survey_responses` | `append` | `recordedDate` | New responses are appended; edits made in UI are not detected (API does not expose modification timestamp). |
 | `distributions` | `cdc` | `modifiedDate` | Distribution records can be updated (e.g., status changes). |
 | `directories` | `snapshot` | N/A | Full refresh; organizational structure. API does not return modification timestamps. |
 | `mailing_lists` | `snapshot` | N/A | Full refresh; relatively small dataset. Requires directoryId. |
