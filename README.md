@@ -27,7 +27,9 @@ Follow the instructions in [`prompts/README.md`](prompts/README.md) to create ne
 2. **Implement the connector** — Implement the `LakeflowConnect` interface methods
 3. **Test & iterate** — Run the standard test suites against a real source system
    - *(Optional)* Implement write-back testing for end-to-end validation (write → read → verify cycle)
-4. **Generate documentation** — Create user-facing docs using the documentation template
+4. **Generate documentation** — Create user-facing docs and connector spec
+   - Create the public-facing README using the documentation template
+   - Generate the connector spec YAML file (connection parameters and allowlist options)
    - *(Temporary)* Run `tools/scripts/merge_python_source.py` to generate the deployable file
 
 ### Claude Code
@@ -52,10 +54,13 @@ class LakeflowConnect:
         """Return the Spark schema for a table."""
 
     def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
-        """Return metadata: primary_keys, cursor_field, ingestion_type (snapshot|cdc|append)."""
+        """Return metadata: primary_keys, cursor_field, ingestion_type (snapshot|cdc|cdc_with_deletes|append)."""
 
     def read_table(self, table_name: str, start_offset: dict, table_options: dict[str, str]) -> (Iterator[dict], dict):
         """Yield records as JSON dicts and return the next offset for incremental reads."""
+
+    def read_table_deletes(self, table_name: str, start_offset: dict, table_options: dict[str, str]) -> (Iterator[dict], dict):
+        """Optional: Yield deleted records for delete synchronization. Only required if ingestion_type is 'cdc_with_deletes'."""
 ```
 
 ### Tests

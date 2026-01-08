@@ -27,7 +27,9 @@ If you need comprehensive end-to-end validation:
 ### Final Step (Required)
 - **Step 6: Create Public Documentation** - Generate user-facing README
   - See details in [create_connector_documentation.md](create_connector_documentation.md)
-- **(Temporary) Step 7: Run merge scripts**
+- **Step 7: Create connector spec YAML file**
+  - See details in [generate_connector_spec_yaml.md](generate_connector_spec_yaml.md)
+- **(Temporary) Step 8: Run merge scripts**
   - As a temporary workaround for current compatibility issues with Python Data Source and SDP, please run `tools/scripts/merge_python_source.py` on your newly developed source. This will combine the source implementation into a single file.
 
 ## Templates

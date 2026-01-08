@@ -13,6 +13,7 @@ from typing import (
     Iterator,
     List,
 )
+import json
 
 from pyspark.sql import Row
 from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
@@ -28,132 +29,182 @@ def register_lakeflow_source(spark):
     # libs/utils.py
     ########################################################
 
+    def _parse_struct(value: Any, field_type: StructType) -> Row:
+        """Parse a dictionary into a PySpark Row based on StructType schema."""
+        if not isinstance(value, dict):
+            raise ValueError(f"Expected a dictionary for StructType, got {type(value)}")
+        # Spark Python -> Arrow conversion require missing StructType fields to be assigned None.
+        if value == {}:
+            raise ValueError(
+                "field in StructType cannot be an empty dict. "
+                "Please assign None as the default value instead."
+            )
+        field_dict = {}
+        for field in field_type.fields:
+            if field.name in value:
+                field_dict[field.name] = parse_value(value.get(field.name), field.dataType)
+            elif field.nullable:
+                field_dict[field.name] = None
+            else:
+                raise ValueError(f"Field {field.name} is not nullable but not found in the input")
+        return Row(**field_dict)
+
+
+    def _parse_array(value: Any, field_type: ArrayType) -> list:
+        """Parse a list into a PySpark array based on ArrayType schema."""
+        if not isinstance(value, list):
+            if field_type.containsNull:
+                return [parse_value(value, field_type.elementType)]
+            raise ValueError(f"Expected a list for ArrayType, got {type(value)}")
+        return [parse_value(v, field_type.elementType) for v in value]
+
+
+    def _parse_map(value: Any, field_type: MapType) -> dict:
+        """Parse a dictionary into a PySpark map based on MapType schema."""
+        if not isinstance(value, dict):
+            raise ValueError(f"Expected a dictionary for MapType, got {type(value)}")
+        return {
+            parse_value(k, field_type.keyType): parse_value(v, field_type.valueType)
+            for k, v in value.items()
+        }
+
+
+    def _parse_string(value: Any) -> str:
+        """Convert value to string."""
+        return str(value)
+
+
+    def _parse_integer(value: Any) -> int:
+        """Convert value to integer."""
+        if isinstance(value, str) and value.strip():
+            return int(float(value)) if "." in value else int(value)
+        if isinstance(value, (int, float)):
+            return int(value)
+        raise ValueError(f"Cannot convert {value} to integer")
+
+
+    def _parse_float(value: Any) -> float:
+        """Convert value to float."""
+        return float(value)
+
+
+    def _parse_decimal(value: Any) -> Decimal:
+        """Convert value to Decimal."""
+        return Decimal(value) if isinstance(value, str) and value.strip() else Decimal(str(value))
+
+
+    def _parse_boolean(value: Any) -> bool:
+        """Convert value to boolean."""
+        if isinstance(value, str):
+            lowered = value.lower()
+            if lowered in ("true", "t", "yes", "y", "1"):
+                return True
+            if lowered in ("false", "f", "no", "n", "0"):
+                return False
+        return bool(value)
+
+
+    def _parse_date(value: Any) -> datetime.date:
+        """Convert value to date."""
+        if isinstance(value, str):
+            for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+                try:
+                    return datetime.strptime(value, fmt).date()
+                except ValueError:
+                    continue
+            return datetime.fromisoformat(value).date()
+        if isinstance(value, datetime):
+            return value.date()
+        raise ValueError(f"Cannot convert {value} to date")
+
+
+    def _parse_timestamp(value: Any) -> datetime:
+        """Convert value to timestamp."""
+        if isinstance(value, str):
+            ts_value = value.replace("Z", "+00:00") if value.endswith("Z") else value
+            try:
+                return datetime.fromisoformat(ts_value)
+            except ValueError:
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
+                    try:
+                        return datetime.strptime(ts_value, fmt)
+                    except ValueError:
+                        continue
+        elif isinstance(value, (int, float)):
+            return datetime.fromtimestamp(value)
+        elif isinstance(value, datetime):
+            return value
+        raise ValueError(f"Cannot convert {value} to timestamp")
+
+
+    def _decode_string_to_bytes(value: str) -> bytes:
+        """Try to decode a string as base64, then hex, then UTF-8."""
+        try:
+            return base64.b64decode(value)
+        except Exception:
+            pass
+        try:
+            return bytes.fromhex(value)
+        except Exception:
+            pass
+        return value.encode("utf-8")
+
+
+    def _parse_binary(value: Any) -> bytes:
+        """Convert value to bytes. Tries base64, then hex, then UTF-8 for strings."""
+        if isinstance(value, bytes):
+            return value
+        if isinstance(value, bytearray):
+            return bytes(value)
+        if isinstance(value, str):
+            return _decode_string_to_bytes(value)
+        if isinstance(value, list):
+            return bytes(value)
+        return str(value).encode("utf-8")
+
+
+    # Mapping of primitive types to their parser functions
+    _PRIMITIVE_PARSERS = {
+        StringType: _parse_string,
+        IntegerType: _parse_integer,
+        LongType: _parse_integer,
+        FloatType: _parse_float,
+        DoubleType: _parse_float,
+        DecimalType: _parse_decimal,
+        BooleanType: _parse_boolean,
+        DateType: _parse_date,
+        TimestampType: _parse_timestamp,
+        BinaryType: _parse_binary,
+    }
+
+
     def parse_value(value: Any, field_type: DataType) -> Any:
         """
         Converts a JSON value into a PySpark-compatible data type based on the provided field type.
         """
         if value is None:
             return None
+
         # Handle complex types
         if isinstance(field_type, StructType):
-            # Validate input for StructType
-            if not isinstance(value, dict):
-                raise ValueError(f"Expected a dictionary for StructType, got {type(value)}")
-            # Spark Python -> Arrow conversion require missing StructType fields to be assigned None.
-            if value == {}:
-                raise ValueError(
-                    f"field in StructType cannot be an empty dict. Please assign None as the default value instead."
-                )
-            # For StructType, recursively parse fields into a Row
-            field_dict = {}
-            for field in field_type.fields:
-                # When a field does not exist in the input:
-                # 1. set it to None when schema marks it as nullable
-                # 2. Otherwise, raise an error.
-                if field.name in value:
-                    field_dict[field.name] = parse_value(value.get(field.name), field.dataType)
-                elif field.nullable:
-                    field_dict[field.name] = None
-                else:
-                    raise ValueError(f"Field {field.name} is not nullable but not found in the input")
+            return _parse_struct(value, field_type)
+        if isinstance(field_type, ArrayType):
+            return _parse_array(value, field_type)
+        if isinstance(field_type, MapType):
+            return _parse_map(value, field_type)
 
-            return Row(**field_dict)
-        elif isinstance(field_type, ArrayType):
-            # For ArrayType, parse each element in the array
-            if not isinstance(value, list):
-                # Handle edge case: single value that should be an array
-                if field_type.containsNull:
-                    # Try to convert to a single-element array if nulls are allowed
-                    return [parse_value(value, field_type.elementType)]
-                else:
-                    raise ValueError(f"Expected a list for ArrayType, got {type(value)}")
-            return [parse_value(v, field_type.elementType) for v in value]
-        elif isinstance(field_type, MapType):
-            # Handle MapType - new support
-            if not isinstance(value, dict):
-                raise ValueError(f"Expected a dictionary for MapType, got {type(value)}")
-            return {
-                parse_value(k, field_type.keyType): parse_value(v, field_type.valueType)
-                for k, v in value.items()
-            }
-        # Handle primitive types with more robust error handling and type conversion
+        # Handle primitive types via type-based lookup
         try:
-            if isinstance(field_type, StringType):
-                # Don't convert None to "None" string
-                return str(value) if value is not None else None
-            elif isinstance(field_type, (IntegerType, LongType)):
-                # Convert numeric strings and floats to integers
-                if isinstance(value, str) and value.strip():
-                    # Handle numeric strings
-                    if "." in value:
-                        return int(float(value))
-                    return int(value)
-                elif isinstance(value, (int, float)):
-                    return int(value)
-                raise ValueError(f"Cannot convert {value} to integer")
-            elif isinstance(field_type, FloatType) or isinstance(field_type, DoubleType):
-                # New support for floating point types
-                if isinstance(value, str) and value.strip():
-                    return float(value)
-                return float(value)
-            elif isinstance(field_type, DecimalType):
-                # New support for Decimal type
+            field_type_class = type(field_type)
+            if field_type_class in _PRIMITIVE_PARSERS:
+                return _PRIMITIVE_PARSERS[field_type_class](value)
 
-                if isinstance(value, str) and value.strip():
-                    return Decimal(value)
-                return Decimal(str(value))
-            elif isinstance(field_type, BooleanType):
-                # Enhanced boolean conversion
-                if isinstance(value, str):
-                    lowered = value.lower()
-                    if lowered in ("true", "t", "yes", "y", "1"):
-                        return True
-                    elif lowered in ("false", "f", "no", "n", "0"):
-                        return False
-                return bool(value)
-            elif isinstance(field_type, DateType):
-                # New support for DateType
-                if isinstance(value, str):
-                    # Try multiple date formats
-                    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"):
-                        try:
-                            return datetime.strptime(value, fmt).date()
-                        except ValueError:
-                            continue
-                    # ISO format as fallback
-                    return datetime.fromisoformat(value).date()
-                elif isinstance(value, datetime):
-                    return value.date()
-                raise ValueError(f"Cannot convert {value} to date")
-            elif isinstance(field_type, TimestampType):
-                # Enhanced timestamp handling
-                if isinstance(value, str):
-                    # Handle multiple timestamp formats including Z and timezone offsets
-                    if value.endswith("Z"):
-                        value = value.replace("Z", "+00:00")
-                    try:
-                        return datetime.fromisoformat(value)
-                    except ValueError:
-                        # Try additional formats if ISO format fails
-                        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
-                            try:
-                                return datetime.strptime(value, fmt)
-                            except ValueError:
-                                continue
-                elif isinstance(value, (int, float)):
-                    # Handle Unix timestamps
-                    return datetime.fromtimestamp(value)
-                elif isinstance(value, datetime):
-                    return value
-                raise ValueError(f"Cannot convert {value} to timestamp")
-            else:
-                # Check for custom UDT handling
-                if hasattr(field_type, "fromJson"):
-                    # Support for User Defined Types that implement fromJson
-                    return field_type.fromJson(value)
-                raise TypeError(f"Unsupported field type: {field_type}")
+            # Check for custom UDT handling
+            if hasattr(field_type, "fromJson"):
+                return field_type.fromJson(value)
+
+            raise TypeError(f"Unsupported field type: {field_type}")
         except (ValueError, TypeError) as e:
-            # Add context to the error
             raise ValueError(f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}")
 
 
@@ -176,6 +227,7 @@ def register_lakeflow_source(spark):
             }
 
         def list_tables(self) -> List[str]:
+            """Return the list of available Zendesk tables."""
             return [
                 "tickets",
                 "organizations",
@@ -443,6 +495,7 @@ def register_lakeflow_source(spark):
         def read_table(
             self, table_name: str, start_offset: dict, table_options: Dict[str, str]
         ) -> (Iterator[dict], dict):
+            """Read data from the specified Zendesk table with incremental support."""
             # Map table names to their API endpoints and response keys
             api_config = {
                 "tickets": {
@@ -502,12 +555,46 @@ def register_lakeflow_source(spark):
             else:
                 return self._read_paginated(table_name, config, start_offset)
 
-        def _read_incremental(self, table_name: str, config: dict, start_offset: dict):
-            """Read data from incremental API endpoints"""
-            start_time = 0
-            if start_offset and "start_time" in start_offset:
-                start_time = start_offset["start_time"]
+        def _parse_timestamp(self, timestamp_str: str) -> int:
+            """Parse a Zendesk timestamp string to Unix timestamp."""
+            try:
+                # pylint: disable=no-member
+                return int(datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%SZ").timestamp())
+            except (ValueError, TypeError):
+                return 0
 
+        def _extract_ticket_comments(self, data: dict) -> tuple:
+            """Extract comment records from ticket events data."""
+            records = []
+            max_time = 0
+            for event in data.get("ticket_events", []):
+                if "child_events" in event:
+                    for child in event["child_events"]:
+                        if child.get("event_type") == "Comment":
+                            comment_record = {
+                                "id": event.get("id"),
+                                "ticket_id": event.get("ticket_id"),
+                                "created_at": event.get("created_at"),
+                                "updated_at": event.get("updated_at"),
+                                **child,
+                            }
+                            records.append(comment_record)
+                event_time = self._parse_timestamp(event.get("created_at", ""))
+                max_time = max(max_time, event_time)
+            return records, max_time
+
+        def _extract_records_with_time(self, data: dict, response_key: str) -> tuple:
+            """Extract records and find the max updated_at time."""
+            records = data.get(response_key, [])
+            max_time = 0
+            for record in records:
+                record_time = self._parse_timestamp(record.get("updated_at", ""))
+                max_time = max(max_time, record_time)
+            return records, max_time
+
+        def _read_incremental(self, table_name: str, config: dict, start_offset: dict):
+            """Read data from incremental API endpoints."""
+            start_time = start_offset.get("start_time", 0) if start_offset else 0
             endpoint = config["endpoint"]
             response_key = config["response_key"]
 
@@ -529,55 +616,16 @@ def register_lakeflow_source(spark):
 
                 data = resp.json()
 
-                # Handle ticket_comments specially
                 if table_name == "ticket_comments":
-                    # Extract comments from ticket events
-                    ticket_events = data.get("ticket_events", [])
-                    for event in ticket_events:
-                        # Create a record that combines ticket info with comments
-                        if "child_events" in event:
-                            for child in event["child_events"]:
-                                if child.get("event_type") == "Comment":
-                                    comment_record = {
-                                        "id": event.get("id"),
-                                        "ticket_id": event.get("ticket_id"),
-                                        "created_at": event.get("created_at"),
-                                        "updated_at": event.get("updated_at"),
-                                        **child,
-                                    }
-                                    all_records.append(comment_record)
-                        # Update last_time
-                        try:
-                            event_time = int(
-                                datetime.strptime(
-                                    event.get("created_at", ""), "%Y-%m-%dT%H:%M:%SZ"
-                                ).timestamp()
-                            )
-                            if event_time > last_time:
-                                last_time = event_time
-                        except Exception:
-                            pass
+                    records, max_time = self._extract_ticket_comments(data)
                 else:
-                    records = data.get(response_key, [])
-                    all_records.extend(records)
+                    records, max_time = self._extract_records_with_time(data, response_key)
 
-                    # Update last_time based on updated_at field
-                    for record in records:
-                        try:
-                            record_time = int(
-                                datetime.strptime(
-                                    record.get("updated_at", ""), "%Y-%m-%dT%H:%M:%SZ"
-                                ).timestamp()
-                            )
-                            if record_time > last_time:
-                                last_time = record_time
-                        except Exception:
-                            pass
+                all_records.extend(records)
+                last_time = max(last_time, max_time)
 
                 next_page = data.get("next_page")
-                end_of_stream = data.get("end_of_stream", True)
-
-                if end_of_stream or not next_page:
+                if data.get("end_of_stream", True) or not next_page:
                     break
 
             return all_records, {"start_time": last_time}
@@ -638,6 +686,8 @@ def register_lakeflow_source(spark):
     METADATA_TABLE = "_lakeflow_metadata"
     TABLE_NAME = "tableName"
     TABLE_NAME_LIST = "tableNameList"
+    TABLE_CONFIGS = "tableConfigs"
+    IS_DELETE_FLOW = "isDeleteFlow"
 
 
     class LakeflowStreamReader(SimpleDataSourceStreamReader):
@@ -662,9 +712,20 @@ def register_lakeflow_source(spark):
             return {}
 
         def read(self, start: dict) -> (Iterator[tuple], dict):
-            records, offset = self.lakeflow_connect.read_table(
-                self.options["tableName"], start, self.options
-            )
+            is_delete_flow = self.options.get(IS_DELETE_FLOW) == "true"
+            # Strip delete flow options before passing to connector
+            table_options = {
+                k: v for k, v in self.options.items() if k != IS_DELETE_FLOW
+            }
+
+            if is_delete_flow:
+                records, offset = self.lakeflow_connect.read_table_deletes(
+                    self.options[TABLE_NAME], start, table_options
+                )
+            else:
+                records, offset = self.lakeflow_connect.read_table(
+                    self.options[TABLE_NAME], start, table_options
+                )
             rows = map(lambda x: parse_value(x, self.schema), records)
             return rows, offset
 
@@ -705,9 +766,12 @@ def register_lakeflow_source(spark):
             table_name_list = self.options.get(TABLE_NAME_LIST, "")
             table_names = [o.strip() for o in table_name_list.split(",") if o.strip()]
             all_records = []
+            table_configs = json.loads(self.options.get(TABLE_CONFIGS, "{}"))
             for table in table_names:
-                metadata = self.lakeflow_connect.read_table_metadata(table, self.options)
-                all_records.append({"tableName": table, **metadata})
+                metadata = self.lakeflow_connect.read_table_metadata(
+                    table, table_configs.get(table, {})
+                )
+                all_records.append({TABLE_NAME: table, **metadata})
             return all_records
 
 
@@ -721,11 +785,11 @@ def register_lakeflow_source(spark):
             return "lakeflow_connect"
 
         def schema(self):
-            table = self.options["tableName"]
+            table = self.options[TABLE_NAME]
             if table == METADATA_TABLE:
                 return StructType(
                     [
-                        StructField("tableName", StringType(), False),
+                        StructField(TABLE_NAME, StringType(), False),
                         StructField("primary_keys", ArrayType(StringType()), True),
                         StructField("cursor_field", StringType(), True),
                         StructField("ingestion_type", StringType(), True),

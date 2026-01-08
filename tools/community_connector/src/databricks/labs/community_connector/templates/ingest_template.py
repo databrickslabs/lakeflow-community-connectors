@@ -1,7 +1,7 @@
 from pipeline.ingestion_pipeline import ingest
 from libs.source_loader import get_register_function
 
-# Connector source name. 
+# Connector source name.
 source_name = "{SOURCE_NAME}"  # e.g., "github", "salesforce"
 
 # =============================================================================
@@ -42,7 +42,8 @@ pipeline_spec = {
                 "table_configuration": {
                     "scd_type": "<SCD_TYPE_1 | SCD_TYPE_2 | APPEND_ONLY>",
                     "primary_keys": ["<PK_COL1>", ...],
-                    "<OTHER_OPTION_NAME>": "<VALUE>",  # e.g., for some GitHub tables, "owner" and "repo" need to be provided.
+                    # e.g., for some GitHub tables, "owner" and "repo" are required.
+                    "<OTHER_OPTION_NAME>": "<VALUE>",
                 },
             }
         },

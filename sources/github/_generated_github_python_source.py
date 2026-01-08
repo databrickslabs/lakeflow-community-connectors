@@ -8,10 +8,12 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Iterator
+import json
 
 from pyspark.sql import Row
 from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
 from pyspark.sql.types import *
+import base64
 import requests
 
 
@@ -22,132 +24,182 @@ def register_lakeflow_source(spark):
     # libs/utils.py
     ########################################################
 
+    def _parse_struct(value: Any, field_type: StructType) -> Row:
+        """Parse a dictionary into a PySpark Row based on StructType schema."""
+        if not isinstance(value, dict):
+            raise ValueError(f"Expected a dictionary for StructType, got {type(value)}")
+        # Spark Python -> Arrow conversion require missing StructType fields to be assigned None.
+        if value == {}:
+            raise ValueError(
+                "field in StructType cannot be an empty dict. "
+                "Please assign None as the default value instead."
+            )
+        field_dict = {}
+        for field in field_type.fields:
+            if field.name in value:
+                field_dict[field.name] = parse_value(value.get(field.name), field.dataType)
+            elif field.nullable:
+                field_dict[field.name] = None
+            else:
+                raise ValueError(f"Field {field.name} is not nullable but not found in the input")
+        return Row(**field_dict)
+
+
+    def _parse_array(value: Any, field_type: ArrayType) -> list:
+        """Parse a list into a PySpark array based on ArrayType schema."""
+        if not isinstance(value, list):
+            if field_type.containsNull:
+                return [parse_value(value, field_type.elementType)]
+            raise ValueError(f"Expected a list for ArrayType, got {type(value)}")
+        return [parse_value(v, field_type.elementType) for v in value]
+
+
+    def _parse_map(value: Any, field_type: MapType) -> dict:
+        """Parse a dictionary into a PySpark map based on MapType schema."""
+        if not isinstance(value, dict):
+            raise ValueError(f"Expected a dictionary for MapType, got {type(value)}")
+        return {
+            parse_value(k, field_type.keyType): parse_value(v, field_type.valueType)
+            for k, v in value.items()
+        }
+
+
+    def _parse_string(value: Any) -> str:
+        """Convert value to string."""
+        return str(value)
+
+
+    def _parse_integer(value: Any) -> int:
+        """Convert value to integer."""
+        if isinstance(value, str) and value.strip():
+            return int(float(value)) if "." in value else int(value)
+        if isinstance(value, (int, float)):
+            return int(value)
+        raise ValueError(f"Cannot convert {value} to integer")
+
+
+    def _parse_float(value: Any) -> float:
+        """Convert value to float."""
+        return float(value)
+
+
+    def _parse_decimal(value: Any) -> Decimal:
+        """Convert value to Decimal."""
+        return Decimal(value) if isinstance(value, str) and value.strip() else Decimal(str(value))
+
+
+    def _parse_boolean(value: Any) -> bool:
+        """Convert value to boolean."""
+        if isinstance(value, str):
+            lowered = value.lower()
+            if lowered in ("true", "t", "yes", "y", "1"):
+                return True
+            if lowered in ("false", "f", "no", "n", "0"):
+                return False
+        return bool(value)
+
+
+    def _parse_date(value: Any) -> datetime.date:
+        """Convert value to date."""
+        if isinstance(value, str):
+            for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+                try:
+                    return datetime.strptime(value, fmt).date()
+                except ValueError:
+                    continue
+            return datetime.fromisoformat(value).date()
+        if isinstance(value, datetime):
+            return value.date()
+        raise ValueError(f"Cannot convert {value} to date")
+
+
+    def _parse_timestamp(value: Any) -> datetime:
+        """Convert value to timestamp."""
+        if isinstance(value, str):
+            ts_value = value.replace("Z", "+00:00") if value.endswith("Z") else value
+            try:
+                return datetime.fromisoformat(ts_value)
+            except ValueError:
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
+                    try:
+                        return datetime.strptime(ts_value, fmt)
+                    except ValueError:
+                        continue
+        elif isinstance(value, (int, float)):
+            return datetime.fromtimestamp(value)
+        elif isinstance(value, datetime):
+            return value
+        raise ValueError(f"Cannot convert {value} to timestamp")
+
+
+    def _decode_string_to_bytes(value: str) -> bytes:
+        """Try to decode a string as base64, then hex, then UTF-8."""
+        try:
+            return base64.b64decode(value)
+        except Exception:
+            pass
+        try:
+            return bytes.fromhex(value)
+        except Exception:
+            pass
+        return value.encode("utf-8")
+
+
+    def _parse_binary(value: Any) -> bytes:
+        """Convert value to bytes. Tries base64, then hex, then UTF-8 for strings."""
+        if isinstance(value, bytes):
+            return value
+        if isinstance(value, bytearray):
+            return bytes(value)
+        if isinstance(value, str):
+            return _decode_string_to_bytes(value)
+        if isinstance(value, list):
+            return bytes(value)
+        return str(value).encode("utf-8")
+
+
+    # Mapping of primitive types to their parser functions
+    _PRIMITIVE_PARSERS = {
+        StringType: _parse_string,
+        IntegerType: _parse_integer,
+        LongType: _parse_integer,
+        FloatType: _parse_float,
+        DoubleType: _parse_float,
+        DecimalType: _parse_decimal,
+        BooleanType: _parse_boolean,
+        DateType: _parse_date,
+        TimestampType: _parse_timestamp,
+        BinaryType: _parse_binary,
+    }
+
+
     def parse_value(value: Any, field_type: DataType) -> Any:
         """
         Converts a JSON value into a PySpark-compatible data type based on the provided field type.
         """
         if value is None:
             return None
+
         # Handle complex types
         if isinstance(field_type, StructType):
-            # Validate input for StructType
-            if not isinstance(value, dict):
-                raise ValueError(f"Expected a dictionary for StructType, got {type(value)}")
-            # Spark Python -> Arrow conversion require missing StructType fields to be assigned None.
-            if value == {}:
-                raise ValueError(
-                    f"field in StructType cannot be an empty dict. Please assign None as the default value instead."
-                )
-            # For StructType, recursively parse fields into a Row
-            field_dict = {}
-            for field in field_type.fields:
-                # When a field does not exist in the input:
-                # 1. set it to None when schema marks it as nullable
-                # 2. Otherwise, raise an error.
-                if field.name in value:
-                    field_dict[field.name] = parse_value(value.get(field.name), field.dataType)
-                elif field.nullable:
-                    field_dict[field.name] = None
-                else:
-                    raise ValueError(f"Field {field.name} is not nullable but not found in the input")
+            return _parse_struct(value, field_type)
+        if isinstance(field_type, ArrayType):
+            return _parse_array(value, field_type)
+        if isinstance(field_type, MapType):
+            return _parse_map(value, field_type)
 
-            return Row(**field_dict)
-        elif isinstance(field_type, ArrayType):
-            # For ArrayType, parse each element in the array
-            if not isinstance(value, list):
-                # Handle edge case: single value that should be an array
-                if field_type.containsNull:
-                    # Try to convert to a single-element array if nulls are allowed
-                    return [parse_value(value, field_type.elementType)]
-                else:
-                    raise ValueError(f"Expected a list for ArrayType, got {type(value)}")
-            return [parse_value(v, field_type.elementType) for v in value]
-        elif isinstance(field_type, MapType):
-            # Handle MapType - new support
-            if not isinstance(value, dict):
-                raise ValueError(f"Expected a dictionary for MapType, got {type(value)}")
-            return {
-                parse_value(k, field_type.keyType): parse_value(v, field_type.valueType)
-                for k, v in value.items()
-            }
-        # Handle primitive types with more robust error handling and type conversion
+        # Handle primitive types via type-based lookup
         try:
-            if isinstance(field_type, StringType):
-                # Don't convert None to "None" string
-                return str(value) if value is not None else None
-            elif isinstance(field_type, (IntegerType, LongType)):
-                # Convert numeric strings and floats to integers
-                if isinstance(value, str) and value.strip():
-                    # Handle numeric strings
-                    if "." in value:
-                        return int(float(value))
-                    return int(value)
-                elif isinstance(value, (int, float)):
-                    return int(value)
-                raise ValueError(f"Cannot convert {value} to integer")
-            elif isinstance(field_type, FloatType) or isinstance(field_type, DoubleType):
-                # New support for floating point types
-                if isinstance(value, str) and value.strip():
-                    return float(value)
-                return float(value)
-            elif isinstance(field_type, DecimalType):
-                # New support for Decimal type
+            field_type_class = type(field_type)
+            if field_type_class in _PRIMITIVE_PARSERS:
+                return _PRIMITIVE_PARSERS[field_type_class](value)
 
-                if isinstance(value, str) and value.strip():
-                    return Decimal(value)
-                return Decimal(str(value))
-            elif isinstance(field_type, BooleanType):
-                # Enhanced boolean conversion
-                if isinstance(value, str):
-                    lowered = value.lower()
-                    if lowered in ("true", "t", "yes", "y", "1"):
-                        return True
-                    elif lowered in ("false", "f", "no", "n", "0"):
-                        return False
-                return bool(value)
-            elif isinstance(field_type, DateType):
-                # New support for DateType
-                if isinstance(value, str):
-                    # Try multiple date formats
-                    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"):
-                        try:
-                            return datetime.strptime(value, fmt).date()
-                        except ValueError:
-                            continue
-                    # ISO format as fallback
-                    return datetime.fromisoformat(value).date()
-                elif isinstance(value, datetime):
-                    return value.date()
-                raise ValueError(f"Cannot convert {value} to date")
-            elif isinstance(field_type, TimestampType):
-                # Enhanced timestamp handling
-                if isinstance(value, str):
-                    # Handle multiple timestamp formats including Z and timezone offsets
-                    if value.endswith("Z"):
-                        value = value.replace("Z", "+00:00")
-                    try:
-                        return datetime.fromisoformat(value)
-                    except ValueError:
-                        # Try additional formats if ISO format fails
-                        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
-                            try:
-                                return datetime.strptime(value, fmt)
-                            except ValueError:
-                                continue
-                elif isinstance(value, (int, float)):
-                    # Handle Unix timestamps
-                    return datetime.fromtimestamp(value)
-                elif isinstance(value, datetime):
-                    return value
-                raise ValueError(f"Cannot convert {value} to timestamp")
-            else:
-                # Check for custom UDT handling
-                if hasattr(field_type, "fromJson"):
-                    # Support for User Defined Types that implement fromJson
-                    return field_type.fromJson(value)
-                raise TypeError(f"Unsupported field type: {field_type}")
+            # Check for custom UDT handling
+            if hasattr(field_type, "fromJson"):
+                return field_type.fromJson(value)
+
+            raise TypeError(f"Unsupported field type: {field_type}")
         except (ValueError, TypeError) as e:
-            # Add context to the error
             raise ValueError(f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}")
 
 
@@ -162,7 +214,8 @@ def register_lakeflow_source(spark):
 
             Expected options:
                 - token: Personal access token used for GitHub REST API authentication.
-                - base_url (optional): Override for GitHub API base URL. Defaults to https://api.github.com.
+                - base_url (optional): Override for GitHub API base URL.
+                  Defaults to https://api.github.com.
             """
             token = options.get("token")
             if not token:
@@ -199,17 +252,9 @@ def register_lakeflow_source(spark):
                 "reviews",
             ]
 
-        def get_table_schema(
-            self, table_name: str, table_options: dict[str, str]
-        ) -> StructType:
-            """
-            Fetch the schema of a table.
-
-            The schema is static and derived from the GitHub REST API documentation
-            and connector design for the `issues` object.
-            """
-            # Nested `user` / `assignee` struct schema
-            user_struct = StructType(
+        def _get_user_struct(self) -> StructType:
+            """Return the nested user/assignee struct schema."""
+            return StructType(
                 [
                     StructField("login", StringType(), True),
                     StructField("id", LongType(), True),
@@ -219,7 +264,19 @@ def register_lakeflow_source(spark):
                 ]
             )
 
-            # Nested `label` struct schema
+        def _get_permissions_struct(self) -> StructType:
+            """Return the permissions struct schema."""
+            return StructType(
+                [
+                    StructField("admin", BooleanType(), True),
+                    StructField("push", BooleanType(), True),
+                    StructField("pull", BooleanType(), True),
+                ]
+            )
+
+        def _get_issues_schema(self) -> StructType:
+            """Return the issues table schema."""
+            user_struct = self._get_user_struct()
             label_struct = StructType(
                 [
                     StructField("id", LongType(), True),
@@ -230,8 +287,6 @@ def register_lakeflow_source(spark):
                     StructField("default", BooleanType(), True),
                 ]
             )
-
-            # Nested `milestone` struct schema (subset of fields)
             milestone_struct = StructType(
                 [
                     StructField("id", LongType(), True),
@@ -244,42 +299,7 @@ def register_lakeflow_source(spark):
                     StructField("due_on", StringType(), True),
                 ]
             )
-
-            # For `pull_request` and `reactions` we use MapType to keep the schema
-            # flexible while preserving nested structure without flattening.
-            pull_request_struct = MapType(StringType(), StringType(), True)
-            reactions_struct = MapType(StringType(), StringType(), True)
-
-            # Common nested structs used across multiple tables
-            permissions_struct = StructType(
-                [
-                    StructField("admin", BooleanType(), True),
-                    StructField("push", BooleanType(), True),
-                    StructField("pull", BooleanType(), True),
-                ]
-            )
-
-            license_struct = StructType(
-                [
-                    StructField("key", StringType(), True),
-                    StructField("name", StringType(), True),
-                    StructField("spdx_id", StringType(), True),
-                    StructField("url", StringType(), True),
-                    StructField("node_id", StringType(), True),
-                ]
-            )
-
-            template_repository_struct = StructType(
-                [
-                    StructField("id", LongType(), True),
-                    StructField("node_id", StringType(), True),
-                    StructField("name", StringType(), True),
-                    StructField("full_name", StringType(), True),
-                ]
-            )
-
-            # Primary `issues` table schema
-            issues_schema = StructType(
+            return StructType(
                 [
                     StructField("id", LongType(), False),
                     StructField("node_id", StringType(), True),
@@ -307,312 +327,335 @@ def register_lakeflow_source(spark):
                     StructField("assignees", ArrayType(user_struct, True), True),
                     StructField("labels", ArrayType(label_struct, True), True),
                     StructField("milestone", milestone_struct, True),
-                    StructField("pull_request", pull_request_struct, True),
-                    StructField("reactions", reactions_struct, True),
+                    StructField("pull_request", MapType(StringType(), StringType(), True), True),
+                    StructField("reactions", MapType(StringType(), StringType(), True), True),
                 ]
             )
 
-            if table_name == "issues":
-                return issues_schema
+        def _get_repositories_schema(self) -> StructType:
+            """Return the repositories table schema."""
+            user_struct = self._get_user_struct()
+            permissions_struct = self._get_permissions_struct()
+            license_struct = StructType(
+                [
+                    StructField("key", StringType(), True),
+                    StructField("name", StringType(), True),
+                    StructField("spdx_id", StringType(), True),
+                    StructField("url", StringType(), True),
+                    StructField("node_id", StringType(), True),
+                ]
+            )
+            template_repository_struct = StructType(
+                [
+                    StructField("id", LongType(), True),
+                    StructField("node_id", StringType(), True),
+                    StructField("name", StringType(), True),
+                    StructField("full_name", StringType(), True),
+                ]
+            )
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("node_id", StringType(), True),
+                    StructField("repository_owner", StringType(), False),
+                    StructField("repository_name", StringType(), False),
+                    StructField("name", StringType(), True),
+                    StructField("full_name", StringType(), True),
+                    StructField("owner", user_struct, True),
+                    StructField("private", BooleanType(), True),
+                    StructField("html_url", StringType(), True),
+                    StructField("description", StringType(), True),
+                    StructField("fork", BooleanType(), True),
+                    StructField("url", StringType(), True),
+                    StructField("archive_url", StringType(), True),
+                    StructField("assignees_url", StringType(), True),
+                    StructField("blobs_url", StringType(), True),
+                    StructField("branches_url", StringType(), True),
+                    StructField("collaborators_url", StringType(), True),
+                    StructField("comments_url", StringType(), True),
+                    StructField("commits_url", StringType(), True),
+                    StructField("compare_url", StringType(), True),
+                    StructField("contents_url", StringType(), True),
+                    StructField("contributors_url", StringType(), True),
+                    StructField("deployments_url", StringType(), True),
+                    StructField("downloads_url", StringType(), True),
+                    StructField("events_url", StringType(), True),
+                    StructField("forks_url", StringType(), True),
+                    StructField("git_commits_url", StringType(), True),
+                    StructField("git_refs_url", StringType(), True),
+                    StructField("git_tags_url", StringType(), True),
+                    StructField("git_url", StringType(), True),
+                    StructField("issue_comment_url", StringType(), True),
+                    StructField("issue_events_url", StringType(), True),
+                    StructField("issues_url", StringType(), True),
+                    StructField("keys_url", StringType(), True),
+                    StructField("labels_url", StringType(), True),
+                    StructField("languages_url", StringType(), True),
+                    StructField("merges_url", StringType(), True),
+                    StructField("milestones_url", StringType(), True),
+                    StructField("notifications_url", StringType(), True),
+                    StructField("pulls_url", StringType(), True),
+                    StructField("releases_url", StringType(), True),
+                    StructField("ssh_url", StringType(), True),
+                    StructField("stargazers_url", StringType(), True),
+                    StructField("statuses_url", StringType(), True),
+                    StructField("subscribers_url", StringType(), True),
+                    StructField("subscription_url", StringType(), True),
+                    StructField("tags_url", StringType(), True),
+                    StructField("teams_url", StringType(), True),
+                    StructField("trees_url", StringType(), True),
+                    StructField("clone_url", StringType(), True),
+                    StructField("mirror_url", StringType(), True),
+                    StructField("hooks_url", StringType(), True),
+                    StructField("svn_url", StringType(), True),
+                    StructField("homepage", StringType(), True),
+                    StructField("language", StringType(), True),
+                    StructField("forks_count", LongType(), True),
+                    StructField("stargazers_count", LongType(), True),
+                    StructField("watchers_count", LongType(), True),
+                    StructField("size", LongType(), True),
+                    StructField("default_branch", StringType(), True),
+                    StructField("open_issues_count", LongType(), True),
+                    StructField("is_template", BooleanType(), True),
+                    StructField("topics", ArrayType(StringType(), True), True),
+                    StructField("has_issues", BooleanType(), True),
+                    StructField("has_projects", BooleanType(), True),
+                    StructField("has_wiki", BooleanType(), True),
+                    StructField("has_pages", BooleanType(), True),
+                    StructField("has_downloads", BooleanType(), True),
+                    StructField("archived", BooleanType(), True),
+                    StructField("disabled", BooleanType(), True),
+                    StructField("visibility", StringType(), True),
+                    StructField("pushed_at", StringType(), True),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                    StructField("permissions", permissions_struct, True),
+                    StructField("allow_rebase_merge", BooleanType(), True),
+                    StructField("template_repository", template_repository_struct, True),
+                    StructField("temp_clone_token", StringType(), True),
+                    StructField("allow_squash_merge", BooleanType(), True),
+                    StructField("allow_merge_commit", BooleanType(), True),
+                    StructField("subscribers_count", LongType(), True),
+                    StructField("network_count", LongType(), True),
+                    StructField("license", license_struct, True),
+                ]
+            )
 
-            # `repositories` snapshot metadata schema
-            if table_name == "repositories":
-                repositories_schema = StructType(
-                    [
-                        StructField("id", LongType(), False),
-                        StructField("node_id", StringType(), True),
-                        StructField("repository_owner", StringType(), False),
-                        StructField("repository_name", StringType(), False),
-                        StructField("name", StringType(), True),
-                        StructField("full_name", StringType(), True),
-                        StructField("owner", user_struct, True),
-                        StructField("private", BooleanType(), True),
-                        StructField("html_url", StringType(), True),
-                        StructField("description", StringType(), True),
-                        StructField("fork", BooleanType(), True),
-                        StructField("url", StringType(), True),
-                        StructField("archive_url", StringType(), True),
-                        StructField("assignees_url", StringType(), True),
-                        StructField("blobs_url", StringType(), True),
-                        StructField("branches_url", StringType(), True),
-                        StructField("collaborators_url", StringType(), True),
-                        StructField("comments_url", StringType(), True),
-                        StructField("commits_url", StringType(), True),
-                        StructField("compare_url", StringType(), True),
-                        StructField("contents_url", StringType(), True),
-                        StructField("contributors_url", StringType(), True),
-                        StructField("deployments_url", StringType(), True),
-                        StructField("downloads_url", StringType(), True),
-                        StructField("events_url", StringType(), True),
-                        StructField("forks_url", StringType(), True),
-                        StructField("git_commits_url", StringType(), True),
-                        StructField("git_refs_url", StringType(), True),
-                        StructField("git_tags_url", StringType(), True),
-                        StructField("git_url", StringType(), True),
-                        StructField("issue_comment_url", StringType(), True),
-                        StructField("issue_events_url", StringType(), True),
-                        StructField("issues_url", StringType(), True),
-                        StructField("keys_url", StringType(), True),
-                        StructField("labels_url", StringType(), True),
-                        StructField("languages_url", StringType(), True),
-                        StructField("merges_url", StringType(), True),
-                        StructField("milestones_url", StringType(), True),
-                        StructField("notifications_url", StringType(), True),
-                        StructField("pulls_url", StringType(), True),
-                        StructField("releases_url", StringType(), True),
-                        StructField("ssh_url", StringType(), True),
-                        StructField("stargazers_url", StringType(), True),
-                        StructField("statuses_url", StringType(), True),
-                        StructField("subscribers_url", StringType(), True),
-                        StructField("subscription_url", StringType(), True),
-                        StructField("tags_url", StringType(), True),
-                        StructField("teams_url", StringType(), True),
-                        StructField("trees_url", StringType(), True),
-                        StructField("clone_url", StringType(), True),
-                        StructField("mirror_url", StringType(), True),
-                        StructField("hooks_url", StringType(), True),
-                        StructField("svn_url", StringType(), True),
-                        StructField("homepage", StringType(), True),
-                        StructField("language", StringType(), True),
-                        StructField("forks_count", LongType(), True),
-                        StructField("stargazers_count", LongType(), True),
-                        StructField("watchers_count", LongType(), True),
-                        StructField("size", LongType(), True),
-                        StructField("default_branch", StringType(), True),
-                        StructField("open_issues_count", LongType(), True),
-                        StructField("is_template", BooleanType(), True),
-                        StructField("topics", ArrayType(StringType(), True), True),
-                        StructField("has_issues", BooleanType(), True),
-                        StructField("has_projects", BooleanType(), True),
-                        StructField("has_wiki", BooleanType(), True),
-                        StructField("has_pages", BooleanType(), True),
-                        StructField("has_downloads", BooleanType(), True),
-                        StructField("archived", BooleanType(), True),
-                        StructField("disabled", BooleanType(), True),
-                        StructField("visibility", StringType(), True),
-                        StructField("pushed_at", StringType(), True),
-                        StructField("created_at", StringType(), True),
-                        StructField("updated_at", StringType(), True),
-                        StructField("permissions", permissions_struct, True),
-                        StructField("allow_rebase_merge", BooleanType(), True),
-                        StructField(
-                            "template_repository", template_repository_struct, True
-                        ),
-                        StructField("temp_clone_token", StringType(), True),
-                        StructField("allow_squash_merge", BooleanType(), True),
-                        StructField("allow_merge_commit", BooleanType(), True),
-                        StructField("subscribers_count", LongType(), True),
-                        StructField("network_count", LongType(), True),
-                        StructField("license", license_struct, True),
-                    ]
-                )
-                return repositories_schema
+        def _get_pull_requests_schema(self) -> StructType:
+            """Return the pull_requests table schema."""
+            user_struct = self._get_user_struct()
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("node_id", StringType(), True),
+                    StructField("number", LongType(), False),
+                    StructField("repository_owner", StringType(), False),
+                    StructField("repository_name", StringType(), False),
+                    StructField("state", StringType(), True),
+                    StructField("title", StringType(), True),
+                    StructField("body", StringType(), True),
+                    StructField("draft", BooleanType(), True),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                    StructField("closed_at", StringType(), True),
+                    StructField("merged_at", StringType(), True),
+                    StructField("merge_commit_sha", StringType(), True),
+                    StructField("user", user_struct, True),
+                    StructField("base", MapType(StringType(), StringType(), True), True),
+                    StructField("head", MapType(StringType(), StringType(), True), True),
+                    StructField("html_url", StringType(), True),
+                    StructField("url", StringType(), True),
+                ]
+            )
 
-            # `pull_requests` cdc table schema
-            if table_name == "pull_requests":
-                pull_requests_schema = StructType(
-                    [
-                        StructField("id", LongType(), False),
-                        StructField("node_id", StringType(), True),
-                        StructField("number", LongType(), False),
-                        StructField("repository_owner", StringType(), False),
-                        StructField("repository_name", StringType(), False),
-                        StructField("state", StringType(), True),
-                        StructField("title", StringType(), True),
-                        StructField("body", StringType(), True),
-                        StructField("draft", BooleanType(), True),
-                        StructField("created_at", StringType(), True),
-                        StructField("updated_at", StringType(), True),
-                        StructField("closed_at", StringType(), True),
-                        StructField("merged_at", StringType(), True),
-                        StructField("merge_commit_sha", StringType(), True),
-                        StructField("user", user_struct, True),
-                        StructField(
-                            "base", MapType(StringType(), StringType(), True), True
-                        ),
-                        StructField(
-                            "head", MapType(StringType(), StringType(), True), True
-                        ),
-                        StructField("html_url", StringType(), True),
-                        StructField("url", StringType(), True),
-                    ]
-                )
-                return pull_requests_schema
+        def _get_comments_schema(self) -> StructType:
+            """Return the comments table schema."""
+            user_struct = self._get_user_struct()
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("node_id", StringType(), True),
+                    StructField("repository_owner", StringType(), False),
+                    StructField("repository_name", StringType(), False),
+                    StructField("issue_url", StringType(), True),
+                    StructField("html_url", StringType(), True),
+                    StructField("body", StringType(), True),
+                    StructField("user", user_struct, True),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                    StructField("author_association", StringType(), True),
+                ]
+            )
 
-            # `comments` cdc table schema (issue comments)
-            if table_name == "comments":
-                comments_schema = StructType(
-                    [
-                        StructField("id", LongType(), False),
-                        StructField("node_id", StringType(), True),
-                        StructField("repository_owner", StringType(), False),
-                        StructField("repository_name", StringType(), False),
-                        StructField("issue_url", StringType(), True),
-                        StructField("html_url", StringType(), True),
-                        StructField("body", StringType(), True),
-                        StructField("user", user_struct, True),
-                        StructField("created_at", StringType(), True),
-                        StructField("updated_at", StringType(), True),
-                        StructField("author_association", StringType(), True),
-                    ]
-                )
-                return comments_schema
+        def _get_commits_schema(self) -> StructType:
+            """Return the commits table schema."""
+            user_struct = self._get_user_struct()
+            return StructType(
+                [
+                    StructField("sha", StringType(), False),
+                    StructField("node_id", StringType(), True),
+                    StructField("repository_owner", StringType(), False),
+                    StructField("repository_name", StringType(), False),
+                    StructField("commit_message", StringType(), True),
+                    StructField("commit_author_name", StringType(), True),
+                    StructField("commit_author_email", StringType(), True),
+                    StructField("commit_author_date", StringType(), True),
+                    StructField("commit_committer_name", StringType(), True),
+                    StructField("commit_committer_email", StringType(), True),
+                    StructField("commit_committer_date", StringType(), True),
+                    StructField("html_url", StringType(), True),
+                    StructField("url", StringType(), True),
+                    StructField("author", user_struct, True),
+                    StructField("committer", user_struct, True),
+                ]
+            )
 
-            # `commits` append-only table schema
-            if table_name == "commits":
-                commits_schema = StructType(
-                    [
-                        StructField("sha", StringType(), False),
-                        StructField("node_id", StringType(), True),
-                        StructField("repository_owner", StringType(), False),
-                        StructField("repository_name", StringType(), False),
-                        StructField("commit_message", StringType(), True),
-                        StructField("commit_author_name", StringType(), True),
-                        StructField("commit_author_email", StringType(), True),
-                        StructField("commit_author_date", StringType(), True),
-                        StructField("commit_committer_name", StringType(), True),
-                        StructField("commit_committer_email", StringType(), True),
-                        StructField("commit_committer_date", StringType(), True),
-                        StructField("html_url", StringType(), True),
-                        StructField("url", StringType(), True),
-                        StructField("author", user_struct, True),
-                        StructField("committer", user_struct, True),
-                    ]
-                )
-                return commits_schema
+        def _get_users_schema(self) -> StructType:
+            """Return the users table schema."""
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("login", StringType(), False),
+                    StructField("node_id", StringType(), True),
+                    StructField("type", StringType(), True),
+                    StructField("site_admin", BooleanType(), True),
+                    StructField("name", StringType(), True),
+                    StructField("company", StringType(), True),
+                    StructField("blog", StringType(), True),
+                    StructField("location", StringType(), True),
+                    StructField("email", StringType(), True),
+                    StructField("created_at", StringType(), True),
+                    StructField("updated_at", StringType(), True),
+                ]
+            )
 
-            # `users` snapshot metadata schema
-            if table_name == "users":
-                users_schema = StructType(
-                    [
-                        StructField("id", LongType(), False),
-                        StructField("login", StringType(), False),
-                        StructField("node_id", StringType(), True),
-                        StructField("type", StringType(), True),
-                        StructField("site_admin", BooleanType(), True),
-                        StructField("name", StringType(), True),
-                        StructField("company", StringType(), True),
-                        StructField("blog", StringType(), True),
-                        StructField("location", StringType(), True),
-                        StructField("email", StringType(), True),
-                        StructField("created_at", StringType(), True),
-                        StructField("updated_at", StringType(), True),
-                    ]
-                )
-                return users_schema
+        def _get_organizations_schema(self) -> StructType:
+            """Return the organizations table schema."""
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("login", StringType(), False),
+                    StructField("node_id", StringType(), True),
+                    StructField("url", StringType(), True),
+                    StructField("repos_url", StringType(), True),
+                    StructField("events_url", StringType(), True),
+                    StructField("hooks_url", StringType(), True),
+                    StructField("issues_url", StringType(), True),
+                    StructField("members_url", StringType(), True),
+                    StructField("public_members_url", StringType(), True),
+                    StructField("avatar_url", StringType(), True),
+                    StructField("description", StringType(), True),
+                ]
+            )
 
-            # `organizations` snapshot metadata schema
-            if table_name == "organizations":
-                # The organizations table now reflects the shape of the
-                # `GET /user/orgs` response without expanding each org via
-                # `GET /orgs/{org}`. This avoids additional permissions that
-                # may be required for the detail endpoint while still exposing
-                # the most useful summary metadata.
-                orgs_schema = StructType(
-                    [
-                        StructField("id", LongType(), False),
-                        StructField("login", StringType(), False),
-                        StructField("node_id", StringType(), True),
-                        StructField("url", StringType(), True),
-                        StructField("repos_url", StringType(), True),
-                        StructField("events_url", StringType(), True),
-                        StructField("hooks_url", StringType(), True),
-                        StructField("issues_url", StringType(), True),
-                        StructField("members_url", StringType(), True),
-                        StructField("public_members_url", StringType(), True),
-                        StructField("avatar_url", StringType(), True),
-                        StructField("description", StringType(), True),
-                    ]
-                )
-                return orgs_schema
+        def _get_teams_schema(self) -> StructType:
+            """Return the teams table schema."""
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("node_id", StringType(), True),
+                    StructField("organization_login", StringType(), False),
+                    StructField("name", StringType(), True),
+                    StructField("slug", StringType(), True),
+                    StructField("description", StringType(), True),
+                    StructField("privacy", StringType(), True),
+                    StructField("permission", StringType(), True),
+                ]
+            )
 
-            # `teams` snapshot metadata schema
-            if table_name == "teams":
-                teams_schema = StructType(
-                    [
-                        StructField("id", LongType(), False),
-                        StructField("node_id", StringType(), True),
-                        StructField("organization_login", StringType(), False),
-                        StructField("name", StringType(), True),
-                        StructField("slug", StringType(), True),
-                        StructField("description", StringType(), True),
-                        StructField("privacy", StringType(), True),
-                        StructField("permission", StringType(), True),
-                    ]
-                )
-                return teams_schema
+        def _get_assignees_schema(self) -> StructType:
+            """Return the assignees table schema."""
+            return StructType(
+                [
+                    StructField("repository_owner", StringType(), False),
+                    StructField("repository_name", StringType(), False),
+                    StructField("login", StringType(), False),
+                    StructField("id", LongType(), False),
+                    StructField("node_id", StringType(), True),
+                    StructField("type", StringType(), True),
+                    StructField("site_admin", BooleanType(), True),
+                ]
+            )
 
-            # `assignees` snapshot metadata schema
-            if table_name == "assignees":
-                assignees_schema = StructType(
-                    [
-                        StructField("repository_owner", StringType(), False),
-                        StructField("repository_name", StringType(), False),
-                        StructField("login", StringType(), False),
-                        StructField("id", LongType(), False),
-                        StructField("node_id", StringType(), True),
-                        StructField("type", StringType(), True),
-                        StructField("site_admin", BooleanType(), True),
-                    ]
-                )
-                return assignees_schema
+        def _get_collaborators_schema(self) -> StructType:
+            """Return the collaborators table schema."""
+            permissions_struct = self._get_permissions_struct()
+            return StructType(
+                [
+                    StructField("repository_owner", StringType(), False),
+                    StructField("repository_name", StringType(), False),
+                    StructField("login", StringType(), False),
+                    StructField("id", LongType(), False),
+                    StructField("node_id", StringType(), True),
+                    StructField("type", StringType(), True),
+                    StructField("site_admin", BooleanType(), True),
+                    StructField("permissions", permissions_struct, True),
+                ]
+            )
 
-            # `collaborators` snapshot metadata schema
-            if table_name == "collaborators":
-                collaborators_schema = StructType(
-                    [
-                        StructField("repository_owner", StringType(), False),
-                        StructField("repository_name", StringType(), False),
-                        StructField("login", StringType(), False),
-                        StructField("id", LongType(), False),
-                        StructField("node_id", StringType(), True),
-                        StructField("type", StringType(), True),
-                        StructField("site_admin", BooleanType(), True),
-                        StructField("permissions", permissions_struct, True),
-                    ]
-                )
-                return collaborators_schema
+        def _get_branches_schema(self) -> StructType:
+            """Return the branches table schema."""
+            commit_ref_struct = StructType(
+                [
+                    StructField("sha", StringType(), True),
+                    StructField("url", StringType(), True),
+                ]
+            )
+            return StructType(
+                [
+                    StructField("repository_owner", StringType(), False),
+                    StructField("repository_name", StringType(), False),
+                    StructField("name", StringType(), False),
+                    StructField("commit", commit_ref_struct, True),
+                    StructField("protected", BooleanType(), True),
+                    StructField("protection_url", StringType(), True),
+                ]
+            )
 
-            # `branches` snapshot metadata schema
-            if table_name == "branches":
-                commit_ref_struct = StructType(
-                    [
-                        StructField("sha", StringType(), True),
-                        StructField("url", StringType(), True),
-                    ]
-                )
-                branches_schema = StructType(
-                    [
-                        StructField("repository_owner", StringType(), False),
-                        StructField("repository_name", StringType(), False),
-                        StructField("name", StringType(), False),
-                        StructField("commit", commit_ref_struct, True),
-                        StructField("protected", BooleanType(), True),
-                        StructField("protection_url", StringType(), True),
-                    ]
-                )
-                return branches_schema
+        def _get_reviews_schema(self) -> StructType:
+            """Return the reviews table schema."""
+            user_struct = self._get_user_struct()
+            return StructType(
+                [
+                    StructField("id", LongType(), False),
+                    StructField("node_id", StringType(), True),
+                    StructField("repository_owner", StringType(), False),
+                    StructField("repository_name", StringType(), False),
+                    StructField("pull_number", LongType(), False),
+                    StructField("state", StringType(), True),
+                    StructField("body", StringType(), True),
+                    StructField("user", user_struct, True),
+                    StructField("commit_id", StringType(), True),
+                    StructField("submitted_at", StringType(), True),
+                    StructField("html_url", StringType(), True),
+                ]
+            )
 
-            # `reviews` append-only table schema
-            if table_name == "reviews":
-                reviews_schema = StructType(
-                    [
-                        StructField("id", LongType(), False),
-                        StructField("node_id", StringType(), True),
-                        StructField("repository_owner", StringType(), False),
-                        StructField("repository_name", StringType(), False),
-                        StructField("pull_number", LongType(), False),
-                        StructField("state", StringType(), True),
-                        StructField("body", StringType(), True),
-                        StructField("user", user_struct, True),
-                        StructField("commit_id", StringType(), True),
-                        StructField("submitted_at", StringType(), True),
-                        StructField("html_url", StringType(), True),
-                    ]
-                )
-                return reviews_schema
+        def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
+            """
+            Fetch the schema of a table.
 
-            raise ValueError(f"Unsupported table: {table_name!r}")
+            The schema is static and derived from the GitHub REST API documentation
+            and connector design for the `issues` object.
+            """
+            schema_map = {
+                "issues": self._get_issues_schema,
+                "repositories": self._get_repositories_schema,
+                "pull_requests": self._get_pull_requests_schema,
+                "comments": self._get_comments_schema,
+                "commits": self._get_commits_schema,
+                "users": self._get_users_schema,
+                "organizations": self._get_organizations_schema,
+                "teams": self._get_teams_schema,
+                "assignees": self._get_assignees_schema,
+                "collaborators": self._get_collaborators_schema,
+                "branches": self._get_branches_schema,
+                "reviews": self._get_reviews_schema,
+            }
+
+            if table_name not in schema_map:
+                raise ValueError(f"Unsupported table: {table_name!r}")
+            return schema_map[table_name]()
 
         def read_table_metadata(
             self, table_name: str, table_options: dict[str, str]
@@ -625,72 +668,63 @@ def register_lakeflow_source(spark):
                 - primary_keys: ["id"]
                 - cursor_field: updated_at
             """
-            if table_name == "issues":
-                return {
+            metadata_map = {
+                "issues": {
                     "primary_keys": ["id"],
                     "cursor_field": "updated_at",
                     "ingestion_type": "cdc",
-                }
-            if table_name == "repositories":
-                return {
+                },
+                "repositories": {
                     "primary_keys": ["id"],
                     "ingestion_type": "snapshot",
-                }
-            if table_name == "pull_requests":
-                return {
+                },
+                "pull_requests": {
                     "primary_keys": ["id"],
                     "cursor_field": "updated_at",
                     "ingestion_type": "cdc",
-                }
-            if table_name == "comments":
-                return {
+                },
+                "comments": {
                     "primary_keys": ["id"],
                     "cursor_field": "updated_at",
                     "ingestion_type": "cdc",
-                }
-            if table_name == "commits":
-                # Append-only stream keyed by immutable sha
-                return {
+                },
+                "commits": {
                     "primary_keys": ["sha"],
                     "ingestion_type": "append",
-                }
-            if table_name == "users":
-                return {
+                },
+                "users": {
                     "primary_keys": ["id"],
                     "ingestion_type": "snapshot",
-                }
-            if table_name == "organizations":
-                return {
+                },
+                "organizations": {
                     "primary_keys": ["id"],
                     "ingestion_type": "snapshot",
-                }
-            if table_name == "teams":
-                return {
+                },
+                "teams": {
                     "primary_keys": ["id"],
                     "ingestion_type": "snapshot",
-                }
-            if table_name == "assignees":
-                return {
+                },
+                "assignees": {
                     "primary_keys": ["repository_owner", "repository_name", "id"],
                     "ingestion_type": "snapshot",
-                }
-            if table_name == "collaborators":
-                return {
+                },
+                "collaborators": {
                     "primary_keys": ["repository_owner", "repository_name", "id"],
                     "ingestion_type": "snapshot",
-                }
-            if table_name == "branches":
-                return {
+                },
+                "branches": {
                     "primary_keys": ["repository_owner", "repository_name", "name"],
                     "ingestion_type": "snapshot",
-                }
-            if table_name == "reviews":
-                return {
+                },
+                "reviews": {
                     "primary_keys": ["id"],
                     "ingestion_type": "append",
-                }
+                },
+            }
 
-            raise ValueError(f"Unsupported table: {table_name!r}")
+            if table_name not in metadata_map:
+                raise ValueError(f"Unsupported table: {table_name!r}")
+            return metadata_map[table_name]
 
         def read_table(
             self, table_name: str, start_offset: dict, table_options: dict[str, str]
@@ -717,34 +751,26 @@ def register_lakeflow_source(spark):
                 - lookback_seconds: Lookback window applied when computing next cursor (default: 300).
                 - max_pages_per_batch: Optional safety limit on pages per read_table call.
             """
-            if table_name == "issues":
-                return self._read_issues(start_offset, table_options)
-            if table_name == "repositories":
-                return self._read_repositories(start_offset, table_options)
-            if table_name == "pull_requests":
-                return self._read_pull_requests(start_offset, table_options)
-            if table_name == "comments":
-                return self._read_comments(start_offset, table_options)
-            if table_name == "commits":
-                return self._read_commits(start_offset, table_options)
-            if table_name == "assignees":
-                return self._read_assignees(start_offset, table_options)
-            if table_name == "branches":
-                return self._read_branches(start_offset, table_options)
-            if table_name == "collaborators":
-                return self._read_collaborators(start_offset, table_options)
-            if table_name == "organizations":
-                return self._read_organizations(start_offset, table_options)
-            if table_name == "teams":
-                return self._read_teams(start_offset, table_options)
-            if table_name == "users":
-                return self._read_users(start_offset, table_options)
-            if table_name == "reviews":
-                return self._read_reviews(start_offset, table_options)
+            reader_map = {
+                "issues": self._read_issues,
+                "repositories": self._read_repositories,
+                "pull_requests": self._read_pull_requests,
+                "comments": self._read_comments,
+                "commits": self._read_commits,
+                "assignees": self._read_assignees,
+                "branches": self._read_branches,
+                "collaborators": self._read_collaborators,
+                "organizations": self._read_organizations,
+                "teams": self._read_teams,
+                "users": self._read_users,
+                "reviews": self._read_reviews,
+            }
 
-            raise ValueError(f"Unsupported table: {table_name!r}")
+            if table_name not in reader_map:
+                raise ValueError(f"Unsupported table: {table_name!r}")
+            return reader_map[table_name](start_offset, table_options)
 
-        def _read_issues(
+        def _read_issues(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
             self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """Internal implementation for reading the `issues` table."""
@@ -854,7 +880,7 @@ def register_lakeflow_source(spark):
 
             return iter(records), next_offset
 
-        def _read_repositories(
+        def _read_repositories(  # pylint: disable=too-many-locals
             self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """
@@ -948,7 +974,7 @@ def register_lakeflow_source(spark):
 
             return iter(records), {}
 
-        def _read_pull_requests(
+        def _read_pull_requests(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
             self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """
@@ -1056,7 +1082,7 @@ def register_lakeflow_source(spark):
 
             return iter(records), next_offset
 
-        def _read_comments(
+        def _read_comments(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
             self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """
@@ -1157,7 +1183,7 @@ def register_lakeflow_source(spark):
 
             return iter(records), next_offset
 
-        def _read_commits(
+        def _read_commits(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
             self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """
@@ -1265,7 +1291,7 @@ def register_lakeflow_source(spark):
 
             return iter(records), next_offset
 
-        def _read_assignees(
+        def _read_assignees(  # pylint: disable=too-many-locals
             self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """
@@ -1334,7 +1360,7 @@ def register_lakeflow_source(spark):
 
             return iter(records), {}
 
-        def _read_branches(
+        def _read_branches(  # pylint: disable=too-many-locals
             self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """
@@ -1402,7 +1428,7 @@ def register_lakeflow_source(spark):
 
             return iter(records), {}
 
-        def _read_collaborators(
+        def _read_collaborators(  # pylint: disable=too-many-locals
             self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """
@@ -1472,7 +1498,7 @@ def register_lakeflow_source(spark):
 
             return iter(records), {}
 
-        def _read_organizations(
+        def _read_organizations(  # pylint: disable=too-many-locals
             self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """
@@ -1557,7 +1583,7 @@ def register_lakeflow_source(spark):
             # Snapshot table – no incremental cursor at the moment.
             return iter(records), {}
 
-        def _read_teams(
+        def _read_teams(  # pylint: disable=too-many-locals
             self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """
@@ -1673,7 +1699,7 @@ def register_lakeflow_source(spark):
             record: dict[str, Any] = dict(user_obj)
             return iter([record]), {}
 
-        def _read_reviews(
+        def _read_reviews(  # pylint: disable=too-many-locals,too-many-statements
             self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """
@@ -1845,6 +1871,8 @@ def register_lakeflow_source(spark):
     METADATA_TABLE = "_lakeflow_metadata"
     TABLE_NAME = "tableName"
     TABLE_NAME_LIST = "tableNameList"
+    TABLE_CONFIGS = "tableConfigs"
+    IS_DELETE_FLOW = "isDeleteFlow"
 
 
     class LakeflowStreamReader(SimpleDataSourceStreamReader):
@@ -1869,9 +1897,20 @@ def register_lakeflow_source(spark):
             return {}
 
         def read(self, start: dict) -> (Iterator[tuple], dict):
-            records, offset = self.lakeflow_connect.read_table(
-                self.options["tableName"], start, self.options
-            )
+            is_delete_flow = self.options.get(IS_DELETE_FLOW) == "true"
+            # Strip delete flow options before passing to connector
+            table_options = {
+                k: v for k, v in self.options.items() if k != IS_DELETE_FLOW
+            }
+
+            if is_delete_flow:
+                records, offset = self.lakeflow_connect.read_table_deletes(
+                    self.options[TABLE_NAME], start, table_options
+                )
+            else:
+                records, offset = self.lakeflow_connect.read_table(
+                    self.options[TABLE_NAME], start, table_options
+                )
             rows = map(lambda x: parse_value(x, self.schema), records)
             return rows, offset
 
@@ -1912,9 +1951,12 @@ def register_lakeflow_source(spark):
             table_name_list = self.options.get(TABLE_NAME_LIST, "")
             table_names = [o.strip() for o in table_name_list.split(",") if o.strip()]
             all_records = []
+            table_configs = json.loads(self.options.get(TABLE_CONFIGS, "{}"))
             for table in table_names:
-                metadata = self.lakeflow_connect.read_table_metadata(table, self.options)
-                all_records.append({"tableName": table, **metadata})
+                metadata = self.lakeflow_connect.read_table_metadata(
+                    table, table_configs.get(table, {})
+                )
+                all_records.append({TABLE_NAME: table, **metadata})
             return all_records
 
 
@@ -1928,11 +1970,11 @@ def register_lakeflow_source(spark):
             return "lakeflow_connect"
 
         def schema(self):
-            table = self.options["tableName"]
+            table = self.options[TABLE_NAME]
             if table == METADATA_TABLE:
                 return StructType(
                     [
-                        StructField("tableName", StringType(), False),
+                        StructField(TABLE_NAME, StringType(), False),
                         StructField("primary_keys", ArrayType(StringType()), True),
                         StructField("cursor_field", StringType(), True),
                         StructField("ingestion_type", StringType(), True),

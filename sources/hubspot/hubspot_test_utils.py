@@ -200,14 +200,15 @@ class LakeflowConnectTestUtils:
     def _get_column_mapping(self, table_name: str, generated_rows: List[Dict]) -> Dict[str, str]:
         """
         Create mapping from written column names to returned column names.
-        For HubSpot, written properties become 'properties_{property_name}' in returned data.
+        For HubSpot, written properties are nested under the 'properties' field.
+        Uses dot notation: 'email' -> 'properties.email'
         """
         if not generated_rows:
             return {}
 
         column_mapping = {}
         for column in generated_rows[0].keys():
-            # In HubSpot, written properties are returned with 'properties_' prefix
-            column_mapping[column] = f"properties_{column}"
+            # In HubSpot, written properties are nested under 'properties' struct
+            column_mapping[column] = f"properties.{column}"
 
         return column_mapping
