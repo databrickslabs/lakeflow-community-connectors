@@ -27,7 +27,9 @@ Follow the instructions in [`prompts/README.md`](prompts/README.md) to create ne
 2. **Implement the connector** — Implement the `LakeflowConnect` interface methods
 3. **Test & iterate** — Run the standard test suites against a real source system
    - *(Optional)* Implement write-back testing for end-to-end validation (write → read → verify cycle)
-4. **Generate documentation** — Create user-facing docs using the documentation template
+4. **Generate documentation** — Create user-facing docs and connector spec
+   - Create the public-facing README using the documentation template
+   - Generate the connector spec YAML file (connection parameters and allowlist options)
    - *(Temporary)* Run `tools/scripts/merge_python_source.py` to generate the deployable file
 
 ### Claude Code

@@ -4,6 +4,13 @@
 # Workspace path to clone the repo to and use as root path for the pipeline
 workspace_path: "/Users/{CURRENT_USER}/.lakeflow_community_connectors/{PIPELINE_NAME}"
 
+# Connection configuration
+connection:
+  # External options allowlist that is always appended to the source-specific allowlist.
+  # These are common table configuration options that all connectors support.
+  # The final externalOptionsAllowList = source_spec_allowlist + this_allowlist
+  external_options_allowlist: "tableName,tableNameList,tableConfigs,isDeleteFlow" 
+
 # Repository configuration
 repo:
   # Default Git repository URL
