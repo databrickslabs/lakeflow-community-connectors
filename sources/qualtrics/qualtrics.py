@@ -723,7 +723,8 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
         Get survey IDs for consolidation.
 
         If surveyId is provided in table_options, uses that (supports comma-separated list).
-        Otherwise, fetches all surveys up to the max_surveys limit.
+        Otherwise, fetches all surveys up to the max_surveys limit, sorted by lastModified
+        date (newest first) to prioritize recently updated surveys.
 
         Args:
             table_options: May contain 'surveyId' parameter (single or comma-separated)
@@ -747,6 +748,10 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
             logger.warning("No surveys found")
             return []
 
+        # Sort surveys by lastModified date (newest first) to prioritize recent surveys
+        # when max_surveys limit is applied
+        surveys.sort(key=lambda s: s.get("lastModified", ""), reverse=True)
+
         # Get survey IDs up to max limit (includes all surveys - active and inactive)
         survey_ids = []
         for survey in surveys:
@@ -764,7 +769,7 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
 
         logger.info(
             f"Found {len(survey_ids)} survey(s) to process "
-            f"(max_surveys={self.max_surveys})"
+            f"(max_surveys={self.max_surveys}), sorted by lastModified (newest first)"
         )
         return survey_ids
 

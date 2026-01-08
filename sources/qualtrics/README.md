@@ -184,7 +184,7 @@ Requires XM Directory (not available for XM Directory Lite).
 
 ### Auto-Consolidation Feature
 
-**New in v1.1**: The connector now supports automatic consolidation of data from multiple surveys into a single table. When `surveyId` is **not provided** for `survey_definitions`, `survey_responses`, or `distributions` tables, the connector will automatically:
+The connector supports automatic consolidation of data from multiple surveys into a single table. When `surveyId` is **not provided** for `survey_definitions`, `survey_responses`, or `distributions` tables, the connector will automatically:
 
 1. Retrieve all survey IDs from your account
 2. Fetch data for each survey
@@ -197,6 +197,7 @@ This eliminates the need to manually union data from multiple surveys in your do
 When using auto-consolidation (no `surveyId` specified):
 
 - **Includes ALL surveys**: Both active and inactive surveys are included (ensures complete historical data)
+- **Sorted by lastModified (newest first)**: Surveys are processed in order of most recent modification, ensuring recently updated surveys are prioritized when `max_surveys` limit is applied
 - **Limit controlled at connection level**: The `max_surveys` parameter (default: 50) is configured at the connection level
 - **Per-survey incremental sync**: For tables that support CDC mode, offsets are tracked per survey
 
