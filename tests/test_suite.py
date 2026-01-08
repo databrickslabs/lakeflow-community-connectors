@@ -604,6 +604,57 @@ class LakeflowConnectTester:
                     )
                     continue
 
+                # Validate records against schema constraints
+                if sample_records:
+                    try:
+                        is_read_table = test_name == "test_read_table"
+
+                        validation_failed = False
+                        for record in sample_records:
+                            # Check 1: Non-nullable fields should not be None
+                            # (only for read_table, not read_table_deletes)
+                            if is_read_table:
+                                non_nullable_violations = self._check_non_nullable_fields(
+                                    record, schema
+                                )
+                                if non_nullable_violations:
+                                    failed_tables.append(
+                                        {
+                                            "table": table_name,
+                                            "reason": f"Non-nullable field(s) are None: "
+                                            f"{non_nullable_violations}",
+                                            "record_sample": record,
+                                        }
+                                    )
+                                    validation_failed = True
+                                    break
+
+                            # Check 2: Cannot have all columns null
+                            # (applies to both read_table and read_table_deletes)
+                            if self._all_columns_null(record, schema):
+                                failed_tables.append(
+                                    {
+                                        "table": table_name,
+                                        "reason": "All columns are null in record",
+                                        "record_sample": record,
+                                    }
+                                )
+                                validation_failed = True
+                                break
+
+                        if validation_failed:
+                            continue
+
+                    except Exception as validate_e:
+                        failed_tables.append(
+                            {
+                                "table": table_name,
+                                "reason": f"Failed to validate record constraints: "
+                                f"{str(validate_e)}",
+                            }
+                        )
+                        continue
+
             except Exception as e:
                 error_tables.append(
                     {
@@ -811,6 +862,68 @@ class LakeflowConnectTester:
 
         if ingestion_type == "append":
             return False
+
+        return True
+
+    def _check_non_nullable_fields(
+        self, record: dict, schema: StructType, prefix: str = ""
+    ) -> List[str]:
+        """
+        Check that non-nullable fields in the schema are not None in the record.
+        Recursively checks nested StructType fields.
+
+        Args:
+            record: The data record to validate (dict at current nesting level).
+            schema: The StructType schema defining field nullability.
+            prefix: The dot-notation prefix for nested field paths (for error reporting).
+
+        Returns:
+            List of field paths that are non-nullable but have None values.
+        """
+        violations = []
+        for field in schema.fields:
+            field_path = f"{prefix}.{field.name}" if prefix else field.name
+            value = record.get(field.name) if isinstance(record, dict) else None
+
+            # Check if non-nullable field is None
+            if not field.nullable and value is None:
+                violations.append(field_path)
+
+            # Recursively check nested StructTypes
+            if isinstance(field.dataType, StructType) and isinstance(value, dict):
+                violations.extend(
+                    self._check_non_nullable_fields(value, field.dataType, field_path)
+                )
+
+        return violations
+
+    def _all_columns_null(
+        self, record: dict, schema: StructType, prefix: str = ""
+    ) -> bool:
+        """
+        Check if all columns in the record are null.
+        Recursively checks nested StructType fields.
+
+        Args:
+            record: The data record to validate (dict at current nesting level).
+            schema: The StructType schema defining the expected fields.
+            prefix: The dot-notation prefix for nested field paths.
+
+        Returns:
+            True if all schema fields (including nested) have None values in the record.
+        """
+        for field in schema.fields:
+            value = record.get(field.name) if isinstance(record, dict) else None
+
+            # If value is not None and not a dict, we found a non-null value
+            if value is not None and not isinstance(value, dict):
+                return False
+
+            # Recursively check nested StructTypes
+            if isinstance(field.dataType, StructType) and isinstance(value, dict):
+                field_path = f"{prefix}.{field.name}" if prefix else field.name
+                if not self._all_columns_null(value, field.dataType, field_path):
+                    return False
 
         return True
 
