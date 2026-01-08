@@ -1,0 +1,63 @@
+# MongoDB Community Connector Spec
+# This file defines the specification for the MongoDB connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+#
+# MongoDB uses a single authentication method via connection URI, which
+# supports various authentication mechanisms (SCRAM-SHA-256, SCRAM-SHA-1,
+# MONGODB-X509, GSSAPI, PLAIN, etc.) based on the URI format.
+# ============================================================================
+connection:
+  parameters:
+    - name: connection_uri
+      type: string
+      required: true
+      description: >
+        MongoDB connection string in standard URI format. Includes host, port,
+        database, authentication credentials, and connection options.
+        Format: mongodb://[username:password@]host[:port][/[database][?options]]
+        
+        Examples:
+        - Standard: mongodb://user:pass@localhost:27017/mydb
+        - Atlas: mongodb+srv://user:pass@cluster.mongodb.net/mydb
+        - Replica Set: mongodb://host1:27017,host2:27017/mydb?replicaSet=rs0
+        
+        Common options: authSource=admin, replicaSet=rs0, tls=true, retryWrites=true
+        
+        Security note: Use read-only credentials with minimal required permissions.
+
+    - name: schema_sample_size
+      type: string
+      required: false
+      description: >
+        Number of documents to sample when inferring schema for each collection.
+        Higher values provide more accurate schema inference but slower initialization.
+        Increase this value for collections with high schema variability.
+        Default: "100"
+        Recommended range: "50" to "1000"
+
+    - name: batch_size
+      type: string
+      required: false
+      description: >
+        Number of documents to fetch per batch during data reading.
+        Tune based on document size and network bandwidth.
+        Smaller batches reduce memory usage but increase query overhead.
+        Larger batches improve throughput for small documents.
+        Default: "1000"
+        Recommended range: "100" to "5000"
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the Unity Catalog connection to allow them to be passed through.
+#
+# MongoDB connector requires the 'database' option to specify which database
+# contains the collection being read. This is necessary because MongoDB
+# organizes data as databases containing collections.
+# ============================================================================
+external_options_allowlist: "database"
+
