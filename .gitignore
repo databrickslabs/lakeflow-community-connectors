@@ -1,0 +1,18 @@
+# IDE
+.idea/
+.vscode/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Configs with secrets (be careful not to commit real credentials)
+**/configs/*_config.json
+!**/configs/example_config.json
+
+**/__pycache__/
+**/*.pyc
+
+*.egg-info

@@ -1,19 +1,15 @@
-import msal
+import msal, os
 import webbrowser
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
 # --- Configuration ---
-
-CLIENT_SECRET = ''
-CLIENT_ID = ''
-TENANT_ID = ''
-
-AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
+CLIENT_ID = os.getenv("CLIENT_ID")
+CLIENT_SECRET = os.getenv("CLIENT_SECRET"
+AUTHORITY = f"https://login.microsoftonline.com/{os.getenv('TENANT')}"
 # Scopes for Outlook Mail API - include Mail.Read and offline_access for refresh token
 SCOPES = ["Mail.Read"]
-REDIRECT_PORT = 8080
-REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}"
+
 
 class OAuthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
