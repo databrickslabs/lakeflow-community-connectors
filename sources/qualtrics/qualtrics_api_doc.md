@@ -429,7 +429,7 @@ curl -X GET \
 **Key behavior**:
 - Returns all contacts across all mailing lists in a directory
 - Requires only `directoryId` as table-level parameter
-- Returns the same contact schema as mailing_list_contacts
+- Schema differs from mailing_list_contacts (has `embeddedData`, no `mailingListUnsubscribed` or `contactLookupId`)
 - Supports pagination
 - Only available for XM Directory users (not XM Directory Lite)
 - Use this endpoint when you want all contacts from a directory without filtering by mailing list
@@ -446,10 +446,9 @@ curl -X GET \
 | `extRef` | string or null | External reference ID. |
 | `language` | string or null | Preferred language code. |
 | `unsubscribed` | boolean | Whether contact is unsubscribed globally. |
-| `mailingListUnsubscribed` | boolean | Whether contact is unsubscribed from this specific mailing list. |
-| `contactLookupId` | string or null | Contact lookup identifier for cross-referencing. |
+| `embeddedData` | object | Custom embedded data fields for the contact (key-value pairs). |
 
-**Note**: The API does not return `lastModifiedDate`, `creationDate`, `embeddedData`, `responseHistory`, or `emailHistory` fields. Therefore, directory_contacts table uses **snapshot mode** (full refresh) instead of CDC.
+**Note**: The API does not return `lastModifiedDate`, `creationDate`, `responseHistory`, or `emailHistory` fields. Therefore, directory_contacts table uses **snapshot mode** (full refresh) instead of CDC.
 
 ### `directories` object
 

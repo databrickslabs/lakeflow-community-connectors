@@ -367,7 +367,7 @@ When using auto-consolidation:
 
 **Note**: Schema validated against live API on 2026-01-06. Fields `library_id`, `category`, and `folder` that appear in some API documentation are NOT returned by the list endpoint.
 
-#### `mailing_list_contacts` and `directory_contacts` table schemas:
+#### `mailing_list_contacts` table schema:
 - `contact_id` (string): Unique contact identifier (primary key)
 - `first_name` (string): Contact's first name
 - `last_name` (string): Contact's last name
@@ -378,6 +378,17 @@ When using auto-consolidation:
 - `unsubscribed` (boolean): Whether contact has unsubscribed globally
 - `mailing_list_unsubscribed` (boolean): Whether contact has unsubscribed from this mailing list
 - `contact_lookup_id` (string): Contact lookup identifier
+
+#### `directory_contacts` table schema:
+- `contact_id` (string): Unique contact identifier (primary key)
+- `first_name` (string): Contact's first name
+- `last_name` (string): Contact's last name
+- `email` (string): Contact's email address
+- `phone` (string): Contact's phone number
+- `ext_ref` (string): External reference ID
+- `language` (string): Preferred language code
+- `unsubscribed` (boolean): Whether contact has unsubscribed globally
+- `embedded_data` (map<string, string>): Custom embedded data fields for the contact
 
 #### `directories` table schema:
 - `directory_id` (string): Unique directory identifier (primary key) - Format: `POOL_...`
