@@ -23,7 +23,7 @@ This ensures:
 - ✅ Field mappings and transformations work correctly (use the mapping from the write-back API documentation)
 - ✅ Cursor field updates and ordering work as expected
 - ✅ End-to-end data integrity from write → read → parse
-- ✅ *(Optional)* Delete synchronization works for tables with `cdc_with_deletes` ingestion type
+- ✅ Delete synchronization works for tables with `cdc_with_deletes` ingestion type
 
 ---
 
@@ -43,8 +43,8 @@ Create `sources/{source_name}/{source_name}_test_utils.py` implementing the inte
 - `get_source_name()`: Return the connector name
 - `list_insertable_tables()`: List tables that support write operations (only those documented in the write-back API section)
 - `generate_rows_and_write()`: Generate test data and write to source system using documented endpoints
-- `list_deletable_tables()`: *(Optional)* List tables that support delete testing — only for tables with `cdc_with_deletes` ingestion type
-- `delete_rows()`: *(Optional)* Delete records and return deleted row info for verification via `read_table_deletes`
+- `list_deletable_tables()`: List tables that support delete testing — only for tables with `cdc_with_deletes` ingestion type
+- `delete_rows()`: Delete records and return deleted row info for verification via `read_table_deletes`
 
 **Reference Implementation:** See `sources/hubspot/hubspot_test_utils.py` for a complete working example.
 
