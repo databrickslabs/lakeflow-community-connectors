@@ -37,7 +37,7 @@ This list includes:
 - **Framework options** (required by the Lakeflow pipeline): `tableName`, `tableNameList`, `tableConfigs`
 - **Table-specific options** (used by Qualtrics tables): `surveyId`, `mailingListId`, `directoryId`
 
-> **Note**: Table-specific options such as `surveyId` are **not** connection parameters. They are provided per-table via the `table_configuration` section in the pipeline specification. The option name must be included in `externalOptionsAllowList` for the connection to allow it.
+Table-specific options like `surveyId` are provided per-table via `table_configuration`, not at the connection level.
 
 ### Obtaining the Required Parameters
 
@@ -54,7 +54,7 @@ This list includes:
    - If this option is unavailable, contact your Brand Administrator to enable API access
 5. **Copy and Store**: Save the generated token securely - you'll use this as the `api_token` connection option
 
-> **Security Note**: Never share your API token or commit it to version control. Store it securely using Databricks secrets or similar secure credential storage.
+Store API tokens securely using Databricks secrets. Never commit to version control.
 
 #### Datacenter ID
 
@@ -150,10 +150,9 @@ Table-specific options are passed via the pipeline spec under `table` in `object
   - Identifies your XM Directory
 - Returns mailing list metadata including:
   - Mailing list ID, name, and owner
-  - Creation and last modified dates (if available)
-  - Contact count (if available)
-  - Category and folder organization (if available)
-- Use the `id` field from this table as the `mailingListId` parameter for the `mailing_list_contacts` table
+  - Creation and last modified dates (epoch milliseconds)
+  - Contact count
+- Use the `mailing_list_id` field from this table as the `mailingListId` parameter for the `mailing_list_contacts` table
 - Only available for XM Directory users (not XM Directory Lite accounts)
 
 #### `mailing_list_contacts` table
@@ -166,7 +165,7 @@ Table-specific options are passed via the pipeline spec under `table` in `object
   - Can be found in: Contacts → Lists → Select a list → check URL or list details
   - Or via API: GET `/directories/{directoryId}/mailinglists`
 
-> **Note**: The `mailing_list_contacts` table is only available for XM Directory users (not XM Directory Lite accounts).
+Requires XM Directory (not available for XM Directory Lite).
 
 #### `directory_contacts` table
 - **`directoryId`** (string, **required**): The Directory ID (also called Pool ID)
@@ -176,7 +175,7 @@ Table-specific options are passed via the pipeline spec under `table` in `object
 - Returns all contacts across all mailing lists in the directory
 - Use this table when you want all contacts from a directory without filtering by mailing list
 
-> **Note**: The `directory_contacts` table is only available for XM Directory users (not XM Directory Lite accounts).
+Requires XM Directory (not available for XM Directory Lite).
 
 #### `directories` table
 - **No table options required**: This table lists all accessible XM Directory instances
@@ -265,7 +264,7 @@ When using auto-consolidation:
 - `creation_date` (string): ISO 8601 timestamp when survey was created
 - `last_modified` (string): ISO 8601 timestamp of last modification (incremental cursor)
 
-> **Note**: Fields like `brand_id`, `brand_base_url`, `organization_id`, and `expiration` are not returned by the list surveys endpoint. Use the `survey_definitions` table if you need detailed survey structure.
+Use the `survey_definitions` table if you need detailed survey structure (questions, blocks, flow).
 
 #### `survey_definitions` table schema:
 - `survey_id` (string): Unique survey identifier (primary key)
@@ -287,10 +286,7 @@ When using auto-consolidation:
 - `scoring` (string): JSON string containing scoring configuration
 - `project_info` (string): JSON string containing project metadata (ProjectCategory, ProjectType, etc.)
 
-> **Note**: Complex nested fields (`questions`, `blocks`, `survey_flow`, etc.) are stored as JSON strings because the Qualtrics API returns variable structures. Use Spark's `from_json()` function to parse them:
-> ```sql
-> SELECT survey_id, from_json(questions, 'MAP<STRING, STRUCT<QuestionText: STRING>>') FROM survey_definitions
-> ```
+Complex nested fields (`questions`, `blocks`, `survey_flow`, etc.) are stored as JSON strings. Use Spark's `from_json()` to parse them.
 
 #### `survey_responses` table schema:
 - `response_id` (string): Unique response identifier (primary key)
@@ -298,7 +294,7 @@ When using auto-consolidation:
 - `recorded_date` (string): ISO 8601 timestamp when response was recorded (incremental cursor)
 - `start_date` (string): When respondent started the survey
 - `end_date` (string): When respondent completed the survey
-- `status` (long): Response status (0=In Progress, 1=Completed, etc.)
+- `status` (long): Response type (0=Normal, 1=Preview, 2=Test, 4=Imported, 16=Offline, 256=Synthetic). Use `finished` field for completion status.
 - `ip_address` (string): Respondent's IP address (if collected)
 - `progress` (long): Percentage completed (0-100)
 - `duration` (long): Time spent in seconds
@@ -317,7 +313,7 @@ When using auto-consolidation:
 - `displayed_values` (map<string, string>): Displayed values
 - `embedded_data` (map<string, string>): Custom embedded data fields
 
-> **Note**: Question IDs (e.g., `QID1`, `QID2`) are dynamic and specific to each survey. The `values` field uses a map type to accommodate any question structure.
+Question IDs (e.g., `QID1`, `QID2`) are survey-specific. The `values` field uses a map type to accommodate any question structure.
 
 #### `distributions` table schema:
 - `id` (string): Unique distribution identifier (primary key)
@@ -365,7 +361,7 @@ When using auto-consolidation:
 - `last_modified_date` (long): Epoch timestamp (milliseconds) of last modification
 - `contact_count` (long): Number of contacts in the mailing list
 
-**Note**: Schema validated against live API on 2026-01-06. Fields `library_id`, `category`, and `folder` that appear in some API documentation are NOT returned by the list endpoint.
+Schema validated against live API on 2026-01-06.
 
 #### `mailing_list_contacts` table schema:
 - `contact_id` (string): Unique contact identifier (primary key)
@@ -593,7 +589,7 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 - Requires XM Directory (not available for XM Directory Lite)
 - Use this when you want all contacts from a directory without filtering by mailing list
 
-> **Note**: Survey response exports can take 30-90 seconds to complete depending on response count. The connector handles this automatically with appropriate wait times and polling.
+Survey response exports take 30-90 seconds depending on response count. The connector handles polling automatically.
 
 #### Best Practices
 
