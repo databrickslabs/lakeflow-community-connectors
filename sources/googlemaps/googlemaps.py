@@ -13,24 +13,27 @@ from pyspark.sql.types import (
 
 class LakeflowConnect:
     """
-    Google Maps Places API connector for Lakeflow.
+    Google Maps API connector for Lakeflow.
     
-    This connector uses the Places API (New) Text Search endpoint to retrieve
-    place data based on text queries.
+    This connector supports:
+    - Places API (New) Text Search for place data
+    - Geocoding API for address-to-coordinates and reverse geocoding
+    - Distance Matrix API for travel distance and time calculations
     """
 
     def __init__(self, options: Dict[str, str]) -> None:
         """
-        Initialize the Google Maps Places connector.
+        Initialize the Google Maps connector.
 
         Args:
             options: Dictionary containing:
                 - api_key: Google Maps Platform API key
         """
         self.api_key = options["api_key"]
-        self.base_url = "https://places.googleapis.com/v1"
+        self.places_base_url = "https://places.googleapis.com/v1"
+        self.maps_base_url = "https://maps.googleapis.com/maps/api"
         
-        # Default field mask for the API requests - requesting most useful fields
+        # Default field mask for Places API requests
         self._default_field_mask = ",".join([
             "places.id",
             "places.displayName",
@@ -82,26 +85,30 @@ class LakeflowConnect:
             "nextPageToken",
         ])
 
+        # =====================
+        # Places Schema
+        # =====================
+        
         # Nested schema for displayName
         self._display_name_schema = StructType([
             StructField("text", StringType(), True),
             StructField("languageCode", StringType(), True),
         ])
 
-        # Nested schema for location
-        self._location_schema = StructType([
+        # Nested schema for location (Places API format)
+        self._places_location_schema = StructType([
             StructField("latitude", DoubleType(), True),
             StructField("longitude", DoubleType(), True),
         ])
 
-        # Nested schema for viewport
-        self._viewport_schema = StructType([
-            StructField("low", self._location_schema, True),
-            StructField("high", self._location_schema, True),
+        # Nested schema for viewport (Places API format)
+        self._places_viewport_schema = StructType([
+            StructField("low", self._places_location_schema, True),
+            StructField("high", self._places_location_schema, True),
         ])
 
-        # Nested schema for address component
-        self._address_component_schema = StructType([
+        # Nested schema for address component (Places API format)
+        self._places_address_component_schema = StructType([
             StructField("longText", StringType(), True),
             StructField("shortText", StringType(), True),
             StructField("types", ArrayType(StringType()), True),
@@ -161,8 +168,8 @@ class LakeflowConnect:
             StructField("acceptsNfc", BooleanType(), True),
         ])
 
-        # Nested schema for plus code
-        self._plus_code_schema = StructType([
+        # Nested schema for plus code (Places API format)
+        self._places_plus_code_schema = StructType([
             StructField("globalCode", StringType(), True),
             StructField("compoundCode", StringType(), True),
         ])
@@ -173,9 +180,9 @@ class LakeflowConnect:
             StructField("displayName", self._display_name_schema, True),
             StructField("formattedAddress", StringType(), True),
             StructField("shortFormattedAddress", StringType(), True),
-            StructField("addressComponents", ArrayType(self._address_component_schema), True),
-            StructField("location", self._location_schema, True),
-            StructField("viewport", self._viewport_schema, True),
+            StructField("addressComponents", ArrayType(self._places_address_component_schema), True),
+            StructField("location", self._places_location_schema, True),
+            StructField("viewport", self._places_viewport_schema, True),
             StructField("googleMapsUri", StringType(), True),
             StructField("websiteUri", StringType(), True),
             StructField("internationalPhoneNumber", StringType(), True),
@@ -214,16 +221,121 @@ class LakeflowConnect:
             StructField("accessibilityOptions", self._accessibility_options_schema, True),
             StructField("parkingOptions", self._parking_options_schema, True),
             StructField("paymentOptions", self._payment_options_schema, True),
-            StructField("plusCode", self._plus_code_schema, True),
+            StructField("plusCode", self._places_plus_code_schema, True),
             StructField("adrFormatAddress", StringType(), True),
         ])
 
-        # Object configuration
+        # =====================
+        # Geocoder Schema
+        # =====================
+        
+        # Nested schema for geocoder location (lat/lng format)
+        self._geocoder_location_schema = StructType([
+            StructField("lat", DoubleType(), True),
+            StructField("lng", DoubleType(), True),
+        ])
+
+        # Nested schema for geocoder viewport bounds
+        self._geocoder_bounds_schema = StructType([
+            StructField("northeast", self._geocoder_location_schema, True),
+            StructField("southwest", self._geocoder_location_schema, True),
+        ])
+
+        # Nested schema for geocoder geometry
+        self._geocoder_geometry_schema = StructType([
+            StructField("location", self._geocoder_location_schema, True),
+            StructField("location_type", StringType(), True),
+            StructField("viewport", self._geocoder_bounds_schema, True),
+            StructField("bounds", self._geocoder_bounds_schema, True),
+        ])
+
+        # Nested schema for geocoder address component
+        self._geocoder_address_component_schema = StructType([
+            StructField("long_name", StringType(), True),
+            StructField("short_name", StringType(), True),
+            StructField("types", ArrayType(StringType()), True),
+        ])
+
+        # Nested schema for geocoder plus code
+        self._geocoder_plus_code_schema = StructType([
+            StructField("global_code", StringType(), True),
+            StructField("compound_code", StringType(), True),
+        ])
+
+        # Full geocoder result schema
+        self._geocoder_schema = StructType([
+            StructField("place_id", StringType(), False),
+            StructField("formatted_address", StringType(), True),
+            StructField("address_components", ArrayType(self._geocoder_address_component_schema), True),
+            StructField("geometry", self._geocoder_geometry_schema, True),
+            StructField("types", ArrayType(StringType()), True),
+            StructField("partial_match", BooleanType(), True),
+            StructField("plus_code", self._geocoder_plus_code_schema, True),
+            StructField("postcode_localities", ArrayType(StringType()), True),
+        ])
+
+        # =====================
+        # Distance Matrix Schema
+        # =====================
+        
+        # Nested schema for distance/duration value
+        self._distance_value_schema = StructType([
+            StructField("value", LongType(), True),
+            StructField("text", StringType(), True),
+        ])
+
+        # Nested schema for fare
+        self._fare_schema = StructType([
+            StructField("currency", StringType(), True),
+            StructField("value", DoubleType(), True),
+            StructField("text", StringType(), True),
+        ])
+
+        # Nested schema for matrix element
+        self._matrix_element_schema = StructType([
+            StructField("status", StringType(), True),
+            StructField("distance", self._distance_value_schema, True),
+            StructField("duration", self._distance_value_schema, True),
+            StructField("duration_in_traffic", self._distance_value_schema, True),
+            StructField("fare", self._fare_schema, True),
+        ])
+
+        # Full distance matrix result schema (flattened per origin-destination pair)
+        self._distance_matrix_schema = StructType([
+            StructField("origin_index", LongType(), False),
+            StructField("destination_index", LongType(), False),
+            StructField("origin_address", StringType(), True),
+            StructField("destination_address", StringType(), True),
+            StructField("status", StringType(), True),
+            StructField("distance", self._distance_value_schema, True),
+            StructField("duration", self._distance_value_schema, True),
+            StructField("duration_in_traffic", self._distance_value_schema, True),
+            StructField("fare", self._fare_schema, True),
+        ])
+
+        # =====================
+        # Object Configuration
+        # =====================
         self._object_config = {
             "places": {
                 "primary_keys": ["id"],
-                "ingestion_type": "snapshot",  # No incremental support for Places API
+                "ingestion_type": "snapshot",
             },
+            "geocoder": {
+                "primary_keys": ["place_id"],
+                "ingestion_type": "snapshot",
+            },
+            "distance_matrix": {
+                "primary_keys": ["origin_index", "destination_index"],
+                "ingestion_type": "snapshot",
+            },
+        }
+
+        # Schema mapping
+        self._schema_config = {
+            "places": self._places_schema,
+            "geocoder": self._geocoder_schema,
+            "distance_matrix": self._distance_matrix_schema,
         }
 
     def list_tables(self) -> List[str]:
@@ -233,7 +345,7 @@ class LakeflowConnect:
         Returns:
             List of supported table names
         """
-        return ["places"]
+        return ["places", "geocoder", "distance_matrix"]
 
     def get_table_schema(
         self, table_name: str, table_options: Dict[str, str]
@@ -248,11 +360,11 @@ class LakeflowConnect:
         Returns:
             StructType representing the table schema
         """
-        if table_name != "places":
+        if table_name not in self._schema_config:
             raise ValueError(
                 f"Unsupported table: {table_name}. Supported tables are: {self.list_tables()}"
             )
-        return self._places_schema
+        return self._schema_config[table_name]
 
     def read_table_metadata(
         self, table_name: str, table_options: Dict[str, str]
@@ -281,11 +393,37 @@ class LakeflowConnect:
         self, table_name: str, start_offset: Dict, table_options: Dict[str, str]
     ) -> Tuple[Iterator[Dict], Dict]:
         """
+        Read data from a table.
+
+        Args:
+            table_name: Name of the table to read
+            start_offset: Not used for snapshot ingestion
+            table_options: Dictionary containing table-specific options
+
+        Returns:
+            Tuple of (iterator of records, offset dict)
+        """
+        if table_name not in self._object_config:
+            raise ValueError(
+                f"Unsupported table: {table_name}. Supported tables are: {self.list_tables()}"
+            )
+
+        if table_name == "places":
+            return self._read_places(table_options)
+        elif table_name == "geocoder":
+            return self._read_geocoder(table_options)
+        elif table_name == "distance_matrix":
+            return self._read_distance_matrix(table_options)
+        else:
+            raise ValueError(f"Unsupported table: {table_name}")
+
+    def _read_places(
+        self, table_options: Dict[str, str]
+    ) -> Tuple[Iterator[Dict], Dict]:
+        """
         Read data from the places table using Text Search API.
 
         Args:
-            table_name: Name of the table to read (must be "places")
-            start_offset: Not used for snapshot ingestion (Places API doesn't support incremental)
             table_options: Dictionary containing:
                 - text_query: Required. The search query (e.g., "restaurants in Seattle")
                 - language_code: Optional. Language code for results (e.g., "en")
@@ -298,9 +436,6 @@ class LakeflowConnect:
         Returns:
             Tuple of (iterator of place records, empty offset dict)
         """
-        if table_name != "places":
-            raise ValueError(f"Unsupported table: {table_name}")
-
         # Validate required parameter
         text_query = table_options.get("text_query")
         if not text_query:
@@ -341,7 +476,7 @@ class LakeflowConnect:
             while page_count < max_pages:
                 # Make API request
                 response = requests.post(
-                    f"{self.base_url}/places:searchText",
+                    f"{self.places_base_url}/places:searchText",
                     headers={
                         "Content-Type": "application/json",
                         "X-Goog-Api-Key": self.api_key,
@@ -371,20 +506,228 @@ class LakeflowConnect:
                 current_body["pageToken"] = next_page_token
                 page_count += 1
 
-        # For snapshot ingestion, offset is empty
         return places_iterator(), {}
+
+    def _read_geocoder(
+        self, table_options: Dict[str, str]
+    ) -> Tuple[Iterator[Dict], Dict]:
+        """
+        Read data from the geocoder table using Geocoding API.
+
+        Args:
+            table_options: Dictionary containing:
+                - address: Address to geocode (for forward geocoding)
+                - latlng: Coordinates to reverse geocode, format: "lat,lng"
+                - place_id: Place ID to geocode
+                (One of address, latlng, or place_id is required)
+                - language: Optional. Language code for results (e.g., "en")
+                - region: Optional. Region code to bias results (e.g., "us")
+                - bounds: Optional. Bounding box to bias results, format: "lat,lng|lat,lng"
+                - components: Optional. Component filter, format: "component:value|..."
+
+        Returns:
+            Tuple of (iterator of geocoder results, empty offset dict)
+        """
+        # Build request parameters
+        params = {
+            "key": self.api_key,
+        }
+
+        # Validate that at least one of address, latlng, or place_id is provided
+        if "address" in table_options:
+            params["address"] = table_options["address"]
+        elif "latlng" in table_options:
+            params["latlng"] = table_options["latlng"]
+        elif "place_id" in table_options:
+            params["place_id"] = table_options["place_id"]
+        else:
+            raise ValueError(
+                "table_options must include one of 'address', 'latlng', or 'place_id' "
+                "for the geocoder table"
+            )
+
+        # Add optional parameters
+        if "language" in table_options:
+            params["language"] = table_options["language"]
+        
+        if "region" in table_options:
+            params["region"] = table_options["region"]
+        
+        if "bounds" in table_options:
+            params["bounds"] = table_options["bounds"]
+        
+        if "components" in table_options:
+            params["components"] = table_options["components"]
+
+        # For reverse geocoding, additional filters
+        if "result_type" in table_options:
+            params["result_type"] = table_options["result_type"]
+        
+        if "location_type" in table_options:
+            params["location_type"] = table_options["location_type"]
+
+        # Create iterator that yields geocoder results
+        def geocoder_iterator() -> Iterator[Dict]:
+            response = requests.get(
+                f"{self.maps_base_url}/geocode/json",
+                params=params,
+            )
+
+            if response.status_code != 200:
+                raise Exception(
+                    f"Google Geocoding API error: {response.status_code} {response.text}"
+                )
+
+            data = response.json()
+            status = data.get("status")
+
+            if status == "ZERO_RESULTS":
+                # No results, return empty iterator
+                return
+            elif status != "OK":
+                raise Exception(
+                    f"Google Geocoding API error: status={status}, "
+                    f"error_message={data.get('error_message', 'Unknown error')}"
+                )
+
+            results = data.get("results", [])
+
+            for result in results:
+                yield result
+
+        return geocoder_iterator(), {}
+
+    def _read_distance_matrix(
+        self, table_options: Dict[str, str]
+    ) -> Tuple[Iterator[Dict], Dict]:
+        """
+        Read data from the distance_matrix table using Distance Matrix API.
+
+        Args:
+            table_options: Dictionary containing:
+                - origins: Required. Pipe-separated list of origins
+                - destinations: Required. Pipe-separated list of destinations
+                - mode: Optional. Travel mode: driving, walking, bicycling, transit
+                - language: Optional. Language code for results
+                - region: Optional. Region code to bias results
+                - avoid: Optional. Features to avoid: tolls|highways|ferries|indoor
+                - units: Optional. Unit system: metric or imperial
+                - departure_time: Optional. Departure time as Unix timestamp or "now"
+                - arrival_time: Optional. Arrival time as Unix timestamp (transit only)
+                - traffic_model: Optional. Traffic model: best_guess, pessimistic, optimistic
+                - transit_mode: Optional. Transit modes: bus|subway|train|tram|rail
+                - transit_routing_preference: Optional. less_walking or fewer_transfers
+
+        Returns:
+            Tuple of (iterator of distance matrix results, empty offset dict)
+        """
+        # Validate required parameters
+        origins = table_options.get("origins")
+        destinations = table_options.get("destinations")
+
+        if not origins:
+            raise ValueError(
+                "table_options must include 'origins' parameter for the distance_matrix table"
+            )
+        if not destinations:
+            raise ValueError(
+                "table_options must include 'destinations' parameter for the distance_matrix table"
+            )
+
+        # Build request parameters
+        params = {
+            "key": self.api_key,
+            "origins": origins,
+            "destinations": destinations,
+        }
+
+        # Add optional parameters
+        if "mode" in table_options:
+            params["mode"] = table_options["mode"]
+        
+        if "language" in table_options:
+            params["language"] = table_options["language"]
+        
+        if "region" in table_options:
+            params["region"] = table_options["region"]
+        
+        if "avoid" in table_options:
+            params["avoid"] = table_options["avoid"]
+        
+        if "units" in table_options:
+            params["units"] = table_options["units"]
+        
+        if "departure_time" in table_options:
+            params["departure_time"] = table_options["departure_time"]
+        
+        if "arrival_time" in table_options:
+            params["arrival_time"] = table_options["arrival_time"]
+        
+        if "traffic_model" in table_options:
+            params["traffic_model"] = table_options["traffic_model"]
+        
+        if "transit_mode" in table_options:
+            params["transit_mode"] = table_options["transit_mode"]
+        
+        if "transit_routing_preference" in table_options:
+            params["transit_routing_preference"] = table_options["transit_routing_preference"]
+
+        # Create iterator that yields distance matrix results
+        def distance_matrix_iterator() -> Iterator[Dict]:
+            response = requests.get(
+                f"{self.maps_base_url}/distancematrix/json",
+                params=params,
+            )
+
+            if response.status_code != 200:
+                raise Exception(
+                    f"Google Distance Matrix API error: {response.status_code} {response.text}"
+                )
+
+            data = response.json()
+            status = data.get("status")
+
+            if status != "OK":
+                raise Exception(
+                    f"Google Distance Matrix API error: status={status}, "
+                    f"error_message={data.get('error_message', 'Unknown error')}"
+                )
+
+            origin_addresses = data.get("origin_addresses", [])
+            destination_addresses = data.get("destination_addresses", [])
+            rows = data.get("rows", [])
+
+            # Flatten the matrix into individual records
+            for origin_index, row in enumerate(rows):
+                elements = row.get("elements", [])
+                for destination_index, element in enumerate(elements):
+                    # Build flattened record
+                    record = {
+                        "origin_index": origin_index,
+                        "destination_index": destination_index,
+                        "origin_address": origin_addresses[origin_index] if origin_index < len(origin_addresses) else None,
+                        "destination_address": destination_addresses[destination_index] if destination_index < len(destination_addresses) else None,
+                        "status": element.get("status"),
+                        "distance": element.get("distance"),
+                        "duration": element.get("duration"),
+                        "duration_in_traffic": element.get("duration_in_traffic"),
+                        "fare": element.get("fare"),
+                    }
+                    yield record
+
+        return distance_matrix_iterator(), {}
 
     def test_connection(self) -> Dict[str, str]:
         """
-        Test the connection to Google Places API.
+        Test the connection to Google Maps APIs.
 
         Returns:
             Dictionary with status and message
         """
         try:
-            # Simple test query
+            # Test Places API
             response = requests.post(
-                f"{self.base_url}/places:searchText",
+                f"{self.places_base_url}/places:searchText",
                 headers={
                     "Content-Type": "application/json",
                     "X-Goog-Api-Key": self.api_key,
@@ -405,4 +748,3 @@ class LakeflowConnect:
                 }
         except Exception as e:
             return {"status": "error", "message": f"Connection failed: {str(e)}"}
-

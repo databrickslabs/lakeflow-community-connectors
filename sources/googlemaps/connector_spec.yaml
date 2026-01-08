@@ -13,15 +13,24 @@ connection:
       required: true
       description: >
         Google Maps Platform API key used for authentication.
-        Must have the Places API (New) enabled. Obtain from the Google Cloud Console
-        under APIs & Services > Credentials.
+        Must have the required APIs enabled in Google Cloud Console:
+        Places API (New) for places table, Geocoding API for geocoder table,
+        and Distance Matrix API for distance_matrix table.
+        Obtain from Google Cloud Console under APIs & Services > Credentials.
 
 # ============================================================================
 # External Options Allowlist
 # These table-specific options must be included in the externalOptionsAllowList
 # parameter of the UC connection to allow them to be passed through.
 # Use a comma-separated string of option names.
-# If no table-specific options are needed, set to empty string or omit.
+#
+# Options by table:
+#   places: text_query, language_code, max_result_count, included_type,
+#           min_rating, open_now, region_code
+#   geocoder: address, latlng, place_id, language, region, bounds,
+#             components, result_type, location_type
+#   distance_matrix: origins, destinations, mode, language, region, avoid,
+#                    units, departure_time, arrival_time, traffic_model,
+#                    transit_mode, transit_routing_preference
 # ============================================================================
-external_options_allowlist: "tableConfigs,text_query,language_code,max_result_count,included_type,min_rating,open_now,region_code"
-
+external_options_allowlist: "tableConfigs,text_query,language_code,max_result_count,included_type,min_rating,open_now,region_code,address,latlng,place_id,language,region,bounds,components,result_type,location_type,origins,destinations,mode,avoid,units,departure_time,arrival_time,traffic_model,transit_mode,transit_routing_preference"

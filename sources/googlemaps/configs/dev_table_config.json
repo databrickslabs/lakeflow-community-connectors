@@ -3,6 +3,15 @@
         "text_query": "restaurants in Seattle",
         "language_code": "en",
         "max_result_count": "5"
+    },
+    "geocoder": {
+        "address": "1600 Amphitheatre Parkway, Mountain View, CA",
+        "language": "en"
+    },
+    "distance_matrix": {
+        "origins": "Seattle, WA",
+        "destinations": "Portland, OR|San Francisco, CA",
+        "mode": "driving",
+        "units": "metric"
     }
 }
-
