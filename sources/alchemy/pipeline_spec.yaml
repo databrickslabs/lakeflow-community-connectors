@@ -44,16 +44,20 @@ objects:
   - table:
       source_table: tokens_by_wallet
       table_configuration:
-        addresses: 0x1E6E8695FAb3Eb382534915eA8d7Cc1D1994B152@eth-mainnet
+        addresses: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+        with_metadata: "true"
+        with_prices: "true"
   - table:
       source_table: token_balances_by_wallet
       table_configuration:
-        addresses: 0x1E6E8695FAb3Eb382534915eA8d7Cc1D1994B152@eth-mainnet
+        addresses: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
   - table:
       source_table: nfts_by_wallet
       table_configuration:
-        addresses: 0x1E6E8695FAb3Eb382534915eA8d7Cc1D1994B152@eth-mainnet
+        addresses: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+        page_size: 10
   - table:
       source_table: wallet_transactions
       table_configuration:
-        addresses: 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045@eth-mainnet
+        addresses: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+        order: "desc"
