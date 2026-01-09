@@ -5,7 +5,7 @@ This documentation provides setup instructions and reference information for the
 ## Prerequisites
 
 - A Microsoft Advertising account with API access
-- An Azure AD application registered in the Azure Portal for OAuth authentication
+- A Microsoft Entra ID application registered in the Azure Portal for OAuth authentication
 - A Microsoft Advertising Developer Token (obtained from Microsoft Advertising web UI → Tools → Developer Token)
 - Multi-factor authentication (MFA) completed during the initial OAuth consent flow (required since June 2022)
 
