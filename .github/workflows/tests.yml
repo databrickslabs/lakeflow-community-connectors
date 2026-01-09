@@ -76,6 +76,7 @@ jobs:
             echo "community_connector=false" >> $GITHUB_OUTPUT
           fi
 
+<<<<<<< HEAD
           # Detect per-source connector changes
           # Triggers when source code, test code, or libs/utils.py changes
           UTILS_CHANGED=false
@@ -133,6 +134,15 @@ jobs:
           echo "sources=[${CHANGED_SOURCES}]" >> $GITHUB_OUTPUT
           echo "Sources to test: [${CHANGED_SOURCES}]"
 
+=======
+          # Check gmail source
+          if echo "$CHANGED_FILES" | grep -qE '^sources/(gmail|interface)/'; then
+            echo "gmail=true" >> $GITHUB_OUTPUT
+          else
+            echo "gmail=false" >> $GITHUB_OUTPUT
+          fi
+
+>>>>>>> afbcc29 (ci: add Gmail connector to test pipeline)
   # Test libs
   test-libs:
     needs: changes
@@ -223,6 +233,7 @@ jobs:
           cd tools/community_connector
           pytest tests/ -v
 
+<<<<<<< HEAD
   # Test source connectors (per-source, triggered by source/test/utils changes)
   test-source:
     needs: changes
@@ -238,10 +249,27 @@ jobs:
         uses: actions/setup-python@v3
         with:
           python-version: "3.10"
+=======
+  # Test Gmail source (unit tests only - no credentials needed)
+  test-gmail:
+    needs: changes
+    if: ${{ needs.changes.outputs.gmail == 'true' }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+>>>>>>> afbcc29 (ci: add Gmail connector to test pipeline)
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+<<<<<<< HEAD
           # Install source-specific dependencies if the source has its own pyproject.toml
           SOURCE_DIR="src/databricks/labs/community_connector/sources/${{ matrix.source }}"
           if [ -f "$SOURCE_DIR/pyproject.toml" ]; then
@@ -264,3 +292,10 @@ jobs:
           fi
           echo "Ignore flags: $IGNORE_FLAGS"
           pytest tests/unit/sources/${{ matrix.source }}/ $IGNORE_FLAGS -v
+=======
+      - name: Run Gmail unit tests
+        env:
+          GMAIL_SKIP_LIVE_TESTS: "true"
+        run: |
+          pytest sources/gmail/test/ -v -k "Unit"
+>>>>>>> afbcc29 (ci: add Gmail connector to test pipeline)
