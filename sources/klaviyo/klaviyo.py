@@ -25,7 +25,7 @@ class LakeflowConnect:
         """
         self.api_key = options["api_key"]
         self.base_url = "https://a.klaviyo.com/api"
-        self.api_version = "2024-10-15"
+        self.api_version = "2025-10-15"
 
         # Request headers for GET requests (no Content-Type needed)
         self.headers = {
