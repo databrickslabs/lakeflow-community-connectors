@@ -123,7 +123,7 @@ These are the tables available for data ingestion through this connector:
 | Roles | `Roles` | User roles hierarchy | `snapshot` |
 | Profiles | `Profiles` | Permission profiles | `snapshot` |
 
-> **Note on Virtual Tables**: Line Items, Junction Tables, and Organization tables are not standalone Zoho CRM modules.
+> **Note on Derived Tables**: Line Items, Junction Tables, and Organization tables are not standalone Zoho CRM modules.
 > The connector constructs these by:
 > - **Line Items**: Extracting subform data from parent records (Quotes, Sales_Orders, Invoices, Purchase_Orders)
 > - **Junction Tables**: Calling the Related Records API for each parent record
@@ -157,7 +157,7 @@ The `GET /crm/v8/settings/modules` endpoint returns all modules in Zoho CRM. Bel
 | `Solutions` | ✅ Supported | Knowledge base |
 | `Tasks` | ✅ Supported | Task activities |
 | `Vendors` | ✅ Supported | Supplier contacts |
-| **Subform Modules (handled as virtual tables)** |||
+| **Subform Modules (handled as derived tables)** |||
 | `Invoiced_Items` | ✅ Virtual | Extracted from Invoices subform |
 | `Ordered_Items` | ✅ Virtual | Extracted from Sales_Orders subform |
 | `Purchase_Items` | ✅ Virtual | Extracted from Purchase_Orders subform |

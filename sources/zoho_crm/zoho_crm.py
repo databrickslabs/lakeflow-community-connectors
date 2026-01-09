@@ -29,8 +29,8 @@ class LakeflowConnect:
     - Junction/Relationship tables (Campaigns_Leads, Campaigns_Contacts, Contacts_X_Deals)
     """
 
-    # Virtual tables that don't exist as standalone modules but we construct from other APIs
-    VIRTUAL_TABLES = {
+    # Derived tables that don't exist as standalone modules but we construct from other APIs
+    DERIVED_TABLES = {
         # Organization/Settings tables - use different API endpoints
         "Users": {"type": "settings", "endpoint": "/crm/v8/users", "data_key": "users"},
         "Roles": {"type": "settings", "endpoint": "/crm/v8/settings/roles", "data_key": "roles"},
@@ -259,14 +259,14 @@ class LakeflowConnect:
         """
         List names of all tables (modules) supported by this connector.
         Uses the Modules API to dynamically discover available modules,
-        plus virtual tables for settings, subforms, and junction tables.
+        plus derived tables for settings, subforms, and junction tables.
         """
         # Get standard CRM modules
         modules = self._get_modules()
         table_names = [m["api_name"] for m in modules]
 
-        # Add virtual tables (settings, subforms, junction tables)
-        table_names.extend(self.VIRTUAL_TABLES.keys())
+        # Add derived tables (settings, subforms, junction tables)
+        table_names.extend(self.DERIVED_TABLES.keys())
 
         return sorted(table_names)
 
@@ -365,11 +365,11 @@ class LakeflowConnect:
         """
         Fetch the schema of a module dynamically from Zoho CRM.
         Uses the Fields Metadata API to build the schema.
-        Handles virtual tables (settings, subforms, junction tables) specially.
+        Handles derived tables (settings, subforms, junction tables) specially.
         """
-        # Check if this is a virtual table
-        if table_name in self.VIRTUAL_TABLES:
-            return self._get_virtual_table_schema(table_name)
+        # Check if this is a derived table
+        if table_name in self.DERIVED_TABLES:
+            return self._get_derived_table_schema(table_name)
 
         # Check if table exists
         available_tables = self.list_tables()
@@ -397,11 +397,11 @@ class LakeflowConnect:
 
         return StructType(struct_fields)
 
-    def _get_virtual_table_schema(self, table_name: str) -> StructType:
+    def _get_derived_table_schema(self, table_name: str) -> StructType:
         """
-        Get schema for virtual tables (settings, subforms, junction tables).
+        Get schema for derived tables (settings, subforms, junction tables).
         """
-        config = self.VIRTUAL_TABLES[table_name]
+        config = self.DERIVED_TABLES[table_name]
         table_type = config["type"]
 
         if table_type == "settings":
@@ -411,7 +411,7 @@ class LakeflowConnect:
         elif table_type == "related":
             return self._get_related_table_schema(table_name, config)
         else:
-            raise ValueError(f"Unknown virtual table type: {table_type}")
+            raise ValueError(f"Unknown derived table type: {table_type}")
 
     def _get_settings_table_schema(self, table_name: str, config: dict) -> StructType:
         """Get schema for settings tables (Users, Roles, Profiles)."""
@@ -536,7 +536,7 @@ class LakeflowConnect:
             StructField("Total_After_Discount", DoubleType(), True),
             StructField("Tax", DoubleType(), True),
             StructField("Description", StringType(), True),
-            StructField("Sequence_Number", IntegerType(), True),
+            StructField("Sequence_Number", LongType(), True),
         ]
 
         schema = StructType(base_fields + common_fields)
@@ -607,11 +607,11 @@ class LakeflowConnect:
         - Primary key is always 'id'
         - Cursor field is 'Modified_Time' for CDC
         - Most modules support CDC ingestion
-        - Virtual tables (subforms, junctions) use snapshot ingestion
+        - Derived tables (subforms, junctions) use snapshot ingestion
         """
-        # Check if this is a virtual table
-        if table_name in self.VIRTUAL_TABLES:
-            return self._get_virtual_table_metadata(table_name)
+        # Check if this is a derived table
+        if table_name in self.DERIVED_TABLES:
+            return self._get_derived_table_metadata(table_name)
 
         # Check if table exists
         available_tables = self.list_tables()
@@ -645,9 +645,9 @@ class LakeflowConnect:
             "ingestion_type": "cdc",
         }
 
-    def _get_virtual_table_metadata(self, table_name: str) -> dict:
-        """Get metadata for virtual tables."""
-        config = self.VIRTUAL_TABLES[table_name]
+    def _get_derived_table_metadata(self, table_name: str) -> dict:
+        """Get metadata for derived tables."""
+        config = self.DERIVED_TABLES[table_name]
         table_type = config["type"]
 
         if table_type == "settings":
@@ -686,15 +686,15 @@ class LakeflowConnect:
         Read records from a Zoho CRM module.
         Supports incremental reads using Modified_Time cursor and pagination.
         Also fetches deleted records for CDC.
-        Routes virtual tables to their specialized readers.
+        Routes derived tables to their specialized readers.
         """
         print(f"[DEBUG] read_table called for '{table_name}'")
         print(f"[DEBUG] start_offset: {start_offset}")
         print(f"[DEBUG] initial_load_start_date: {self.initial_load_start_date}")
 
-        # Check if this is a virtual table
-        if table_name in self.VIRTUAL_TABLES:
-            return self._read_virtual_table(table_name, start_offset, table_options)
+        # Check if this is a derived table
+        if table_name in self.DERIVED_TABLES:
+            return self._read_derived_table(table_name, start_offset, table_options)
 
         # Check if table exists
         available_tables = self.list_tables()
@@ -754,11 +754,11 @@ class LakeflowConnect:
         print(f"[DEBUG] read_table returning. next_offset: {next_offset}")
         return records_iter, next_offset
 
-    def _read_virtual_table(self, table_name: str, start_offset: dict, table_options: dict[str, str]) -> (Iterator[dict], dict):
+    def _read_derived_table(self, table_name: str, start_offset: dict, table_options: dict[str, str]) -> (Iterator[dict], dict):
         """
-        Read records from a virtual table (settings, subforms, or junction tables).
+        Read records from a derived table (settings, subforms, or junction tables).
         """
-        config = self.VIRTUAL_TABLES[table_name]
+        config = self.DERIVED_TABLES[table_name]
         table_type = config["type"]
 
         if table_type == "settings":
@@ -768,7 +768,7 @@ class LakeflowConnect:
         elif table_type == "related":
             return self._read_related_table(table_name, config, start_offset)
         else:
-            raise ValueError(f"Unknown virtual table type: {table_type}")
+            raise ValueError(f"Unknown derived table type: {table_type}")
 
     def _read_settings_table(self, table_name: str, config: dict, start_offset: dict) -> (Iterator[dict], dict):
         """
@@ -850,6 +850,12 @@ class LakeflowConnect:
 
                 try:
                     response = self._make_request("GET", f"/crm/v8/{parent_module}", params=params)
+                except requests.exceptions.HTTPError as e:
+                    # 400/404 means the parent module doesn't exist or isn't accessible
+                    if e.response.status_code in (400, 404):
+                        print(f"[DEBUG] Parent module {parent_module} not accessible (HTTP {e.response.status_code}), returning empty")
+                        return
+                    raise
                 except Exception as e:
                     print(f"[DEBUG] Error fetching {parent_module}: {e}")
                     raise
@@ -912,6 +918,12 @@ class LakeflowConnect:
 
                 try:
                     response = self._make_request("GET", f"/crm/v8/{parent_module}", params=params)
+                except requests.exceptions.HTTPError as e:
+                    # 400/404 means the parent module doesn't exist or isn't accessible
+                    if e.response.status_code in (400, 404):
+                        print(f"[DEBUG] Parent module {parent_module} not accessible (HTTP {e.response.status_code}), returning empty")
+                        return
+                    raise
                 except Exception as e:
                     print(f"[DEBUG] Error fetching {parent_module}: {e}")
                     raise
