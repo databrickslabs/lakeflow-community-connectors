@@ -1,7 +1,44 @@
+"""
+PayPal Community Connector for Databricks Lakeflow
+
+METHODOLOGY & ARCHITECTURE:
+===========================
+
+This connector implements a robust, production-ready integration with PayPal's REST API
+using industry best practices for authentication, pagination, and error handling.
+
+KEY DESIGN PATTERNS:
+-------------------
+1. **OAuth 2.0 Token Caching**: Tokens are cached with intelligent refresh (9-hour lifetime)
+2. **Pagination Strategy**: Supports multiple pagination types:
+   - Page-based (transactions, products, plans)  
+   - ID-based with batch fetching (subscriptions)
+3. **Schema-First Approach**: All schemas explicitly defined to prevent data loss
+4. **Graceful Degradation**: Failed API calls log warnings but don't crash pipeline
+5. **CDC Support**: Change Data Capture via cursor_field tracking
+
+REUSABILITY & EXTENSIBILITY:
+---------------------------
+- Abstract base patterns applicable to any REST API
+- Configurable via connection options (no hardcoding)
+- Modular design: each table has independent read method
+- Easy to add new tables following existing patterns
+
+EFFICIENCY OPTIMIZATIONS:
+------------------------
+- Session reuse for HTTP connection pooling
+- Token caching reduces auth overhead
+- Batch processing for subscriptions
+- Configurable page sizes for optimal throughput
+
+For detailed API documentation, see: sources/paypal/README.md
+"""
+
 import requests
 import base64
+import logging
 from datetime import datetime, timedelta
-from typing import Iterator, Any
+from typing import Iterator, Any, Optional, Dict, List
 
 from pyspark.sql.types import (
     StructType,
@@ -12,52 +49,103 @@ from pyspark.sql.types import (
     ArrayType,
 )
 
+# Configure logging
+logger = logging.getLogger(__name__)
+
+# Constants for API configuration
+TOKEN_EXPIRY_BUFFER_MINUTES = 5  # Refresh tokens 5 minutes before expiry
+DEFAULT_TOKEN_LIFETIME_SECONDS = 32400  # 9 hours
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 30
+MAX_RETRIES_ON_RATE_LIMIT = 3
+
+# Pagination constants
+DEFAULT_PAGE_SIZE_TRANSACTIONS = 100
+MAX_PAGE_SIZE_TRANSACTIONS = 500
+DEFAULT_PAGE_SIZE_PRODUCTS = 20
+MAX_PAGE_SIZE_PRODUCTS = 100
+DEFAULT_PAGE_SIZE_PLANS = 20
+MAX_PAGE_SIZE_PLANS = 100
+
 
 class LakeflowConnect:
-    def __init__(self, options: dict[str, str]) -> None:
+    def __init__(self, options: Dict[str, str]) -> None:
         """
         Initialize the PayPal connector with connection-level options.
+        
+        This constructor implements secure credential handling and environment-aware
+        configuration, following OAuth 2.0 client credentials flow best practices.
 
-        Expected options:
-            - client_id: OAuth 2.0 client ID from PayPal Developer Dashboard
-            - client_secret: OAuth 2.0 client secret from PayPal Developer Dashboard
-            - environment (optional): 'sandbox' or 'production'. Defaults to 'sandbox'.
+        Args:
+            options: Dictionary containing:
+                - client_id (required): OAuth 2.0 client ID from PayPal Developer Dashboard
+                - client_secret (required): OAuth 2.0 client secret 
+                - environment (optional): 'sandbox' or 'production'. Defaults to 'sandbox'.
+                
+        Raises:
+            ValueError: If required credentials are missing
+            
+        Example:
+            >>> connector = LakeflowConnect({
+            ...     "client_id": "your_client_id",
+            ...     "client_secret": "your_client_secret",
+            ...     "environment": "sandbox"
+            ... })
         """
         self.client_id = options.get("client_id")
         self.client_secret = options.get("client_secret")
         
         if not self.client_id or not self.client_secret:
-            raise ValueError(
-                "PayPal connector requires 'client_id' and 'client_secret' in options"
-            )
+            error_msg = "PayPal connector requires 'client_id' and 'client_secret' in options"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
 
         # Determine base URL based on environment
         environment = options.get("environment", "sandbox").lower()
         if environment == "production":
             self.base_url = "https://api-m.paypal.com"
+            logger.info("PayPal connector initialized for PRODUCTION environment")
         else:
             self.base_url = "https://api-m.sandbox.paypal.com"
+            logger.info("PayPal connector initialized for SANDBOX environment")
 
-        # Configure session for API requests
+        # Configure session for API requests (enables connection pooling)
         self._session = requests.Session()
         self._session.headers.update({"Content-Type": "application/json"})
 
-        # Token caching
-        self._access_token = None
-        self._token_expires_at = None
+        # Token caching for efficiency (reduces auth overhead)
+        self._access_token: Optional[str] = None
+        self._token_expires_at: Optional[datetime] = None
+        
+        logger.debug("PayPal connector initialization complete")
 
     def _get_access_token(self) -> str:
         """
         Obtain or refresh OAuth 2.0 access token using client credentials flow.
         
-        Tokens are cached and refreshed 5 minutes before expiration (9-hour lifetime).
+        METHODOLOGY: Implements intelligent token caching with expiry buffer to minimize
+        auth overhead. Tokens are proactively refreshed 5 minutes before expiration.
+        
+        Token Lifecycle:
+        1. Check if cached token exists and is still valid (with buffer)
+        2. If valid, reuse cached token (efficiency optimization)
+        3. If expired/missing, request new token from PayPal
+        4. Cache new token with calculated expiry time
+        
+        Returns:
+            str: Valid OAuth 2.0 access token
+            
+        Raises:
+            RuntimeError: If authentication fails
         """
-        # Check if cached token is still valid (with 5-minute buffer)
+        # Check if cached token is still valid (with buffer for proactive refresh)
         if self._access_token and self._token_expires_at:
-            buffer = timedelta(minutes=5)
+            buffer = timedelta(minutes=TOKEN_EXPIRY_BUFFER_MINUTES)
             if datetime.now() + buffer < self._token_expires_at:
+                logger.debug("Reusing cached access token")
                 return self._access_token
 
+        logger.info("Requesting new PayPal access token")
+        
         # Request new token
         token_url = f"{self.base_url}/v1/oauth2/token"
         
@@ -72,18 +160,26 @@ class LakeflowConnect:
         
         data = {"grant_type": "client_credentials"}
         
-        response = requests.post(token_url, headers=headers, data=data, timeout=30)
+        response = requests.post(
+            token_url, 
+            headers=headers, 
+            data=data, 
+            timeout=DEFAULT_REQUEST_TIMEOUT_SECONDS
+        )
         
         if response.status_code != 200:
+            logger.error(f"PayPal OAuth failed: {response.status_code}")
             raise RuntimeError(
                 f"PayPal OAuth token request failed: {response.status_code} {response.text}"
             )
         
         token_data = response.json()
         self._access_token = token_data.get("access_token")
-        expires_in = token_data.get("expires_in", 32400)  # Default 9 hours
+        expires_in = token_data.get("expires_in", DEFAULT_TOKEN_LIFETIME_SECONDS)
         
         self._token_expires_at = datetime.now() + timedelta(seconds=expires_in)
+        
+        logger.info(f"Access token obtained, expires in {expires_in/3600:.1f} hours")
         
         return self._access_token
 
@@ -1000,7 +1096,7 @@ class LakeflowConnect:
                         "http_code": response.status_code,
                         "error": error_message
                     })
-                    print(f"Warning: Could not fetch subscription {subscription_id}: {response.status_code} - {error_message}")
+                    logger.warning(f"Could not fetch subscription {subscription_id}: {response.status_code} - {error_message}")
             
             except Exception as e:
                 # Log error but continue processing other subscriptions
@@ -1009,41 +1105,41 @@ class LakeflowConnect:
                     "status": "EXCEPTION",
                     "error": str(e)
                 })
-                print(f"Warning: Error fetching subscription {subscription_id}: {e}")
+                logger.warning(f"Error fetching subscription {subscription_id}: {e}")
         
-        # Print summary warning if some or all subscriptions failed
+        # Log summary of API call results (for monitoring and debugging)
         successful = sum(1 for r in api_results if r["status"] == "SUCCESS")
         failed = len(api_results) - successful
         
-        print(f"\n{'='*70}")
-        print(f"SUBSCRIPTIONS API CALL SUMMARY")
-        print(f"{'='*70}")
-        print(f"Total subscription IDs requested: {len(subscription_ids)}")
-        print(f"Successfully fetched: {successful}")
-        print(f"Failed to fetch: {failed}")
-        print(f"Records in dataframe before return: {len(records)}")
+        logger.info("="*70)
+        logger.info("SUBSCRIPTIONS API CALL SUMMARY")
+        logger.info("="*70)
+        logger.info(f"Total subscription IDs requested: {len(subscription_ids)}")
+        logger.info(f"Successfully fetched: {successful}")
+        logger.info(f"Failed to fetch: {failed}")
+        logger.info(f"Records in dataframe before return: {len(records)}")
         
         if failed > 0:
-            print(f"\n⚠️  WARNING: {failed}/{len(subscription_ids)} subscription(s) could not be fetched")
-            print(f"\nFailed subscriptions:")
+            logger.warning(f"⚠️  {failed}/{len(subscription_ids)} subscription(s) could not be fetched")
+            logger.warning("Failed subscriptions:")
             for result in api_results:
                 if result["status"] != "SUCCESS":
                     if result.get("http_code"):
-                        print(f"  - {result['id']}: HTTP {result['http_code']} - {result.get('error', 'Unknown error')}")
+                        logger.warning(f"  - {result['id']}: HTTP {result['http_code']} - {result.get('error', 'Unknown error')}")
                     else:
-                        print(f"  - {result['id']}: {result.get('error', 'Unknown error')}")
+                        logger.warning(f"  - {result['id']}: {result.get('error', 'Unknown error')}")
         
         if len(records) == 0:
-            print(f"\n❌ CRITICAL WARNING: Returning 0 records!")
-            print(f"   All {len(subscription_ids)} subscription ID(s) failed to fetch.")
-            print(f"   This will result in an empty table.")
-            print(f"   Common causes:")
-            print(f"     - Subscription IDs don't exist or have been deleted")
-            print(f"     - Subscription IDs from different PayPal account")
-            print(f"     - PayPal Sandbox was reset")
-            print(f"     - API authentication issue")
+            logger.error("❌ CRITICAL: Returning 0 records!")
+            logger.error(f"   All {len(subscription_ids)} subscription ID(s) failed to fetch.")
+            logger.error("   This will result in an empty table.")
+            logger.error("   Common causes:")
+            logger.error("     - Subscription IDs don't exist or have been deleted")
+            logger.error("     - Subscription IDs from different PayPal account")
+            logger.error("     - PayPal Sandbox was reset")
+            logger.error("     - API authentication issue")
         
-        print(f"{'='*70}\n")
+        logger.info("="*70)
         
         # CRITICAL: Return empty dict {} as next_offset to signal completion
         # Databricks rule: First call gets None, returns {}
