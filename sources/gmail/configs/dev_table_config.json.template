@@ -1,0 +1,18 @@
+{
+    "messages": {
+        "maxResults": "10"
+    },
+    "threads": {
+        "maxResults": "10"
+    },
+    "labels": {},
+    "drafts": {
+        "maxResults": "10"
+    },
+    "profile": {},
+    "settings": {},
+    "filters": {},
+    "forwarding_addresses": {},
+    "send_as": {},
+    "delegates": {}
+}
