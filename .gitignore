@@ -12,3 +12,6 @@ venv/
 
 # OS
 .DS_Store
+
+# Dev configs
+sources/**/configs/dev_*.json
