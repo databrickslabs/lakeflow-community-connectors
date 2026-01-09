@@ -10,10 +10,18 @@ from decimal import Decimal
 from typing import Any, Iterator
 import json
 
+from .handlers import (
+    ModuleHandler,
+    RelatedHandler,
+    SettingsHandler,
+    SubformHandler,
+)
+from .zoho_client import ZohoAPIClient
 from pyspark.sql import Row
 from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
 from pyspark.sql.types import *
 import base64
+import logging
 
 
 def register_lakeflow_source(spark):
@@ -205,86 +213,6 @@ def register_lakeflow_source(spark):
     ########################################################
     # sources/zoho_crm/zoho_crm.py
     ########################################################
-
-    Zoho CRM connector for Lakeflow/Databricks.
-
-    This module provides the main LakeflowConnect class that orchestrates
-    data ingestion from Zoho CRM into Databricks.
-
-    =============================================================================
-    CODE STRUCTURE
-    =============================================================================
-
-    The Zoho CRM connector is organized into modular components:
-
-        zoho_crm/
-        ├── zoho_crm.py          # Main orchestrator (this file)
-        ├── zoho_client.py       # API client: auth, HTTP, pagination
-        ├── zoho_types.py        # Spark type mappings and schema definitions
-        └── handlers/
-            ├── base.py          # Abstract TableHandler interface
-            ├── module.py        # Standard CRM modules (Leads, Contacts, etc.)
-            ├── settings.py      # Org tables (Users, Roles, Profiles)
-            ├── subform.py       # Line items (disabled by default, see file)
-            └── related.py       # Junction tables (Campaigns_Leads, etc.)
-
-    =============================================================================
-    ARCHITECTURE
-    =============================================================================
-
-    LakeflowConnect (this file)
-        │
-        ├── ZohoAPIClient (zoho_client.py)
-        │       Handles OAuth2 authentication, HTTP requests, rate limiting,
-        │       and pagination. Shared by all handlers.
-        │
-        └── TableHandlers (handlers/)
-                Each handler implements get_schema(), get_metadata(), read()
-                for a specific table type. The orchestrator routes requests
-                to the appropriate handler based on table name.
-
-    =============================================================================
-    SUPPORTED TABLE TYPES
-    =============================================================================
-
-    1. Standard Modules (ModuleHandler)
-       - Dynamically discovered via Modules API
-       - Schemas fetched from Fields API
-       - Support CDC via Modified_Time cursor
-       - Examples: Leads, Contacts, Accounts, Deals, Tasks, Notes
-
-    2. Settings Tables (SettingsHandler)
-       - Fixed set of org-level tables
-       - Predefined schemas (stable structure)
-       - Use different API endpoints than modules
-       - Tables: Users, Roles, Profiles
-
-    3. Subform Tables (SubformHandler)
-       - Extracted from parent record subform fields
-       - Line items from Quotes, Sales Orders, Invoices, Purchase Orders
-       - Include _parent_id, _parent_module for traceability
-       - NOTE: Disabled by default (requires Zoho Inventory/Books)
-       - See handlers/subform.py to enable if you have these products
-
-    4. Junction Tables (RelatedHandler)
-       - Many-to-many relationships between modules
-       - Fetched via Related Records API
-       - Include _junction_id, _parent_id, _parent_module
-       - Tables: Campaigns_Leads, Campaigns_Contacts, Contacts_X_Deals
-    """
-
-    import logging
-    from typing import Iterator
-
-    from pyspark.sql.types import StructType
-
-    from .zoho_client import ZohoAPIClient
-    from .handlers import (
-        ModuleHandler,
-        SettingsHandler,
-        SubformHandler,
-        RelatedHandler,
-    )
 
     logger = logging.getLogger(__name__)
 
