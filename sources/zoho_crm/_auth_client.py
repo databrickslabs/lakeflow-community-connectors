@@ -7,49 +7,101 @@ from typing import Optional
 
 class AuthClient:
     """
-    Handles OAuth authentication and token management for Zoho CRM API interactions.
-    This includes obtaining and refreshing access tokens, and making authenticated API requests.
+    Handles OAuth 2.0 authentication and API requests for Zoho CRM.
+
+    This class manages the OAuth token lifecycle, including:
+    - Storing and refreshing access tokens before expiry
+    - Deriving the correct API endpoint based on regional OAuth URL
+    - Making authenticated HTTP requests with retry logic
+    - Handling rate limiting (HTTP 429) with exponential backoff
+
+    Attributes:
+        client_id: OAuth Client ID from Zoho API Console.
+        client_secret: OAuth Client Secret from Zoho API Console.
+        refresh_token: Long-lived refresh token for obtaining access tokens.
+        accounts_url: Zoho accounts URL for OAuth (region-specific).
+        api_url: Zoho CRM API URL (derived from accounts_url).
+        access_token: Current valid access token (or None if not yet obtained).
+        token_expires_at: Expiration datetime of current access token.
+
+    Note:
+        The class maintains a requests.Session for connection pooling,
+        which improves performance for multiple sequential API calls.
     """
+
+    # Token refresh buffer - refresh 5 minutes before actual expiry
+    TOKEN_REFRESH_BUFFER_MINUTES = 5
+
+    # Maximum retry attempts for transient errors
+    MAX_RETRIES = 3
 
     def __init__(self, options: dict[str, str]) -> None:
         """
-        Initializes the AuthClient with OAuth credentials and base URLs.
+        Initialize the authentication client with OAuth credentials.
 
         Args:
-            options: A dictionary containing connection-level options, including:
-                     - client_id: OAuth Client ID from Zoho API Console.
-                     - client_secret: OAuth Client Secret from Zoho API Console.
-                     - refresh_token: Long-lived refresh token obtained from OAuth flow.
-                     - base_url (optional): Zoho accounts URL for OAuth. Defaults to https://accounts.zoho.com.
+            options: Dictionary containing connection configuration:
+                - client_id (required): OAuth Client ID from Zoho API Console.
+                - client_value_tmp (required): OAuth Client Secret.
+                - refresh_value_tmp (required): Long-lived refresh token.
+                - base_url (optional): Zoho accounts URL for OAuth.
+                  Defaults to "https://accounts.zoho.com" (US region).
+                  Other regions:
+                    - EU: https://accounts.zoho.eu
+                    - IN: https://accounts.zoho.in
+                    - AU: https://accounts.zoho.com.au
+                    - CN: https://accounts.zoho.com.cn
+
+        Note:
+            The API URL is automatically derived from the accounts URL.
+            For example, https://accounts.zoho.eu -> https://www.zohoapis.eu
         """
+        # Extract OAuth credentials from options
         self.client_id = options.get("client_id")
         self.client_secret = options.get("client_value_tmp")
         self.refresh_token = options.get("refresh_value_tmp")
 
-        # Determine Zoho Accounts URL for OAuth and derive the Zoho CRM API URL.
+        # Determine the Zoho Accounts URL (for OAuth) and derive the API URL
         self.accounts_url = options.get("base_url", "https://accounts.zoho.com").rstrip("/")
-        # The API URL is derived from the accounts URL's domain suffix (e.g., .eu, .com).
+
+        # Extract domain suffix (e.g., "eu", "in", "com.au") from accounts URL
+        # Pattern: accounts.zoho.{suffix} -> www.zohoapis.{suffix}
         match = re.search(r"accounts\.zoho\.(.+)$", self.accounts_url)
         domain_suffix = match.group(1) if match else "com"
         self.api_url = f"https://www.zohoapis.{domain_suffix}"
 
-        # Initialize attributes for managing OAuth access tokens and their expiration.
+        # Token management - initially no token is available
         self.access_token: Optional[str] = None
         self.token_expires_at: Optional[datetime] = None
 
-        # Configure a session for making persistent API requests to Zoho CRM.
+        # Use a persistent session for connection pooling and keep-alive
         self._session = requests.Session()
 
     def get_access_token(self) -> str:
         """
-        Retrieves a valid OAuth access token, refreshing it if necessary.
-        Access tokens typically expire after 1 hour (3600 seconds).
-        """
-        # Return current token if it's still valid (with a 5-minute buffer).
-        if self.access_token and self.token_expires_at and datetime.now() < self.token_expires_at - timedelta(minutes=5):
-            return self.access_token
+        Retrieve a valid OAuth access token, refreshing if necessary.
 
-        # Construct the token refresh URL and payload.
+        This method implements lazy token refresh - it only requests a new
+        token when the current one is expired or about to expire (within
+        5 minutes of expiry).
+
+        Returns:
+            A valid access token string.
+
+        Raises:
+            Exception: If token refresh fails or response is invalid.
+
+        Note:
+            Access tokens typically expire after 1 hour (3600 seconds).
+            This method automatically handles the refresh before expiry.
+        """
+        # Check if current token is still valid (with buffer time)
+        if self.access_token and self.token_expires_at:
+            buffer = timedelta(minutes=self.TOKEN_REFRESH_BUFFER_MINUTES)
+            if datetime.now() < self.token_expires_at - buffer:
+                return self.access_token
+
+        # Token is expired or doesn't exist - refresh it
         token_refresh_url = f"{self.accounts_url}/oauth/v2/token"
         refresh_payload = {
             "refresh_token": self.refresh_token,
@@ -58,29 +110,27 @@ class AuthClient:
             "grant_type": "refresh_token",
         }
 
-        # Send the refresh token request.
         response = requests.post(token_refresh_url, data=refresh_payload)
 
         try:
-            response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx).
+            response.raise_for_status()
         except requests.exceptions.HTTPError as e:
             error_detail = response.text
             raise Exception(f"Failed to refresh access token: {e}. Response: {error_detail}")
 
         token_data = response.json()
 
-        # Validate the presence of 'access_token' in the response.
+        # Validate response contains access_token
         if "access_token" not in token_data:
             raise Exception(
                 f"Token refresh response missing 'access_token'. "
                 f"Response: {token_data}. "
-                f"Requested with data: {refresh_payload}. "
-                f"Please check your client_id, client_secret, and refresh_token are valid."
+                f"Please check your client_id, client_value_tmp, and refresh_value_tmp are valid."
             )
 
-        # Update access token and expiration time.
+        # Store the new token and calculate expiration time
         self.access_token = token_data["access_token"]
-        expires_in_seconds = token_data.get("expires_in", 3600)  # Default to 3600 seconds (1 hour).
+        expires_in_seconds = token_data.get("expires_in", 3600)
         self.token_expires_at = datetime.now() + timedelta(seconds=expires_in_seconds)
 
         return self.access_token
@@ -93,12 +143,47 @@ class AuthClient:
         data: Optional[dict] = None,
     ) -> dict:
         """
-        Makes an authenticated API request to Zoho CRM, handling token refresh and rate limiting.
-        Includes retry logic for transient errors like rate limits or expired tokens.
+        Make an authenticated API request to Zoho CRM.
+
+        This method handles:
+        - Automatic token refresh if needed
+        - Rate limiting with exponential backoff
+        - Token re-acquisition on 401 errors
+        - Empty response handling
+
+        Args:
+            method: HTTP method (GET, POST, PUT, DELETE).
+            endpoint: API endpoint path (e.g., "/crm/v8/Leads").
+            params: Optional query parameters as a dictionary.
+            data: Optional request body for POST/PUT requests.
+
+        Returns:
+            Parsed JSON response as a dictionary.
+            Returns empty dict for empty responses.
+
+        Raises:
+            ValueError: If an unsupported HTTP method is specified.
+            Exception: If request fails after max retries or rate limit exceeded.
+            requests.exceptions.HTTPError: For non-retryable HTTP errors.
+
+        Example:
+            >>> # GET request with query parameters
+            >>> response = client.make_request(
+            ...     "GET",
+            ...     "/crm/v8/Leads",
+            ...     params={"page": 1, "per_page": 200}
+            ... )
+
+            >>> # POST request with JSON body
+            >>> response = client.make_request(
+            ...     "POST",
+            ...     "/crm/v8/Leads",
+            ...     data={"data": [{"Last_Name": "Smith"}]}
+            ... )
         """
         access_token = self.get_access_token()
 
-        # Construct the full API URL and headers, including authorization.
+        # Construct full URL and authorization header
         request_url = f"{self.api_url}{endpoint}"
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}",
@@ -107,10 +192,10 @@ class AuthClient:
         if data:
             headers["Content-Type"] = "application/json"
 
-        max_retries = 3
-        for attempt in range(max_retries):
+        # Retry loop with exponential backoff for transient errors
+        for attempt in range(self.MAX_RETRIES):
             try:
-                # Execute the HTTP request based on the specified method.
+                # Execute the appropriate HTTP method
                 if method.upper() == "GET":
                     response = self._session.get(request_url, headers=headers, params=params)
                 elif method.upper() == "POST":
@@ -122,29 +207,30 @@ class AuthClient:
                 else:
                     raise ValueError(f"Unsupported HTTP method: {method}")
 
-                # Handle API rate limiting (HTTP 429 Too Many Requests) with exponential backoff.
+                # Handle rate limiting (HTTP 429) with exponential backoff
                 if response.status_code == 429:
-                    if attempt < max_retries - 1:
-                        time.sleep(2**attempt)  # Wait for 2^attempt seconds.
+                    if attempt < self.MAX_RETRIES - 1:
+                        wait_time = 2 ** attempt  # 1s, 2s, 4s
+                        time.sleep(wait_time)
                         continue
                     else:
                         raise Exception("Rate limit exceeded after multiple retries. Please wait and try again later.")
 
-                response.raise_for_status()  # Raise HTTPError for other bad responses (e.g., 400, 500).
+                response.raise_for_status()
 
-                # Return an empty dictionary for empty responses to prevent JSON parsing errors.
+                # Handle empty responses (some Zoho endpoints return no body)
                 if not response.text or response.text.strip() == "":
                     return {}
 
                 return response.json()
 
             except requests.exceptions.HTTPError as e:
-                # If 401 Unauthorized, invalidate token, refresh, and re-attempt the request once.
+                # On 401 Unauthorized, try refreshing the token once
                 if e.response.status_code == 401 and attempt == 0:
-                    self.access_token = None  # Clear the expired token.
-                    access_token = self.get_access_token()  # Fetch a new access token.
-                    headers["Authorization"] = f"Zoho-oauthtoken {access_token}"  # Update authorization header.
+                    self.access_token = None  # Force token refresh
+                    access_token = self.get_access_token()
+                    headers["Authorization"] = f"Zoho-oauthtoken {access_token}"
                     continue
-                raise  # Re-raise all other HTTP errors immediately.
+                raise
 
-        raise Exception(f"Failed to make API request after {max_retries} attempts")
+        raise Exception(f"Failed to make API request after {self.MAX_RETRIES} attempts")

@@ -5,18 +5,18 @@
 # Do not edit manually. Make changes to the source files instead.
 # ==============================================================================
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any, Iterator
+from typing import Any, Iterator, Optional
+import base64
 import json
+import re
+import time
 
-from ._auth_client import AuthClient
-from ._metadata_manager import MetadataManager
-from ._schema_generator import SchemaGenerator
 from pyspark.sql import Row
 from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
 from pyspark.sql.types import *
-import base64
+import requests
 
 
 def register_lakeflow_source(spark):
@@ -206,6 +206,1162 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
+    # sources/zoho_crm/_auth_client.py
+    ########################################################
+
+    class AuthClient:
+        """
+        Handles OAuth authentication and token management for Zoho CRM API interactions.
+        This includes obtaining and refreshing access tokens, and making authenticated API requests.
+        """
+
+        def __init__(self, options: dict[str, str]) -> None:
+            """
+            Initializes the AuthClient with OAuth credentials and base URLs.
+
+            Args:
+                options: A dictionary containing connection-level options, including:
+                         - client_id: OAuth Client ID from Zoho API Console.
+                         - client_secret: OAuth Client Secret from Zoho API Console.
+                         - refresh_token: Long-lived refresh token obtained from OAuth flow.
+                         - base_url (optional): Zoho accounts URL for OAuth. Defaults to https://accounts.zoho.com.
+            """
+            self.client_id = options.get("client_id")
+            self.client_secret = options.get("client_value_tmp")
+            self.refresh_token = options.get("refresh_value_tmp")
+
+            # Determine Zoho Accounts URL for OAuth and derive the Zoho CRM API URL.
+            self.accounts_url = options.get("base_url", "https://accounts.zoho.com").rstrip("/")
+            # The API URL is derived from the accounts URL's domain suffix (e.g., .eu, .com).
+            match = re.search(r"accounts\.zoho\.(.+)$", self.accounts_url)
+            domain_suffix = match.group(1) if match else "com"
+            self.api_url = f"https://www.zohoapis.{domain_suffix}"
+
+            # Initialize attributes for managing OAuth access tokens and their expiration.
+            self.access_token: Optional[str] = None
+            self.token_expires_at: Optional[datetime] = None
+
+            # Configure a session for making persistent API requests to Zoho CRM.
+            self._session = requests.Session()
+
+        def get_access_token(self) -> str:
+            """
+            Retrieves a valid OAuth access token, refreshing it if necessary.
+            Access tokens typically expire after 1 hour (3600 seconds).
+            """
+            # Return current token if it's still valid (with a 5-minute buffer).
+            if self.access_token and self.token_expires_at and datetime.now() < self.token_expires_at - timedelta(minutes=5):
+                return self.access_token
+
+            # Construct the token refresh URL and payload.
+            token_refresh_url = f"{self.accounts_url}/oauth/v2/token"
+            refresh_payload = {
+                "refresh_token": self.refresh_token,
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "grant_type": "refresh_token",
+            }
+
+            # Send the refresh token request.
+            response = requests.post(token_refresh_url, data=refresh_payload)
+
+            try:
+                response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx).
+            except requests.exceptions.HTTPError as e:
+                error_detail = response.text
+                raise Exception(f"Failed to refresh access token: {e}. Response: {error_detail}")
+
+            token_data = response.json()
+
+            # Validate the presence of 'access_token' in the response.
+            if "access_token" not in token_data:
+                raise Exception(
+                    f"Token refresh response missing 'access_token'. "
+                    f"Response: {token_data}. "
+                    f"Requested with data: {refresh_payload}. "
+                    f"Please check your client_id, client_secret, and refresh_token are valid."
+                )
+
+            # Update access token and expiration time.
+            self.access_token = token_data["access_token"]
+            expires_in_seconds = token_data.get("expires_in", 3600)  # Default to 3600 seconds (1 hour).
+            self.token_expires_at = datetime.now() + timedelta(seconds=expires_in_seconds)
+
+            return self.access_token
+
+        def make_request(
+            self,
+            method: str,
+            endpoint: str,
+            params: Optional[dict] = None,
+            data: Optional[dict] = None,
+        ) -> dict:
+            """
+            Makes an authenticated API request to Zoho CRM, handling token refresh and rate limiting.
+            Includes retry logic for transient errors like rate limits or expired tokens.
+            """
+            access_token = self.get_access_token()
+
+            # Construct the full API URL and headers, including authorization.
+            request_url = f"{self.api_url}{endpoint}"
+            headers = {
+                "Authorization": f"Zoho-oauthtoken {access_token}",
+            }
+
+            if data:
+                headers["Content-Type"] = "application/json"
+
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    # Execute the HTTP request based on the specified method.
+                    if method.upper() == "GET":
+                        response = self._session.get(request_url, headers=headers, params=params)
+                    elif method.upper() == "POST":
+                        response = self._session.post(request_url, headers=headers, json=data, params=params)
+                    elif method.upper() == "PUT":
+                        response = self._session.put(request_url, headers=headers, json=data, params=params)
+                    elif method.upper() == "DELETE":
+                        response = self._session.delete(request_url, headers=headers, params=params)
+                    else:
+                        raise ValueError(f"Unsupported HTTP method: {method}")
+
+                    # Handle API rate limiting (HTTP 429 Too Many Requests) with exponential backoff.
+                    if response.status_code == 429:
+                        if attempt < max_retries - 1:
+                            time.sleep(2**attempt)  # Wait for 2^attempt seconds.
+                            continue
+                        else:
+                            raise Exception("Rate limit exceeded after multiple retries. Please wait and try again later.")
+
+                    response.raise_for_status()  # Raise HTTPError for other bad responses (e.g., 400, 500).
+
+                    # Return an empty dictionary for empty responses to prevent JSON parsing errors.
+                    if not response.text or response.text.strip() == "":
+                        return {}
+
+                    return response.json()
+
+                except requests.exceptions.HTTPError as e:
+                    # If 401 Unauthorized, invalidate token, refresh, and re-attempt the request once.
+                    if e.response.status_code == 401 and attempt == 0:
+                        self.access_token = None  # Clear the expired token.
+                        access_token = self.get_access_token()  # Fetch a new access token.
+                        headers["Authorization"] = f"Zoho-oauthtoken {access_token}"  # Update authorization header.
+                        continue
+                    raise  # Re-raise all other HTTP errors immediately.
+
+            raise Exception(f"Failed to make API request after {max_retries} attempts")
+
+
+    ########################################################
+    # sources/zoho_crm/_metadata_manager.py
+    ########################################################
+
+    class MetadataManager:
+        """
+        Manages Zoho CRM module and field metadata, including caching and determining
+        table metadata (primary keys, cursor fields, ingestion types).
+        """
+
+        def __init__(self, auth_client: AuthClient, derived_tables: dict) -> None:
+            """
+            Initializes the MetadataManager with an AuthClient instance and derived table configuration.
+
+            Args:
+                auth_client: An instance of AuthClient for making API requests.
+                derived_tables: A dictionary defining derived tables.
+            """
+            self._auth_client = auth_client
+            self.DERIVED_TABLES = derived_tables
+
+            # Initialize caches to store fetched metadata (modules, fields)
+            # to minimize redundant API calls and improve performance.
+            self._modules_cache: Optional[list[dict]] = None
+            self._fields_cache: dict[str, list[dict]] = {}
+
+        def _get_modules(self) -> list[dict]:
+            """
+            Retrieves and caches a list of all available Zoho CRM modules.
+            Filters out analytics, system, and other modules not suitable for data ingestion.
+            """
+            if self._modules_cache is not None:
+                return self._modules_cache  # Return cached modules if available.
+
+            # Fetch modules from the Zoho CRM settings API.
+            modules_response = self._auth_client.make_request("GET", "/crm/v8/settings/modules")
+            all_modules = modules_response.get("modules", [])
+
+            # Define modules to be explicitly excluded from the supported list.
+            modules_to_exclude = {
+                "Visits",  # No fields available, typically analytics.
+                "Actions_Performed",  # No fields available.
+                "Email_Sentiment",  # Analytics module, separate API.
+                "Email_Analytics",  # Analytics module, separate API.
+                "Email_Template_Analytics",  # Analytics module, separate API.
+                "Locking_Information__s",  # Internal system module, often forbidden.
+            }
+
+            # Filter modules to include only API-supported, standard/custom types, and not in the exclusion list.
+            supported_modules = [
+                module for module in all_modules
+                if module.get("api_supported")  # Ensure the module supports API access.
+                and module.get("generated_type") in ["default", "custom"]  # Include standard and custom modules.
+                and module.get("api_name") not in modules_to_exclude  # Exclude known problematic modules.
+            ]
+
+            self._modules_cache = supported_modules  # Cache the filtered list of modules.
+            return supported_modules
+
+        def get_fields(self, module_name: str) -> list[dict]:
+            """
+            Retrieves and caches field metadata for a specified Zoho CRM module.
+            Handles cases where a module might not have accessible field metadata.
+            """
+            if module_name in self._fields_cache:
+                return self._fields_cache[module_name]  # Return cached fields if available.
+
+            params = {"module": module_name}
+            try:
+                # Fetch field metadata from the Zoho CRM settings API.
+                fields_response = self._auth_client.make_request("GET", "/crm/v8/settings/fields", params=params)
+                module_fields = fields_response.get("fields", [])
+            except Exception as e:
+                # Log a warning and return an empty list if field metadata cannot be fetched.
+                print(f"Warning: Could not fetch fields for module '{module_name}': {e}")
+                module_fields = []
+
+            self._fields_cache[module_name] = module_fields  # Cache the fetched fields.
+            return module_fields
+
+        def list_tables(self) -> list[str]:
+            """
+            Lists the names of all supported tables (modules) by this connector.
+            This includes both standard Zoho CRM modules discovered via API and
+            connector-defined derived tables (settings, subforms, and junction tables).
+            """
+            # Retrieve standard CRM modules that are accessible via API.
+            standard_modules = self._get_modules()
+            table_names = [module["api_name"] for module in standard_modules]
+
+            # Add the names of all derived tables defined within the connector.
+            table_names.extend(self.DERIVED_TABLES.keys())
+
+            return sorted(table_names)  # Return a sorted list of all unique table names.
+
+        def read_table_metadata(self, table_name: str, get_table_schema_func, table_options: dict[str, str]) -> dict:
+            """
+            Retrieves metadata for a specified Zoho CRM module or derived table.
+            This metadata includes primary keys, the cursor field for Change Data Capture (CDC),
+            and the recommended ingestion type (CDC, snapshot, or append).
+            """
+            # Delegate metadata retrieval to a specialized method if it's a derived table.
+            if table_name in self.DERIVED_TABLES:
+                return self._get_derived_table_metadata(table_name)
+
+            # Ensure the requested table (module) is supported by the connector.
+            supported_tables = self.list_tables()
+            if table_name not in supported_tables:
+                raise ValueError(f"Table '{table_name}' is not supported. Available tables: {', '.join(supported_tables)}")
+
+            # Fetch the table's schema to determine the presence of 'Modified_Time' and 'id' fields.
+            table_schema = get_table_schema_func(table_name, table_options)
+            schema_field_names = table_schema.fieldNames()
+            has_modified_time_field = "Modified_Time" in schema_field_names
+            has_id_field = "id" in schema_field_names
+
+            # Special handling for 'Attachments': they are typically append-only and lack CDC.
+            if table_name == "Attachments":
+                return {
+                    "primary_keys": ["id"] if has_id_field else [],
+                    "ingestion_type": "append",
+                }
+
+            # Modules without a 'Modified_Time' field are best ingested as snapshots.
+            if not has_modified_time_field:
+                return {
+                    "primary_keys": ["id"] if has_id_field else [],
+                    "ingestion_type": "snapshot",
+                }
+
+            # By default, most modules support CDC with 'Modified_Time' as the cursor.
+            return {
+                "primary_keys": ["id"],
+                "cursor_field": "Modified_Time",
+                "ingestion_type": "cdc",
+            }
+
+        def _get_derived_table_metadata(self, table_name: str) -> dict:
+            """
+            Retrieves metadata specifically for derived tables.
+            This includes defining primary keys and the ingestion type (snapshot or CDC)
+            based on the derived table's inherent characteristics.
+            """
+            derived_table_config = self.DERIVED_TABLES[table_name]
+            table_type = derived_table_config["type"]
+
+            if table_type == "settings":
+                # For settings tables, 'Users' supports CDC, while 'Roles' and 'Profiles' are snapshot.
+                if table_name == "Users":
+                    return {
+                        "primary_keys": ["id"],
+                        "cursor_field": "Modified_Time",
+                        "ingestion_type": "cdc",
+                    }
+                else:
+                    return {
+                        "primary_keys": ["id"],
+                        "ingestion_type": "snapshot",
+                    }
+            elif table_type == "subform":
+                # Subforms are ingested as snapshots as individual line items don't have CDC tracking.
+                return {
+                    "primary_keys": ["id"],
+                    "ingestion_type": "snapshot",
+                }
+            elif table_type == "related":
+                # Junction/related tables are ingested as snapshots, using a composite key.
+                return {
+                    "primary_keys": ["_junction_id"],
+                    "ingestion_type": "snapshot",
+                }
+            else:
+                # Default metadata for any other unrecognized derived table types.
+                return {
+                    "primary_keys": ["id"],
+                    "ingestion_type": "snapshot",
+                }
+
+
+    ########################################################
+    # sources/zoho_crm/_schema_generator.py
+    ########################################################
+
+    class SchemaGenerator:
+        """
+        Generates PySpark SQL schemas for Zoho CRM modules and derived tables.
+
+        This class handles the mapping of Zoho CRM data types to PySpark types and
+        constructs complex schemas for settings, subform, and related tables.
+        """
+
+        def __init__(self, metadata_manager: MetadataManager, derived_tables: dict) -> None:
+            """
+            Initializes the SchemaGenerator with a MetadataManager instance and derived table configuration.
+
+            Args:
+                metadata_manager: An instance of MetadataManager for fetching field metadata.
+                derived_tables: A dictionary defining derived tables.
+            """
+            self._metadata_manager = metadata_manager
+            self.DERIVED_TABLES = derived_tables
+
+            # Initialize caches for subform schemas to minimize redundant API calls and improve performance.
+            self._subform_schema_cache: dict[str, StructType] = {}
+
+        def _zoho_type_to_spark_type(self, field: dict) -> StructField:
+            """
+            Converts a Zoho CRM field definition dictionary into a PySpark StructField.
+            This mapping is crucial for defining the schema of ingested data in Spark.
+            It handles various Zoho data types, including special cases like lookups and JSON fields.
+            """
+            field_api_name = field["api_name"]
+            zoho_data_type = field.get("data_type", "text")
+            zoho_json_type = field.get("json_type")
+            is_nullable = not field.get("required", False)
+
+            # Initialize spark_type as StringType by default to catch unmapped types safely.
+            spark_type: Any = StringType()
+
+            # Map Zoho CRM data types to corresponding PySpark SQL types.
+            if zoho_data_type == "bigint":
+                spark_type = LongType()
+            elif zoho_data_type in ["text", "textarea", "email", "phone", "website", "autonumber"]:
+                spark_type = StringType()
+            elif zoho_data_type == "picklist":
+                spark_type = StringType()
+            elif zoho_data_type == "multiselectpicklist":
+                spark_type = ArrayType(StringType(), True)
+            elif zoho_data_type == "integer":
+                spark_type = LongType()  # Use LongType for integers to avoid potential overflow issues.
+            elif zoho_data_type in ["double", "currency", "percent"]:
+                spark_type = DoubleType()
+            elif zoho_data_type == "boolean":
+                spark_type = BooleanType()
+            elif zoho_data_type in ["date", "datetime"]:
+                spark_type = StringType()  # Store date and datetime values as ISO 8601 strings.
+            elif zoho_data_type in ["lookup", "ownerlookup"]:
+                # Lookup fields are represented as nested structures, often with 'id', 'name', 'email'.
+                spark_type = StructType([
+                    StructField("id", StringType(), True),
+                    StructField("name", StringType(), True),
+                    StructField("email", StringType(), True),
+                ])
+            elif zoho_data_type == "multiselectlookup":
+                # Multi-select lookups are arrays of nested structures, typically with 'id' and 'name'.
+                spark_type = ArrayType(StructType([
+                    StructField("id", StringType(), True),
+                    StructField("name", StringType(), True),
+                ]), True)
+            elif zoho_data_type in ["fileupload", "imageupload", "profileimage"]:
+                spark_type = StringType()  # File/image uploads are stored as URLs or file paths.
+            elif zoho_data_type == "subform":
+                # Subforms are complex nested structures; a flexible schema is used initially.
+                spark_type = ArrayType(StructType([
+                    StructField("id", StringType(), True),
+                ]), True)
+            elif zoho_data_type == "consent_lookup":
+                spark_type = StructType([
+                    StructField("id", StringType(), True),
+                    StructField("name", StringType(), True),
+                ])
+            elif zoho_data_type == "event_reminder":
+                spark_type = StringType()
+            elif zoho_data_type == "RRULE":
+                spark_type = StructType([
+                    StructField("FREQ", StringType(), True),
+                    StructField("INTERVAL", StringType(), True),
+                ])
+            elif zoho_data_type == "ALARM":
+                spark_type = StructType([
+                    StructField("ACTION", StringType(), True),
+                ])
+            # No 'else' block here as spark_type is initialized to StringType, handling unknown types.
+
+            # Handle special Zoho JSON types by ensuring they are stored as Spark StringType.
+            if zoho_json_type in ("jsonarray", "jsonobject"):
+                spark_type = StringType() # Force JSON types to be serialized as strings for flexibility.
+
+            return StructField(field_api_name, spark_type, is_nullable)
+
+        def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
+            """
+            Retrieves the schema for a specified Zoho CRM module or a derived table.
+            This method acts as a dispatcher, calling specialized schema-generation
+            logic for standard modules and derived tables respectively.
+            """
+            # If the table is a derived table, delegate schema generation to a specialized method.
+            if table_name in self.DERIVED_TABLES:
+                return self._get_derived_table_schema(table_name)
+
+            # Ensure the requested table (module) is supported by the connector.
+            supported_tables = self._metadata_manager.list_tables()
+            if table_name not in supported_tables:
+                raise ValueError(f"Table '{table_name}' is not supported. Available tables: {', '.join(supported_tables)}")
+
+            # Fetch field metadata for standard CRM modules.
+            module_fields = self._metadata_manager.get_fields(table_name)
+
+            # If no fields are returned by Zoho CRM, provide a minimal schema to prevent errors.
+            if not module_fields:
+                print(f"Warning: No fields available for {table_name}. Returning minimal schema with 'id' field.")
+                return StructType([StructField("id", LongType(), False)])
+
+            # Convert Zoho CRM field definitions to PySpark StructField objects.
+            spark_struct_fields = []
+            for field_definition in module_fields:
+                try:
+                    spark_struct_fields.append(self._zoho_type_to_spark_type(field_definition))
+                except Exception as e:
+                    # Log a warning and skip fields that cause conversion errors.
+                    print(f"Warning: Could not convert field '{field_definition.get('api_name')}' for {table_name}: {e}")
+                    continue
+
+            return StructType(spark_struct_fields)
+
+        def _get_derived_table_schema(self, table_name: str) -> StructType:
+            """
+            Retrieves the PySpark schema for a specified derived table.
+            This method dispatches to more specific schema generation functions
+            based on the 'type' of the derived table (settings, subform, or related).
+            """
+            derived_table_config = self.DERIVED_TABLES[table_name]
+            table_type = derived_table_config["type"]
+
+            # Delegate to specialized schema methods based on the derived table's type.
+            if table_type == "settings":
+                return self._get_settings_table_schema(table_name, derived_table_config)
+            elif table_type == "subform":
+                return self._get_subform_table_schema(table_name, derived_table_config)
+            elif table_type == "related":
+                return self._get_related_table_schema(table_name, derived_table_config)
+            else:
+                # Raise an error for any unhandled derived table types.
+                raise ValueError(f"Unknown derived table type encountered: {table_type}")
+
+        def _get_settings_table_schema(self, table_name: str, config: dict) -> StructType:
+            """
+            Defines the static PySpark schema for Zoho CRM settings/organization tables
+            like 'Users', 'Roles', and 'Profiles'.
+            """
+            if table_name == "Users":
+                # Schema for the 'Users' table, including nested 'role' and 'profile' information.
+                return StructType([
+                    StructField("id", StringType(), False),
+                    StructField("name", StringType(), True),
+                    StructField("email", StringType(), True),
+                    StructField("first_name", StringType(), True),
+                    StructField("last_name", StringType(), True),
+                    StructField("role", StructType([
+                        StructField("id", StringType(), True),
+                        StructField("name", StringType(), True),
+                    ]), True),
+                    StructField("profile", StructType([
+                        StructField("id", StringType(), True),
+                        StructField("name", StringType(), True),
+                    ]), True),
+                    StructField("status", StringType(), True),
+                    StructField("created_time", StringType(), True),
+                    StructField("Modified_Time", StringType(), True),
+                    StructField("confirm", BooleanType(), True),
+                    StructField("territories", ArrayType(StructType([
+                        StructField("id", StringType(), True),
+                        StructField("name", StringType(), True),
+                    ])), True),
+                ])
+            elif table_name == "Roles":
+                # Schema for the 'Roles' table, including reporting structure details.
+                return StructType([
+                    StructField("id", StringType(), False),
+                    StructField("name", StringType(), True),
+                    StructField("display_label", StringType(), True),
+                    StructField("reporting_to", StructType([
+                        StructField("id", StringType(), True),
+                        StructField("name", StringType(), True),
+                    ]), True),
+                    StructField("admin_user", BooleanType(), True),
+                ])
+            elif table_name == "Profiles":
+                # Schema for the 'Profiles' table.
+                return StructType([
+                    StructField("id", StringType(), False),
+                    StructField("name", StringType(), True),
+                    StructField("display_label", StringType(), True),
+                    StructField("default", BooleanType(), True),
+                    StructField("description", StringType(), True),
+                    StructField("created_time", StringType(), True),
+                    StructField("Modified_Time", StringType(), True),
+                ])
+            else:
+                # Fallback for any other unrecognized settings tables, providing a minimal schema.
+                return StructType([StructField("id", StringType(), False)])
+
+        def _get_subform_table_schema(self, table_name: str, config: dict) -> StructType:
+            """
+            Defines the static PySpark schema for subform/line item tables.
+            This schema includes common fields expected in line items and references
+            to their parent records.
+            """
+            # Return cached schema if already generated.
+            if table_name in self._subform_schema_cache:
+                return self._subform_schema_cache[table_name]
+
+            # Retrieve parent module and subform field names from the configuration.
+            parent_module_name = config["parent_module"]
+            subform_field_name = config["subform_field"]
+
+            # Define base fields common to all subform line items.
+            base_fields = [
+                StructField("id", StringType(), False),
+                StructField("_parent_id", StringType(), False),  # Foreign key to the parent record.
+                StructField("_parent_module", StringType(), False),  # Name of the parent module.
+            ]
+
+            # Define additional common fields typically found in product-related line items.
+            common_line_item_fields = [
+                StructField("Product_Name", StructType([
+                    StructField("id", StringType(), True),
+                    StructField("name", StringType(), True),
+                ]), True),
+                StructField("Quantity", DoubleType(), True),
+                StructField("Unit_Price", DoubleType(), True),
+                StructField("List_Price", DoubleType(), True),
+                StructField("Net_Total", DoubleType(), True),
+                StructField("Total", DoubleType(), True),
+                StructField("Discount", DoubleType(), True),
+                StructField("Total_After_Discount", DoubleType(), True),
+                StructField("Tax", DoubleType(), True),
+                StructField("Description", StringType(), True),
+                StructField("Sequence_Number", IntegerType(), True),
+            ]
+
+            # Combine base and common fields to form the complete subform schema.
+            composed_schema = StructType(base_fields + common_line_item_fields)
+            self._subform_schema_cache[table_name] = composed_schema  # Cache the generated schema.
+            return composed_schema
+
+        def _get_related_table_schema(self, table_name: str, config: dict) -> StructType:
+            """
+            Defines the PySpark schema for junction/related tables, which represent
+            many-to-many relationships between Zoho CRM modules.
+            The schema includes fields from both the parent and related modules.
+            """
+            parent_module_name = config["parent_module"]
+            related_module_name = config["related_module"]
+
+            # Define base fields common to all junction table records.
+            base_junction_fields = [
+                StructField("_junction_id", StringType(), False),  # Composite key for the junction record.
+                StructField("_parent_id", StringType(), False),  # ID of the parent record in the relationship.
+                StructField("_parent_module", StringType(), False),  # Module name of the parent record.
+                StructField("id", StringType(), False),  # ID of the related record.
+            ]
+
+            # Add specific fields based on the type of the related module.
+            if related_module_name == "Leads":
+                related_module_specific_fields = [
+                    StructField("First_Name", StringType(), True),
+                    StructField("Last_Name", StringType(), True),
+                    StructField("Email", StringType(), True),
+                    StructField("Company", StringType(), True),
+                    StructField("Phone", StringType(), True),
+                    StructField("Lead_Status", StringType(), True),
+                ]
+            elif related_module_name == "Contacts":
+                related_module_specific_fields = [
+                    StructField("First_Name", StringType(), True),
+                    StructField("Last_Name", StringType(), True),
+                    StructField("Email", StringType(), True),
+                    StructField("Phone", StringType(), True),
+                    StructField("Account_Name", StructType([
+                        StructField("id", StringType(), True),
+                        StructField("name", StringType(), True),
+                    ]), True),
+                ]
+            elif related_module_name == "Contact_Roles":
+                # Special schema for 'Contact_Roles', which links Deals to Contacts with a role.
+                related_module_specific_fields = [
+                    StructField("Contact_Role", StringType(), True),
+                    StructField("name", StringType(), True),
+                    StructField("Email", StringType(), True),
+                ]
+            else:
+                # Default fields for unmapped related modules.
+                related_module_specific_fields = [
+                    StructField("name", StringType(), True),
+                ]
+
+            # Combine base junction fields with related module-specific fields to form the complete schema.
+            return StructType(base_junction_fields + related_module_specific_fields)
+
+
+    ########################################################
+    # sources/zoho_crm/_data_reader.py
+    ########################################################
+
+    class DataReader:
+        """
+        Handles reading data from Zoho CRM, including standard modules and derived tables.
+
+        This class manages pagination, incremental reads (CDC), fetching deleted records,
+        and normalizing records for Spark compatibility.
+        """
+
+        def __init__(self, auth_client: AuthClient, metadata_manager: MetadataManager, schema_generator: SchemaGenerator, derived_tables: dict, initial_load_start_date: Optional[str]) -> None:
+            """
+            Initializes the DataReader with necessary client instances and configuration.
+
+            Args:
+                auth_client: An instance of AuthClient for making API requests.
+                metadata_manager: An instance of MetadataManager for fetching metadata.
+                schema_generator: An instance of SchemaGenerator for retrieving table schemas.
+                derived_tables: A dictionary defining derived tables.
+                initial_load_start_date: Starting point for the first sync, if provided.
+            """
+            self._auth_client = auth_client
+            self._metadata_manager = metadata_manager
+            self._schema_generator = schema_generator
+            self.DERIVED_TABLES = derived_tables
+            self.initial_load_start_date = initial_load_start_date
+
+            # Attribute to track the maximum 'Modified_Time' encountered during data reads,
+            # essential for Change Data Capture (CDC) to determine the next ingestion point.
+            self._current_max_modified_time: Optional[str] = None
+
+        def read_table(self, table_name: str, start_offset: dict, table_options: dict[str, str]) -> (Iterator[dict], dict):
+            """
+            Reads records from a specified Zoho CRM module or derived table.
+
+            This is the primary method for data ingestion, supporting:
+            - Incremental reads using a 'Modified_Time' cursor.
+            - Pagination to fetch large datasets efficiently.
+            - Fetching deleted records for Change Data Capture (CDC).
+            - Routing requests to specialized readers for derived tables.
+
+            Args:
+                table_name: The name of the table (module or derived table) to read.
+                start_offset: A dictionary containing the 'cursor_time' for incremental reads.
+                table_options: Additional options specific to the table, if any.
+
+            Returns:
+                A tuple containing:
+                - An iterator yielding dictionaries, where each dictionary represents a record.
+                - A dictionary representing the next 'start_offset' for subsequent reads (containing 'cursor_time').
+            """
+            print(f"[DEBUG] Invoking read_table for '{table_name}' with start_offset: {start_offset} and initial_load_start_date: {self.initial_load_start_date}")
+
+            # If the table is a derived type, delegate the read operation to a specialized handler.
+            if table_name in self.DERIVED_TABLES:
+                return self._read_derived_table(table_name, start_offset, table_options)
+
+            # Validate that the requested table (module) is supported by the connector.
+            available_modules = self._metadata_manager.list_tables()
+            if table_name not in available_modules:
+                raise ValueError(f"Table '{table_name}' is not supported. Available tables: {', '.join(available_modules)}")
+
+            # Determine the effective cursor time for incremental data fetching.
+            # This prioritizes the provided start_offset, then initial_load_start_date, otherwise fetches all data.
+            effective_cursor_time = None
+            if start_offset and "cursor_time" in start_offset:
+                effective_cursor_time = start_offset["cursor_time"]
+                print(f"[DEBUG] Using cursor_time from start_offset: {effective_cursor_time}")
+            elif self.initial_load_start_date:
+                effective_cursor_time = self.initial_load_start_date
+                print(f"[DEBUG] Using initial_load_start_date as cursor_time: {effective_cursor_time}")
+            else:
+                print("[DEBUG] No cursor_time provided; performing a full historical data load.")
+
+            # Apply a lookback window to the cursor time for robust CDC, ensuring no recent updates are missed.
+            if effective_cursor_time:
+                cursor_datetime_obj = datetime.fromisoformat(effective_cursor_time.replace("Z", "+00:00"))
+                lookback_datetime_obj = cursor_datetime_obj - timedelta(minutes=5)
+                effective_cursor_time = lookback_datetime_obj.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+                print(f"[DEBUG] Cursor_time adjusted with 5-minute lookback: {effective_cursor_time}")
+
+            # Retrieve table metadata to determine the appropriate ingestion strategy (CDC, snapshot, append).
+            table_metadata = self._metadata_manager.read_table_metadata(table_name, self._schema_generator.get_table_schema, table_options)
+            ingestion_strategy = table_metadata.get("ingestion_type")
+
+            # For snapshot ingestion, the cursor time is irrelevant as all data is re-fetched.
+            if ingestion_strategy == "snapshot":
+                effective_cursor_time = None
+                print("[DEBUG] Table configured for snapshot ingestion; cursor_time reset to None.")
+
+            # Fetch active records from the module based on the effective cursor time.
+            active_records_iterator = self._read_records(table_name, effective_cursor_time)
+
+            # If CDC is enabled and a cursor time is present, also fetch deleted records.
+            if ingestion_strategy == "cdc" and effective_cursor_time:
+                # Convert the active records iterator to a list to allow for multiple iterations.
+                all_records_list = list(active_records_iterator)
+                deleted_records_list = list(self._read_deleted_records(table_name, effective_cursor_time))
+
+                # Combine both active and deleted records into a single iterator for output.
+                def combined_records_generator():
+                    yield from all_records_list
+                    yield from deleted_records_list
+
+                active_records_iterator = combined_records_generator()
+                print(f"[DEBUG] Combined {len(all_records_list)} active and {len(deleted_records_list)} deleted records for CDC.")
+
+            # Calculate the next offset for the subsequent incremental read based on the latest modified/deleted time seen.
+            next_offset_value = self._current_max_modified_time
+            if next_offset_value:
+                next_read_offset = {"cursor_time": next_offset_value}
+            else:
+                # If no records were processed, maintain the original start_offset for the next run.
+                next_read_offset = start_offset or {}
+
+            print(f"[DEBUG] Exiting read_table. Next offset for subsequent reads: {next_read_offset}")
+            return active_records_iterator, next_read_offset
+
+        def _read_derived_table(self, table_name: str, start_offset: dict, table_options: dict[str, str]) -> (Iterator[dict], dict):
+            """
+            Reads records from a specific derived table by delegating to specialized
+            reader methods based on the derived table's type (settings, subforms, or related).
+
+            Args:
+                table_name: The name of the derived table to read.
+                start_offset: The offset for the read operation.
+                table_options: Additional options specific to the table.
+
+            Returns:
+                A tuple containing an iterator of records and the next offset.
+            """
+            derived_table_config = self.DERIVED_TABLES[table_name]
+            derived_table_type = derived_table_config["type"]
+
+            # Delegate to the appropriate specialized reader based on the derived table type.
+            if derived_table_type == "settings":
+                return self._read_settings_table(table_name, derived_table_config, start_offset)
+            elif derived_table_type == "subform":
+                return self._read_subform_table(table_name, derived_table_config, start_offset)
+            elif derived_table_type == "related":
+                return self._read_related_table(table_name, derived_table_config, start_offset)
+            else:
+                # Raise an error if an unknown derived table type is encountered.
+                raise ValueError(f"Unknown derived table type encountered: {derived_table_type}")
+
+        def _read_settings_table(self, table_name: str, config: dict, start_offset: dict) -> (Iterator[dict], dict):
+            """
+            Read records from settings/organization tables (Users, Roles, Profiles).
+
+            Note: Users table requires additional OAuth scope: ZohoCRM.users.READ
+            If you get 401 errors, re-authorize with the additional scope.
+            """
+            endpoint = config["endpoint"]
+            data_key = config["data_key"]
+
+            def records_generator():
+                page = 1
+                per_page = 200
+
+                while True:
+                    params = {"page": page, "per_page": per_page}
+
+                    if table_name == "Users":
+                        params["type"] = "AllUsers"
+
+                    try:
+                        response = self._auth_client.make_request("GET", endpoint, params=params)
+                    except requests.exceptions.HTTPError as e:
+                        if e.response.status_code == 401 and table_name == "Users":
+                            print(f"[WARNING] Users table requires ZohoCRM.users.READ scope. " f"Please re-authorize with additional scopes to access user data.")
+                            return  # Return empty generator
+                        raise
+                    except Exception as e:
+                        print(f"[DEBUG] Error fetching {table_name}: {e}")
+                        raise
+
+                    data = response.get(data_key, [])
+                    info = response.get("info", {})
+
+                    print(f"[DEBUG] {table_name} page {page}: got {len(data)} records")
+
+                    for record in data:
+                        yield record
+
+                    more_records = info.get("more_records", False)
+                    if not more_records or not data:
+                        break
+
+                    page += 1
+
+            # Settings tables use snapshot (no cursor tracking needed)
+            return records_generator(), {}
+
+        def _read_subform_table(self, table_name: str, config: dict, start_offset: dict) -> (Iterator[dict], dict):
+            """
+            Read subform/line item records by extracting them from parent records.
+            Example: Quoted_Items extracted from Quotes.Quoted_Items
+            """
+            parent_module = config["parent_module"]
+            subform_field = config["subform_field"]
+
+            def records_generator():
+                print(f"[DEBUG] Reading {table_name} from {parent_module}.{subform_field}")
+
+                # Get fields for parent module to include the subform
+                fields_meta = self._metadata_manager.get_fields(parent_module)
+                field_names = [f["api_name"] for f in fields_meta] if fields_meta else []
+
+                page = 1
+                per_page = 200
+                total_items = 0
+
+                while True:
+                    params = {
+                        "page": page,
+                        "per_page": per_page,
+                        "sort_order": "asc",
+                        "sort_by": "Modified_Time",
+                    }
+
+                    if field_names:
+                        params["fields"] = ",".join(field_names)
+
+                    try:
+                        response = self._auth_client.make_request("GET", f"/crm/v8/{parent_module}", params=params)
+                    except Exception as e:
+                        print(f"[DEBUG] Error fetching {parent_module}: {e}")
+                        raise
+
+                    data = response.get("data", [])
+                    info = response.get("info", {})
+
+                    print(f"[DEBUG] {parent_module} page {page}: got {len(data)} parent records")
+
+                    # Extract subform items from each parent record
+                    for parent_record in data:
+                        parent_id = parent_record.get("id")
+                        subform_items = parent_record.get(subform_field, [])
+
+                        if subform_items:
+                            for item in subform_items:
+                                # Add parent reference
+                                item["_parent_id"] = parent_id
+                                item["_parent_module"] = parent_module
+                                total_items += 1
+                                yield item
+
+                    more_records = info.get("more_records", False)
+                    if not more_records or not data:
+                        break
+
+                    page += 1
+
+                print(f"[DEBUG] Total {table_name} items extracted: {total_items}")
+
+            # Subforms use snapshot (no cursor tracking)
+            return records_generator(), {}
+
+        def _read_related_table(self, table_name: str, config: dict, start_offset: dict) -> (Iterator[dict], dict):
+            """
+            Read junction/related records by iterating through parent records
+            and fetching their related records.
+            Example: Campaigns_Leads by fetching Leads for each Campaign.
+            """
+            parent_module = config["parent_module"]
+            related_module = config["related_module"]
+
+            # Get fields for the related module (required by API)
+            related_fields = self._get_related_module_fields(related_module)
+
+            def records_generator():
+                print(f"[DEBUG] Reading {table_name}: {parent_module} -> {related_module}")
+
+                # First, get all parent records
+                parent_ids = []
+                page = 1
+                per_page = 200
+
+                while True:
+                    params = {
+                        "page": page,
+                        "per_page": per_page,
+                        "fields": "id",  # Only need ID
+                    }
+
+                    try:
+                        response = self._auth_client.make_request("GET", f"/crm/v8/{parent_module}", params=params)
+                    except Exception as e:
+                        print(f"[DEBUG] Error fetching {parent_module}: {e}")
+                        raise
+
+                    data = response.get("data", [])
+                    info = response.get("info", {})
+
+                    parent_ids.extend([r.get("id") for r in data if r.get("id")])
+
+                    more_records = info.get("more_records", False)
+                    if not more_records or not data:
+                        break
+
+                    page += 1
+
+                print(f"[DEBUG] Found {len(parent_ids)} parent records in {parent_module}")
+
+                # For each parent, fetch related records
+                total_related = 0
+                for parent_id in parent_ids:
+                    related_page = 1
+
+                    while True:
+                        params = {
+                            "page": related_page,
+                            "per_page": per_page,
+                            "fields": related_fields,  # Required by Zoho API
+                        }
+
+                        try:
+                            response = self._auth_client.make_request("GET", f"/crm/v8/{parent_module}/{parent_id}/{related_module}", params=params)
+                        except requests.exceptions.HTTPError as e:
+                            # 204 No Content, 400 (no data), or 404 means no related records
+                            if e.response.status_code in (204, 400, 404):
+                                break
+                            raise
+                        except Exception as e:
+                            print(f"[DEBUG] Error fetching related {related_module} for {parent_id}: {e}")
+                            break
+
+                        data = response.get("data", [])
+                        info = response.get("info", {})
+
+                        for record in data:
+                            # Add junction metadata
+                            record["_junction_id"] = f"{parent_id}_{record.get('id')}"
+                            record["_parent_id"] = parent_id
+                            record["_parent_module"] = parent_module
+                            total_related += 1
+                            yield record
+
+                        more_records = info.get("more_records", False)
+                        if not more_records or not data:
+                            break
+
+                        related_page += 1
+
+                print(f"[DEBUG] Total {table_name} junction records: {total_related}")
+
+            # Junction tables use snapshot (no cursor tracking)
+            return records_generator(), {}
+
+        def _get_related_module_fields(self, related_module: str) -> str:
+            """
+            Get field names for a related module to pass to Related Records API.
+            Returns common fields based on the module type.
+            """
+            # Map related module types to their field lists
+            field_maps = {
+                "Leads": "id,First_Name,Last_Name,Email,Company,Phone,Lead_Status",
+                "Contacts": "id,First_Name,Last_Name,Email,Phone,Account_Name",
+                "Deals": "id,Deal_Name,Stage,Amount,Closing_Date,Account_Name",
+                "Contact_Roles": "id,Contact_Role,name,Email",
+            }
+            return field_maps.get(related_module, "id,name")
+
+        def _get_json_fields(self, module_name: str) -> set:
+            """
+            Get field names that should be serialized as JSON strings.
+            These are fields with json_type 'jsonobject' or 'jsonarray'.
+            """
+            # Fetch field metadata for standard CRM modules.
+            fields = self._metadata_manager.get_fields(module_name)
+            json_fields = set()
+            for field in fields:
+                json_type = field.get("json_type")
+                if json_type in ("jsonobject", "jsonarray"):
+                    json_fields.add(field.get("api_name"))
+            return json_fields
+
+        def _normalize_record(self, record: dict, json_fields: set) -> dict:
+            """
+            Normalize a record for Spark compatibility.
+            Only serializes fields that are declared as JSON strings in schema.
+            """
+            normalized = {}
+            for key, value in record.items():
+                if value is None:
+                    normalized[key] = None
+                elif key in json_fields and isinstance(value, (dict, list)):
+                    # Only serialize fields that are declared as StringType for JSON
+                    normalized[key] = json.dumps(value)
+                else:
+                    normalized[key] = value
+            return normalized
+
+        def _read_records(self, module_name: str, cursor_time: Optional[str] = None) -> Iterator[dict]:
+            """
+            Read records from a module with pagination.
+            """
+            print(f"[DEBUG] _read_records called for '{module_name}' with cursor_time: {cursor_time}")
+            self._current_max_modified_time = cursor_time
+
+            # Get fields that need JSON serialization
+            json_fields = self._get_json_fields(module_name)
+            print(f"[DEBUG] JSON fields to serialize: {json_fields}")
+
+            # Get field names for this module (required by Zoho API)
+            fields = self._metadata_manager.get_fields(module_name)
+            field_names = [f["api_name"] for f in fields] if fields else []
+            print(f"[DEBUG] Field names for {module_name}: {len(field_names)} fields")
+
+            page = 1
+            per_page = 200  # Maximum allowed by Zoho CRM
+            total_records_yielded = 0
+
+            while True:
+                params = {
+                    "page": page,
+                    "per_page": per_page,
+                    "sort_order": "asc",
+                    "sort_by": "Modified_Time",
+                }
+
+                # Add fields parameter (required by Zoho API despite docs saying optional)
+                if field_names:
+                    params["fields"] = ",".join(field_names)
+
+                # Add incremental filter if cursor_time is provided
+                if cursor_time:
+                    # URL encode the criteria
+                    criteria = f"(Modified_Time:greater_equal:{cursor_time})"
+                    params["criteria"] = criteria
+
+                print(f"[DEBUG] API request: GET /crm/v8/{module_name} with params: {params}")
+
+                try:
+                    response = self._auth_client.make_request("GET", f"/crm/v8/{module_name}", params=params)
+                    print(f"[DEBUG] API response keys: {response.keys() if response else 'None'}")
+                except Exception as e:
+                    print(f"[DEBUG] ERROR fetching page {page} for {module_name}: {e}")
+                    raise
+
+                data = response.get("data", [])
+                info = response.get("info", {})
+                print(f"[DEBUG] Page {page}: got {len(data)} records, info: {info}")
+
+                # Track the maximum Modified_Time seen
+                for record in data:
+                    modified_time = record.get("Modified_Time")
+                    if modified_time:
+                        if not self._current_max_modified_time or modified_time > self._current_max_modified_time:
+                            self._current_max_modified_time = modified_time
+
+                    total_records_yielded += 1
+                    yield self._normalize_record(record, json_fields)
+
+                # Check if there are more pages
+                more_records = info.get("more_records", False)
+                print(f"[DEBUG] more_records: {more_records}, data empty: {len(data) == 0}")
+                if not more_records or not data:
+                    print(f"[DEBUG] Stopping pagination. Total records yielded: {total_records_yielded}")
+                    break
+
+                page += 1
+
+        def _read_deleted_records(self, module_name: str, cursor_time: Optional[str] = None) -> Iterator[dict]:
+            """
+            Read deleted records from a module.
+            Returns records marked for deletion with a special field.
+            """
+            page = 1
+            per_page = 200
+
+            while True:
+                params = {
+                    "type": "all",
+                    "page": page,
+                    "per_page": per_page,
+                }
+
+                try:
+                    response = self._auth_client.make_request("GET", f"/crm/v8/{module_name}/deleted", params=params)
+                except Exception as e:
+                    print(f"[DEBUG] ERROR fetching deleted records for {module_name}: {e}")
+                    raise
+
+                data = response.get("data", [])
+                info = response.get("info", {})
+
+                # Filter by cursor_time if provided
+                for record in data:
+                    deleted_time = record.get("deleted_time")
+
+                    # Only include records deleted after cursor_time
+                    if cursor_time and deleted_time:
+                        if deleted_time < cursor_time:
+                            continue
+
+                    # Mark this record as deleted
+                    record["_zoho_deleted"] = True
+
+                    # Update max modified time to deleted_time
+                    if deleted_time:
+                        if not self._current_max_modified_time or deleted_time > self._current_max_modified_time:
+                            self._current_max_modified_time = deleted_time
+
+                    yield record
+
+                # Check if there are more pages
+                more_records = info.get("more_records", False)
+                if not more_records or not data:
+                    break
+
+                page += 1
+
+
+    ########################################################
     # sources/zoho_crm/zoho_crm.py
     ########################################################
 
@@ -242,8 +1398,8 @@ def register_lakeflow_source(spark):
             Initializes the Zoho CRM connector with connection-level options.
 
             Expected options:
-                - client_value_temp: OAuth Client ID from Zoho API Console.
-                - client_secret: OAuth Client Secret from Zoho API Console.
+                - client_id: OAuth Client ID from Zoho API Console.
+                - client_value_tmp: OAuth Client Secret from Zoho API Console.
                 - refresh_value_tmp: Long-lived refresh token obtained from OAuth flow.
                 - base_url (optional): Zoho accounts URL for OAuth. Defaults to https://accounts.zoho.com.
                   Examples: https://accounts.zoho.com (US), https://accounts.zoho.eu (EU),
@@ -258,7 +1414,6 @@ def register_lakeflow_source(spark):
             self._auth_client = AuthClient(options)
 
             # Set the optional initial load start date for historical data synchronization.
-            # Set the optional initial load start date for historical data synchronization.
             self.initial_load_start_date = options.get("initial_load_start_date")
 
             # Initialize the metadata manager to handle module and field metadata operations.
@@ -267,26 +1422,50 @@ def register_lakeflow_source(spark):
             # Initialize the schema generator to manage PySpark schema definitions.
             self._schema_generator = SchemaGenerator(self._metadata_manager, self.DERIVED_TABLES)
 
-
             # Initialize the data reader to manage all data ingestion operations.
-            self._data_reader = DataReader(self._auth_client, self._metadata_manager, self._schema_generator, self.DERIVED_TABLES, self.initial_load_start_date)
+            self._data_reader = DataReader(
+                self._auth_client,
+                self._metadata_manager,
+                self._schema_generator,
+                self.DERIVED_TABLES,
+                self.initial_load_start_date
+            )
 
+        def list_tables(self) -> list[str]:
+            """
+            List names of all tables (modules) supported by this connector.
+            Uses the Modules API to dynamically discover available modules,
+            plus derived tables for settings, subforms, and junction tables.
+            """
+            return self._metadata_manager.list_tables()
 
-
-
-
-
-
-
-
-
+        def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
+            """
+            Fetch the schema of a module dynamically from Zoho CRM.
+            Uses the Fields Metadata API to build the schema.
+            Handles derived tables (settings, subforms, junction tables) specially.
+            """
+            return self._schema_generator.get_table_schema(table_name, table_options)
 
         def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
             """
             Retrieves metadata for a specified Zoho CRM module or derived table.
-            This method delegates the metadata retrieval operation to the `MetadataManager` instance.
+            This method delegates the metadata retrieval operation to the MetadataManager instance.
             """
-            return self._metadata_manager.read_table_metadata(table_name, self._schema_generator.get_table_schema, table_options)
+            return self._metadata_manager.read_table_metadata(
+                table_name, self._schema_generator.get_table_schema, table_options
+            )
+
+        def read_table(
+            self, table_name: str, start_offset: dict, table_options: dict[str, str]
+        ) -> tuple[Iterator[dict], dict]:
+            """
+            Read records from a Zoho CRM module.
+            Supports incremental reads using Modified_Time cursor and pagination.
+            Also fetches deleted records for CDC.
+            Routes derived tables to their specialized readers.
+            """
+            return self._data_reader.read_table(table_name, start_offset, table_options)
 
 
     ########################################################

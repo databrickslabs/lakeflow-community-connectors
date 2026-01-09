@@ -1,524 +1,622 @@
-import json
-import re
-import requests
-import time
-from datetime import datetime, timedelta
-from typing import Any, Iterator, Optional
+"""
+Data reader for Zoho CRM connector.
 
-from pyspark.sql.types import StructType
+This module handles reading data from Zoho CRM APIs and transforming
+it for ingestion into Delta Lake. It provides:
+- Reading records from standard CRM modules
+- Reading data from derived tables (settings, subforms, junctions)
+- Incremental data loading using cursor fields (CDC)
+- Pagination handling for large datasets
+- Deleted records tracking for CDC
+
+The DataReader works with the AuthClient for API access, MetadataManager
+for field information, and SchemaGenerator for data transformation.
+
+Example:
+    >>> reader = DataReader(auth_client, metadata_manager, schema_gen, derived_tables, None)
+    >>> for record in reader.read("Leads", {"cursor_position": "2024-01-01T00:00:00Z"}):
+    ...     print(record)
+"""
+
+import json
+import logging
+from datetime import datetime
+from typing import Iterator, Optional
+from itertools import chain
 
 from ._auth_client import AuthClient
 from ._metadata_manager import MetadataManager
 from ._schema_generator import SchemaGenerator
 
 
+# Configure logging for debug output instead of print statements
+logger = logging.getLogger(__name__)
+
+
 class DataReader:
     """
-    Handles reading data from Zoho CRM, including standard modules and derived tables.
+    Reads and transforms data from Zoho CRM for ingestion.
 
-    This class manages pagination, incremental reads (CDC), fetching deleted records,
-    and normalizing records for Spark compatibility.
+    This class handles the complexity of reading data from various
+    Zoho CRM endpoints and normalizing it for Delta Lake ingestion:
+
+    - **Standard Modules**: Uses /crm/v8/{module}/search for CDC reads
+      and /crm/v8/{module} for full reads. Handles pagination using
+      the more_records flag and page parameter.
+
+    - **Derived Tables**: Routes to specialized readers for each type:
+      - Settings: /crm/v8/settings/users, /crm/v8/settings/roles, etc.
+      - Subforms: Extracts embedded line-item data from parent records
+      - Junctions: Uses /crm/v8/{module}/{id}/{related} API
+
+    - **CDC (Change Data Capture)**: Uses Modified_Time field to fetch
+      only records changed since the last sync.
+
+    - **Deleted Records**: Fetches deleted record IDs for soft delete
+      handling in the destination.
+
+    Attributes:
+        PAGE_SIZE: Number of records to fetch per API call (max 200).
     """
 
-    def __init__(self, auth_client: AuthClient, metadata_manager: MetadataManager, schema_generator: SchemaGenerator, derived_tables: dict, initial_load_start_date: Optional[str]) -> None:
+    # Zoho CRM API maximum page size
+    PAGE_SIZE = 200
+
+    def __init__(
+        self,
+        auth_client: AuthClient,
+        metadata_manager: MetadataManager,
+        schema_generator: SchemaGenerator,
+        derived_tables: dict,
+        initial_load_start_date: Optional[datetime],
+    ) -> None:
         """
-        Initializes the DataReader with necessary client instances and configuration.
+        Initialize the DataReader.
 
         Args:
-            auth_client: An instance of AuthClient for making API requests.
-            metadata_manager: An instance of MetadataManager for fetching metadata.
-            schema_generator: An instance of SchemaGenerator for retrieving table schemas.
-            derived_tables: A dictionary defining derived tables.
-            initial_load_start_date: Starting point for the first sync, if provided.
+            auth_client: Authenticated client for API calls.
+            metadata_manager: Manager for field/module metadata.
+            schema_generator: Generator for schema information.
+            derived_tables: Dictionary of derived table definitions.
+            initial_load_start_date: Optional start date for initial loads.
+                If specified, only records modified after this date are
+                fetched on initial sync.
         """
         self._auth_client = auth_client
         self._metadata_manager = metadata_manager
         self._schema_generator = schema_generator
         self.DERIVED_TABLES = derived_tables
-        self.initial_load_start_date = initial_load_start_date
+        self._initial_load_start_date = initial_load_start_date
 
-        # Attribute to track the maximum 'Modified_Time' encountered during data reads,
-        # essential for Change Data Capture (CDC) to determine the next ingestion point.
-        self._current_max_modified_time: Optional[str] = None
-
-    def read_table(self, table_name: str, start_offset: dict, table_options: dict[str, str]) -> (Iterator[dict], dict):
+    def read_table(
+        self,
+        table_name: str,
+        start_offset: dict,
+        table_options: dict[str, str],
+    ) -> tuple[Iterator[dict], dict]:
         """
-        Reads records from a specified Zoho CRM module or derived table.
+        Read records and deleted records from a table.
 
-        This is the primary method for data ingestion, supporting:
-        - Incremental reads using a 'Modified_Time' cursor.
-        - Pagination to fetch large datasets efficiently.
-        - Fetching deleted records for Change Data Capture (CDC).
-        - Routing requests to specialized readers for derived tables.
+        This is the main interface method called by LakeflowConnect. It:
+        1. Reads new/modified records from the table
+        2. Reads deleted records for CDC
+        3. Combines both into a single iterator
+        4. Returns an empty offset dict (cursor management handled upstream)
 
         Args:
-            table_name: The name of the table (module or derived table) to read.
-            start_offset: A dictionary containing the 'cursor_time' for incremental reads.
-            table_options: Additional options specific to the table, if any.
+            table_name: Name of the table to read from.
+            start_offset: Offset dictionary containing:
+                - cursor_position: ISO timestamp for incremental reads
+            table_options: Additional table-specific options.
 
         Returns:
-            A tuple containing:
-            - An iterator yielding dictionaries, where each dictionary represents a record.
-            - A dictionary representing the next 'start_offset' for subsequent reads (containing 'cursor_time').
-        """
-        print(f"[DEBUG] Invoking read_table for '{table_name}' with start_offset: {start_offset} and initial_load_start_date: {self.initial_load_start_date}")
+            Tuple of (record_iterator, offset_dict) where:
+            - record_iterator: Iterator yielding all records (data + deletes)
+            - offset_dict: Empty dict (cursor position managed by pipeline)
 
-        # If the table is a derived type, delegate the read operation to a specialized handler.
+        Example:
+            >>> records_iter, offset = reader.read_table(
+            ...     "Leads",
+            ...     {"cursor_position": "2024-06-15T10:30:00Z"},
+            ...     {}
+            ... )
+            >>> for record in records_iter:
+            ...     process(record)
+        """
+        # Merge start_offset into options for the internal readers
+        options = {**table_options, **start_offset}
+
+        # Read data records and deleted records
+        data_records = self.read(table_name, options)
+        deleted_records = self.read_deletes(table_name, options)
+
+        # Combine both iterators efficiently without loading into memory
+        combined_records = chain(data_records, deleted_records)
+
+        # Return empty offset - cursor management is handled by the pipeline
+        return combined_records, {}
+
+    def read(self, table_name: str, options: dict[str, str]) -> Iterator[dict]:
+        """
+        Read data from the specified table.
+
+        This is the internal entry point for data reading. It determines the
+        table type and routes to the appropriate reading strategy.
+
+        Args:
+            table_name: Name of the table to read from.
+            options: Reading options including:
+                - cursor_position: ISO timestamp for incremental reads
+                - Additional table-specific options
+
+        Yields:
+            Dict records ready for ingestion.
+
+        Example:
+            >>> # Full read (no cursor)
+            >>> records = list(reader.read("Leads", {}))
+
+            >>> # Incremental read
+            >>> records = list(reader.read("Leads", {
+            ...     "cursor_position": "2024-06-15T10:30:00Z"
+            ... }))
+        """
+        # Route to appropriate reader based on table type
         if table_name in self.DERIVED_TABLES:
-            return self._read_derived_table(table_name, start_offset, table_options)
-
-        # Validate that the requested table (module) is supported by the connector.
-        available_modules = self._metadata_manager.list_tables()
-        if table_name not in available_modules:
-            raise ValueError(f"Table '{table_name}' is not supported. Available tables: {', '.join(available_modules)}")
-
-        # Determine the effective cursor time for incremental data fetching.
-        # This prioritizes the provided start_offset, then initial_load_start_date, otherwise fetches all data.
-        effective_cursor_time = None
-        if start_offset and "cursor_time" in start_offset:
-            effective_cursor_time = start_offset["cursor_time"]
-            print(f"[DEBUG] Using cursor_time from start_offset: {effective_cursor_time}")
-        elif self.initial_load_start_date:
-            effective_cursor_time = self.initial_load_start_date
-            print(f"[DEBUG] Using initial_load_start_date as cursor_time: {effective_cursor_time}")
+            yield from self._read_derived_table(table_name, options)
         else:
-            print("[DEBUG] No cursor_time provided; performing a full historical data load.")
+            yield from self._read_module(table_name, options)
 
-        # Apply a lookback window to the cursor time for robust CDC, ensuring no recent updates are missed.
-        if effective_cursor_time:
-            cursor_datetime_obj = datetime.fromisoformat(effective_cursor_time.replace("Z", "+00:00"))
-            lookback_datetime_obj = cursor_datetime_obj - timedelta(minutes=5)
-            effective_cursor_time = lookback_datetime_obj.strftime("%Y-%m-%dT%H:%M:%S+00:00")
-            print(f"[DEBUG] Cursor_time adjusted with 5-minute lookback: {effective_cursor_time}")
-
-        # Retrieve table metadata to determine the appropriate ingestion strategy (CDC, snapshot, append).
-        table_metadata = self._metadata_manager.read_table_metadata(table_name, self._schema_generator.get_table_schema, table_options)
-        ingestion_strategy = table_metadata.get("ingestion_type")
-
-        # For snapshot ingestion, the cursor time is irrelevant as all data is re-fetched.
-        if ingestion_strategy == "snapshot":
-            effective_cursor_time = None
-            print("[DEBUG] Table configured for snapshot ingestion; cursor_time reset to None.")
-
-        # Fetch active records from the module based on the effective cursor time.
-        active_records_iterator = self._read_records(table_name, effective_cursor_time)
-
-        # If CDC is enabled and a cursor time is present, also fetch deleted records.
-        if ingestion_strategy == "cdc" and effective_cursor_time:
-            # Convert the active records iterator to a list to allow for multiple iterations.
-            all_records_list = list(active_records_iterator)
-            deleted_records_list = list(self._read_deleted_records(table_name, effective_cursor_time))
-
-            # Combine both active and deleted records into a single iterator for output.
-            def combined_records_generator():
-                yield from all_records_list
-                yield from deleted_records_list
-
-            active_records_iterator = combined_records_generator()
-            print(f"[DEBUG] Combined {len(all_records_list)} active and {len(deleted_records_list)} deleted records for CDC.")
-
-        # Calculate the next offset for the subsequent incremental read based on the latest modified/deleted time seen.
-        next_offset_value = self._current_max_modified_time
-        if next_offset_value:
-            next_read_offset = {"cursor_time": next_offset_value}
-        else:
-            # If no records were processed, maintain the original start_offset for the next run.
-            next_read_offset = start_offset or {}
-
-        print(f"[DEBUG] Exiting read_table. Next offset for subsequent reads: {next_read_offset}")
-        return active_records_iterator, next_read_offset
-
-    def _read_derived_table(self, table_name: str, start_offset: dict, table_options: dict[str, str]) -> (Iterator[dict], dict):
+    def read_deletes(self, table_name: str, options: dict[str, str]) -> Iterator[dict]:
         """
-        Reads records from a specific derived table by delegating to specialized
-        reader methods based on the derived table's type (settings, subforms, or related).
+        Read deleted records from the specified table.
+
+        Zoho CRM provides a deleted records API that returns IDs of
+        records deleted within a time range. This is used for CDC to
+        handle deletions in the destination.
 
         Args:
-            table_name: The name of the derived table to read.
-            start_offset: The offset for the read operation.
-            table_options: Additional options specific to the table.
+            table_name: Name of the module to check for deletes.
+            options: Reading options including:
+                - cursor_position: ISO timestamp - fetch deletes after this time
+
+        Yields:
+            Dict containing deleted record information:
+            - id: The deleted record's ID
+            - deleted_time: When the record was deleted
+
+        Note:
+            - Only standard CRM modules support the deleted records API
+            - Derived tables return empty iterator (deletions handled differently)
+            - Maximum retention period for deleted records is 60 days
+        """
+        # Derived tables don't have a separate deleted records API
+        if table_name in self.DERIVED_TABLES:
+            return
+
+        cursor_position = options.get("cursor_position")
+        if not cursor_position:
+            # No cursor means full load - don't process deletes
+            return
+
+        # Fetch deleted records using the dedicated API
+        params = {
+            "type": "recycle",  # "recycle" = soft delete, "permanent" = hard delete
+            "per_page": self.PAGE_SIZE,
+        }
+
+        # Add time filter if cursor is available
+        # The API uses different parameter name: 'from_time' instead of 'from'
+        params["from_time"] = cursor_position
+
+        page = 1
+        while True:
+            params["page"] = page
+            endpoint = f"/crm/v8/{table_name}/deleted"
+
+            try:
+                response = self._auth_client.make_request("GET", endpoint, params=params)
+            except Exception as e:
+                logger.warning(f"Failed to fetch deleted records for {table_name}: {e}")
+                return
+
+            deleted_records = response.get("data", [])
+
+            for record in deleted_records:
+                yield {
+                    "id": record.get("id"),
+                    "deleted_time": record.get("deleted_time"),
+                }
+
+            # Check for more pages
+            info = response.get("info", {})
+            if not info.get("more_records", False):
+                break
+            page += 1
+
+    def _read_module(self, module_name: str, options: dict[str, str]) -> Iterator[dict]:
+        """
+        Read records from a standard CRM module.
+
+        Uses the appropriate API based on whether this is a CDC read:
+        - CDC read: Uses /search endpoint with Modified_Time criteria
+        - Full read: Uses standard /module endpoint
+
+        Args:
+            module_name: The API name of the CRM module.
+            options: Reading options including cursor_position.
+
+        Yields:
+            Normalized record dictionaries.
+        """
+        cursor_position = options.get("cursor_position")
+
+        # Determine start time for the read
+        # Priority: cursor_position > initial_load_start_date > full load
+        if cursor_position:
+            start_time = cursor_position
+        elif self._initial_load_start_date:
+            start_time = self._initial_load_start_date.isoformat()
+        else:
+            start_time = None
+
+        yield from self._read_records(module_name, start_time)
+
+    def _read_records(
+        self,
+        module_name: str,
+        start_time: Optional[str],
+    ) -> Iterator[dict]:
+        """
+        Read records from a module with optional time-based filtering.
+
+        This method handles:
+        - Pagination through large result sets
+        - Field normalization (lookups, multiselect, JSON fields)
+        - CDC filtering using Modified_Time
+
+        Args:
+            module_name: The API name of the CRM module.
+            start_time: Optional ISO timestamp for CDC reads.
+
+        Yields:
+            Normalized record dictionaries with:
+            - Lookup fields converted to ID strings
+            - Multiselect values as JSON arrays
+            - Complex fields serialized to JSON
+        """
+        # Get field metadata for normalization
+        json_fields = self._get_json_fields(module_name)
+        all_field_names = [f.get("api_name") for f in self._metadata_manager.get_fields(module_name)]
+
+        page = 1
+        while True:
+            # Build request based on whether we have a time filter
+            if start_time:
+                # Use search endpoint for time-based filtering
+                # COQL (Criteria Query Language) syntax
+                endpoint = f"/crm/v8/{module_name}/search"
+                params = {
+                    "criteria": f"Modified_Time:greater_equal:{start_time}",
+                    "per_page": self.PAGE_SIZE,
+                    "page": page,
+                }
+            else:
+                # Full read - use standard endpoint
+                endpoint = f"/crm/v8/{module_name}"
+                params = {
+                    "per_page": self.PAGE_SIZE,
+                    "page": page,
+                }
+
+            response = self._auth_client.make_request("GET", endpoint, params=params)
+            records = response.get("data", [])
+
+            for record in records:
+                yield self._normalize_record(record, json_fields, all_field_names)
+
+            # Check for more pages
+            info = response.get("info", {})
+            if not info.get("more_records", False):
+                break
+            page += 1
+
+    def _get_json_fields(self, module_name: str) -> set[str]:
+        """
+        Get the set of fields that should be serialized as JSON.
+
+        Certain Zoho CRM field types contain complex nested data that
+        needs to be serialized to JSON strings for storage in Delta Lake.
+
+        Args:
+            module_name: The API name of the CRM module.
 
         Returns:
-            A tuple containing an iterator of records and the next offset.
+            Set of field API names that should be JSON-serialized.
         """
-        derived_table_config = self.DERIVED_TABLES[table_name]
-        derived_table_type = derived_table_config["type"]
+        fields = self._metadata_manager.get_fields(module_name)
+        json_types = {"jsonobject", "jsonarray"}
 
-        # Delegate to the appropriate specialized reader based on the derived table type.
-        if derived_table_type == "settings":
-            return self._read_settings_table(table_name, derived_table_config, start_offset)
-        elif derived_table_type == "subform":
-            return self._read_subform_table(table_name, derived_table_config, start_offset)
-        elif derived_table_type == "related":
-            return self._read_related_table(table_name, derived_table_config, start_offset)
-        else:
-            # Raise an error if an unknown derived table type is encountered.
-            raise ValueError(f"Unknown derived table type encountered: {derived_table_type}")
+        return {
+            field.get("api_name")
+            for field in fields
+            if field.get("json_type") in json_types
+        }
 
-    def _read_settings_table(self, table_name: str, config: dict, start_offset: dict) -> (Iterator[dict], dict):
+    def _normalize_record(
+        self,
+        record: dict,
+        json_fields: set[str],
+        all_field_names: list[str],
+    ) -> dict:
         """
-        Read records from settings/organization tables (Users, Roles, Profiles).
+        Normalize a Zoho CRM record for Delta Lake ingestion.
 
-        Note: Users table requires additional OAuth scope: ZohoCRM.users.READ
-        If you get 401 errors, re-authorize with the additional scope.
+        Transformations applied:
+        1. Lookup fields: Extract ID from {id, name} object
+        2. Multi-value fields: Convert to JSON array string
+        3. JSON fields: Serialize complex objects to JSON strings
+        4. Owner field: Extract ID from owner object
+
+        Args:
+            record: Raw record from Zoho CRM API.
+            json_fields: Set of field names requiring JSON serialization.
+            all_field_names: List of all valid field names for the module.
+
+        Returns:
+            Normalized record dictionary.
         """
-        endpoint = config["endpoint"]
-        data_key = config["data_key"]
+        normalized = {}
 
-        def records_generator():
-            page = 1
-            per_page = 200
+        for key, value in record.items():
+            # Skip fields not in schema (system fields, etc.)
+            if key not in all_field_names and key != "id":
+                continue
 
-            while True:
-                params = {"page": page, "per_page": per_page}
+            if value is None:
+                normalized[key] = None
 
-                if table_name == "Users":
-                    params["type"] = "AllUsers"
+            # Handle lookup fields (object with id and name)
+            elif isinstance(value, dict) and "id" in value:
+                normalized[key] = str(value["id"])
 
-                try:
-                    response = self._auth_client.make_request("GET", endpoint, params=params)
-                except requests.exceptions.HTTPError as e:
-                    if e.response.status_code == 401 and table_name == "Users":
-                        print(f"[WARNING] Users table requires ZohoCRM.users.READ scope. " f"Please re-authorize with additional scopes to access user data.")
-                        return  # Return empty generator
-                    raise
-                except Exception as e:
-                    print(f"[DEBUG] Error fetching {table_name}: {e}")
-                    raise
+            # Handle multi-value fields (list of objects or primitives)
+            elif isinstance(value, list):
+                # If list of objects with IDs, extract IDs
+                if value and isinstance(value[0], dict) and "id" in value[0]:
+                    normalized[key] = json.dumps([str(item["id"]) for item in value])
+                else:
+                    normalized[key] = json.dumps(value)
 
-                data = response.get(data_key, [])
-                info = response.get("info", {})
+            # Handle JSON fields
+            elif key in json_fields:
+                normalized[key] = json.dumps(value) if value else None
 
-                print(f"[DEBUG] {table_name} page {page}: got {len(data)} records")
+            else:
+                normalized[key] = value
 
-                for record in data:
-                    yield record
+        return normalized
 
-                more_records = info.get("more_records", False)
-                if not more_records or not data:
-                    break
-
-                page += 1
-
-        # Settings tables use snapshot (no cursor tracking needed)
-        return records_generator(), {}
-
-    def _read_subform_table(self, table_name: str, config: dict, start_offset: dict) -> (Iterator[dict], dict):
+    def _read_derived_table(
+        self,
+        table_name: str,
+        options: dict[str, str],
+    ) -> Iterator[dict]:
         """
-        Read subform/line item records by extracting them from parent records.
-        Example: Quoted_Items extracted from Quotes.Quoted_Items
+        Read data from a connector-defined derived table.
+
+        Routes to the appropriate reader based on derived table type:
+        - settings: Users, Roles, Profiles from Settings API
+        - subform: Line items embedded in parent records
+        - related: Junction tables from Related Records API
+
+        Args:
+            table_name: Name of the derived table.
+            options: Reading options.
+
+        Yields:
+            Record dictionaries for the derived table.
+        """
+        config = self.DERIVED_TABLES[table_name]
+        table_type = config["type"]
+
+        if table_type == "settings":
+            yield from self._read_settings_table(table_name, options)
+        elif table_type == "subform":
+            yield from self._read_subform_table(table_name, config, options)
+        elif table_type == "related":
+            yield from self._read_related_table(table_name, config, options)
+
+    def _read_settings_table(
+        self,
+        table_name: str,
+        options: dict[str, str],
+    ) -> Iterator[dict]:
+        """
+        Read data from a settings-type derived table.
+
+        Settings tables include Users, Roles, and Profiles. These are
+        accessed via the Settings API rather than the standard CRM API.
+
+        Args:
+            table_name: Name of the settings table.
+            options: Reading options (cursor_position for CDC on Users).
+
+        Yields:
+            Normalized settings records.
+
+        Note:
+            Only the Users table supports CDC via Modified_Time filtering.
+            Roles and Profiles always do a full read.
+        """
+        # Map table name to settings endpoint
+        endpoint_map = {
+            "Users": "/crm/v8/settings/users",
+            "Roles": "/crm/v8/settings/roles",
+            "Profiles": "/crm/v8/settings/profiles",
+        }
+
+        endpoint = endpoint_map.get(table_name)
+        if not endpoint:
+            logger.warning(f"Unknown settings table: {table_name}")
+            return
+
+        params = {"per_page": self.PAGE_SIZE}
+
+        # Users table supports CDC
+        cursor_position = options.get("cursor_position")
+        if table_name == "Users" and cursor_position:
+            params["modified_since"] = cursor_position
+
+        page = 1
+        while True:
+            params["page"] = page
+            response = self._auth_client.make_request("GET", endpoint, params=params)
+
+            # Settings API uses different response keys
+            data_key = table_name.lower()  # "users", "roles", "profiles"
+            records = response.get(data_key, [])
+
+            for record in records:
+                # Normalize lookup fields in settings records
+                normalized = {}
+                for key, value in record.items():
+                    if isinstance(value, dict) and "id" in value:
+                        normalized[key] = str(value["id"])
+                    else:
+                        normalized[key] = value
+                yield normalized
+
+            # Check for more pages
+            info = response.get("info", {})
+            if not info.get("more_records", False):
+                break
+            page += 1
+
+    def _read_subform_table(
+        self,
+        table_name: str,
+        config: dict,
+        options: dict[str, str],
+    ) -> Iterator[dict]:
+        """
+        Read data from a subform-type derived table.
+
+        Subforms are line-item data embedded within parent records
+        (e.g., Quote_Line_Items within Quotes). To read them:
+        1. Fetch parent records from the parent module
+        2. Extract subform data from each parent record
+        3. Add parent reference (_parent_id) to each subform record
+
+        Args:
+            table_name: Name of the subform table.
+            config: Derived table configuration:
+                - parent_module: Parent module API name
+                - subform_field: Subform field name in parent
+            options: Reading options.
+
+        Yields:
+            Subform records with _parent_id added.
+
+        Note:
+            Subform data doesn't have its own Modified_Time, so CDC
+            is based on the parent record's Modified_Time.
         """
         parent_module = config["parent_module"]
         subform_field = config["subform_field"]
 
-        def records_generator():
-            print(f"[DEBUG] Reading {table_name} from {parent_module}.{subform_field}")
+        cursor_position = options.get("cursor_position")
+        start_time = cursor_position if cursor_position else None
 
-            # Get fields for parent module to include the subform
-            fields_meta = self._metadata_manager.get_fields(parent_module)
-            field_names = [f["api_name"] for f in fields_meta] if fields_meta else []
+        # Read parent records and extract subform data
+        for parent_record in self._read_records(parent_module, start_time):
+            parent_id = parent_record.get("id")
 
-            page = 1
-            per_page = 200
-            total_items = 0
+            # Get subform data from the parent record
+            # Note: We need to fetch the full record to get subform data
+            # The search endpoint may not include subform fields
+            try:
+                full_record_response = self._auth_client.make_request(
+                    "GET", f"/crm/v8/{parent_module}/{parent_id}"
+                )
+                full_record = full_record_response.get("data", [{}])[0]
+            except Exception as e:
+                logger.warning(f"Failed to fetch subform data for {parent_module}/{parent_id}: {e}")
+                continue
 
-            while True:
-                params = {
-                    "page": page,
-                    "per_page": per_page,
-                    "sort_order": "asc",
-                    "sort_by": "Modified_Time",
-                }
+            subform_data = full_record.get(subform_field, [])
+            if not subform_data:
+                continue
 
-                if field_names:
-                    params["fields"] = ",".join(field_names)
+            for item in subform_data:
+                # Add parent reference
+                item["_parent_id"] = parent_id
+                yield item
 
-                try:
-                    response = self._auth_client.make_request("GET", f"/crm/v8/{parent_module}", params=params)
-                except Exception as e:
-                    print(f"[DEBUG] Error fetching {parent_module}: {e}")
-                    raise
-
-                data = response.get("data", [])
-                info = response.get("info", {})
-
-                print(f"[DEBUG] {parent_module} page {page}: got {len(data)} parent records")
-
-                # Extract subform items from each parent record
-                for parent_record in data:
-                    parent_id = parent_record.get("id")
-                    subform_items = parent_record.get(subform_field, [])
-
-                    if subform_items:
-                        for item in subform_items:
-                            # Add parent reference
-                            item["_parent_id"] = parent_id
-                            item["_parent_module"] = parent_module
-                            total_items += 1
-                            yield item
-
-                more_records = info.get("more_records", False)
-                if not more_records or not data:
-                    break
-
-                page += 1
-
-            print(f"[DEBUG] Total {table_name} items extracted: {total_items}")
-
-        # Subforms use snapshot (no cursor tracking)
-        return records_generator(), {}
-
-    def _read_related_table(self, table_name: str, config: dict, start_offset: dict) -> (Iterator[dict], dict):
+    def _read_related_table(
+        self,
+        table_name: str,
+        config: dict,
+        options: dict[str, str],
+    ) -> Iterator[dict]:
         """
-        Read junction/related records by iterating through parent records
-        and fetching their related records.
-        Example: Campaigns_Leads by fetching Leads for each Campaign.
+        Read data from a junction/related-type derived table.
+
+        Junction tables represent many-to-many relationships between
+        modules (e.g., Contacts linked to Deals). The data is accessed
+        via the Related Records API.
+
+        Args:
+            table_name: Name of the junction table.
+            config: Derived table configuration:
+                - parent_module: Primary module API name
+                - related_module: Related module API name
+            options: Reading options.
+
+        Yields:
+            Junction records with:
+            - _junction_id: Composite key (parent_id + related_id)
+            - {parent_module}_id: Parent record ID
+            - {related_module}_id: Related record ID
+
+        Note:
+            Junction tables always do a full read because there's no
+            Modified_Time on the relationship itself.
         """
         parent_module = config["parent_module"]
         related_module = config["related_module"]
 
-        # Get fields for the related module (required by API)
-        related_fields = self._get_related_module_fields(related_module)
+        # First, get all parent records to iterate through
+        for parent_record in self._read_records(parent_module, None):
+            parent_id = parent_record.get("id")
 
-        def records_generator():
-            print(f"[DEBUG] Reading {table_name}: {parent_module} -> {related_module}")
+            # Fetch related records for this parent
+            endpoint = f"/crm/v8/{parent_module}/{parent_id}/{related_module}"
+            params = {"per_page": self.PAGE_SIZE}
 
-            # First, get all parent records
-            parent_ids = []
             page = 1
-            per_page = 200
-
             while True:
-                params = {
-                    "page": page,
-                    "per_page": per_page,
-                    "fields": "id",  # Only need ID
-                }
-
+                params["page"] = page
                 try:
-                    response = self._auth_client.make_request("GET", f"/crm/v8/{parent_module}", params=params)
+                    response = self._auth_client.make_request("GET", endpoint, params=params)
                 except Exception as e:
-                    print(f"[DEBUG] Error fetching {parent_module}: {e}")
-                    raise
-
-                data = response.get("data", [])
-                info = response.get("info", {})
-
-                parent_ids.extend([r.get("id") for r in data if r.get("id")])
-
-                more_records = info.get("more_records", False)
-                if not more_records or not data:
+                    logger.warning(f"Failed to fetch related records for {parent_module}/{parent_id}: {e}")
                     break
 
-                page += 1
+                related_records = response.get("data", [])
 
-            print(f"[DEBUG] Found {len(parent_ids)} parent records in {parent_module}")
+                for related_record in related_records:
+                    related_id = related_record.get("id")
 
-            # For each parent, fetch related records
-            total_related = 0
-            for parent_id in parent_ids:
-                related_page = 1
-
-                while True:
-                    params = {
-                        "page": related_page,
-                        "per_page": per_page,
-                        "fields": related_fields,  # Required by Zoho API
+                    # Create junction record with composite key
+                    yield {
+                        "_junction_id": f"{parent_id}_{related_id}",
+                        f"{parent_module}_id": parent_id,
+                        f"{related_module}_id": related_id,
                     }
 
-                    try:
-                        response = self._auth_client.make_request("GET", f"/crm/v8/{parent_module}/{parent_id}/{related_module}", params=params)
-                    except requests.exceptions.HTTPError as e:
-                        # 204 No Content, 400 (no data), or 404 means no related records
-                        if e.response.status_code in (204, 400, 404):
-                            break
-                        raise
-                    except Exception as e:
-                        print(f"[DEBUG] Error fetching related {related_module} for {parent_id}: {e}")
-                        break
-
-                    data = response.get("data", [])
-                    info = response.get("info", {})
-
-                    for record in data:
-                        # Add junction metadata
-                        record["_junction_id"] = f"{parent_id}_{record.get('id')}"
-                        record["_parent_id"] = parent_id
-                        record["_parent_module"] = parent_module
-                        total_related += 1
-                        yield record
-
-                    more_records = info.get("more_records", False)
-                    if not more_records or not data:
-                        break
-
-                    related_page += 1
-
-            print(f"[DEBUG] Total {table_name} junction records: {total_related}")
-
-        # Junction tables use snapshot (no cursor tracking)
-        return records_generator(), {}
-
-    def _get_related_module_fields(self, related_module: str) -> str:
-        """
-        Get field names for a related module to pass to Related Records API.
-        Returns common fields based on the module type.
-        """
-        # Map related module types to their field lists
-        field_maps = {
-            "Leads": "id,First_Name,Last_Name,Email,Company,Phone,Lead_Status",
-            "Contacts": "id,First_Name,Last_Name,Email,Phone,Account_Name",
-            "Deals": "id,Deal_Name,Stage,Amount,Closing_Date,Account_Name",
-            "Contact_Roles": "id,Contact_Role,name,Email",
-        }
-        return field_maps.get(related_module, "id,name")
-
-    def _get_json_fields(self, module_name: str) -> set:
-        """
-        Get field names that should be serialized as JSON strings.
-        These are fields with json_type 'jsonobject' or 'jsonarray'.
-        """
-        # Fetch field metadata for standard CRM modules.
-        fields = self._metadata_manager.get_fields(module_name)
-        json_fields = set()
-        for field in fields:
-            json_type = field.get("json_type")
-            if json_type in ("jsonobject", "jsonarray"):
-                json_fields.add(field.get("api_name"))
-        return json_fields
-
-    def _normalize_record(self, record: dict, json_fields: set) -> dict:
-        """
-        Normalize a record for Spark compatibility.
-        Only serializes fields that are declared as JSON strings in schema.
-        """
-        normalized = {}
-        for key, value in record.items():
-            if value is None:
-                normalized[key] = None
-            elif key in json_fields and isinstance(value, (dict, list)):
-                # Only serialize fields that are declared as StringType for JSON
-                normalized[key] = json.dumps(value)
-            else:
-                normalized[key] = value
-        return normalized
-
-    def _read_records(self, module_name: str, cursor_time: Optional[str] = None) -> Iterator[dict]:
-        """
-        Read records from a module with pagination.
-        """
-        print(f"[DEBUG] _read_records called for '{module_name}' with cursor_time: {cursor_time}")
-        self._current_max_modified_time = cursor_time
-
-        # Get fields that need JSON serialization
-        json_fields = self._get_json_fields(module_name)
-        print(f"[DEBUG] JSON fields to serialize: {json_fields}")
-
-        # Get field names for this module (required by Zoho API)
-        fields = self._metadata_manager.get_fields(module_name)
-        field_names = [f["api_name"] for f in fields] if fields else []
-        print(f"[DEBUG] Field names for {module_name}: {len(field_names)} fields")
-
-        page = 1
-        per_page = 200  # Maximum allowed by Zoho CRM
-        total_records_yielded = 0
-
-        while True:
-            params = {
-                "page": page,
-                "per_page": per_page,
-                "sort_order": "asc",
-                "sort_by": "Modified_Time",
-            }
-
-            # Add fields parameter (required by Zoho API despite docs saying optional)
-            if field_names:
-                params["fields"] = ",".join(field_names)
-
-            # Add incremental filter if cursor_time is provided
-            if cursor_time:
-                # URL encode the criteria
-                criteria = f"(Modified_Time:greater_equal:{cursor_time})"
-                params["criteria"] = criteria
-
-            print(f"[DEBUG] API request: GET /crm/v8/{module_name} with params: {params}")
-
-            try:
-                response = self._auth_client.make_request("GET", f"/crm/v8/{module_name}", params=params)
-                print(f"[DEBUG] API response keys: {response.keys() if response else 'None'}")
-            except Exception as e:
-                print(f"[DEBUG] ERROR fetching page {page} for {module_name}: {e}")
-                raise
-
-            data = response.get("data", [])
-            info = response.get("info", {})
-            print(f"[DEBUG] Page {page}: got {len(data)} records, info: {info}")
-
-            # Track the maximum Modified_Time seen
-            for record in data:
-                modified_time = record.get("Modified_Time")
-                if modified_time:
-                    if not self._current_max_modified_time or modified_time > self._current_max_modified_time:
-                        self._current_max_modified_time = modified_time
-
-                total_records_yielded += 1
-                yield self._normalize_record(record, json_fields)
-
-            # Check if there are more pages
-            more_records = info.get("more_records", False)
-            print(f"[DEBUG] more_records: {more_records}, data empty: {len(data) == 0}")
-            if not more_records or not data:
-                print(f"[DEBUG] Stopping pagination. Total records yielded: {total_records_yielded}")
-                break
-
-            page += 1
-
-    def _read_deleted_records(self, module_name: str, cursor_time: Optional[str] = None) -> Iterator[dict]:
-        """
-        Read deleted records from a module.
-        Returns records marked for deletion with a special field.
-        """
-        page = 1
-        per_page = 200
-
-        while True:
-            params = {
-                "type": "all",
-                "page": page,
-                "per_page": per_page,
-            }
-
-            try:
-                response = self._auth_client.make_request("GET", f"/crm/v8/{module_name}/deleted", params=params)
-            except Exception as e:
-                print(f"[DEBUG] ERROR fetching deleted records for {module_name}: {e}")
-                raise
-
-            data = response.get("data", [])
-            info = response.get("info", {})
-
-            # Filter by cursor_time if provided
-            for record in data:
-                deleted_time = record.get("deleted_time")
-
-                # Only include records deleted after cursor_time
-                if cursor_time and deleted_time:
-                    if deleted_time < cursor_time:
-                        continue
-
-                # Mark this record as deleted
-                record["_zoho_deleted"] = True
-
-                # Update max modified time to deleted_time
-                if deleted_time:
-                    if not self._current_max_modified_time or deleted_time > self._current_max_modified_time:
-                        self._current_max_modified_time = deleted_time
-
-                yield record
-
-            # Check if there are more pages
-            more_records = info.get("more_records", False)
-            if not more_records or not data:
-                break
-
-            page += 1
+                # Check for more pages
+                info = response.get("info", {})
+                if not info.get("more_records", False):
+                    break
+                page += 1
