@@ -1,0 +1,6 @@
+{
+  "client_id": "YOUR_OAUTH_CLIENT_ID",
+  "client_secret": "YOUR_OAUTH_CLIENT_SECRET",
+  "refresh_token": "YOUR_OAUTH_REFRESH_TOKEN",
+  "user_id": "me"
+}
