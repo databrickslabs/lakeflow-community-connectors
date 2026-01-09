@@ -698,7 +698,7 @@ def register_lakeflow_source(spark):
             cursor_obj = collection.find(query_filter).sort("_id", 1).limit(self.batch_size)
 
             records = []
-            last_id = cursor
+            last_id = None
 
             for doc in cursor_obj:
                 # Convert document to JSON-serializable format
@@ -707,7 +707,14 @@ def register_lakeflow_source(spark):
                 last_id = record["_id"]
 
             # Build next offset
-            next_offset = {"cursor": last_id} if last_id else {}
+            # If we got fewer records than batch_size, we've reached the end
+            # Return empty offset to signal completion
+            if len(records) < self.batch_size:
+                next_offset = {}
+            elif last_id:
+                next_offset = {"cursor": last_id}
+            else:
+                next_offset = {}
 
             return records, next_offset
 
@@ -731,19 +738,14 @@ def register_lakeflow_source(spark):
             records = []
             resume_token = start_offset.get("resume_token") if start_offset else None
 
-            # For initial sync, perform a full scan first
-            if not resume_token:
-                # Initial full scan
-                cursor_obj = collection.find().sort("_id", 1).limit(self.batch_size)
+            # For initial sync, perform a full scan first using incremental read
+            if not resume_token or start_offset.get("initial_sync"):
+                # Use incremental read for initial full scan
+                # This ensures we get all records through proper pagination
+                return self._read_incremental(database_name, collection_name, start_offset)
 
-                for doc in cursor_obj:
-                    record = self._convert_document(doc)
-                    records.append(record)
-
-                # After initial scan, set up for change stream on next call
-                # Use current cluster time as starting point
-                next_offset = {"resume_token": None, "initial_sync": True}
-                return records, next_offset
+            # If initial sync is complete (empty offset returned), switch to CDC mode
+            # by setting up change stream with current cluster time
 
             # For subsequent reads, use Change Streams
             # Note: In production, this would watch for a limited time or count
