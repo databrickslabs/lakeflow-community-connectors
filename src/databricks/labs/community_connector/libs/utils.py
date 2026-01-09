@@ -180,12 +180,15 @@ def parse_value(value: Any, field_type: DataType) -> Any:
     if value is None:
         return None
 
-    # Handle complex types
-    if isinstance(field_type, StructType):
+    # Handle complex types - use type name fallback for merged file scope compatibility
+    # In merged files, isinstance() may fail because types are imported in different scopes
+    field_type_name = type(field_type).__name__
+
+    if isinstance(field_type, StructType) or field_type_name == "StructType":
         return _parse_struct(value, field_type)
-    if isinstance(field_type, ArrayType):
+    if isinstance(field_type, ArrayType) or field_type_name == "ArrayType":
         return _parse_array(value, field_type)
-    if isinstance(field_type, MapType):
+    if isinstance(field_type, MapType) or field_type_name == "MapType":
         return _parse_map(value, field_type)
 
     # Handle primitive types via type-based lookup
@@ -194,9 +197,10 @@ def parse_value(value: Any, field_type: DataType) -> Any:
         if field_type_class in _PRIMITIVE_PARSERS:
             return _PRIMITIVE_PARSERS[field_type_class](value)
 
-        # Check for custom UDT handling
-        if hasattr(field_type, "fromJson"):
-            return field_type.fromJson(value)
+        # Fallback: check by type name for merged file scope compatibility
+        for parser_type, parser_func in _PRIMITIVE_PARSERS.items():
+            if parser_type.__name__ == field_type_name:
+                return parser_func(value)
 
         raise TypeError(f"Unsupported field type: {field_type}")
     except (ValueError, TypeError) as e:
