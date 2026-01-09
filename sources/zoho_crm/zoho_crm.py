@@ -850,12 +850,6 @@ class LakeflowConnect:
 
                 try:
                     response = self._make_request("GET", f"/crm/v8/{parent_module}", params=params)
-                except requests.exceptions.HTTPError as e:
-                    # 400/404 means the parent module doesn't exist or isn't accessible
-                    if e.response.status_code in (400, 404):
-                        print(f"[DEBUG] Parent module {parent_module} not accessible (HTTP {e.response.status_code}), returning empty")
-                        return
-                    raise
                 except Exception as e:
                     print(f"[DEBUG] Error fetching {parent_module}: {e}")
                     raise
@@ -918,12 +912,6 @@ class LakeflowConnect:
 
                 try:
                     response = self._make_request("GET", f"/crm/v8/{parent_module}", params=params)
-                except requests.exceptions.HTTPError as e:
-                    # 400/404 means the parent module doesn't exist or isn't accessible
-                    if e.response.status_code in (400, 404):
-                        print(f"[DEBUG] Parent module {parent_module} not accessible (HTTP {e.response.status_code}), returning empty")
-                        return
-                    raise
                 except Exception as e:
                     print(f"[DEBUG] Error fetching {parent_module}: {e}")
                     raise
