@@ -26,4 +26,4 @@ connection:
 # These table-specific options must be included in the externalOptionsAllowList
 # parameter of the UC connection to allow them to be passed through.
 # ============================================================================
-external_options_allowlist: "network,contract_address,owner_address,token_id,with_metadata,page_size,start_time,end_time,symbols,tokens,contract_addresses,addresses,token_uri_timeout_in_ms,refresh_cache,include_native_tokens,include_erc20_tokens,from_block,to_block,from_timestamp,to_timestamp,category,order,page_key,webhook_id,limit,after,tableConfigs"
+external_options_allowlist: "network,contract_address,owner_address,token_id,with_metadata,page_size,start_time,end_time,symbol,symbols,tokens,contract_addresses,addresses,address,token_uri_timeout_in_ms,refresh_cache,include_native_tokens,include_erc20_tokens,from_block,to_block,from_timestamp,to_timestamp,category,order,page_key,webhook_id,limit,after,interval,tableConfigs"
