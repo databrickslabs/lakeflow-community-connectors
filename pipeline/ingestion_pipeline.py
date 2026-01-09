@@ -75,7 +75,22 @@ def _create_cdc_table(
 
 
 def _create_snapshot_table(spark, connection_name: str, config: SdpTableConfig) -> None:
-    """Create snapshot table using batch read and apply_changes_from_snapshot"""
+    """Create snapshot table using batch read and apply_changes_from_snapshot
+    
+    Note: Snapshot ingestion requires primary keys to perform upserts.
+    If your table doesn't have primary keys defined in the source, you must
+    specify them explicitly in your pipeline spec using the 'primary_keys' field.
+    """
+    
+    # Validate that primary keys are provided
+    if not config.primary_keys or len(config.primary_keys) == 0:
+        raise ValueError(
+            f"Snapshot ingestion for table '{config.source_table}' requires primary keys. "
+            f"Either define primary keys in the source table or specify them in the pipeline spec "
+            f"using 'table_configuration.primary_keys'. "
+            f"Example: {{'table_configuration': {{'primary_keys': ['id']}}}} "
+            f"If you don't need upsert logic, consider using ingestion_type='append' instead."
+        )
 
     @sdp.view(name=config.view_name)
     def snapshot_view():
