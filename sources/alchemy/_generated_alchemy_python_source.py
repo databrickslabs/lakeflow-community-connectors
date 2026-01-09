@@ -689,7 +689,6 @@ def register_lakeflow_source(spark):
                     StructField("symbol", StringType(), True),
                     StructField("logo", StringType(), True),
                     StructField("price", DoubleType(), True),
-                    StructField("network", StringType(), True),
                 ])
 
             elif table_name == "token_balances_by_wallet":
