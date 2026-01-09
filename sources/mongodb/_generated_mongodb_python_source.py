@@ -220,12 +220,6 @@ def register_lakeflow_source(spark):
     # sources/mongodb/mongodb.py
     ########################################################
 
-    MongoDB Connector Fix - Lazy Client Initialization
-
-    Replace the __init__ and _initialize_client methods with these,
-    and add the __getstate__/__setstate__ methods and client property.
-    """
-
     class LakeflowConnect:
         def __init__(self, options: dict[str, str]) -> None:
             """
