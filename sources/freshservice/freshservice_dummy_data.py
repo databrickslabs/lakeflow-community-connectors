@@ -19,7 +19,7 @@ import time
 # ============================================================================
 
 FRESHSERVICE_DOMAIN = "https://databricks042.freshservice.com"
-FRESHSERVICE_API_KEY = ""
+FRESHSERVICE_API_KEY = ""  # <--------------------------------------------------- INSERT API KEY HERE
 FRESHSERVICE_BASE_URL = f"{FRESHSERVICE_DOMAIN}/api/v2"
 
 # Valid agent IDs in the Freshservice instance
