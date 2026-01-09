@@ -17,12 +17,10 @@ from typing import (
 import json
 import time
 
-from botocore.exceptions import ClientError
 from pyspark.sql import Row
 from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
 from pyspark.sql.types import *
 import base64
-import boto3
 
 
 def register_lakeflow_source(spark):
@@ -289,8 +287,13 @@ def register_lakeflow_source(spark):
 
         @property
         def client(self):
-            """Lazily initialize the boto3 client on first access."""
+            """Lazily initialize the boto3 client on first access.
+
+            boto3 is imported here (not at module level) to avoid serialization
+            issues when Spark distributes the DataSource to workers.
+            """
             if self._client is None:
+                import boto3  # Import here to avoid serialization issues
                 self._client = boto3.client("redshift-data", **self._client_kwargs)
             return self._client
 
@@ -322,6 +325,8 @@ def register_lakeflow_source(spark):
             Returns:
                 Statement ID for tracking execution
             """
+            from botocore.exceptions import ClientError  # Import here to avoid serialization issues
+
             params = {
                 "Database": self.database,
                 "Sql": sql,
@@ -358,6 +363,8 @@ def register_lakeflow_source(spark):
             Raises:
                 RuntimeError: If statement fails or times out
             """
+            from botocore.exceptions import ClientError  # Import here to avoid serialization issues
+
             for attempt in range(self.max_poll_attempts):
                 try:
                     response = self.client.describe_statement(Id=statement_id)
@@ -391,6 +398,8 @@ def register_lakeflow_source(spark):
             Returns:
                 List of records, where each record is a list of field values
             """
+            from botocore.exceptions import ClientError  # Import here to avoid serialization issues
+
             records = []
             next_token = None
 
@@ -738,6 +747,8 @@ def register_lakeflow_source(spark):
                 Tuple of (iterator of records as dicts, final offset dict)
                 The offset dict is empty for snapshot ingestion
             """
+            from botocore.exceptions import ClientError  # Import here to avoid serialization issues
+
             # Validate table exists
             available_tables = self.list_tables()
             if table_name not in available_tables:

@@ -7,8 +7,10 @@ workgroups using the AWS Redshift Data API (REST-based, asynchronous execution m
 
 import time
 from typing import Dict, List, Iterator, Any, Optional
-import boto3
-from botocore.exceptions import ClientError
+
+# NOTE: boto3 and botocore imports are moved inside methods to avoid
+# serialization issues when Spark distributes the DataSource to workers.
+# See: https://docs.databricks.com/aws/en/pyspark/datasources#step-2-implement-the-reader-for-a-batch-query
 
 from pyspark.sql.types import (
     StructType,
@@ -100,8 +102,13 @@ class LakeflowConnect:
 
     @property
     def client(self):
-        """Lazily initialize the boto3 client on first access."""
+        """Lazily initialize the boto3 client on first access.
+        
+        boto3 is imported here (not at module level) to avoid serialization
+        issues when Spark distributes the DataSource to workers.
+        """
         if self._client is None:
+            import boto3  # Import here to avoid serialization issues
             self._client = boto3.client("redshift-data", **self._client_kwargs)
         return self._client
 
@@ -133,11 +140,13 @@ class LakeflowConnect:
         Returns:
             Statement ID for tracking execution
         """
+        from botocore.exceptions import ClientError  # Import here to avoid serialization issues
+        
         params = {
             "Database": self.database,
             "Sql": sql,
         }
-
+        
         # Add cluster or workgroup
         if self.cluster_identifier:
             params["ClusterIdentifier"] = self.cluster_identifier
@@ -145,11 +154,11 @@ class LakeflowConnect:
                 params["DbUser"] = self.db_user
         else:
             params["WorkgroupName"] = self.workgroup_name
-
+        
         # Add secret ARN if provided
         if self.secret_arn:
             params["SecretArn"] = self.secret_arn
-
+        
         try:
             response = self.client.execute_statement(**params)
             return response["Id"]
@@ -169,11 +178,13 @@ class LakeflowConnect:
         Raises:
             RuntimeError: If statement fails or times out
         """
+        from botocore.exceptions import ClientError  # Import here to avoid serialization issues
+        
         for attempt in range(self.max_poll_attempts):
             try:
                 response = self.client.describe_statement(Id=statement_id)
                 status = response["Status"]
-
+                
                 if status == "FINISHED":
                     return response
                 elif status == "FAILED":
@@ -187,7 +198,7 @@ class LakeflowConnect:
                 
             except ClientError as e:
                 raise RuntimeError(f"Failed to describe statement: {e}") from e
-
+        
         raise RuntimeError(
             f"Statement timed out after {self.max_poll_attempts} polling attempts"
         )
@@ -202,25 +213,27 @@ class LakeflowConnect:
         Returns:
             List of records, where each record is a list of field values
         """
+        from botocore.exceptions import ClientError  # Import here to avoid serialization issues
+        
         records = []
         next_token = None
-
+        
         try:
             while True:
                 params = {"Id": statement_id}
                 if next_token:
                     params["NextToken"] = next_token
-
+                
                 response = self.client.get_statement_result(**params)
                 records.extend(response.get("Records", []))
-
+                
                 next_token = response.get("NextToken")
                 if not next_token:
                     break
 
         except ClientError as e:
             raise RuntimeError(f"Failed to get statement results: {e}") from e
-
+        
         return records
 
     def _execute_and_fetch(self, sql: str) -> List[List[Dict[str, Any]]]:
@@ -549,6 +562,8 @@ class LakeflowConnect:
             Tuple of (iterator of records as dicts, final offset dict)
             The offset dict is empty for snapshot ingestion
         """
+        from botocore.exceptions import ClientError  # Import here to avoid serialization issues
+        
         # Validate table exists
         available_tables = self.list_tables()
         if table_name not in available_tables:

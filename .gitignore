@@ -21,6 +21,7 @@ wheels/
 *.egg
 
 # Virtual environments
+.venv/
 venv/
 ENV/
 env/
@@ -38,13 +39,12 @@ env/
 htmlcov/
 .tox/
 
-# Sensitive configuration files
-**/configs/dev_config.json
-**/configs/dev_table_config.json
-
 # OS
 .DS_Store
 Thumbs.db
 
 # Logs
 *.log
+
+# Dev configs (sensitive credentials)
+sources/**/configs/dev_*.json

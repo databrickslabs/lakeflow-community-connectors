@@ -7,7 +7,7 @@ from tests.test_utils import load_config
 
 
 def test_redshift_connector():
-    """Test the Redshift connector using the test suite"""
+    """Test the Redshift connector using the test suite with multiple table configurations"""
     # Inject the LakeflowConnect class into test_suite module's namespace
     # This is required because test_suite.py expects LakeflowConnect to be available
     test_suite.LakeflowConnect = LakeflowConnect
@@ -20,16 +20,28 @@ def test_redshift_connector():
     config = load_config(config_path)
     table_config = load_config(table_config_path)
 
-    # Create tester with the config
-    tester = LakeflowConnectTester(config, table_config)
+    # Test each table configuration
+    for table_name, table_options in table_config.items():
+        print(f"\n{'='*60}")
+        print(f"Testing table: {table_name}")
+        print(f"Options: {table_options}")
+        print(f"{'='*60}")
+        
+        # Create tester with the specific table config
+        tester = LakeflowConnectTester(config, {table_name: table_options})
 
-    # Run all tests
-    report = tester.run_all_tests()
+        # Run all tests for this table
+        report = tester.run_all_tests()
 
-    # Print the report
-    tester.print_report(report, show_details=True)
+        # Print the report
+        tester.print_report(report, show_details=True)
 
-    # Assert that all tests passed
-    assert report.passed_tests == report.total_tests, (
-        f"Test suite had failures: {report.failed_tests} failed, {report.error_tests} errors"
-    )
+        # Assert that all tests passed for this table
+        assert report.passed_tests == report.total_tests, (
+            f"Test suite failed for table {table_name}: "
+            f"{report.failed_tests} failed, {report.error_tests} errors"
+        )
+
+    print(f"\n{'='*60}")
+    print(f"✅ All tables tested successfully!")
+    print(f"{'='*60}")
