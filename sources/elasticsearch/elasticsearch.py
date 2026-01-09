@@ -13,6 +13,7 @@ from pyspark.sql.types import (
     BinaryType,
     ArrayType,
     TimestampType,
+    MapType,
 )
 
 
@@ -378,6 +379,7 @@ class LakeflowConnect:
             "keyword": StringType(),
             "text": StringType(),
             "date": TimestampType(),
+            "date_nanos": TimestampType(),
             "boolean": BooleanType(),
             "binary": BinaryType(),
             "long": LongType(),
@@ -389,6 +391,10 @@ class LakeflowConnect:
             "float": DoubleType(),
             "half_float": DoubleType(),
             "scaled_float": DoubleType(),
+            "ip": StringType(),
+            "flattened": MapType(StringType(), StringType(), True),
+            "version": StringType(),
+            "completion": StringType(),
             "geo_shape": StringType(),
             "geo_point": StructType(
                 [

@@ -118,10 +118,12 @@ Schema per system index is resolved live from `_mapping`; Elasticsearch does not
 - Typical mapping to connector types:
   - `keyword` → string
   - `text` → string (not ideal for exact keys)
-  - `date` → datetime
+  - `date`, `date_nanos` → datetime
   - `long` / `integer` / `double` / `float` / `half_float` / `scaled_float` → numeric
   - `boolean` → boolean
   - `binary` → bytes (base64)
+  - `ip`, `version`, `completion` → string
+  - `flattened` → map<string, string>
   - `object` → struct
   - `nested` → array\<struct\>
   - `geo_point` → struct/array (lat, lon)

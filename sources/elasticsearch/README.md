@@ -73,11 +73,13 @@ Behavior notes:
 | Elasticsearch type | Connector type (Spark) | Notes |
 | --- | --- | --- |
 | `keyword`, `text` | string | |
-| `date` | timestamp | |
+| `date`, `date_nanos` | timestamp | |
 | `boolean` | boolean | |
 | `binary` | binary | Base64 payload preserved. |
 | `long`, `integer`, `short`, `byte`, `unsigned_long` | long | |
 | `double`, `float`, `half_float`, `scaled_float` | double | |
+| `ip`, `version`, `completion` | string | |
+| `flattened` | map<string, string> | |
 | `geo_point` | struct(lat: double, lon: double) | |
 | `geo_shape` | string | Shape serialized to string. |
 | `object` | struct | Nested properties mapped to struct. |
