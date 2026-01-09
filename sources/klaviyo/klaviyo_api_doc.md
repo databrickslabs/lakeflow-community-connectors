@@ -4,10 +4,10 @@
 
 - **Chosen method**: Private API Key authentication for server-side RESTful API requests.
 - **Base URL**: `https://a.klaviyo.com/api`
-- **API Version**: `2024-10-15` (latest stable version as of documentation date)
+- **API Version**: `2025-10-15` (latest stable version as of documentation date)
 - **Auth placement**:
   - HTTP header: `Authorization: Klaviyo-API-Key <private_api_key>`
-  - API version header: `revision: 2024-10-15`
+  - API version header: `revision: 2025-10-15`
   - Accept header: `Accept: application/json`
 - **Required scopes**: API keys require specific scopes for each endpoint:
   - `profiles:read` - Read profiles data
@@ -28,7 +28,7 @@ Example authenticated request:
 ```bash
 curl -X GET \
   -H "Authorization: Klaviyo-API-Key pk_your_private_key" \
-  -H "revision: 2024-10-15" \
+  -H "revision: 2025-10-15" \
   -H "Accept: application/json" \
   "https://a.klaviyo.com/api/profiles/"
 ```
@@ -135,7 +135,7 @@ The object list is **static** (defined by the connector), not discovered dynamic
 ```bash
 curl -X GET \
   -H "Authorization: Klaviyo-API-Key pk_your_private_key" \
-  -H "revision: 2024-10-15" \
+  -H "revision: 2025-10-15" \
   -H "Accept: application/json" \
   "https://a.klaviyo.com/api/profiles/?page[size]=100"
 ```
@@ -244,7 +244,7 @@ curl -X GET \
 ```bash
 curl -X GET \
   -H "Authorization: Klaviyo-API-Key pk_your_private_key" \
-  -H "revision: 2024-10-15" \
+  -H "revision: 2025-10-15" \
   -H "Accept: application/json" \
   "https://a.klaviyo.com/api/events/?page[size]=100&sort=-datetime"
 ```
@@ -430,7 +430,7 @@ There is no dedicated metadata endpoint to get primary keys. Primary keys are de
 **Common Headers**:
 ```
 Authorization: Klaviyo-API-Key <private_api_key>
-revision: 2024-10-15
+revision: 2025-10-15
 Accept: application/json
 ```
 
@@ -475,7 +475,7 @@ Accept: application/json
 ```bash
 curl -X GET \
   -H "Authorization: Klaviyo-API-Key pk_your_private_key" \
-  -H "revision: 2024-10-15" \
+  -H "revision: 2025-10-15" \
   -H "Accept: application/json" \
   "https://a.klaviyo.com/api/profiles/?page[size]=100&filter=greater-than(updated,2024-01-01T00:00:00Z)&sort=updated"
 ```
@@ -505,7 +505,7 @@ curl -X GET \
 ```bash
 curl -X GET \
   -H "Authorization: Klaviyo-API-Key pk_your_private_key" \
-  -H "revision: 2024-10-15" \
+  -H "revision: 2025-10-15" \
   -H "Accept: application/json" \
   "https://a.klaviyo.com/api/events/?page[size]=100&filter=greater-than(datetime,2024-01-01T00:00:00Z)&sort=datetime"
 ```

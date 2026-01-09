@@ -244,7 +244,7 @@ Follow the Lakeflow Community Connector UI, which will guide you through setting
 ## Implementation Details
 
 ### API Endpoints Used
-The connector uses the Klaviyo REST API v2024-10-15:
+The connector uses the Klaviyo REST API v2025-10-15:
 - **Base URL**: `https://a.klaviyo.com/api`
 - **Pagination**: Cursor-based pagination via `page[cursor]` parameter
 - **Filtering**: JSON:API filter syntax for incremental reads
