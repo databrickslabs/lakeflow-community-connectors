@@ -106,7 +106,7 @@ Example pipeline snippet:
     "object": [
       {
         "table": {
-          "source_table": "logs-2026-*",
+          "source_table": "logs-2026-01",
           "cursor_field": "timestamp",
           "page_size": 1000,
           "pit_keep_alive": "2m"
@@ -116,7 +116,7 @@ Example pipeline snippet:
         "table": {
           "source_table": "orders",
           "ingestion_type": "append",
-          "cursor_field": "_seq_no"
+          "cursor_field": "updated_at"
         }
       }
     ]

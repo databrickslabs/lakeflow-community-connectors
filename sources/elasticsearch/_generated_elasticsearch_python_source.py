@@ -12,6 +12,8 @@ import json
 
 from pyspark.sql import Row
 from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 from pyspark.sql.types import *
 import base64
 import requests
@@ -255,11 +257,37 @@ def register_lakeflow_source(spark):
 
 
     class _ElasticsearchClient:
-        def __init__(self, endpoint: str, auth: _AuthMethod, verify_ssl: bool = True):
+        def __init__(
+            self,
+            endpoint: str,
+            auth: _AuthMethod,
+            verify_ssl: bool = True,
+            timeout: float | tuple[float, float] = (5.0, 30.0),
+            max_retries: int = 3,
+            backoff_factor: float = 0.5,
+        ):
             self._endpoint = endpoint.rstrip("/")
             self._auth = auth
-            self._session = requests.Session()
             self._verify_ssl = verify_ssl
+            self._timeout = timeout
+
+            # Configure a session with basic retry/backoff for transient failures.
+            retry = Retry(
+                total=max_retries,
+                connect=max_retries,
+                read=max_retries,
+                status=max_retries,
+                backoff_factor=backoff_factor,
+                status_forcelist=[429, 500, 502, 503, 504],
+                allowed_methods=frozenset(["GET", "POST"]),
+                respect_retry_after_header=True,
+                raise_on_status=False,
+            )
+            adapter = HTTPAdapter(max_retries=retry)
+            session = requests.Session()
+            session.mount("http://", adapter)
+            session.mount("https://", adapter)
+            self._session = session
 
         def _build_headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
             headers = {"Content-Type": "application/json"}
@@ -274,6 +302,7 @@ def register_lakeflow_source(spark):
                 headers=self._build_headers(),
                 params=params,
                 verify=self._verify_ssl,
+                timeout=self._timeout,
             )
             resp.raise_for_status()
             return resp.json()
@@ -285,6 +314,19 @@ def register_lakeflow_source(spark):
                 json=json,
                 params=params,
                 verify=self._verify_ssl,
+                timeout=self._timeout,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+        def delete(self, path: str, json: dict | None = None, params: dict | None = None) -> dict:
+            resp = self._session.delete(
+                f"{self._endpoint}{path}",
+                headers=self._build_headers(),
+                json=json,
+                params=params,
+                verify=self._verify_ssl,
+                timeout=self._timeout,
             )
             resp.raise_for_status()
             return resp.json()
@@ -335,7 +377,7 @@ def register_lakeflow_source(spark):
                 verify_ssl=verify_ssl
             )
 
-            self._default_cursor_fields = ["timestamp", "updated_at", "_seq_no"] # evaluated in order!
+            self._default_cursor_fields = ["timestamp", "updated_at"]  # evaluated in order!
 
             # Cache for discovered and available indices to avoid repeated API calls
             self._indices_cache: list[str] = []
@@ -348,6 +390,15 @@ def register_lakeflow_source(spark):
 
             # Cache for discovered schemas to avoid recomputation
             self._schema_cache: dict[str, StructType] = {}
+
+        @staticmethod
+        def _validate_index(index: str) -> None:
+            """Reject wildcard/pattern inputs; only single index/alias names are allowed."""
+            if any(ch in index for ch in ["*", "?", ","]):
+                raise ValueError(
+                    f"Unsupported index name '{index}'. Wildcards or comma-separated patterns are not allowed; "
+                    "specify a single index or alias."
+                )
 
         def _discover_indices(self) -> list[str]:
             """Fetch indices and aliases visible to the provided credentials."""
@@ -397,21 +448,42 @@ def register_lakeflow_source(spark):
             if not isinstance(mapping, dict):
                 raise ValueError(f"Unexpected mapping response for index/alias {index}")
 
+            # Resolve the mapping item:
+            # - direct match when key exists
+            # - single concrete index when len == 1
+            # - multi-index alias/data stream: ensure properties are identical, else raise
+            selected_item = None
+
             if index in mapping:
-                item = mapping[index]
-
+                selected_item = mapping[index]
             elif len(mapping) == 1:
-                # alias resolving to a single concrete index
-                _, item = next(iter(mapping.items()))
-
+                _, selected_item = next(iter(mapping.items()))
             else:
-                raise ValueError(f"Expected mapping for {index}, got keys: {list(mapping.keys())}")
+                # multi-index response: compare properties across all backing indices
+                properties_list = []
+                for _, item in mapping.items():
+                    props = item.get("mappings", {}).get("properties")
+                    if not isinstance(props, dict):
+                        raise ValueError(
+                            "Expected typeless mapping with 'mappings.properties' (Elasticsearch 8.x+). "
+                            f"Received keys: {list(item.get('mappings', {}).keys())}"
+                        )
+                    properties_list.append(props)
 
-            properties = item.get("mappings", {}).get("properties")
+                first_props = properties_list[0]
+                if all(props == first_props for props in properties_list[1:]):
+                    selected_item = next(iter(mapping.values()))
+                else:
+                    raise ValueError(
+                        f"Alias or pattern '{index}' resolves to multiple indices with different mappings; "
+                        "ensure backing indices share the same schema or target a specific index."
+                    )
+
+            properties = selected_item.get("mappings", {}).get("properties")
             if not isinstance(properties, dict):
                 raise ValueError(
                     "Expected typeless mapping with 'mappings.properties' (Elasticsearch 8.x+). "
-                    f"Received keys: {list(item.get('mappings', {}).keys())}"
+                    f"Received keys: {list(selected_item.get('mappings', {}).keys())}"
                 )
 
             # Cache the result
@@ -450,6 +522,10 @@ def register_lakeflow_source(spark):
             # Determine cursor field
             if "cursor_field" in options:
                 cursor_field = options["cursor_field"]
+                if cursor_field.startswith("_"):
+                    raise ValueError(
+                        f"Unsupported cursor_field '{cursor_field}'. Fields starting with '_' (meta fields) are not allowed as cursors."
+                    )
                 if not self._is_field_available(properties=properties, field_path=cursor_field):
                     raise ValueError(f"Configured cursor_field '{cursor_field}' not found in index '{index}'")
 
@@ -485,14 +561,11 @@ def register_lakeflow_source(spark):
             """
             field_type = field.get("type")
 
-            # Handle object via properties: map to array<struct> to tolerate list or single object values
+            # object → struct; nested → array<struct>
             if "properties" in field and field_type != "nested":
                 return StructField(
                     name=name,
-                    dataType=ArrayType(
-                        self._properties_to_struct(properties=field.get("properties", {})),
-                        containsNull=True,
-                    ),
+                    dataType=self._properties_to_struct(properties=field.get("properties", {})),
                     nullable=True,
                 )
 
@@ -510,6 +583,7 @@ def register_lakeflow_source(spark):
                 "keyword": StringType(),
                 "text": StringType(),
                 "date": TimestampType(),
+                "date_nanos": TimestampType(),
                 "boolean": BooleanType(),
                 "binary": BinaryType(),
                 "long": LongType(),
@@ -521,6 +595,10 @@ def register_lakeflow_source(spark):
                 "float": DoubleType(),
                 "half_float": DoubleType(),
                 "scaled_float": DoubleType(),
+                "ip": StringType(),
+                "flattened": MapType(StringType(), StringType(), True),
+                "version": StringType(),
+                "completion": StringType(),
                 "geo_shape": StringType(),
                 "geo_point": StructType(
                     [
@@ -550,6 +628,14 @@ def register_lakeflow_source(spark):
             if not pit_id:
                 raise ValueError(f"Failed to open point-in-time for index {index}")
             return pit_id
+
+        def _close_point_in_time(self, pit_id: str) -> None:
+            """Best-effort PIT close to release server-side resources."""
+            try:
+                self._client.delete(path="/_pit", json={"id": pit_id})
+            except Exception:
+                # Ignore close failures; PIT will expire on its own
+                pass
 
         def _build_search_request(
             self,
@@ -593,6 +679,7 @@ def register_lakeflow_source(spark):
             start_offset = start_offset or {}
 
             metadata = self.read_table_metadata(table_name=index, table_options=options)
+            schema = self.get_table_schema(table_name=index, table_options=options)
 
             # Page size for pagination (default 1000)
             size = int(options.get("page_size", 1000))
@@ -610,13 +697,28 @@ def register_lakeflow_source(spark):
             response = self._client.post(path="/_search", json=search_body)
             hits = response.get("hits", {}).get("hits", [])
 
+            def _normalize_record(record: dict, schema: StructType) -> dict:
+                """Coerce list values into structs when schema expects a StructType."""
+                normalized = dict(record)
+                for field in schema.fields:
+                    value = normalized.get(field.name)
+                    if isinstance(field.dataType, StructType) and isinstance(value, list):
+                        if value:
+                            normalized[field.name] = value[0] if isinstance(value[0], dict) else None
+                        else:
+                            normalized[field.name] = None
+                return normalized
+
             def _iter_records() -> Iterator[dict]:
                 for hit in hits:
-                    record = dict(hit.get("_source", {}))
+                    record = _normalize_record(dict(hit.get("_source", {})), schema)
                     record["_id"] = hit.get("_id")
                     yield record
 
             if not hits:
+                # No more data; close PIT if we opened or received one
+                if pit_id:
+                    self._close_point_in_time(pit_id)
                 next_offset = start_offset or {}
                 return _iter_records(), next_offset
 
@@ -643,6 +745,7 @@ def register_lakeflow_source(spark):
             return self._indices_cache
 
         def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
+            self._validate_index(table_name)
             if table_name not in self.list_tables():
                 raise ValueError(f"Unsupported index: {table_name}. Index is not available or not accessible.")
 
@@ -662,6 +765,7 @@ def register_lakeflow_source(spark):
 
         def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict[str, Any]:
             table_options = table_options or {}
+            self._validate_index(table_name)
             if table_name not in self.list_tables():
                 raise ValueError(f"Unsupported index: {table_name}. Index is not available or not accessible.")
 
@@ -681,6 +785,7 @@ def register_lakeflow_source(spark):
             self, table_name: str, start_offset: dict, table_options: dict[str, str]
         ) -> tuple[Iterator[dict], dict]:
 
+            self._validate_index(table_name)
             if table_name not in self.list_tables():
                 raise ValueError(f"Unsupported index: {table_name}. Index is not available or not accessible.")
 
