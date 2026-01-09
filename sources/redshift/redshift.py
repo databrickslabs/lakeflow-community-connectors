@@ -462,7 +462,7 @@ class LakeflowConnect:
         Returns:
             Dictionary containing:
                 - primary_keys: List of primary key column names
-                - ingestion_type: "snapshot" (Redshift Data API doesn't support CDC)
+                - ingestion_type: "snapshot" (Redshift Data API does not support CDC)
         """
         # Validate table exists
         available_tables = self.list_tables()
@@ -516,7 +516,7 @@ class LakeflowConnect:
         Read all records from a table.
         
         For Redshift, this performs a full table scan (snapshot ingestion).
-        The start_offset is ignored since we don't support incremental reads via Data API.
+        The start_offset is ignored since we do not support incremental reads via Data API.
         
         Args:
             table_name: Table name in format "schema.table" or just "table"

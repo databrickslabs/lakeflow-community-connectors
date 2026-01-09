@@ -723,7 +723,7 @@ def register_lakeflow_source(spark):
             Read all records from a table.
 
             For Redshift, this performs a full table scan (snapshot ingestion).
-            The start_offset is ignored since we don't support incremental reads via Data API.
+            The start_offset is ignored since we do not support incremental reads via Data API.
 
             Args:
                 table_name: Table name in format "schema.table" or just "table"
