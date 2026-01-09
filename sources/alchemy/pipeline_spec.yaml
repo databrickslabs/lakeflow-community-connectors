@@ -11,18 +11,18 @@ objects:
   - table:
       source_table: nfts_for_contract
       table_configuration:
-        contract_address: 0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D
+        contract_address: "0xe785E82358879F061BC3dcAC6f0444462D4b5330"
         with_metadata: "true"
         page_size: 10
   - table:
       source_table: nft_metadata
       table_configuration:
-        contract_address: 0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D
+        contract_address: "0xe785E82358879F061BC3dcAC6f0444462D4b5330"
         token_id: 1
   - table:
       source_table: contract_metadata
       table_configuration:
-        contract_address: 0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D
+        contract_address: "0xe785E82358879F061BC3dcAC6f0444462D4b5330"
   - table:
       source_table: nft_sales
       table_configuration:
@@ -30,7 +30,7 @@ objects:
   - table:
       source_table: floor_prices
       table_configuration:
-        contract_address: 0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D
+        contract_address: "0xe785E82358879F061BC3dcAC6f0444462D4b5330"
   - table:
       source_table: token_prices
       table_configuration:
