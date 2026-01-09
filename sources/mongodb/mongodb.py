@@ -125,25 +125,35 @@ class LakeflowConnect:
     
     def list_tables(self) -> List[str]:
         """
-        List all collections from the default database specified in connection URI.
+        List all unique collection names across all non-system databases.
         
-        Note: MongoDB can have multiple databases, but for Lakeflow compatibility,
-        we list collections only from the database specified in the connection URI.
-        Use the 'database' option in table_options to access collections from
-        different databases.
+        IMPORTANT: This method returns only collection names (without database prefix)
+        to avoid multipart identifier issues in Databricks. The database is specified
+        separately via the 'database' option in table_options.
+        
+        Note: If multiple databases have collections with the same name, they will
+        appear only once in this list. Use the 'database' option in table_options
+        to specify which database to use for each table.
         
         Returns:
-            List of collection names (without database prefix)
+            List of collection names (without database prefix, no dots)
         """
-        tables = []
+        collections_set = set()
         
         try:
-            # Get default database from connection URI
+            # Get default database from connection URI if available
             default_db_name = self._get_database_from_uri()
             
-            if not default_db_name:
-                # If no database in URI, list all databases (excluding system)
-                # This maintains backward compatibility but may cause issues with dots in names
+            if default_db_name:
+                # If database is specified in URI, list collections from that database only
+                db = self.client[default_db_name]
+                collection_names = db.list_collection_names()
+                
+                for coll_name in collection_names:
+                    if not coll_name.startswith("system."):
+                        collections_set.add(coll_name)
+            else:
+                # No database in URI - list collections from all non-system databases
                 database_names = self.client.list_database_names()
                 system_dbs = {"admin", "config", "local"}
                 
@@ -154,24 +164,14 @@ class LakeflowConnect:
                     db = self.client[db_name]
                     collection_names = db.list_collection_names()
                     
-                    # Return collections with database prefix for multi-db scenarios
                     for coll_name in collection_names:
                         if not coll_name.startswith("system."):
-                            tables.append(f"{db_name}.{coll_name}")
-            else:
-                # List collections from the specified database only
-                db = self.client[default_db_name]
-                collection_names = db.list_collection_names()
-                
-                # Return collection names without database prefix
-                for coll_name in collection_names:
-                    if not coll_name.startswith("system."):
-                        tables.append(coll_name)
+                            collections_set.add(coll_name)
         
         except Exception as e:
             raise OperationFailure(f"Failed to list MongoDB tables: {str(e)}")
         
-        return tables
+        return sorted(list(collections_set))
     
     def get_table_schema(
         self, table_name: str, table_options: Dict[str, str]
@@ -186,18 +186,17 @@ class LakeflowConnect:
         Returns:
             StructType representing the inferred schema
         """
-        # Parse database and collection
+        # Parse database and collection (table_name should just be collection name)
         db_from_name, collection_name = self._parse_collection_name(table_name)
         database_name = db_from_name if db_from_name else self._get_database_name(table_options)
         
-        # Validate table exists
+        # Validate collection exists in the list
         supported_tables = self.list_tables()
         
-        # Check if table_name (without database prefix) is in list
-        # or if full name (with database prefix) is in list (for backward compatibility)
-        if collection_name not in supported_tables and f"{database_name}.{collection_name}" not in supported_tables:
+        if collection_name not in supported_tables:
             raise ValueError(
-                f"Collection '{collection_name}' not found in database '{database_name}'. Available tables: {supported_tables}"
+                f"Collection '{collection_name}' not found. Available collections: {supported_tables}. "
+                f"Make sure to specify the 'database' in table_options."
             )
         
         # Check cache (use full table name as key)
@@ -383,18 +382,17 @@ class LakeflowConnect:
         Returns:
             Dictionary with primary_keys, cursor_field, and ingestion_type
         """
-        # Parse database and collection
+        # Parse database and collection (table_name should just be collection name)
         db_from_name, collection_name = self._parse_collection_name(table_name)
         database_name = db_from_name if db_from_name else self._get_database_name(table_options)
         
-        # Validate table exists
+        # Validate collection exists in the list
         supported_tables = self.list_tables()
         
-        # Check if table_name (without database prefix) is in list
-        # or if full name (with database prefix) is in list (for backward compatibility)
-        if collection_name not in supported_tables and f"{database_name}.{collection_name}" not in supported_tables:
+        if collection_name not in supported_tables:
             raise ValueError(
-                f"Collection '{collection_name}' not found in database '{database_name}'. Available tables: {supported_tables}"
+                f"Collection '{collection_name}' not found. Available collections: {supported_tables}. "
+                f"Make sure to specify the 'database' in table_options."
             )
         
         # Check cache (use full table name as key)
@@ -432,24 +430,23 @@ class LakeflowConnect:
         Read records from a MongoDB collection.
         
         Args:
-            table_name: Name of the collection
+            table_name: Name of the collection (without database prefix)
             start_offset: Dictionary containing cursor information
             table_options: Options including 'database'
             
         Returns:
             Tuple of (record iterator, next_offset)
         """
-        # Validate table exists
-        supported_tables = self.list_tables()
-        
-        # Parse database and collection
+        # Parse database and collection (table_name should just be collection name)
         db_from_name, collection_name = self._parse_collection_name(table_name)
         database_name = db_from_name if db_from_name else self._get_database_name(table_options)
         
-        full_table_name = f"{database_name}.{collection_name}"
-        if full_table_name not in supported_tables:
+        # Validate collection exists in the list
+        supported_tables = self.list_tables()
+        if collection_name not in supported_tables:
             raise ValueError(
-                f"Table '{table_name}' is not supported. Available tables: {supported_tables}"
+                f"Collection '{collection_name}' not found. Available collections: {supported_tables}. "
+                f"Make sure to specify the 'database' in table_options."
             )
         
         # Get metadata to determine ingestion type
@@ -609,24 +606,23 @@ class LakeflowConnect:
         Read deleted records using Change Streams.
         
         Args:
-            table_name: Name of the collection
+            table_name: Name of the collection (without database prefix)
             start_offset: Dictionary with resume token
             table_options: Options including 'database'
             
         Returns:
             Tuple of (deleted records, next_offset)
         """
-        # Validate table exists
-        supported_tables = self.list_tables()
-        
-        # Parse database and collection
+        # Parse database and collection (table_name should just be collection name)
         db_from_name, collection_name = self._parse_collection_name(table_name)
         database_name = db_from_name if db_from_name else self._get_database_name(table_options)
         
-        full_table_name = f"{database_name}.{collection_name}"
-        if full_table_name not in supported_tables:
+        # Validate collection exists in the list
+        supported_tables = self.list_tables()
+        if collection_name not in supported_tables:
             raise ValueError(
-                f"Table '{table_name}' is not supported. Available tables: {supported_tables}"
+                f"Collection '{collection_name}' not found. Available collections: {supported_tables}. "
+                f"Make sure to specify the 'database' in table_options."
             )
         
         db = self.client[database_name]
