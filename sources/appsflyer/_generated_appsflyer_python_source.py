@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Iterator
 import json
+import time
 
 from pyspark.sql import Row
 from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
@@ -223,13 +224,22 @@ def register_lakeflow_source(spark):
                 raise ValueError("AppsFlyer connector requires 'api_token' in options")
 
             self.base_url = options.get("base_url", "https://hq1.appsflyer.com").rstrip("/")
+            self.api_token = api_token
+
+            # Rate limiting: Fixed 60 second delay between requests to avoid WAF challenges
+            # AppsFlyer API triggers WAF challenges if requests are too frequent
+            self.rate_limit_delay = 60.0  # Fixed at 60 seconds between requests
+            self._last_request_time = 0
 
             # Configure a session with proper headers for AppsFlyer API
+            # Note: Management API (/api/mng/*) and Raw Data Export API (/export/*)
+            # may require different headers
             self._session = requests.Session()
             self._session.headers.update(
                 {
                     "Authorization": f"Bearer {api_token}",
-                    "accept": "application/json",
+                    "User-Agent": "lakeflow-appsflyer-connector/1.0",
+                    "Accept": "application/json",
                 }
             )
 
@@ -263,11 +273,15 @@ def register_lakeflow_source(spark):
                 "installs_report": self._get_installs_report_schema,
                 "in_app_events_report": self._get_in_app_events_report_schema,
                 "uninstall_events_report": self._get_uninstall_events_report_schema,
-                "organic_installs_report": self._get_installs_report_schema,  # Same as installs
-                "organic_in_app_events_report": self._get_in_app_events_report_schema,  # Same as in_app_events
+                # Same as installs
+                "organic_installs_report": self._get_installs_report_schema,
+                # Same as in_app_events
+                "organic_in_app_events_report": self._get_in_app_events_report_schema,
                 "daily_report": self._get_daily_report_schema,
-                "retargeting_installs_report": self._get_installs_report_schema,  # Same as installs
-                "retargeting_in_app_events_report": self._get_in_app_events_report_schema,  # Same as in_app_events
+                # Same as installs
+                "retargeting_installs_report": self._get_installs_report_schema,
+                # Same as in_app_events
+                "retargeting_in_app_events_report": self._get_in_app_events_report_schema,
             }
 
             if table_name not in schema_map:
@@ -574,12 +588,30 @@ def register_lakeflow_source(spark):
                 ]
             )
 
+        def _apply_rate_limit(self):
+            """
+            Apply rate limiting to avoid triggering WAF challenges.
+            Waits if necessary to maintain the configured delay between requests.
+            """
+            if self.rate_limit_delay > 0:
+                current_time = time.time()
+                time_since_last_request = current_time - self._last_request_time
+
+                if time_since_last_request < self.rate_limit_delay:
+                    sleep_time = self.rate_limit_delay - time_since_last_request
+                    time.sleep(sleep_time)
+
+                self._last_request_time = time.time()
+
         def _read_apps(
             self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """
             Read the apps snapshot table.
             """
+            # Apply rate limiting before making request
+            self._apply_rate_limit()
+
             url = f"{self.base_url}/api/mng/apps"
             response = self._session.get(url, timeout=60)
 
@@ -588,10 +620,17 @@ def register_lakeflow_source(spark):
                     f"AppsFlyer API error for apps: {response.status_code} {response.text}"
                 )
 
-            apps = response.json() or []
-            if not isinstance(apps, list):
+            data = response.json()
+
+            # Handle different response formats
+            if isinstance(data, list):
+                apps = data
+            elif isinstance(data, dict):
+                # Response might be wrapped in a dict with 'apps' or 'data' key
+                apps = data.get('apps') or data.get('data') or [data]
+            else:
                 raise ValueError(
-                    f"Unexpected response format for apps: {type(apps).__name__}"
+                    f"Unexpected response format for apps: {type(data).__name__}"
                 )
 
             return iter(apps), {}
@@ -676,6 +715,7 @@ def register_lakeflow_source(spark):
                 "retargeting_in_app_events_report", start_offset, table_options
             )
 
+        # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         def _read_event_report(
             self,
             report_type: str,
@@ -747,8 +787,13 @@ def register_lakeflow_source(spark):
                 "timezone": "UTC",
             }
 
-            # Make API request
-            response = self._session.get(url, params=params, timeout=120)
+            # Apply rate limiting before making request
+            self._apply_rate_limit()
+
+            # Make API request with CSV Accept header
+            # Note: Raw Data Export API expects CSV format
+            headers = {"Accept": "text/csv"}
+            response = self._session.get(url, params=params, headers=headers, timeout=120)
 
             if response.status_code != 200:
                 raise RuntimeError(
