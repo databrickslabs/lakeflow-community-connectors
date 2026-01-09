@@ -1,0 +1,7 @@
+# Install lakeflow-community-connectors from TestPyPI
+# Upload this file to your Databricks workspace and reference it with:
+# "-r /Workspace/Users/<your-username>/requirements.txt"
+
+--extra-index-url https://test.pypi.org/simple/
+lakeflow-community-connectors==1.0.2
+
