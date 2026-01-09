@@ -5,39 +5,28 @@
 # Do not edit manually. Make changes to the source files instead.
 # ==============================================================================
 
+from datetime import datetime
+from decimal import Decimal
+from typing import (
+    Any,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+)
+import json
+import time
+
+from botocore.exceptions import ClientError
+from pyspark.sql import Row
+from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
+from pyspark.sql.types import *
+import base64
+import boto3
+
 
 def register_lakeflow_source(spark):
     """Register the Lakeflow Python source with Spark."""
-    
-    # Import all required modules inside the function scope
-    from datetime import datetime
-    from decimal import Decimal
-    from typing import Any, Iterator, Dict, List, Optional
-    import json
-    import base64
-    import time
-    import boto3
-    from botocore.exceptions import ClientError
-    
-    from pyspark.sql import Row
-    from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
-    from pyspark.sql.types import (
-        StructType,
-        StructField,
-        StringType,
-        IntegerType,
-        LongType,
-        FloatType,
-        DoubleType,
-        BooleanType,
-        DateType,
-        TimestampType,
-        DecimalType,
-        BinaryType,
-        ArrayType,
-        MapType,
-        DataType,
-    )
 
     ########################################################
     # libs/utils.py
@@ -225,33 +214,6 @@ def register_lakeflow_source(spark):
     ########################################################
     # sources/redshift/redshift.py
     ########################################################
-
-    Amazon Redshift connector implementation using the Redshift Data API.
-
-    This connector enables reading data from Amazon Redshift clusters and serverless
-    workgroups using the AWS Redshift Data API (REST-based, asynchronous execution model).
-    """
-
-    import time
-    from typing import Dict, List, Iterator, Any, Optional
-    import boto3
-    from botocore.exceptions import ClientError
-
-    from pyspark.sql.types import (
-        StructType,
-        StructField,
-        StringType,
-        IntegerType,
-        LongType,
-        FloatType,
-        DoubleType,
-        BooleanType,
-        DateType,
-        TimestampType,
-        DecimalType,
-        BinaryType,
-    )
-
 
     class LakeflowConnect:
         """
