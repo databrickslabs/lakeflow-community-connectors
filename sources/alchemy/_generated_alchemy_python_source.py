@@ -885,10 +885,16 @@ def register_lakeflow_source(spark):
 
             # Make API request (GET or POST)
             method = config.get("method", "GET")
+            headers = {"Content-Type": "application/json"}
+
+            # Portfolio and Prices APIs require Bearer token authentication
+            if config["api_type"] in ["portfolio", "prices"]:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+
             if method == "POST":
-                response = requests.post(url, json=request_data, headers={"Content-Type": "application/json"})
+                response = requests.post(url, json=request_data, headers=headers)
             else:
-                response = requests.get(url, params=request_data)
+                response = requests.get(url, params=request_data, headers=headers)
 
             response.raise_for_status()
             data = response.json()
