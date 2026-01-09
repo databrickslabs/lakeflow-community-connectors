@@ -925,8 +925,22 @@ class LakeflowConnect:
         """
         Process API response into records.
         """
-        if table_name in ["nfts_by_owner", "nfts_for_contract", "nft_metadata"]:
-            return data.get("ownedNfts", []) if "ownedNfts" in data else [data] if table_name == "nft_metadata" else []
+        if table_name in ["nfts_by_owner", "nfts_for_contract"]:
+            return data.get("ownedNfts", []) if "ownedNfts" in data else data.get("nfts", [])
+
+        elif table_name == "nft_metadata":
+            record = dict(data)
+            # Normalize nested fields that might be strings instead of dicts
+            if "rawMetadata" in record and isinstance(record["rawMetadata"], str):
+                try:
+                    record["rawMetadata"] = json.loads(record["rawMetadata"])
+                except (json.JSONDecodeError, TypeError):
+                    record["rawMetadata"] = None
+            if "tokenUri" in record and isinstance(record["tokenUri"], str):
+                record["tokenUri"] = {"raw": record["tokenUri"], "gateway": record["tokenUri"]}
+            if "contract" in record and isinstance(record["contract"], str):
+                record["contract"] = {"address": record["contract"], "name": None, "symbol": None, "totalSupply": None, "tokenType": None}
+            return [record]
 
         elif table_name == "contract_metadata":
             # Ensure contractAddress is in the response (may be returned as 'address' or missing)
