@@ -1,0 +1,13 @@
+source_table,category,table_configuration_json
+issues,cdc,{}
+pull_requests,cdc,{}
+comments,cdc,{}
+commits,append,{}
+reviews,append,{}
+repositories,snapshot,{}
+users,snapshot,{}
+organizations,snapshot,{}
+teams,snapshot,{}
+assignees,snapshot,{}
+collaborators,snapshot,{}
+branches,snapshot,{}
