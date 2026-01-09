@@ -144,7 +144,7 @@ Schema per system index is resolved live from `_mapping`; Elasticsearch does not
   - Field mapping types: https://www.elastic.co/guide/en/elasticsearch/reference/current/mapping-types.html
 
 ## **Connector defaults and options**
-- Default cursor detection order: `timestamp`, `updated_at`, `_seq_no`.
+- Default cursor detection order: `timestamp`, `updated_at` (meta-fields starting with `_` are currently not allowed as cursors).
 - Per-table options:
   - `cursor_field`: override cursor detection.
   - `ingestion_type`: optional override (`append` or `cdc`); requires a cursor field. If none is available, the connector falls back to `snapshot`.

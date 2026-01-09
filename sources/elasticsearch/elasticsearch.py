@@ -172,7 +172,7 @@ class LakeflowConnect:
             verify_ssl=verify_ssl
         )
 
-        self._default_cursor_fields = ["timestamp", "updated_at", "_seq_no"] # evaluated in order!
+        self._default_cursor_fields = ["timestamp", "updated_at"]  # evaluated in order!
 
         # Cache for discovered and available indices to avoid repeated API calls
         self._indices_cache: list[str] = []
@@ -287,6 +287,10 @@ class LakeflowConnect:
         # Determine cursor field
         if "cursor_field" in options:
             cursor_field = options["cursor_field"]
+            if cursor_field.startswith("_"):
+                raise ValueError(
+                    f"Unsupported cursor_field '{cursor_field}'. Fields starting with '_' (meta fields) are not allowed as cursors."
+                )
             if not self._is_field_available(properties=properties, field_path=cursor_field):
                 raise ValueError(f"Configured cursor_field '{cursor_field}' not found in index '{index}'")
 

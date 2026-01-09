@@ -52,7 +52,7 @@ The connection can also be created using the standard Unity Catalog API.
 
 | Object (index/alias) | Primary Key | Ingestion Type | Cursor | Notes |
 | --- | --- | --- | --- | --- |
-| Any accessible index/alias | `_id` | Defaults to `cdc` when a cursor field exists; otherwise `snapshot`. Override with `ingestion_type=cdc` or `append` when a cursor is present. | Auto-detected in order: `timestamp`, `updated_at`, `_seq_no` (or set `cursor_field`). | Works with user and system indices; aliases and data streams resolve to concrete indices. |
+| Any accessible index/alias | `_id` | Defaults to `cdc` when a cursor field exists; otherwise `snapshot`. Override with `ingestion_type=cdc` or `append` when a cursor is present. | Auto-detected in order: `timestamp`, `updated_at` (or set `cursor_field`). Fields starting with `_` (meta fields) are currently not allowed as cursors. | Works with user and system indices; aliases and data streams resolve to concrete indices. |
 
 Table options (set per table in the pipeline):
 - `cursor_field` (string, optional): Force the cursor field if auto-detection is not desired.
@@ -63,7 +63,7 @@ Table options (set per table in the pipeline):
 Behavior notes:
 - Reads use **point-in-time (PIT)** plus `search_after` with `_shard_doc` as a tiebreaker for deterministic paging.
 - `_id` is always added as a column in the ingested data.
-- If no suitable cursor is found, the connector performs a snapshot read.
+- Fields starting with `_` (meta fields such as `_seq_no`, `_version`, `_id`) are currently not accepted as cursors. If no suitable cursor is found, the connector performs a snapshot read.
 - Network resiliency: HTTP calls use explicit timeouts (5s connect / 30s read) and a small retry with backoff (up to 3 attempts on 429/5xx, honoring `Retry-After`).
 
 ## Data Type Mapping
