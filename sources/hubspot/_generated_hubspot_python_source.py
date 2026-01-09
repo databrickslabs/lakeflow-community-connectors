@@ -809,14 +809,29 @@ def register_lakeflow_source(spark):
             transformed_record = {}
 
             # Copy base fields
-            for field in ["id", "createdAt", "updatedAt", "archived", "properties"]:
+            for field in ["id", "createdAt", "updatedAt", "archived"]:
                 if field in record:
                     transformed_record[field] = record[field]
+
+            # Copy properties with empty string to None conversion
+            # HubSpot API returns "" for null values in many fields
+            if "properties" in record:
+                transformed_record["properties"] = self._sanitize_properties(record["properties"])
 
             # Handle associations
             transformed_record.update(self._extract_associations(record, table_name))
 
             return transformed_record
+
+        def _sanitize_properties(self, properties: Dict) -> Dict:
+            """Convert empty strings to None in properties dict.
+
+            HubSpot API returns empty strings "" instead of null for many fields,
+            which causes issues when parsing to typed schemas (e.g., LongType).
+            """
+            if not properties:
+                return properties
+            return {k: (None if v == "" else v) for k, v in properties.items()}
 
         def _extract_associations(self, record: Dict, table_name: str) -> Dict:
             """Extract association IDs from record"""
