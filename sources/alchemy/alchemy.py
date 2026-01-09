@@ -960,7 +960,14 @@ class LakeflowConnect:
         """
         Process API response into records.
         """
-        if table_name in ["nfts_by_owner", "nfts_for_contract"]:
+        if table_name == "nfts_by_owner":
+            records = data.get("ownedNfts", []) if "ownedNfts" in data else data.get("nfts", [])
+            # API response doesn't include owner, add it from table_options
+            owner = table_options.get("owner_address")
+            normalized = [self._normalize_nft_record(r) for r in records]
+            return [{**record, "owner": owner} for record in normalized]
+
+        elif table_name == "nfts_for_contract":
             records = data.get("ownedNfts", []) if "ownedNfts" in data else data.get("nfts", [])
             # Normalize nested fields that might be strings instead of dicts
             return [self._normalize_nft_record(r) for r in records]
