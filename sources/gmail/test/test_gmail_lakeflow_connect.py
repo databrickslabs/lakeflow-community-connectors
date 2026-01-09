@@ -7,21 +7,7 @@ from sources.gmail.gmail import LakeflowConnect
 
 
 def test_gmail_connector():
-    """Test the Gmail connector using the shared LakeflowConnect test suite.
-
-    This test validates:
-    - Connector initialization with OAuth credentials
-    - list_tables() returns all 10 supported tables
-    - get_table_schema() returns valid StructType for each table
-    - read_table_metadata() returns required metadata (primary_keys, ingestion_type)
-    - read_table() successfully fetches data from Gmail API
-    - Custom table options (maxResults, q, labelIds, format) work correctly
-
-    To run these tests:
-    1. Copy dev_config.json.template to dev_config.json
-    2. Add your OAuth credentials (see README.md for setup instructions)
-    3. Run: PYTHONPATH=. pytest sources/gmail/test/test_gmail_lakeflow_connect.py -v
-    """
+    """Test the Gmail connector using the shared LakeflowConnect test suite."""
     # Inject the Gmail LakeflowConnect class into the shared test_suite namespace
     test_suite.LakeflowConnect = LakeflowConnect
 
