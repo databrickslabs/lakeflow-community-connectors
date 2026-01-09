@@ -667,7 +667,10 @@ def register_lakeflow_source(spark):
             self, database_name: str, collection_name: str, start_offset: dict
         ) -> tuple[List[dict], dict]:
             """
-            Read documents incrementally using _id cursor.
+            Read ALL documents from collection (full scan for initial sync).
+
+            For initial sync (no cursor), reads all documents in batches internally
+            and returns them all at once. This ensures complete data synchronization.
 
             Args:
                 database_name: Database name
@@ -675,7 +678,7 @@ def register_lakeflow_source(spark):
                 start_offset: Dictionary with 'cursor' key containing last _id
 
             Returns:
-                Tuple of (records list, next_offset)
+                Tuple of (all records list, empty offset)
             """
             # Lazy import to avoid serialization issues
             from bson import ObjectId
@@ -683,42 +686,71 @@ def register_lakeflow_source(spark):
             db = self.client[database_name]
             collection = db[collection_name]
 
-            # Build query filter based on cursor
-            query_filter = {}
+            # Check if this is initial sync or incremental
             cursor = start_offset.get("cursor") if start_offset else None
 
-            if cursor:
-                # Resume from last cursor
+            if not cursor:
+                # Initial sync - read ALL documents
+                all_records = []
+                last_id = None
+
+                while True:
+                    # Build query filter based on cursor
+                    query_filter = {}
+                    if last_id:
+                        try:
+                            cursor_id = ObjectId(last_id) if isinstance(last_id, str) else last_id
+                            query_filter = {"_id": {"$gt": cursor_id}}
+                        except Exception:
+                            query_filter = {"_id": {"$gt": last_id}}
+
+                    # Fetch batch of documents
+                    cursor_obj = collection.find(query_filter).sort("_id", 1).limit(self.batch_size)
+
+                    batch_records = []
+                    for doc in cursor_obj:
+                        record = self._convert_document(doc)
+                        batch_records.append(record)
+                        last_id = record["_id"]
+
+                    # Add batch to all records
+                    all_records.extend(batch_records)
+
+                    # If we got fewer records than batch_size, we've read everything
+                    if len(batch_records) < self.batch_size:
+                        break
+
+                # Return all records with empty offset (initial sync complete)
+                return all_records, {}
+
+            else:
+                # Incremental read - return single batch for subsequent syncs
+                query_filter = {}
                 try:
                     cursor_id = ObjectId(cursor) if isinstance(cursor, str) else cursor
                     query_filter = {"_id": {"$gt": cursor_id}}
                 except Exception:
-                    # If cursor is not a valid ObjectId, treat as string
                     query_filter = {"_id": {"$gt": cursor}}
 
-            # Fetch batch of documents
-            cursor_obj = collection.find(query_filter).sort("_id", 1).limit(self.batch_size)
+                cursor_obj = collection.find(query_filter).sort("_id", 1).limit(self.batch_size)
 
-            records = []
-            last_id = None
+                records = []
+                last_id = None
 
-            for doc in cursor_obj:
-                # Convert document to JSON-serializable format
-                record = self._convert_document(doc)
-                records.append(record)
-                last_id = record["_id"]
+                for doc in cursor_obj:
+                    record = self._convert_document(doc)
+                    records.append(record)
+                    last_id = record["_id"]
 
-            # Build next offset
-            # If we got fewer records than batch_size, we've reached the end
-            # Return empty offset to signal completion
-            if len(records) < self.batch_size:
-                next_offset = {}
-            elif last_id:
-                next_offset = {"cursor": last_id}
-            else:
-                next_offset = {}
+                # Return batch with cursor if more data exists
+                if len(records) < self.batch_size:
+                    next_offset = {}
+                elif last_id:
+                    next_offset = {"cursor": last_id}
+                else:
+                    next_offset = {}
 
-            return records, next_offset
+                return records, next_offset
 
         def _read_change_stream(
             self, database_name: str, collection_name: str, start_offset: dict
