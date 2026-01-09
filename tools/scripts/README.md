@@ -22,6 +22,9 @@ The script combines three essential components into one file:
 # Basic usage - saves to sources/{source_name}/_generated_{source_name}_python_source.py
 python3 tools/scripts/merge_python_source.py <source_name>
 
+# Regenerate all sources at once (saves to default location, -o is not supported)
+python3 tools/scripts/merge_python_source.py all
+
 # Save to a custom file location
 python3 tools/scripts/merge_python_source.py <source_name> -o <output_file>
 ```
@@ -34,6 +37,9 @@ python3 tools/scripts/merge_python_source.py zendesk
 
 # Merge Example source (saves to sources/example/_generated_example_python_source.py)
 python3 tools/scripts/merge_python_source.py example
+
+# Regenerate all sources (auto-discovers connectors, saves to default locations)
+python3 tools/scripts/merge_python_source.py all
 
 # Merge Zendesk source and save to custom location
 python3 tools/scripts/merge_python_source.py zendesk -o output/zendesk_merged.py
