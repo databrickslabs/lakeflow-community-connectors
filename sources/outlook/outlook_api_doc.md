@@ -27,7 +27,6 @@ The connector **does not** run user-facing OAuth flows. The refresh token must b
 For read-only access to mail:
 - `Mail.Read`: Read user mail
 - `Mail.ReadBasic`: Read basic mail properties
-- `offline_access`: Maintain access to data via refresh token
 
 For read/write access:
 - `Mail.ReadWrite`: Read and write user mail

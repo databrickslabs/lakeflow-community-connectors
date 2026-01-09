@@ -65,7 +65,7 @@ class LakeflowConnect:
             "client_secret": self.client_secret,
             "refresh_token": self.refresh_token,
             "grant_type": "refresh_token",
-            "scope": "User.Read offline_access",
+            "scope": "User.Read",
         }
 
         response = requests.post(self.token_endpoint, data=token_data, timeout=30)
