@@ -1,31 +1,76 @@
-# Gmail Connector - Demo Access Guide
+# Gmail Connector - Testing Guide
 
-## Quick Start for Judges
+## For Internal Evaluators/Judges
 
-### Demo Gmail Account
+### Demo Account Access
+
+A pre-configured demo Gmail account with test data is available for evaluation purposes.
+
+**Access Credentials**: Available in the internal **Keeper vault**:
 ```
-Email: lakeflow.mail.demo@gmail.com
-Password: DiscoverLakehouse
+Vault Path: Hackathon 2026 / Gmail Connector Demo Account
 ```
 
-### Pre-populated Demo Data
+The demo account includes:
+- ~20 pre-existing emails demonstrating various use cases
+- Customer support threads, sales communications, system notifications
+- Custom labels and organized data
+- Ready for immediate testing
 
-The account contains **~20 emails** demonstrating:
-- ✅ Customer support conversation threads (3 threads)
-- ✅ Sales communications (4 emails)
-- ✅ System notifications (4 emails)
-- ✅ Marketing emails (3 emails)
-- ✅ Draft messages (5 drafts)
-- ✅ Custom Gmail labels (Customer Support, Sales, Notifications, Marketing)
+---
 
-## Option 1: Use Pre-configured Credentials (Fastest)
+## Testing with Your Own Gmail Account
 
-We've prepared ready-to-use OAuth credentials for testing.
+### Why Use Your Own Account?
 
-### Step 1: Create Config File
+- **No setup required**: Use your existing emails
+- **Real data**: More authentic testing experience
+- **Safe**: Read-only access (`gmail.readonly` scope)
+- **No automation risks**: No flagging by Google
 
-Create file: `sources/gmail/configs/dev_config.json`
+### Prerequisites
 
+1. **Gmail Account**: Personal Gmail or Google Workspace account with existing emails
+2. **Google Cloud Access**: Ability to create OAuth 2.0 credentials
+3. **Time Required**: ~10-15 minutes for OAuth setup
+
+### Quick Start
+
+#### Step 1: Set Up OAuth Credentials
+
+Follow the detailed guide in [SETUP_GUIDE.md](./SETUP_GUIDE.md) to:
+
+1. **Create Google Cloud Project** (2 min)
+   - Go to https://console.cloud.google.com/
+   - Create new project: "Gmail Connector Test"
+
+2. **Enable Gmail API** (1 min)
+   - Navigate to APIs & Services → Library
+   - Search "Gmail API" → Enable
+
+3. **Configure OAuth Consent Screen** (3 min)
+   - Choose "External" user type
+   - Add scope: `https://www.googleapis.com/auth/gmail.readonly`
+   - Add yourself as test user
+
+4. **Create OAuth Credentials** (2 min)
+   - APIs & Services → Credentials
+   - Create OAuth 2.0 Client ID (Desktop app type)
+   - Save Client ID and Client Secret
+
+5. **Generate Refresh Token** (2 min)
+   ```bash
+   python sources/gmail/get_refresh_token.py
+   ```
+   - Enter your Client ID and Secret
+   - Authorize in browser
+   - Refresh token saved automatically
+
+#### Step 2: Create Configuration File
+
+The helper script creates this automatically, but you can also create manually:
+
+`sources/gmail/configs/dev_config.json`:
 ```json
 {
   "client_id": "YOUR_CLIENT_ID_HERE",
@@ -35,261 +80,311 @@ Create file: `sources/gmail/configs/dev_config.json`
 }
 ```
 
-**Note**: Actual credentials will be provided separately for security.
+⚠️ **Security Note**: This file is in `.gitignore` and will NOT be committed.
 
-### Step 2: Run Tests
-
-```bash
-cd /path/to/lakeflow-community-connectors
-
-# Run the test suite
-pytest sources/gmail/test/test_gmail_lakeflow_connect.py -v
-```
-
-**Expected Result**: ✅ All 6 tests pass
-
-```
-test_initialization ........................... PASSED
-test_list_tables .............................. PASSED
-test_get_table_schema ......................... PASSED
-test_read_table_metadata ...................... PASSED
-test_read_table ................................ PASSED
-test_read_table_deletes ....................... PASSED
-```
-
-## Option 2: Set Up Your Own OAuth (Alternative)
-
-If you prefer to use your own OAuth credentials:
-
-### Step 1: Create OAuth Credentials
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project or use existing
-3. Enable Gmail API
-4. Create OAuth 2.0 Desktop credentials
-5. Configure OAuth consent screen with scope: `https://www.googleapis.com/auth/gmail.readonly`
-6. Add `lakeflow.mail.demo@gmail.com` as a test user
-
-### Step 2: Get Refresh Token
+#### Step 3: Run Tests
 
 ```bash
-# Run the helper script
-python sources/gmail/get_refresh_token.py
-
-# Follow the prompts:
-# 1. Enter your Client ID
-# 2. Enter your Client Secret
-# 3. Authorize in the browser (use demo account credentials)
-```
-
-This automatically creates `sources/gmail/configs/dev_config.json`.
-
-### Step 3: Run Tests
-
-```bash
-pytest sources/gmail/test/test_gmail_lakeflow_connect.py -v
-```
-
-## What the Connector Does
-
-### Tables Supported (5 tables)
-
-1. **messages** - Email messages with full content
-   - Ingestion Type: CDC (incremental sync with historyId)
-   - Schema: Nested structure with headers, body parts, attachments metadata
-
-2. **threads** - Email conversation threads
-   - Ingestion Type: CDC (incremental sync with historyId)
-   - Schema: Contains array of messages in the thread
-
-3. **labels** - Gmail labels (INBOX, SENT, custom labels)
-   - Ingestion Type: Snapshot (full sync)
-   - Schema: Label metadata and counts
-
-4. **drafts** - Draft messages
-   - Ingestion Type: Snapshot (full sync)
-   - Schema: Draft with embedded message object
-
-5. **profile** - User profile information
-   - Ingestion Type: Snapshot (full sync)
-   - Schema: Email address, message counts, historyId
-
-### Key Features Demonstrated
-
-✅ **OAuth 2.0 Authentication**: Secure token-based auth with automatic refresh
-✅ **Incremental Sync (CDC)**: Uses Gmail History API for efficient updates
-✅ **Full Sync**: Initial load of all historical data
-✅ **Rich Schemas**: Handles nested JSON structures (headers, parts, attachments)
-✅ **Error Handling**: Automatic fallback and retry logic
-✅ **Rate Limiting**: Built-in delays to respect API limits
-
-## Demo Workflow
-
-### 1. Local Testing (5 minutes)
-```bash
-# Show connector implementation
-head -100 sources/gmail/gmail.py
+# Install dependencies
+pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client pytest
 
 # Run tests
 pytest sources/gmail/test/test_gmail_lakeflow_connect.py -v
-
-# All tests should pass ✅
 ```
 
-### 2. Inspect Demo Data (2 minutes)
-- Log into Gmail web interface with demo credentials
-- Browse the emails organized by labels
-- Note the variety of content (HTML, plain text, threads)
-
-### 3. Deploy to Databricks (10 minutes)
-- Use community connector CLI tool
-- Configure Delta Live Tables pipeline
-- Run initial ingestion (full sync)
-- Query data in Unity Catalog
-
-### 4. Demonstrate Incremental Sync (5 minutes)
-```bash
-# Add new emails to demonstrate CDC
-python sources/gmail/demo/add_incremental_data.py
-
-# Re-run ingestion (incremental mode)
-# Only new emails are synced (efficient!)
-```
-
-## Sample SQL Queries (After Ingestion)
-
-```sql
--- Count emails by label
-SELECT
-  explode(labelIds) as label,
-  COUNT(*) as email_count
-FROM gmail_messages
-GROUP BY label
-ORDER BY email_count DESC;
-
--- Find customer support emails
-SELECT
-  id,
-  snippet,
-  FROM_UNIXTIME(CAST(internalDate AS BIGINT)/1000) as received_date
-FROM gmail_messages
-WHERE array_contains(labelIds, 'Customer Support')
-ORDER BY internalDate DESC;
-
--- Analyze email threads
-SELECT
-  t.id as thread_id,
-  t.snippet,
-  SIZE(t.messages) as message_count,
-  t.historyId
-FROM gmail_threads t
-WHERE SIZE(t.messages) > 1
-ORDER BY message_count DESC;
-
--- Extract email headers
-SELECT
-  m.id,
-  header.name,
-  header.value
-FROM gmail_messages m
-LATERAL VIEW explode(m.payload.headers) as header
-WHERE header.name IN ('From', 'To', 'Subject', 'Date');
-
--- Profile statistics
-SELECT
-  emailAddress,
-  messagesTotal,
-  threadsTotal,
-  historyId
-FROM gmail_profile;
-```
-
-## Architecture Highlights
-
-### LakeflowConnect Interface
-The connector implements the standard interface:
-- `__init__()` - OAuth token exchange
-- `list_tables()` - Returns 5 tables
-- `get_table_schema()` - Returns PySpark StructType schemas
-- `read_table_metadata()` - Returns primary keys, cursor field, ingestion type
-- `read_table()` - Returns iterator of records + offset dict
-
-### Incremental Sync Pattern
-```python
-# Full sync: List message IDs → Fetch details → Track max historyId
-if not start_offset:
-    return _read_messages_full()
-
-# Incremental sync: History API → Extract changed IDs → Fetch updates
-elif "historyId" in start_offset:
-    return _read_messages_incremental(start_offset["historyId"])
-```
-
-### Error Recovery
-- Automatic access token refresh on 401 errors
-- Fallback to full sync on 404 (expired historyId)
-- Proper handling of rate limits and timeouts
-
-## Technical Specifications
-
-**API Used**: Gmail API v1
-**Authentication**: OAuth 2.0 (refresh token flow)
-**Primary Scope**: `gmail.readonly`
-**Rate Limits**: 1.2M quota units/minute per project
-**Cursor Field**: historyId (for CDC tables)
-**Pagination**: pageToken-based
-
-## Files to Review
-
-### Core Implementation
-- `sources/gmail/gmail.py` - Main connector (500 lines)
-- `sources/gmail/gmail_api_doc.md` - API research documentation
-
-### Testing
-- `sources/gmail/test/test_gmail_lakeflow_connect.py` - Test suite integration
-- Tests validate: schemas, metadata, data reading, error handling
-
-### Documentation
-- `sources/gmail/README.md` - User-facing documentation
-- `sources/gmail/SETUP_GUIDE.md` - OAuth setup guide
-- `sources/gmail/demo/README.md` - Demo data scripts guide
-
-### Demo Scripts
-- `sources/gmail/demo/populate_demo_data.py` - Creates initial demo data
-- `sources/gmail/demo/add_incremental_data.py` - Adds data for CDC demo
-
-## Support & Questions
-
-For issues during evaluation:
-
-1. **Test failures**: Ensure `dev_config.json` has valid OAuth credentials
-2. **Authentication errors**: Token may have expired, regenerate using `get_refresh_token.py`
-3. **API errors**: Check network connectivity and Gmail API enablement
-4. **Import errors**: Ensure project root is in PYTHONPATH
-
-## Judging Criteria Alignment
-
-### Completeness & Functionality (50%)
-✅ All 5 tables fully implemented
-✅ Complete API coverage (messages, threads, labels, drafts, profile)
-✅ Both CDC and snapshot modes supported
-✅ Comprehensive test suite (6/6 passing)
-✅ Error handling and recovery mechanisms
-
-### Methodology & Reusability (30%)
-✅ Documented development methodology (vibe coding approach)
-✅ OAuth pattern reusable for other Google APIs (Calendar, Drive, etc.)
-✅ History API pattern applicable to similar services
-✅ Helper scripts (get_refresh_token.py) reusable
-✅ Schema design patterns for nested structures
-
-### Code Quality & Efficiency (20%)
-✅ Well-structured with clear separation of concerns
-✅ Efficient CDC using History API (minimal API calls)
-✅ Proper error handling with automatic token refresh
-✅ Comprehensive inline documentation
-✅ Follows Python best practices and type hints
+**Expected Result**: All 6 tests pass ✅
 
 ---
 
-**Ready to test?** Start with Option 1 above and run the pytest command! 🚀
+## What Gets Tested with Your Emails
+
+The connector will read from your actual Gmail account:
+
+### Data Read (All Read-Only)
+- ✅ Email messages (subject, body, headers)
+- ✅ Email threads/conversations
+- ✅ Gmail labels (INBOX, SENT, custom labels)
+- ✅ Draft messages
+- ✅ Profile information (email address, message counts)
+
+### Data NOT Modified
+- ❌ No emails sent
+- ❌ No emails deleted
+- ❌ No labels modified
+- ❌ No settings changed
+- ❌ No mark as read/unread
+
+**Scope**: Only `gmail.readonly` - completely safe!
+
+---
+
+## Testing Different Features
+
+### Recommended Email Content (Use What You Have)
+
+Your existing Gmail likely already has suitable test data. Ideal content includes:
+
+**Minimum** (most accounts have this):
+- 10+ emails in inbox
+- At least 1 email thread (conversation)
+- A few labels (INBOX, SENT, etc.)
+- Maybe a draft or two
+
+**Better** (for comprehensive testing):
+- Email threads with multiple replies
+- Custom labels you've created
+- Mix of personal and automated emails (newsletters, notifications)
+- Emails from different time periods
+- HTML formatted emails (most modern emails)
+
+**You don't need to create anything new** - the connector works with your existing emails!
+
+### Test Execution Output
+
+When you run tests, you'll see output showing YOUR real emails:
+
+```python
+# Sample output (your actual data):
+{
+  "id": "abc123def456",
+  "threadId": "abc123def456",
+  "labelIds": ["INBOX", "IMPORTANT"],
+  "snippet": "Hi, following up on our meeting...",
+  "internalDate": "1704067200000",
+  "from": "colleague@company.com",
+  "subject": "Meeting Follow-up"
+}
+```
+
+This confirms the connector correctly reads and structures your Gmail data.
+
+---
+
+## Testing Specific Features
+
+### Test 1: Basic Authentication
+```bash
+pytest sources/gmail/test/ -v -k "test_initialization"
+```
+Verifies OAuth works with your credentials.
+
+### Test 2: List Your Tables
+```bash
+pytest sources/gmail/test/ -v -k "test_list_tables"
+```
+Shows the 5 available tables: messages, threads, labels, drafts, profile.
+
+### Test 3: Read Your Messages
+```bash
+pytest sources/gmail/test/ -v -k "test_read_table"
+```
+Reads actual emails from your inbox - you'll see snippets in the output.
+
+### Test 4: Check Your Labels
+The test will discover all your labels:
+- Default labels: INBOX, SENT, DRAFTS, TRASH, SPAM
+- Your custom labels (if any)
+- Label statistics (message counts, unread counts)
+
+### Test 5: Incremental Sync
+
+To test CDC mode:
+1. Note your current Gmail historyId (from test output)
+2. Send yourself a new email or receive one naturally
+3. Re-run tests - connector detects only the new email!
+
+---
+
+## Privacy & Security
+
+### What Data is Accessed?
+
+The connector reads your Gmail data temporarily during testing:
+- Data stays on your machine
+- No data sent to external servers (except Gmail API)
+- No data stored permanently (tests run and complete)
+
+### OAuth Permissions
+
+The `gmail.readonly` scope allows:
+- ✅ Read emails and metadata
+- ✅ Read labels and settings
+- ❌ Cannot send emails
+- ❌ Cannot delete or modify
+- ❌ Cannot access other Google services
+
+### Revoking Access
+
+After testing, you can revoke access:
+
+1. Go to https://myaccount.google.com/permissions
+2. Find your OAuth app ("Gmail Connector Test")
+3. Click "Remove Access"
+
+This immediately invalidates the refresh token.
+
+### Best Practices
+
+1. **Use Test Account** (if available): Safer than production email
+2. **Limit Scope**: Only grant `gmail.readonly` (already configured)
+3. **Rotate Credentials**: Change OAuth credentials after hackathon
+4. **Check Periodically**: Monitor Google account activity
+5. **Clean Up**: Delete `dev_config.json` after testing
+
+---
+
+## Troubleshooting
+
+### "Invalid credentials"
+**Solution**: Regenerate refresh token:
+```bash
+python sources/gmail/get_refresh_token.py
+```
+
+### "Access blocked"
+**Solution**: Add yourself as test user in OAuth consent screen
+1. Google Cloud Console → OAuth consent screen
+2. Test users → Add your email
+3. Try authentication again
+
+### "No data found" in tests
+**Check**:
+- Your Gmail account has emails (inbox not empty)
+- Labels exist (at least INBOX)
+- OAuth token has correct permissions
+
+### Rate limiting
+**If you see quota errors**:
+- Wait 1 minute and retry
+- Gmail API allows 1.2M requests/minute (plenty for testing)
+- Individual test runs use ~20-50 requests
+
+---
+
+## What Makes a Good Test?
+
+### Sufficient Data ✅
+Your account should have:
+- At least 10 emails (most people have hundreds)
+- At least 1 conversation/thread
+- Some labels (most accounts have several)
+
+### Variety is Helpful ✅
+- Mix of new and old emails
+- Different senders and subjects
+- HTML and plain text
+- Attachments (metadata will be captured)
+
+### You Don't Need Perfect Data ❌
+- Don't create fake test data
+- Don't organize specially for testing
+- Don't clean up your inbox
+- Just use what you have naturally!
+
+**The connector works with messy, real-world email data.**
+
+---
+
+## Testing Checklist
+
+Before submitting results:
+
+- [ ] OAuth credentials configured
+- [ ] All 6 tests passing
+- [ ] Tested with your real Gmail account
+- [ ] Verified messages table reads your emails
+- [ ] Verified threads table shows conversations
+- [ ] Verified labels table lists your labels
+- [ ] Checked profile table shows your stats
+- [ ] No errors in test output
+- [ ] Confirmed read-only access (nothing modified)
+
+---
+
+## Example Test Session
+
+Here's what a typical test session looks like:
+
+```bash
+$ pytest sources/gmail/test/test_gmail_lakeflow_connect.py -v
+
+============================== test session starts ===============================
+sources/gmail/test/test_gmail_lakeflow_connect.py::test_gmail_connector
+
+Running LakeflowConnect tests...
+
+✅ test_initialization ................. PASSED
+   OAuth authentication successful
+   Access token obtained
+
+✅ test_list_tables .................... PASSED
+   Found 5 tables: messages, threads, labels, drafts, profile
+
+✅ test_get_table_schema ............... PASSED
+   All schemas valid with proper types
+
+✅ test_read_table_metadata ............ PASSED
+   Metadata correct for all tables
+   CDC mode: messages, threads (with historyId cursor)
+   Snapshot mode: labels, drafts, profile
+
+✅ test_read_table ..................... PASSED
+   Sample data from messages table:
+   - Read 10 emails from your inbox
+   - Found 5 labels
+   - Detected 3 conversation threads
+   - Profile: 2,347 total messages
+
+✅ test_read_table_deletes ............. PASSED
+   Skipped (not applicable for Gmail)
+
+============================== 6 passed in 3.42s ================================
+```
+
+---
+
+## Alternative: Testing Without Personal Account
+
+If you prefer not to use your personal email:
+
+### Option 1: Create Fresh Gmail Account
+1. Go to https://accounts.google.com/signup
+2. Create account: `your-test-name@gmail.com`
+3. Send yourself 5-10 emails from another account
+4. Use this account for testing
+
+**Note**: Avoid using automated scripts to populate - Google may flag
+
+### Option 2: Request Demo Account Access
+Contact hackathon organizers for access to shared demo account.
+
+---
+
+## Additional Resources
+
+- **[SETUP_GUIDE.md](./SETUP_GUIDE.md)** - Detailed OAuth setup walkthrough
+- **[README.md](./README.md)** - Complete connector documentation
+- **[gmail_api_doc.md](./gmail_api_doc.md)** - API research and specifications
+
+---
+
+## Support
+
+**For OAuth/Setup Issues**:
+1. Review [SETUP_GUIDE.md](./SETUP_GUIDE.md) troubleshooting section
+2. Verify Gmail API enabled in Google Cloud Console
+3. Check OAuth consent screen configuration
+
+**For Test Failures**:
+1. Ensure `dev_config.json` has valid credentials
+2. Verify your Gmail account has emails
+3. Check test output for specific error messages
+
+**For Security Questions**:
+- Connector only uses `gmail.readonly` scope
+- No data is modified or sent externally
+- You can revoke access anytime
+
+---
+
+**Ready to Test?** Just follow Steps 1-3 above and run the tests with your own Gmail account! The connector will work with whatever emails you already have. ✅
