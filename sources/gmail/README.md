@@ -26,7 +26,7 @@ Provide the following **connection-level** options when configuring the connecto
 | `client_secret` | string | yes | OAuth 2.0 client secret | `GOCSPX-xxxx...` |
 | `refresh_token` | string | yes | Long-lived refresh token from OAuth flow | `1//0xxxx...` |
 | `user_id` | string | no | User email or `me` (default: `me`) | `user@gmail.com` |
-| `externalOptionsAllowList` | string | no | Comma-separated list of table-specific options (optional for this connector) | `q,labelIds,maxResults,includeSpamTrash,format` |
+| `externalOptionsAllowList` | string | no | Comma-separated list of table-specific options (optional for this connector) | `tableName,tableNameList,tableConfigs,isDeleteFlow,q,labelIds,maxResults,includeSpamTrash,format` |
 
 The full list of supported table-specific options for `externalOptionsAllowList` is:
 `q,labelIds,maxResults,includeSpamTrash,format`
@@ -35,48 +35,194 @@ The full list of supported table-specific options for `externalOptionsAllowList`
 
 ### Obtaining OAuth Credentials
 
-#### Step 1: Create a Google Cloud Project
+Follow these steps to obtain the OAuth credentials required for the Gmail connector.
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/).
-2. Create a new project or select an existing one.
-3. Navigate to **APIs & Services → Library**.
-4. Search for "Gmail API" and enable it.
+---
+
+#### Step 1: Create a Google Cloud Project and Enable Gmail API
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Click **Select a project** → **New Project**
+3. Enter a project name (e.g., "Gmail Lakeflow Connector") and click **Create**
+4. Once created, select your new project
+5. Navigate to **APIs & Services → Library**
+6. Search for "Gmail API" and click on it
+7. Click **Enable**
+
+![Enable Gmail API](screenshots/gmail-api-enabled.png)
+
+---
 
 #### Step 2: Configure OAuth Consent Screen
 
-1. Go to **APIs & Services → OAuth consent screen**.
-2. Choose **External** (for personal Gmail) or **Internal** (for Google Workspace).
-3. Fill in the required app information.
-4. Add the scope: `https://www.googleapis.com/auth/gmail.readonly`.
-5. Add your email as a test user (for External apps in testing mode).
+Before creating credentials, you must configure the OAuth consent screen:
+1. Go to **APIs & Services → OAuth consent screen**
+2. Click **Get started** or **Create**
+3. Fill in the **App Information**:
+   - **App name**: `Gmail Lakeflow Connector` (or your preferred name)
+   - **User support email**: Your email address
+4. Fill in **Developer contact information**:
+   - **Email addresses**: Your email address
+5. Select **External** (for personal Gmail accounts) or **Internal** (for Google Workspace organizations)
+6. Click **Save and Continue**
+7. On the **Audience** page:
+   - If External, click **Add Users** under **Test users**
+   - Enter your Gmail address and click **Add**
+8. Click **Save and Continue**
+9. On the **Data Access** page, click **Add or Remove Scopes**
+10. Search for `gmail.readonly` and check the box for:
+   - `https://www.googleapis.com/auth/gmail.readonly`
+11. Click **Update** → **Save and Continue**
+
+---
 
 #### Step 3: Create OAuth 2.0 Credentials
 
-1. Go to **APIs & Services → Credentials**.
-2. Click **Create Credentials → OAuth client ID**.
-3. Select **Desktop app** as the application type.
-4. Download the JSON file containing `client_id` and `client_secret`.
+1. Go to **APIs & Services → Credentials**
+2. Click **Create Credentials → OAuth client ID**
+
+![Create Credentials](screenshots/create-credentials.png)
+
+3. Select **Web application** as the Application type
+4. Enter a name (e.g., "Gmail Lakeflow Web Client")
+5. Under **Authorized redirect URIs**, click **Add URI** and enter:
+   ```
+   https://oauth.pstmn.io/v1/callback
+   ```
+   > This redirect URI is used to capture the authorization code in the next step.
+
+![OAuth Client Config](screenshots/oauth-client-config.png)
+
+6. Click **Create**
+7. A dialog will appear with your credentials. **Copy and save** both:
+   - **Client ID** (e.g., `123456789-abc.apps.googleusercontent.com`)
+   - **Client Secret** (e.g., `GOCSPX-xxxx...`)
+
+![OAuth Credentials](screenshots/oauth-credentials-dialog.png)
+
+---
 
 #### Step 4: Obtain a Refresh Token
 
-Use the [Google OAuth 2.0 Playground](https://developers.google.com/oauthplayground):
+Now you'll authorize the app and obtain a refresh token. This is a one-time process.
 
-1. Click the gear icon ⚙️ and check "Use your own OAuth credentials".
-2. Enter your `client_id` and `client_secret`.
-3. In Step 1, select `Gmail API v1` → `https://www.googleapis.com/auth/gmail.readonly`.
-4. Click "Authorize APIs" and complete the consent flow.
-5. In Step 2, click "Exchange authorization code for tokens".
-6. Copy the `refresh_token` from the response.
+**4.1. Build the Authorization URL**
+
+Replace `YOUR_CLIENT_ID` in the URL below with your actual Client ID:
+
+```
+https://accounts.google.com/o/oauth2/v2/auth?client_id=YOUR_CLIENT_ID&redirect_uri=https://oauth.pstmn.io/v1/callback&response_type=code&scope=https://www.googleapis.com/auth/gmail.readonly&access_type=offline&prompt=consent
+```
+
+
+
+**4.2. Authorize the Application**
+
+1. Open the URL in your web browser
+2. Sign in with the Google account you want to connect
+3. Click **Continue** on the "Google hasn't verified this app" warning (since this is your own app)
+4. Grant permission to view your email messages and settings
+5. You'll be redirected to a page showing a callback URL
+
+![Auth URL1](screenshots/auth_url1.png)
+![Auth URL2](screenshots/auth_url2.png)
+
+**4.3. Copy the Authorization Code**
+
+After authorization, you'll be redirected to a URL like:
+```
+https://oauth.pstmn.io/v1/callback?code=4/0AfJohXl...&scope=...
+```
+
+Copy the `code` parameter value (everything after `code=` and before `&scope`).
+
+![Authorization Code](screenshots/authorization-code.png)
+
+**4.4. Exchange the Code for a Refresh Token**
+
+Run this `curl` command in your terminal, replacing the placeholders:
+
+```bash
+curl -X POST https://oauth2.googleapis.com/token \
+  -d "code=YOUR_AUTHORIZATION_CODE" \
+  -d "client_id=YOUR_CLIENT_ID" \
+  -d "client_secret=YOUR_CLIENT_SECRET" \
+  -d "redirect_uri=https://oauth.pstmn.io/v1/callback" \
+  -d "grant_type=authorization_code"
+```
+
+**4.5. Save the Refresh Token**
+
+The response will look like:
+```json
+{
+  "access_token": "ya29.a0AfH6SM...",
+  "expires_in": 3599,
+  "refresh_token": "1//0eXXXXXXXXXXX-XXXXXXXXXXXXXXXXX",
+  "scope": "https://www.googleapis.com/auth/gmail.readonly",
+  "token_type": "Bearer"
+}
+```
+
+**Copy the `refresh_token` value and save it securely.** This token does not expire and will be used by the connector to access Gmail.
+
+> ⚠️ **Important**: The refresh token is only returned on the first authorization. If you need a new one, you must revoke access at [Google Account Permissions](https://myaccount.google.com/permissions) and repeat this process.
+
+---
+
+#### Summary: Your Three Credentials
+
+You now have the three values needed for the connector:
+
+| Credential | Example | Where to find it |
+|------------|---------|------------------|
+| `client_id` | `123456789-abc.apps.googleusercontent.com` | Step 3 - OAuth client creation |
+| `client_secret` | `GOCSPX-xxxx...` | Step 3 - OAuth client creation |
+| `refresh_token` | `1//0eXXXX...` | Step 4 - Token exchange response |
 
 ### Create a Unity Catalog Connection
 
-A Unity Catalog connection for this connector can be created in two ways via the UI:
+You need to create a Unity Catalog connection to securely store your Gmail OAuth credentials. Choose one of the methods below.
 
-1. Follow the **Lakeflow Community Connector** UI flow from the **Add Data** page.
-2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
-3. Set `externalOptionsAllowList` to `q,labelIds,maxResults,includeSpamTrash,format` if you want to use table-specific filtering options.
+---
 
-The connection can also be created using the standard Unity Catalog API.
+#### Option A: Using SQL Editor (Recommended)
+
+Run the following SQL command in Databricks SQL Editor or a notebook:
+
+```sql
+CREATE CONNECTION gmail_connector
+TYPE GENERIC_LAKEFLOW_CONNECT
+OPTIONS (
+  sourceName = 'gmail',
+  client_id = '<YOUR_CLIENT_ID>',
+  client_secret = '<YOUR_CLIENT_SECRET>',
+  refresh_token = '<YOUR_REFRESH_TOKEN>',
+  externalOptionsAllowList = 'tableName,tableNameList,tableConfigs,isDeleteFlow,q,labelIds,maxResults,includeSpamTrash,format'
+);
+```
+
+---
+
+#### Option B: Using Databricks UI
+
+1. In Databricks, go to **Catalog** in the left sidebar
+2. Click on the gear icon, then **Connections**
+3. Click **Create connection**
+4. Fill in the connection details:
+   - **Connection name**: `gmail_connector`
+   - **Connection type**: Select `Lakeflow community connector`
+5. In the **Connection options** section, add the following key-value pairs:
+
+| Key | Value |
+|-----|-------|
+| `sourceName` | `gmail` |
+| `client_id` | Your OAuth Client ID |
+| `client_secret` | Your OAuth Client Secret |
+| `refresh_token` | Your Refresh Token |
+| `externalOptionsAllowList` | `tableName,tableNameList,tableConfigs,isDeleteFlow,q,labelIds,maxResults,includeSpamTrash,format` |
+
+6. Click **Create**
 
 ## Supported Objects
 
@@ -217,28 +363,18 @@ The connector:
 
 ## How to Run
 
-### Step 1: Clone/Copy the Source Connector Code
+### Step 1: Create an ingestion pipeline
 
-Use the Lakeflow Community Connector UI to copy or reference the Gmail connector source in your workspace. This will place the connector code (`gmail.py`) under a project path that Lakeflow can load.
+1. On  the left sidebar, go to Jobs & Pipelines, the click on create Ingestion pipeline. 
+2. Select 'Custom Connector' on the Community connectors section. 
+3. Fill the source name of the connector `gmail` and the Git Repository URL where the connector is merged. 
+![Add customer connector](screenshots/add-gmail-connector.png)
+4. On connection, select the gmail connection configured on the previous steps. 
+![Select gmail connection](screenshots/select-gmail-connection.png)
+5. Select an event log location : catalog + schema, and a Root path where the assets related to the connector would be stored. 
+![Ingestion Setup](screenshots/ingestion-setup.png)
 
-### Step 2: Generate the Merged Source File
-
-Before running the pipeline, you must generate the merged source file. This combines:
-- `libs/utils.py` (parsing utilities)
-- `sources/gmail/gmail.py` (connector implementation)
-- `pipeline/lakeflow_python_source.py` (PySpark data source registration)
-
-**Run from the project root directory:**
-
-```bash
-python tools/scripts/merge_python_source.py gmail
-```
-
-This creates `sources/gmail/_generated_gmail_python_source.py` which is required by the pipeline.
-
-> **Note**: Re-run this command whenever you modify `gmail.py` to regenerate the merged file.
-
-### Step 3: Configure Your `ingest.py` File
+### Step 2: Configure Your `ingest.py` File
 
 Copy the `pipeline-spec/example_ingest.py` file and modify it for Gmail. Here's a complete example:
 
@@ -384,7 +520,7 @@ ingest(spark, pipeline_spec)
 
 > **Tip**: Start with the `labels` table to validate your credentials before ingesting larger tables like `messages` or `threads`.
 
-### Step 4: Run and Schedule the Pipeline
+### Step 3: Run and Schedule the Pipeline
 
 Run the pipeline using your standard Lakeflow / Databricks orchestration:
 
@@ -420,7 +556,7 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration:
 - **Authentication failures (`401 Unauthorized`)**:
   - Verify `client_id`, `client_secret`, and `refresh_token` are correct
   - Ensure the refresh token hasn't been revoked
-  - Refresh tokens expire if unused for 6 months - regenerate via OAuth Playground
+  - Refresh tokens expire if unused for 6 months - regenerate by repeating Step 4 of the OAuth setup
   - Check that the OAuth consent screen includes the `gmail.readonly` scope
 
 - **`403 Forbidden`**:
@@ -443,10 +579,10 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration:
 
 This connector includes several optimizations for high-performance data ingestion:
 
-- **Batch API**: Uses Gmail's batch endpoint to fetch up to 50 message/thread details in a single HTTP request, reducing network overhead by up to 50x
+- **Parallel fetching**: Uses ThreadPoolExecutor with 5 workers to fetch message/thread details concurrently
 - **Connection pooling**: Reuses HTTP sessions for multiple requests
 - **Token caching**: Caches OAuth access tokens until expiration to avoid redundant token exchanges
-- **Parallel fallback**: Falls back to parallel sequential requests if batch API fails
+- **Graceful error handling**: Handles 403 errors gracefully for restricted endpoints
 
 ## References
 
