@@ -10,7 +10,7 @@ This documentation describes how to configure and use the **Azure DevOps** Lakef
   - Must be created in Azure DevOps and supplied to the connector as the `personal_access_token` option.
   - Minimum scopes:
     - `Code (read)` - Grants read access to source code, commits, and Git repositories.
-    - `User Profile (read)` or `Member Entitlement Management (read)` - Required if ingesting the `users` table.
+    - `Graph (read)` - Required if ingesting the `users` table from the Graph Users API.
 - **Network access**: The environment running the connector must be able to reach `https://dev.azure.com` and `https://vssps.dev.azure.com` (for the `users` table).
 - **Lakeflow / Databricks environment**: A workspace where you can register a Lakeflow community connector and run ingestion pipelines.
 
@@ -46,7 +46,7 @@ Provide the following **connection-level** options when configuring the connecto
      - **Expiration**: Set an appropriate expiration date (or use a custom date).
      - **Scopes**: Select **Custom defined** and check:
        - **Code (read)** under the Code section - Required for Git operations
-       - **User Profile (read)** under the User Profile section - Required if you plan to ingest the `users` table
+       - **Graph (read)** under the Graph section - Required if you plan to ingest the `users` table
   5. Click **Create** and copy the generated token immediately. Store it securely as you won't be able to see it again.
   6. Use this token as the `personal_access_token` connection option.
 
@@ -322,7 +322,7 @@ In your pipeline code (e.g., `ingestion_pipeline.py` or a similar entrypoint), c
 }
 ```
 
-**What happens**: The connector fetches all users in the organization. Note that this requires the `User Profile (read)` scope in your PAT.
+**What happens**: The connector fetches all users in the organization. Note that this requires the `Graph (read)` scope in your PAT.
 
 #### Example 6: Ingest multiple objects from the same repository
 
@@ -379,7 +379,7 @@ In your pipeline code (e.g., `ingestion_pipeline.py` or a similar entrypoint), c
   - Obtain `repository_id` UUID from the `repositories` table's `id` field
 - The `status_filter` option for `pullrequests` accepts: `active`, `completed`, `abandoned`, or `all` (default).
 - The `filter` option for `refs` can be `heads/` (branches only), `tags/` (tags only), or omitted (all refs).
-- The `users` table requires no table-specific options and fetches all users in the organization. Ensure your PAT has `User Profile (read)` scope.
+- The `users` table requires no table-specific options and fetches all users in the organization. Ensure your PAT has `Graph (read)` scope.
 
 ### Step 3: Run and Schedule the Pipeline
 
@@ -439,9 +439,9 @@ Common issues and how to address them:
   - Verify that the `personal_access_token` is correct and not expired or revoked.
   - Check that the token has the required scopes:
     - `Code (read)` for Git tables (`repositories`, `commits`, `pullrequests`, `refs`, `pushes`)
-    - `User Profile (read)` or `Member Entitlement Management (read)` for the `users` table
+    - `Graph (read)` for the `users` table
   - Ensure the account associated with the PAT has access to the specified organization and project.
-  - If only the `users` table fails with 401 while Git tables succeed, the PAT is missing the User Profile scope.
+  - If only the `users` table fails with 401 while Git tables succeed, the PAT is missing the Graph (read) scope.
 
 - **`404 Not Found` errors**:
   - **For connection-level errors**: Verify that the `organization` and `project` names are spelled correctly. Check that they exist and are accessible.

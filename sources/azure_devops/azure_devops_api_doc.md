@@ -10,7 +10,7 @@
   - Alternatively, HTTP Basic authentication with empty username and PAT as password.
 - **Required scopes for read-only access**:
   - `Code (read)` - Grants read access to source code, commits, and Git repositories (for Git objects: repositories, commits, pullrequests, refs, pushes).
-  - `User Profile (read)` or `Member Entitlement Management (read)` - Grants read access to user identities and profiles (for users object).
+  - `Graph (read)` - Grants read access to user identities and profiles via the Graph Users API (for users object).
 - **Other supported methods (not used by this connector)**:
   - OAuth 2.0 is also supported by Azure DevOps, but the connector will **not** perform interactive OAuth flows. Tokens must be provisioned out-of-band and stored in configuration.
 
@@ -540,8 +540,8 @@ curl -u :{PERSONAL_ACCESS_TOKEN} \
 - None. The `users` object operates at organization level and does not require table-specific options.
 
 **Authentication requirements**:
-- Requires PAT with `User Profile (read)` or `Member Entitlement Management (read)` scope.
-- Broader than the `Code (read)` scope used for Git objects.
+- Requires PAT with `Graph (read)` scope.
+- This is a different API surface (Graph API) than the Git objects, which use the `Code (read)` scope.
 
 
 ## **Get Object Primary Keys**
@@ -1031,7 +1031,7 @@ When conflicts arise, **official Azure DevOps documentation** is treated as the 
 | Official Docs | https://learn.microsoft.com/en-us/rest/api/azure/devops/git/refs?view=azure-devops-rest-7.1 | 2025-01-06 | High | Refs API: List endpoint, filter parameter for branches/tags, ref schema including name/objectId/creator. |
 | Official Docs | https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pushes?view=azure-devops-rest-7.1 | 2025-01-06 | High | Pushes API: Get Pushes endpoint, pagination, searchCriteria for date/pusher filtering, push schema including refUpdates and commits. |
 | Official Docs | https://learn.microsoft.com/en-us/rest/api/azure/devops/graph/users?view=azure-devops-rest-7.1 | 2025-01-08 | High | Graph Users API: List users endpoint, continuation token pagination, user schema including descriptor/displayName/mailAddress/principalName/origin. Uses different base URL (vssps.dev.azure.com). |
-| Official Docs | https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/authentication-guidance | 2025-01-06 | High | Personal Access Token authentication, header format, Base64 encoding. Required scopes: Code (read) for Git objects, User Profile (read) for users. |
+| Official Docs | https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/authentication-guidance | 2025-01-06 | High | Personal Access Token authentication, header format, Base64 encoding. Required scopes: Code (read) for Git objects, Graph (read) for users. |
 | Official Docs | https://learn.microsoft.com/en-us/azure/devops/integrate/concepts/rate-limits | 2025-01-06 | High | Rate limiting behavior, typical limits (~200 requests/user/minute), throttling strategy, Retry-After headers. |
 | Official Docs | https://learn.microsoft.com/en-us/azure/devops/integrate/concepts/rest-api-versioning | 2025-01-06 | High | API versioning scheme. Connector uses `api-version=7.1` (stable) to avoid preview version requirements. |
 

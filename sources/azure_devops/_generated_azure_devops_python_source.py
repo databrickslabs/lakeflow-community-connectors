@@ -1107,7 +1107,7 @@ def register_lakeflow_source(spark):
             }
 
             # Add continuation token from start_offset if present
-            continuation_token = start_offset.get("continuationToken")
+            continuation_token = (start_offset or {}).get("continuationToken")
             if continuation_token:
                 params["continuationToken"] = continuation_token
 
