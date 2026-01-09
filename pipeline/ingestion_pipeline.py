@@ -92,8 +92,10 @@ def _create_snapshot_table(spark, connection_name: str, config: SdpTableConfig) 
             f"If you don't need upsert logic, consider using ingestion_type='append' instead."
         )
 
-    @sdp.view(name=config.view_name)
-    def snapshot_view():
+    # Create a streaming table from the batch source
+    # For snapshot ingestion, we read the entire table as a one-time operation
+    @sdp.table(name=config.view_name)
+    def snapshot_source():
         return (
             spark.read.format("lakeflow_connect")
             .option("databricks.connection", connection_name)
@@ -102,6 +104,7 @@ def _create_snapshot_table(spark, connection_name: str, config: SdpTableConfig) 
             .load()
         )
 
+    # Create the destination streaming table and apply changes from snapshot
     sdp.create_streaming_table(name=config.destination_table)
     sdp.apply_changes_from_snapshot(
         target=config.destination_table,
