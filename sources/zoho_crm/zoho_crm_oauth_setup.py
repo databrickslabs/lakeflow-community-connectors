@@ -30,13 +30,13 @@
 # COMMAND ----------
 
 # DBTITLE 1,Configuration - Fill These In
-CLIENT_ID = "1000.L6NI2N4G3SUQ885LKVBUXQNLB3DC5R"  # From Zoho API Console
-CLIENT_SECRET = "1e87e37b3e129c85e4cfd3b284a987feb3d71be945"  # From Zoho API Console
-REDIRECT_URI = "https://e2-dogfood.staging.cloud.databricks.com/login/oauth/zoho_crm.html"  # e.g., https://your-workspace.cloud.databricks.com/login/oauth/zoho_crm.html
+CLIENT_ID = ""  # From Zoho API Console
+CLIENT_SECRET = ""  # From Zoho API Console
+REDIRECT_URI = ""  # e.g., https://your-workspace.cloud.databricks.com/login/oauth/zoho_crm.html
 
 # Data Center - uncomment your region:
-# DATA_CENTER = "https://accounts.zoho.com"  # US (default)
-DATA_CENTER = "https://accounts.zoho.eu"  # EU
+DATA_CENTER = "https://accounts.zoho.com"  # US (default)
+# DATA_CENTER = "https://accounts.zoho.eu"  # EU
 # DATA_CENTER = "https://accounts.zoho.in"  # India
 # DATA_CENTER = "https://accounts.zoho.com.au"  # Australia
 # DATA_CENTER = "https://accounts.zoho.jp"  # Japan
@@ -84,7 +84,7 @@ print("⚠️ The code expires in 2 MINUTES!")
 # COMMAND ----------
 
 # DBTITLE 1,Paste Redirect URL Here
-REDIRECT_URL_WITH_CODE = "https://e2-dogfood.staging.cloud.databricks.com/login/oauth/zoho_crm.html?code=1000.09f42e6f7a54fb5a76e9115fe7137920.979c44e0c97be559089d78a0b1f186e3&location=eu&accounts-server=https%3A%2F%2Faccounts.zoho.eu"  # Paste the full URL from your browser
+REDIRECT_URL_WITH_CODE = ""  # Paste the full URL from your browser
 
 # COMMAND ----------
 
@@ -171,4 +171,3 @@ print("\n" + "=" * 80)
 print("🎉 Done! Create a Unity Catalog Connection with these credentials.")
 
 # COMMAND ----------
-
