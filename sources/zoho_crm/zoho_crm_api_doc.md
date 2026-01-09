@@ -105,7 +105,7 @@ These are the tables available for data ingestion through this connector:
 | Sales_Orders | `Sales_Orders` | Confirmed sales orders | `cdc` |
 | Purchase_Orders | `Purchase_Orders` | Purchase orders to vendors | `cdc` |
 | Invoices | `Invoices` | Billing invoices | `cdc` |
-| **Line Items (Virtual - extracted from parent subforms)** ||||
+| **Line Items (Derived - extracted from parent subforms)** ||||
 | Quoted_Items | `Quoted_Items` | Line items within Quotes | `snapshot` |
 | Ordered_Items | `Ordered_Items` | Line items within Sales_Orders | `snapshot` |
 | Invoiced_Items | `Invoiced_Items` | Line items within Invoices | `snapshot` |
@@ -114,16 +114,16 @@ These are the tables available for data ingestion through this connector:
 | Campaigns | `Campaigns` | Marketing campaigns | `cdc` |
 | Cases | `Cases` | Customer support cases | `cdc` |
 | Solutions | `Solutions` | Knowledge base solutions | `cdc` |
-| **Junction Tables (Virtual - fetched via Related Records API)** ||||
+| **Junction Tables (Derived - fetched via Related Records API)** ||||
 | Campaigns_Leads | `Campaigns_Leads` | Many-to-many: Campaigns ↔ Leads | `snapshot` |
 | Campaigns_Contacts | `Campaigns_Contacts` | Many-to-many: Campaigns ↔ Contacts | `snapshot` |
 | Contacts_X_Deals | `Contacts_X_Deals` | Many-to-many: Contacts ↔ Deals with roles | `snapshot` |
-| **Organization & Settings (Virtual - fetched via Settings API)** ||||
+| **Organization & Settings (Derived - fetched via Settings API)** ||||
 | Users | `Users` | CRM users (requires `ZohoCRM.users.READ` scope) | `cdc` |
 | Roles | `Roles` | User roles hierarchy | `snapshot` |
 | Profiles | `Profiles` | Permission profiles | `snapshot` |
 
-> **Note on Virtual Tables**: Line Items, Junction Tables, and Organization tables are not standalone Zoho CRM modules.
+> **Note on Derived Tables**: Line Items, Junction Tables, and Organization tables are not standalone Zoho CRM modules.
 > The connector constructs these by:
 > - **Line Items**: Extracting subform data from parent records (Quotes, Sales_Orders, Invoices, Purchase_Orders)
 > - **Junction Tables**: Calling the Related Records API for each parent record
@@ -157,11 +157,11 @@ The `GET /crm/v8/settings/modules` endpoint returns all modules in Zoho CRM. Bel
 | `Solutions` | ✅ Supported | Knowledge base |
 | `Tasks` | ✅ Supported | Task activities |
 | `Vendors` | ✅ Supported | Supplier contacts |
-| **Subform Modules (handled as virtual tables)** |||
-| `Invoiced_Items` | ✅ Virtual | Extracted from Invoices subform |
-| `Ordered_Items` | ✅ Virtual | Extracted from Sales_Orders subform |
-| `Purchase_Items` | ✅ Virtual | Extracted from Purchase_Orders subform |
-| `Quoted_Items` | ✅ Virtual | Extracted from Quotes subform |
+| **Subform Modules (handled as Derived tables)** |||
+| `Invoiced_Items` | ✅ Derived | Extracted from Invoices subform |
+| `Ordered_Items` | ✅ Derived | Extracted from Sales_Orders subform |
+| `Purchase_Items` | ✅ Derived | Extracted from Purchase_Orders subform |
+| `Quoted_Items` | ✅ Derived | Extracted from Quotes subform |
 | **Excluded - No Fields / Empty Schema** |||
 | `Actions_Performed` | ❌ Excluded | No fields available from API |
 | `Visits` | ❌ Excluded | No fields available from API |
