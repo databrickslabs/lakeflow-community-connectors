@@ -24,11 +24,11 @@ source_name = "mongodb"
 # Please update the spec below to configure your ingestion pipeline.
 
 pipeline_spec = {
-    "connection_name": "the_mongodb_connection",
+    "connection_name": "my_mongodb_connection",
     "objects": [
         {
             "table": {
-                "source_table": "testdb.orders",
+                "source_table": "orders",
             }
         }
     ]
