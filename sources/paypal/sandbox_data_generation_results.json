@@ -1,0 +1,260 @@
+{
+  "products": [
+    {
+      "product_id": "PROD-8MR98187LM992610A",
+      "name": "Premium Membership - Tier 1",
+      "status": "created"
+    },
+    {
+      "product_id": "PROD-8DC30698XU0725527",
+      "name": "Software License - Tier 2",
+      "status": "created"
+    },
+    {
+      "product_id": "PROD-0FA27487PR777143U",
+      "name": "Consulting Package - Tier 3",
+      "status": "created"
+    },
+    {
+      "product_id": "PROD-3EM47757JU290544F",
+      "name": "Training Course - Tier 4",
+      "status": "created"
+    },
+    {
+      "product_id": "PROD-1UE60513VK204291L",
+      "name": "Support Plan - Tier 5",
+      "status": "created"
+    }
+  ],
+  "plans": [
+    {
+      "plan_id": "P-3XD0063772173964MNFQGUSY",
+      "product_id": "PROD-8MR98187LM992610A",
+      "name": "Premium Membership - Tier 1 - Monthly",
+      "status": "ACTIVE"
+    },
+    {
+      "plan_id": "P-5X497077EF485860NNFQGUSY",
+      "product_id": "PROD-8MR98187LM992610A",
+      "name": "Premium Membership - Tier 1 - Quarterly",
+      "status": "ACTIVE"
+    },
+    {
+      "plan_id": "P-15T04156VW1523639NFQGUTA",
+      "product_id": "PROD-8MR98187LM992610A",
+      "name": "Premium Membership - Tier 1 - Annual",
+      "status": "ACTIVE"
+    },
+    {
+      "plan_id": "P-0CT29099XM7786710NFQGUTA",
+      "product_id": "PROD-8DC30698XU0725527",
+      "name": "Software License - Tier 2 - Monthly",
+      "status": "ACTIVE"
+    },
+    {
+      "plan_id": "P-53G58154BJ424392YNFQGUTI",
+      "product_id": "PROD-8DC30698XU0725527",
+      "name": "Software License - Tier 2 - Quarterly",
+      "status": "ACTIVE"
+    },
+    {
+      "plan_id": "P-8M764906CR071611SNFQGUTQ",
+      "product_id": "PROD-8DC30698XU0725527",
+      "name": "Software License - Tier 2 - Annual",
+      "status": "ACTIVE"
+    },
+    {
+      "plan_id": "P-16E45048B7469281WNFQGUTQ",
+      "product_id": "PROD-0FA27487PR777143U",
+      "name": "Consulting Package - Tier 3 - Monthly",
+      "status": "ACTIVE"
+    },
+    {
+      "plan_id": "P-8KU5715319325413SNFQGUTY",
+      "product_id": "PROD-0FA27487PR777143U",
+      "name": "Consulting Package - Tier 3 - Quarterly",
+      "status": "ACTIVE"
+    },
+    {
+      "plan_id": "P-9B8812549L478701LNFQGUTY",
+      "product_id": "PROD-0FA27487PR777143U",
+      "name": "Consulting Package - Tier 3 - Annual",
+      "status": "ACTIVE"
+    },
+    {
+      "plan_id": "P-27801856S29577055NFQGUUA",
+      "product_id": "PROD-3EM47757JU290544F",
+      "name": "Training Course - Tier 4 - Monthly",
+      "status": "ACTIVE"
+    },
+    {
+      "plan_id": "P-5HM48295E9183184NNFQGUUI",
+      "product_id": "PROD-3EM47757JU290544F",
+      "name": "Training Course - Tier 4 - Quarterly",
+      "status": "ACTIVE"
+    },
+    {
+      "plan_id": "P-86E29409WT390261ANFQGUUI",
+      "product_id": "PROD-3EM47757JU290544F",
+      "name": "Training Course - Tier 4 - Annual",
+      "status": "ACTIVE"
+    },
+    {
+      "plan_id": "P-2YY19950Y8834992KNFQGUUQ",
+      "product_id": "PROD-1UE60513VK204291L",
+      "name": "Support Plan - Tier 5 - Monthly",
+      "status": "ACTIVE"
+    },
+    {
+      "plan_id": "P-6A482870YC776025SNFQGUUY",
+      "product_id": "PROD-1UE60513VK204291L",
+      "name": "Support Plan - Tier 5 - Quarterly",
+      "status": "ACTIVE"
+    },
+    {
+      "plan_id": "P-5T87774877856651JNFQGUUY",
+      "product_id": "PROD-1UE60513VK204291L",
+      "name": "Support Plan - Tier 5 - Annual",
+      "status": "ACTIVE"
+    }
+  ],
+  "subscriptions": [
+    {
+      "subscription_id": "I-S45EDF98N3AV",
+      "plan_id": "P-3XD0063772173964MNFQGUSY",
+      "plan_name": "Premium Membership - Tier 1 - Monthly",
+      "status": "APPROVAL_PENDING"
+    },
+    {
+      "subscription_id": "I-FWEC6DA9AKVJ",
+      "plan_id": "P-5X497077EF485860NNFQGUSY",
+      "plan_name": "Premium Membership - Tier 1 - Quarterly",
+      "status": "APPROVAL_PENDING"
+    },
+    {
+      "subscription_id": "I-D6JVS5Y2V12P",
+      "plan_id": "P-15T04156VW1523639NFQGUTA",
+      "plan_name": "Premium Membership - Tier 1 - Annual",
+      "status": "APPROVAL_PENDING"
+    },
+    {
+      "subscription_id": "I-GN66ML8DL6NC",
+      "plan_id": "P-0CT29099XM7786710NFQGUTA",
+      "plan_name": "Software License - Tier 2 - Monthly",
+      "status": "APPROVAL_PENDING"
+    },
+    {
+      "subscription_id": "I-BJK104AU5722",
+      "plan_id": "P-53G58154BJ424392YNFQGUTI",
+      "plan_name": "Software License - Tier 2 - Quarterly",
+      "status": "APPROVAL_PENDING"
+    }
+  ],
+  "transactions": [
+    {
+      "order_id": "6NT67192XM331860K",
+      "amount": "200.0",
+      "description": "Custom Service Fee",
+      "status": "COMPLETED",
+      "capture_id": "76N75848TV622762M"
+    },
+    {
+      "order_id": "7S569800B6306294N",
+      "amount": "50.0",
+      "description": "Digital Download",
+      "status": "COMPLETED",
+      "capture_id": "0MG0911214101500K"
+    },
+    {
+      "order_id": "6HG680364X8912111",
+      "amount": "99.99",
+      "description": "Sample Product Purchase",
+      "status": "COMPLETED",
+      "capture_id": "3LD26424MF7197529"
+    },
+    {
+      "order_id": "1FL69667WH461334V",
+      "amount": "10.0",
+      "description": "Custom Service Fee",
+      "status": "COMPLETED",
+      "capture_id": "4HS82112U6496935L"
+    },
+    {
+      "order_id": "7NN17684C6338711K",
+      "amount": "25.5",
+      "description": "Monthly Subscription Payment",
+      "status": "COMPLETED",
+      "capture_id": "7X432316EL5457506"
+    },
+    {
+      "order_id": "68T439980A967435D",
+      "amount": "200.0",
+      "description": "Custom Service Fee",
+      "status": "COMPLETED",
+      "capture_id": "4CC28254601303510"
+    },
+    {
+      "order_id": "0KT07222MF4919010",
+      "amount": "10.0",
+      "description": "Annual License Fee",
+      "status": "COMPLETED",
+      "capture_id": "0TS75178BM581805F"
+    },
+    {
+      "order_id": "5U297962C0165863F",
+      "amount": "200.0",
+      "description": "Training Course Fee",
+      "status": "COMPLETED",
+      "capture_id": "0E343976Y8757714T"
+    },
+    {
+      "order_id": "6D6648640X5514822",
+      "amount": "99.99",
+      "description": "Custom Service Fee",
+      "status": "COMPLETED",
+      "capture_id": "4YF52157H14143118"
+    },
+    {
+      "order_id": "7VT13074MR703992Y",
+      "amount": "99.99",
+      "description": "Service Upgrade",
+      "status": "COMPLETED",
+      "capture_id": "2CT74509L7213572C"
+    },
+    {
+      "order_id": "2D27284003951353E",
+      "amount": "150.0",
+      "description": "Monthly Subscription Payment",
+      "status": "COMPLETED",
+      "capture_id": "87Y91710LL625872F"
+    },
+    {
+      "order_id": "70T91745M0132184S",
+      "amount": "200.0",
+      "description": "Service Upgrade",
+      "status": "COMPLETED",
+      "capture_id": "7WV01359BX263112N"
+    },
+    {
+      "order_id": "1M0874625E893083K",
+      "amount": "50.0",
+      "description": "Consulting Service",
+      "status": "COMPLETED",
+      "capture_id": "96U30151EM596870D"
+    },
+    {
+      "order_id": "4C7119214S288363E",
+      "amount": "25.5",
+      "description": "Training Course Fee",
+      "status": "COMPLETED",
+      "capture_id": "2BA75130LW963915V"
+    },
+    {
+      "order_id": "1UD57541V30037705",
+      "amount": "200.0",
+      "description": "Service Upgrade",
+      "status": "COMPLETED",
+      "capture_id": "2HH693113Y918680K"
+    }
+  ]
+}
