@@ -11,29 +11,15 @@ print("="*70)
 
 try:
     connection_info = spark.sql("DESCRIBE CONNECTION paypal_v2").collect()
-    print("\n✅ Connection exists:")
+    print("\n✅ Connection exists")
+    print("\nConnection details:")
     for row in connection_info:
-        print(f"  {row.info_name}: {row.info_value}")
+        print(f"  {row}")
     
-    # Check if subscription_ids is in allowlist
-    allowlist_rows = [row for row in connection_info if row.info_name == "externalOptionsAllowList"]
-    if allowlist_rows:
-        allowlist = allowlist_rows[0].info_value
-        if "subscription_ids" in allowlist:
-            print("\n✅ subscription_ids IS in externalOptionsAllowList")
-        else:
-            print("\n❌ PROBLEM: subscription_ids NOT in externalOptionsAllowList")
-            print(f"   Current allowlist: {allowlist}")
-            print("\n   FIX: Run this SQL:")
-            print("""
-DROP CONNECTION IF EXISTS paypal_v2;
-CREATE CONNECTION paypal_v2 TYPE LAKEFLOW OPTIONS (
-    client_id = 'Acpqp1DwjKoGnOxGJllN1BeS0PBc-thgcOMy2cgnSm0o67X8ReSGCSA2DBQ0_wstTV16AoolSc_l3Ja5',
-    client_secret = 'EPJMwfXdAM-bUftXFuaLYziuTTWvwwzaC3ym4dCmBc4FWz7BMDvuyr3dyoFwZz8-PV7oh8WpfKnEDCF8',
-    environment = 'sandbox',
-    externalOptionsAllowList = 'start_date,end_date,page_size,subscription_ids,include_transactions,product_id,plan_ids'
-);
-            """)
+    print("\nNOTE: To manually check if subscription_ids is allowed:")
+    print("  Look at the connection definition when it was created")
+    print("  Or try using subscription_ids - if it fails, it's not in allowlist")
+    
 except Exception as e:
     print(f"\n❌ Connection error: {e}")
     print("\n   Connection might not exist or you don't have permission to view it")
@@ -57,13 +43,14 @@ except Exception as e:
     import traceback
     traceback.print_exc()
 
-# Test 3: Test subscriptions table directly
+# Test 3: Test if subscription_ids is allowed (REAL TEST)
 print("\n" + "="*70)
-print("TEST 3: Test Subscriptions Table Directly")
+print("TEST 3: Test if subscription_ids Option is Allowed")
 print("="*70)
 
 subscription_ids = ["I-S45EDF98N3AV", "I-FWEC6DA9AKVJ", "I-D6JVS5Y2V12P", "I-GN66ML8DL6NC", "I-BJK104AU5722"]
 
+print("\nAttempting to read with subscription_ids option...")
 try:
     # Try to read subscriptions using Spark
     df = spark.read.format("lakeflow") \
@@ -72,23 +59,42 @@ try:
         .option("subscription_ids", ",".join(subscription_ids)) \
         .load()
     
+    print("✅ subscription_ids option was ACCEPTED by connection")
+    print("   (This means it's in the externalOptionsAllowList)")
+    
     count = df.count()
-    print(f"\n✅ Subscriptions read: {count} records")
+    print(f"\n✅ Retrieved {count} subscription record(s)")
     
     if count > 0:
         print("\nFirst 5 records:")
         df.select("id", "status", "plan_id").show(5, truncate=False)
     else:
         print("\n❌ PROBLEM: 0 records retrieved")
-        print("\nPossible causes:")
-        print("  1. subscription_ids not being passed correctly")
-        print("  2. Connector code not updated in workspace")
-        print("  3. Connection not allowing external options")
+        print("\nThe option is allowed, but no data returned. Possible causes:")
+        print("  1. Connector code issue (pagination not working)")
+        print("  2. Subscription IDs are invalid")
+        print("  3. API authentication problem")
         
 except Exception as e:
-    print(f"\n❌ Error reading subscriptions: {e}")
-    import traceback
-    traceback.print_exc()
+    error_msg = str(e)
+    
+    if "not allowed by connection" in error_msg or "externalOptionsAllowList" in error_msg:
+        print("\n❌ PROBLEM FOUND: subscription_ids NOT in externalOptionsAllowList")
+        print(f"\n   Error: {error_msg}")
+        print("\n   FIX: Update your connection with this SQL:")
+        print("""
+DROP CONNECTION IF EXISTS paypal_v2;
+CREATE CONNECTION paypal_v2 TYPE LAKEFLOW OPTIONS (
+    client_id = 'Acpqp1DwjKoGnOxGJllN1BeS0PBc-thgcOMy2cgnSm0o67X8ReSGCSA2DBQ0_wstTV16AoolSc_l3Ja5',
+    client_secret = 'EPJMwfXdAM-bUftXFuaLYziuTTWvwwzaC3ym4dCmBc4FWz7BMDvuyr3dyoFwZz8-PV7oh8WpfKnEDCF8',
+    environment = 'sandbox',
+    externalOptionsAllowList = 'start_date,end_date,page_size,subscription_ids,include_transactions,product_id,plan_ids'
+);
+        """)
+    else:
+        print(f"\n❌ Different error: {error_msg}")
+        import traceback
+        traceback.print_exc()
 
 # Test 4: Check existing table
 print("\n" + "="*70)
