@@ -79,6 +79,28 @@ The IAM user or role used by the connector requires the following permissions:
 - The connector uses the AWS Redshift Data API (HTTPS) and does not require direct network connectivity to your Redshift cluster
 - Ensure the Databricks workspace can make HTTPS requests to AWS APIs in your region
 
+## Authentication Best Practices
+
+> ⚠️ **SECURITY NOTICE**
+> 
+> **For Production Use:**
+> - ✅ **Use IAM Roles/Instance Profiles** - Attach IAM roles to your Databricks clusters via instance profiles. This eliminates the need for hardcoded credentials.
+> - ✅ **Use AWS Secrets Manager** - Store database credentials in AWS Secrets Manager and reference them via `secret_arn`.
+> - ❌ **DO NOT hardcode credentials** - Never commit AWS access keys or database passwords to version control.
+> 
+> **For Local Development/Testing Only:**
+> - Use temporary AWS credentials (session tokens) that expire within hours
+> - Use environment variables instead of config files: `export AWS_ACCESS_KEY_ID="..."` 
+> - Always clean up config files containing credentials after testing
+> 
+> **Production Authentication Hierarchy (Most to Least Secure):**
+> 1. **IAM Instance Profiles** (Databricks clusters) - No credentials needed ✅
+> 2. **AWS Secrets Manager** - Credentials managed by AWS ✅
+> 3. **IAM User Credentials** - Long-lived access keys ⚠️
+> 4. **Temporary Credentials** - Short-lived session tokens ⚠️
+> 
+> See the [DATABRICKS_SETUP.md](./DATABRICKS_SETUP.md) guide for detailed instructions on setting up instance profiles.
+
 ## Connection Configuration
 
 ### Unity Catalog Connection Parameters
@@ -93,6 +115,7 @@ When creating a Unity Catalog connection for this connector, provide the followi
 | `workgroup_name` | Conditional* | Serverless workgroup name (for serverless) | `my-workgroup` |
 | `access_key_id` | Conditional** | AWS access key ID | `AKIAIOSFODNN7EXAMPLE` | <!-- gitleaks:allow -->
 | `secret_access_key` | Conditional** | AWS secret access key | `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` |
+| `session_token` | No | AWS session token (required for temporary credentials) | `IQoJb3JpZ2luX2VjE...` |
 | `db_user` | No*** | Database user (for cluster authentication) | `admin` |
 | `secret_arn` | No | ARN of AWS Secrets Manager secret containing credentials | `arn:aws:secretsmanager:...` |
 | `schema_filter` | No | Comma-separated list of schemas to include | `public,analytics` |
