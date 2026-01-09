@@ -435,6 +435,7 @@ def register_lakeflow_source(spark):
                 "primary_keys": ["TimePeriod", "AccountId", "CampaignId"],
                 "cursor_field": "TimePeriod",
                 "ingestion_type": "append",
+                "report_type": "CampaignPerformanceReport",
                 "schema": StructType(
                     [
                         StructField("TimePeriod", StringType(), False),
@@ -460,6 +461,7 @@ def register_lakeflow_source(spark):
                 "primary_keys": ["TimePeriod", "AccountId", "CampaignId", "AdGroupId"],
                 "cursor_field": "TimePeriod",
                 "ingestion_type": "append",
+                "report_type": "AdGroupPerformanceReport",
                 "schema": StructType(
                     [
                         StructField("TimePeriod", StringType(), False),
@@ -492,6 +494,7 @@ def register_lakeflow_source(spark):
                 ],
                 "cursor_field": "TimePeriod",
                 "ingestion_type": "append",
+                "report_type": "AdPerformanceReport",
                 "schema": StructType(
                     [
                         StructField("TimePeriod", StringType(), False),
@@ -528,6 +531,7 @@ def register_lakeflow_source(spark):
                 ],
                 "cursor_field": "TimePeriod",
                 "ingestion_type": "append",
+                "report_type": "KeywordPerformanceReport",
                 "schema": StructType(
                     [
                         StructField("TimePeriod", StringType(), False),
@@ -658,6 +662,18 @@ def register_lakeflow_source(spark):
             """
             return list(self.SUPPORTED_TABLES.keys())
 
+        def _get_schema_column_names(self, table_name: str) -> list[str]:
+            """Extract column names from the schema of a supported table.
+
+            Args:
+                table_name: The name of the table in SUPPORTED_TABLES.
+
+            Returns:
+                A list of column names derived from the schema's StructFields.
+            """
+            schema = self.SUPPORTED_TABLES[table_name]["schema"]
+            return [field.name for field in schema.fields]
+
         def _validate_table_name(self, table_name: str) -> None:
             """Validate that the table name is supported.
 
@@ -732,6 +748,16 @@ def register_lakeflow_source(spark):
             """
             self._validate_table_name(table_name)
 
+            # Check if this is a report table with report_type configured
+            table_config = self.SUPPORTED_TABLES[table_name]
+            if "report_type" in table_config:
+                return self._read_performance_report(
+                    report_type=table_config["report_type"],
+                    columns=self._get_schema_column_names(table_name),
+                    start_offset=start_offset,
+                    table_options=table_options,
+                )
+
             if table_name == "accounts":
                 return self._read_accounts(start_offset, table_options)
             elif table_name == "campaigns":
@@ -742,14 +768,6 @@ def register_lakeflow_source(spark):
                 return self._read_ads(start_offset, table_options)
             elif table_name == "keywords":
                 return self._read_keywords(start_offset, table_options)
-            elif table_name == "campaign_performance_report":
-                return self._read_campaign_performance_report(start_offset, table_options)
-            elif table_name == "ad_group_performance_report":
-                return self._read_ad_group_performance_report(start_offset, table_options)
-            elif table_name == "ad_performance_report":
-                return self._read_ad_performance_report(start_offset, table_options)
-            elif table_name == "keyword_performance_report":
-                return self._read_keyword_performance_report(start_offset, table_options)
 
             raise ValueError(f"Unsupported table: {table_name!r}")
 
@@ -1327,165 +1345,6 @@ def register_lakeflow_source(spark):
                 start_date = end_date
 
             return start_date, end_date
-
-        def _read_campaign_performance_report(
-            self, start_offset: dict, table_options: dict[str, str]
-        ) -> tuple[Iterator[dict], dict]:
-            """Read campaign performance report.
-
-            Args:
-                start_offset: The offset to start reading from.
-                table_options: A dictionary of options.
-                    - account_id: Required. The account ID to read reports from.
-                    - start_date: Start date (YYYY-MM-DD format)
-                    - end_date: End date (YYYY-MM-DD format)
-                    - lookback_days: Number of days to look back (default: 3)
-
-            Returns:
-                An iterator of report records and the next offset.
-            """
-            return self._read_performance_report(
-                report_type="CampaignPerformanceReport",
-                columns=[
-                    "TimePeriod",
-                    "AccountId",
-                    "AccountName",
-                    "CampaignId",
-                    "CampaignName",
-                    "CampaignStatus",
-                    "Impressions",
-                    "Clicks",
-                    "Ctr",
-                    "AverageCpc",
-                    "Spend",
-                    "Conversions",
-                    "ConversionRate",
-                    "CostPerConversion",
-                    "Revenue",
-                    "ReturnOnAdSpend",
-                ],
-                start_offset=start_offset,
-                table_options=table_options,
-            )
-
-        def _read_ad_group_performance_report(
-            self, start_offset: dict, table_options: dict[str, str]
-        ) -> tuple[Iterator[dict], dict]:
-            """Read ad group performance report.
-
-            Args:
-                start_offset: The offset to start reading from.
-                table_options: A dictionary of options.
-
-            Returns:
-                An iterator of report records and the next offset.
-            """
-            return self._read_performance_report(
-                report_type="AdGroupPerformanceReport",
-                columns=[
-                    "TimePeriod",
-                    "AccountId",
-                    "AccountName",
-                    "CampaignId",
-                    "CampaignName",
-                    "AdGroupId",
-                    "AdGroupName",
-                    "Impressions",
-                    "Clicks",
-                    "Ctr",
-                    "AverageCpc",
-                    "Spend",
-                    "Conversions",
-                    "ConversionRate",
-                    "CostPerConversion",
-                    "Revenue",
-                    "ReturnOnAdSpend",
-                ],
-                start_offset=start_offset,
-                table_options=table_options,
-            )
-
-        def _read_ad_performance_report(
-            self, start_offset: dict, table_options: dict[str, str]
-        ) -> tuple[Iterator[dict], dict]:
-            """Read ad performance report.
-
-            Args:
-                start_offset: The offset to start reading from.
-                table_options: A dictionary of options.
-
-            Returns:
-                An iterator of report records and the next offset.
-            """
-            return self._read_performance_report(
-                report_type="AdPerformanceReport",
-                columns=[
-                    "TimePeriod",
-                    "AccountId",
-                    "AccountName",
-                    "CampaignId",
-                    "CampaignName",
-                    "AdGroupId",
-                    "AdGroupName",
-                    "AdId",
-                    "AdTitle",
-                    "AdStatus",
-                    "AdType",
-                    "Impressions",
-                    "Clicks",
-                    "Ctr",
-                    "AverageCpc",
-                    "Spend",
-                    "Conversions",
-                    "ConversionRate",
-                    "CostPerConversion",
-                    "Revenue",
-                    "ReturnOnAdSpend",
-                ],
-                start_offset=start_offset,
-                table_options=table_options,
-            )
-
-        def _read_keyword_performance_report(
-            self, start_offset: dict, table_options: dict[str, str]
-        ) -> tuple[Iterator[dict], dict]:
-            """Read keyword performance report.
-
-            Args:
-                start_offset: The offset to start reading from.
-                table_options: A dictionary of options.
-
-            Returns:
-                An iterator of report records and the next offset.
-            """
-            return self._read_performance_report(
-                report_type="KeywordPerformanceReport",
-                columns=[
-                    "TimePeriod",
-                    "AccountId",
-                    "AccountName",
-                    "CampaignId",
-                    "CampaignName",
-                    "AdGroupId",
-                    "AdGroupName",
-                    "KeywordId",
-                    "Keyword",
-                    "BidMatchType",
-                    "Impressions",
-                    "Clicks",
-                    "Ctr",
-                    "AverageCpc",
-                    "Spend",
-                    "QualityScore",
-                    "Conversions",
-                    "ConversionRate",
-                    "CostPerConversion",
-                    "Revenue",
-                    "ReturnOnAdSpend",
-                ],
-                start_offset=start_offset,
-                table_options=table_options,
-            )
 
         def _read_performance_report(
             self,
