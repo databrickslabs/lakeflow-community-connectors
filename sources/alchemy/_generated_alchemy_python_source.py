@@ -365,8 +365,8 @@ def register_lakeflow_source(spark):
                     "cursor_field": "timestamp",
                     "ingestion_type": "cdc",
                     "supports_pagination": False,
-                    "required_params": ["start_time", "end_time"],
-                    "optional_params": ["symbol", "network", "address", "interval"]
+                    "required_params": ["symbol", "start_time", "end_time"],
+                    "optional_params": ["interval"]
                 },
                 # Portfolio Tables
                 "tokens_by_wallet": {
@@ -1028,13 +1028,8 @@ def register_lakeflow_source(spark):
                         })
 
             elif table_name == "token_prices_historical":
-                # Can use either symbol or network+address
-                if "symbol" in table_options:
-                    body["symbol"] = table_options["symbol"]
-                elif "network" in table_options and "address" in table_options:
-                    body["network"] = table_options["network"]
-                    body["address"] = table_options["address"]
-
+                # symbol is required per Alchemy API docs
+                body["symbol"] = table_options["symbol"]
                 body["startTime"] = table_options["start_time"]
                 body["endTime"] = table_options["end_time"]
                 if "interval" in table_options:
