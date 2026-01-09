@@ -1,18 +1,17 @@
-# IDE
-.idea/
-.vscode/
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
 
 # Testing
 .pytest_cache/
-.coverage
-htmlcov/
-.tox/
 
-# Configs with secrets (be careful not to commit real credentials)
-**/configs/*_config.json
-!**/configs/example_config.json
+# OS
+.DS_Store
 
-**/__pycache__/
-**/*.pyc
-
-*.egg-info
+# Dev configs
+sources/**/configs/dev_*.json
