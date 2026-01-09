@@ -5,39 +5,19 @@
 # Do not edit manually. Make changes to the source files instead.
 # ==============================================================================
 
+from datetime import datetime
+from decimal import Decimal
+from typing import Any, Iterator
+import json
+
+from pyspark.sql import Row
+from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
+from pyspark.sql.types import *
+import base64
+
 
 def register_lakeflow_source(spark):
     """Register the Lakeflow Python source with Spark."""
-    
-    # Import all required modules inside the function scope
-    from datetime import datetime
-    from decimal import Decimal
-    from typing import Any, Iterator, Dict, List, Optional
-    import json
-    import base64
-    import time
-    import boto3
-    from botocore.exceptions import ClientError
-    
-    from pyspark.sql import Row
-    from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
-    from pyspark.sql.types import (
-        StructType,
-        StructField,
-        StringType,
-        IntegerType,
-        LongType,
-        FloatType,
-        DoubleType,
-        BooleanType,
-        DateType,
-        TimestampType,
-        DecimalType,
-        BinaryType,
-        ArrayType,
-        MapType,
-        DataType,
-    )
 
     ########################################################
     # libs/utils.py
@@ -309,20 +289,28 @@ def register_lakeflow_source(spark):
             self.poll_interval = int(options.get("poll_interval", "2"))
             self.max_poll_attempts = int(options.get("max_poll_attempts", "300"))
 
-            # Initialize AWS client
-            client_kwargs = {"region_name": self.region}
+            # Store client configuration for lazy initialization
+            # We don't create the boto3 client here because it contains thread locks
+            # that cannot be pickled/serialized by Spark
+            self._client = None
+            self._client_kwargs = {"region_name": self.region}
 
             access_key_id = options.get("access_key_id")
             secret_access_key = options.get("secret_access_key")
             session_token = options.get("session_token")
 
             if access_key_id and secret_access_key:
-                client_kwargs["aws_access_key_id"] = access_key_id
-                client_kwargs["aws_secret_access_key"] = secret_access_key
+                self._client_kwargs["aws_access_key_id"] = access_key_id
+                self._client_kwargs["aws_secret_access_key"] = secret_access_key
                 if session_token:
-                    client_kwargs["aws_session_token"] = session_token
+                    self._client_kwargs["aws_session_token"] = session_token
 
-            self.client = boto3.client("redshift-data", **client_kwargs)
+        @property
+        def client(self):
+            """Lazily initialize the boto3 client on first access."""
+            if self._client is None:
+                self._client = boto3.client("redshift-data", **self._client_kwargs)
+            return self._client
 
         def _parse_schema_filter(self, schema_filter: str) -> Optional[List[str]]:
             """Parse comma-separated schema filter string."""
