@@ -13,12 +13,36 @@ Usage:
     python tools/scripts/merge_python_source.py <source_name>
     python tools/scripts/merge_python_source.py zendesk
     python tools/scripts/merge_python_source.py zendesk -o output/zendesk_merged.py
+    python tools/scripts/merge_python_source.py all  # Regenerate all sources
 """
 
 import argparse
 import sys
 from pathlib import Path
 from typing import List, Optional
+
+# Get the project root directory
+SCRIPT_DIR = Path(__file__).parent
+PROJECT_ROOT = SCRIPT_DIR.parent.parent
+
+
+def get_all_sources() -> List[str]:
+    """
+    Discover all available source connectors.
+    
+    Returns a list of source names that have a {source_name}.py file
+    in their directory (excluding 'interface').
+    """
+    sources_dir = PROJECT_ROOT / "sources"
+    sources = []
+    
+    for source_dir in sources_dir.iterdir():
+        if source_dir.is_dir() and source_dir.name != "interface":
+            source_file = source_dir / f"{source_dir.name}.py"
+            if source_file.exists():
+                sources.append(source_dir.name)
+    
+    return sorted(sources)
 
 
 def read_file_content(file_path: Path) -> str:
@@ -293,19 +317,15 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     Returns:
         The merged content as a string
     """
-    # Get the project root directory
-    script_dir = Path(__file__).parent
-    project_root = script_dir.parent.parent
-
     # Define file paths
-    utils_path = project_root / "libs" / "utils.py"
-    source_path = project_root / "sources" / source_name / f"{source_name}.py"
-    lakeflow_source_path = project_root / "pipeline" / "lakeflow_python_source.py"
+    utils_path = PROJECT_ROOT / "libs" / "utils.py"
+    source_path = PROJECT_ROOT / "sources" / source_name / f"{source_name}.py"
+    lakeflow_source_path = PROJECT_ROOT / "pipeline" / "lakeflow_python_source.py"
 
     # If no output path specified, use default location in source directory
     if output_path is None:
         output_path = (
-            project_root
+            PROJECT_ROOT
             / "sources"
             / source_name
             / f"_generated_{source_name}_python_source.py"
@@ -412,6 +432,24 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     return merged_content
 
 
+def merge_all_sources() -> None:
+    """Merge all available source connectors."""
+    sources = get_all_sources()
+    print(f"Regenerating {len(sources)} sources: {', '.join(sources)}", file=sys.stderr)
+    print("Output: sources/<source>/_generated_<source>_python_source.py", file=sys.stderr)
+    print("", file=sys.stderr)
+    
+    for source in sources:
+        try:
+            merge_files(source)
+        except Exception as e:
+            print(f"Error merging {source}: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    print("", file=sys.stderr)
+    print(f"✅ All {len(sources)} sources regenerated!", file=sys.stderr)
+
+
 def main():
     """Main entry point for the script."""
     parser = argparse.ArgumentParser(
@@ -427,24 +465,33 @@ Examples:
 
   # Merge zendesk source and save to custom location
   python tools/scripts/merge_python_source.py zendesk -o output/zendesk_merged.py
+
+  # Regenerate all sources
+  python tools/scripts/merge_python_source.py all
         """,
     )
 
     parser.add_argument(
-        "source_name", help="Name of the source to merge (e.g., zendesk, example)"
+        "source_name", 
+        help="Name of the source to merge (e.g., zendesk, example) or 'all' to regenerate all sources"
     )
 
     parser.add_argument(
         "-o",
         "--output",
         type=Path,
-        help="Output file path (default: sources/{source_name}/_generated_{source_name}_python_source.py)",
+        help="Output file path (default: sources/{source_name}/_generated_{source_name}_python_source.py). Not applicable when using 'all'.",
     )
 
     args = parser.parse_args()
 
     try:
-        merge_files(args.source_name, args.output)
+        if args.source_name == "all":
+            if args.output:
+                print("Warning: --output is ignored when using 'all'", file=sys.stderr)
+            merge_all_sources()
+        else:
+            merge_files(args.source_name, args.output)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
