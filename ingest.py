@@ -96,6 +96,129 @@ pipeline_spec = {
                 },
             }
         },
+        # Table 6: Disputes - Customer disputes and chargebacks
+        {
+            "table": {
+                "source_table": "disputes",
+                "destination_catalog": "alex_owen_the_unity_catalog",
+                "destination_schema": "paypal_comunity_connector_a0",
+                "destination_table": "disputes",
+                "table_configuration": {
+                    "scd_type": "SCD_TYPE_1",
+                    "page_size": 10
+                },
+            }
+        },
+        # Table 7: Payouts - Payout batch information
+        {
+            "table": {
+                "source_table": "payouts",
+                "destination_catalog": "alex_owen_the_unity_catalog",
+                "destination_schema": "paypal_comunity_connector_a0",
+                "destination_table": "payouts",
+                "table_configuration": {
+                    "scd_type": "SCD_TYPE_1",
+                    "start_date": "2026-01-01",
+                    "end_date": "2026-01-09",
+                    "page_size": 10
+                },
+            }
+        },
+        # Table 8: Refunds - Refund transactions
+        {
+            "table": {
+                "source_table": "refunds",
+                "destination_catalog": "alex_owen_the_unity_catalog",
+                "destination_schema": "paypal_comunity_connector_a0",
+                "destination_table": "refunds",
+                "table_configuration": {
+                    "scd_type": "APPEND_ONLY",
+                    "start_date": "2026-01-09T00:00:00Z",
+                    "end_date": "2026-01-09T23:59:59Z"
+                },
+            }
+        },
+        # Table 9: Payment Authorizations - Payment authorization records
+        {
+            "table": {
+                "source_table": "payment_authorizations",
+                "destination_catalog": "alex_owen_the_unity_catalog",
+                "destination_schema": "paypal_comunity_connector_a0",
+                "destination_table": "payment_authorizations",
+                "table_configuration": {
+                    "scd_type": "APPEND_ONLY",
+                    "start_date": "2026-01-09T00:00:00Z",
+                    "end_date": "2026-01-09T23:59:59Z"
+                },
+            }
+        },
+        # Table 10: Webhooks Events - Webhook event history
+        {
+            "table": {
+                "source_table": "webhooks_events",
+                "destination_catalog": "alex_owen_the_unity_catalog",
+                "destination_schema": "paypal_comunity_connector_a0",
+                "destination_table": "webhooks_events",
+                "table_configuration": {
+                    "scd_type": "SCD_TYPE_1",
+                    "page_size": 10
+                },
+            }
+        },
+        # Table 11: Invoices - Invoice data (requires special permissions)
+        # Note: May return empty in Sandbox without proper permissions
+        {
+            "table": {
+                "source_table": "invoices",
+                "destination_catalog": "alex_owen_the_unity_catalog",
+                "destination_schema": "paypal_comunity_connector_a0",
+                "destination_table": "invoices",
+                "table_configuration": {
+                    "scd_type": "SCD_TYPE_1",
+                    "page_size": 20
+                },
+            }
+        },
+        # Table 12: Orders - Order data (limited - no bulk listing)
+        # Note: Will return empty - use transactions table instead
+        {
+            "table": {
+                "source_table": "orders",
+                "destination_catalog": "alex_owen_the_unity_catalog",
+                "destination_schema": "paypal_comunity_connector_a0",
+                "destination_table": "orders",
+                "table_configuration": {
+                    "scd_type": "SCD_TYPE_1"
+                },
+            }
+        },
+        # Table 13: Payment Experiences - Web payment profiles
+        {
+            "table": {
+                "source_table": "payment_experiences",
+                "destination_catalog": "alex_owen_the_unity_catalog",
+                "destination_schema": "paypal_comunity_connector_a0",
+                "destination_table": "payment_experiences",
+                "table_configuration": {
+                    "scd_type": "SCD_TYPE_1"
+                },
+            }
+        },
+        # Table 14: Tracking - Shipment tracking information
+        # Note: Requires at least one filter parameter
+        {
+            "table": {
+                "source_table": "tracking",
+                "destination_catalog": "alex_owen_the_unity_catalog",
+                "destination_schema": "paypal_comunity_connector_a0",
+                "destination_table": "tracking",
+                "table_configuration": {
+                    "scd_type": "SCD_TYPE_1",
+                    "page_size": 10
+                    # Add transaction_id, tracking_number, or date range as needed
+                },
+            }
+        },
     ],
 }
 
