@@ -733,7 +733,10 @@ def register_lakeflow_source(spark):
                 }
 
             data = [normalize_record(record) for record in raw_data]
-            print(f"[AppsFlyer] {report_type}: Normalized {len(data)} records, date range: {from_date} to {to_date}")
+            print(
+                f"[AppsFlyer] {report_type}: Normalized {len(data)} records, "
+                f"date range: {from_date} to {to_date}"
+            )
 
             # Find the maximum event_time or date for the next cursor
             max_cursor = cursor
