@@ -109,6 +109,7 @@ Schema per system index is resolved live from `_mapping`; Elasticsearch does not
     Source: [search_after](https://www.elastic.co/guide/en/elasticsearch/reference/current/paginate-search-results.html#search-after).
   - **Scroll (fallback/legacy):** `POST /{index}/_search?scroll=1m` then `POST /_search/scroll` with `_scroll_id` until no hits; clear via `DELETE /_search/scroll`. Source: [Scroll](https://www.elastic.co/guide/en/elasticsearch/reference/current/paginate-search-results.html#scroll-search-results).
   - **Tiebreaker note:** `_shard_doc` is used instead of `_id` as the secondary sort key to avoid fielddata requirements on `_id`.
+- **PIT lifecycle:** PITs are opened per read, `keep_alive` is included on each `_search` request, and PITs are closed when no more hits are returned to release resources.
 - **Filtering:** pass Query DSL in `query`; use `_source` includes/excludes to trim payload.
 - **Count (optional):** `GET /{index}/_count`. Source: [Count API](https://www.elastic.co/guide/en/elasticsearch/reference/current/search-count.html).
 - **Deletes:** Search APIs return only existing docs; no delete stream is provided.

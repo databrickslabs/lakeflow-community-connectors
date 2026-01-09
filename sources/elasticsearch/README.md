@@ -66,6 +66,7 @@ Behavior notes:
 - Fields starting with `_` (meta fields such as `_seq_no`, `_version`, `_id`) are currently not accepted as cursors. If no suitable cursor is found, the connector performs a snapshot read.
 - Wildcards or comma-separated patterns are not supported; each table must reference a single index or alias (no `logs-*` fanout).
 - Aliases/data streams that resolve to multiple backing indices must share identical mappings; otherwise the connector raises an error to avoid schema drift.
+- PIT lifecycle: each read opens a PIT with the configured `pit_keep_alive`; keep-alive is sent on every page, and the PIT is closed when no more hits are returned to free resources.
 - Network resiliency: HTTP calls use explicit timeouts (5s connect / 30s read) and a small retry with backoff (up to 3 attempts on 429/5xx, honoring `Retry-After`).
 
 ## Data Type Mapping

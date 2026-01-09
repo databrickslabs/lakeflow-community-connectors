@@ -127,6 +127,18 @@ class _ElasticsearchClient:
         resp.raise_for_status()
         return resp.json()
 
+    def delete(self, path: str, json: dict | None = None, params: dict | None = None) -> dict:
+        resp = self._session.delete(
+            f"{self._endpoint}{path}",
+            headers=self._build_headers(),
+            json=json,
+            params=params,
+            verify=self._verify_ssl,
+            timeout=self._timeout,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
 
 class LakeflowConnect:
 
@@ -425,6 +437,14 @@ class LakeflowConnect:
             raise ValueError(f"Failed to open point-in-time for index {index}")
         return pit_id
 
+    def _close_point_in_time(self, pit_id: str) -> None:
+        """Best-effort PIT close to release server-side resources."""
+        try:
+            self._client.delete(path="/_pit", json={"id": pit_id})
+        except Exception:
+            # Ignore close failures; PIT will expire on its own
+            pass
+
     def _build_search_request(
         self,
         index: str,
@@ -491,6 +511,9 @@ class LakeflowConnect:
                 yield record
 
         if not hits:
+            # No more data; close PIT if we opened or received one
+            if pit_id:
+                self._close_point_in_time(pit_id)
             next_offset = start_offset or {}
             return _iter_records(), next_offset
 
