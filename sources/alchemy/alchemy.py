@@ -926,21 +926,12 @@ class LakeflowConnect:
         Process API response into records.
         """
         if table_name in ["nfts_by_owner", "nfts_for_contract"]:
-            return data.get("ownedNfts", []) if "ownedNfts" in data else data.get("nfts", [])
+            records = data.get("ownedNfts", []) if "ownedNfts" in data else data.get("nfts", [])
+            # Normalize nested fields that might be strings instead of dicts
+            return [self._normalize_nft_record(r) for r in records]
 
         elif table_name == "nft_metadata":
-            record = dict(data)
-            # Normalize nested fields that might be strings instead of dicts
-            if "rawMetadata" in record and isinstance(record["rawMetadata"], str):
-                try:
-                    record["rawMetadata"] = json.loads(record["rawMetadata"])
-                except (json.JSONDecodeError, TypeError):
-                    record["rawMetadata"] = None
-            if "tokenUri" in record and isinstance(record["tokenUri"], str):
-                record["tokenUri"] = {"raw": record["tokenUri"], "gateway": record["tokenUri"]}
-            if "contract" in record and isinstance(record["contract"], str):
-                record["contract"] = {"address": record["contract"], "name": None, "symbol": None, "totalSupply": None, "tokenType": None}
-            return [record]
+            return [self._normalize_nft_record(data)]
 
         elif table_name == "contract_metadata":
             # Ensure contractAddress is in the response (may be returned as 'address' or missing)
@@ -1021,7 +1012,8 @@ class LakeflowConnect:
 
         elif table_name == "nft_metadata_batch":
             # Response contains an array of NFT metadata objects
-            return data if isinstance(data, list) else []
+            records = data if isinstance(data, list) else []
+            return [self._normalize_nft_record(r) for r in records]
 
         elif table_name == "contract_metadata_batch":
             # Response contains an array of contract metadata objects
@@ -1049,6 +1041,31 @@ class LakeflowConnect:
             return records
 
         return []
+
+    def _normalize_nft_record(self, record: Dict) -> Dict:
+        """Normalize NFT record fields that might be strings instead of dicts."""
+        record = dict(record)
+        if "rawMetadata" in record and isinstance(record["rawMetadata"], str):
+            try:
+                record["rawMetadata"] = json.loads(record["rawMetadata"])
+            except (json.JSONDecodeError, TypeError):
+                record["rawMetadata"] = None
+        if "tokenUri" in record and isinstance(record["tokenUri"], str):
+            record["tokenUri"] = {"raw": record["tokenUri"], "gateway": record["tokenUri"]}
+        if "contract" in record and isinstance(record["contract"], str):
+            record["contract"] = {"address": record["contract"], "name": None, "symbol": None, "totalSupply": None, "tokenType": None}
+        if "media" in record and isinstance(record["media"], str):
+            try:
+                record["media"] = json.loads(record["media"])
+            except (json.JSONDecodeError, TypeError):
+                record["media"] = None
+        if record.get("rawMetadata") and isinstance(record["rawMetadata"], dict):
+            if "attributes" in record["rawMetadata"] and isinstance(record["rawMetadata"]["attributes"], str):
+                try:
+                    record["rawMetadata"]["attributes"] = json.loads(record["rawMetadata"]["attributes"])
+                except (json.JSONDecodeError, TypeError):
+                    record["rawMetadata"]["attributes"] = None
+        return record
 
     def _calculate_next_offset(self, table_name: str, data: Dict, current_offset: Dict) -> Dict:
         """
