@@ -92,11 +92,10 @@ test_incremental_after_write PASSED - Incremental sync captured new records
 
 ### Step 4: Implement Delete Testing (Optional)
 
-For connectors that support `cdc_with_deletes` ingestion type and implement `read_table_deletes`, you can also test delete synchronization.
+For connectors that support `cdc_with_deletes` ingestion type, you can also test delete synchronization.
 
 **When to Implement:**
 - The connector has tables with `ingestion_type: "cdc_with_deletes"` in their metadata
-- The connector implements the `read_table_deletes()` method
 - The source API supports deleting records.
 
 **Methods to Implement:**
