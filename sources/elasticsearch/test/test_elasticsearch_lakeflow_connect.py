@@ -242,10 +242,7 @@ def test_read_index_returns_next_offset_with_cursor():
 
     iterator, offset = conn.read_table("idx", {}, {"cursor_field": "timestamp"})
     assert list(iterator) == [{"name": "alice", "_id": "1"}]
-    assert offset["pit_id"] == "pit-xyz"
-    assert offset["search_after"] == ["2024-01-01T00:00:00Z", 5]
-    assert offset["cursor"] == "2024-01-01T00:00:00Z"
-    assert offset["cursor_field"] == "timestamp"
+    assert offset == {"cursor": "2024-01-01T00:00:00Z", "cursor_field": "timestamp"}
 
 
 def test_list_tables_discovers_indices_and_caches():
@@ -316,16 +313,9 @@ def test_read_table_paginates_and_closes_pit_after_last_page():
     conn = TestConnector(client)
     conn._metadata_cache["idx"] = {"primary_keys": ["_id"], "ingestion_type": "cdc", "cursor_field": "timestamp"}
 
-    # First page
-    iterator1, offset1 = conn.read_table("idx", {}, {"cursor_field": "timestamp"})
-    assert list(iterator1) == [{"name": "a", "_id": "1"}]
-    assert offset1["pit_id"] == "pit-1"
-    assert offset1["search_after"] == ["c1", 1]
-
-    # Second (final) page should close PIT
-    iterator2, offset2 = conn.read_table("idx", offset1, {"cursor_field": "timestamp"})
-    assert list(iterator2) == []
-    assert offset2 == offset1
+    iterator, offset = conn.read_table("idx", {}, {"cursor_field": "timestamp"})
+    assert list(iterator) == [{"name": "a", "_id": "1"}]
+    assert offset == {"cursor": "c1", "cursor_field": "timestamp"}
     assert ("DELETE", "/_pit") in client.calls
 
 

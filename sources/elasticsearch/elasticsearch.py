@@ -489,7 +489,7 @@ class LakeflowConnect:
         metadata = self.read_table_metadata(table_name=index, table_options=options)
         schema = self.get_table_schema(table_name=index, table_options=options)
 
-        # Page size for pagination (default 1000)
+        # Page size per Elasticsearch request (default 1000)
         size = int(options.get("page_size", 1000))
         keep_alive = str(options.get("pit_keep_alive", "1m"))
         cursor_field = options.get("cursor_field") or metadata.get("cursor_field")
@@ -506,61 +506,63 @@ class LakeflowConnect:
                         normalized[field.name] = None
             return normalized
 
-        def _iter_records() -> Iterator[dict]:
-            for hit in hits:
-                record = _normalize_record(dict(hit.get("_source", {})), schema)
-                record["_id"] = hit.get("_id")
-                yield record
-        def _paged_iter() -> Iterator[dict]:
-            nonlocal start_offset
-            pit_id: str | None = None
-            search_after: list | None = start_offset.get("search_after")
-            cursor_value = start_offset.get("cursor")
-            last_sort: list | None = None
-            try:
-                while True:
-                    effective_offset: dict[str, Any] = {"pit_id": pit_id} if pit_id else {}
-                    if search_after:
-                        effective_offset["search_after"] = search_after
-                    if cursor_value:
-                        effective_offset["cursor"] = cursor_value
+        # Eager pagination: loop over all pages (search_after + PIT) and compute the
+        # final cursor before returning
+        records: list[dict[str, Any]] = []
+        pit_id: str | None = None
+        search_after: list | None = start_offset.get("search_after")
+        cursor_value = start_offset.get("cursor")
+        last_sort: list | None = None
 
-                    pit_id, search_body = self._build_search_request(
-                        index=index,
-                        cursor_field=cursor_field,
-                        start_offset=effective_offset,
-                        size=size,
-                        keep_alive=keep_alive,
-                    )
+        try:
+            # Open PIT up-front so keep_alive overrides always apply.
+            pit_id = start_offset.get("pit_id") or self._open_point_in_time(
+                index=index, keep_alive=keep_alive
+            )
 
-                    response = self._client.post(path="/_search", json=search_body)
-                    hits = response.get("hits", {}).get("hits", [])
-                    if not hits:
-                        break
+            while True:
+                prev_search_after = search_after
+                effective_offset: dict[str, Any] = {"pit_id": pit_id} if pit_id else {}
+                if search_after:
+                    effective_offset["search_after"] = search_after
+                if cursor_value:
+                    effective_offset["cursor"] = cursor_value
 
-                    last_sort = hits[-1].get("sort", [])
-                    for hit in hits:
-                        record = _normalize_record(dict(hit.get("_source", {})), schema)
-                        record["_id"] = hit.get("_id")
-                        yield record
+                pit_id, search_body = self._build_search_request(
+                    index=index,
+                    cursor_field=cursor_field,
+                    start_offset=effective_offset,
+                    size=size,
+                    keep_alive=keep_alive,
+                )
 
-                    search_after = last_sort
-                    if cursor_field and last_sort:
-                        cursor_value = last_sort[0]
-            finally:
-                if pit_id:
-                    self._close_point_in_time(pit_id)
+                response = self._client.post(path="/_search", json=search_body)
+                hits = response.get("hits", {}).get("hits", [])
+                if not hits:
+                    break
 
-            # Update final offset with cursor if available (search_after is PIT-specific)
-            final_offset: dict[str, Any] = {}
-            if cursor_field and search_after:
-                final_offset["cursor"] = search_after[0]
-                final_offset["cursor_field"] = cursor_field
-            start_offset = final_offset
+                last_sort = hits[-1].get("sort", [])
+                # Protect against infinite loops if ES repeats the same sort key.
+                if prev_search_after is not None and last_sort == prev_search_after:
+                    break
 
-        iterator = _paged_iter()
-        next_offset = start_offset or {}
-        return iterator, next_offset
+                for hit in hits:
+                    record = _normalize_record(dict(hit.get("_source", {})), schema)
+                    record["_id"] = hit.get("_id")
+                    records.append(record)
+
+                search_after = last_sort
+                if cursor_field and last_sort:
+                    cursor_value = last_sort[0]
+        finally:
+            if pit_id:
+                self._close_point_in_time(pit_id)
+
+        next_offset: dict[str, Any] = {}
+        if cursor_field and last_sort:
+            next_offset = {"cursor": cursor_value or last_sort[0], "cursor_field": cursor_field}
+
+        return iter(records), next_offset
 
     def list_tables(self) -> list[str]:
         """List available indices/aliases."""
