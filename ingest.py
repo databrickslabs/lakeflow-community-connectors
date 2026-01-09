@@ -24,29 +24,13 @@ source_name = "mongodb"
 # Please update the spec below to configure your ingestion pipeline.
 
 pipeline_spec = {
-    "connection_name": "mongodb",
+    "connection_name": "the_mongodb_connection",
     "objects": [
-        # Minimal config: just specify the source table
-        # {
-        #     "table": {
-        #         "source_table": "orders",
-        #     }
-        # }
-        # Full config: customize destination and behavior
         {
             "table": {
                 "source_table": "test_db",
-                "destination_catalog": "main",
-                "destination_schema": "aj_mongo",
-                "destination_table": "test_db"
-                # "table_configuration": {
-                #     # "scd_type": "<SCD_TYPE_1 | SCD_TYPE_2 | APPEND_ONLY>",
-                #     # "primary_keys": ["<PK_COL1>", ...],
-                #     # "<OTHER_OPTION_NAME>": "<VALUE>",  # e.g., for some connectors, additional options may be required (see connector's README).
-                # }
             }
         }
-        # ... more tables to ingest...
     ]
 }
 
