@@ -669,7 +669,7 @@ def register_lakeflow_source(spark):
             Returns:
                 Dictionary containing:
                     - primary_keys: List of primary key column names
-                    - ingestion_type: "snapshot" (Redshift Data API doesn't support CDC)
+                    - ingestion_type: "snapshot" (Redshift Data API does not support CDC)
             """
             # Validate table exists
             available_tables = self.list_tables()
