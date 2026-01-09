@@ -10,11 +10,11 @@ from pyspark.sql.types import (
     BinaryType,
     TimestampType,
 )
-from pymongo import MongoClient
-from pymongo.errors import ConnectionFailure, OperationFailure
-from bson import ObjectId, Decimal128, Binary, Timestamp as BSONTimestamp
 from datetime import datetime
 import time
+
+# NOTE: pymongo and bson imports are done lazily inside methods
+# to avoid serialization issues when PySpark distributes the connector to executors
 
 
 # MongoDB Connector Fix - Lazy Client Initialization
@@ -55,6 +55,7 @@ class LakeflowConnect:
     
     def _initialize_client(self):
         """Initialize MongoDB client and test connection."""
+        # Lazy import to avoid serialization issues
         from pymongo import MongoClient
         from pymongo.errors import ConnectionFailure
         
@@ -148,6 +149,9 @@ class LakeflowConnect:
         Returns:
             List of collection names (no database prefix, no dots, no underscores)
         """
+        # Lazy import to avoid serialization issues
+        from pymongo.errors import OperationFailure
+        
         tables = []
         
         try:
@@ -301,6 +305,9 @@ class LakeflowConnect:
         Returns:
             String representation of the type
         """
+        # Lazy import to avoid serialization issues
+        from bson import ObjectId, Decimal128, Binary, Timestamp as BSONTimestamp
+        
         if value is None:
             return "null"
         elif isinstance(value, bool):
@@ -481,6 +488,9 @@ class LakeflowConnect:
         Returns:
             Tuple of (records list, next_offset)
         """
+        # Lazy import to avoid serialization issues
+        from bson import ObjectId
+        
         db = self.client[database_name]
         collection = db[collection_name]
         
@@ -623,6 +633,9 @@ class LakeflowConnect:
         Returns:
             Tuple of (deleted records, next_offset)
         """
+        # Lazy import to avoid serialization issues
+        from bson import ObjectId
+        
         # Parse database and collection from table_name
         db_from_name, collection_name = self._parse_collection_name(table_name)
         database_name = db_from_name if db_from_name else self._get_database_name(table_options)
@@ -709,6 +722,9 @@ class LakeflowConnect:
         Returns:
             JSON-serializable value
         """
+        # Lazy import to avoid serialization issues
+        from bson import ObjectId, Decimal128, Binary, Timestamp as BSONTimestamp
+        
         if value is None:
             return None
         elif isinstance(value, ObjectId):
