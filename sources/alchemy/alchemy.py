@@ -683,6 +683,10 @@ class LakeflowConnect:
         if config["api_type"] in ["portfolio", "prices"]:
             headers["Authorization"] = f"Bearer {self.api_key}"
         
+        # Webhook APIs require X-Alchemy-Token header
+        if config["api_type"] == "webhooks" and self.webhook_auth_token:
+            headers["X-Alchemy-Token"] = self.webhook_auth_token
+        
         if method == "POST":
             response = requests.post(url, json=request_data, headers=headers)
         else:
@@ -835,16 +839,21 @@ class LakeflowConnect:
 
         elif table_name == "tokens_by_wallet":
             body["addresses"] = []
-            # Parse addresses from table_options["addresses"] - expected format: "address1@network1,address2@network2"
+            # Parse addresses - can be "address1,address2" (uses default network) or "address1@network1,address2@network2"
             addresses_str = table_options["addresses"]
+            default_network = self._convert_network_format(table_options.get("network", self.default_network))
             for addr_spec in addresses_str.split(","):
+                addr_spec = addr_spec.strip()
                 if "@" in addr_spec:
-                    address, networks_str = addr_spec.split("@", 1)
-                    networks = [n.strip() for n in networks_str.split("|")] if "|" in networks_str else [networks_str.strip()]
-                    body["addresses"].append({
-                        "address": address.strip(),
-                        "networks": networks
-                    })
+                    address, network_str = addr_spec.split("@", 1)
+                    network = self._convert_network_format(network_str.strip())
+                else:
+                    address = addr_spec
+                    network = default_network
+                body["addresses"].append({
+                    "address": address.strip(),
+                    "network": network
+                })
 
             body["withMetadata"] = table_options.get("with_metadata", "true").lower() == "true"
             body["withPrices"] = table_options.get("with_prices", "true").lower() == "true"
@@ -855,14 +864,19 @@ class LakeflowConnect:
         elif table_name == "token_balances_by_wallet":
             body["addresses"] = []
             addresses_str = table_options["addresses"]
+            default_network = self._convert_network_format(table_options.get("network", self.default_network))
             for addr_spec in addresses_str.split(","):
+                addr_spec = addr_spec.strip()
                 if "@" in addr_spec:
-                    address, networks_str = addr_spec.split("@", 1)
-                    networks = [n.strip() for n in networks_str.split("|")] if "|" in networks_str else [networks_str.strip()]
-                    body["addresses"].append({
-                        "address": address.strip(),
-                        "networks": networks
-                    })
+                    address, network_str = addr_spec.split("@", 1)
+                    network = self._convert_network_format(network_str.strip())
+                else:
+                    address = addr_spec
+                    network = default_network
+                body["addresses"].append({
+                    "address": address.strip(),
+                    "network": network
+                })
 
             body["includeNativeTokens"] = table_options.get("include_native_tokens", "true").lower() == "true"
             if "include_erc20_tokens" in table_options:
@@ -871,14 +885,19 @@ class LakeflowConnect:
         elif table_name == "nfts_by_wallet":
             body["addresses"] = []
             addresses_str = table_options["addresses"]
+            default_network = self._convert_network_format(table_options.get("network", self.default_network))
             for addr_spec in addresses_str.split(","):
+                addr_spec = addr_spec.strip()
                 if "@" in addr_spec:
-                    address, networks_str = addr_spec.split("@", 1)
-                    networks = [n.strip() for n in networks_str.split("|")] if "|" in networks_str else [networks_str.strip()]
-                    body["addresses"].append({
-                        "address": address.strip(),
-                        "networks": networks
-                    })
+                    address, network_str = addr_spec.split("@", 1)
+                    network = self._convert_network_format(network_str.strip())
+                else:
+                    address = addr_spec
+                    network = default_network
+                body["addresses"].append({
+                    "address": address.strip(),
+                    "network": network
+                })
 
             body["withMetadata"] = table_options.get("with_metadata", "true").lower() == "true"
             if "page_size" in table_options:
@@ -887,28 +906,38 @@ class LakeflowConnect:
         elif table_name == "nft_collections_by_wallet":
             body["addresses"] = []
             addresses_str = table_options["addresses"]
+            default_network = self._convert_network_format(table_options.get("network", self.default_network))
             for addr_spec in addresses_str.split(","):
+                addr_spec = addr_spec.strip()
                 if "@" in addr_spec:
-                    address, networks_str = addr_spec.split("@", 1)
-                    networks = [n.strip() for n in networks_str.split("|")] if "|" in networks_str else [networks_str.strip()]
-                    body["addresses"].append({
-                        "address": address.strip(),
-                        "networks": networks
-                    })
+                    address, network_str = addr_spec.split("@", 1)
+                    network = self._convert_network_format(network_str.strip())
+                else:
+                    address = addr_spec
+                    network = default_network
+                body["addresses"].append({
+                    "address": address.strip(),
+                    "network": network
+                })
 
             body["withMetadata"] = table_options.get("with_metadata", "true").lower() == "true"
 
         elif table_name == "wallet_transactions":
             body["addresses"] = []
             addresses_str = table_options["addresses"]
+            default_network = self._convert_network_format(table_options.get("network", self.default_network))
             for addr_spec in addresses_str.split(","):
+                addr_spec = addr_spec.strip()
                 if "@" in addr_spec:
-                    address, networks_str = addr_spec.split("@", 1)
-                    networks = [n.strip() for n in networks_str.split("|")] if "|" in networks_str else [networks_str.strip()]
-                    body["addresses"].append({
-                        "address": address.strip(),
-                        "networks": networks
-                    })
+                    address, network_str = addr_spec.split("@", 1)
+                    network = self._convert_network_format(network_str.strip())
+                else:
+                    address = addr_spec
+                    network = default_network
+                body["addresses"].append({
+                    "address": address.strip(),
+                    "network": network
+                })
 
             if "page_size" in table_options:
                 body["pageSize"] = int(table_options["page_size"])
@@ -1047,6 +1076,11 @@ class LakeflowConnect:
             return records
 
         return []
+
+    def _convert_network_format(self, network: str) -> str:
+        """Convert network from connector format (eth-mainnet) to Alchemy API format (ETH_MAINNET)."""
+        # Replace hyphens with underscores and uppercase
+        return network.replace("-", "_").upper()
 
     def _normalize_nft_record(self, record: Dict) -> Dict:
         """Normalize NFT record fields that might be strings instead of dicts."""
