@@ -1115,76 +1115,94 @@ def register_lakeflow_source(spark):
             """
             Internal implementation for reading the 'subscriptions' table.
 
-            Uses PayPal Subscriptions API v1: GET /v1/billing/subscriptions
+            Uses PayPal Subscriptions API v1: GET /v1/billing/subscriptions/{id}
+
+            IMPORTANT: PayPal does NOT support bulk listing of subscriptions.
+            You must provide subscription IDs in table_options.
+
+            Required table_options:
+                - subscription_ids: List or comma-separated string of subscription IDs
+                                    Example: ["I-ABC123", "I-DEF456"] or "I-ABC123,I-DEF456"
 
             Optional table_options:
-                - plan_id: Filter by plan ID
-                - start_time: Filter by start time (ISO 8601)
-                - end_time: Filter by end time (ISO 8601)
+                - include_transactions: If true, fetch transaction details for each subscription
             """
-            # Note: PayPal Subscriptions API has limited bulk listing capability
-            # The API primarily supports getting subscriptions by ID
-            # This implementation provides a basic framework that may need adjustment
+            # Get subscription IDs from table_options
+            subscription_ids = table_options.get("subscription_ids", [])
 
-            # Get starting page from offset (default 1)
-            if start_offset and isinstance(start_offset, dict):
-                page = start_offset.get("page", 1)
-                last_id = start_offset.get("last_id")
-            else:
-                page = 1
-                last_id = None
-
-            # Build query parameters
-            params = {}
-            if table_options.get("plan_id"):
-                params["plan_id"] = table_options["plan_id"]
-            if table_options.get("start_time"):
-                params["start_time"] = table_options["start_time"]
-            if table_options.get("end_time"):
-                params["end_time"] = table_options["end_time"]
-
-            # Note: This endpoint may require a plan_id or may not support bulk listing
-            # Depending on PayPal API capabilities, this may need to be adjusted
-            try:
-                response = self._make_request("GET", "/v1/billing/subscriptions", params)
-            except RuntimeError as e:
-                # If the bulk list endpoint doesn't exist, return empty with note
-                if "404" in str(e):
-                    raise RuntimeError(
-                        "PayPal Subscriptions API does not support bulk listing. "
-                        "You may need to specify a 'plan_id' in table_options, or "
-                        "subscriptions may need to be accessed through other means."
-                    )
-                raise
-
-            if response.status_code != 200:
-                raise RuntimeError(
-                    f"PayPal API error for subscriptions: {response.status_code} {response.text}"
-                )
-
-            data = response.json()
-
-            # Extract subscriptions array (actual field name may vary)
-            subscriptions = data.get("subscriptions", data.get("items", []))
-            if not isinstance(subscriptions, list):
+            # Handle comma-separated string or list
+            if isinstance(subscription_ids, str):
+                subscription_ids = [sid.strip() for sid in subscription_ids.split(",") if sid.strip()]
+            elif not isinstance(subscription_ids, list):
                 raise ValueError(
-                    f"Unexpected response format for subscriptions: {type(subscriptions).__name__}"
+                    "table_options for 'subscriptions' must include 'subscription_ids' as a list or comma-separated string. "
+                    "Example: {'subscription_ids': ['I-ABC123', 'I-DEF456']} or {'subscription_ids': 'I-ABC123,I-DEF456'}. "
+                    "\n\nNote: PayPal does not support bulk listing of subscriptions - you must provide specific IDs."
                 )
 
-            # Process records
-            records: list[dict[str, Any]] = []
-            for subscription in subscriptions:
-                records.append(subscription)
+            if not subscription_ids:
+                raise ValueError(
+                    "table_options for 'subscriptions' must include at least one subscription ID in 'subscription_ids'. "
+                    "\n\nNote: PayPal does not support bulk listing of subscriptions - you must provide specific IDs. "
+                    "You can find subscription IDs in your PayPal dashboard or from subscription creation responses."
+                )
 
-            # Check for pagination
-            links = data.get("links", [])
-            has_next = any(link.get("rel") == "next" for link in links if isinstance(link, dict))
-
-            if has_next and records:
-                last_record_id = records[-1].get("id") if records else None
-                next_offset = {"page": page + 1, "last_id": last_record_id}
+            # Get starting index from offset (default 0)
+            if start_offset and isinstance(start_offset, dict):
+                current_index = start_offset.get("index", 0)
             else:
-                next_offset = start_offset if start_offset else {"page": page}
+                current_index = 0
+
+            # If we've processed all IDs, return empty
+            if current_index >= len(subscription_ids):
+                return iter([]), start_offset if start_offset else {"index": current_index}
+
+            # Fetch subscription details
+            records: list[dict[str, Any]] = []
+            include_transactions = table_options.get("include_transactions", "false").lower() == "true"
+
+            # Process subscription at current index
+            subscription_id = subscription_ids[current_index]
+
+            try:
+                # Fetch subscription details
+                response = self._make_request("GET", f"/v1/billing/subscriptions/{subscription_id}")
+
+                if response.status_code == 200:
+                    subscription_data = response.json()
+
+                    # Optionally fetch transactions for this subscription
+                    if include_transactions:
+                        try:
+                            txn_response = self._make_request(
+                                "GET",
+                                f"/v1/billing/subscriptions/{subscription_id}/transactions",
+                                {"start_time": subscription_data.get("start_time"), "end_time": subscription_data.get("update_time")}
+                            )
+                            if txn_response.status_code == 200:
+                                subscription_data["transactions"] = txn_response.json().get("transactions", [])
+                        except Exception:
+                            # Transactions endpoint might not be available
+                            subscription_data["transactions"] = None
+
+                    records.append(subscription_data)
+                else:
+                    # Log error but continue (subscription might not exist or be inaccessible)
+                    print(f"Warning: Could not fetch subscription {subscription_id}: {response.status_code}")
+
+            except Exception as e:
+                # Log error but continue processing other subscriptions
+                print(f"Warning: Error fetching subscription {subscription_id}: {e}")
+
+            # Move to next subscription
+            next_index = current_index + 1
+
+            # Determine next offset
+            if next_index < len(subscription_ids):
+                next_offset = {"index": next_index}
+            else:
+                # All subscriptions processed
+                next_offset = {"index": next_index}
 
             return iter(records), next_offset
 
@@ -1423,7 +1441,6 @@ def register_lakeflow_source(spark):
                 "end_date": end_date,
                 "page_size": page_size,
                 "page": page,
-                "transaction_type": "T0106",  # T0106 = Payment capture
             }
 
             # Make API request

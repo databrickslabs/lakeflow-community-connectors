@@ -77,7 +77,7 @@ A Unity Catalog connection for this connector can be created in two ways:
            "client_id": "YOUR_CLIENT_ID",
            "client_secret": "YOUR_CLIENT_SECRET",
            "environment": "sandbox",
-           "externalOptionsAllowList": "start_date,end_date,page_size,plan_id,start_time,end_time"
+           "externalOptionsAllowList": "start_date,end_date,page_size,plan_id,start_time,end_time,subscription_ids,include_transactions,product_id,plan_ids"
        }
    )
    ```
