@@ -294,6 +294,18 @@ def register_lakeflow_source(spark):
                 self._client = boto3.client("redshift-data", **self._client_kwargs)
             return self._client
 
+        def __getstate__(self):
+            """Custom pickle method to exclude unpicklable boto3 client."""
+            state = self.__dict__.copy()
+            # Remove the unpicklable boto3 client
+            state['_client'] = None
+            return state
+
+        def __setstate__(self, state):
+            """Custom unpickle method to restore state without boto3 client."""
+            self.__dict__.update(state)
+            # Client will be lazily recreated when first accessed
+
         def _parse_schema_filter(self, schema_filter: str) -> Optional[List[str]]:
             """Parse comma-separated schema filter string."""
             if not schema_filter or schema_filter.strip() == "":
