@@ -221,50 +221,170 @@ The connector:
 
 Use the Lakeflow Community Connector UI to copy or reference the Gmail connector source in your workspace. This will place the connector code (`gmail.py`) under a project path that Lakeflow can load.
 
-### Step 2: Configure Your Pipeline
+### Step 2: Generate the Merged Source File
 
-In your pipeline code, configure a `pipeline_spec` that references:
+Before running the pipeline, you must generate the merged source file. This combines:
+- `libs/utils.py` (parsing utilities)
+- `sources/gmail/gmail.py` (connector implementation)
+- `pipeline/lakeflow_python_source.py` (PySpark data source registration)
 
-- A **Unity Catalog connection** with your Gmail OAuth credentials
-- One or more **tables** to ingest, with optional filtering options
+**Run from the project root directory:**
 
-Example `pipeline_spec` snippet:
-
-```json
-{
-  "pipeline_spec": {
-    "connection_name": "gmail_connection",
-    "objects": [
-      {
-        "table": {
-          "source_table": "messages",
-          "maxResults": "100",
-          "q": "newer_than:7d"
-        }
-      },
-      {
-        "table": {
-          "source_table": "labels"
-        }
-      },
-      {
-        "table": {
-          "source_table": "threads",
-          "labelIds": "INBOX",
-          "maxResults": "50"
-        }
-      }
-    ]
-  }
-}
+```bash
+python tools/scripts/merge_python_source.py gmail
 ```
 
-- `connection_name` must point to the UC connection configured with your Gmail OAuth credentials.
-- For each `table`:
-  - `source_table` must be one of: `messages`, `threads`, `labels`, `drafts`, `profile`, `settings`, `filters`, `forwarding_addresses`, `send_as`, `delegates`
-  - Optional filters like `q`, `labelIds`, `maxResults` customize what data is fetched
+This creates `sources/gmail/_generated_gmail_python_source.py` which is required by the pipeline.
 
-### Step 3: Run and Schedule the Pipeline
+> **Note**: Re-run this command whenever you modify `gmail.py` to regenerate the merged file.
+
+### Step 3: Configure Your `ingest.py` File
+
+Copy the `pipeline-spec/example_ingest.py` file and modify it for Gmail. Here's a complete example:
+
+#### Basic Configuration (Start Here)
+
+```python
+from pipeline.ingestion_pipeline import ingest
+from libs.source_loader import get_register_function
+
+# Set the connector source name
+source_name = "gmail"
+
+# Configure your pipeline
+pipeline_spec = {
+    "connection_name": "gmail_connection",  # Your Unity Catalog connection name
+    "objects": [
+        # Start with labels to validate credentials
+        {
+            "table": {
+                "source_table": "labels",
+            }
+        },
+    ],
+}
+
+# Register the Gmail source and run ingestion
+register_lakeflow_source = get_register_function(source_name)
+register_lakeflow_source(spark)
+ingest(spark, pipeline_spec)
+```
+
+#### Full Example with Multiple Tables
+
+```python
+from pipeline.ingestion_pipeline import ingest
+from libs.source_loader import get_register_function
+
+source_name = "gmail"
+
+pipeline_spec = {
+    "connection_name": "gmail_connection",
+    "objects": [
+        # Messages - with query filter for recent emails
+        {
+            "table": {
+                "source_table": "messages",
+                "table_configuration": {
+                    "q": "newer_than:7d",           # Only last 7 days
+                    "maxResults": "100",            # Batch size
+                    "labelIds": "INBOX",            # Only inbox
+                }
+            }
+        },
+        # Threads
+        {
+            "table": {
+                "source_table": "threads",
+                "table_configuration": {
+                    "maxResults": "50",
+                }
+            }
+        },
+        # Labels (no options needed)
+        {
+            "table": {
+                "source_table": "labels",
+            }
+        },
+        # Profile
+        {
+            "table": {
+                "source_table": "profile",
+            }
+        },
+        # Settings
+        {
+            "table": {
+                "source_table": "settings",
+            }
+        },
+        # Drafts
+        {
+            "table": {
+                "source_table": "drafts",
+            }
+        },
+        # Filters
+        {
+            "table": {
+                "source_table": "filters",
+            }
+        },
+        # Forwarding addresses
+        {
+            "table": {
+                "source_table": "forwarding_addresses",
+            }
+        },
+        # Send-as aliases
+        {
+            "table": {
+                "source_table": "send_as",
+            }
+        },
+        # Delegates
+        {
+            "table": {
+                "source_table": "delegates",
+            }
+        },
+    ],
+}
+
+register_lakeflow_source = get_register_function(source_name)
+register_lakeflow_source(spark)
+ingest(spark, pipeline_spec)
+```
+
+#### Table Configuration Options Reference
+
+| Option | Type | Tables | Description |
+|--------|------|--------|-------------|
+| `q` | string | messages, threads | Gmail search query (e.g., `newer_than:7d`, `from:user@example.com`) |
+| `labelIds` | string | messages, threads | Filter by label ID (`INBOX`, `SENT`, `DRAFT`, `SPAM`, `TRASH`) |
+| `maxResults` | string | all | Max items per page (`"100"`, max `"500"`) |
+| `includeSpamTrash` | string | messages, threads | Include spam/trash (`"true"` or `"false"`) |
+| `format` | string | messages, threads, drafts | Message format (`"full"`, `"metadata"`, `"minimal"`) |
+
+#### Available Tables Quick Reference
+
+| Table | Description | Recommended First Test |
+|-------|-------------|------------------------|
+| `labels` | Gmail labels | ✅ Start here (simple, validates auth) |
+| `profile` | User profile info | ✅ Single record |
+| `messages` | Email messages | Use with `q` filter |
+| `threads` | Email threads | Use with `maxResults` |
+| `drafts` | Draft messages | |
+| `settings` | Account settings | |
+| `filters` | Email filter rules | |
+| `forwarding_addresses` | Forwarding config | |
+| `send_as` | Send-as aliases | |
+| `delegates` | Delegated access | |
+
+> **Tip**: Start with the `labels` table to validate your credentials before ingesting larger tables like `messages` or `threads`.
+
+### Step 4: Run and Schedule the Pipeline
 
 Run the pipeline using your standard Lakeflow / Databricks orchestration:
 
@@ -281,11 +401,26 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration:
 
 #### Troubleshooting
 
-**Common Issues:**
+**Pipeline Configuration Issues:**
 
-- **Authentication failures (`401`)**:
+- **"Connection not found"**:
+  - Verify `connection_name` in your `pipeline_spec` matches your Unity Catalog connection exactly
+  - Check that the connection was created successfully in Unity Catalog
+
+- **"Table not supported"**:
+  - Check spelling of `source_table` - must be one of the 10 supported tables
+  - Supported tables: `messages`, `threads`, `labels`, `drafts`, `profile`, `settings`, `filters`, `forwarding_addresses`, `send_as`, `delegates`
+
+- **"Source not found" or module import errors**:
+  - Ensure `source_name = "gmail"` is set correctly
+  - Verify the Gmail connector files are in `sources/gmail/` directory
+
+**API and Authentication Issues:**
+
+- **Authentication failures (`401 Unauthorized`)**:
   - Verify `client_id`, `client_secret`, and `refresh_token` are correct
   - Ensure the refresh token hasn't been revoked
+  - Refresh tokens expire if unused for 6 months - regenerate via OAuth Playground
   - Check that the OAuth consent screen includes the `gmail.readonly` scope
 
 - **`403 Forbidden`**:
