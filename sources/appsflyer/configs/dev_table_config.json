@@ -1,0 +1,7 @@
+{
+  "app_id": "YOUR_APP_ID",
+  "start_date": "2026-01-01",
+  "end_date": "2026-01-31",
+  "lookback_hours": "6",
+  "max_days_per_batch": "7"
+}
