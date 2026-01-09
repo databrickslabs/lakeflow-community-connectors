@@ -1196,7 +1196,10 @@ def register_lakeflow_source(spark):
                 return data.get("data", [])
 
             elif table_name == "token_prices_historical":
-                return data.get("data", [])
+                # API response doesn't include symbol, add it from table_options
+                records = data.get("data", [])
+                symbol = table_options.get("symbol")
+                return [{**record, "symbol": symbol} for record in records]
 
             elif table_name in ["tokens_by_wallet", "token_balances_by_wallet"]:
                 records = []
