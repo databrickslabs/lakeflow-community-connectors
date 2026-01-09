@@ -139,3 +139,100 @@ def test_alchemy_connector_with_mock():
         print(f"\n📊 Mock test results: {passed_count}/{len(mock_supported_tables)} tables passed")
 
         assert passed_count == len(mock_supported_tables), f"Some mock tests failed: {test_results}"
+
+
+def test_token_prices_multiple_symbols():
+    """
+    Test that token_prices correctly sends multiple symbols as array-style query params.
+    
+    The Alchemy API expects: ?symbols=ETH&symbols=BTC&symbols=SOL
+    Not: ?symbols=ETH,BTC,SOL
+    """
+    # Load configuration
+    parent_dir = Path(__file__).parent.parent
+    config_path = parent_dir / "configs" / "dev_config.json"
+    config = load_config(config_path)
+    
+    # Create connector
+    connector = LakeflowConnect(config)
+    
+    # Track the params that were sent to the API
+    captured_params = {}
+    
+    def mock_get(url, params=None, **kwargs):
+        nonlocal captured_params
+        captured_params = params or {}
+        
+        # Return mock response
+        response = mock.MagicMock()
+        response.json.return_value = {
+            "data": [
+                {"symbol": "ETH", "prices": [{"currency": "usd", "value": "3000.00"}]},
+                {"symbol": "BTC", "prices": [{"currency": "usd", "value": "60000.00"}]},
+                {"symbol": "SOL", "prices": [{"currency": "usd", "value": "150.00"}]}
+            ]
+        }
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.get', side_effect=mock_get):
+        # Test with multiple comma-separated symbols
+        table_options = {"symbols": "ETH,BTC,SOL"}
+        records, offset = connector.read_table("token_prices", {}, table_options)
+        records_list = list(records)
+        
+        # Verify the symbols parameter was sent as a list (array-style)
+        assert "symbols" in captured_params, "symbols parameter should be in request params"
+        assert isinstance(captured_params["symbols"], list), \
+            f"symbols should be a list, got {type(captured_params['symbols'])}"
+        assert captured_params["symbols"] == ["ETH", "BTC", "SOL"], \
+            f"symbols should be ['ETH', 'BTC', 'SOL'], got {captured_params['symbols']}"
+        
+        # Verify we got the expected records
+        assert len(records_list) == 3, f"Expected 3 records, got {len(records_list)}"
+        
+        print("✅ Multiple symbols test passed!")
+        print(f"   Sent params: {captured_params}")
+        print(f"   Records received: {len(records_list)}")
+
+
+def test_token_prices_single_symbol():
+    """Test that token_prices also works correctly with a single symbol."""
+    # Load configuration
+    parent_dir = Path(__file__).parent.parent
+    config_path = parent_dir / "configs" / "dev_config.json"
+    config = load_config(config_path)
+    
+    # Create connector
+    connector = LakeflowConnect(config)
+    
+    # Track the params that were sent to the API
+    captured_params = {}
+    
+    def mock_get(url, params=None, **kwargs):
+        nonlocal captured_params
+        captured_params = params or {}
+        
+        response = mock.MagicMock()
+        response.json.return_value = {
+            "data": [
+                {"symbol": "ETH", "prices": [{"currency": "usd", "value": "3000.00"}]}
+            ]
+        }
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.get', side_effect=mock_get):
+        # Test with single symbol (no comma)
+        table_options = {"symbols": "ETH"}
+        records, offset = connector.read_table("token_prices", {}, table_options)
+        records_list = list(records)
+        
+        # Even single symbol should be sent as a list
+        assert "symbols" in captured_params
+        assert isinstance(captured_params["symbols"], list)
+        assert captured_params["symbols"] == ["ETH"]
+        assert len(records_list) == 1
+        
+        print("✅ Single symbol test passed!")
+        print(f"   Sent params: {captured_params}")
