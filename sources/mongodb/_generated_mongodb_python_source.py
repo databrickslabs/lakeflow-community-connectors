@@ -220,29 +220,23 @@ def register_lakeflow_source(spark):
     # sources/mongodb/mongodb.py
     ########################################################
 
+    MongoDB Connector Fix - Lazy Client Initialization
+
+    Replace the __init__ and _initialize_client methods with these,
+    and add the __getstate__/__setstate__ methods and client property.
+    """
+
     class LakeflowConnect:
         def __init__(self, options: dict[str, str]) -> None:
             """
             Initialize MongoDB connector with connection parameters.
-
-            Args:
-                options: Dictionary containing:
-                    - connection_uri: MongoDB connection string (required)
-                      Formats supported:
-                        - Standard: mongodb://[username:password@]host[:port][/[database][?options]]
-                        - Atlas SRV: mongodb+srv://username:password@cluster.mongodb.net/database
-                      Examples:
-                        - mongodb://user:pass@localhost:27017/mydb
-                        - mongodb+srv://user:pass@cluster0.mongodb.net/mydb
-                      Note: SRV URIs require dnspython package to be installed
             """
             connection_uri = options.get("connection_uri")
             if not connection_uri:
                 raise ValueError("MongoDB connector requires 'connection_uri' in options")
 
             self.connection_uri = connection_uri
-            self.client = None
-            self._initialize_client()
+            self._client = None  # Use underscore prefix - will be created lazily
 
             # Cache for schemas and metadata
             self._schema_cache = {}
@@ -252,18 +246,38 @@ def register_lakeflow_source(spark):
             self.sample_size = int(options.get("schema_sample_size", "100"))
             self.batch_size = int(options.get("batch_size", "1000"))
 
+            # DON'T call _initialize_client() here!
+            # The client will be created on first access via the property
+
+        @property
+        def client(self):
+            """Lazy initialization of MongoDB client."""
+            if self._client is None:
+                self._initialize_client()
+            return self._client
+
         def _initialize_client(self):
             """Initialize MongoDB client and test connection."""
+            from pymongo import MongoClient
+            from pymongo.errors import ConnectionFailure
+
             try:
-                self.client = MongoClient(
+                self._client = MongoClient(
                     self.connection_uri,
                     serverSelectionTimeoutMS=30000,
                     connectTimeoutMS=30000
                 )
                 # Test connection
-                self.client.admin.command('ping')
+                self._client.admin.command('ping')
             except Exception as e:
                 raise ConnectionFailure(f"Failed to connect to MongoDB: {str(e)}")
+
+        def __getstate__(self):
+            """Handle pickling - exclude the unpicklable MongoDB client."""
+            state = self.__dict__.copy()
+            # Remove the client - it will be recreated on first use after unpickling
+            state['_client'] = None
+            return state
 
         def _is_replica_set(self) -> bool:
             """Check if MongoDB deployment is a replica set or sharded cluster."""
