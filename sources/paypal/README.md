@@ -23,9 +23,9 @@ To configure the connector, provide the following parameters in your connection 
 | `client_id` | string | Yes | OAuth 2.0 Client ID from PayPal Developer Dashboard | `"AYourClientIdHere..."` |
 | `client_secret` | string | Yes | OAuth 2.0 Client Secret from PayPal Developer Dashboard | `"EYourClientSecretHere..."` |
 | `environment` | string | No | API environment: `"sandbox"` or `"production"`. Defaults to `"sandbox"` | `"sandbox"` |
-| `externalOptionsAllowList` | string | Yes | Comma-separated list of table-specific options that can be configured per table: `"start_date,end_date,page_size,page,total_required,plan_id,start_time,end_time"` | `"start_date,end_date,page_size,page,total_required,plan_id,start_time,end_time"` |
+| `externalOptionsAllowList` | string | Yes | Comma-separated list of table-specific options that can be configured per table: `"start_date,end_date,page_size,plan_id,start_time,end_time"` | `"start_date,end_date,page_size,plan_id,start_time,end_time"` |
 
-**Note**: The `externalOptionsAllowList` parameter is **required** and must include: `"start_date,end_date,page_size,page,total_required,plan_id,start_time,end_time"`. These options allow you to configure date ranges, pagination, and filtering for each table.
+**Note**: The `externalOptionsAllowList` parameter is **required** and must include: `"start_date,end_date,page_size,plan_id,start_time,end_time"`. These options allow you to configure date ranges, pagination, and filtering for each table.
 
 ### Obtaining PayPal API Credentials
 
@@ -61,7 +61,7 @@ A Unity Catalog connection for this connector can be created in two ways:
    - Follow the Lakeflow Community Connector UI flow
    - Select PayPal as your source connector
    - Provide your `client_id`, `client_secret`, and `environment`
-   - Set `externalOptionsAllowList` to: `"start_date,end_date,page_size,page,total_required,plan_id,start_time,end_time"`
+   - Set `externalOptionsAllowList` to: `"start_date,end_date,page_size,plan_id,start_time,end_time"`
 
 2. **Via Unity Catalog API**:
    ```python
@@ -77,7 +77,7 @@ A Unity Catalog connection for this connector can be created in two ways:
            "client_id": "YOUR_CLIENT_ID",
            "client_secret": "YOUR_CLIENT_SECRET",
            "environment": "sandbox",
-           "externalOptionsAllowList": "start_date,end_date,page_size,page,total_required,plan_id,start_time,end_time"
+           "externalOptionsAllowList": "start_date,end_date,page_size,plan_id,start_time,end_time"
        }
    )
    ```
@@ -88,13 +88,12 @@ The PayPal connector supports the following tables:
 
 1. **`transactions`** - Transaction history (fully functional)
 2. **`subscriptions`** - Subscription data (functional - may require plan_id)
-3. **`invoices`** - Invoice data (functional but requires special API permissions - see below)
 
-**Available by Default**: `transactions`, `subscriptions`
+**Available Tables**: `transactions`, `subscriptions`
 
-**Additional Tables (requires configuration)**:
-- **`invoices`** - Fully implemented but requires Invoicing API permissions. Not included in `list_tables()` by default because basic sandbox credentials lack these permissions. Users with proper permissions can access this table directly.
-- **`orders`** - Not available (PayPal Orders API v2 does not support bulk listing). Use the `transactions` table instead for order and payment history.
+**Tables Not Included**:
+- **`invoices`** - ❌ **Not Available in Sandbox Environment**. The Invoicing API requires special production-only permissions that are not available with PayPal Sandbox credentials. This table has been removed from the connector.
+- **`orders`** - ❌ **Not Available**. PayPal Orders API v2 does not support bulk listing. Use the `transactions` table instead for order and payment history.
 
 ### `transactions` Table
 
@@ -138,45 +137,15 @@ The `transactions` table includes nested structures for comprehensive transactio
 - **3-Year Historical Limit**: Transaction data is only available for the last 3 years from the current date.
 - **Immutable Transactions**: Transactions don't change after creation. Refunds and reversals appear as new transactions.
 
-### `invoices` Table
+### ❌ `invoices` Table - Not Included
 
-The **`invoices`** table provides invoice data from your PayPal account using the Invoicing API v2.
+**Status**: Not available in this connector
 
-**⚠️ API Permissions Required**: The Invoicing API requires specific permissions. Basic sandbox credentials may return a 403 error. Ensure your PayPal app has Invoicing API access enabled in the PayPal Developer Dashboard.
+**Reason**: The PayPal Invoicing API v2 requires special permissions that are **not available in the PayPal Sandbox environment**. Testing and development with Sandbox credentials consistently returns 403 "NOT_AUTHORIZED" errors, making it impossible to validate the implementation.
 
-**Primary Key**: `id`
+**Impact**: The `invoices` table has been removed from the connector and will not appear in `list_tables()`.
 
-**Incremental Ingestion**:
-- **Strategy**: Snapshot-based ingestion with pagination
-- **Cursor Field**: `detail.invoice_date`
-- **Ingestion Type**: `snapshot`
-
-**Optional Table Options**:
-
-| Option | Type | Required | Description | Example |
-|--------|------|----------|-------------|---------|
-| `page` | integer | No | Page number (default: 1) | `1` |
-| `page_size` | integer | No | Number of invoices per page (default: 20, max: 100) | `20` |
-| `total_required` | string | No | Whether to show total count (default: "false") | `"false"` |
-
-**Schema Highlights**:
-
-- **`id`**: Unique invoice identifier
-- **`status`**: Invoice status (DRAFT, SENT, PAID, CANCELLED, etc.)
-- **`detail`**: Invoice details including invoice_number, dates, currency, notes
-- **`invoicer`**: Invoicer information (name, email, tax ID, logo)
-- **`primary_recipients`**: Array of recipients with billing and shipping info
-- **`items`**: Array of line items with quantities, amounts, taxes, discounts
-- **`amount`**: Total amount breakdown (item_total, tax_total, shipping, discount)
-- **`due_amount`**: Amount due
-- **`links`**: HATEOAS links for invoice actions
-
-**Key Fields**:
-- `id` (string, not null): Unique invoice identifier
-- `status` (string): Current invoice status
-- `detail.invoice_date` (string): Invoice creation date (ISO 8601)
-- `detail.invoice_number` (string): Human-readable invoice number
-- `due_amount` (struct): Outstanding amount with currency_code and value
+**Alternative**: If you need invoice data and have production credentials with Invoicing API access enabled, please contact the maintainers to discuss adding this table back as a production-only feature.
 
 ### `subscriptions` Table
 
@@ -271,12 +240,6 @@ pipeline_spec = {
         },
         {
             "table": {
-                "source_table": "invoices",
-                "page_size": 50
-            }
-        },
-        {
-            "table": {
                 "source_table": "subscriptions",
                 "plan_id": "P-12345ABCDE"  # Optional but recommended
             }
@@ -367,17 +330,11 @@ pipeline_spec = {
    - **Cause**: PayPal Orders API v2 doesn't support bulk order listing
    - **Solution**: Use the `transactions` table instead, which includes order and payment information
 
-9. **Invoices Pagination Issues**
-   - **Cause**: Large number of invoices may require multiple page requests
-   - **Solution**: The connector handles pagination automatically. Adjust `page_size` (max 100) for better performance.
-
 ## References
 
 - [PayPal REST API Documentation](https://developer.paypal.com/api/rest/)
 - [PayPal Transaction Search API v1](https://developer.paypal.com/docs/api/transaction-search/v1/)
-- [PayPal Invoicing API v2](https://developer.paypal.com/docs/api/invoicing/v2/)
 - [PayPal Subscriptions API v1](https://developer.paypal.com/docs/api/subscriptions/v1/)
-- [PayPal Orders API v2](https://developer.paypal.com/docs/api/orders/v2/)
 - [PayPal Developer Dashboard](https://developer.paypal.com/dashboard/)
 - [PayPal REST API Current Resources](https://developer.paypal.com/api/rest/current-resources/)
 - [OAuth 2.0 Client Credentials Flow](https://developer.paypal.com/api/rest/authentication/)
