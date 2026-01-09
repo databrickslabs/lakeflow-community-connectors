@@ -3,6 +3,57 @@ connection_name: alchemy
 objects:
   # Minimal config for all tables
   - table:
+      source_table: nfts_by_owner
+      table_configuration:
+        owner_address: 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+        with_metadata: true
+        page_size: 10
+  - table:
+      source_table: nfts_for_contract
+      table_configuration:
+        contract_address: 0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D
+        with_metadata: true
+        page_size: 10
+  - table:
+      source_table: nft_metadata
+      table_configuration:
+        contract_address: 0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D
+        token_id: 1
+  - table:
+      source_table: contract_metadata
+      table_configuration:
+        contract_address: 0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D
+  - table:
+      source_table: nft_sales
+      table_configuration:
+        contract_address: 0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D
+  - table:
+      source_table: floor_prices
+      table_configuration:
+        contract_address: 0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D
+  - table:
       source_table: token_prices
       table_configuration:
-        symbols: ETH
+        symbols: ETH,BTC,USDC
+  - table:
+      source_table: token_prices_historical
+      table_configuration:
+        symbol: ETH
+        start_time: 2024-01-01T00:00:00Z
+        end_time: 2024-01-02T00:00:00Z
+  - table:
+      source_table: tokens_by_wallet
+      table_configuration:
+        addresses: 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045@eth-mainnet
+  - table:
+      source_table: token_balances_by_wallet
+      table_configuration:
+        addresses: 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045@eth-mainnet
+  - table:
+      source_table: nfts_by_wallet
+      table_configuration:
+        addresses: 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045@eth-mainnet
+  - table:
+      source_table: wallet_transactions
+      table_configuration:
+        addresses: 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045@eth-mainnet
