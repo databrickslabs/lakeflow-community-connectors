@@ -5,19 +5,24 @@
 # Do not edit manually. Make changes to the source files instead.
 # ==============================================================================
 
-from datetime import datetime
-from decimal import Decimal
-from typing import Any, Iterator
-import json
-
-from pyspark.sql import Row
-from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
-from pyspark.sql.types import *
-import base64
-
 
 def register_lakeflow_source(spark):
     """Register the Lakeflow Python source with Spark."""
+    
+    # Import all dependencies inside the function to avoid scoping issues
+    from datetime import datetime
+    from decimal import Decimal
+    from typing import Any, Iterator
+    import json
+    import base64
+    
+    from pyspark.sql import Row
+    from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
+    from pyspark.sql.types import (
+        StructType, StructField, StringType, LongType, DoubleType, 
+        BooleanType, TimestampType, ArrayType, MapType, DecimalType, 
+        DateType, BinaryType, IntegerType, DataType
+    )
 
     ########################################################
     # libs/utils.py
