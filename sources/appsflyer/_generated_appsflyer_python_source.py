@@ -250,6 +250,7 @@ def register_lakeflow_source(spark):
                 "uninstall_events_report",
                 "organic_installs_report",
                 "organic_in_app_events_report",
+                "organic_uninstall_events_report",
             ]
 
         def get_table_schema(
@@ -270,6 +271,8 @@ def register_lakeflow_source(spark):
                 "organic_installs_report": self._get_installs_report_schema,
                 # Same as in_app_events
                 "organic_in_app_events_report": self._get_in_app_events_report_schema,
+                # Same as uninstall_events
+                "organic_uninstall_events_report": self._get_uninstall_events_report_schema,
             }
 
             if table_name not in schema_map:
@@ -312,6 +315,11 @@ def register_lakeflow_source(spark):
                     "cursor_field": "event_time",
                     "ingestion_type": "cdc",
                 },
+                "organic_uninstall_events_report": {
+                    "primary_keys": ["appsflyer_id", "event_time"],
+                    "cursor_field": "event_time",
+                    "ingestion_type": "cdc",
+                },
             }
 
             if table_name not in metadata_map:
@@ -344,6 +352,7 @@ def register_lakeflow_source(spark):
                 "uninstall_events_report": self._read_uninstall_events_report,
                 "organic_installs_report": self._read_organic_installs_report,
                 "organic_in_app_events_report": self._read_organic_in_app_events_report,
+                "organic_uninstall_events_report": self._read_organic_uninstall_events_report,
             }
 
             if table_name not in reader_map:
@@ -625,6 +634,16 @@ def register_lakeflow_source(spark):
             """
             return self._read_event_report(
                 "organic_in_app_events_report", start_offset, table_options
+            )
+
+        def _read_organic_uninstall_events_report(
+            self, start_offset: dict, table_options: dict[str, str]
+        ) -> (Iterator[dict], dict):
+            """
+            Read the organic_uninstall_events_report table.
+            """
+            return self._read_event_report(
+                "organic_uninstall_events_report", start_offset, table_options
             )
 
         # pylint: disable=too-many-locals,too-many-branches,too-many-statements

@@ -43,6 +43,7 @@ The object list is **static** (defined by the connector), representing different
 | `uninstall_events_report` | Uninstall events for an app | `GET /api/raw-data/export/app/<app_id>/uninstall_events_report/v5` | `cdc` (based on event_time) |
 | `organic_installs_report` | Organic (non-attributed) installs | `GET /api/raw-data/export/app/<app_id>/organic_installs_report/v5` | `cdc` (based on event_time) |
 | `organic_in_app_events_report` | Organic in-app events | `GET /api/raw-data/export/app/<app_id>/organic_in_app_events_report/v5` | `cdc` (based on event_time) |
+| `organic_uninstall_events_report` | Organic uninstall events | `GET /api/raw-data/export/app/<app_id>/organic_uninstall_events_report/v5` | `cdc` (based on event_time) |
 
 **Connector scope for initial implementation**:
 - Step 1 focuses on the `apps` object and `installs_report` to document in detail
@@ -59,8 +60,7 @@ High-level notes on objects:
 - **uninstall_events_report**: Records when users uninstall the app (CSV format)
 - **organic_installs_report**: Non-attributed installation events (CSV format)
 - **organic_in_app_events_report**: Non-attributed in-app events (CSV format)
-- **daily_report**: Aggregated metrics by day, media source, and campaign
-- **cohort_report**: Retention and LTV metrics grouped by cohorts
+- **organic_uninstall_events_report**: Non-attributed uninstall events (CSV format)
 - All event-based reports support date range filtering for incremental reads
 
 ## **Object Schema**
@@ -292,8 +292,9 @@ Instead, primary keys are defined **statically** based on the resource schema.
 Primary keys for additional objects (defined statically):
 
 - **`uninstall_events_report`**: `appsflyer_id` + `event_time`  
-- **`daily_report`**: `date` + `media_source` + `campaign` + `geo` (composite)  
-- **`cohort_report`**: `cohort_date` + `cohort_day` + `geo` (composite)
+- **`organic_installs_report`**: `appsflyer_id` + `event_time`  
+- **`organic_in_app_events_report`**: `appsflyer_id` + `event_time` + `event_name`  
+- **`organic_uninstall_events_report`**: `appsflyer_id` + `event_time`
 
 ## **Object's ingestion type**
 
@@ -312,8 +313,7 @@ Planned ingestion types for AppsFlyer objects:
 | `uninstall_events_report` | `cdc` | Uninstall events are immutable. Use `event_time` as cursor. |
 | `organic_installs_report` | `cdc` | Organic installs follow same pattern as attributed installs. |
 | `organic_in_app_events_report` | `cdc` | Organic events follow same pattern as attributed events. |
-| `daily_report` | `cdc` | Daily aggregated metrics can be incrementally synced by date. |
-| `cohort_report` | `snapshot` | Cohort data changes as users progress through days; typically refreshed fully. |
+| `organic_uninstall_events_report` | `cdc` | Organic uninstalls follow same pattern as attributed uninstalls. |
 
 For `installs_report` and event reports:
 - **Primary key**: `appsflyer_id` + `event_time` (composite)
@@ -387,19 +387,29 @@ curl -X GET \
 For objects treated as events (`in_app_events_report`, `uninstall_events_report`, etc.), the connector uses similar patterns:
 
 - **In-app events**:  
-  - Endpoint: `GET /export/<app_id>/in_app_events_report/v5`  
+  - Endpoint: `GET /api/raw-data/export/app/<app_id>/in_app_events_report/v5`  
   - Key query params: `from`, `to`, `timezone`, `event_name` (optional filter)
   - Incremental strategy: same as installs, using `event_time` as cursor
 
 - **Uninstall events**:  
-  - Endpoint: `GET /export/<app_id>/uninstall_events_report/v5`  
+  - Endpoint: `GET /api/raw-data/export/app/<app_id>/uninstall_events_report/v5`  
   - Key query params: `from`, `to`, `timezone`
   - Incremental strategy: same as installs
 
-- **Daily report** (aggregated):  
-  - Endpoint: `GET /export/<app_id>/partners_report/v5`  
-  - Key query params: `from`, `to`, `groupings` (e.g., `date,geo,media_source`)
-  - Incremental strategy: fetch by date range; upsert based on composite key
+- **Organic installs**:  
+  - Endpoint: `GET /api/raw-data/export/app/<app_id>/organic_installs_report/v5`  
+  - Key query params: `from`, `to`, `timezone`
+  - Incremental strategy: same as installs
+
+- **Organic in-app events**:  
+  - Endpoint: `GET /api/raw-data/export/app/<app_id>/organic_in_app_events_report/v5`  
+  - Key query params: `from`, `to`, `timezone`, `event_name` (optional filter)
+  - Incremental strategy: same as in_app_events
+
+- **Organic uninstall events**:  
+  - Endpoint: `GET /api/raw-data/export/app/<app_id>/organic_uninstall_events_report/v5`  
+  - Key query params: `from`, `to`, `timezone`
+  - Incremental strategy: same as uninstalls
 
 ### Read endpoint for snapshot-style metadata objects
 
