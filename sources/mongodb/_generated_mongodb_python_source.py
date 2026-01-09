@@ -310,32 +310,56 @@ def register_lakeflow_source(spark):
         def _parse_collection_name(self, table_name: str) -> tuple[str, str]:
             """
             Parse table_name into database and collection.
-            Format: database.collection or just collection (use default db)
+            Format: database_collection (underscore) or database.collection (dot) or just collection
+
+            To avoid Databricks multipart name issues, we use underscores instead of dots
+            in table names. This method accepts both formats for backward compatibility.
 
             Returns:
                 Tuple of (database_name, collection_name)
             """
+            # Check for dot format first (e.g., "testdb.orders")
             if "." in table_name:
                 parts = table_name.split(".", 1)
                 return parts[0], parts[1]
+
+            # Check for underscore format (e.g., "testdb_orders")  
+            # We need to be careful here - only split on the FIRST underscore
+            # that separates a known database name from a collection
+            # For now, we'll check if this matches database_collection pattern
+            if "_" in table_name:
+                # Try to split on first underscore
+                parts = table_name.split("_", 1)
+                # Check if the first part could be a database name
+                # by seeing if it exists in our databases
+                try:
+                    db_names = self.client.list_database_names()
+                    if parts[0] in db_names:
+                        return parts[0], parts[1]
+                except:
+                    pass
+
+            # No database prefix found
             return "", table_name
 
         def list_tables(self) -> List[str]:
             """
-            List all unique collection names across all non-system databases.
+            List all tables in format database_collection (using underscore separator).
 
-            IMPORTANT: This method returns only collection names (without database prefix)
-            to avoid multipart identifier issues in Databricks. The database is specified
-            as part of the table name (e.g., "testdb.orders") and parsed by _parse_collection_name().
+            IMPORTANT: Returns table names in "database_collection" format (with underscore)
+            instead of "database.collection" (with dot) to avoid Databricks multipart identifier
+            issues. The underscore format prevents errors like "View with multipart name not supported".
 
-            Note: If multiple databases have collections with the same name, they will
-            appear only once in this list. The actual database to query is determined
-            by parsing the table_name parameter passed to other methods.
+            When specifying tables in your pipeline spec, use the underscore format:
+            - ✓ Correct: "testdb_orders", "testdb_users"  
+            - ✗ Wrong: "testdb.orders", "testdb.users" (dots cause Databricks errors)
+
+            The connector will automatically parse "testdb_orders" as database="testdb", collection="orders".
 
             Returns:
-                List of collection names (without database prefix, no dots)
+                List of table names in "database_collection" format (underscores, no dots)
             """
-            collections_set = set()
+            tables = []
 
             try:
                 # Try to get database from URI first
@@ -356,7 +380,8 @@ def register_lakeflow_source(spark):
 
                     for coll_name in collection_names:
                         if not coll_name.startswith("system."):
-                            collections_set.add(coll_name)
+                            # Use underscore to join database and collection
+                            tables.append(f"{default_db_name}_{coll_name}")
                 else:
                     # No database in URI - list collections from all non-system databases
                     database_names = self.client.list_database_names()
@@ -371,12 +396,13 @@ def register_lakeflow_source(spark):
 
                         for coll_name in collection_names:
                             if not coll_name.startswith("system."):
-                                collections_set.add(coll_name)
+                                # Use underscore to join database and collection
+                                tables.append(f"{db_name}_{coll_name}")
 
             except Exception as e:
                 raise OperationFailure(f"Failed to list MongoDB tables: {str(e)}")
 
-            return sorted(list(collections_set))
+            return sorted(tables)
 
         def get_table_schema(
             self, table_name: str, table_options: Dict[str, str]
@@ -385,23 +411,23 @@ def register_lakeflow_source(spark):
             Fetch the schema of a MongoDB collection by sampling documents.
 
             Args:
-                table_name: Name of the collection (without database prefix)
-                table_options: Options including 'database' (required)
+                table_name: Name in format "database_collection" or "database.collection"
+                table_options: Additional options (database name is parsed from table_name)
 
             Returns:
                 StructType representing the inferred schema
             """
-            # Parse database and collection (table_name should just be collection name)
+            # Parse database and collection from table_name
             db_from_name, collection_name = self._parse_collection_name(table_name)
             database_name = db_from_name if db_from_name else self._get_database_name(table_options)
 
-            # Validate collection exists in the list
+            # Validate table exists (using underscore format)
             supported_tables = self.list_tables()
+            expected_table_name = f"{database_name}_{collection_name}"
 
-            if collection_name not in supported_tables:
+            if expected_table_name not in supported_tables:
                 raise ValueError(
-                    f"Collection '{collection_name}' not found. Available collections: {supported_tables}. "
-                    f"Make sure to specify the 'database' in table_options."
+                    f"Table '{expected_table_name}' not found. Available tables: {supported_tables}"
                 )
 
             # Check cache (use full table name as key)
@@ -581,23 +607,23 @@ def register_lakeflow_source(spark):
             Fetch metadata for a MongoDB collection.
 
             Args:
-                table_name: Name of the collection (without database prefix)
-                table_options: Options including 'database' (required)
+                table_name: Name in format "database_collection" or "database.collection"
+                table_options: Additional options (database name is parsed from table_name)
 
             Returns:
                 Dictionary with primary_keys, cursor_field, and ingestion_type
             """
-            # Parse database and collection (table_name should just be collection name)
+            # Parse database and collection from table_name
             db_from_name, collection_name = self._parse_collection_name(table_name)
             database_name = db_from_name if db_from_name else self._get_database_name(table_options)
 
-            # Validate collection exists in the list
+            # Validate table exists (using underscore format)
             supported_tables = self.list_tables()
+            expected_table_name = f"{database_name}_{collection_name}"
 
-            if collection_name not in supported_tables:
+            if expected_table_name not in supported_tables:
                 raise ValueError(
-                    f"Collection '{collection_name}' not found. Available collections: {supported_tables}. "
-                    f"Make sure to specify the 'database' in table_options."
+                    f"Table '{expected_table_name}' not found. Available tables: {supported_tables}"
                 )
 
             # Check cache (use full table name as key)
@@ -635,23 +661,24 @@ def register_lakeflow_source(spark):
             Read records from a MongoDB collection.
 
             Args:
-                table_name: Name of the collection (without database prefix)
+                table_name: Name in format "database_collection" or "database.collection"
                 start_offset: Dictionary containing cursor information
-                table_options: Options including 'database'
+                table_options: Additional options (database name is parsed from table_name)
 
             Returns:
                 Tuple of (record iterator, next_offset)
             """
-            # Parse database and collection (table_name should just be collection name)
+            # Parse database and collection from table_name
             db_from_name, collection_name = self._parse_collection_name(table_name)
             database_name = db_from_name if db_from_name else self._get_database_name(table_options)
 
-            # Validate collection exists in the list
+            # Validate table exists (using underscore format)
             supported_tables = self.list_tables()
-            if collection_name not in supported_tables:
+            expected_table_name = f"{database_name}_{collection_name}"
+
+            if expected_table_name not in supported_tables:
                 raise ValueError(
-                    f"Collection '{collection_name}' not found. Available collections: {supported_tables}. "
-                    f"Make sure to specify the 'database' in table_options."
+                    f"Table '{expected_table_name}' not found. Available tables: {supported_tables}"
                 )
 
             # Get metadata to determine ingestion type
@@ -811,23 +838,24 @@ def register_lakeflow_source(spark):
             Read deleted records using Change Streams.
 
             Args:
-                table_name: Name of the collection (without database prefix)
+                table_name: Name in format "database_collection" or "database.collection"
                 start_offset: Dictionary with resume token
-                table_options: Options including 'database'
+                table_options: Additional options (database name is parsed from table_name)
 
             Returns:
                 Tuple of (deleted records, next_offset)
             """
-            # Parse database and collection (table_name should just be collection name)
+            # Parse database and collection from table_name
             db_from_name, collection_name = self._parse_collection_name(table_name)
             database_name = db_from_name if db_from_name else self._get_database_name(table_options)
 
-            # Validate collection exists in the list
+            # Validate table exists (using underscore format)
             supported_tables = self.list_tables()
-            if collection_name not in supported_tables:
+            expected_table_name = f"{database_name}_{collection_name}"
+
+            if expected_table_name not in supported_tables:
                 raise ValueError(
-                    f"Collection '{collection_name}' not found. Available collections: {supported_tables}. "
-                    f"Make sure to specify the 'database' in table_options."
+                    f"Table '{expected_table_name}' not found. Available tables: {supported_tables}"
                 )
 
             db = self.client[database_name]
