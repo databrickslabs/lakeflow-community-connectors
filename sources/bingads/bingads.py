@@ -379,9 +379,6 @@ class LakeflowConnect:
                 - account_id: Target account ID (optional, can be provided in table_options)
                 - env: Environment to use ("production" or "sandbox"), defaults to "production"
         """
-        
-        print(f"Initializing Bing Ads connector with options: {options}")
-        
         self.client_id = options.get("client_id")
         self.client_secret = options.get("client_secret")
         self.refresh_token = options.get("refresh_token")
@@ -545,8 +542,6 @@ class LakeflowConnect:
         """
         self._validate_table_name(table_name)
 
-        print(f"Reading table '{table_name}' with options: {table_options}")
-
         if table_name == "accounts":
             return self._read_accounts(start_offset, table_options)
         elif table_name == "campaigns":
@@ -641,64 +636,55 @@ class LakeflowConnect:
 
     def _get_enum_attr(self, obj: Any, attr: str) -> Optional[str]:
         """Get an enum attribute as a string, or None if missing."""
-        if hasattr(obj, attr):
-            val = getattr(obj, attr, None)
-            return str(val) if val is not None else None
+        if (val := getattr(obj, attr, None)) is not None:
+            return str(val)
         return None
 
     def _get_string_array(self, obj: Any, attr: str) -> Optional[list[str]]:
         """Convert a SOAP string array to a Python list."""
-        if hasattr(obj, attr) and getattr(obj, attr):
-            arr = getattr(obj, attr)
-            if hasattr(arr, "string") and arr.string:
-                return list(arr.string)
+        if (arr := getattr(obj, attr, None)):
+            if (strings := getattr(arr, "string", None)):
+                return list(strings)
         return None
 
     def _get_date_attr(self, obj: Any, attr: str) -> Optional[str]:
         """Convert a SOAP date object to YYYY-MM-DD string."""
-        if hasattr(obj, attr) and getattr(obj, attr):
-            d = getattr(obj, attr)
+        if (d := getattr(obj, attr, None)):
             if hasattr(d, "Year") and d.Year:
-                return f"{d.Year}-{str(d.Month).zfill(2)}-{str(d.Day).zfill(2)}"
+                return f"{d.Year}-{d.Month:02d}-{d.Day:02d}"
         return None
 
     def _get_bid_attr(self, obj: Any, attr: str) -> Optional[dict[str, Any]]:
         """Extract a bid object with Amount."""
-        if hasattr(obj, attr) and getattr(obj, attr):
-            bid = getattr(obj, attr)
+        if (bid := getattr(obj, attr, None)):
             return {"Amount": getattr(bid, "Amount", None)}
         return None
 
     def _get_bidding_scheme(self, obj: Any, attr: str) -> Optional[dict[str, Any]]:
         """Extract a complex bidding scheme object."""
-        if hasattr(obj, attr) and getattr(obj, attr):
-            bs = getattr(obj, attr)
+        if (bs := getattr(obj, attr, None)):
             return {
                 "Type": getattr(bs, "Type", None),
-                "MaxCpc": getattr(getattr(bs, "MaxCpc", None), "Amount", None)
-                if hasattr(bs, "MaxCpc") and bs.MaxCpc
-                else None,
-                "TargetCpa": getattr(bs, "TargetCpa", None)
-                if hasattr(bs, "TargetCpa")
-                else None,
-                "TargetRoas": getattr(bs, "TargetRoas", None)
-                if hasattr(bs, "TargetRoas")
-                else None,
+                "MaxCpc": getattr(getattr(bs, "MaxCpc", None), "Amount", None),
+                "TargetCpa": getattr(bs, "TargetCpa", None),
+                "TargetRoas": getattr(bs, "TargetRoas", None),
             }
         return None
 
     def _get_asset_array(self, obj: Any, attr: str) -> Optional[list[str]]:
         """Extract text from an array of asset links (Headlines, Descriptions)."""
-        if hasattr(obj, attr) and getattr(obj, attr):
-            arr = getattr(obj, attr)
-            if hasattr(arr, "AssetLink") and arr.AssetLink:
-                return [a.Text for a in arr.AssetLink if hasattr(a, "Text")]
-        return None
+        texts: list[str] = []
+        if (arr := getattr(obj, attr, None)):
+            if (asset_links := getattr(arr, "AssetLink", None)):
+                for asset_link in asset_links:
+                    if (asset := getattr(asset_link, "Asset", None)):
+                        if (text := getattr(asset, "Text", None)):
+                            texts.append(text)
+        return texts
 
     def _get_ad_rotation(self, obj: Any, attr: str) -> Optional[str]:
         """Extract AdRotation.Type as string."""
-        if hasattr(obj, attr) and getattr(obj, attr):
-            ar = getattr(obj, attr)
+        if (ar := getattr(obj, attr, None)):
             if hasattr(ar, "Type"):
                 return str(ar.Type) if ar.Type else None
         return None
@@ -742,8 +728,6 @@ class LakeflowConnect:
 
         if extra:
             result.update(extra)
-
-        print("_serialize_soap_object", result)
 
         return result
 
