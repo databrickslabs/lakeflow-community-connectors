@@ -775,7 +775,9 @@ class LakeflowConnect:
             params["contractAddress"] = table_options["contract_address"]
 
         elif table_name == "token_prices":
-            params["symbols"] = table_options["symbols"]
+            # Alchemy expects symbols as array-style query params: ?symbols=ETH&symbols=BTC
+            symbols_str = table_options["symbols"]
+            params["symbols"] = [s.strip() for s in symbols_str.split(",")]
 
         elif table_name == "webhook_addresses":
             params["webhook_id"] = table_options["webhook_id"]
