@@ -667,12 +667,14 @@ class LakeflowConnect:
         # For each repository, fetch commits
         for repo in repositories:
             repo_id = repo.get("id")
-            if not repo_id:
+            project_name = repo.get("project_name")  # Get project from repo
+            if not repo_id or not project_name:
                 continue
                 
-            # Create modified table_options with this repository_id
+            # Create modified table_options with this repository_id and project
             repo_table_options = dict(table_options)
             repo_table_options["repository_id"] = repo_id
+            repo_table_options["project"] = project_name  # Add project from repo
             
             # Fetch commits for this repository
             try:
@@ -782,12 +784,14 @@ class LakeflowConnect:
         # For each repository, fetch pull requests
         for repo in repositories:
             repo_id = repo.get("id")
-            if not repo_id:
+            project_name = repo.get("project_name")  # Get project from repo
+            if not repo_id or not project_name:
                 continue
                 
-            # Create modified table_options with this repository_id
+            # Create modified table_options with this repository_id and project
             repo_table_options = dict(table_options)
             repo_table_options["repository_id"] = repo_id
+            repo_table_options["project"] = project_name  # Add project from repo
             
             # Fetch PRs for this repository
             try:
@@ -892,12 +896,14 @@ class LakeflowConnect:
         # For each repository, fetch refs
         for repo in repositories:
             repo_id = repo.get("id")
-            if not repo_id:
+            project_name = repo.get("project_name")  # Get project from repo
+            if not repo_id or not project_name:
                 continue
                 
-            # Create modified table_options with this repository_id
+            # Create modified table_options with this repository_id and project
             repo_table_options = dict(table_options)
             repo_table_options["repository_id"] = repo_id
+            repo_table_options["project"] = project_name  # Add project from repo
             
             # Fetch refs for this repository
             try:
@@ -1009,12 +1015,14 @@ class LakeflowConnect:
         # For each repository, fetch pushes
         for repo in repositories:
             repo_id = repo.get("id")
-            if not repo_id:
+            project_name = repo.get("project_name")  # Get project from repo
+            if not repo_id or not project_name:
                 continue
                 
-            # Create modified table_options with this repository_id
+            # Create modified table_options with this repository_id and project
             repo_table_options = dict(table_options)
             repo_table_options["repository_id"] = repo_id
+            repo_table_options["project"] = project_name  # Add project from repo
             
             # Fetch pushes for this repository
             try:
