@@ -17,12 +17,11 @@ from datetime import datetime
 import time
 
 
-"""
-MongoDB Connector Fix - Lazy Client Initialization
+# MongoDB Connector Fix - Lazy Client Initialization
 
-Replace the __init__ and _initialize_client methods with these,
-and add the __getstate__/__setstate__ methods and client property.
-"""
+# Replace the __init__ and _initialize_client methods with these,
+# and add the __getstate__/__setstate__ methods and client property.
+
 
 class LakeflowConnect:
     def __init__(self, options: dict[str, str]) -> None:
@@ -126,29 +125,48 @@ class LakeflowConnect:
     
     def list_tables(self) -> List[str]:
         """
-        List all collections across all non-system databases.
+        List all collections from the default database specified in connection URI.
+        
+        Note: MongoDB can have multiple databases, but for Lakeflow compatibility,
+        we list collections only from the database specified in the connection URI.
+        Use the 'database' option in table_options to access collections from
+        different databases.
         
         Returns:
-            List of table names in format: database.collection
+            List of collection names (without database prefix)
         """
         tables = []
         
         try:
-            # List all databases (excluding system databases)
-            database_names = self.client.list_database_names()
-            system_dbs = {"admin", "config", "local"}
+            # Get default database from connection URI
+            default_db_name = self._get_database_from_uri()
             
-            for db_name in database_names:
-                if db_name in system_dbs:
-                    continue
+            if not default_db_name:
+                # If no database in URI, list all databases (excluding system)
+                # This maintains backward compatibility but may cause issues with dots in names
+                database_names = self.client.list_database_names()
+                system_dbs = {"admin", "config", "local"}
                 
-                db = self.client[db_name]
+                for db_name in database_names:
+                    if db_name in system_dbs:
+                        continue
+                    
+                    db = self.client[db_name]
+                    collection_names = db.list_collection_names()
+                    
+                    # Return collections with database prefix for multi-db scenarios
+                    for coll_name in collection_names:
+                        if not coll_name.startswith("system."):
+                            tables.append(f"{db_name}.{coll_name}")
+            else:
+                # List collections from the specified database only
+                db = self.client[default_db_name]
                 collection_names = db.list_collection_names()
                 
-                # Filter out system collections
+                # Return collection names without database prefix
                 for coll_name in collection_names:
                     if not coll_name.startswith("system."):
-                        tables.append(f"{db_name}.{coll_name}")
+                        tables.append(coll_name)
         
         except Exception as e:
             raise OperationFailure(f"Failed to list MongoDB tables: {str(e)}")
@@ -162,27 +180,28 @@ class LakeflowConnect:
         Fetch the schema of a MongoDB collection by sampling documents.
         
         Args:
-            table_name: Name of the collection (or database.collection)
-            table_options: Options including 'database' (required if not in table_name)
+            table_name: Name of the collection (without database prefix)
+            table_options: Options including 'database' (required)
             
         Returns:
             StructType representing the inferred schema
         """
-        # Validate table exists
-        supported_tables = self.list_tables()
-        
         # Parse database and collection
         db_from_name, collection_name = self._parse_collection_name(table_name)
         database_name = db_from_name if db_from_name else self._get_database_name(table_options)
         
-        full_table_name = f"{database_name}.{collection_name}"
-        if full_table_name not in supported_tables:
+        # Validate table exists
+        supported_tables = self.list_tables()
+        
+        # Check if table_name (without database prefix) is in list
+        # or if full name (with database prefix) is in list (for backward compatibility)
+        if collection_name not in supported_tables and f"{database_name}.{collection_name}" not in supported_tables:
             raise ValueError(
-                f"Table '{table_name}' is not supported. Available tables: {supported_tables}"
+                f"Collection '{collection_name}' not found in database '{database_name}'. Available tables: {supported_tables}"
             )
         
-        # Check cache
-        cache_key = full_table_name
+        # Check cache (use full table name as key)
+        cache_key = f"{database_name}.{collection_name}"
         if cache_key in self._schema_cache:
             return self._schema_cache[cache_key]
         
@@ -358,27 +377,28 @@ class LakeflowConnect:
         Fetch metadata for a MongoDB collection.
         
         Args:
-            table_name: Name of the collection
-            table_options: Options including 'database'
+            table_name: Name of the collection (without database prefix)
+            table_options: Options including 'database' (required)
             
         Returns:
             Dictionary with primary_keys, cursor_field, and ingestion_type
         """
-        # Validate table exists
-        supported_tables = self.list_tables()
-        
         # Parse database and collection
         db_from_name, collection_name = self._parse_collection_name(table_name)
         database_name = db_from_name if db_from_name else self._get_database_name(table_options)
         
-        full_table_name = f"{database_name}.{collection_name}"
-        if full_table_name not in supported_tables:
+        # Validate table exists
+        supported_tables = self.list_tables()
+        
+        # Check if table_name (without database prefix) is in list
+        # or if full name (with database prefix) is in list (for backward compatibility)
+        if collection_name not in supported_tables and f"{database_name}.{collection_name}" not in supported_tables:
             raise ValueError(
-                f"Table '{table_name}' is not supported. Available tables: {supported_tables}"
+                f"Collection '{collection_name}' not found in database '{database_name}'. Available tables: {supported_tables}"
             )
         
-        # Check cache
-        cache_key = full_table_name
+        # Check cache (use full table name as key)
+        cache_key = f"{database_name}.{collection_name}"
         if cache_key in self._metadata_cache:
             return self._metadata_cache[cache_key]
         
