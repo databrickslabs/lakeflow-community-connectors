@@ -64,6 +64,7 @@ Behavior notes:
 - Reads use **point-in-time (PIT)** plus `search_after` with `_shard_doc` as a tiebreaker for deterministic paging.
 - `_id` is always added as a column in the ingested data.
 - If no suitable cursor is found, the connector performs a snapshot read.
+- Network resiliency: HTTP calls use explicit timeouts (5s connect / 30s read) and a small retry with backoff (up to 3 attempts on 429/5xx, honoring `Retry-After`).
 
 ## Data Type Mapping
 

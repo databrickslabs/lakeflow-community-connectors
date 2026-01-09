@@ -1,6 +1,8 @@
 from typing import Iterator, Any
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 from pyspark.sql.types import (
     StructType,
     StructField,
@@ -62,11 +64,37 @@ class _BearerAuth(_AuthMethod):
 
 
 class _ElasticsearchClient:
-    def __init__(self, endpoint: str, auth: _AuthMethod, verify_ssl: bool = True):
+    def __init__(
+        self,
+        endpoint: str,
+        auth: _AuthMethod,
+        verify_ssl: bool = True,
+        timeout: float | tuple[float, float] = (5.0, 30.0),
+        max_retries: int = 3,
+        backoff_factor: float = 0.5,
+    ):
         self._endpoint = endpoint.rstrip("/")
         self._auth = auth
-        self._session = requests.Session()
         self._verify_ssl = verify_ssl
+        self._timeout = timeout
+
+        # Configure a session with basic retry/backoff for transient failures.
+        retry = Retry(
+            total=max_retries,
+            connect=max_retries,
+            read=max_retries,
+            status=max_retries,
+            backoff_factor=backoff_factor,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=frozenset(["GET", "POST"]),
+            respect_retry_after_header=True,
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        session = requests.Session()
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        self._session = session
 
     def _build_headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -81,6 +109,7 @@ class _ElasticsearchClient:
             headers=self._build_headers(),
             params=params,
             verify=self._verify_ssl,
+            timeout=self._timeout,
         )
         resp.raise_for_status()
         return resp.json()
@@ -92,6 +121,7 @@ class _ElasticsearchClient:
             json=json,
             params=params,
             verify=self._verify_ssl,
+            timeout=self._timeout,
         )
         resp.raise_for_status()
         return resp.json()
