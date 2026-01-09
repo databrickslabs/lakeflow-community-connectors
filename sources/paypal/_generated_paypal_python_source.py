@@ -1147,63 +1147,51 @@ def register_lakeflow_source(spark):
                     "You can find subscription IDs in your PayPal dashboard or from subscription creation responses."
                 )
 
-            # Get starting index from offset (default 0)
-            if start_offset and isinstance(start_offset, dict):
-                current_index = start_offset.get("index", 0)
-            else:
-                current_index = 0
+            # Check if we've already processed all subscriptions
+            # Use a simple "done" flag instead of index-based pagination
+            if start_offset and start_offset.get("done"):
+                # Already processed all - return empty with same offset
+                return iter([]), start_offset
 
-            # If we've processed all IDs, return empty
-            if current_index >= len(subscription_ids):
-                return iter([]), start_offset if start_offset else {"index": current_index}
-
-            # Fetch subscription details
+            # Fetch ALL subscription details in one call
             records: list[dict[str, Any]] = []
             include_transactions = table_options.get("include_transactions", "false").lower() == "true"
 
-            # Process subscription at current index
-            subscription_id = subscription_ids[current_index]
+            # Process ALL subscriptions
+            for subscription_id in subscription_ids:
+                try:
+                    # Fetch subscription details
+                    response = self._make_request("GET", f"/v1/billing/subscriptions/{subscription_id}")
 
-            try:
-                # Fetch subscription details
-                response = self._make_request("GET", f"/v1/billing/subscriptions/{subscription_id}")
+                    if response.status_code == 200:
+                        subscription_data = response.json()
 
-                if response.status_code == 200:
-                    subscription_data = response.json()
+                        # Optionally fetch transactions for this subscription
+                        if include_transactions:
+                            try:
+                                txn_response = self._make_request(
+                                    "GET",
+                                    f"/v1/billing/subscriptions/{subscription_id}/transactions",
+                                    {"start_time": subscription_data.get("start_time"), "end_time": subscription_data.get("update_time")}
+                                )
+                                if txn_response.status_code == 200:
+                                    subscription_data["transactions"] = txn_response.json().get("transactions", [])
+                            except Exception:
+                                # Transactions endpoint might not be available
+                                subscription_data["transactions"] = None
 
-                    # Optionally fetch transactions for this subscription
-                    if include_transactions:
-                        try:
-                            txn_response = self._make_request(
-                                "GET",
-                                f"/v1/billing/subscriptions/{subscription_id}/transactions",
-                                {"start_time": subscription_data.get("start_time"), "end_time": subscription_data.get("update_time")}
-                            )
-                            if txn_response.status_code == 200:
-                                subscription_data["transactions"] = txn_response.json().get("transactions", [])
-                        except Exception:
-                            # Transactions endpoint might not be available
-                            subscription_data["transactions"] = None
+                        records.append(subscription_data)
+                    else:
+                        # Log error but continue (subscription might not exist or be inaccessible)
+                        print(f"Warning: Could not fetch subscription {subscription_id}: {response.status_code}")
 
-                    records.append(subscription_data)
-                else:
-                    # Log error but continue (subscription might not exist or be inaccessible)
-                    print(f"Warning: Could not fetch subscription {subscription_id}: {response.status_code}")
+                except Exception as e:
+                    # Log error but continue processing other subscriptions
+                    print(f"Warning: Error fetching subscription {subscription_id}: {e}")
 
-            except Exception as e:
-                # Log error but continue processing other subscriptions
-                print(f"Warning: Error fetching subscription {subscription_id}: {e}")
-
-            # Move to next subscription
-            next_index = current_index + 1
-
-            # Determine next offset
-            if next_index < len(subscription_ids):
-                # More subscriptions to process
-                next_offset = {"index": next_index}
-            else:
-                # All subscriptions processed - return same offset to signal completion
-                next_offset = start_offset if start_offset else {"index": current_index}
+            # All subscriptions processed - signal completion with done flag
+            # For next call, return same offset ({"done": True}) to indicate no more data
+            next_offset = {"done": True}
 
             return iter(records), next_offset
 
