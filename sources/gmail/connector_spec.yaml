@@ -1,0 +1,47 @@
+# Gmail Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+connection:
+  parameters:
+    - name: client_id
+      type: string
+      required: true
+      description: >
+        OAuth 2.0 Client ID from Google Cloud Console.
+        Created when setting up OAuth 2.0 credentials for Gmail API.
+
+    - name: client_secret
+      type: string
+      required: true
+      description: >
+        OAuth 2.0 Client Secret from Google Cloud Console.
+        Corresponds to the client_id above.
+
+    - name: refresh_token
+      type: string
+      required: true
+      description: >
+        OAuth 2.0 refresh token obtained through the authorization flow.
+        Provides long-term access to the Gmail account.
+        Use the get_refresh_token.py helper script to obtain this.
+
+    - name: user_id
+      type: string
+      required: false
+      description: >
+        Gmail user ID to access. Defaults to "me" (the authenticated user).
+        For service accounts with domain-wide delegation, specify the
+        email address of the user to impersonate.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# ============================================================================
+external_options_allowlist: "q,labelIds,includeSpamTrash,format"
