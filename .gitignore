@@ -9,6 +9,7 @@ venv/
 
 # Testing
 .pytest_cache/
+sources/**/configs/dev_config.json
 
 # OS
 .DS_Store
