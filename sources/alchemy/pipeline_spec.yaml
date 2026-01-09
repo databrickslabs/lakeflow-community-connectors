@@ -5,7 +5,7 @@ objects:
   - table:
       source_table: nfts_by_owner
       table_configuration:
-        owner_address: 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
+        owner_address: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
         with_metadata: "true"
         page_size: 10
   - table:
@@ -26,7 +26,7 @@ objects:
   - table:
       source_table: nft_sales
       table_configuration:
-        contract_address: 0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D
+        contract_address: "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D"
   - table:
       source_table: floor_prices
       table_configuration:
