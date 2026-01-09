@@ -1,0 +1,8 @@
+# example pipeline_spec.yaml
+connection_name: alchemy
+objects:
+  # Minimal config for all tables
+  - table:
+      source_table: token_prices
+      table_configuration:
+        symbols: ETH
