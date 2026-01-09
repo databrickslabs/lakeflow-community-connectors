@@ -1,9 +1,5 @@
 from pathlib import Path
 
-# Add project root to path for direct script execution
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-
 from tests import test_suite
 from tests.test_suite import LakeflowConnectTester
 from tests.test_utils import load_config
@@ -37,7 +33,3 @@ def test_bingads_connector():
     assert report.passed_tests == report.total_tests, (
         f"Test suite had failures: {report.failed_tests} failed, {report.error_tests} errors"
     )
-
-
-if __name__ == "__main__":
-    test_bingads_connector()
