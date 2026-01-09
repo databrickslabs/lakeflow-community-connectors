@@ -119,6 +119,10 @@ class LakeflowConnect:
             elif response.status_code == 404:
                 # History ID expired or resource not found
                 return None
+            elif response.status_code == 403:
+                # Forbidden - missing OAuth scope or permission
+                # Return None to allow graceful handling
+                return None
             else:
                 response.raise_for_status()
 
@@ -690,7 +694,7 @@ class LakeflowConnect:
         include_spam_trash: bool,
         table_options: Dict[str, str],
     ) -> (Iterator[dict], dict):
-        """Stream messages with batch fetching for efficiency."""
+        """Stream messages with sequential fetching for reliability."""
         params = {"maxResults": min(max_results, 500)}
         if query:
             params["q"] = query
@@ -700,6 +704,14 @@ class LakeflowConnect:
             params["includeSpamTrash"] = "true"
 
         state = {"latest_history_id": None}
+        format_type = table_options.get("format", "full")
+
+        def fetch_message(mid):
+            return self._make_request(
+                "GET",
+                f"/users/{self.user_id}/messages/{mid}",
+                {"format": format_type}
+            )
 
         def message_generator() -> Generator[Dict, None, None]:
             page_token = None
@@ -716,27 +728,20 @@ class LakeflowConnect:
                     break
 
                 message_ids = [m["id"] for m in response.get("messages", [])]
-                format_type = table_options.get("format", "full")
 
-                for i in range(0, len(message_ids), self.BATCH_SIZE):
-                    batch_ids = message_ids[i : i + self.BATCH_SIZE]
-                    endpoints = [
-                        f"/users/{self.user_id}/messages/{mid}" for mid in batch_ids
-                    ]
-                    params_list = [{"format": format_type}] * len(batch_ids)
-
-                    batch_results = self._make_batch_request(endpoints, params_list)
-
-                    for msg_detail in batch_results:
-                        if msg_detail:
-                            if msg_detail.get("historyId"):
-                                if (
-                                    not state["latest_history_id"]
-                                    or msg_detail["historyId"]
-                                    > state["latest_history_id"]
-                                ):
-                                    state["latest_history_id"] = msg_detail["historyId"]
-                            yield msg_detail
+                # Fetch messages in parallel for better performance
+                with ThreadPoolExecutor(max_workers=self.MAX_WORKERS) as executor:
+                    results = list(executor.map(fetch_message, message_ids))
+                
+                for msg_detail in results:
+                    if msg_detail:
+                        if msg_detail.get("historyId"):
+                            if (
+                                not state["latest_history_id"]
+                                or msg_detail["historyId"] > state["latest_history_id"]
+                            ):
+                                state["latest_history_id"] = msg_detail["historyId"]
+                        yield msg_detail
 
                 page_token = response.get("nextPageToken")
                 if not page_token:
@@ -834,7 +839,7 @@ class LakeflowConnect:
         include_spam_trash: bool,
         table_options: Dict[str, str],
     ) -> (Iterator[dict], dict):
-        """Stream threads with batch fetching."""
+        """Stream threads with parallel fetching for performance."""
         params = {"maxResults": min(max_results, 500)}
         if query:
             params["q"] = query
@@ -846,6 +851,14 @@ class LakeflowConnect:
         state = {"latest_history_id": None}
         all_threads = []
         page_token = None
+        format_type = table_options.get("format", "full")
+
+        def fetch_thread(tid):
+            return self._make_request(
+                "GET",
+                f"/users/{self.user_id}/threads/{tid}",
+                {"format": format_type}
+            )
 
         while True:
             if page_token:
@@ -859,27 +872,20 @@ class LakeflowConnect:
                 break
 
             thread_ids = [t["id"] for t in response.get("threads", [])]
-            format_type = table_options.get("format", "full")
 
-            for i in range(0, len(thread_ids), self.BATCH_SIZE):
-                batch_ids = thread_ids[i : i + self.BATCH_SIZE]
-                endpoints = [
-                    f"/users/{self.user_id}/threads/{tid}" for tid in batch_ids
-                ]
-                params_list = [{"format": format_type}] * len(batch_ids)
+            # Fetch threads in parallel for better performance
+            with ThreadPoolExecutor(max_workers=self.MAX_WORKERS) as executor:
+                results = list(executor.map(fetch_thread, thread_ids))
 
-                batch_results = self._make_batch_request(endpoints, params_list)
-
-                for thread_detail in batch_results:
-                    if thread_detail:
-                        if thread_detail.get("historyId"):
-                            if (
-                                not state["latest_history_id"]
-                                or thread_detail["historyId"]
-                                > state["latest_history_id"]
-                            ):
-                                state["latest_history_id"] = thread_detail["historyId"]
-                        all_threads.append(thread_detail)
+            for thread_detail in results:
+                if thread_detail:
+                    if thread_detail.get("historyId"):
+                        if (
+                            not state["latest_history_id"]
+                            or thread_detail["historyId"] > state["latest_history_id"]
+                        ):
+                            state["latest_history_id"] = thread_detail["historyId"]
+                    all_threads.append(thread_detail)
 
             page_token = response.get("nextPageToken")
             if not page_token:
@@ -948,32 +954,38 @@ class LakeflowConnect:
     def _read_labels(
         self, start_offset: dict, table_options: Dict[str, str]
     ) -> (Iterator[dict], dict):
-        """Read all labels (snapshot mode) with batch fetching."""
+        """Read all labels (snapshot mode)."""
         response = self._make_request("GET", f"/users/{self.user_id}/labels")
 
         if not response or "labels" not in response:
             return iter([]), {}
 
-        label_ids = [label["id"] for label in response.get("labels", [])]
-
+        # Get basic label list first
+        labels = response.get("labels", [])
+        
+        # Fetch full details for each label to get counts and colors
         all_labels = []
-        for i in range(0, len(label_ids), self.BATCH_SIZE):
-            batch_ids = label_ids[i : i + self.BATCH_SIZE]
-            endpoints = [f"/users/{self.user_id}/labels/{lid}" for lid in batch_ids]
-
-            batch_results = self._make_batch_request(endpoints)
-            all_labels.extend([r for r in batch_results if r])
+        for label in labels:
+            label_id = label.get("id")
+            if label_id:
+                detail = self._make_request("GET", f"/users/{self.user_id}/labels/{label_id}")
+                if detail:
+                    all_labels.append(detail)
+                else:
+                    # Fallback to basic info if detail fetch fails
+                    all_labels.append(label)
 
         return iter(all_labels), {}
 
     def _read_drafts(
         self, start_offset: dict, table_options: Dict[str, str]
     ) -> (Iterator[dict], dict):
-        """Read all drafts (snapshot mode) with batch fetching."""
+        """Read all drafts (snapshot mode) with parallel fetching."""
         params = {"maxResults": int(table_options.get("maxResults", "100"))}
 
         all_drafts = []
         page_token = None
+        format_type = table_options.get("format", "full")
 
         while True:
             if page_token:
@@ -987,17 +999,18 @@ class LakeflowConnect:
                 break
 
             draft_ids = [d["id"] for d in response.get("drafts", [])]
-            format_type = table_options.get("format", "full")
 
-            for i in range(0, len(draft_ids), self.BATCH_SIZE):
-                batch_ids = draft_ids[i : i + self.BATCH_SIZE]
-                endpoints = [
-                    f"/users/{self.user_id}/drafts/{did}" for did in batch_ids
-                ]
-                params_list = [{"format": format_type}] * len(batch_ids)
+            # Fetch drafts in parallel for better performance
+            def fetch_draft(draft_id):
+                return self._make_request(
+                    "GET",
+                    f"/users/{self.user_id}/drafts/{draft_id}",
+                    {"format": format_type}
+                )
 
-                batch_results = self._make_batch_request(endpoints, params_list)
-                all_drafts.extend([r for r in batch_results if r])
+            with ThreadPoolExecutor(max_workers=self.MAX_WORKERS) as executor:
+                results = list(executor.map(fetch_draft, draft_ids))
+                all_drafts.extend([r for r in results if r])
 
             page_token = response.get("nextPageToken")
             if not page_token:
