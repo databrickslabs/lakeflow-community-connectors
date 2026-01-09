@@ -176,8 +176,8 @@ Returns historical price data for tokens.
 Returns tokens with balances, prices, and metadata.
 
 **Required Parameters:**
-- `addresses`: Wallet addresses with networks (format: "address@network1|network2,address2@network3")
-  - Max 2 addresses, 5 networks each
+- `addresses`: Wallet addresses (comma-separated). Uses the connection's default network, or optionally specify per-address with `@` (e.g., "0x123@polygon-mainnet")
+  - Max 2 addresses
 
 **Optional Parameters:**
 - `with_metadata`: Include token metadata (default: true)
@@ -191,8 +191,8 @@ Returns tokens with balances, prices, and metadata.
 Returns token balances only.
 
 **Required Parameters:**
-- `addresses`: Wallet addresses with networks (format: "address@network1|network2,address2@network3")
-  - Max 3 addresses, 20 networks each
+- `addresses`: Wallet addresses (comma-separated). Uses the connection's default network, or optionally specify per-address with `@`
+  - Max 3 addresses
 
 **Optional Parameters:**
 - `include_native_tokens`: Include native tokens (default: true)
@@ -204,8 +204,8 @@ Returns token balances only.
 Returns NFTs owned by wallets across networks.
 
 **Required Parameters:**
-- `addresses`: Wallet addresses with networks (format: "address@network1|network2,address2@network3")
-  - Max 2 addresses, 5 networks each
+- `addresses`: Wallet addresses (comma-separated). Uses the connection's default network, or optionally specify per-address with `@`
+  - Max 2 addresses
 
 **Optional Parameters:**
 - `with_metadata`: Include NFT metadata (default: true)
@@ -217,8 +217,8 @@ Returns NFTs owned by wallets across networks.
 Returns transaction history for wallets.
 
 **Required Parameters:**
-- `addresses`: Wallet addresses with networks (format: "address@network1|network2,address2@network3")
-  - Max 2 addresses, 5 networks each
+- `addresses`: Wallet addresses (comma-separated). Uses the connection's default network, or optionally specify per-address with `@`
+  - Max 2 addresses
 
 **Optional Parameters:**
 - `from_block`: Start block number
@@ -236,8 +236,8 @@ Returns transaction history for wallets.
 Returns NFT collections owned by wallets across networks.
 
 **Required Parameters:**
-- `addresses`: Wallet addresses with networks (format: "address@network1|network2,address2@network3")
-  - Max 2 addresses, 5 networks each
+- `addresses`: Wallet addresses (comma-separated). Uses the connection's default network, or optionally specify per-address with `@`
+  - Max 2 addresses
 
 **Optional Parameters:**
 - `with_metadata`: Include collection metadata (default: true)

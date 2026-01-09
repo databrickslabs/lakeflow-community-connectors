@@ -62,84 +62,698 @@ def test_alchemy_connector_core():
 
     print("\n🎉 All core Alchemy connector tests passed!")
     print(f"📊 Successfully tested {len(tables)} tables")
-    print("\n⚠️  Note: Network-dependent read_table tests require a valid Alchemy API key")
-    print("🔧 To test actual API calls, ensure your API key has proper permissions and network access")
 
 
-def test_alchemy_connector_with_mock():
-    """Test the Alchemy connector with mocked network calls"""
-    # Inject the LakeflowConnect class into test_suite module's namespace
-    test_suite.LakeflowConnect = LakeflowConnect
+# =============================================================================
+# NFT API ENDPOINT TESTS
+# =============================================================================
 
-    # Load configuration
+def test_nfts_by_owner():
+    """Test the nfts_by_owner endpoint (GET /getNFTsForOwner)"""
     parent_dir = Path(__file__).parent.parent
-    config_path = parent_dir / "configs" / "dev_config.json"
-    table_config_path = parent_dir / "configs" / "dev_table_config.json"
-
-    config = load_config(config_path)
-    table_config = load_config(table_config_path)
-
-    # Create connector directly
+    config = load_config(parent_dir / "configs" / "dev_config.json")
     connector = LakeflowConnect(config)
-
-    # Mock successful API responses for key tables
-    mock_responses = {
-        "token_prices": {
-            "data": [
+    
+    captured_params = {}
+    
+    def mock_get(url, params=None, **kwargs):
+        nonlocal captured_params
+        captured_params = params or {}
+        
+        assert "getNFTsForOwner" in url
+        response = mock.MagicMock()
+        response.json.return_value = {
+            "ownedNfts": [
                 {
-                    "symbol": "ETH",
-                    "prices": [{"currency": "usd", "value": "3000.00"}]
+                    "contract": {"address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D"},
+                    "tokenId": "1234",
+                    "tokenType": "ERC721",
+                    "title": "Bored Ape #1234",
+                    "description": "A Bored Ape",
+                    "rawMetadata": {"name": "Bored Ape #1234"},
+                    "tokenUri": {"raw": "ipfs://..."},
+                    "media": []
+                }
+            ],
+            "pageKey": None
+        }
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.get', side_effect=mock_get):
+        table_options = {"owner_address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "page_size": "10"}
+        records, offset = connector.read_table("nfts_by_owner", {}, table_options)
+        records_list = list(records)
+        
+        assert "owner" in captured_params
+        assert captured_params["owner"] == "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+        assert len(records_list) == 1
+        print("✅ nfts_by_owner test passed")
+
+
+def test_nfts_for_contract():
+    """Test the nfts_for_contract endpoint (GET /getNFTsForContract)"""
+    parent_dir = Path(__file__).parent.parent
+    config = load_config(parent_dir / "configs" / "dev_config.json")
+    connector = LakeflowConnect(config)
+    
+    captured_params = {}
+    
+    def mock_get(url, params=None, **kwargs):
+        nonlocal captured_params
+        captured_params = params or {}
+        
+        assert "getNFTsForContract" in url
+        response = mock.MagicMock()
+        response.json.return_value = {
+            "nfts": [
+                {
+                    "contract": {"address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D"},
+                    "tokenId": "1",
+                    "tokenType": "ERC721"
                 }
             ]
-        },
-        "contract_metadata": {
-            "contractAddress": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D",
+        }
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.get', side_effect=mock_get):
+        table_options = {"contract_address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D"}
+        records, offset = connector.read_table("nfts_for_contract", {}, table_options)
+        records_list = list(records)
+        
+        assert "contractAddress" in captured_params
+        assert len(records_list) == 1
+        print("✅ nfts_for_contract test passed")
+
+
+def test_nft_metadata():
+    """Test the nft_metadata endpoint (GET /getNFTMetadata)"""
+    parent_dir = Path(__file__).parent.parent
+    config = load_config(parent_dir / "configs" / "dev_config.json")
+    connector = LakeflowConnect(config)
+    
+    captured_params = {}
+    
+    def mock_get(url, params=None, **kwargs):
+        nonlocal captured_params
+        captured_params = params or {}
+        
+        assert "getNFTMetadata" in url
+        response = mock.MagicMock()
+        response.json.return_value = {
+            "contract": {"address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D", "name": "BAYC"},
+            "tokenId": "1",
+            "tokenType": "ERC721",
+            "title": "Bored Ape #1",
+            "description": "A Bored Ape",
+            "rawMetadata": {"name": "Bored Ape #1", "attributes": []},
+            "tokenUri": {"raw": "ipfs://...", "gateway": "https://..."},
+            "media": []
+        }
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.get', side_effect=mock_get):
+        table_options = {"contract_address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D", "token_id": "1"}
+        records, offset = connector.read_table("nft_metadata", {}, table_options)
+        records_list = list(records)
+        
+        assert captured_params["contractAddress"] == "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D"
+        assert captured_params["tokenId"] == "1"
+        assert len(records_list) == 1
+        print("✅ nft_metadata test passed")
+
+
+def test_contract_metadata():
+    """Test the contract_metadata endpoint (GET /getContractMetadata)"""
+    parent_dir = Path(__file__).parent.parent
+    config = load_config(parent_dir / "configs" / "dev_config.json")
+    connector = LakeflowConnect(config)
+    
+    captured_params = {}
+    
+    def mock_get(url, params=None, **kwargs):
+        nonlocal captured_params
+        captured_params = params or {}
+        
+        assert "getContractMetadata" in url
+        response = mock.MagicMock()
+        response.json.return_value = {
+            "address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D",
             "name": "BoredApeYachtClub",
             "symbol": "BAYC",
             "totalSupply": "10000",
             "tokenType": "ERC721"
         }
-    }
-
-    def mock_get(url, params=None, **kwargs):
-        # Mock successful responses for supported endpoints
-        if "tokens/by-symbol" in url:
-            response = mock.MagicMock()
-            response.json.return_value = mock_responses["token_prices"]
-            return response
-        elif "getContractMetadata" in url:
-            response = mock.MagicMock()
-            response.json.return_value = mock_responses["contract_metadata"]
-            return response
-        else:
-            # For unsupported endpoints, raise connection error
-            import requests
-            raise requests.exceptions.ConnectionError("Mocked network error - endpoint not implemented in test")
-
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
     with mock.patch('requests.get', side_effect=mock_get):
-        # Run only specific tests that we have mocks for
-        test_results = []
+        table_options = {"contract_address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D"}
+        records, offset = connector.read_table("contract_metadata", {}, table_options)
+        records_list = list(records)
+        
+        assert captured_params["contractAddress"] == "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D"
+        assert len(records_list) == 1
+        assert records_list[0]["contractAddress"] == "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D"
+        print("✅ contract_metadata test passed")
 
-        # Test the tables we have mocks for
-        mock_supported_tables = ["token_prices", "contract_metadata"]
 
-        for table_name in mock_supported_tables:
-            try:
-                table_options = table_config.get(table_name, {})
-                records, offset = connector.read_table(table_name, {}, table_options)
-                list(records)  # Consume the iterator
-                test_results.append({"table": table_name, "status": "PASSED"})
-                print(f"✅ {table_name} read_table test passed")
-            except Exception as e:
-                test_results.append({"table": table_name, "status": "ERROR", "error": str(e)})
-                print(f"❌ {table_name} read_table test failed: {e}")
+def test_nft_metadata_batch():
+    """Test the nft_metadata_batch endpoint (POST /getNFTMetadataBatch)"""
+    parent_dir = Path(__file__).parent.parent
+    config = load_config(parent_dir / "configs" / "dev_config.json")
+    connector = LakeflowConnect(config)
+    
+    captured_body = {}
+    
+    def mock_post(url, json=None, **kwargs):
+        nonlocal captured_body
+        captured_body = json or {}
+        
+        assert "getNFTMetadataBatch" in url
+        response = mock.MagicMock()
+        response.json.return_value = [
+            {
+                "contract": {"address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D"},
+                "tokenId": "1",
+                "tokenType": "ERC721"
+            },
+            {
+                "contract": {"address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D"},
+                "tokenId": "2",
+                "tokenType": "ERC721"
+            }
+        ]
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.post', side_effect=mock_post):
+        table_options = {"tokens": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D:1,0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D:2"}
+        records, offset = connector.read_table("nft_metadata_batch", {}, table_options)
+        records_list = list(records)
+        
+        assert "tokens" in captured_body
+        assert len(captured_body["tokens"]) == 2
+        assert len(records_list) == 2
+        print("✅ nft_metadata_batch test passed")
 
-        # Check results
-        passed_count = sum(1 for r in test_results if r["status"] == "PASSED")
-        print(f"\n📊 Mock test results: {passed_count}/{len(mock_supported_tables)} tables passed")
 
-        assert passed_count == len(mock_supported_tables), f"Some mock tests failed: {test_results}"
+def test_contract_metadata_batch():
+    """Test the contract_metadata_batch endpoint (POST /getContractMetadataBatch)"""
+    parent_dir = Path(__file__).parent.parent
+    config = load_config(parent_dir / "configs" / "dev_config.json")
+    connector = LakeflowConnect(config)
+    
+    captured_body = {}
+    
+    def mock_post(url, json=None, **kwargs):
+        nonlocal captured_body
+        captured_body = json or {}
+        
+        assert "getContractMetadataBatch" in url
+        response = mock.MagicMock()
+        response.json.return_value = [
+            {"address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D", "name": "BAYC"},
+            {"address": "0x60E4d786628Fea6478F785A6d7e704777c86a7c6", "name": "MAYC"}
+        ]
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.post', side_effect=mock_post):
+        table_options = {"contract_addresses": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D,0x60E4d786628Fea6478F785A6d7e704777c86a7c6"}
+        records, offset = connector.read_table("contract_metadata_batch", {}, table_options)
+        records_list = list(records)
+        
+        assert "contractAddresses" in captured_body
+        assert len(captured_body["contractAddresses"]) == 2
+        assert len(records_list) == 2
+        print("✅ contract_metadata_batch test passed")
 
+
+def test_nft_sales():
+    """Test the nft_sales endpoint (GET /getNFTSales)"""
+    parent_dir = Path(__file__).parent.parent
+    config = load_config(parent_dir / "configs" / "dev_config.json")
+    connector = LakeflowConnect(config)
+    
+    captured_params = {}
+    
+    def mock_get(url, params=None, **kwargs):
+        nonlocal captured_params
+        captured_params = params or {}
+        
+        assert "getNFTSales" in url
+        response = mock.MagicMock()
+        response.json.return_value = {
+            "nftSales": [
+                {
+                    "contractAddress": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D",
+                    "tokenId": "1234",
+                    "transactionHash": "0x123...",
+                    "logIndex": 0,
+                    "blockNumber": 15000000,
+                    "sellerAddress": "0x111...",
+                    "buyerAddress": "0x222...",
+                    "sellerFee": {"amount": "1000000000000000000"},
+                    "protocolFee": {"amount": "25000000000000000"},
+                    "royaltyFee": {"amount": "25000000000000000"},
+                    "marketplace": "opensea",
+                    "quantity": "1",
+                    "taker": "BUYER"
+                }
+            ],
+            "pageKey": None
+        }
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.get', side_effect=mock_get):
+        table_options = {"contract_address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D", "order": "desc"}
+        records, offset = connector.read_table("nft_sales", {}, table_options)
+        records_list = list(records)
+        
+        assert captured_params["order"] == "desc"
+        assert len(records_list) == 1
+        print("✅ nft_sales test passed")
+
+
+def test_floor_prices():
+    """Test the floor_prices endpoint (GET /getFloorPrice)"""
+    parent_dir = Path(__file__).parent.parent
+    config = load_config(parent_dir / "configs" / "dev_config.json")
+    connector = LakeflowConnect(config)
+    
+    captured_params = {}
+    
+    def mock_get(url, params=None, **kwargs):
+        nonlocal captured_params
+        captured_params = params or {}
+        
+        assert "getFloorPrice" in url
+        response = mock.MagicMock()
+        response.json.return_value = {
+            "openSea": {"floorPrice": 25.5, "priceCurrency": "ETH"},
+            "looksRare": {"floorPrice": 24.8, "priceCurrency": "ETH"}
+        }
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.get', side_effect=mock_get):
+        table_options = {"contract_address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D"}
+        records, offset = connector.read_table("floor_prices", {}, table_options)
+        records_list = list(records)
+        
+        assert captured_params["contractAddress"] == "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D"
+        assert len(records_list) == 1
+        assert records_list[0]["contractAddress"] == "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D"
+        print("✅ floor_prices test passed")
+
+
+# =============================================================================
+# TOKEN/PRICE API ENDPOINT TESTS
+# =============================================================================
+
+def test_token_prices():
+    """Test the token_prices endpoint (GET /tokens/by-symbol)"""
+    parent_dir = Path(__file__).parent.parent
+    config = load_config(parent_dir / "configs" / "dev_config.json")
+    connector = LakeflowConnect(config)
+    
+    captured_params = {}
+    
+    def mock_get(url, params=None, **kwargs):
+        nonlocal captured_params
+        captured_params = params or {}
+        
+        assert "tokens/by-symbol" in url
+        response = mock.MagicMock()
+        response.json.return_value = {
+            "data": [
+                {"symbol": "ETH", "prices": [{"currency": "usd", "value": "3000.00"}]},
+                {"symbol": "BTC", "prices": [{"currency": "usd", "value": "60000.00"}]}
+            ]
+        }
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.get', side_effect=mock_get):
+        table_options = {"symbols": "ETH,BTC"}
+        records, offset = connector.read_table("token_prices", {}, table_options)
+        records_list = list(records)
+        
+        assert "symbols" in captured_params
+        assert isinstance(captured_params["symbols"], list)
+        assert captured_params["symbols"] == ["ETH", "BTC"]
+        assert len(records_list) == 2
+        print("✅ token_prices test passed")
+
+
+def test_token_prices_by_address():
+    """Test the token_prices_by_address endpoint (POST /tokens/by-address)"""
+    parent_dir = Path(__file__).parent.parent
+    config = load_config(parent_dir / "configs" / "dev_config.json")
+    connector = LakeflowConnect(config)
+    
+    captured_body = {}
+    
+    def mock_post(url, json=None, **kwargs):
+        nonlocal captured_body
+        captured_body = json or {}
+        
+        assert "tokens/by-address" in url
+        response = mock.MagicMock()
+        response.json.return_value = {
+            "data": [
+                {
+                    "network": "eth-mainnet",
+                    "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                    "prices": [{"currency": "usd", "value": "1.00"}]
+                }
+            ]
+        }
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.post', side_effect=mock_post):
+        table_options = {"addresses": "eth-mainnet:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"}
+        records, offset = connector.read_table("token_prices_by_address", {}, table_options)
+        records_list = list(records)
+        
+        assert "addresses" in captured_body
+        assert len(records_list) == 1
+        print("✅ token_prices_by_address test passed")
+
+
+def test_token_prices_historical():
+    """Test the token_prices_historical endpoint (POST /tokens/historical)"""
+    parent_dir = Path(__file__).parent.parent
+    config = load_config(parent_dir / "configs" / "dev_config.json")
+    connector = LakeflowConnect(config)
+    
+    captured_body = {}
+    
+    def mock_post(url, json=None, **kwargs):
+        nonlocal captured_body
+        captured_body = json or {}
+        
+        assert "tokens/historical" in url
+        response = mock.MagicMock()
+        response.json.return_value = {
+            "data": [
+                {"symbol": "ETH", "timestamp": "2024-01-01T00:00:00Z", "value": "2500.00"},
+                {"symbol": "ETH", "timestamp": "2024-01-02T00:00:00Z", "value": "2600.00"}
+            ]
+        }
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.post', side_effect=mock_post):
+        table_options = {
+            "symbol": "ETH",
+            "start_time": "2024-01-01T00:00:00Z",
+            "end_time": "2024-01-02T00:00:00Z"
+        }
+        records, offset = connector.read_table("token_prices_historical", {}, table_options)
+        records_list = list(records)
+        
+        assert captured_body["symbol"] == "ETH"
+        assert captured_body["startTime"] == "2024-01-01T00:00:00Z"
+        assert captured_body["endTime"] == "2024-01-02T00:00:00Z"
+        assert len(records_list) == 2
+        print("✅ token_prices_historical test passed")
+
+
+# =============================================================================
+# PORTFOLIO API ENDPOINT TESTS
+# =============================================================================
+
+def test_tokens_by_wallet():
+    """Test the tokens_by_wallet endpoint (POST /getTokensByWallet)"""
+    parent_dir = Path(__file__).parent.parent
+    config = load_config(parent_dir / "configs" / "dev_config.json")
+    connector = LakeflowConnect(config)
+    
+    captured_body = {}
+    
+    def mock_post(url, json=None, **kwargs):
+        nonlocal captured_body
+        captured_body = json or {}
+        
+        assert "getTokensByWallet" in url
+        response = mock.MagicMock()
+        response.json.return_value = [
+            {
+                "address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+                "network": "ETH_MAINNET",
+                "tokenBalances": [
+                    {"contractAddress": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "tokenBalance": "1000000000"}
+                ]
+            }
+        ]
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.post', side_effect=mock_post):
+        table_options = {"addresses": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"}
+        records, offset = connector.read_table("tokens_by_wallet", {}, table_options)
+        records_list = list(records)
+        
+        assert "addresses" in captured_body
+        assert len(captured_body["addresses"]) == 1
+        assert captured_body["addresses"][0]["network"] == "ETH_MAINNET"
+        assert len(records_list) == 1
+        print("✅ tokens_by_wallet test passed")
+
+
+def test_token_balances_by_wallet():
+    """Test the token_balances_by_wallet endpoint (POST /getTokenBalancesByWallet)"""
+    parent_dir = Path(__file__).parent.parent
+    config = load_config(parent_dir / "configs" / "dev_config.json")
+    connector = LakeflowConnect(config)
+    
+    captured_body = {}
+    
+    def mock_post(url, json=None, **kwargs):
+        nonlocal captured_body
+        captured_body = json or {}
+        
+        assert "getTokenBalancesByWallet" in url
+        response = mock.MagicMock()
+        response.json.return_value = [
+            {
+                "address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+                "network": "ETH_MAINNET",
+                "tokenBalances": [
+                    {"contractAddress": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "tokenBalance": "1000000000"}
+                ]
+            }
+        ]
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.post', side_effect=mock_post):
+        table_options = {"addresses": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"}
+        records, offset = connector.read_table("token_balances_by_wallet", {}, table_options)
+        records_list = list(records)
+        
+        assert "addresses" in captured_body
+        assert captured_body["addresses"][0]["network"] == "ETH_MAINNET"
+        assert len(records_list) == 1
+        print("✅ token_balances_by_wallet test passed")
+
+
+def test_nfts_by_wallet():
+    """Test the nfts_by_wallet endpoint (POST /getNftsByWallet)"""
+    parent_dir = Path(__file__).parent.parent
+    config = load_config(parent_dir / "configs" / "dev_config.json")
+    connector = LakeflowConnect(config)
+    
+    captured_body = {}
+    
+    def mock_post(url, json=None, **kwargs):
+        nonlocal captured_body
+        captured_body = json or {}
+        
+        assert "getNftsByWallet" in url
+        response = mock.MagicMock()
+        response.json.return_value = [
+            {
+                "address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+                "network": "ETH_MAINNET",
+                "nfts": [
+                    {"contractAddress": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D", "tokenId": "1234", "balance": "1"}
+                ]
+            }
+        ]
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.post', side_effect=mock_post):
+        table_options = {"addresses": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "page_size": "10"}
+        records, offset = connector.read_table("nfts_by_wallet", {}, table_options)
+        records_list = list(records)
+        
+        assert "addresses" in captured_body
+        assert captured_body["addresses"][0]["network"] == "ETH_MAINNET"
+        assert len(records_list) == 1
+        print("✅ nfts_by_wallet test passed")
+
+
+def test_nft_collections_by_wallet():
+    """Test the nft_collections_by_wallet endpoint (POST /getNftCollectionsByWallet)"""
+    parent_dir = Path(__file__).parent.parent
+    config = load_config(parent_dir / "configs" / "dev_config.json")
+    connector = LakeflowConnect(config)
+    
+    captured_body = {}
+    
+    def mock_post(url, json=None, **kwargs):
+        nonlocal captured_body
+        captured_body = json or {}
+        
+        assert "getNftCollectionsByWallet" in url
+        response = mock.MagicMock()
+        response.json.return_value = [
+            {
+                "address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+                "network": "ETH_MAINNET",
+                "collections": [
+                    {"contractAddress": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D", "name": "BAYC", "count": 2}
+                ]
+            }
+        ]
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.post', side_effect=mock_post):
+        table_options = {"addresses": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"}
+        records, offset = connector.read_table("nft_collections_by_wallet", {}, table_options)
+        records_list = list(records)
+        
+        assert "addresses" in captured_body
+        assert captured_body["addresses"][0]["network"] == "ETH_MAINNET"
+        assert len(records_list) == 1
+        print("✅ nft_collections_by_wallet test passed")
+
+
+def test_wallet_transactions():
+    """Test the wallet_transactions endpoint (POST /getTransactionsByWallet)"""
+    parent_dir = Path(__file__).parent.parent
+    config = load_config(parent_dir / "configs" / "dev_config.json")
+    connector = LakeflowConnect(config)
+    
+    captured_body = {}
+    
+    def mock_post(url, json=None, **kwargs):
+        nonlocal captured_body
+        captured_body = json or {}
+        
+        assert "getTransactionsByWallet" in url
+        response = mock.MagicMock()
+        response.json.return_value = [
+            {
+                "address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+                "network": "ETH_MAINNET",
+                "transactions": [
+                    {
+                        "hash": "0x123...",
+                        "blockNum": "15000000",
+                        "from": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+                        "to": "0x222...",
+                        "value": "1000000000000000000"
+                    }
+                ]
+            }
+        ]
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.post', side_effect=mock_post):
+        table_options = {"addresses": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "order": "desc"}
+        records, offset = connector.read_table("wallet_transactions", {}, table_options)
+        records_list = list(records)
+        
+        assert "addresses" in captured_body
+        assert captured_body["addresses"][0]["network"] == "ETH_MAINNET"
+        assert len(records_list) == 1
+        print("✅ wallet_transactions test passed")
+
+
+# =============================================================================
+# WEBHOOK API ENDPOINT TESTS
+# =============================================================================
+
+def test_webhooks():
+    """Test the webhooks endpoint (GET /team-webhooks)"""
+    parent_dir = Path(__file__).parent.parent
+    config = load_config(parent_dir / "configs" / "dev_config.json")
+    config["webhook_auth_token"] = "test_token"  # Add webhook auth token
+    connector = LakeflowConnect(config)
+    
+    def mock_get(url, params=None, **kwargs):
+        assert "team-webhooks" in url
+        # Check for auth header
+        headers = kwargs.get("headers", {})
+        assert headers.get("X-Alchemy-Token") == "test_token"
+        
+        response = mock.MagicMock()
+        response.json.return_value = {
+            "data": [
+                {"id": "wh_123", "network": "ETH_MAINNET", "webhook_type": "ADDRESS_ACTIVITY", "is_active": True}
+            ]
+        }
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.get', side_effect=mock_get):
+        records, offset = connector.read_table("webhooks", {}, {})
+        records_list = list(records)
+        
+        assert len(records_list) == 1
+        assert records_list[0]["id"] == "wh_123"
+        print("✅ webhooks test passed")
+
+
+def test_webhook_addresses():
+    """Test the webhook_addresses endpoint (GET /webhook-addresses)"""
+    parent_dir = Path(__file__).parent.parent
+    config = load_config(parent_dir / "configs" / "dev_config.json")
+    config["webhook_auth_token"] = "test_token"
+    connector = LakeflowConnect(config)
+    
+    captured_params = {}
+    
+    def mock_get(url, params=None, **kwargs):
+        nonlocal captured_params
+        captured_params = params or {}
+        
+        assert "webhook-addresses" in url
+        headers = kwargs.get("headers", {})
+        assert headers.get("X-Alchemy-Token") == "test_token"
+        
+        response = mock.MagicMock()
+        response.json.return_value = {
+            "addresses": ["0x111...", "0x222...", "0x333..."],
+            "totalCount": 3
+        }
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.get', side_effect=mock_get):
+        table_options = {"webhook_id": "wh_123"}
+        records, offset = connector.read_table("webhook_addresses", {}, table_options)
+        records_list = list(records)
+        
+        assert captured_params["webhook_id"] == "wh_123"
+        assert len(records_list) == 3
+        print("✅ webhook_addresses test passed")
+
+
+# =============================================================================
+# SPECIAL CASE TESTS
+# =============================================================================
 
 def test_token_prices_multiple_symbols():
     """
@@ -148,22 +762,16 @@ def test_token_prices_multiple_symbols():
     The Alchemy API expects: ?symbols=ETH&symbols=BTC&symbols=SOL
     Not: ?symbols=ETH,BTC,SOL
     """
-    # Load configuration
     parent_dir = Path(__file__).parent.parent
-    config_path = parent_dir / "configs" / "dev_config.json"
-    config = load_config(config_path)
-    
-    # Create connector
+    config = load_config(parent_dir / "configs" / "dev_config.json")
     connector = LakeflowConnect(config)
     
-    # Track the params that were sent to the API
     captured_params = {}
     
     def mock_get(url, params=None, **kwargs):
         nonlocal captured_params
         captured_params = params or {}
         
-        # Return mock response
         response = mock.MagicMock()
         response.json.return_value = {
             "data": [
@@ -176,37 +784,22 @@ def test_token_prices_multiple_symbols():
         return response
     
     with mock.patch('requests.get', side_effect=mock_get):
-        # Test with multiple comma-separated symbols
         table_options = {"symbols": "ETH,BTC,SOL"}
         records, offset = connector.read_table("token_prices", {}, table_options)
         records_list = list(records)
         
-        # Verify the symbols parameter was sent as a list (array-style)
-        assert "symbols" in captured_params, "symbols parameter should be in request params"
-        assert isinstance(captured_params["symbols"], list), \
-            f"symbols should be a list, got {type(captured_params['symbols'])}"
-        assert captured_params["symbols"] == ["ETH", "BTC", "SOL"], \
-            f"symbols should be ['ETH', 'BTC', 'SOL'], got {captured_params['symbols']}"
-        
-        # Verify we got the expected records
-        assert len(records_list) == 3, f"Expected 3 records, got {len(records_list)}"
-        
+        assert isinstance(captured_params["symbols"], list)
+        assert captured_params["symbols"] == ["ETH", "BTC", "SOL"]
+        assert len(records_list) == 3
         print("✅ Multiple symbols test passed!")
-        print(f"   Sent params: {captured_params}")
-        print(f"   Records received: {len(records_list)}")
 
 
 def test_token_prices_single_symbol():
     """Test that token_prices also works correctly with a single symbol."""
-    # Load configuration
     parent_dir = Path(__file__).parent.parent
-    config_path = parent_dir / "configs" / "dev_config.json"
-    config = load_config(config_path)
-    
-    # Create connector
+    config = load_config(parent_dir / "configs" / "dev_config.json")
     connector = LakeflowConnect(config)
     
-    # Track the params that were sent to the API
     captured_params = {}
     
     def mock_get(url, params=None, **kwargs):
@@ -215,24 +808,86 @@ def test_token_prices_single_symbol():
         
         response = mock.MagicMock()
         response.json.return_value = {
-            "data": [
-                {"symbol": "ETH", "prices": [{"currency": "usd", "value": "3000.00"}]}
-            ]
+            "data": [{"symbol": "ETH", "prices": [{"currency": "usd", "value": "3000.00"}]}]
         }
         response.raise_for_status = mock.MagicMock()
         return response
     
     with mock.patch('requests.get', side_effect=mock_get):
-        # Test with single symbol (no comma)
         table_options = {"symbols": "ETH"}
         records, offset = connector.read_table("token_prices", {}, table_options)
         records_list = list(records)
         
-        # Even single symbol should be sent as a list
-        assert "symbols" in captured_params
         assert isinstance(captured_params["symbols"], list)
         assert captured_params["symbols"] == ["ETH"]
         assert len(records_list) == 1
-        
         print("✅ Single symbol test passed!")
-        print(f"   Sent params: {captured_params}")
+
+
+def test_portfolio_with_network_override():
+    """Test that portfolio endpoints correctly handle network override with @ syntax."""
+    parent_dir = Path(__file__).parent.parent
+    config = load_config(parent_dir / "configs" / "dev_config.json")
+    connector = LakeflowConnect(config)
+    
+    captured_body = {}
+    
+    def mock_post(url, json=None, **kwargs):
+        nonlocal captured_body
+        captured_body = json or {}
+        
+        response = mock.MagicMock()
+        response.json.return_value = [
+            {
+                "address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+                "network": "POLYGON_MAINNET",
+                "tokenBalances": []
+            }
+        ]
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.post', side_effect=mock_post):
+        # Test with explicit network override using @ syntax
+        table_options = {"addresses": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045@polygon-mainnet"}
+        records, offset = connector.read_table("tokens_by_wallet", {}, table_options)
+        list(records)
+        
+        # Should use the overridden network, not the default
+        assert captured_body["addresses"][0]["network"] == "POLYGON_MAINNET"
+        print("✅ Network override test passed!")
+
+
+def test_nft_metadata_string_normalization():
+    """Test that nft_metadata correctly normalizes string fields to objects."""
+    parent_dir = Path(__file__).parent.parent
+    config = load_config(parent_dir / "configs" / "dev_config.json")
+    connector = LakeflowConnect(config)
+    
+    def mock_get(url, params=None, **kwargs):
+        response = mock.MagicMock()
+        # Simulate API returning string values instead of objects
+        response.json.return_value = {
+            "contract": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D",  # String instead of object
+            "tokenId": "1",
+            "tokenType": "ERC721",
+            "rawMetadata": '{"name": "Test"}',  # JSON string instead of object
+            "tokenUri": "ipfs://test",  # String instead of object
+            "media": "[]"  # JSON string instead of array
+        }
+        response.raise_for_status = mock.MagicMock()
+        return response
+    
+    with mock.patch('requests.get', side_effect=mock_get):
+        table_options = {"contract_address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D", "token_id": "1"}
+        records, offset = connector.read_table("nft_metadata", {}, table_options)
+        records_list = list(records)
+        
+        record = records_list[0]
+        # Check that string fields were normalized to proper objects
+        assert isinstance(record["contract"], dict)
+        assert record["contract"]["address"] == "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D"
+        assert isinstance(record["tokenUri"], dict)
+        assert record["tokenUri"]["raw"] == "ipfs://test"
+        assert isinstance(record["rawMetadata"], dict)
+        print("✅ NFT metadata string normalization test passed!")

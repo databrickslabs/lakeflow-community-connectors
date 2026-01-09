@@ -32,19 +32,19 @@
     "end_time": "2024-01-02T00:00:00Z"
   },
   "tokens_by_wallet": {
-    "addresses": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045@eth-mainnet",
+    "addresses": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
     "with_metadata": "true",
     "with_prices": "true"
   },
   "token_balances_by_wallet": {
-    "addresses": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045@eth-mainnet"
+    "addresses": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
   },
   "nfts_by_wallet": {
-    "addresses": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045@eth-mainnet",
+    "addresses": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
     "page_size": "10"
   },
   "wallet_transactions": {
-    "addresses": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045@eth-mainnet",
+    "addresses": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
     "order": "desc"
   }
 }
