@@ -6,13 +6,13 @@ objects:
       source_table: nfts_by_owner
       table_configuration:
         owner_address: 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
-        with_metadata: true
+        with_metadata: "true"
         page_size: 10
   - table:
       source_table: nfts_for_contract
       table_configuration:
         contract_address: 0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D
-        with_metadata: true
+        with_metadata: "true"
         page_size: 10
   - table:
       source_table: nft_metadata
@@ -39,8 +39,8 @@ objects:
       source_table: token_prices_historical
       table_configuration:
         symbol: ETH
-        start_time: 2024-01-01T00:00:00Z
-        end_time: 2024-01-02T00:00:00Z
+        start_time: "2024-01-01T00:00:00Z"
+        end_time: "2024-01-02T00:00:00Z"
   - table:
       source_table: tokens_by_wallet
       table_configuration:
