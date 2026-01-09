@@ -7,13 +7,20 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Iterator
+from typing import (
+    Any,
+    Dict,
+    Iterator,
+    List,
+)
 import json
+import os
 
 from pyspark.sql import Row
 from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
 from pyspark.sql.types import *
 import base64
+import requests
 
 
 def register_lakeflow_source(spark):
@@ -205,36 +212,6 @@ def register_lakeflow_source(spark):
     ########################################################
     # sources/particle/particle.py
     ########################################################
-
-    Particle.io REST API connector for Lakeflow.
-
-    This connector provides access to Particle Device Cloud data including:
-    - Devices (user-owned and product devices)
-    - Products
-    - SIM cards and data usage
-    - Device diagnostics/vitals
-    - User information
-    - OAuth clients
-
-    Authentication: Bearer token via Particle access token.
-    Base URL: https://api.particle.io
-    """
-
-    from datetime import datetime
-    from typing import Iterator, Any, Dict, List
-
-    import requests
-    from pyspark.sql.types import (
-        StructType,
-        StructField,
-        LongType,
-        StringType,
-        BooleanType,
-        ArrayType,
-        MapType,
-        DoubleType,
-    )
-
 
     class LakeflowConnect:
         """Particle.io REST API connector implementing the LakeflowConnect interface."""
