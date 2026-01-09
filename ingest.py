@@ -28,7 +28,7 @@ pipeline_spec = {
     "objects": [
         {
             "table": {
-                "source_table": "test_db",
+                "source_table": "testdb.orders",
             }
         }
     ]
