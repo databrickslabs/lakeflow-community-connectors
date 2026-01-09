@@ -10,6 +10,33 @@ Alchemy provides REST APIs for accessing blockchain data including NFTs, token p
 
 All requests require an API key obtained from the Alchemy Dashboard. The API key is passed in the URL path for most endpoints.
 
+## Parameter Naming Convention
+
+This connector uses **snake_case** for user-facing parameters (e.g., `start_time`, `page_size`), which are automatically converted to **camelCase** when calling the Alchemy API (e.g., `startTime`, `pageSize`). The table below shows the mapping:
+
+| Connector Parameter | Alchemy API Parameter |
+|--------------------|-----------------------|
+| `start_time` | `startTime` |
+| `end_time` | `endTime` |
+| `page_size` | `pageSize` |
+| `page_key` | `pageKey` |
+| `with_metadata` | `withMetadata` |
+| `with_prices` | `withPrices` |
+| `owner_address` | `owner` |
+| `contract_address` | `contractAddress` |
+| `contract_addresses` | `contractAddresses` |
+| `token_id` | `tokenId` |
+| `token_type` | `tokenType` |
+| `refresh_cache` | `refreshCache` |
+| `start_token` | `startToken` |
+| `from_block` | `fromBlock` |
+| `to_block` | `toBlock` |
+| `from_timestamp` | `fromTimestamp` |
+| `to_timestamp` | `toTimestamp` |
+| `include_native_tokens` | `includeNativeTokens` |
+| `include_erc20_tokens` | `includeErc20Tokens` |
+| `webhook_id` | `webhook_id` |
+
 ## Supported Tables
 
 ### NFT Tables
@@ -133,18 +160,15 @@ Returns current token prices by contract address.
 #### token_prices_historical
 Returns historical price data for tokens.
 
-**Required Parameters (choose one method):**
-- Method 1: `symbol` + `network` + `address`
-- Method 2: `symbol` only (for major tokens)
-
 **Required Parameters:**
-- `start_time`: ISO timestamp start
-- `end_time`: ISO timestamp end
+- `symbol`: Token symbol (e.g., "ETH", "BTC")
+- `start_time`: ISO timestamp start (e.g., "2024-01-01T00:00:00Z")
+- `end_time`: ISO timestamp end (e.g., "2024-01-31T23:59:59Z")
 
 **Optional Parameters:**
-- `interval`: Data interval
+- `interval`: Data interval (e.g., "1d" for daily)
 
-**API Endpoint:** `GET /api.g.alchemy.com/prices/v1/{apiKey}/tokens/historical`
+**API Endpoint:** `POST /api.g.alchemy.com/prices/v1/{apiKey}/tokens/historical`
 
 ### Portfolio Tables
 
@@ -152,51 +176,59 @@ Returns historical price data for tokens.
 Returns tokens with balances, prices, and metadata.
 
 **Required Parameters:**
-- `addresses`: Wallet addresses with networks (max 2 addresses, 5 networks each)
+- `addresses`: Wallet addresses with networks (format: "address@network1|network2,address2@network3")
+  - Max 2 addresses, 5 networks each
 
 **Optional Parameters:**
 - `with_metadata`: Include token metadata (default: true)
 - `with_prices`: Include token prices (default: true)
 - `include_native_tokens`: Include native tokens like ETH (default: true)
+- `include_erc20_tokens`: Include ERC-20 tokens (default: true)
 
-**API Endpoint:** `GET /api.g.alchemy.com/data/v1/{apiKey}/getTokensByWallet`
+**API Endpoint:** `POST /api.g.alchemy.com/data/v1/{apiKey}/getTokensByWallet`
 
 #### token_balances_by_wallet
 Returns token balances only.
 
 **Required Parameters:**
-- `addresses`: Wallet addresses with networks (max 3 addresses, 20 networks each)
+- `addresses`: Wallet addresses with networks (format: "address@network1|network2,address2@network3")
+  - Max 3 addresses, 20 networks each
 
 **Optional Parameters:**
 - `include_native_tokens`: Include native tokens (default: true)
 - `include_erc20_tokens`: Include ERC-20 tokens (default: true)
 
-**API Endpoint:** `GET /api.g.alchemy.com/data/v1/{apiKey}/getTokenBalancesByWallet`
+**API Endpoint:** `POST /api.g.alchemy.com/data/v1/{apiKey}/getTokenBalancesByWallet`
 
 #### nfts_by_wallet
 Returns NFTs owned by wallets across networks.
 
 **Required Parameters:**
-- `addresses`: Wallet addresses with networks (max 2 addresses, 5 networks each)
+- `addresses`: Wallet addresses with networks (format: "address@network1|network2,address2@network3")
+  - Max 2 addresses, 5 networks each
 
 **Optional Parameters:**
+- `with_metadata`: Include NFT metadata (default: true)
 - `page_size`: Results per page (max 100)
 
-**API Endpoint:** `GET /api.g.alchemy.com/data/v1/{apiKey}/getNftsByWallet`
+**API Endpoint:** `POST /api.g.alchemy.com/data/v1/{apiKey}/getNftsByWallet`
 
 #### wallet_transactions
 Returns transaction history for wallets.
 
 **Required Parameters:**
-- `addresses`: Wallet addresses with networks (max 2 addresses, 5 networks each)
+- `addresses`: Wallet addresses with networks (format: "address@network1|network2,address2@network3")
+  - Max 2 addresses, 5 networks each
 
 **Optional Parameters:**
-- `from_block`: Start block
-- `to_block`: End block
-- `from_timestamp`: Start timestamp
-- `to_timestamp`: End timestamp
-- `category`: Transaction categories to include
+- `from_block`: Start block number
+- `to_block`: End block number
+- `from_timestamp`: Start timestamp (Unix or ISO 8601)
+- `to_timestamp`: End timestamp (Unix or ISO 8601)
+- `category`: Transaction categories (comma-separated: external,internal,erc20,erc721,erc1155)
 - `order`: 'asc' or 'desc'
+- `page_size`: Results per page
+- `page_key`: Pagination cursor
 
 **API Endpoint:** `POST /api.g.alchemy.com/data/v1/{apiKey}/getTransactionsByWallet`
 
@@ -204,42 +236,13 @@ Returns transaction history for wallets.
 Returns NFT collections owned by wallets across networks.
 
 **Required Parameters:**
-- `addresses`: Wallet addresses with networks (max 2 addresses, 5 networks each)
+- `addresses`: Wallet addresses with networks (format: "address@network1|network2,address2@network3")
+  - Max 2 addresses, 5 networks each
 
 **Optional Parameters:**
 - `with_metadata`: Include collection metadata (default: true)
 
 **API Endpoint:** `POST /api.g.alchemy.com/data/v1/{apiKey}/getNftCollectionsByWallet`
-
-### New POST Endpoints
-
-#### nft_metadata_batch
-Returns metadata for multiple NFTs (up to 100).
-
-**Required Parameters:**
-- `tokens`: Array of contract address and token ID pairs (format: "contract:tokenId,contract:tokenId")
-
-**Optional Parameters:**
-- `token_uri_timeout_in_ms`: Timeout for metadata fetch (ms)
-- `refresh_cache`: Force cache refresh
-
-**API Endpoint:** `POST /{network}.g.alchemy.com/nft/v3/{apiKey}/getNFTMetadataBatch`
-
-#### contract_metadata_batch
-Returns metadata for multiple NFT contracts.
-
-**Required Parameters:**
-- `contract_addresses`: Comma-separated list of contract addresses
-
-**API Endpoint:** `POST /{network}.g.alchemy.com/nft/v3/{apiKey}/getContractMetadataBatch`
-
-#### token_prices_by_address
-Returns token prices by contract address.
-
-**Required Parameters:**
-- `addresses`: Network and address pairs (format: "network:address,network:address")
-
-**API Endpoint:** `POST /api.g.alchemy.com/prices/v1/{apiKey}/tokens/by-address`
 
 ### Webhook Tables
 
