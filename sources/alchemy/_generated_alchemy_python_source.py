@@ -1137,13 +1137,20 @@ def register_lakeflow_source(spark):
                 return data.get("ownedNfts", []) if "ownedNfts" in data else [data] if table_name == "nft_metadata" else []
 
             elif table_name == "contract_metadata":
-                return [data]
+                # Ensure contractAddress is in the response (may be returned as 'address' or missing)
+                record = dict(data)
+                if "contractAddress" not in record:
+                    record["contractAddress"] = record.get("address") or table_options.get("contract_address")
+                return [record]
 
             elif table_name == "nft_sales":
                 return data.get("nftSales", [])
 
             elif table_name == "floor_prices":
-                return [data]
+                # API response doesn't include contractAddress, add it from table_options
+                record = dict(data)
+                record["contractAddress"] = table_options.get("contract_address")
+                return [record]
 
             elif table_name == "token_prices":
                 return data.get("data", [])
