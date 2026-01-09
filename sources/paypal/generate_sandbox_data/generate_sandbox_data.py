@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
 """
-Generate test data in PayPal Sandbox for all connector tables
+Generate test data in PayPal Sandbox for ALL connector tables
 
-This script creates test data for:
+This script creates test data for all 14 PayPal connector tables:
 1. Products (catalog products)
 2. Plans (billing plans linked to products)
 3. Subscriptions (subscriptions linked to plans)
 4. Transactions (payment captures)
 5. Payment Captures (derived from transactions)
+6. Payment Experiences (web payment profiles)
+7. Tracking (shipment tracking information)
+8. Refunds (refund transactions)
+9. Payment Authorizations (authorization-only orders)
+10. Payouts (payout batches) - may require additional setup
+11. Disputes - AUTO-GENERATED (cannot be created programmatically)
+12. Webhooks Events - AUTO-GENERATED (created by PayPal actions)
+13. Invoices - REQUIRES SPECIAL PERMISSIONS (not available in basic Sandbox)
+14. Orders - Already created during transaction generation
 """
 
 import requests
@@ -15,7 +24,8 @@ import base64
 import json
 import uuid
 import random
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 
 # Base URL for sandbox
 BASE_URL = 'https://api-m.sandbox.paypal.com'
@@ -41,11 +51,7 @@ def get_access_token(client_id, client_secret):
 
 
 def create_product(access_token, name, description, product_type="SERVICE", category="SOFTWARE"):
-    """
-    Create a product in the catalog.
-    
-    Products are the foundation for billing plans and subscriptions.
-    """
+    """Create a product in the catalog."""
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
@@ -83,11 +89,7 @@ def create_product(access_token, name, description, product_type="SERVICE", cate
 
 
 def create_billing_plan(access_token, product_id, plan_name, plan_description, amount, currency="USD", frequency="MONTH"):
-    """
-    Create a billing plan for a product.
-    
-    Plans define pricing and billing cycles for subscriptions.
-    """
+    """Create a billing plan for a product."""
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
@@ -106,7 +108,7 @@ def create_billing_plan(access_token, product_id, plan_name, plan_description, a
                 },
                 "tenure_type": "REGULAR",
                 "sequence": 1,
-                "total_cycles": 0,  # 0 = infinite
+                "total_cycles": 0,
                 "pricing_scheme": {
                     "fixed_price": {
                         "value": str(amount),
@@ -145,11 +147,7 @@ def create_billing_plan(access_token, product_id, plan_name, plan_description, a
 
 
 def create_subscription(access_token, plan_id, plan_name):
-    """
-    Create a subscription for a billing plan.
-    
-    Note: Subscriptions will be in APPROVAL_PENDING state until a buyer approves them.
-    """
+    """Create a subscription for a billing plan."""
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
@@ -198,18 +196,13 @@ def create_subscription(access_token, plan_id, plan_name):
 
 
 def create_transaction(access_token, amount, description):
-    """
-    Create a transaction (order with immediate capture).
-    
-    This creates both a transaction and a payment capture record.
-    """
+    """Create a transaction (order with immediate capture)."""
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
         "PayPal-Request-Id": str(uuid.uuid4()),
     }
     
-    # Test card that works in sandbox
     payload = {
         "intent": "CAPTURE",
         "purchase_units": [
@@ -247,7 +240,6 @@ def create_transaction(access_token, amount, description):
     if response.status_code in [200, 201]:
         order = response.json()
         
-        # Extract capture info if available
         capture_id = None
         if order.get("purchase_units"):
             payments = order["purchase_units"][0].get("payments", {})
@@ -269,16 +261,225 @@ def create_transaction(access_token, amount, description):
         }
 
 
+def create_payment_experience(access_token, profile_name):
+    """Create a web payment profile (payment experience)."""
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    
+    payload = {
+        "name": profile_name,
+        "presentation": {
+            "brand_name": f"Test Brand {random.randint(1, 999)}",
+            "logo_image": "https://example.com/logo.png",
+            "locale_code": "US"
+        },
+        "input_fields": {
+            "allow_note": True,
+            "no_shipping": 0,
+            "address_override": 1
+        },
+        "flow_config": {
+            "landing_page_type": "LOGIN",
+            "bank_txn_pending_url": "https://example.com/pending",
+            "user_action": "commit"
+        }
+    }
+    
+    response = requests.post(
+        f"{BASE_URL}/v1/payment-experience/web-profiles",
+        headers=headers,
+        json=payload,
+        timeout=30
+    )
+    
+    if response.status_code in [200, 201]:
+        profile = response.json()
+        return {
+            "profile_id": profile.get("id"),
+            "name": profile.get("name"),
+            "status": "created"
+        }
+    else:
+        return {
+            "error": f"{response.status_code}: {response.text}",
+            "name": profile_name
+        }
+
+
+def add_tracking(access_token, transaction_id):
+    """Add tracking information to a transaction."""
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    
+    tracking_number = f"1Z{random.randint(100000, 999999)}{random.randint(10000000, 99999999)}"
+    
+    payload = {
+        "trackers": [
+            {
+                "transaction_id": transaction_id,
+                "tracking_number": tracking_number,
+                "status": "SHIPPED",
+                "carrier": "FEDEX"
+            }
+        ]
+    }
+    
+    response = requests.post(
+        f"{BASE_URL}/v1/shipping/trackers-batch",
+        headers=headers,
+        json=payload,
+        timeout=30
+    )
+    
+    if response.status_code in [200, 201]:
+        result = response.json()
+        trackers = result.get("tracker_identifiers", [])
+        if trackers:
+            return {
+                "transaction_id": transaction_id,
+                "tracking_number": tracking_number,
+                "status": "created"
+            }
+        else:
+            return {
+                "error": "No tracker returned",
+                "transaction_id": transaction_id
+            }
+    else:
+        return {
+            "error": f"{response.status_code}: {response.text}",
+            "transaction_id": transaction_id
+        }
+
+
+def refund_capture(access_token, capture_id, amount):
+    """Refund a payment capture."""
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "PayPal-Request-Id": str(uuid.uuid4()),
+    }
+    
+    # Refund partial amount (50%)
+    refund_amount = float(amount) * 0.5
+    
+    payload = {
+        "amount": {
+            "value": f"{refund_amount:.2f}",
+            "currency_code": "USD"
+        },
+        "note_to_payer": "Test refund"
+    }
+    
+    response = requests.post(
+        f"{BASE_URL}/v2/payments/captures/{capture_id}/refund",
+        headers=headers,
+        json=payload,
+        timeout=30
+    )
+    
+    if response.status_code in [200, 201]:
+        refund = response.json()
+        return {
+            "refund_id": refund.get("id"),
+            "capture_id": capture_id,
+            "amount": refund_amount,
+            "status": refund.get("status")
+        }
+    else:
+        return {
+            "error": f"{response.status_code}: {response.text}",
+            "capture_id": capture_id
+        }
+
+
+def create_authorization(access_token, amount):
+    """Create a payment authorization (without capture)."""
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "PayPal-Request-Id": str(uuid.uuid4()),
+    }
+    
+    payload = {
+        "intent": "AUTHORIZE",  # Authorization only, no capture
+        "purchase_units": [
+            {
+                "amount": {
+                    "currency_code": "USD",
+                    "value": str(amount)
+                }
+            }
+        ],
+        "payment_source": {
+            "card": {
+                "number": "4111111111111111",
+                "expiry": "2030-12",
+                "name": "Test Buyer",
+                "billing_address": {
+                    "address_line_1": "123 Main St",
+                    "admin_area_2": "San Jose",
+                    "admin_area_1": "CA",
+                    "postal_code": "95131",
+                    "country_code": "US"
+                }
+            }
+        }
+    }
+    
+    response = requests.post(
+        f"{BASE_URL}/v2/checkout/orders",
+        headers=headers,
+        json=payload,
+        timeout=30
+    )
+    
+    if response.status_code in [200, 201]:
+        order = response.json()
+        
+        auth_id = None
+        if order.get("purchase_units"):
+            payments = order["purchase_units"][0].get("payments", {})
+            authorizations = payments.get("authorizations", [])
+            if authorizations:
+                auth_id = authorizations[0].get("id")
+        
+        return {
+            "order_id": order.get("id"),
+            "authorization_id": auth_id,
+            "amount": str(amount),
+            "status": order.get("status")
+        }
+    else:
+        return {
+            "error": f"{response.status_code}: {response.text}",
+            "amount": str(amount)
+        }
+
+
 def main():
     print("="*70)
-    print("PayPal Sandbox Test Data Generator")
+    print("PayPal Sandbox Test Data Generator - ALL 14 TABLES")
     print("="*70)
     print("\nThis script will create test data for all connector tables:")
-    print("  1. Products")
-    print("  2. Plans")
-    print("  3. Subscriptions")
-    print("  4. Transactions")
-    print("  5. Payment Captures (derived from transactions)")
+    print("  1. ✅ Products")
+    print("  2. ✅ Plans")
+    print("  3. ✅ Subscriptions")
+    print("  4. ✅ Transactions")
+    print("  5. ✅ Payment Captures")
+    print("  6. ✅ Payment Experiences (Web Profiles)")
+    print("  7. ✅ Tracking")
+    print("  8. ✅ Refunds")
+    print("  9. ✅ Payment Authorizations")
+    print(" 10. ⚠️  Payouts (may require additional setup)")
+    print(" 11. ℹ️  Disputes (auto-generated, cannot create)")
+    print(" 12. ℹ️  Webhooks Events (auto-generated)")
+    print(" 13. ℹ️  Invoices (requires special permissions)")
+    print(" 14. ℹ️  Orders (created with transactions)")
     print()
     
     # Get credentials
@@ -301,7 +502,18 @@ def main():
         "products": [],
         "plans": [],
         "subscriptions": [],
-        "transactions": []
+        "transactions": [],
+        "payment_experiences": [],
+        "tracking": [],
+        "refunds": [],
+        "payment_authorizations": [],
+        "notes": {
+            "disputes": "Auto-generated by PayPal - cannot be created programmatically",
+            "webhooks_events": "Auto-generated by PayPal based on API actions",
+            "invoices": "Requires special permissions not available in basic Sandbox",
+            "orders": "Created automatically with transactions",
+            "payouts": "Requires payout recipient setup - may not work in basic Sandbox"
+        }
     }
     
     # Get user input for quantities
@@ -311,18 +523,27 @@ def main():
         num_plans_per_product = int(input("  Plans per product (1-5): ").strip() or "2")
         num_subscriptions = int(input("  Subscriptions (0-10): ").strip() or "3")
         num_transactions = int(input("  Transactions (1-20): ").strip() or "10")
+        num_payment_experiences = int(input("  Payment Experiences (1-5): ").strip() or "3")
+        num_authorizations = int(input("  Payment Authorizations (0-10): ").strip() or "3")
+        num_refunds = int(input("  Refunds (0-10): ").strip() or "2")
     except ValueError:
-        print("❌ Invalid input. Using defaults: 3 products, 2 plans each, 3 subscriptions, 10 transactions")
+        print("❌ Invalid input. Using defaults")
         num_products = 3
         num_plans_per_product = 2
         num_subscriptions = 3
         num_transactions = 10
+        num_payment_experiences = 3
+        num_authorizations = 3
+        num_refunds = 2
     
     # Validate inputs
     num_products = max(1, min(num_products, 10))
     num_plans_per_product = max(1, min(num_plans_per_product, 5))
     num_subscriptions = max(0, min(num_subscriptions, 10))
     num_transactions = max(1, min(num_transactions, 20))
+    num_payment_experiences = max(0, min(num_payment_experiences, 5))
+    num_authorizations = max(0, min(num_authorizations, 10))
+    num_refunds = max(0, min(num_refunds, 10))
     
     print("\n" + "="*70)
     print("STEP 1: Creating Products")
@@ -377,7 +598,7 @@ def main():
             plan_name, plan_desc, amount, frequency = plan_configs[i % len(plan_configs)]
             plan_name = f"{product_name} - {plan_name}"
             
-            print(f"\nCreating plan for {product_name}: {plan_name}")
+            print(f"\nCreating plan: {plan_name}")
             result = create_billing_plan(
                 access_token,
                 product_id,
@@ -392,36 +613,33 @@ def main():
             if "error" in result:
                 print(f"  ❌ Error: {result['error']}")
             else:
-                print(f"  ✅ Created: {result['plan_id']} (${amount}/{frequency})")
+                print(f"  ✅ Created: {result['plan_id']}")
     
     print("\n" + "="*70)
     print("STEP 3: Creating Subscriptions")
     print("="*70)
     
-    # Get active plans
     active_plans = [p for p in results["plans"] if "error" not in p]
     
     if not active_plans:
-        print("⚠️  No plans available to create subscriptions")
+        print("⚠️  No plans available")
     elif num_subscriptions == 0:
-        print("⏭️  Skipping subscription creation (user requested 0)")
+        print("⏭️  Skipping (user requested 0)")
     else:
         for i in range(min(num_subscriptions, len(active_plans))):
             plan = active_plans[i]
-            plan_id = plan["plan_id"]
-            plan_name = plan["name"]
             
-            print(f"\nCreating subscription {i+1}/{num_subscriptions} for: {plan_name}")
-            result = create_subscription(access_token, plan_id, plan_name)
+            print(f"\nCreating subscription {i+1}/{num_subscriptions}")
+            result = create_subscription(access_token, plan["plan_id"], plan["name"])
             results["subscriptions"].append(result)
             
             if "error" in result:
                 print(f"  ❌ Error: {result['error']}")
             else:
-                print(f"  ✅ Created: {result['subscription_id']} (Status: {result['status']})")
+                print(f"  ✅ Created: {result['subscription_id']}")
     
     print("\n" + "="*70)
-    print("STEP 4: Creating Transactions (Payment Captures)")
+    print("STEP 4: Creating Transactions & Payment Captures")
     print("="*70)
     
     descriptions = [
@@ -443,38 +661,135 @@ def main():
         amount = random.choice(amounts)
         description = random.choice(descriptions)
         
-        print(f"\nCreating transaction {i+1}/{num_transactions}: ${amount} - {description}")
+        print(f"\nCreating transaction {i+1}/{num_transactions}: ${amount}")
         result = create_transaction(access_token, amount, description)
         results["transactions"].append(result)
         
         if "error" in result:
             print(f"  ❌ Error: {result['error']}")
         else:
-            print(f"  ✅ Created: {result['order_id']} (Capture: {result.get('capture_id', 'N/A')})")
+            print(f"  ✅ Created: {result['order_id']}")
+            # Small delay to avoid rate limiting
+            time.sleep(1)
+    
+    print("\n" + "="*70)
+    print("STEP 5: Creating Payment Experiences (Web Profiles)")
+    print("="*70)
+    
+    if num_payment_experiences == 0:
+        print("⏭️  Skipping (user requested 0)")
+    else:
+        for i in range(num_payment_experiences):
+            profile_name = f"Test Web Profile {i+1}"
+            
+            print(f"\nCreating payment experience {i+1}/{num_payment_experiences}")
+            result = create_payment_experience(access_token, profile_name)
+            results["payment_experiences"].append(result)
+            
+            if "error" in result:
+                print(f"  ❌ Error: {result['error']}")
+            else:
+                print(f"  ✅ Created: {result['profile_id']}")
+    
+    print("\n" + "="*70)
+    print("STEP 6: Adding Tracking Information")
+    print("="*70)
+    
+    completed_transactions = [t for t in results["transactions"] if "error" not in t and t.get("order_id")]
+    
+    if not completed_transactions:
+        print("⚠️  No transactions available for tracking")
+    else:
+        num_tracking = min(len(completed_transactions), 5)
+        print(f"Adding tracking to {num_tracking} transactions...")
+        
+        for i in range(num_tracking):
+            transaction = completed_transactions[i]
+            order_id = transaction["order_id"]
+            
+            print(f"\nAdding tracking {i+1}/{num_tracking}")
+            result = add_tracking(access_token, order_id)
+            results["tracking"].append(result)
+            
+            if "error" in result:
+                print(f"  ⚠️  {result['error']}")
+            else:
+                print(f"  ✅ Created: {result['tracking_number']}")
+    
+    print("\n" + "="*70)
+    print("STEP 7: Creating Refunds")
+    print("="*70)
+    
+    captures_with_id = [t for t in results["transactions"] if "error" not in t and t.get("capture_id")]
+    
+    if not captures_with_id:
+        print("⚠️  No captures available for refunds")
+    elif num_refunds == 0:
+        print("⏭️  Skipping (user requested 0)")
+    else:
+        for i in range(min(num_refunds, len(captures_with_id))):
+            transaction = captures_with_id[i]
+            capture_id = transaction["capture_id"]
+            amount = transaction["amount"]
+            
+            print(f"\nCreating refund {i+1}/{num_refunds}")
+            result = refund_capture(access_token, capture_id, amount)
+            results["refunds"].append(result)
+            
+            if "error" in result:
+                print(f"  ❌ Error: {result['error']}")
+            else:
+                print(f"  ✅ Created: {result['refund_id']}")
+            time.sleep(1)
+    
+    print("\n" + "="*70)
+    print("STEP 8: Creating Payment Authorizations")
+    print("="*70)
+    
+    if num_authorizations == 0:
+        print("⏭️  Skipping (user requested 0)")
+    else:
+        for i in range(num_authorizations):
+            amount = random.choice([25.00, 50.00, 100.00])
+            
+            print(f"\nCreating authorization {i+1}/{num_authorizations}: ${amount}")
+            result = create_authorization(access_token, amount)
+            results["payment_authorizations"].append(result)
+            
+            if "error" in result:
+                print(f"  ❌ Error: {result['error']}")
+            else:
+                print(f"  ✅ Created: {result.get('authorization_id', 'N/A')}")
+            time.sleep(1)
     
     # Summary
     print("\n" + "="*70)
-    print("SUMMARY")
+    print("SUMMARY - ALL 14 TABLES")
     print("="*70)
     
     products_created = len([p for p in results["products"] if "error" not in p])
     plans_created = len([p for p in results["plans"] if "error" not in p])
     subscriptions_created = len([s for s in results["subscriptions"] if "error" not in s])
     transactions_created = len([t for t in results["transactions"] if "error" not in t])
+    experiences_created = len([e for e in results["payment_experiences"] if "error" not in e])
+    tracking_created = len([t for t in results["tracking"] if "error" not in t])
+    refunds_created = len([r for r in results["refunds"] if "error" not in r])
+    auths_created = len([a for a in results["payment_authorizations"] if "error" not in a])
     
-    print(f"\n✅ Products created: {products_created}/{num_products}")
-    print(f"✅ Plans created: {plans_created}/{num_products * num_plans_per_product}")
-    print(f"✅ Subscriptions created: {subscriptions_created}/{num_subscriptions}")
-    print(f"✅ Transactions created: {transactions_created}/{num_transactions}")
-    
-    print("\n" + "="*70)
-    print("CONNECTOR TABLE DATA AVAILABILITY")
-    print("="*70)
-    print(f"\n1. products table: {products_created} records available")
-    print(f"2. plans table: {plans_created} records available")
-    print(f"3. subscriptions table: {subscriptions_created} records available")
-    print(f"4. transactions table: {transactions_created} records available")
-    print(f"5. payment_captures table: {transactions_created} records available (from transactions)")
+    print(f"\n✅ 1. products: {products_created} records")
+    print(f"✅ 2. plans: {plans_created} records")
+    print(f"✅ 3. subscriptions: {subscriptions_created} records")
+    print(f"✅ 4. transactions: {transactions_created} records")
+    print(f"✅ 5. payment_captures: {transactions_created} records")
+    print(f"✅ 6. payment_experiences: {experiences_created} records")
+    print(f"✅ 7. tracking: {tracking_created} records")
+    print(f"✅ 8. refunds: {refunds_created} records")
+    print(f"✅ 9. payment_authorizations: {auths_created} records")
+    print(f"ℹ️  10. payouts: {0} records (requires additional setup)")
+    print(f"ℹ️  11. disputes: Auto-generated (cannot create)")
+    print(f"ℹ️  12. webhooks_events: Auto-generated")
+    print(f"ℹ️  13. invoices: Requires special permissions")
+    print(f"ℹ️  14. orders: {transactions_created} records (from transactions)")
     
     # Save results
     output_file = "sandbox_data_generation_results.json"
@@ -489,20 +804,23 @@ def main():
         print("\n" + "="*70)
         print("SUBSCRIPTION IDS FOR CONNECTOR CONFIG")
         print("="*70)
-        print("\nTo use the subscriptions table, add these IDs to your config:")
         print(f'\n"subscription_ids": {json.dumps(subscription_ids[:5])}')
     
     print("\n" + "="*70)
     print("NEXT STEPS")
     print("="*70)
-    print("\n1. Update your table config with date ranges:")
+    print("\n1. Update your ingest.py with today's date range:")
     print(f'   "start_date": "{datetime.utcnow().strftime("%Y-%m-%dT00:00:00Z")}"')
     print(f'   "end_date": "{datetime.utcnow().strftime("%Y-%m-%dT23:59:59Z")}"')
-    print("\n2. Run your connector to ingest the data")
-    print("\n3. Data should be available in all 5 tables!")
+    print("\n2. Run your connector to ingest all available tables")
+    print("\n3. Tables ready for ingestion:")
+    print(f"   - 9 tables have data: products, plans, subscriptions, transactions,")
+    print(f"     payment_captures, payment_experiences, tracking, refunds,")
+    print(f"     payment_authorizations")
+    print(f"   - 5 tables are informational: disputes, webhooks_events, invoices,")
+    print(f"     orders, payouts")
     print("\n" + "="*70)
 
 
 if __name__ == "__main__":
     main()
-

@@ -1,250 +1,229 @@
 {
   "products": [
     {
-      "product_id": "PROD-64V59128322455418",
+      "product_id": "PROD-08H4328860876080A",
       "name": "Premium Membership - Tier 1",
       "status": "created"
     },
     {
-      "product_id": "PROD-14M45019ED737734A",
+      "product_id": "PROD-5LW68595HB044422F",
       "name": "Software License - Tier 2",
       "status": "created"
     },
     {
-      "product_id": "PROD-9039142808559183T",
+      "product_id": "PROD-6K453024JH105341M",
       "name": "Consulting Package - Tier 3",
-      "status": "created"
-    },
-    {
-      "product_id": "PROD-1C9772033G856670E",
-      "name": "Training Course - Tier 4",
-      "status": "created"
-    },
-    {
-      "product_id": "PROD-8L338765K5713900R",
-      "name": "Support Plan - Tier 5",
       "status": "created"
     }
   ],
   "plans": [
     {
-      "plan_id": "P-00G93122PF2516940NFQKEGA",
-      "product_id": "PROD-64V59128322455418",
+      "plan_id": "P-3EX73252MH784460PNFQXKVA",
+      "product_id": "PROD-08H4328860876080A",
       "name": "Premium Membership - Tier 1 - Monthly",
       "status": "ACTIVE"
     },
     {
-      "plan_id": "P-66B97660G0470634LNFQKEGI",
-      "product_id": "PROD-64V59128322455418",
+      "plan_id": "P-3AX27610HS191952WNFQXKVA",
+      "product_id": "PROD-08H4328860876080A",
       "name": "Premium Membership - Tier 1 - Quarterly",
       "status": "ACTIVE"
     },
     {
-      "plan_id": "P-9UX52300KV443941GNFQKEGI",
-      "product_id": "PROD-64V59128322455418",
-      "name": "Premium Membership - Tier 1 - Annual",
-      "status": "ACTIVE"
-    },
-    {
-      "plan_id": "P-1BB68225P5330613ANFQKEGQ",
-      "product_id": "PROD-64V59128322455418",
-      "name": "Premium Membership - Tier 1 - Weekly",
-      "status": "ACTIVE"
-    },
-    {
-      "plan_id": "P-7BC00753GP9292352NFQKEGY",
-      "product_id": "PROD-64V59128322455418",
-      "name": "Premium Membership - Tier 1 - Bi-Annual",
-      "status": "ACTIVE"
-    },
-    {
-      "plan_id": "P-1JD68156XN070353ANFQKEGY",
-      "product_id": "PROD-14M45019ED737734A",
+      "plan_id": "P-65Y95023FF153944FNFQXKVI",
+      "product_id": "PROD-5LW68595HB044422F",
       "name": "Software License - Tier 2 - Monthly",
       "status": "ACTIVE"
     },
     {
-      "plan_id": "P-57977420CR329225TNFQKEHA",
-      "product_id": "PROD-14M45019ED737734A",
+      "plan_id": "P-5NN92219EN481302BNFQXKVI",
+      "product_id": "PROD-5LW68595HB044422F",
       "name": "Software License - Tier 2 - Quarterly",
       "status": "ACTIVE"
     },
     {
-      "plan_id": "P-7F3962552Y018910XNFQKEHA",
-      "product_id": "PROD-14M45019ED737734A",
-      "name": "Software License - Tier 2 - Annual",
-      "status": "ACTIVE"
-    },
-    {
-      "plan_id": "P-58J4526888886132FNFQKEHI",
-      "product_id": "PROD-14M45019ED737734A",
-      "name": "Software License - Tier 2 - Weekly",
-      "status": "ACTIVE"
-    },
-    {
-      "plan_id": "P-5RM78778CA8525219NFQKEHQ",
-      "product_id": "PROD-14M45019ED737734A",
-      "name": "Software License - Tier 2 - Bi-Annual",
-      "status": "ACTIVE"
-    },
-    {
-      "plan_id": "P-76T279155U023270MNFQKEHQ",
-      "product_id": "PROD-9039142808559183T",
+      "plan_id": "P-1NW94199NC010693NNFQXKVQ",
+      "product_id": "PROD-6K453024JH105341M",
       "name": "Consulting Package - Tier 3 - Monthly",
       "status": "ACTIVE"
     },
     {
-      "plan_id": "P-8UY48021XE185972MNFQKEHY",
-      "product_id": "PROD-9039142808559183T",
+      "plan_id": "P-5HL80030K5195322FNFQXKVY",
+      "product_id": "PROD-6K453024JH105341M",
       "name": "Consulting Package - Tier 3 - Quarterly",
-      "status": "ACTIVE"
-    },
-    {
-      "plan_id": "P-5VS10609P0615282DNFQKEIA",
-      "product_id": "PROD-9039142808559183T",
-      "name": "Consulting Package - Tier 3 - Annual",
-      "status": "ACTIVE"
-    },
-    {
-      "plan_id": "P-8S111891R61176938NFQKEIA",
-      "product_id": "PROD-9039142808559183T",
-      "name": "Consulting Package - Tier 3 - Weekly",
-      "status": "ACTIVE"
-    },
-    {
-      "plan_id": "P-7F186374LC729191WNFQKEII",
-      "product_id": "PROD-9039142808559183T",
-      "name": "Consulting Package - Tier 3 - Bi-Annual",
-      "status": "ACTIVE"
-    },
-    {
-      "plan_id": "P-6WY907452E6038231NFQKEII",
-      "product_id": "PROD-1C9772033G856670E",
-      "name": "Training Course - Tier 4 - Monthly",
-      "status": "ACTIVE"
-    },
-    {
-      "plan_id": "P-6J9433302K343594PNFQKEIQ",
-      "product_id": "PROD-1C9772033G856670E",
-      "name": "Training Course - Tier 4 - Quarterly",
-      "status": "ACTIVE"
-    },
-    {
-      "plan_id": "P-87667907GB734823BNFQKEIY",
-      "product_id": "PROD-1C9772033G856670E",
-      "name": "Training Course - Tier 4 - Annual",
-      "status": "ACTIVE"
-    },
-    {
-      "plan_id": "P-8X9966142S796953ANFQKEIY",
-      "product_id": "PROD-1C9772033G856670E",
-      "name": "Training Course - Tier 4 - Weekly",
-      "status": "ACTIVE"
-    },
-    {
-      "plan_id": "P-2CM04018S5391960KNFQKEJA",
-      "product_id": "PROD-1C9772033G856670E",
-      "name": "Training Course - Tier 4 - Bi-Annual",
-      "status": "ACTIVE"
-    },
-    {
-      "plan_id": "P-5X90938819059261SNFQKEJI",
-      "product_id": "PROD-8L338765K5713900R",
-      "name": "Support Plan - Tier 5 - Monthly",
-      "status": "ACTIVE"
-    },
-    {
-      "plan_id": "P-1KB857623S9710920NFQKEJI",
-      "product_id": "PROD-8L338765K5713900R",
-      "name": "Support Plan - Tier 5 - Quarterly",
-      "status": "ACTIVE"
-    },
-    {
-      "plan_id": "P-9P905739F8135511CNFQKEJQ",
-      "product_id": "PROD-8L338765K5713900R",
-      "name": "Support Plan - Tier 5 - Annual",
-      "status": "ACTIVE"
-    },
-    {
-      "plan_id": "P-8WY02848CN475424NNFQKEJY",
-      "product_id": "PROD-8L338765K5713900R",
-      "name": "Support Plan - Tier 5 - Weekly",
-      "status": "ACTIVE"
-    },
-    {
-      "plan_id": "P-4MP89046JW532981MNFQKEJY",
-      "product_id": "PROD-8L338765K5713900R",
-      "name": "Support Plan - Tier 5 - Bi-Annual",
       "status": "ACTIVE"
     }
   ],
   "subscriptions": [
     {
-      "subscription_id": "I-UGRPYC05ATB2",
-      "plan_id": "P-00G93122PF2516940NFQKEGA",
+      "subscription_id": "I-U9HND8BH8NKR",
+      "plan_id": "P-3EX73252MH784460PNFQXKVA",
       "plan_name": "Premium Membership - Tier 1 - Monthly",
       "status": "APPROVAL_PENDING"
     },
     {
-      "subscription_id": "I-8C7CWF5AB208",
-      "plan_id": "P-66B97660G0470634LNFQKEGI",
+      "subscription_id": "I-64WW4JLFC89E",
+      "plan_id": "P-3AX27610HS191952WNFQXKVA",
       "plan_name": "Premium Membership - Tier 1 - Quarterly",
       "status": "APPROVAL_PENDING"
     },
     {
-      "subscription_id": "I-N4D2YUNDR8BW",
-      "plan_id": "P-9UX52300KV443941GNFQKEGI",
-      "plan_name": "Premium Membership - Tier 1 - Annual",
-      "status": "APPROVAL_PENDING"
-    },
-    {
-      "subscription_id": "I-FLKBV5UEJ5SJ",
-      "plan_id": "P-1BB68225P5330613ANFQKEGQ",
-      "plan_name": "Premium Membership - Tier 1 - Weekly",
-      "status": "APPROVAL_PENDING"
-    },
-    {
-      "subscription_id": "I-V8PCU045H25R",
-      "plan_id": "P-7BC00753GP9292352NFQKEGY",
-      "plan_name": "Premium Membership - Tier 1 - Bi-Annual",
+      "subscription_id": "I-S33XUA6GLAA2",
+      "plan_id": "P-65Y95023FF153944FNFQXKVI",
+      "plan_name": "Software License - Tier 2 - Monthly",
       "status": "APPROVAL_PENDING"
     }
   ],
   "transactions": [
     {
-      "order_id": "7541443108657752A",
+      "order_id": "1LW88814606423407",
+      "amount": "50.0",
+      "description": "Annual License Fee",
+      "status": "COMPLETED",
+      "capture_id": "70795387EA4362255"
+    },
+    {
+      "order_id": "448476910M4264002",
       "amount": "150.0",
+      "description": "Digital Download",
+      "status": "COMPLETED",
+      "capture_id": "6EN208837N901540C"
+    },
+    {
+      "order_id": "9UN15060RS0355132",
+      "amount": "200.0",
+      "description": "Training Course Fee",
+      "status": "COMPLETED",
+      "capture_id": "70F76362XY761184L"
+    },
+    {
+      "order_id": "9CB23427EP440245V",
+      "amount": "50.0",
+      "description": "Support Plan Payment",
+      "status": "COMPLETED",
+      "capture_id": "5W505659TW2690647"
+    },
+    {
+      "order_id": "4HC53225HG208624N",
+      "amount": "200.0",
       "description": "Monthly Subscription Payment",
       "status": "COMPLETED",
-      "capture_id": "8FJ40413JY057634U"
+      "capture_id": "58L45154MV748660P"
     },
     {
-      "order_id": "97E54088U2199041M",
-      "amount": "25.5",
-      "description": "Sample Product Purchase",
+      "order_id": "0YM09109PK381863G",
+      "amount": "200.0",
+      "description": "Digital Download",
       "status": "COMPLETED",
-      "capture_id": "9PS06773UR7469831"
+      "capture_id": "10D83108TF589431N"
     },
     {
-      "order_id": "76N95036FT813564E",
+      "order_id": "5TA859357E379910J",
+      "amount": "150.0",
+      "description": "Support Plan Payment",
+      "status": "COMPLETED",
+      "capture_id": "9B2698572J991273N"
+    },
+    {
+      "order_id": "6KY1520868833280N",
       "amount": "10.0",
-      "description": "Support Plan Payment",
+      "description": "Test Transaction",
       "status": "COMPLETED",
-      "capture_id": "64C27302L2556262C"
+      "capture_id": "2CY50821X6851093Y"
     },
     {
-      "order_id": "3XR72341H8129121A",
-      "amount": "50.0",
-      "description": "Service Upgrade",
+      "order_id": "6C0733763H999554H",
+      "amount": "25.5",
+      "description": "Digital Download",
       "status": "COMPLETED",
-      "capture_id": "5CF959330B095544U"
+      "capture_id": "28W427015D162105N"
     },
     {
-      "order_id": "6UX73540DX417244F",
-      "amount": "50.0",
-      "description": "Support Plan Payment",
+      "order_id": "59J25861TK1216724",
+      "amount": "200.0",
+      "description": "Training Course Fee",
       "status": "COMPLETED",
-      "capture_id": "1W990865HV978604A"
+      "capture_id": "00C99889B61498729"
     }
-  ]
+  ],
+  "payment_experiences": [
+    {
+      "profile_id": "XP-C7E9-STZS-F5JQ-EQY9",
+      "name": "Test Web Profile 1",
+      "status": "created"
+    },
+    {
+      "profile_id": "XP-ZAP2-PZLC-N25T-XG37",
+      "name": "Test Web Profile 2",
+      "status": "created"
+    },
+    {
+      "profile_id": "XP-CFFB-RCDD-P2TR-MFYB",
+      "name": "Test Web Profile 3",
+      "status": "created"
+    }
+  ],
+  "tracking": [
+    {
+      "error": "No tracker returned",
+      "transaction_id": "1LW88814606423407"
+    },
+    {
+      "error": "No tracker returned",
+      "transaction_id": "448476910M4264002"
+    },
+    {
+      "error": "No tracker returned",
+      "transaction_id": "9UN15060RS0355132"
+    },
+    {
+      "error": "No tracker returned",
+      "transaction_id": "9CB23427EP440245V"
+    },
+    {
+      "error": "No tracker returned",
+      "transaction_id": "4HC53225HG208624N"
+    }
+  ],
+  "refunds": [
+    {
+      "refund_id": "90L18143L52383437",
+      "capture_id": "70795387EA4362255",
+      "amount": 25.0,
+      "status": "COMPLETED"
+    },
+    {
+      "refund_id": "3BB07269EA076354E",
+      "capture_id": "6EN208837N901540C",
+      "amount": 75.0,
+      "status": "COMPLETED"
+    }
+  ],
+  "payment_authorizations": [
+    {
+      "order_id": "10182106B1152972W",
+      "authorization_id": "7HY89055XD502110A",
+      "amount": "50.0",
+      "status": "COMPLETED"
+    },
+    {
+      "order_id": "3V190977B34137456",
+      "authorization_id": "8PX82116UD2632437",
+      "amount": "25.0",
+      "status": "COMPLETED"
+    },
+    {
+      "order_id": "7YJ643104U761033R",
+      "authorization_id": "57V90806VA188345S",
+      "amount": "100.0",
+      "status": "COMPLETED"
+    }
+  ],
+  "notes": {
+    "disputes": "Auto-generated by PayPal - cannot be created programmatically",
+    "webhooks_events": "Auto-generated by PayPal based on API actions",
+    "invoices": "Requires special permissions not available in basic Sandbox",
+    "orders": "Created automatically with transactions",
+    "payouts": "Requires payout recipient setup - may not work in basic Sandbox"
+  }
 }
