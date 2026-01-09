@@ -487,6 +487,7 @@ class LakeflowConnect:
         start_offset = start_offset or {}
 
         metadata = self.read_table_metadata(table_name=index, table_options=options)
+        schema = self.get_table_schema(table_name=index, table_options=options)
 
         # Page size for pagination (default 1000)
         size = int(options.get("page_size", 1000))
@@ -504,9 +505,21 @@ class LakeflowConnect:
         response = self._client.post(path="/_search", json=search_body)
         hits = response.get("hits", {}).get("hits", [])
 
+        def _normalize_record(record: dict, schema: StructType) -> dict:
+            """Coerce list values into structs when schema expects a StructType."""
+            normalized = dict(record)
+            for field in schema.fields:
+                value = normalized.get(field.name)
+                if isinstance(field.dataType, StructType) and isinstance(value, list):
+                    if value:
+                        normalized[field.name] = value[0] if isinstance(value[0], dict) else None
+                    else:
+                        normalized[field.name] = None
+            return normalized
+
         def _iter_records() -> Iterator[dict]:
             for hit in hits:
-                record = dict(hit.get("_source", {}))
+                record = _normalize_record(dict(hit.get("_source", {})), schema)
                 record["_id"] = hit.get("_id")
                 yield record
 
