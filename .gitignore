@@ -2,23 +2,16 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
-dist/
-build/
 
-# Environments
-.env
+# Virtual environments
 .venv/
 venv/
 
 # Testing
 .pytest_cache/
-.coverage
-htmlcov/
-
-# IDEs
-.idea/
-.vscode/
-*.swp
 
 # OS
 .DS_Store
+
+# Dev configs
+sources/**/configs/dev_*.json
