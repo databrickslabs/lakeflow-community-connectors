@@ -186,6 +186,15 @@ class LakeflowConnect:
         # Cache for discovered schemas to avoid recomputation
         self._schema_cache: dict[str, StructType] = {}
 
+    @staticmethod
+    def _validate_index(index: str) -> None:
+        """Reject wildcard/pattern inputs; only single index/alias names are allowed."""
+        if any(ch in index for ch in ["*", "?", ","]):
+            raise ValueError(
+                f"Unsupported index name '{index}'. Wildcards or comma-separated patterns are not allowed; "
+                "specify a single index or alias."
+            )
+
     def _discover_indices(self) -> list[str]:
         """Fetch indices and aliases visible to the provided credentials."""
         candidates: set[str] = set()
@@ -481,6 +490,7 @@ class LakeflowConnect:
         return self._indices_cache
 
     def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
+        self._validate_index(table_name)
         if table_name not in self.list_tables():
             raise ValueError(f"Unsupported index: {table_name}. Index is not available or not accessible.")
 
@@ -500,6 +510,7 @@ class LakeflowConnect:
 
     def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict[str, Any]:
         table_options = table_options or {}
+        self._validate_index(table_name)
         if table_name not in self.list_tables():
             raise ValueError(f"Unsupported index: {table_name}. Index is not available or not accessible.")
 
@@ -519,6 +530,7 @@ class LakeflowConnect:
         self, table_name: str, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
 
+        self._validate_index(table_name)
         if table_name not in self.list_tables():
             raise ValueError(f"Unsupported index: {table_name}. Index is not available or not accessible.")
 

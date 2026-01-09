@@ -144,12 +144,16 @@ Schema per system index is resolved live from `_mapping`; Elasticsearch does not
   - Field mapping types: https://www.elastic.co/guide/en/elasticsearch/reference/current/mapping-types.html
 
 ## **Connector defaults and options**
-- Default cursor detection order: `timestamp`, `updated_at` (meta-fields starting with `_` are currently not allowed as cursors).
+- Default cursor detection order: `timestamp`, `updated_at` (falls back to snapshot ingestion if no default cursor was found!)
 - Per-table options:
   - `cursor_field`: override cursor detection.
   - `ingestion_type`: optional override (`append` or `cdc`); requires a cursor field. If none is available, the connector falls back to `snapshot`.
   - `page_size`: page size for search (default `1000`). Legacy `size` is still accepted.
   - `pit_keep_alive`: PIT keep-alive duration (default `1m`).
+
+## **Restrictions**
+- Wildcards or comma-separated patterns are not supported; each table must reference a single index or alias (no `logs-*` fanout).
+- Cursor fields: Meta-fields starting with `_` are currently not allowed as cursors.
 
 ## Research Log
 
