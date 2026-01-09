@@ -21,7 +21,23 @@ def register_lakeflow_source(spark):
     
     from pyspark.sql import Row
     from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
-    from pyspark.sql.types import *
+    from pyspark.sql.types import (
+        StructType,
+        StructField,
+        StringType,
+        IntegerType,
+        LongType,
+        FloatType,
+        DoubleType,
+        BooleanType,
+        DateType,
+        TimestampType,
+        DecimalType,
+        BinaryType,
+        ArrayType,
+        MapType,
+        DataType,
+    )
 
     ########################################################
     # libs/utils.py
