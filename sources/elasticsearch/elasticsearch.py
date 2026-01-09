@@ -322,14 +322,11 @@ class LakeflowConnect:
         """
         field_type = field.get("type")
 
-        # Handle object via properties: map to array<struct> to tolerate list or single object values
+        # object → struct; nested → array<struct>
         if "properties" in field and field_type != "nested":
             return StructField(
                 name=name,
-                dataType=ArrayType(
-                    self._properties_to_struct(properties=field.get("properties", {})),
-                    containsNull=True,
-                ),
+                dataType=self._properties_to_struct(properties=field.get("properties", {})),
                 nullable=True,
             )
 

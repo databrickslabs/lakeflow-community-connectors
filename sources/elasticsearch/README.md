@@ -78,7 +78,8 @@ Behavior notes:
 | `double`, `float`, `half_float`, `scaled_float` | double | |
 | `geo_point` | struct(lat: double, lon: double) | |
 | `geo_shape` | string | Shape serialized to string. |
-| `object`, `nested` | array<struct> | Nested properties mapped to structs; arrays tolerated. |
+| `object` | struct | Nested properties mapped to struct. |
+| `nested` | array<struct> | Nested type stays as array of structs. |
 | other/unknown | string | Fallback type. |
 | `_id` (added) | string | Added by the connector as primary key. |
 
