@@ -129,11 +129,11 @@ class LakeflowConnect:
         
         IMPORTANT: This method returns only collection names (without database prefix)
         to avoid multipart identifier issues in Databricks. The database is specified
-        separately via the 'database' option in table_options.
+        as part of the table name (e.g., "testdb.orders") and parsed by _parse_collection_name().
         
         Note: If multiple databases have collections with the same name, they will
-        appear only once in this list. Use the 'database' option in table_options
-        to specify which database to use for each table.
+        appear only once in this list. The actual database to query is determined
+        by parsing the table_name parameter passed to other methods.
         
         Returns:
             List of collection names (without database prefix, no dots)
@@ -141,8 +141,16 @@ class LakeflowConnect:
         collections_set = set()
         
         try:
-            # Get default database from connection URI if available
-            default_db_name = self._get_database_from_uri()
+            # Try to get database from URI first
+            default_db_name = None
+            if "/" in self.connection_uri:
+                parts = self.connection_uri.split("/")
+                if len(parts) >= 4:
+                    db_with_params = parts[3]
+                    default_db_name = db_with_params.split("?")[0] if "?" in db_with_params else db_with_params
+                    # Empty string means no database in URI
+                    if not default_db_name:
+                        default_db_name = None
             
             if default_db_name:
                 # If database is specified in URI, list collections from that database only
