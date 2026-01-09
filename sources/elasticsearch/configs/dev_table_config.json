@@ -1,0 +1,9 @@
+{
+  "kibana_sample_data_flights": {
+    "ingestion_type": "append",
+    "cursor_field": "timestamp",
+    "page_size": 1000,
+    "pit_keep_alive": "2m"
+  },
+  "kibana_sample_data_ecommerce": {}
+}

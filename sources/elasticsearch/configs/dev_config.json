@@ -1,0 +1,6 @@
+{
+    "endpoint": "https://my-elasticsearch-project-b48753.es.us-central1.gcp.elastic.cloud:443",
+    "authentication": "API_KEY",
+    "api_key": "THdIaW9wc0JYd1dFbldiNEo3Zzk6WGJtd3FnemE2YkxGWm9XdGFZaXlCUQ==",
+    "verify_ssl": "true"
+}
