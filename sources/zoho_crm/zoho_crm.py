@@ -18,7 +18,7 @@ The Zoho CRM connector is organized into modular components:
         ├── base.py          # Abstract TableHandler interface
         ├── module.py        # Standard CRM modules (Leads, Contacts, etc.)
         ├── settings.py      # Org tables (Users, Roles, Profiles)
-        ├── subform.py       # Line items (Quoted_Items, etc.)
+        ├── subform.py       # Line items (disabled by default, see file)
         └── related.py       # Junction tables (Campaigns_Leads, etc.)
 
 =============================================================================
@@ -56,35 +56,14 @@ SUPPORTED TABLE TYPES
    - Extracted from parent record subform fields
    - Line items from Quotes, Sales Orders, Invoices, Purchase Orders
    - Include _parent_id, _parent_module for traceability
-   - Tables: Quoted_Items, Ordered_Items, Invoiced_Items, Purchase_Items
+   - NOTE: Disabled by default (requires Zoho Inventory/Books)
+   - See handlers/subform.py to enable if you have these products
 
 4. Junction Tables (RelatedHandler)
    - Many-to-many relationships between modules
    - Fetched via Related Records API
    - Include _junction_id, _parent_id, _parent_module
    - Tables: Campaigns_Leads, Campaigns_Contacts, Contacts_X_Deals
-
-=============================================================================
-USAGE
-=============================================================================
-
-    from sources.zoho_crm import LakeflowConnect
-
-    connector = LakeflowConnect({
-        "client_id": "your_client_id",
-        "client_value_tmp": "your_client_secret",
-        "refresh_value_tmp": "your_refresh_token",
-    })
-
-    # List available tables
-    tables = connector.list_tables()
-
-    # Get schema and metadata
-    schema = connector.get_table_schema("Leads", {})
-    metadata = connector.read_table_metadata("Leads", {})
-
-    # Read records (with incremental support)
-    records, next_offset = connector.read_table("Leads", {}, {})
 """
 
 import logging

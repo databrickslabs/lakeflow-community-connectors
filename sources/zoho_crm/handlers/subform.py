@@ -3,6 +3,27 @@ Handler for Zoho CRM subform/line item tables.
 
 Handles tables like Quoted_Items, Ordered_Items, Invoiced_Items that are
 extracted from subform fields in parent records.
+
+=============================================================================
+NOTE ON INVENTORY/ORDER MANAGEMENT TABLES
+=============================================================================
+
+The following subform tables are DISABLED by default because they require
+Zoho Inventory or Zoho Books integration (separate paid products):
+
+    - Quoted_Items (parent: Quotes)
+    - Ordered_Items (parent: Sales_Orders)
+    - Invoiced_Items (parent: Invoices)
+    - Purchase_Items (parent: Purchase_Orders)
+
+Without these products enabled, the parent modules return HTTP 400 errors.
+
+To enable these tables if you have Zoho Inventory/Books:
+1. Uncomment the relevant entries in SUBFORM_TABLES below
+2. Ensure your OAuth token has the appropriate scopes
+
+See: https://www.zoho.com/inventory/api/v1/
+=============================================================================
 """
 
 import logging
@@ -17,23 +38,25 @@ logger = logging.getLogger(__name__)
 
 
 # Configuration for subform tables
-SUBFORM_TABLES = {
-    "Quoted_Items": {
-        "parent_module": "Quotes",
-        "subform_field": "Quoted_Items",
-    },
-    "Ordered_Items": {
-        "parent_module": "Sales_Orders",
-        "subform_field": "Ordered_Items",
-    },
-    "Invoiced_Items": {
-        "parent_module": "Invoices",
-        "subform_field": "Invoiced_Items",
-    },
-    "Purchase_Items": {
-        "parent_module": "Purchase_Orders",
-        "subform_field": "Purchased_Items",
-    },
+# NOTE: Inventory/Order Management tables are commented out - see module docstring
+SUBFORM_TABLES: dict[str, dict] = {
+    # Uncomment if you have Zoho Inventory or Zoho Books enabled:
+    # "Quoted_Items": {
+    #     "parent_module": "Quotes",
+    #     "subform_field": "Quoted_Items",
+    # },
+    # "Ordered_Items": {
+    #     "parent_module": "Sales_Orders",
+    #     "subform_field": "Ordered_Items",
+    # },
+    # "Invoiced_Items": {
+    #     "parent_module": "Invoices",
+    #     "subform_field": "Invoiced_Items",
+    # },
+    # "Purchase_Items": {
+    #     "parent_module": "Purchase_Orders",
+    #     "subform_field": "Purchased_Items",
+    # },
 }
 
 
