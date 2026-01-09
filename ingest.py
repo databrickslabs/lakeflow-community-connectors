@@ -51,12 +51,7 @@ pipeline_spec = {
                 "destination_table": "subscriptions",
                 "table_configuration": {
                     "scd_type": "SCD_TYPE_1",
-                    "page_size": 20
-                    # Optional filters:
-                    # "plan_id": "P-XXXXX",  # Filter by billing plan
-                    # "product_id": "PROD-XXXXX",  # Filter by product
-                    # "start_time": "2024-01-01T00:00:00Z",  # Created after
-                    # "end_time": "2024-12-31T23:59:59Z"  # Created before
+                    "subscription_ids": ["I-S45EDF98N3AV", "I-FWEC6DA9AKVJ", "I-D6JVS5Y2V12P", "I-GN66ML8DL6NC", "I-BJK104AU5722"]
                 },
             }
         },
