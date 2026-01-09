@@ -243,21 +243,42 @@ class LakeflowConnect:
         if not isinstance(mapping, dict):
             raise ValueError(f"Unexpected mapping response for index/alias {index}")
 
+        # Resolve the mapping item:
+        # - direct match when key exists
+        # - single concrete index when len == 1
+        # - multi-index alias/data stream: ensure properties are identical, else raise
+        selected_item = None
+
         if index in mapping:
-            item = mapping[index]
-
+            selected_item = mapping[index]
         elif len(mapping) == 1:
-            # alias resolving to a single concrete index
-            _, item = next(iter(mapping.items()))
-
+            _, selected_item = next(iter(mapping.items()))
         else:
-            raise ValueError(f"Expected mapping for {index}, got keys: {list(mapping.keys())}")
+            # multi-index response: compare properties across all backing indices
+            properties_list = []
+            for _, item in mapping.items():
+                props = item.get("mappings", {}).get("properties")
+                if not isinstance(props, dict):
+                    raise ValueError(
+                        "Expected typeless mapping with 'mappings.properties' (Elasticsearch 8.x+). "
+                        f"Received keys: {list(item.get('mappings', {}).keys())}"
+                    )
+                properties_list.append(props)
 
-        properties = item.get("mappings", {}).get("properties")
+            first_props = properties_list[0]
+            if all(props == first_props for props in properties_list[1:]):
+                selected_item = next(iter(mapping.values()))
+            else:
+                raise ValueError(
+                    f"Alias or pattern '{index}' resolves to multiple indices with different mappings; "
+                    "ensure backing indices share the same schema or target a specific index."
+                )
+
+        properties = selected_item.get("mappings", {}).get("properties")
         if not isinstance(properties, dict):
             raise ValueError(
                 "Expected typeless mapping with 'mappings.properties' (Elasticsearch 8.x+). "
-                f"Received keys: {list(item.get('mappings', {}).keys())}"
+                f"Received keys: {list(selected_item.get('mappings', {}).keys())}"
             )
 
         # Cache the result

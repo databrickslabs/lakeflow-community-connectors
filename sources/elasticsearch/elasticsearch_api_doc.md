@@ -154,6 +154,7 @@ Schema per system index is resolved live from `_mapping`; Elasticsearch does not
 ## **Restrictions**
 - Wildcards or comma-separated patterns are not supported; each table must reference a single index or alias (no `logs-*` fanout).
 - Cursor fields: Meta-fields starting with `_` are currently not allowed as cursors.
+- Aliases or data streams resolving to multiple backing indices must have identical mappings; otherwise the connector raises an error to avoid schema drift.
 
 ## Research Log
 

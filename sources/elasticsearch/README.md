@@ -65,6 +65,7 @@ Behavior notes:
 - `_id` is always added as a column in the ingested data.
 - Fields starting with `_` (meta fields such as `_seq_no`, `_version`, `_id`) are currently not accepted as cursors. If no suitable cursor is found, the connector performs a snapshot read.
 - Wildcards or comma-separated patterns are not supported; each table must reference a single index or alias (no `logs-*` fanout).
+- Aliases/data streams that resolve to multiple backing indices must share identical mappings; otherwise the connector raises an error to avoid schema drift.
 - Network resiliency: HTTP calls use explicit timeouts (5s connect / 30s read) and a small retry with backoff (up to 3 attempts on 429/5xx, honoring `Retry-After`).
 
 ## Data Type Mapping
