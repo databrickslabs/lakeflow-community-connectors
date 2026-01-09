@@ -464,7 +464,7 @@ class LakeflowConnect:
         elif table_name == "token_prices_historical":
             return StructType([
                 StructField("symbol", StringType(), False),
-                StructField("timestamp", LongType(), False),
+                StructField("timestamp", StringType(), False),  # API returns ISO timestamp string
                 StructField("value", DoubleType(), True),
                 StructField("marketCap", DoubleType(), True),
                 StructField("volume24h", DoubleType(), True),
