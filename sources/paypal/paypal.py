@@ -191,27 +191,28 @@ class LakeflowConnect:
         ])
 
         if table_name == "transactions":
+            # Flattened transactions table schema
+            # All fields from nested objects (transaction_info, payer_info, shipping_info, cart_info) 
+            # are now top-level columns
             
             payer_name_struct = StructType([
                 StructField("given_name", StringType(), True),
                 StructField("surname", StringType(), True),
             ])
             
-            payer_info_struct = StructType([
-                StructField("account_id", StringType(), True),
-                StructField("email_address", StringType(), True),
-                StructField("address_status", StringType(), True),
-                StructField("payer_status", StringType(), True),
-                StructField("payer_name", payer_name_struct, True),
-                StructField("country_code", StringType(), True),
+            # Item details for cart
+            item_details_struct = StructType([
+                StructField("item_code", StringType(), True),
+                StructField("item_name", StringType(), True),
+                StructField("item_description", StringType(), True),
+                StructField("item_quantity", StringType(), True),
+                StructField("item_unit_price", amount_struct, True),
+                StructField("item_amount", amount_struct, True),
             ])
             
-            shipping_info_struct = StructType([
-                StructField("name", StringType(), True),
-                StructField("address", address_struct, True),
-            ])
-            
-            transaction_info_struct = StructType([
+            # Flattened schema with all fields at top level
+            transactions_schema = StructType([
+                # Fields from transaction_info
                 StructField("transaction_id", StringType(), False),
                 StructField("paypal_account_id", StringType(), True),
                 StructField("transaction_event_code", StringType(), True),
@@ -226,28 +227,18 @@ class LakeflowConnect:
                 StructField("invoice_id", StringType(), True),
                 StructField("custom_field", StringType(), True),
                 StructField("protection_eligibility", StringType(), True),
-            ])
-            
-            # Item details for cart info
-            item_details_struct = StructType([
-                StructField("item_code", StringType(), True),
-                StructField("item_name", StringType(), True),
-                StructField("item_description", StringType(), True),
-                StructField("item_quantity", StringType(), True),
-                StructField("item_unit_price", amount_struct, True),
-                StructField("item_amount", amount_struct, True),
-            ])
-            
-            cart_info_struct = StructType([
+                # Fields from payer_info
+                StructField("payer_account_id", StringType(), True),
+                StructField("payer_email_address", StringType(), True),
+                StructField("payer_address_status", StringType(), True),
+                StructField("payer_status", StringType(), True),
+                StructField("payer_name", payer_name_struct, True),
+                StructField("payer_country_code", StringType(), True),
+                # Fields from shipping_info
+                StructField("shipping_name", StringType(), True),
+                StructField("shipping_address", address_struct, True),
+                # Fields from cart_info
                 StructField("item_details", ArrayType(item_details_struct, True), True),
-            ])
-            
-            # Main transactions table schema
-            transactions_schema = StructType([
-                StructField("transaction_info", transaction_info_struct, True),
-                StructField("payer_info", payer_info_struct, True),
-                StructField("shipping_info", shipping_info_struct, True),
-                StructField("cart_info", cart_info_struct, True),
             ])
             
             return transactions_schema
@@ -645,15 +636,43 @@ class LakeflowConnect:
                 f"{type(transaction_details).__name__}"
             )
         
-        # Process records - keep nested structure, set missing nested objects to None
+        # Process records - flatten nested objects into top-level fields
         records: list[dict[str, Any]] = []
         for txn in transaction_details:
-            # Preserve nested structure as returned by API
+            transaction_info = txn.get("transaction_info", {}) or {}
+            payer_info = txn.get("payer_info", {}) or {}
+            shipping_info = txn.get("shipping_info", {}) or {}
+            cart_info = txn.get("cart_info", {}) or {}
+            
+            # Flatten all fields to top level
             record: dict[str, Any] = {
-                "transaction_info": txn.get("transaction_info"),
-                "payer_info": txn.get("payer_info"),
-                "shipping_info": txn.get("shipping_info"),
-                "cart_info": txn.get("cart_info"),
+                # Fields from transaction_info
+                "transaction_id": transaction_info.get("transaction_id"),
+                "paypal_account_id": transaction_info.get("paypal_account_id"),
+                "transaction_event_code": transaction_info.get("transaction_event_code"),
+                "transaction_initiation_date": transaction_info.get("transaction_initiation_date"),
+                "transaction_updated_date": transaction_info.get("transaction_updated_date"),
+                "transaction_amount": transaction_info.get("transaction_amount"),
+                "fee_amount": transaction_info.get("fee_amount"),
+                "transaction_status": transaction_info.get("transaction_status"),
+                "transaction_subject": transaction_info.get("transaction_subject"),
+                "ending_balance": transaction_info.get("ending_balance"),
+                "available_balance": transaction_info.get("available_balance"),
+                "invoice_id": transaction_info.get("invoice_id"),
+                "custom_field": transaction_info.get("custom_field"),
+                "protection_eligibility": transaction_info.get("protection_eligibility"),
+                # Fields from payer_info
+                "payer_account_id": payer_info.get("account_id"),
+                "payer_email_address": payer_info.get("email_address"),
+                "payer_address_status": payer_info.get("address_status"),
+                "payer_status": payer_info.get("payer_status"),
+                "payer_name": payer_info.get("payer_name"),
+                "payer_country_code": payer_info.get("country_code"),
+                # Fields from shipping_info
+                "shipping_name": shipping_info.get("name"),
+                "shipping_address": shipping_info.get("address"),
+                # Fields from cart_info
+                "item_details": cart_info.get("item_details"),
             }
             records.append(record)
         

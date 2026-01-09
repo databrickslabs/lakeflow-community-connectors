@@ -99,11 +99,11 @@ The PayPal connector supports the following tables:
 
 The **`transactions`** table provides transaction history data from your PayPal account.
 
-**Primary Key**: `transaction_info.transaction_id`
+**Primary Key**: `transaction_id`
 
 **Incremental Ingestion**: 
 - **Strategy**: Snapshot-based ingestion with date range filtering
-- **Cursor Field**: `transaction_info.transaction_initiation_date`
+- **Cursor Field**: `transaction_initiation_date`
 - **Ingestion Type**: `snapshot`
 
 **Required Table Options**:
@@ -114,21 +114,46 @@ The **`transactions`** table provides transaction history data from your PayPal 
 | `end_date` | string | Yes | End of date range in ISO 8601 format (UTC). Maximum 31-day range from start_date. | `"2024-01-31T23:59:59Z"` |
 | `page_size` | integer | No | Number of transactions per page (default: 100, max: 500) | `100` |
 
-**Schema Highlights**:
+**Schema Structure**:
 
-The `transactions` table includes nested structures for comprehensive transaction data:
+The `transactions` table has a **flattened schema** with all fields at the top level for easier querying:
 
-- **`transaction_info`**: Core transaction details including transaction ID, dates, amounts, status, and fees
-- **`payer_info`**: Payer account information including email, name, and country
-- **`shipping_info`**: Shipping recipient name and address (when applicable)
-- **`cart_info`**: Array of item details for transactions involving product purchases
+**Transaction Fields** (from PayPal `transaction_info`):
+- `transaction_id` (string, not null): Unique transaction identifier
+- `paypal_account_id` (string): PayPal account ID associated with transaction
+- `transaction_event_code` (string): Event code (e.g., T0000, T0001)
+- `transaction_initiation_date` (string): Transaction creation timestamp (ISO 8601)
+- `transaction_updated_date` (string): Last update timestamp (ISO 8601)
+- `transaction_amount` (struct): Amount with `currency_code` and `value` fields
+- `fee_amount` (struct): Fee amount with `currency_code` and `value` fields
+- `transaction_status` (string): Status code (S=Success, P=Pending, D=Denied, V=Voided, F=Failed)
+- `transaction_subject` (string): Transaction description
+- `ending_balance` (struct): Account balance after transaction
+- `available_balance` (struct): Available balance after transaction
+- `invoice_id` (string): Associated invoice ID (if applicable)
+- `custom_field` (string): Custom data field
+- `protection_eligibility` (string): Buyer/seller protection status
 
-**Key Fields**:
-- `transaction_info.transaction_id` (string, not null): Unique transaction identifier
-- `transaction_info.transaction_initiation_date` (string): Transaction creation timestamp (ISO 8601)
-- `transaction_info.transaction_status` (string): Transaction status (S=Success, P=Pending, D=Denied, V=Voided, F=Failed)
-- `transaction_info.transaction_amount` (struct): Amount with currency_code and value
-- `payer_info.email_address` (string): Payer's email address
+**Payer Fields** (from PayPal `payer_info`):
+- `payer_account_id` (string): Payer's PayPal account ID
+- `payer_email_address` (string): Payer's email address
+- `payer_address_status` (string): Address verification status
+- `payer_status` (string): Payer account status
+- `payer_name` (struct): Payer name with `given_name` and `surname` fields
+- `payer_country_code` (string): Payer's country code
+
+**Shipping Fields** (from PayPal `shipping_info`):
+- `shipping_name` (string): Recipient name
+- `shipping_address` (struct): Address with `line1`, `city`, `country_code`, `postal_code` fields
+
+**Cart Fields** (from PayPal `cart_info`):
+- `item_details` (array<struct>): Array of purchased items, each with:
+  - `item_code` (string): Item SKU/code
+  - `item_name` (string): Item name
+  - `item_description` (string): Item description
+  - `item_quantity` (string): Quantity purchased
+  - `item_unit_price` (struct): Unit price with `currency_code` and `value`
+  - `item_amount` (struct): Total item amount with `currency_code` and `value`
 
 **Delete Synchronization**: Not supported. PayPal transactions are immutable once created.
 
@@ -329,6 +354,133 @@ pipeline_spec = {
 8. **Orders Table Not Available**
    - **Cause**: PayPal Orders API v2 doesn't support bulk order listing
    - **Solution**: Use the `transactions` table instead, which includes order and payment information
+
+## Example Queries
+
+Once your transactions data is ingested into Databricks, you can query it using SQL. The flattened schema makes querying straightforward:
+
+### Basic Transaction Query
+
+```sql
+SELECT 
+    transaction_id,
+    transaction_initiation_date,
+    transaction_status,
+    transaction_amount.value as amount,
+    transaction_amount.currency_code as currency,
+    payer_email_address,
+    payer_name.given_name as payer_first_name,
+    payer_name.surname as payer_last_name
+FROM main.paypal_data.transactions
+WHERE transaction_status = 'S'  -- Success
+ORDER BY transaction_initiation_date DESC
+LIMIT 100;
+```
+
+### Calculate Total Revenue by Date
+
+```sql
+SELECT 
+    DATE(transaction_initiation_date) as transaction_date,
+    transaction_amount.currency_code as currency,
+    SUM(CAST(transaction_amount.value AS DECIMAL(19,4))) as total_revenue,
+    SUM(CAST(fee_amount.value AS DECIMAL(19,4))) as total_fees,
+    COUNT(*) as transaction_count
+FROM main.paypal_data.transactions
+WHERE transaction_status = 'S'
+GROUP BY DATE(transaction_initiation_date), transaction_amount.currency_code
+ORDER BY transaction_date DESC;
+```
+
+### Analyze Transactions by Country
+
+```sql
+SELECT 
+    payer_country_code,
+    COUNT(*) as transaction_count,
+    SUM(CAST(transaction_amount.value AS DECIMAL(19,4))) as total_amount,
+    transaction_amount.currency_code as currency
+FROM main.paypal_data.transactions
+WHERE transaction_status = 'S'
+    AND payer_country_code IS NOT NULL
+GROUP BY payer_country_code, transaction_amount.currency_code
+ORDER BY total_amount DESC;
+```
+
+### Transactions with Shipping Information
+
+```sql
+SELECT 
+    transaction_id,
+    transaction_initiation_date,
+    payer_email_address,
+    shipping_name,
+    shipping_address.city,
+    shipping_address.country_code,
+    shipping_address.postal_code,
+    transaction_amount.value as amount
+FROM main.paypal_data.transactions
+WHERE shipping_name IS NOT NULL
+    AND transaction_status = 'S'
+ORDER BY transaction_initiation_date DESC;
+```
+
+### Analyze Cart Items (Exploded)
+
+```sql
+SELECT 
+    transaction_id,
+    transaction_initiation_date,
+    item.item_name,
+    item.item_quantity,
+    item.item_unit_price.value as unit_price,
+    item.item_amount.value as item_total,
+    item.item_unit_price.currency_code as currency
+FROM main.paypal_data.transactions
+LATERAL VIEW EXPLODE(item_details) AS item
+WHERE item_details IS NOT NULL
+    AND transaction_status = 'S'
+ORDER BY transaction_initiation_date DESC;
+```
+
+### Top Products by Revenue
+
+```sql
+SELECT 
+    item.item_name,
+    item.item_code,
+    COUNT(*) as times_sold,
+    SUM(CAST(item.item_quantity AS INT)) as total_quantity,
+    SUM(CAST(item.item_amount.value AS DECIMAL(19,4))) as total_revenue,
+    item.item_amount.currency_code as currency
+FROM main.paypal_data.transactions
+LATERAL VIEW EXPLODE(item_details) AS item
+WHERE item_details IS NOT NULL
+    AND transaction_status = 'S'
+GROUP BY item.item_name, item.item_code, item.item_amount.currency_code
+ORDER BY total_revenue DESC
+LIMIT 20;
+```
+
+### Transaction Status Distribution
+
+```sql
+SELECT 
+    CASE transaction_status
+        WHEN 'S' THEN 'Success'
+        WHEN 'P' THEN 'Pending'
+        WHEN 'D' THEN 'Denied'
+        WHEN 'V' THEN 'Voided'
+        WHEN 'F' THEN 'Failed'
+        ELSE 'Unknown'
+    END as status_label,
+    transaction_status,
+    COUNT(*) as count,
+    SUM(CAST(transaction_amount.value AS DECIMAL(19,4))) as total_amount
+FROM main.paypal_data.transactions
+GROUP BY transaction_status
+ORDER BY count DESC;
+```
 
 ## References
 
