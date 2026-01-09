@@ -38,9 +38,9 @@ class LakeflowConnect:
         Initializes the Zoho CRM connector with connection-level options.
 
         Expected options:
-            - client_id: OAuth Client ID from Zoho API Console.
+            - client_value_temp: OAuth Client ID from Zoho API Console.
             - client_secret: OAuth Client Secret from Zoho API Console.
-            - refresh_token: Long-lived refresh token obtained from OAuth flow.
+            - refresh_value_tmp: Long-lived refresh token obtained from OAuth flow.
             - base_url (optional): Zoho accounts URL for OAuth. Defaults to https://accounts.zoho.com.
               Examples: https://accounts.zoho.com (US), https://accounts.zoho.eu (EU),
                         https://accounts.zoho.in (IN), https://accounts.zoho.com.au (AU).
