@@ -263,9 +263,12 @@ def register_lakeflow_source(spark):
 
         def _initialize_client(self):
             """Initialize MongoDB client and test connection."""
-            # Lazy import to avoid serialization issues
-            from pymongo import MongoClient
-            from pymongo.errors import ConnectionFailure
+            # Import using importlib to avoid PySpark serialization issues
+            import importlib
+            pymongo_module = importlib.import_module('pymongo')
+            pymongo_errors = importlib.import_module('pymongo.errors')
+            MongoClient = pymongo_module.MongoClient
+            ConnectionFailure = pymongo_errors.ConnectionFailure
 
             try:
                 self._client = MongoClient(
@@ -357,8 +360,10 @@ def register_lakeflow_source(spark):
             Returns:
                 List of collection names (no database prefix, no dots, no underscores)
             """
-            # Lazy import to avoid serialization issues
-            from pymongo.errors import OperationFailure
+            # Import using importlib to avoid PySpark serialization issues
+            import importlib
+            pymongo_errors = importlib.import_module('pymongo.errors')
+            OperationFailure = pymongo_errors.OperationFailure
 
             tables = []
 
@@ -513,8 +518,13 @@ def register_lakeflow_source(spark):
             Returns:
                 String representation of the type
             """
-            # Lazy import to avoid serialization issues
-            from bson import ObjectId, Decimal128, Binary, Timestamp as BSONTimestamp
+            # Import using importlib to avoid PySpark serialization issues
+            import importlib
+            bson_module = importlib.import_module('bson')
+            ObjectId = bson_module.ObjectId
+            Decimal128 = bson_module.Decimal128
+            Binary = bson_module.Binary
+            BSONTimestamp = bson_module.Timestamp
 
             if value is None:
                 return "null"
@@ -699,8 +709,10 @@ def register_lakeflow_source(spark):
             Returns:
                 Tuple of (records list, next_offset)
             """
-            # Lazy import to avoid serialization issues
-            from bson import ObjectId
+            # Import using importlib to avoid PySpark serialization issues
+            import importlib
+            bson_module = importlib.import_module('bson')
+            ObjectId = bson_module.ObjectId
 
             db = self.client[database_name]
             collection = db[collection_name]
@@ -860,8 +872,10 @@ def register_lakeflow_source(spark):
             Returns:
                 Tuple of (deleted records, next_offset)
             """
-            # Lazy import to avoid serialization issues
-            from bson import ObjectId
+            # Import using importlib to avoid PySpark serialization issues
+            import importlib
+            bson_module = importlib.import_module('bson')
+            ObjectId = bson_module.ObjectId
 
             # Parse database and collection from table_name
             db_from_name, collection_name = self._parse_collection_name(table_name)
@@ -949,8 +963,13 @@ def register_lakeflow_source(spark):
             Returns:
                 JSON-serializable value
             """
-            # Lazy import to avoid serialization issues
-            from bson import ObjectId, Decimal128, Binary, Timestamp as BSONTimestamp
+            # Import using importlib to avoid PySpark serialization issues
+            import importlib
+            bson_module = importlib.import_module('bson')
+            ObjectId = bson_module.ObjectId
+            Decimal128 = bson_module.Decimal128
+            Binary = bson_module.Binary
+            BSONTimestamp = bson_module.Timestamp
 
             if value is None:
                 return None
