@@ -480,6 +480,9 @@ class LakeflowConnect:
         """
         Read documents incrementally using _id cursor.
         
+        For initial sync (no cursor), reads ALL documents from the collection.
+        For subsequent syncs, reads in batches using cursor.
+        
         Args:
             database_name: Database name
             collection_name: Collection name
@@ -494,42 +497,65 @@ class LakeflowConnect:
         db = self.client[database_name]
         collection = db[collection_name]
         
-        # Build query filter based on cursor
-        query_filter = {}
         cursor = start_offset.get("cursor") if start_offset else None
         
-        if cursor:
-            # Resume from last cursor
+        # Initial sync - read ALL documents
+        if not cursor:
+            all_records = []
+            last_id = None
+            
+            while True:
+                query_filter = {}
+                if last_id:
+                    try:
+                        cursor_id = ObjectId(last_id) if isinstance(last_id, str) else last_id
+                        query_filter = {"_id": {"$gt": cursor_id}}
+                    except Exception:
+                        query_filter = {"_id": {"$gt": last_id}}
+                
+                cursor_obj = collection.find(query_filter).sort("_id", 1).limit(self.batch_size)
+                
+                batch_records = []
+                for doc in cursor_obj:
+                    record = self._convert_document(doc)
+                    batch_records.append(record)
+                    last_id = record["_id"]
+                
+                all_records.extend(batch_records)
+                
+                # Stop when we get fewer records than batch_size
+                if len(batch_records) < self.batch_size:
+                    break
+            
+            return all_records, {}
+        
+        # Incremental sync - read single batch
+        else:
+            query_filter = {}
             try:
                 cursor_id = ObjectId(cursor) if isinstance(cursor, str) else cursor
                 query_filter = {"_id": {"$gt": cursor_id}}
             except Exception:
-                # If cursor is not a valid ObjectId, treat as string
                 query_filter = {"_id": {"$gt": cursor}}
-        
-        # Fetch batch of documents
-        cursor_obj = collection.find(query_filter).sort("_id", 1).limit(self.batch_size)
-        
-        records = []
-        last_id = None
-        
-        for doc in cursor_obj:
-            # Convert document to JSON-serializable format
-            record = self._convert_document(doc)
-            records.append(record)
-            last_id = record["_id"]
-        
-        # Build next offset
-        # If we got fewer records than batch_size, we've reached the end
-        # Return empty offset to signal completion
-        if len(records) < self.batch_size:
-            next_offset = {}
-        elif last_id:
-            next_offset = {"cursor": last_id}
-        else:
-            next_offset = {}
-        
-        return records, next_offset
+            
+            cursor_obj = collection.find(query_filter).sort("_id", 1).limit(self.batch_size)
+            
+            records = []
+            last_id = None
+            
+            for doc in cursor_obj:
+                record = self._convert_document(doc)
+                records.append(record)
+                last_id = record["_id"]
+            
+            if len(records) < self.batch_size:
+                next_offset = {}
+            elif last_id:
+                next_offset = {"cursor": last_id}
+            else:
+                next_offset = {}
+            
+            return records, next_offset
     
     def _read_change_stream(
         self, database_name: str, collection_name: str, start_offset: dict
