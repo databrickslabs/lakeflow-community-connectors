@@ -686,10 +686,13 @@ def register_lakeflow_source(spark):
             db = self.client[database_name]
             collection = db[collection_name]
 
-            cursor = start_offset.get("cursor") if start_offset else None
+            # Check if this is initial sync (no cursor in offset)
+            cursor = None
+            if start_offset and "cursor" in start_offset:
+                cursor = start_offset["cursor"]
 
             # Initial sync - read ALL documents without batching
-            if not cursor:
+            if cursor is None:
                 # No limit - let MongoDB cursor iterate through ALL documents
                 cursor_obj = collection.find().sort("_id", 1)
 
