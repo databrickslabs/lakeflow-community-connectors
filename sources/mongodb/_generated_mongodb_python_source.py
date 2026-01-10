@@ -669,8 +669,8 @@ def register_lakeflow_source(spark):
             """
             Read documents incrementally using _id cursor.
 
-            For initial sync (no cursor), reads ALL documents from the collection.
-            For subsequent syncs, reads in batches using cursor.
+            For initial sync (no cursor), reads documents in batches.
+            For subsequent syncs, reads next batch using cursor.
 
             Args:
                 database_name: Database name
@@ -680,7 +680,6 @@ def register_lakeflow_source(spark):
             Returns:
                 Tuple of (records list, next_offset)
             """
-            # Lazy import to avoid serialization issues
             from bson import ObjectId
 
             db = self.client[database_name]
@@ -688,69 +687,41 @@ def register_lakeflow_source(spark):
 
             cursor = start_offset.get("cursor") if start_offset else None
 
-            # Initial sync - read ALL documents using skip-based pagination
-            if not cursor:
-                all_records = []
-                skip_count = 0
-
-                while True:
-                    # Use skip and limit for reliable pagination
-                    cursor_obj = collection.find().sort("_id", 1).skip(skip_count).limit(self.batch_size)
-
-                    batch_records = []
-                    for doc in cursor_obj:
-                        # Convert document
-                        record = self._convert_document(doc)
-                        batch_records.append(record)
-
-                    all_records.extend(batch_records)
-
-                    # Stop when we get fewer records than batch_size (reached end of collection)
-                    if len(batch_records) < self.batch_size:
-                        break
-
-                    # Increment skip count for next batch
-                    skip_count += len(batch_records)
-
-                    # Safety check: if no records returned, break to avoid infinite loop
-                    if len(batch_records) == 0:
-                        break
-
-                return all_records, {}
-
-            # Incremental sync - read single batch
-            else:
-                query_filter = {}
+            # Build query filter
+            if cursor:
+                # Incremental: read from last cursor position
                 try:
                     cursor_id = ObjectId(cursor) if isinstance(cursor, str) else cursor
                     query_filter = {"_id": {"$gt": cursor_id}}
                 except Exception:
                     query_filter = {"_id": {"$gt": cursor}}
+            else:
+                # Initial sync: start from beginning
+                query_filter = {}
 
-                cursor_obj = collection.find(query_filter).sort("_id", 1).limit(self.batch_size)
+            # Read one batch at a time
+            cursor_obj = collection.find(query_filter).sort("_id", 1).limit(self.batch_size)
 
-                records = []
-                last_id = None
+            records = []
+            last_id = None
 
-                for doc in cursor_obj:
-                    # Store raw _id BEFORE converting document
-                    raw_id = doc["_id"]
+            for doc in cursor_obj:
+                # Convert document
+                record = self._convert_document(doc)
+                records.append(record)
+                last_id = record["_id"]
 
-                    # Now convert document (which converts _id to string)
-                    record = self._convert_document(doc)
-                    records.append(record)
+            # Determine next offset
+            if len(records) < self.batch_size:
+                # Reached end of collection
+                next_offset = {}
+            elif last_id:
+                # More records available
+                next_offset = {"cursor": last_id}
+            else:
+                next_offset = {}
 
-                    # Store the converted string version for offset
-                    last_id = record["_id"]
-
-                if len(records) < self.batch_size:
-                    next_offset = {}
-                elif last_id:
-                    next_offset = {"cursor": last_id}
-                else:
-                    next_offset = {}
-
-                return records, next_offset
+            return records, next_offset
 
         def _read_change_stream(
             self, database_name: str, collection_name: str, start_offset: dict
