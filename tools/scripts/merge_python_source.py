@@ -377,48 +377,62 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
         merged_lines.append("")
         merged_lines.append("")
 
-    # Start the register_lakeflow_source function
-    merged_lines.append("def register_lakeflow_source(spark):")
-    merged_lines.append('    """Register the Lakeflow Python source with Spark."""')
+    # Section 1: libs/utils.py code (MODULE LEVEL - NO INDENTATION)
+    merged_lines.append("#" * 56)
+    merged_lines.append("# libs/utils.py")
+    merged_lines.append("#" * 56)
     merged_lines.append("")
-
-    # Section 1: libs/utils.py code
-    merged_lines.append("    " + "#" * 56)
-    merged_lines.append("    # libs/utils.py")
-    merged_lines.append("    " + "#" * 56)
-    merged_lines.append("")
-    # Indent the code
+    # NO indentation - module level
     for line in utils_code.strip().split("\n"):
-        if line.strip():  # Only indent non-empty lines
-            merged_lines.append("    " + line)
-        else:
-            merged_lines.append("")
+        merged_lines.append(line)
     merged_lines.append("")
     merged_lines.append("")
 
-    # Section 2: sources/{source_name}/{source_name}.py code
-    merged_lines.append("    " + "#" * 56)
-    merged_lines.append(f"    # sources/{source_name}/{source_name}.py")
-    merged_lines.append("    " + "#" * 56)
+    # Section 2: sources/{source_name}/{source_name}.py code (MODULE LEVEL - NO INDENTATION)
+    merged_lines.append("#" * 56)
+    merged_lines.append(f"# sources/{source_name}/{source_name}.py")
+    merged_lines.append("#" * 56)
     merged_lines.append("")
     for line in source_code.strip().split("\n"):
-        if line.strip():
-            merged_lines.append("    " + line)
-        else:
-            merged_lines.append("")
+        merged_lines.append(line)
     merged_lines.append("")
     merged_lines.append("")
 
-    # Section 3: pipeline/lakeflow_python_source.py code
-    merged_lines.append("    " + "#" * 56)
-    merged_lines.append("    # pipeline/lakeflow_python_source.py")
-    merged_lines.append("    " + "#" * 56)
+    # Section 3: pipeline/lakeflow_python_source.py code (MODULE LEVEL - NO INDENTATION, except register function)
+    merged_lines.append("#" * 56)
+    merged_lines.append("# pipeline/lakeflow_python_source.py")
+    merged_lines.append("#" * 56)
     merged_lines.append("")
-    for line in lakeflow_code.strip().split("\n"):
-        if line.strip():
-            merged_lines.append("    " + line)
+    
+    # Parse lakeflow_code to separate classes from register function and filter out module-level register call
+    lakeflow_lines = lakeflow_code.strip().split("\n")
+    in_register_function = False
+    register_function_lines = []
+    module_level_lines = []
+    
+    for line in lakeflow_lines:
+        # Skip the module-level spark.dataSource.register call
+        if "spark.dataSource.register" in line and not line.strip().startswith("def "):
+            continue
+        # Check if we're entering the register function
+        if line.strip().startswith("def register_lakeflow_source(spark):"):
+            in_register_function = True
+            register_function_lines.append(line)
+        elif in_register_function:
+            register_function_lines.append(line)
         else:
-            merged_lines.append("")
+            module_level_lines.append(line)
+    
+    # Add module-level code (classes, constants) - NO INDENTATION
+    for line in module_level_lines:
+        merged_lines.append(line)
+    
+    # Add a simple register function that just calls spark.dataSource.register
+    merged_lines.append("")
+    merged_lines.append("")
+    merged_lines.append("def register_lakeflow_source(spark):")
+    merged_lines.append('    """Register the Lakeflow Python source with Spark."""')
+    merged_lines.append("    spark.dataSource.register(LakeflowSource)")
     merged_lines.append("")
 
     merged_content = "\n".join(merged_lines)
