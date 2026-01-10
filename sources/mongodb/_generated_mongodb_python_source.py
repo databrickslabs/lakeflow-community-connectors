@@ -75,9 +75,20 @@ def register_lakeflow_source(spark):
 
 
     def _parse_integer(value: Any) -> int:
-        """Convert value to integer."""
+        """Convert value to integer. Tries to extract numeric part from dirty data."""
         if isinstance(value, str) and value.strip():
-            return int(float(value)) if "." in value else int(value)
+            import re
+            # Try direct conversion first
+            try:
+                return int(float(value)) if "." in value else int(value)
+            except ValueError:
+                # Try to extract numeric part from potentially dirty data (e.g., "1981è" -> 1981)
+                match = re.match(r'^(-?\d+(?:\.\d+)?)', value.strip())
+                if match:
+                    num_str = match.group(1)
+                    return int(float(num_str)) if "." in num_str else int(num_str)
+                # No numeric part found
+                raise ValueError(f"Cannot extract integer from '{value}'")
         if isinstance(value, (int, float)):
             return int(value)
         raise ValueError(f"Cannot convert {value} to integer")
@@ -197,7 +208,11 @@ def register_lakeflow_source(spark):
         try:
             field_type_class = type(field_type)
             if field_type_class in _PRIMITIVE_PARSERS:
-                return _PRIMITIVE_PARSERS[field_type_class](value)
+                parsed = _PRIMITIVE_PARSERS[field_type_class](value)
+                # If parser returned None for unparseable value, return None
+                if parsed is None:
+                    return None
+                return parsed
 
             # Check for custom UDT handling
             if hasattr(field_type, "fromJson"):
@@ -205,7 +220,11 @@ def register_lakeflow_source(spark):
 
             raise TypeError(f"Unsupported field type: {field_type}")
         except (ValueError, TypeError) as e:
-            raise ValueError(f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}")
+            # Log warning and return None for unparseable values instead of failing
+            # This allows the pipeline to continue with dirty data
+            import warnings
+            warnings.warn(f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}. Returning None.")
+            return None
 
 
     ########################################################
