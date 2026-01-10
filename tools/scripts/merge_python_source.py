@@ -77,22 +77,9 @@ def extract_imports_and_code(content: str) -> tuple:
         # code, docstrings are kept as-is.
         if stripped.startswith('"""') or stripped.startswith("'''"):
             if in_imports:
-                # Skip leading module docstring - handle multi-line docstrings
-                quote_type = '"""' if stripped.startswith('"""') else "'''"
-                # Check if it's a single-line docstring
-                if stripped.endswith(quote_type) and len(stripped) > 6:
-                    # Single-line docstring like """text"""
-                    i += 1
-                    continue
-                else:
-                    # Multi-line docstring - skip until we find the closing quotes
-                    i += 1
-                    while i < len(lines):
-                        if lines[i].strip().endswith(quote_type):
-                            i += 1
-                            break
-                        i += 1
-                    continue
+                # Skip leading module docstring lines entirely
+                i += 1
+                continue
             else:
                 # Inner/function/class docstrings are part of the code
                 code_lines.append(line)
