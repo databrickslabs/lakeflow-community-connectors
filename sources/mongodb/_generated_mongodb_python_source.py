@@ -815,36 +815,28 @@ def register_lakeflow_source(spark):
                 watch_options["resume_after"] = resume_token
 
             try:
-                # Watch for changes (with timeout to avoid blocking indefinitely)
+                # Watch for changes - this will block until changes arrive
                 with collection.watch(**watch_options) as stream:
                     # Process a limited number of changes in this batch
                     change_count = 0
                     max_changes = self.batch_size
                     last_token = resume_token
 
-                    # Use a timeout to avoid blocking forever if no changes
-                    import time
-                    start_time = time.time()
-                    timeout_seconds = 5  # Max 5 seconds total
+                    # Iterate over change stream (blocking)
+                    for change in stream:
+                        # Process change event
+                        record = self._process_change_event(change)
+                        if record:
+                            records.append(record)
 
-                    # Use try_next() instead of iterator to avoid blocking
-                    while time.time() - start_time < timeout_seconds and change_count < max_changes:
-                        # Non-blocking check for next change
-                        change = stream.try_next()
+                        last_token = stream.resume_token
+                        change_count += 1
 
-                        if change is not None:
-                            # Process change event
-                            record = self._process_change_event(change)
-                            if record:
-                                records.append(record)
+                        # Stop after processing batch_size changes
+                        if change_count >= max_changes:
+                            break
 
-                            last_token = stream.resume_token
-                            change_count += 1
-                        else:
-                            # No change available, sleep briefly before checking again
-                            time.sleep(0.1)
-
-                    # Preserve CDC mode even if no changes found
+                    # Preserve CDC mode and resume token for next batch
                     next_offset = {"cdc_started": True, "resume_token": last_token if last_token else resume_token}
 
             except Exception as e:
@@ -929,32 +921,25 @@ def register_lakeflow_source(spark):
                     max_deletes = self.batch_size
                     last_token = resume_token
 
-                    # Use timeout to avoid blocking
-                    import time
-                    start_time = time.time()
-                    timeout_seconds = 5
+                    # Iterate over change stream (blocking)
+                    for change in stream:
+                        # For deletes, we only have documentKey (which contains _id)
+                        document_key = change.get("documentKey", {})
+                        doc_id = document_key.get("_id")
 
-                    # Use try_next() instead of iterator to avoid blocking
-                    while time.time() - start_time < timeout_seconds and delete_count < max_deletes:
-                        change = stream.try_next()
+                        if doc_id:
+                            # Return minimal record with just _id
+                            delete_record = {
+                                "_id": str(doc_id) if isinstance(doc_id, ObjectId) else doc_id
+                            }
+                            records.append(delete_record)
 
-                        if change is not None:
-                            # For deletes, we only have documentKey (which contains _id)
-                            document_key = change.get("documentKey", {})
-                            doc_id = document_key.get("_id")
+                        last_token = stream.resume_token
+                        delete_count += 1
 
-                            if doc_id:
-                                # Return minimal record with just _id
-                                delete_record = {
-                                    "_id": str(doc_id) if isinstance(doc_id, ObjectId) else doc_id
-                                }
-                                records.append(delete_record)
-
-                            last_token = stream.resume_token
-                            delete_count += 1
-                        else:
-                            # No change available, sleep briefly
-                            time.sleep(0.1)
+                        # Stop after processing batch_size deletes
+                        if delete_count >= max_deletes:
+                            break
 
                     next_offset = {"resume_token": last_token if last_token else resume_token}
 
