@@ -2,7 +2,7 @@
 
 ## Goal
 Implement the Python connector for **{{source_name}}** that conforms exactly to the interface defined in  
-[lakeflow_connect.py](../sources/interface/lakeflow_connect.py). The implementation should be based on the source API documentation in `sources/{source_name}/{source_name}_api_doc.md` produced by "understand-source".
+[lakeflow_connect.py](../src/databricks/labs/community_connector/sources/interface/lakeflow_connect.py). The implementation should be based on the source API documentation in `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md` produced by "understand-source".
 
 ## Implementation Requirements
 - Implement all methods declared in the interface.
@@ -23,5 +23,5 @@ Implement the Python connector for **{{source_name}}** that conforms exactly to 
   - list the parent objects
   - for each parent object, list the child objects
   - combine the results into a single output table with the parent object identifier as the extra field.
-- Refer to `example/example.py` or other connectors under `connector_sources` as examples
+- Refer to `src/databricks/labs/community_connector/sources/example/example.py` or other connectors under `src/databricks/labs/community_connector/sources` as examples
 

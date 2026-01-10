@@ -1,0 +1,2 @@
+"""Stripe source connector."""
+

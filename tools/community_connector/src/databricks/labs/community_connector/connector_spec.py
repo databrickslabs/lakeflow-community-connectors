@@ -161,15 +161,37 @@ def load_connector_spec(
         cli_parent = Path(cli_file_path).parent
         local_paths.append(
             cli_parent.parent.parent.parent.parent.parent.parent.parent
+            / "src"
+            / "databricks"
+            / "labs"
+            / "community_connector"
             / "sources"
             / source_name
             / "connector_spec.yaml"
         )
 
     # Current working directory is repo root
-    local_paths.append(Path.cwd() / "sources" / source_name / "connector_spec.yaml")
+    local_paths.append(
+        Path.cwd()
+        / "src"
+        / "databricks"
+        / "labs"
+        / "community_connector"
+        / "sources"
+        / source_name
+        / "connector_spec.yaml"
+    )
     # Current working directory is tools/community_connector (2 levels up to repo root)
-    local_paths.append(Path.cwd().parent.parent / "sources" / source_name / "connector_spec.yaml")
+    local_paths.append(
+        Path.cwd().parent.parent
+        / "src"
+        / "databricks"
+        / "labs"
+        / "community_connector"
+        / "sources"
+        / source_name
+        / "connector_spec.yaml"
+    )
 
     for local_path in local_paths:
         result = _load_yaml_file(local_path)
@@ -190,7 +212,7 @@ def load_connector_spec(
     # Remove trailing slash if present
     repo_raw_url = repo_raw_url.rstrip("/")
 
-    spec_url = f"{repo_raw_url}/sources/{source_name}/connector_spec.yaml"
+    spec_url = f"{repo_raw_url}/src/databricks/labs/community_connector/sources/{source_name}/connector_spec.yaml"
     try:
         with urllib.request.urlopen(spec_url, timeout=10) as response:
             content = response.read().decode("utf-8")

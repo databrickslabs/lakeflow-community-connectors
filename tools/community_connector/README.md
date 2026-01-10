@@ -239,6 +239,13 @@ pytest tests/ -v
 
 ### Project Structure
 
+The main source code is organized under `src/databricks/labs/community_connector/`:
+- `libs/` — Shared utilities (spec_parser.py, utils.py, source_loader.py)
+- `pipeline/` — Core ingestion logic (PySpark Data Source, SDP orchestration)
+- `sources/` — Source connectors (github/, zendesk/, stripe/, etc.)
+  - `interface/` — LakeflowConnect base interface
+  - `{source}/` — Each connector has: {source}.py, README.md, test/, configs/
+
 ```
 tools/community_connector/
 ├── src/databricks/labs/community_connector/

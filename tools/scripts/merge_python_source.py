@@ -5,9 +5,9 @@ Due to current limitations, the Spark Declarative Pipeline (SDP) does not
 support module imports for Python Data Source implementations.
 
 This script combines:
-1. libs/utils.py (parsing utilities)
-2. sources/{source_name}/{source_name}.py (source connector implementation)
-3. pipeline/lakeflow_python_source.py (PySpark data source registration)
+1. src/databricks/labs/community_connector/libs/utils.py (parsing utilities)
+2. src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py (source connector implementation)
+3. src/databricks/labs/community_connector/pipeline/lakeflow_python_source.py (PySpark data source registration)
 
 Usage:
     python tools/scripts/merge_python_source.py <source_name>
@@ -33,7 +33,7 @@ def get_all_sources() -> List[str]:
     Returns a list of source names that have a {source_name}.py file
     in their directory (excluding 'interface').
     """
-    sources_dir = PROJECT_ROOT / "sources"
+    sources_dir = PROJECT_ROOT / "src" / "databricks" / "labs" / "community_connector" / "sources"
     sources = []
     
     for source_dir in sources_dir.iterdir():
@@ -143,9 +143,9 @@ def deduplicate_imports(import_lists: List[List[str]]) -> List[str]:
     """
     # Imports to skip (internal imports that won't work in merged file)
     skip_patterns = [
-        "from libs.utils import",
-        "from pipeline.lakeflow_python_source import",
-        "from sources.",
+        "from databricks.labs.community_connector.libs.utils import",
+        "from databricks.labs.community_connector.pipeline.lakeflow_python_source import",
+        "from databricks.labs.community_connector.sources.",
     ]
 
     # Track 'from X import Y' style imports to merge them
@@ -318,17 +318,15 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
         The merged content as a string
     """
     # Define file paths
-    utils_path = PROJECT_ROOT / "libs" / "utils.py"
-    source_path = PROJECT_ROOT / "sources" / source_name / f"{source_name}.py"
-    lakeflow_source_path = PROJECT_ROOT / "pipeline" / "lakeflow_python_source.py"
+    src_base = PROJECT_ROOT / "src" / "databricks" / "labs" / "community_connector"
+    utils_path = src_base / "libs" / "utils.py"
+    source_path = src_base / "sources" / source_name / f"{source_name}.py"
+    lakeflow_source_path = src_base / "pipeline" / "lakeflow_python_source.py"
 
     # If no output path specified, use default location in source directory
     if output_path is None:
         output_path = (
-            PROJECT_ROOT
-            / "sources"
-            / source_name
-            / f"_generated_{source_name}_python_source.py"
+            src_base / "sources" / source_name / f"_generated_{source_name}_python_source.py"
         )
 
     # Verify all files exist
@@ -382,9 +380,9 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     merged_lines.append('    """Register the Lakeflow Python source with Spark."""')
     merged_lines.append("")
 
-    # Section 1: libs/utils.py code
+    # Section 1: src/databricks/labs/community_connector/libs/utils.py code
     merged_lines.append("    " + "#" * 56)
-    merged_lines.append("    # libs/utils.py")
+    merged_lines.append("    # src/databricks/labs/community_connector/libs/utils.py")
     merged_lines.append("    " + "#" * 56)
     merged_lines.append("")
     # Indent the code
@@ -396,9 +394,11 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     merged_lines.append("")
     merged_lines.append("")
 
-    # Section 2: sources/{source_name}/{source_name}.py code
+    # Section 2: src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py code
     merged_lines.append("    " + "#" * 56)
-    merged_lines.append(f"    # sources/{source_name}/{source_name}.py")
+    merged_lines.append(
+        f"    # src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py"
+    )
     merged_lines.append("    " + "#" * 56)
     merged_lines.append("")
     for line in source_code.strip().split("\n"):
@@ -409,9 +409,11 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     merged_lines.append("")
     merged_lines.append("")
 
-    # Section 3: pipeline/lakeflow_python_source.py code
+    # Section 3: src/databricks/labs/community_connector/pipeline/lakeflow_python_source.py code
     merged_lines.append("    " + "#" * 56)
-    merged_lines.append("    # pipeline/lakeflow_python_source.py")
+    merged_lines.append(
+        "    # src/databricks/labs/community_connector/pipeline/lakeflow_python_source.py"
+    )
     merged_lines.append("    " + "#" * 56)
     merged_lines.append("")
     for line in lakeflow_code.strip().split("\n"):
@@ -436,7 +438,10 @@ def merge_all_sources() -> None:
     """Merge all available source connectors."""
     sources = get_all_sources()
     print(f"Regenerating {len(sources)} sources: {', '.join(sources)}", file=sys.stderr)
-    print("Output: sources/<source>/_generated_<source>_python_source.py", file=sys.stderr)
+    print(
+        "Output: src/databricks/labs/community_connector/sources/<source>/_generated_<source>_python_source.py",
+        file=sys.stderr,
+    )
     print("", file=sys.stderr)
     
     for source in sources:
@@ -457,10 +462,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Merge zendesk source (saves to sources/zendesk/_generated_zendesk_python_source.py)
+  # Merge zendesk source (saves to src/databricks/labs/community_connector/sources/zendesk/_generated_zendesk_python_source.py)
   python tools/scripts/merge_python_source.py zendesk
 
-  # Merge example source (saves to sources/example/_generated_example_python_source.py)
+  # Merge example source (saves to src/databricks/labs/community_connector/sources/example/_generated_example_python_source.py)
   python tools/scripts/merge_python_source.py example
 
   # Merge zendesk source and save to custom location
@@ -480,7 +485,7 @@ Examples:
         "-o",
         "--output",
         type=Path,
-        help="Output file path (default: sources/{source_name}/_generated_{source_name}_python_source.py). Not applicable when using 'all'.",
+        help="Output file path (default: src/databricks/labs/community_connector/sources/{source_name}/_generated_{source_name}_python_source.py). Not applicable when using 'all'.",
     )
 
     args = parser.parse_args()
