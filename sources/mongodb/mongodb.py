@@ -507,19 +507,19 @@ class LakeflowConnect:
             while True:
                 query_filter = {}
                 if last_id:
-                    try:
-                        cursor_id = ObjectId(last_id) if isinstance(last_id, str) else last_id
-                        query_filter = {"_id": {"$gt": cursor_id}}
-                    except Exception:
-                        query_filter = {"_id": {"$gt": last_id}}
+                    # Use raw ObjectId directly (no conversion needed)
+                    query_filter = {"_id": {"$gt": last_id}}
                 
                 cursor_obj = collection.find(query_filter).sort("_id", 1).limit(self.batch_size)
                 
                 batch_records = []
                 for doc in cursor_obj:
+                    # Store raw _id BEFORE converting document
+                    last_id = doc["_id"]
+                    
+                    # Now convert document (which converts _id to string)
                     record = self._convert_document(doc)
                     batch_records.append(record)
-                    last_id = record["_id"]
                 
                 all_records.extend(batch_records)
                 
@@ -544,8 +544,14 @@ class LakeflowConnect:
             last_id = None
             
             for doc in cursor_obj:
+                # Store raw _id BEFORE converting document
+                raw_id = doc["_id"]
+                
+                # Now convert document (which converts _id to string)
                 record = self._convert_document(doc)
                 records.append(record)
+                
+                # Store the converted string version for offset
                 last_id = record["_id"]
             
             if len(records) < self.batch_size:
