@@ -11,6 +11,7 @@ requires-python = ">=3.10"
 dependencies = [
     "pyspark>=3.5.0",
     "pydantic>=2.0.0",
+    "requests>=2.32.5",
 ]
 
 [project.optional-dependencies]
