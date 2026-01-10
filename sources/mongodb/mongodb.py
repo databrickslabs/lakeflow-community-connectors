@@ -499,33 +499,32 @@ class LakeflowConnect:
         
         cursor = start_offset.get("cursor") if start_offset else None
         
-        # Initial sync - read ALL documents
+        # Initial sync - read ALL documents using skip-based pagination
         if not cursor:
             all_records = []
-            last_id_str = None
+            skip_count = 0
             
             while True:
-                query_filter = {}
-                if last_id_str:
-                    # Convert string back to ObjectId for query
-                    last_id_obj = ObjectId(last_id_str)
-                    query_filter = {"_id": {"$gt": last_id_obj}}
-                
-                cursor_obj = collection.find(query_filter).sort("_id", 1).limit(self.batch_size)
+                # Use skip and limit for reliable pagination
+                cursor_obj = collection.find().sort("_id", 1).skip(skip_count).limit(self.batch_size)
                 
                 batch_records = []
                 for doc in cursor_obj:
-                    # Store _id as string immediately (safe for serialization)
-                    last_id_str = str(doc["_id"])
-                    
-                    # Convert document (which also converts _id to string)
+                    # Convert document
                     record = self._convert_document(doc)
                     batch_records.append(record)
                 
                 all_records.extend(batch_records)
                 
-                # Stop when we get fewer records than batch_size
+                # Stop when we get fewer records than batch_size (reached end of collection)
                 if len(batch_records) < self.batch_size:
+                    break
+                
+                # Increment skip count for next batch
+                skip_count += len(batch_records)
+                
+                # Safety check: if no records returned, break to avoid infinite loop
+                if len(batch_records) == 0:
                     break
             
             return all_records, {}
