@@ -27,7 +27,7 @@ def register_lakeflow_source(spark):
     """Register the Lakeflow Python source with Spark."""
 
     ########################################################
-    # libs/utils.py
+    # src/databricks/labs/community_connector/libs/utils.py
     ########################################################
 
     def _parse_struct(value: Any, field_type: StructType) -> Row:
@@ -210,7 +210,7 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
-    # sources/example/example.py
+    # src/databricks/labs/community_connector/sources/example/example.py
     ########################################################
 
     class ExampleTableOptions(BaseModel):
@@ -331,7 +331,7 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
-    # pipeline/lakeflow_python_source.py
+    # src/databricks/labs/community_connector/pipeline/lakeflow_python_source.py
     ########################################################
 
     METADATA_TABLE = "_lakeflow_metadata"
