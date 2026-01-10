@@ -827,19 +827,22 @@ def register_lakeflow_source(spark):
                     start_time = time.time()
                     timeout_seconds = 5  # Max 5 seconds total
 
-                    for change in stream:
-                        if change_count >= max_changes:
-                            break
-                        if time.time() - start_time > timeout_seconds:
-                            break
+                    # Use try_next() instead of iterator to avoid blocking
+                    while time.time() - start_time < timeout_seconds and change_count < max_changes:
+                        # Non-blocking check for next change
+                        change = stream.try_next()
 
-                        # Process change event
-                        record = self._process_change_event(change)
-                        if record:
-                            records.append(record)
+                        if change is not None:
+                            # Process change event
+                            record = self._process_change_event(change)
+                            if record:
+                                records.append(record)
 
-                        last_token = stream.resume_token
-                        change_count += 1
+                            last_token = stream.resume_token
+                            change_count += 1
+                        else:
+                            # No change available, sleep briefly before checking again
+                            time.sleep(0.1)
 
                     # Preserve CDC mode even if no changes found
                     next_offset = {"cdc_started": True, "resume_token": last_token if last_token else resume_token}
@@ -926,25 +929,34 @@ def register_lakeflow_source(spark):
                     max_deletes = self.batch_size
                     last_token = resume_token
 
-                    for change in stream:
-                        if delete_count >= max_deletes:
-                            break
+                    # Use timeout to avoid blocking
+                    import time
+                    start_time = time.time()
+                    timeout_seconds = 5
 
-                        # For deletes, we only have documentKey (which contains _id)
-                        document_key = change.get("documentKey", {})
-                        doc_id = document_key.get("_id")
+                    # Use try_next() instead of iterator to avoid blocking
+                    while time.time() - start_time < timeout_seconds and delete_count < max_deletes:
+                        change = stream.try_next()
 
-                        if doc_id:
-                            # Return minimal record with just _id
-                            delete_record = {
-                                "_id": str(doc_id) if isinstance(doc_id, ObjectId) else doc_id
-                            }
-                            records.append(delete_record)
+                        if change is not None:
+                            # For deletes, we only have documentKey (which contains _id)
+                            document_key = change.get("documentKey", {})
+                            doc_id = document_key.get("_id")
 
-                        last_token = stream.resume_token
-                        delete_count += 1
+                            if doc_id:
+                                # Return minimal record with just _id
+                                delete_record = {
+                                    "_id": str(doc_id) if isinstance(doc_id, ObjectId) else doc_id
+                                }
+                                records.append(delete_record)
 
-                    next_offset = {"resume_token": last_token}
+                            last_token = stream.resume_token
+                            delete_count += 1
+                        else:
+                            # No change available, sleep briefly
+                            time.sleep(0.1)
+
+                    next_offset = {"resume_token": last_token if last_token else resume_token}
 
             except Exception as e:
                 # If change stream not available, return empty
