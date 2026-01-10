@@ -1,0 +1,169 @@
+# Auto-Discovery Pipeline Spec for Azure DevOps Connector
+# Fetches data from ALL projects, repositories, and pull requests
+# Ideal for comprehensive org-wide data ingestion
+
+connection_name: azure_devops_connection
+
+objects:
+  # ========================================
+  # Organization Tables
+  # ========================================
+  
+  - table:
+      source_table: projects
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      table_configuration:
+        scd_type: SCD_TYPE_1
+        primary_keys:
+          - id
+
+  - table:
+      source_table: users
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      table_configuration:
+        scd_type: SCD_TYPE_1
+        primary_keys:
+          - descriptor
+
+  # ========================================
+  # Git Tables - Auto-Discovery Mode
+  # No project or repository_id specified = fetch from ALL
+  # ========================================
+  
+  - table:
+      source_table: repositories
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      table_configuration:
+        scd_type: SCD_TYPE_1
+        primary_keys:
+          - id
+        # No project = fetch from all projects
+
+  - table:
+      source_table: commits
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      table_configuration:
+        scd_type: APPEND_ONLY
+        primary_keys:
+          - commitId
+          - repository_id
+        # No project/repository_id = fetch from all projects and repos
+
+  - table:
+      source_table: pullrequests
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      table_configuration:
+        scd_type: SCD_TYPE_2
+        primary_keys:
+          - pullRequestId
+          - repository_id
+        status_filter: all
+        # No project/repository_id = fetch from all projects and repos
+
+  - table:
+      source_table: refs
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      table_configuration:
+        scd_type: SCD_TYPE_1
+        primary_keys:
+          - name
+          - repository_id
+        # No project/repository_id = fetch from all projects and repos
+
+  - table:
+      source_table: pushes
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      table_configuration:
+        scd_type: APPEND_ONLY
+        primary_keys:
+          - pushId
+          - repository_id
+        # No project/repository_id = fetch from all projects and repos
+
+  # ========================================
+  # Pull Request Detail Tables - Auto-Discovery
+  # Fetches from all PRs across all repos and projects
+  # ========================================
+  
+  - table:
+      source_table: pullrequest_threads
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      table_configuration:
+        scd_type: APPEND_ONLY
+        primary_keys:
+          - id
+          - pullrequest_id
+          - repository_id
+        # No project/repository_id/pullrequest_id = fetch from all
+
+  - table:
+      source_table: pullrequest_workitems
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      table_configuration:
+        scd_type: SCD_TYPE_1
+        primary_keys:
+          - id
+          - pullrequest_id
+          - repository_id
+        # No project/repository_id/pullrequest_id = fetch from all
+
+  - table:
+      source_table: pullrequest_commits
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      table_configuration:
+        scd_type: SCD_TYPE_1
+        primary_keys:
+          - commitId
+          - pullrequest_id
+          - repository_id
+        # No project/repository_id/pullrequest_id = fetch from all
+
+  - table:
+      source_table: pullrequest_reviewers
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      table_configuration:
+        scd_type: SCD_TYPE_1
+        primary_keys:
+          - id
+          - pullrequest_id
+          - repository_id
+        # No project/repository_id/pullrequest_id = fetch from all
+
+  # ========================================
+  # Work Item Tracking - Auto-Discovery
+  # ========================================
+  
+  # Note: Use workitem_revisions first to discover all work item IDs
+  - table:
+      source_table: workitem_revisions
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      table_configuration:
+        scd_type: APPEND_ONLY
+        primary_keys:
+          - id
+          - rev
+        # No project = fetch from all projects
+
+  - table:
+      source_table: workitem_types
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      table_configuration:
+        scd_type: SCD_TYPE_1
+        primary_keys:
+          - referenceName
+          - project_name
+        # No project = fetch from all projects
+
