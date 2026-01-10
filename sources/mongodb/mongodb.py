@@ -273,6 +273,10 @@ class LakeflowConnect:
             spark_type = self._resolve_spark_type(types)
             schema_fields.append(StructField(field_name, spark_type, True))
         
+        # Add cluster time field for CDC sequencing (nullable, only populated during CDC)
+        from pyspark.sql.types import DoubleType
+        schema_fields.append(StructField("_lakeflow_cluster_time", DoubleType(), True))
+        
         return StructType(schema_fields)
     
     def _collect_field_types(self, obj: Any, field_types: Dict[str, set], prefix: str = ""):
@@ -431,17 +435,19 @@ class LakeflowConnect:
         # MongoDB collections always have _id as primary key
         metadata = {
             "primary_keys": ["_id"],
-            "cursor_field": "_id",  # Use _id for cursor-based pagination
         }
         
-        # Set ingestion type based on capabilities
+        # Set ingestion type and cursor field based on capabilities
         if is_replica_set:
             # Change Streams available - support CDC with deletes
+            # Use cluster time for sequencing CDC changes
             metadata["ingestion_type"] = "cdc_with_deletes"
+            metadata["cursor_field"] = "_lakeflow_cluster_time"
         else:
             # Standalone deployment - use snapshot or append
-            # Default to append (incremental using _id cursor)
+            # Use _id for cursor-based pagination
             metadata["ingestion_type"] = "append"
+            metadata["cursor_field"] = "_id"
         
         # Cache result
         self._metadata_cache[cache_key] = metadata
@@ -648,11 +654,15 @@ class LakeflowConnect:
                 next_offset = {"cdc_started": True, "resume_token": last_token if last_token else resume_token}
         
         except Exception as e:
-            # If change stream fails (e.g., not a replica set), log and return empty
-            # Don't fall back to incremental read as it would duplicate data
+            # If change stream fails, log detailed error information
             import warnings
-            warnings.warn(f"Change stream failed: {e}. Returning empty result. Check if MongoDB is a replica set.")
+            import traceback
+            error_msg = f"Change stream failed: {type(e).__name__}: {str(e)}"
+            error_trace = traceback.format_exc()
+            warnings.warn(f"{error_msg}\n{error_trace}")
+            
             # Return empty records but preserve CDC state
+            # This allows the pipeline to continue even if change streams fail
             return [], {"cdc_started": True, "resume_token": resume_token}
         
         return records, next_offset
@@ -673,7 +683,17 @@ class LakeflowConnect:
             # Return the full document
             full_doc = change.get("fullDocument")
             if full_doc:
-                return self._convert_document(full_doc)
+                record = self._convert_document(full_doc)
+                
+                # Add cluster time as a sequence field for CDC
+                # This allows Databricks apply_changes to properly order changes
+                cluster_time = change.get("clusterTime")
+                if cluster_time:
+                    # Convert Timestamp to Unix epoch seconds (float)
+                    # This provides a monotonically increasing sequence value
+                    record["_lakeflow_cluster_time"] = float(cluster_time.time) + (float(cluster_time.inc) / 1000000.0)
+                
+                return record
         
         # Deletes are handled separately in read_table_deletes
         return None
