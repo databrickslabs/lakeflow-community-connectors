@@ -806,23 +806,26 @@ def register_lakeflow_source(spark):
             # For this implementation, we return empty to indicate CDC setup is ready
             # Real CDC implementation would require a long-running process
 
-            # Build watch options with timeout to avoid blocking
+            # Build watch options
             watch_options = {
                 "full_document": "updateLookup",
-                "max_await_time_ms": 1000  # Wait max 1 second for changes
             }
             if resume_token and resume_token != "None" and resume_token is not None:
                 watch_options["resume_after"] = resume_token
 
             try:
-                # Watch for changes - this will block until changes arrive
+                # Watch for changes - this will block until at least one change arrives
                 with collection.watch(**watch_options) as stream:
-                    # Process a limited number of changes in this batch
+                    # Process changes as they arrive
                     change_count = 0
                     max_changes = self.batch_size
                     last_token = resume_token
 
-                    # Iterate over change stream (blocking)
+                    # STRATEGY: Block waiting for the FIRST change, then grab any additional
+                    # changes that are immediately available (non-blocking) before returning.
+                    # This ensures we return quickly with data rather than waiting for batch_size changes.
+
+                    # Wait for first change (blocking)
                     for change in stream:
                         # Process change event
                         record = self._process_change_event(change)
@@ -832,9 +835,22 @@ def register_lakeflow_source(spark):
                         last_token = stream.resume_token
                         change_count += 1
 
-                        # Stop after processing batch_size changes
-                        if change_count >= max_changes:
-                            break
+                        # After first change, try to grab more without blocking
+                        while change_count < max_changes:
+                            next_change = stream.try_next()
+                            if next_change is None:
+                                # No more changes immediately available
+                                break
+
+                            # Process additional change
+                            record = self._process_change_event(next_change)
+                            if record:
+                                records.append(record)
+                            last_token = stream.resume_token
+                            change_count += 1
+
+                        # Exit after processing first change + any immediate additional changes
+                        break
 
                     # Preserve CDC mode and resume token for next batch
                     next_offset = {"cdc_started": True, "resume_token": last_token if last_token else resume_token}
