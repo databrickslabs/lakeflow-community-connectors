@@ -1,0 +1,56 @@
+# Elasticsearch Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+connection:
+  auth_methods:
+    - name: API_KEY
+      description: >
+        Authenticate using an Elasticsearch API key (base64 of id:api_key) sent
+        via Authorization: ApiKey.
+      parameters:
+        - name: api_key
+          type: string
+          required: true
+          description: >
+            Base64-encoded API key value for Authorization: ApiKey.
+    - name: BEARER
+      description: >
+        Authenticate using a bearer/OAuth access token sent via
+        Authorization: Bearer.
+      parameters:
+        - name: token
+          type: string
+          required: true
+          description: >
+            Bearer access token for Authorization: Bearer.
+  common_parameters:
+    - name: endpoint
+      type: string
+      required: true
+      description: >
+        Base URL for the Elasticsearch cluster, e.g. https://host:9200.
+    - name: authentication
+      type: string
+      required: true
+      description: >
+        Authentication method to use: API_KEY or BEARER (must match auth method
+        selection).
+    - name: verify_ssl
+      type: boolean
+      required: false
+      description: >
+        Set to false to skip TLS verification (default: true).
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# If no table-specific options are needed, set to empty string or omit.
+# ============================================================================
+external_options_allowlist: "cursor_field,ingestion_type,page_size,pit_keep_alive"
