@@ -502,22 +502,23 @@ class LakeflowConnect:
         # Initial sync - read ALL documents
         if not cursor:
             all_records = []
-            last_id = None
+            last_id_str = None
             
             while True:
                 query_filter = {}
-                if last_id:
-                    # Use raw ObjectId directly (no conversion needed)
-                    query_filter = {"_id": {"$gt": last_id}}
+                if last_id_str:
+                    # Convert string back to ObjectId for query
+                    last_id_obj = ObjectId(last_id_str)
+                    query_filter = {"_id": {"$gt": last_id_obj}}
                 
                 cursor_obj = collection.find(query_filter).sort("_id", 1).limit(self.batch_size)
                 
                 batch_records = []
                 for doc in cursor_obj:
-                    # Store raw _id BEFORE converting document
-                    last_id = doc["_id"]
+                    # Store _id as string immediately (safe for serialization)
+                    last_id_str = str(doc["_id"])
                     
-                    # Now convert document (which converts _id to string)
+                    # Convert document (which also converts _id to string)
                     record = self._convert_document(doc)
                     batch_records.append(record)
                 
