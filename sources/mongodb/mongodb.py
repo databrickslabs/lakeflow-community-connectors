@@ -582,11 +582,13 @@ class LakeflowConnect:
         records = []
         resume_token = start_offset.get("resume_token") if start_offset else None
         
-        # For initial sync, perform a full scan first using incremental read
-        if not resume_token or start_offset.get("initial_sync"):
-            # Use incremental read for initial full scan
-            # This ensures we get all records through proper pagination
-            return self._read_incremental(database_name, collection_name, start_offset)
+        # Check if we need to do initial full scan
+        # Only do full scan if there's no resume_token AND no "cdc_started" flag
+        if not resume_token and not start_offset.get("cdc_started"):
+            # Do initial full scan using incremental read
+            all_records, _ = self._read_incremental(database_name, collection_name, {})
+            # After full scan, return a special offset to indicate CDC should start
+            return all_records, {"cdc_started": True, "resume_token": None}
         
         # If initial sync is complete (empty offset returned), switch to CDC mode
         # by setting up change stream with current cluster time
@@ -596,9 +598,12 @@ class LakeflowConnect:
         # For this implementation, we return empty to indicate CDC setup is ready
         # Real CDC implementation would require a long-running process
         
-        # Build watch options
-        watch_options = {"full_document": "updateLookup"}
-        if resume_token and resume_token != "None":
+        # Build watch options with timeout to avoid blocking
+        watch_options = {
+            "full_document": "updateLookup",
+            "max_await_time_ms": 1000  # Wait max 1 second for changes
+        }
+        if resume_token and resume_token != "None" and resume_token is not None:
             watch_options["resume_after"] = resume_token
         
         try:
@@ -609,8 +614,15 @@ class LakeflowConnect:
                 max_changes = self.batch_size
                 last_token = resume_token
                 
+                # Use a timeout to avoid blocking forever if no changes
+                import time
+                start_time = time.time()
+                timeout_seconds = 5  # Max 5 seconds total
+                
                 for change in stream:
                     if change_count >= max_changes:
+                        break
+                    if time.time() - start_time > timeout_seconds:
                         break
                     
                     # Process change event
@@ -621,11 +633,16 @@ class LakeflowConnect:
                     last_token = stream.resume_token
                     change_count += 1
                 
-                next_offset = {"resume_token": last_token}
+                # Preserve CDC mode even if no changes found
+                next_offset = {"cdc_started": True, "resume_token": last_token if last_token else resume_token}
         
         except Exception as e:
-            # If change stream fails, fall back to incremental read
-            return self._read_incremental(database_name, collection_name, start_offset)
+            # If change stream fails (e.g., not a replica set), log and return empty
+            # Don't fall back to incremental read as it would duplicate data
+            import warnings
+            warnings.warn(f"Change stream failed: {e}. Returning empty result. Check if MongoDB is a replica set.")
+            # Return empty records but preserve CDC state
+            return [], {"cdc_started": True, "resume_token": resume_token}
         
         return records, next_offset
     
