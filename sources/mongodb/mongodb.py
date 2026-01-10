@@ -499,34 +499,18 @@ class LakeflowConnect:
         
         cursor = start_offset.get("cursor") if start_offset else None
         
-        # Initial sync - read ALL documents using skip-based pagination
+        # Initial sync - read ALL documents without batching
         if not cursor:
+            # No limit - let MongoDB cursor iterate through ALL documents
+            cursor_obj = collection.find().sort("_id", 1)
+            
             all_records = []
-            skip_count = 0
+            for doc in cursor_obj:
+                # Convert document
+                record = self._convert_document(doc)
+                all_records.append(record)
             
-            while True:
-                # Use skip and limit for reliable pagination
-                cursor_obj = collection.find().sort("_id", 1).skip(skip_count).limit(self.batch_size)
-                
-                batch_records = []
-                for doc in cursor_obj:
-                    # Convert document
-                    record = self._convert_document(doc)
-                    batch_records.append(record)
-                
-                all_records.extend(batch_records)
-                
-                # Stop when we get fewer records than batch_size (reached end of collection)
-                if len(batch_records) < self.batch_size:
-                    break
-                
-                # Increment skip count for next batch
-                skip_count += len(batch_records)
-                
-                # Safety check: if no records returned, break to avoid infinite loop
-                if len(batch_records) == 0:
-                    break
-            
+            # Return all records with empty offset (sync complete)
             return all_records, {}
         
         # Incremental sync - read single batch
