@@ -1001,6 +1001,25 @@ def register_lakeflow_source(spark):
             for key, value in doc.items():
                 result[key] = self._convert_value(value)
 
+            # Add cluster time for sequencing (for initial sync records, extract from _id ObjectId)
+            if "_lakeflow_cluster_time" not in result and "_id" in doc:
+                # Extract timestamp from ObjectId if available
+                # ObjectId embeds creation timestamp in first 4 bytes
+                try:
+                    import importlib
+                    bson_module = importlib.import_module('bson')
+                    ObjectId = bson_module.ObjectId
+
+                    raw_id = doc["_id"]
+                    if isinstance(raw_id, ObjectId):
+                        # ObjectId.generation_time returns datetime
+                        generation_time = raw_id.generation_time
+                        # Convert to Unix timestamp (float)
+                        result["_lakeflow_cluster_time"] = generation_time.timestamp()
+                except Exception:
+                    # If extraction fails, leave it None (will be populated during CDC)
+                    pass
+
             return result
 
         def _convert_value(self, value: Any) -> Any:
