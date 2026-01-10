@@ -669,8 +669,8 @@ def register_lakeflow_source(spark):
             """
             Read documents incrementally using _id cursor.
 
-            For initial sync (no cursor), reads documents in batches.
-            For subsequent syncs, reads next batch using cursor.
+            For initial sync (no cursor), reads ALL documents from the collection.
+            For subsequent syncs, reads in batches using cursor.
 
             Args:
                 database_name: Database name
@@ -680,6 +680,7 @@ def register_lakeflow_source(spark):
             Returns:
                 Tuple of (records list, next_offset)
             """
+            # Lazy import to avoid serialization issues
             from bson import ObjectId
 
             db = self.client[database_name]
@@ -687,41 +688,53 @@ def register_lakeflow_source(spark):
 
             cursor = start_offset.get("cursor") if start_offset else None
 
-            # Build query filter
-            if cursor:
-                # Incremental: read from last cursor position
+            # Initial sync - read ALL documents without batching
+            if not cursor:
+                # No limit - let MongoDB cursor iterate through ALL documents
+                cursor_obj = collection.find().sort("_id", 1)
+
+                all_records = []
+                for doc in cursor_obj:
+                    # Convert document
+                    record = self._convert_document(doc)
+                    all_records.append(record)
+
+                # Return all records with empty offset (sync complete)
+                return all_records, {}
+
+            # Incremental sync - read single batch
+            else:
+                query_filter = {}
                 try:
                     cursor_id = ObjectId(cursor) if isinstance(cursor, str) else cursor
                     query_filter = {"_id": {"$gt": cursor_id}}
                 except Exception:
                     query_filter = {"_id": {"$gt": cursor}}
-            else:
-                # Initial sync: start from beginning
-                query_filter = {}
 
-            # Read one batch at a time
-            cursor_obj = collection.find(query_filter).sort("_id", 1).limit(self.batch_size)
+                cursor_obj = collection.find(query_filter).sort("_id", 1).limit(self.batch_size)
 
-            records = []
-            last_id = None
+                records = []
+                last_id = None
 
-            for doc in cursor_obj:
-                # Convert document
-                record = self._convert_document(doc)
-                records.append(record)
-                last_id = record["_id"]
+                for doc in cursor_obj:
+                    # Store raw _id BEFORE converting document
+                    raw_id = doc["_id"]
 
-            # Determine next offset
-            if len(records) < self.batch_size:
-                # Reached end of collection
-                next_offset = {}
-            elif last_id:
-                # More records available
-                next_offset = {"cursor": last_id}
-            else:
-                next_offset = {}
+                    # Now convert document (which converts _id to string)
+                    record = self._convert_document(doc)
+                    records.append(record)
 
-            return records, next_offset
+                    # Store the converted string version for offset
+                    last_id = record["_id"]
+
+                if len(records) < self.batch_size:
+                    next_offset = {}
+                elif last_id:
+                    next_offset = {"cursor": last_id}
+                else:
+                    next_offset = {}
+
+                return records, next_offset
 
         def _read_change_stream(
             self, database_name: str, collection_name: str, start_offset: dict
