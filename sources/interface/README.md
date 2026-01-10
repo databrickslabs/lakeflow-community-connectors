@@ -32,15 +32,6 @@ spark.read.format("lakeflow_connect")
      .option("tableNameList", ",".join(table_list))
      .load()
 
-# API to list all tables
-# Schema: table_schema, table_name
-# Only table_name is required
-spark.read.format("lakeflow_connect")
-     .option("databricks.connection", connection_name)
-     .option("tableName", "_lakeflow_table_list")
-     .option("tableNameList", ",".join(table_list))
-     .load()
-
 
 # API to batch read
 # required if the table supports snapshot ingestion type
