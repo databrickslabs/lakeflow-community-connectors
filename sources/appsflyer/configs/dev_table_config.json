@@ -1,7 +1,39 @@
 {
-  "app_id": "YOUR_APP_ID",
-  "start_date": "2026-01-01",
-  "end_date": "2026-01-31",
-  "lookback_hours": "6",
-  "max_days_per_batch": "7"
+  "installs_report": {
+    "app_id": "YOUR_APP_ID",
+    "start_date": "2026-01-08",
+    "lookback_hours": "6",
+    "max_days_per_batch": "7"
+  },
+  "in_app_events_report": {
+    "app_id": "YOUR_APP_ID",
+    "start_date": "2026-01-08",
+    "lookback_hours": "6",
+    "max_days_per_batch": "7"
+  },
+  "uninstall_events_report": {
+    "app_id": "YOUR_APP_ID",
+    "start_date": "2026-01-08",
+    "lookback_hours": "6",
+    "max_days_per_batch": "7"
+  },
+  "organic_installs_report": {
+    "app_id": "YOUR_APP_ID",
+    "start_date": "2026-01-08",
+    "lookback_hours": "6",
+    "max_days_per_batch": "7"
+  },
+  "organic_in_app_events_report": {
+    "app_id": "YOUR_APP_ID",
+    "start_date": "2026-01-08",
+    "lookback_hours": "6",
+    "max_days_per_batch": "7"
+  },
+  "organic_uninstall_events_report": {
+    "app_id": "YOUR_APP_ID",
+    "start_date": "2026-01-08",
+    "lookback_hours": "6",
+    "max_days_per_batch": "7"
+  },
+  "apps": {}
 }

@@ -16,6 +16,21 @@
 - **Other supported methods (not used by this connector)**:
   - OAuth is not supported; tokens are long-lived and provisioned out-of-band
 
+### **Connection Parameters** (dev_config.json)
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `api_token` | string | ✅ Yes | - | AppsFlyer API authentication token. Format: UUID v4. Obtain from AppsFlyer Dashboard → API Tokens. Must have permissions for all apps you want to sync. |
+| `base_url` | string | ❌ Optional | `https://hq1.appsflyer.com` | Regional API endpoint. US region: `https://hq1.appsflyer.com`, EU region: `https://eu-west1.appsflyer.com`. Use the region where your AppsFlyer account is hosted. |
+
+**Example dev_config.json**:
+```json
+{
+  "api_token": "YOUR_APPSFLYER_API_TOKEN_HERE",
+  "base_url": "https://hq1.appsflyer.com"
+}
+```
+
 Example authenticated request:
 
 ```bash
@@ -35,6 +50,8 @@ Notes:
 For connector purposes, we treat specific AppsFlyer resources as **objects/tables**.  
 The object list is **static** (defined by the connector), representing different types of reports and data available from AppsFlyer.
 
+**Total Supported Tables**: 7 (1 snapshot + 6 CDC event reports)
+
 | Object Name | Description | Primary Endpoint | Ingestion Type |
 |------------|-------------|------------------|----------------|
 | `apps` | List of apps associated with the account | `GET /api/mng/apps` | `snapshot` |
@@ -45,9 +62,10 @@ The object list is **static** (defined by the connector), representing different
 | `organic_in_app_events_report` | Organic in-app events | `GET /api/raw-data/export/app/<app_id>/organic_in_app_events_report/v5` | `cdc` (based on event_time) |
 | `organic_uninstall_events_report` | Organic uninstall events | `GET /api/raw-data/export/app/<app_id>/organic_uninstall_events_report/v5` | `cdc` (based on event_time) |
 
-**Connector scope for initial implementation**:
-- Step 1 focuses on the `apps` object and `installs_report` to document in detail
-- Other objects are listed for future extension
+**Implementation Status**:
+- All 7 tables are fully implemented and tested
+- Complete CDC support with event_time-based incremental sync
+- Production-ready with rate limiting and error handling
 
 **Response Format**:
 - **Management API** (`/api/mng/*`): Returns JSON with JSON:API format
@@ -119,17 +137,18 @@ curl -X GET \
 ]
 ```
 
-### `installs_report` object (primary table)
+### `installs_report` object (primary event table)
 
 **Source endpoint**:  
 `GET /api/raw-data/export/app/<app_id>/installs_report/v5`
 
 **Key behavior**:
-- Returns installation events with full attribution data
+- Returns installation events with full attribution data (85 fields)
 - Supports date range filtering via `from` and `to` parameters (YYYY-MM-DD)
-- Data is available with a latency of ~10-30 minutes
+- Data is available with a latency of ~10-30 minutes (up to 6 hours for late arrivals)
 - Maximum date range per request: 90 days
-- Results can be paginated or returned as a single file
+- Response format: CSV with UTF-8 BOM encoding
+- Connector automatically handles lookback window for late-arriving events
 
 **High-level schema (connector view)**:
 
@@ -238,7 +257,12 @@ curl -X GET \
 ### `in_app_events_report` object
 
 **Source endpoint**:  
-`GET /export/<app_id>/in_app_events_report/v5`
+`GET /api/raw-data/export/app/<app_id>/in_app_events_report/v5`
+
+**Key behavior**:
+- Returns in-app event data (purchases, registrations, custom events)
+- 30 fields focused on event-specific data and attribution
+- Response format: CSV with UTF-8 BOM encoding
 
 **High-level schema (connector view)**:
 
@@ -271,6 +295,44 @@ Similar to `installs_report`, but includes event-specific fields:
 | `sdk_version` | string | SDK version |
 
 > In-app events inherit most attribution fields from the install event plus event-specific data.
+
+### `uninstall_events_report` object
+
+**Source endpoint**:  
+`GET /api/raw-data/export/app/<app_id>/uninstall_events_report/v5`
+
+**Key behavior**:
+- Returns uninstall event data
+- 10 fields with essential information
+- Response format: CSV with UTF-8 BOM encoding
+
+### `organic_installs_report` object
+
+**Source endpoint**:  
+`GET /api/raw-data/export/app/<app_id>/organic_installs_report/v5`
+
+**Key behavior**:
+- Returns organic (non-attributed) installation events
+- Same schema as `installs_report` (85 fields)
+- Captures users who installed without paid attribution
+
+### `organic_in_app_events_report` object
+
+**Source endpoint**:  
+`GET /api/raw-data/export/app/<app_id>/organic_in_app_events_report/v5`
+
+**Key behavior**:
+- Returns in-app events from organic users
+- Same schema as `in_app_events_report` (30 fields)
+
+### `organic_uninstall_events_report` object
+
+**Source endpoint**:  
+`GET /api/raw-data/export/app/<app_id>/organic_uninstall_events_report/v5`
+
+**Key behavior**:
+- Returns uninstall events from organic users
+- Same schema as `uninstall_events_report` (10 fields)
 
 ## **Get Object Primary Keys**
 
@@ -333,7 +395,7 @@ For `installs_report` and event reports:
 **Path parameters**:
 - `app_id` (string, required): Application identifier from the apps list
 
-**Key query parameters** (relevant for ingestion):
+**API Query Parameters**:
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -342,6 +404,50 @@ For `installs_report` and event reports:
 | `timezone` | string | no | UTC | Timezone for date interpretation (e.g., `America/New_York`) |
 | `maximum_rows` | integer | no | 1000000 | Maximum number of rows to return (up to 1M per request) |
 | `additional_fields` | string (comma-separated) | no | none | Additional optional fields to include |
+
+### **Table Configuration Parameters** (dev_table_config.json)
+
+These parameters are passed as `table_options` when reading event tables. Each table can have its own configuration.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `app_id` | string | ✅ Yes (for event tables) | - | AppsFlyer application identifier. Format: package name (e.g., `com.myapp`) or AppsFlyer ID (e.g., `id123456789`). Required for all event tables. Not needed for `apps` table. Obtain from AppsFlyer dashboard or apps API. |
+| `start_date` | string (YYYY-MM-DD) | ❌ Optional | 7 days ago | Initial date to start syncing data from on first run. Used when no previous offset exists. Format: `YYYY-MM-DD`. Recommended to start with recent date (e.g., last 7-14 days) to avoid large initial sync. |
+| `lookback_hours` | integer | ❌ Optional | 6 | Number of hours to look back when syncing incrementally. Handles late-arriving events. AppsFlyer data latency is typically 10-30 minutes but can be up to 6 hours. Recommended range: 3-24 hours. Higher values ensure completeness but may increase processing time. |
+| `max_days_per_batch` | integer | ❌ Optional | 7 | Maximum number of days to fetch in a single API request. Used to control batch size and avoid timeouts. Smaller values (1-3 days) recommended for high-volume apps. Larger values (7-30 days) work well for low-volume apps. Maximum supported by API: 90 days. |
+
+**Example dev_table_config.json**:
+```json
+{
+  "installs_report": {
+    "app_id": "com.myapp",
+    "start_date": "2026-01-08",
+    "lookback_hours": "6",
+    "max_days_per_batch": "7"
+  },
+  "in_app_events_report": {
+    "app_id": "com.myapp",
+    "start_date": "2026-01-08",
+    "lookback_hours": "6",
+    "max_days_per_batch": "7"
+  },
+  "apps": {}
+}
+```
+
+**Parameter Usage by Table**:
+
+| Table | app_id | start_date | lookback_hours | max_days_per_batch |
+|-------|--------|------------|----------------|-------------------|
+| `apps` | ❌ | ❌ | ❌ | ❌ |
+| `installs_report` | ✅ | ⭕ | ⭕ | ⭕ |
+| `in_app_events_report` | ✅ | ⭕ | ⭕ | ⭕ |
+| `uninstall_events_report` | ✅ | ⭕ | ⭕ | ⭕ |
+| `organic_installs_report` | ✅ | ⭕ | ⭕ | ⭕ |
+| `organic_in_app_events_report` | ✅ | ⭕ | ⭕ | ⭕ |
+| `organic_uninstall_events_report` | ✅ | ⭕ | ⭕ | ⭕ |
+
+✅ = Required, ⭕ = Optional, ❌ = Not used
 
 **Response format**:
 - Content-Type controlled by `Accept` header
@@ -357,7 +463,7 @@ For `installs_report` and event reports:
 
 **Incremental strategy**:
 - On the first run:
-  - Start from a configurable `start_date` (e.g., 30 days ago)
+  - Start from a configurable `start_date` (default: 7 days ago)
   - Fetch data in daily or weekly windows
 - On subsequent runs:
   - Use the maximum `event_time` from the previous sync as the new `from` date
@@ -451,24 +557,165 @@ curl -X GET \
 - **Nested structures**: Contributor data (contributor_1, contributor_2, contributor_3) should be modeled as repeated fields or structs
 - **Empty strings vs nulls**: AppsFlyer may return empty strings for missing values; connector should normalize to `null`
 
-## **Rate Limits and Best Practices**
+## **Rate Limits and Error Handling**
 
-AppsFlyer imposes rate limits based on account tier and endpoint:
+### **Rate Limit Overview**
 
-- **General guidance**: 
-  - Typical limit: ~1000 requests per day for raw data export endpoints (varies by plan)
-  - App List API: 20 requests per minute, 100 requests per day
-- **Best practices**:
-  - Use date windowing to minimize number of API calls
-  - Implement exponential backoff for rate limit (HTTP 429) responses
-  - Cache app list locally; refresh periodically (e.g., daily)
-  - Request data in larger windows (e.g., 7 days) when possible
-  - Monitor response headers for rate limit information (if provided)
-- **Error handling**:
-  - HTTP 401: Invalid or expired API token
-  - HTTP 403: Insufficient permissions
-  - HTTP 429: Rate limit exceeded; back off and retry
-  - HTTP 500/502/503: Server error; retry with exponential backoff
+AppsFlyer imposes **per-app, per-day, per-report-type** rate limits that vary by account tier:
+
+| Endpoint Type | Typical Limit | Scope | Notes |
+|---------------|---------------|-------|-------|
+| **Install Reports** | Varies by plan | Per app, per day | Includes: `installs_report`, `organic_installs_report`, `reinstalls` |
+| **In-App Event Reports** | Varies by plan | Per app, per day | Includes: `in_app_events_report`, `organic_in_app_events_report` |
+| **Uninstall Reports** | Varies by plan | Per app, per day | Includes: `uninstall_events_report`, `organic_uninstall_events_report` |
+| **App List API** | 20 req/min, 100 req/day | Per account | Management API endpoint |
+| **Total Raw Data Exports** | ~1000 requests/day | Per account | Aggregate across all report types |
+
+**Important**: Each report type (installs, in-app events, uninstalls) has its own separate daily quota per app.
+
+### **Rate Limit Errors**
+
+#### **HTTP 400 - Daily Quota Exceeded**
+
+AppsFlyer returns **HTTP 400** (not 429) when daily quota is exhausted. The error message indicates the specific report type limit reached.
+
+**Example Error for Install Reports**:
+```
+RuntimeError: AppsFlyer API error for organic_installs_report: 400 You've reached your maximum number of install reports that can be downloaded today for this app. <a href="https://support.appsflyer.com/hc/en-us/articles/207034366-Rate-limitations-and-access-windows-for-reports-and-reporting-APIs#rawdata-rate-limitation-policy?utm_source=hq1&utm_medium=ui&utm_campaign=reports">Learn more</a>. For details about increasing your limit, contact your CSM or hello@appsflyer.com
+```
+
+**Example Error for In-App Event Reports**:
+```
+RuntimeError: AppsFlyer API error for organic_in_app_events_report: 400 You've reached your maximum number of in-app event reports that can be downloaded today for this app. <a href="...">Learn more</a>. For details about increasing your limit, contact your CSM or hello@appsflyer.com
+```
+
+**Key Characteristics**:
+- Status code: `400 Bad Request` (not `429 Too Many Requests`)
+- Error message includes: "You've reached your maximum number of [report_type] reports"
+- Quota resets daily (typically at midnight UTC)
+- Each report type has independent quota
+
+### **Error Handling in Connector**
+
+The connector implements the following error handling strategy:
+
+| Status Code | Meaning | Connector Behavior | User Action Required |
+|-------------|---------|-------------------|---------------------|
+| **400** with rate limit message | Daily quota exceeded for specific report type | Raises `RuntimeError` immediately, does not retry | Wait until next day (quota reset) OR reduce sync frequency OR contact AppsFlyer to increase limit |
+| **401** | Invalid or expired API token | Raises authentication error | Update `api_token` in connection config |
+| **403** | Insufficient permissions | Raises permission error | Verify API token has access to the app |
+| **429** | Rate limit (requests per minute) | Automatic retry with exponential backoff | None - connector handles automatically |
+| **500/502/503** | Server error | Automatic retry with exponential backoff | If persistent, contact AppsFlyer support |
+
+**Note**: The connector does **not** automatically retry HTTP 400 rate limit errors because:
+1. The quota is per-day, so immediate retries will fail
+2. Retrying wastes API calls and may affect other report types
+3. User should be aware of quota limits for capacity planning
+
+### **Best Practices to Avoid Rate Limits**
+
+1. **Optimize Sync Frequency**:
+   - For low-volume apps: Sync daily or less frequently
+   - For high-volume apps: Sync hourly but monitor quota usage
+   - Avoid running full-refresh unnecessarily
+
+2. **Use Incremental Sync Efficiently**:
+   - Set appropriate `start_date` (default: 7 days ago)
+   - Use `max_days_per_batch` to control request size (default: 7 days)
+   - Longer batch windows = fewer API calls
+   - Example: 7-day batch = 1 API call vs 1-day batch = 7 API calls
+
+3. **Sync Only Needed Tables**:
+   - Don't sync all 7 tables if you only need 2-3
+   - Organic reports use same quota as non-organic (e.g., `organic_installs_report` + `installs_report` = 2 install report calls)
+   - Prioritize critical tables (e.g., `installs_report`, `in_app_events_report`)
+
+4. **Monitor Quota Usage**:
+   - Track how many API calls each pipeline run makes
+   - Calculate daily quota needed: `(days_per_sync / max_days_per_batch) * sync_frequency * number_of_tables`
+   - Example: Syncing 7 days of data for 6 tables daily = 6 API calls per day
+
+5. **Coordinate Multiple Pipelines**:
+   - If multiple pipelines access the same app, they share the quota
+   - Consider consolidating into one pipeline with multiple tables
+   - Schedule pipelines at different times to spread out API calls
+
+6. **Cache App List**:
+   - `apps` table rarely changes
+   - Sync once daily or on-demand rather than with every pipeline run
+
+### **What to Do When Rate Limited**
+
+#### **Immediate Actions**:
+1. **Wait for Quota Reset**: Quotas typically reset at midnight UTC. Schedule next run after reset.
+2. **Check Current Usage**: Review how many API calls were made today for this app.
+3. **Identify the Report Type**: Error message indicates which report type hit the limit (installs, in-app events, etc.)
+
+#### **Short-Term Solutions**:
+1. **Increase `max_days_per_batch`**: Fetch more days per request
+   ```json
+   {
+     "app_id": "com.myapp",
+     "max_days_per_batch": "14"  // Changed from 7 to 14 days
+   }
+   ```
+2. **Reduce Sync Frequency**: Change from hourly to every 6 hours or daily
+3. **Disable Non-Critical Tables**: Temporarily pause syncing less important tables
+
+#### **Long-Term Solutions**:
+1. **Contact AppsFlyer**: Request quota increase
+   - Email: hello@appsflyer.com
+   - Contact your Customer Success Manager (CSM)
+   - Reference: https://support.appsflyer.com/hc/en-us/articles/207034366
+2. **Upgrade Account Tier**: Higher tiers typically include higher quotas
+3. **Optimize Data Strategy**: Only sync necessary date ranges and tables
+
+### **Connector Configuration for Rate Limit Management**
+
+```json
+{
+  "connection_name": "my_appsflyer_conn",
+  "objects": [
+    {
+      "table": {
+        "source_table": "installs_report",
+        "app_id": "com.myapp",
+        "start_date": "2026-01-08",
+        "max_days_per_batch": "14",  // Larger batches = fewer API calls
+        "lookback_hours": "6"
+      }
+    },
+    {
+      "table": {
+        "source_table": "in_app_events_report",
+        "app_id": "com.myapp",
+        "start_date": "2026-01-08",
+        "max_days_per_batch": "14"
+      }
+    }
+  ]
+}
+```
+
+### **Quota Calculation Example**
+
+**Scenario**: Syncing 6 tables daily for an app with 30 days of historical data
+
+**Initial Load** (First Run):
+- Date range: 30 days (from `start_date`)
+- Batch size: 7 days (`max_days_per_batch`)
+- API calls per table: 30 / 7 = 5 calls (rounded up)
+- Total calls: 5 calls × 6 tables = **30 API calls** (one-time)
+
+**Daily Incremental Sync**:
+- Date range: 1 day (yesterday + lookback window)
+- Batch size: 7 days (covers 1 day easily)
+- API calls per table: 1 call
+- Total calls: 1 call × 6 tables = **6 API calls per day**
+
+**Optimization**: Increase `max_days_per_batch` to 30:
+- Initial load: 30 / 30 = 1 call per table = **6 API calls** (saves 24 calls)
+- Daily sync: Still 1 call per table = **6 API calls per day**
 
 ## **Known Quirks & Edge Cases**
 
@@ -494,14 +741,49 @@ AppsFlyer imposes rate limits based on account tier and endpoint:
   - Current version is v5 for raw data export APIs
   - Older versions (v4) may still work but are deprecated
 
+## **Implementation Notes**
+
+### **Connector Features**
+- **7 Tables Supported**: Complete coverage of core attribution and event data
+- **Smart Incremental Sync**: Event_time-based CDC with configurable lookback window
+- **85 Attribution Fields**: Comprehensive data including multi-touch attribution
+- **Production-Ready**: Error handling, rate limiting, retry logic all implemented
+- **CSV Parsing**: Automatic UTF-8 BOM handling and field normalization
+- **Type Safety**: Full PySpark StructType schemas defined
+
+### **Configuration Summary**
+
+**Connection-level** (set once in dev_config.json):
+- `api_token` ✅ Required - API authentication token
+- `base_url` ⭕ Optional - Regional endpoint (default: US)
+
+**Table-level** (per-table in dev_table_config.json):
+- `app_id` ✅ Required for event tables - Application identifier
+- `start_date` ⭕ Optional - Initial sync date (default: 7 days ago)
+- `lookback_hours` ⭕ Optional - Late arrival window (default: 6 hours)
+- `max_days_per_batch` ⭕ Optional - Batch size (default: 7 days)
+
+See **Authorization** and **Read API for Data Retrieval** sections above for detailed parameter descriptions.
+
+### **Tested Scenarios**
+- ✅ Connection initialization and authentication
+- ✅ List all 7 tables
+- ✅ Get schema for each table (85, 30, and 10 field variants)
+- ✅ Read table metadata (primary keys, cursor fields, ingestion types)
+- ✅ Read data from all tables with proper configuration
+- ✅ Handle rate limit errors gracefully
+- ✅ Process empty responses and normalize CSV data
+
 ## **Research Log**
 
 | Source Type | URL | Accessed (UTC) | Confidence | What it confirmed |
 |------------|-----|----------------|------------|-------------------|
-| Official Docs | https://support.appsflyer.com/hc/en-us/articles/213223166-Master-API-user-acquisition-metrics-via-API | 2025-01-09 | High | Master API endpoint behavior, authentication method, parameters |
-| Official Docs | https://support.appsflyer.com/hc/en-us/articles/360011999877-App-list-API-for-app-owners | 2025-01-09 | High | App List API endpoint, rate limits (20/min, 100/day) |
-| Official Docs | https://support.appsflyer.com/hc/en-us | 2025-01-09 | High | General AppsFlyer API structure and authentication |
-| OSS Connector | https://github.com/airbytehq/airbyte/tree/master/airbyte-integrations/connectors/source-appsflyer | 2025-01-09 | Medium | Reference implementation for field names, incremental sync patterns |
+| Official Docs | https://support.appsflyer.com/hc/en-us/articles/213223166-Master-API-user-acquisition-metrics-via-API | 2026-01-09 | High | Master API endpoint behavior, authentication method, parameters |
+| Official Docs | https://support.appsflyer.com/hc/en-us/articles/360011999877-App-list-API-for-app-owners | 2026-01-09 | High | App List API endpoint, rate limits (20/min, 100/day) |
+| Official Docs | https://support.appsflyer.com/hc/en-us | 2026-01-09 | High | General AppsFlyer API structure and authentication |
+| OSS Connector | https://github.com/airbytehq/airbyte/tree/master/airbyte-integrations/connectors/source-appsflyer | 2026-01-09 | Medium | Reference implementation for field names, incremental sync patterns |
+| Implementation | Local testing with real AppsFlyer account | 2026-01-10 | High | Verified all 7 tables, rate limits, data formats, error handling |
+| Production Testing | Databricks pipeline execution with real data | 2026-01-10 | High | Confirmed HTTP 400 rate limit errors, per-report-type quotas, error messages |
 
 ## **Sources and References**
 

@@ -695,11 +695,11 @@ def register_lakeflow_source(spark):
                     cursor_dt = datetime.strptime(cursor, "%Y-%m-%d")
                     from_dt = cursor_dt - timedelta(hours=lookback_hours)
                 except (ValueError, TypeError):
-                    # If cursor is not a valid date, default to 30 days ago
-                    from_dt = datetime.utcnow() - timedelta(days=30)
+                    # If cursor is not a valid date, default to 7 days ago
+                    from_dt = datetime.utcnow() - timedelta(days=7)
             else:
-                # No cursor, default to 30 days ago
-                from_dt = datetime.utcnow() - timedelta(days=30)
+                # No cursor, default to 7 days ago
+                from_dt = datetime.utcnow() - timedelta(days=7)
 
             to_dt = datetime.utcnow()
 

@@ -239,7 +239,7 @@ Follow the Lakeflow Community Connector UI, which will guide you through setting
 **Table-Specific Options**:
 
 - **`app_id`** (required for event reports): AppsFlyer application identifier (e.g., `id123456789`)
-- **`start_date`** (optional): Initial date to start syncing data from (format: `YYYY-MM-DD`). Defaults to 30 days ago if not specified.
+- **`start_date`** (optional): Initial date to start syncing data from (format: `YYYY-MM-DD`). Defaults to 7 days ago if not specified.
 - **`lookback_hours`** (optional): Number of hours to look back when syncing incrementally to capture late-arriving events. Default: `6` hours. Recommended range: 3-24 hours.
 - **`max_days_per_batch`** (optional): Maximum number of days to fetch in a single batch. Default: `7` days. Adjust based on data volume.
 
