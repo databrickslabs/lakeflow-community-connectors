@@ -10,7 +10,6 @@ from decimal import Decimal
 from typing import Any, Iterator
 import json
 
-from __future__ import annotations
 from pyspark.sql import Row
 from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
 from pyspark.sql.types import *
