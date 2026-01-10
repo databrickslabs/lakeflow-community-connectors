@@ -557,29 +557,165 @@ curl -X GET \
 - **Nested structures**: Contributor data (contributor_1, contributor_2, contributor_3) should be modeled as repeated fields or structs
 - **Empty strings vs nulls**: AppsFlyer may return empty strings for missing values; connector should normalize to `null`
 
-## **Rate Limits and Best Practices**
+## **Rate Limits and Error Handling**
 
-AppsFlyer imposes rate limits based on account tier and endpoint:
+### **Rate Limit Overview**
 
-- **General guidance**: 
-  - Typical limit: ~1000 requests per day for raw data export endpoints (varies by plan)
-  - Different limits for install reports vs in-app event reports
-  - App List API: 20 requests per minute, 100 requests per day
-- **Connector Implementation**:
-  - Automatic retry with exponential backoff for HTTP 429
-  - Configurable `max_days_per_batch` (default: 7 days) to control request size
-  - Lookback window (default: 6 hours) handles late-arriving data efficiently
-- **Best practices**:
-  - Use date windowing to minimize number of API calls
-  - Cache app list locally; refresh periodically (e.g., daily)
-  - Request data in larger windows when possible
-  - Monitor for HTTP 400 errors indicating rate limit exhaustion
-- **Error handling** (implemented in connector):
-  - HTTP 400: Rate limit reached (error message in response)
-  - HTTP 401: Invalid or expired API token
-  - HTTP 403: Insufficient permissions
-  - HTTP 429: Rate limit exceeded; automatic retry with backoff
-  - HTTP 500/502/503: Server error; retry with exponential backoff
+AppsFlyer imposes **per-app, per-day, per-report-type** rate limits that vary by account tier:
+
+| Endpoint Type | Typical Limit | Scope | Notes |
+|---------------|---------------|-------|-------|
+| **Install Reports** | Varies by plan | Per app, per day | Includes: `installs_report`, `organic_installs_report`, `reinstalls` |
+| **In-App Event Reports** | Varies by plan | Per app, per day | Includes: `in_app_events_report`, `organic_in_app_events_report` |
+| **Uninstall Reports** | Varies by plan | Per app, per day | Includes: `uninstall_events_report`, `organic_uninstall_events_report` |
+| **App List API** | 20 req/min, 100 req/day | Per account | Management API endpoint |
+| **Total Raw Data Exports** | ~1000 requests/day | Per account | Aggregate across all report types |
+
+**Important**: Each report type (installs, in-app events, uninstalls) has its own separate daily quota per app.
+
+### **Rate Limit Errors**
+
+#### **HTTP 400 - Daily Quota Exceeded**
+
+AppsFlyer returns **HTTP 400** (not 429) when daily quota is exhausted. The error message indicates the specific report type limit reached.
+
+**Example Error for Install Reports**:
+```
+RuntimeError: AppsFlyer API error for organic_installs_report: 400 You've reached your maximum number of install reports that can be downloaded today for this app. <a href="https://support.appsflyer.com/hc/en-us/articles/207034366-Rate-limitations-and-access-windows-for-reports-and-reporting-APIs#rawdata-rate-limitation-policy?utm_source=hq1&utm_medium=ui&utm_campaign=reports">Learn more</a>. For details about increasing your limit, contact your CSM or hello@appsflyer.com
+```
+
+**Example Error for In-App Event Reports**:
+```
+RuntimeError: AppsFlyer API error for organic_in_app_events_report: 400 You've reached your maximum number of in-app event reports that can be downloaded today for this app. <a href="...">Learn more</a>. For details about increasing your limit, contact your CSM or hello@appsflyer.com
+```
+
+**Key Characteristics**:
+- Status code: `400 Bad Request` (not `429 Too Many Requests`)
+- Error message includes: "You've reached your maximum number of [report_type] reports"
+- Quota resets daily (typically at midnight UTC)
+- Each report type has independent quota
+
+### **Error Handling in Connector**
+
+The connector implements the following error handling strategy:
+
+| Status Code | Meaning | Connector Behavior | User Action Required |
+|-------------|---------|-------------------|---------------------|
+| **400** with rate limit message | Daily quota exceeded for specific report type | Raises `RuntimeError` immediately, does not retry | Wait until next day (quota reset) OR reduce sync frequency OR contact AppsFlyer to increase limit |
+| **401** | Invalid or expired API token | Raises authentication error | Update `api_token` in connection config |
+| **403** | Insufficient permissions | Raises permission error | Verify API token has access to the app |
+| **429** | Rate limit (requests per minute) | Automatic retry with exponential backoff | None - connector handles automatically |
+| **500/502/503** | Server error | Automatic retry with exponential backoff | If persistent, contact AppsFlyer support |
+
+**Note**: The connector does **not** automatically retry HTTP 400 rate limit errors because:
+1. The quota is per-day, so immediate retries will fail
+2. Retrying wastes API calls and may affect other report types
+3. User should be aware of quota limits for capacity planning
+
+### **Best Practices to Avoid Rate Limits**
+
+1. **Optimize Sync Frequency**:
+   - For low-volume apps: Sync daily or less frequently
+   - For high-volume apps: Sync hourly but monitor quota usage
+   - Avoid running full-refresh unnecessarily
+
+2. **Use Incremental Sync Efficiently**:
+   - Set appropriate `start_date` (default: 7 days ago)
+   - Use `max_days_per_batch` to control request size (default: 7 days)
+   - Longer batch windows = fewer API calls
+   - Example: 7-day batch = 1 API call vs 1-day batch = 7 API calls
+
+3. **Sync Only Needed Tables**:
+   - Don't sync all 7 tables if you only need 2-3
+   - Organic reports use same quota as non-organic (e.g., `organic_installs_report` + `installs_report` = 2 install report calls)
+   - Prioritize critical tables (e.g., `installs_report`, `in_app_events_report`)
+
+4. **Monitor Quota Usage**:
+   - Track how many API calls each pipeline run makes
+   - Calculate daily quota needed: `(days_per_sync / max_days_per_batch) * sync_frequency * number_of_tables`
+   - Example: Syncing 7 days of data for 6 tables daily = 6 API calls per day
+
+5. **Coordinate Multiple Pipelines**:
+   - If multiple pipelines access the same app, they share the quota
+   - Consider consolidating into one pipeline with multiple tables
+   - Schedule pipelines at different times to spread out API calls
+
+6. **Cache App List**:
+   - `apps` table rarely changes
+   - Sync once daily or on-demand rather than with every pipeline run
+
+### **What to Do When Rate Limited**
+
+#### **Immediate Actions**:
+1. **Wait for Quota Reset**: Quotas typically reset at midnight UTC. Schedule next run after reset.
+2. **Check Current Usage**: Review how many API calls were made today for this app.
+3. **Identify the Report Type**: Error message indicates which report type hit the limit (installs, in-app events, etc.)
+
+#### **Short-Term Solutions**:
+1. **Increase `max_days_per_batch`**: Fetch more days per request
+   ```json
+   {
+     "app_id": "com.myapp",
+     "max_days_per_batch": "14"  // Changed from 7 to 14 days
+   }
+   ```
+2. **Reduce Sync Frequency**: Change from hourly to every 6 hours or daily
+3. **Disable Non-Critical Tables**: Temporarily pause syncing less important tables
+
+#### **Long-Term Solutions**:
+1. **Contact AppsFlyer**: Request quota increase
+   - Email: hello@appsflyer.com
+   - Contact your Customer Success Manager (CSM)
+   - Reference: https://support.appsflyer.com/hc/en-us/articles/207034366
+2. **Upgrade Account Tier**: Higher tiers typically include higher quotas
+3. **Optimize Data Strategy**: Only sync necessary date ranges and tables
+
+### **Connector Configuration for Rate Limit Management**
+
+```json
+{
+  "connection_name": "my_appsflyer_conn",
+  "objects": [
+    {
+      "table": {
+        "source_table": "installs_report",
+        "app_id": "com.myapp",
+        "start_date": "2026-01-08",
+        "max_days_per_batch": "14",  // Larger batches = fewer API calls
+        "lookback_hours": "6"
+      }
+    },
+    {
+      "table": {
+        "source_table": "in_app_events_report",
+        "app_id": "com.myapp",
+        "start_date": "2026-01-08",
+        "max_days_per_batch": "14"
+      }
+    }
+  ]
+}
+```
+
+### **Quota Calculation Example**
+
+**Scenario**: Syncing 6 tables daily for an app with 30 days of historical data
+
+**Initial Load** (First Run):
+- Date range: 30 days (from `start_date`)
+- Batch size: 7 days (`max_days_per_batch`)
+- API calls per table: 30 / 7 = 5 calls (rounded up)
+- Total calls: 5 calls × 6 tables = **30 API calls** (one-time)
+
+**Daily Incremental Sync**:
+- Date range: 1 day (yesterday + lookback window)
+- Batch size: 7 days (covers 1 day easily)
+- API calls per table: 1 call
+- Total calls: 1 call × 6 tables = **6 API calls per day**
+
+**Optimization**: Increase `max_days_per_batch` to 30:
+- Initial load: 30 / 30 = 1 call per table = **6 API calls** (saves 24 calls)
+- Daily sync: Still 1 call per table = **6 API calls per day**
 
 ## **Known Quirks & Edge Cases**
 
@@ -647,6 +783,7 @@ See **Authorization** and **Read API for Data Retrieval** sections above for det
 | Official Docs | https://support.appsflyer.com/hc/en-us | 2026-01-09 | High | General AppsFlyer API structure and authentication |
 | OSS Connector | https://github.com/airbytehq/airbyte/tree/master/airbyte-integrations/connectors/source-appsflyer | 2026-01-09 | Medium | Reference implementation for field names, incremental sync patterns |
 | Implementation | Local testing with real AppsFlyer account | 2026-01-10 | High | Verified all 7 tables, rate limits, data formats, error handling |
+| Production Testing | Databricks pipeline execution with real data | 2026-01-10 | High | Confirmed HTTP 400 rate limit errors, per-report-type quotas, error messages |
 
 ## **Sources and References**
 
