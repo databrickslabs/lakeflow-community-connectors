@@ -1208,6 +1208,9 @@ def register_lakeflow_source(spark):
                 for token in tokens:
                     if "network" not in token:
                         token["network"] = default_network
+                    # Rename 'address' to 'wallet_address' for schema compatibility
+                    if "address" in token and "wallet_address" not in token:
+                        token["wallet_address"] = token.pop("address")
                     records.append(token)
                 return records
 
@@ -1220,6 +1223,9 @@ def register_lakeflow_source(spark):
                 for token in tokens:
                     if "network" not in token:
                         token["network"] = default_network
+                    # Rename 'address' to 'wallet_address' for schema compatibility
+                    if "address" in token and "wallet_address" not in token:
+                        token["wallet_address"] = token.pop("address")
                     records.append(token)
                 return records
 
@@ -1233,6 +1239,9 @@ def register_lakeflow_source(spark):
                     # Ensure network field exists
                     if "network" not in nft:
                         nft["network"] = default_network
+                    # Rename 'address' to 'wallet_address' for schema compatibility
+                    if "address" in nft and "wallet_address" not in nft:
+                        nft["wallet_address"] = nft.pop("address")
                     records.append(nft)
                 return records
 
