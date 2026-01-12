@@ -173,7 +173,7 @@ class LakeflowConnect:
                 "optional_params": ["with_metadata", "with_prices", "include_native_tokens"]
             },
             "token_balances_by_wallet": {
-                "endpoint": "/getTokenBalancesByWallet",
+                "endpoint": "/assets/tokens/balances/by-address",
                 "api_type": "portfolio",
                 "method": "POST",
                 "primary_keys": ["wallet_address", "network", "contractAddress"],
@@ -181,7 +181,7 @@ class LakeflowConnect:
                 "ingestion_type": "snapshot",
                 "supports_pagination": False,
                 "required_params": ["addresses"],
-                "optional_params": ["include_native_tokens", "include_erc20_tokens"]
+                "optional_params": []
             },
             "nfts_by_wallet": {
                 "endpoint": "/assets/nfts/by-address",
@@ -863,25 +863,23 @@ class LakeflowConnect:
                 body["includeErc20Tokens"] = table_options["include_erc20_tokens"].lower() == "true"
 
         elif table_name == "token_balances_by_wallet":
+            # This endpoint uses networks (plural, array) per address
             body["addresses"] = []
             addresses_str = table_options["addresses"]
-            default_network = self._convert_network_format(table_options.get("network", self.default_network))
+            default_network = table_options.get("network", self.default_network)
             for addr_spec in addresses_str.split(","):
                 addr_spec = addr_spec.strip()
                 if "@" in addr_spec:
-                    address, network_str = addr_spec.split("@", 1)
-                    network = self._convert_network_format(network_str.strip())
+                    address, networks_str = addr_spec.split("@", 1)
+                    # Support multiple networks with | separator
+                    networks = [n.strip() for n in networks_str.split("|")]
                 else:
                     address = addr_spec
-                    network = default_network
+                    networks = [default_network]
                 body["addresses"].append({
                     "address": address.strip(),
-                    "network": network
+                    "networks": networks  # Note: plural, array format
                 })
-
-            body["includeNativeTokens"] = table_options.get("include_native_tokens", "true").lower() == "true"
-            if "include_erc20_tokens" in table_options:
-                body["includeErc20Tokens"] = table_options["include_erc20_tokens"].lower() == "true"
 
         elif table_name == "nfts_by_wallet":
             # This endpoint uses networks (plural, array) per address
@@ -1005,17 +1003,14 @@ class LakeflowConnect:
             return records
 
         elif table_name == "token_balances_by_wallet":
+            # Response has "balances" or "tokenBalances" array
+            balances = data.get("balances", data.get("tokenBalances", []))
             records = []
-            for wallet_data in data:
-                wallet_address = wallet_data.get("address")
-                network = wallet_data.get("network", table_options.get("network", self.default_network))
-                for token in wallet_data.get("tokenBalances", []):
-                    record = {
-                        "wallet_address": wallet_address,
-                        "network": network,
-                        **token
-                    }
-                    records.append(record)
+            default_network = table_options.get("network", self.default_network)
+            for balance in balances:
+                if "network" not in balance:
+                    balance["network"] = default_network
+                records.append(balance)
             return records
 
         elif table_name == "nfts_by_wallet":

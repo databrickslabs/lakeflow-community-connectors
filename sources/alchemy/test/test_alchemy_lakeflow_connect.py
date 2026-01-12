@@ -532,7 +532,7 @@ def test_tokens_by_wallet():
 
 
 def test_token_balances_by_wallet():
-    """Test the token_balances_by_wallet endpoint (POST /getTokenBalancesByWallet)"""
+    """Test the token_balances_by_wallet endpoint (POST /assets/tokens/balances/by-address)"""
     parent_dir = Path(__file__).parent.parent
     config = load_config(parent_dir / "configs" / "dev_config.json")
     connector = LakeflowConnect(config)
@@ -543,17 +543,18 @@ def test_token_balances_by_wallet():
         nonlocal captured_body
         captured_body = json or {}
         
-        assert "getTokenBalancesByWallet" in url
+        assert "assets/tokens/balances/by-address" in url
         response = mock.MagicMock()
-        response.json.return_value = [
-            {
-                "address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-                "network": "ETH_MAINNET",
-                "tokenBalances": [
-                    {"contractAddress": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "tokenBalance": "1000000000"}
-                ]
-            }
-        ]
+        # New API returns flat balances array
+        response.json.return_value = {
+            "balances": [
+                {
+                    "contractAddress": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                    "tokenBalance": "1000000000",
+                    "network": "eth-mainnet"
+                }
+            ]
+        }
         response.raise_for_status = mock.MagicMock()
         return response
     
@@ -563,7 +564,9 @@ def test_token_balances_by_wallet():
         records_list = list(records)
         
         assert "addresses" in captured_body
-        assert captured_body["addresses"][0]["network"] == "ETH_MAINNET"
+        # New API uses networks (plural, array)
+        assert "networks" in captured_body["addresses"][0]
+        assert captured_body["addresses"][0]["networks"] == ["eth-mainnet"]
         assert len(records_list) == 1
         print("✅ token_balances_by_wallet test passed")
 
