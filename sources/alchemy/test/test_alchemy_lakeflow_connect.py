@@ -639,7 +639,7 @@ def test_nft_collections_by_wallet():
 
 
 def test_wallet_transactions():
-    """Test the wallet_transactions endpoint (POST /getTransactionsByWallet)"""
+    """Test the wallet_transactions endpoint (POST /transactions/history/by-address)"""
     parent_dir = Path(__file__).parent.parent
     config = load_config(parent_dir / "configs" / "dev_config.json")
     connector = LakeflowConnect(config)
@@ -650,33 +650,33 @@ def test_wallet_transactions():
         nonlocal captured_body
         captured_body = json or {}
         
-        assert "getTransactionsByWallet" in url
+        assert "transactions/history/by-address" in url
         response = mock.MagicMock()
-        response.json.return_value = [
-            {
-                "address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-                "network": "ETH_MAINNET",
-                "transactions": [
-                    {
-                        "hash": "0x123...",
-                        "blockNum": "15000000",
-                        "from": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-                        "to": "0x222...",
-                        "value": "1000000000000000000"
-                    }
-                ]
-            }
-        ]
+        # New API returns flat transactions array
+        response.json.return_value = {
+            "transactions": [
+                {
+                    "hash": "0x123...",
+                    "network": "eth-mainnet",
+                    "blockNum": "15000000",
+                    "from": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+                    "to": "0x222...",
+                    "value": "1000000000000000000"
+                }
+            ]
+        }
         response.raise_for_status = mock.MagicMock()
         return response
     
     with mock.patch('requests.post', side_effect=mock_post):
-        table_options = {"addresses": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045", "order": "desc"}
+        table_options = {"addresses": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"}
         records, offset = connector.read_table("wallet_transactions", {}, table_options)
         records_list = list(records)
         
         assert "addresses" in captured_body
-        assert captured_body["addresses"][0]["network"] == "ETH_MAINNET"
+        # New API uses networks (plural, array)
+        assert "networks" in captured_body["addresses"][0]
+        assert captured_body["addresses"][0]["networks"] == ["eth-mainnet"]
         assert len(records_list) == 1
         print("✅ wallet_transactions test passed")
 
