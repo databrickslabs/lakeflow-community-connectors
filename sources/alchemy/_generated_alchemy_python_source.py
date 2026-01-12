@@ -370,7 +370,7 @@ def register_lakeflow_source(spark):
                 },
                 # Portfolio Tables
                 "tokens_by_wallet": {
-                    "endpoint": "/getTokensByWallet",
+                    "endpoint": "/assets/tokens/by-address",
                     "api_type": "portfolio",
                     "method": "POST",
                     "primary_keys": ["wallet_address", "network", "contractAddress"],
@@ -378,10 +378,10 @@ def register_lakeflow_source(spark):
                     "ingestion_type": "snapshot",
                     "supports_pagination": False,
                     "required_params": ["addresses"],
-                    "optional_params": ["with_metadata", "with_prices", "include_native_tokens", "include_erc20_tokens"]
+                    "optional_params": ["with_metadata", "with_prices", "include_native_tokens"]
                 },
                 "token_balances_by_wallet": {
-                    "endpoint": "/getTokenBalancesByWallet",
+                    "endpoint": "/assets/tokens/balances/by-address",
                     "api_type": "portfolio",
                     "method": "POST",
                     "primary_keys": ["wallet_address", "network", "contractAddress"],
@@ -389,10 +389,10 @@ def register_lakeflow_source(spark):
                     "ingestion_type": "snapshot",
                     "supports_pagination": False,
                     "required_params": ["addresses"],
-                    "optional_params": ["include_native_tokens", "include_erc20_tokens"]
+                    "optional_params": []
                 },
                 "nfts_by_wallet": {
-                    "endpoint": "/getNftsByWallet",
+                    "endpoint": "/assets/nfts/by-address",
                     "api_type": "portfolio",
                     "method": "POST",
                     "primary_keys": ["wallet_address", "network", "contractAddress", "tokenId"],
@@ -1046,21 +1046,22 @@ def register_lakeflow_source(spark):
                     body["interval"] = table_options["interval"]
 
             elif table_name == "tokens_by_wallet":
+                # This endpoint uses networks (plural, array) per address
                 body["addresses"] = []
-                # Parse addresses - can be "address1,address2" (uses default network) or "address1@network1,address2@network2"
                 addresses_str = table_options["addresses"]
-                default_network = self._convert_network_format(table_options.get("network", self.default_network))
+                default_network = table_options.get("network", self.default_network)
                 for addr_spec in addresses_str.split(","):
                     addr_spec = addr_spec.strip()
                     if "@" in addr_spec:
-                        address, network_str = addr_spec.split("@", 1)
-                        network = self._convert_network_format(network_str.strip())
+                        address, networks_str = addr_spec.split("@", 1)
+                        # Support multiple networks with | separator
+                        networks = [n.strip() for n in networks_str.split("|")]
                     else:
                         address = addr_spec
-                        network = default_network
+                        networks = [default_network]
                     body["addresses"].append({
                         "address": address.strip(),
-                        "network": network
+                        "networks": networks  # Note: plural, array format
                     })
 
                 body["withMetadata"] = table_options.get("with_metadata", "true").lower() == "true"
@@ -1070,41 +1071,41 @@ def register_lakeflow_source(spark):
                     body["includeErc20Tokens"] = table_options["include_erc20_tokens"].lower() == "true"
 
             elif table_name == "token_balances_by_wallet":
+                # This endpoint uses networks (plural, array) per address
                 body["addresses"] = []
                 addresses_str = table_options["addresses"]
-                default_network = self._convert_network_format(table_options.get("network", self.default_network))
+                default_network = table_options.get("network", self.default_network)
                 for addr_spec in addresses_str.split(","):
                     addr_spec = addr_spec.strip()
                     if "@" in addr_spec:
-                        address, network_str = addr_spec.split("@", 1)
-                        network = self._convert_network_format(network_str.strip())
+                        address, networks_str = addr_spec.split("@", 1)
+                        # Support multiple networks with | separator
+                        networks = [n.strip() for n in networks_str.split("|")]
                     else:
                         address = addr_spec
-                        network = default_network
+                        networks = [default_network]
                     body["addresses"].append({
                         "address": address.strip(),
-                        "network": network
+                        "networks": networks  # Note: plural, array format
                     })
 
-                body["includeNativeTokens"] = table_options.get("include_native_tokens", "true").lower() == "true"
-                if "include_erc20_tokens" in table_options:
-                    body["includeErc20Tokens"] = table_options["include_erc20_tokens"].lower() == "true"
-
             elif table_name == "nfts_by_wallet":
+                # This endpoint uses networks (plural, array) per address
                 body["addresses"] = []
                 addresses_str = table_options["addresses"]
-                default_network = self._convert_network_format(table_options.get("network", self.default_network))
+                default_network = table_options.get("network", self.default_network)
                 for addr_spec in addresses_str.split(","):
                     addr_spec = addr_spec.strip()
                     if "@" in addr_spec:
-                        address, network_str = addr_spec.split("@", 1)
-                        network = self._convert_network_format(network_str.strip())
+                        address, networks_str = addr_spec.split("@", 1)
+                        # Support multiple networks with | separator
+                        networks = [n.strip() for n in networks_str.split("|")]
                     else:
                         address = addr_spec
-                        network = default_network
+                        networks = [default_network]
                     body["addresses"].append({
                         "address": address.strip(),
-                        "network": network
+                        "networks": networks  # Note: plural, array format
                     })
 
                 body["withMetadata"] = table_options.get("with_metadata", "true").lower() == "true"
@@ -1198,32 +1199,41 @@ def register_lakeflow_source(spark):
                 symbol = table_options.get("symbol")
                 return [{**record, "symbol": symbol} for record in records]
 
-            elif table_name in ["tokens_by_wallet", "token_balances_by_wallet"]:
+            elif table_name == "tokens_by_wallet":
+                # Response has data.tokens array with token data including network
+                inner_data = data.get("data", data)
+                tokens = inner_data.get("tokens", [])
                 records = []
-                for wallet_data in data:
-                    wallet_address = wallet_data.get("address")
-                    network = wallet_data.get("network", table_options.get("network", self.default_network))
-                    for token in wallet_data.get("tokenBalances", []):
-                        record = {
-                            "wallet_address": wallet_address,
-                            "network": network,
-                            **token
-                        }
-                        records.append(record)
+                default_network = table_options.get("network", self.default_network)
+                for token in tokens:
+                    if "network" not in token:
+                        token["network"] = default_network
+                    records.append(token)
+                return records
+
+            elif table_name == "token_balances_by_wallet":
+                # Response has data.tokens array
+                inner_data = data.get("data", data)
+                tokens = inner_data.get("tokens", inner_data.get("balances", []))
+                records = []
+                default_network = table_options.get("network", self.default_network)
+                for token in tokens:
+                    if "network" not in token:
+                        token["network"] = default_network
+                    records.append(token)
                 return records
 
             elif table_name == "nfts_by_wallet":
+                # Response has data.ownedNfts array
+                inner_data = data.get("data", data)
+                nfts = inner_data.get("ownedNfts", inner_data.get("nfts", []))
                 records = []
-                for wallet_data in data:
-                    wallet_address = wallet_data.get("address")
-                    network = wallet_data.get("network", table_options.get("network", self.default_network))
-                    for nft in wallet_data.get("nfts", []):
-                        record = {
-                            "wallet_address": wallet_address,
-                            "network": network,
-                            **nft
-                        }
-                        records.append(record)
+                default_network = table_options.get("network", self.default_network)
+                for nft in nfts:
+                    # Ensure network field exists
+                    if "network" not in nft:
+                        nft["network"] = default_network
+                    records.append(nft)
                 return records
 
             elif table_name == "wallet_transactions":
