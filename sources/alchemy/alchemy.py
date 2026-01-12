@@ -162,7 +162,7 @@ class LakeflowConnect:
             },
             # Portfolio Tables
             "tokens_by_wallet": {
-                "endpoint": "/getTokensByWallet",
+                "endpoint": "/assets/tokens/by-address",
                 "api_type": "portfolio",
                 "method": "POST",
                 "primary_keys": ["wallet_address", "network", "contractAddress"],
@@ -170,7 +170,7 @@ class LakeflowConnect:
                 "ingestion_type": "snapshot",
                 "supports_pagination": False,
                 "required_params": ["addresses"],
-                "optional_params": ["with_metadata", "with_prices", "include_native_tokens", "include_erc20_tokens"]
+                "optional_params": ["with_metadata", "with_prices", "include_native_tokens"]
             },
             "token_balances_by_wallet": {
                 "endpoint": "/getTokenBalancesByWallet",
@@ -838,21 +838,22 @@ class LakeflowConnect:
                 body["interval"] = table_options["interval"]
 
         elif table_name == "tokens_by_wallet":
+            # This endpoint uses networks (plural, array) per address
             body["addresses"] = []
-            # Parse addresses - can be "address1,address2" (uses default network) or "address1@network1,address2@network2"
             addresses_str = table_options["addresses"]
-            default_network = self._convert_network_format(table_options.get("network", self.default_network))
+            default_network = table_options.get("network", self.default_network)
             for addr_spec in addresses_str.split(","):
                 addr_spec = addr_spec.strip()
                 if "@" in addr_spec:
-                    address, network_str = addr_spec.split("@", 1)
-                    network = self._convert_network_format(network_str.strip())
+                    address, networks_str = addr_spec.split("@", 1)
+                    # Support multiple networks with | separator
+                    networks = [n.strip() for n in networks_str.split("|")]
                 else:
                     address = addr_spec
-                    network = default_network
+                    networks = [default_network]
                 body["addresses"].append({
                     "address": address.strip(),
-                    "network": network
+                    "networks": networks  # Note: plural, array format
                 })
 
             body["withMetadata"] = table_options.get("with_metadata", "true").lower() == "true"
@@ -992,7 +993,18 @@ class LakeflowConnect:
             symbol = table_options.get("symbol")
             return [{**record, "symbol": symbol} for record in records]
 
-        elif table_name in ["tokens_by_wallet", "token_balances_by_wallet"]:
+        elif table_name == "tokens_by_wallet":
+            # Response has "tokens" array with token data including network
+            tokens = data.get("tokens", [])
+            records = []
+            default_network = table_options.get("network", self.default_network)
+            for token in tokens:
+                if "network" not in token:
+                    token["network"] = default_network
+                records.append(token)
+            return records
+
+        elif table_name == "token_balances_by_wallet":
             records = []
             for wallet_data in data:
                 wallet_address = wallet_data.get("address")
