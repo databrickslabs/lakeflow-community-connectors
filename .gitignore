@@ -1,3 +1,17 @@
+# Python
 __pycache__/
-dev_config.json
-candidate_connectors.md
+*.py[cod]
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+
+# Testing
+.pytest_cache/
+
+# OS
+.DS_Store
+
+# Dev configs
+sources/**/configs/dev_*.json
