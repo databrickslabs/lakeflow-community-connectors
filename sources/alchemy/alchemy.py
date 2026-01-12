@@ -1044,6 +1044,9 @@ class LakeflowConnect:
                 # Rename 'address' to 'wallet_address' for schema compatibility
                 if "address" in token and "wallet_address" not in token:
                     token["wallet_address"] = token.pop("address")
+                # Rename 'tokenAddress' to 'contractAddress' for schema compatibility
+                if "tokenAddress" in token and "contractAddress" not in token:
+                    token["contractAddress"] = token.pop("tokenAddress")
                 records.append(token)
             return records
 
