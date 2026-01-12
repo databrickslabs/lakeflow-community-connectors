@@ -414,7 +414,7 @@ def register_lakeflow_source(spark):
                     "optional_params": ["with_metadata"]
                 },
                 "wallet_transactions": {
-                    "endpoint": "/getTransactionsByWallet",
+                    "endpoint": "/transactions/history/by-address",
                     "api_type": "portfolio",
                     "method": "POST",
                     "primary_keys": ["hash", "network"],
@@ -422,7 +422,7 @@ def register_lakeflow_source(spark):
                     "ingestion_type": "cdc",
                     "supports_pagination": True,
                     "required_params": ["addresses"],
-                    "optional_params": ["page_size", "page_key", "from_block", "to_block", "from_timestamp", "to_timestamp", "category", "order"]
+                    "optional_params": ["page_size", "page_key"]
                 },
                 # Webhook Tables
                 "webhooks": {
@@ -1131,38 +1131,28 @@ def register_lakeflow_source(spark):
                 body["withMetadata"] = table_options.get("with_metadata", "true").lower() == "true"
 
             elif table_name == "wallet_transactions":
+                # This endpoint uses networks (plural, array) per address
                 body["addresses"] = []
                 addresses_str = table_options["addresses"]
-                default_network = self._convert_network_format(table_options.get("network", self.default_network))
+                default_network = table_options.get("network", self.default_network)
                 for addr_spec in addresses_str.split(","):
                     addr_spec = addr_spec.strip()
                     if "@" in addr_spec:
-                        address, network_str = addr_spec.split("@", 1)
-                        network = self._convert_network_format(network_str.strip())
+                        address, networks_str = addr_spec.split("@", 1)
+                        # Support multiple networks with | separator: address@eth-mainnet|base-mainnet
+                        networks = [n.strip() for n in networks_str.split("|")]
                     else:
                         address = addr_spec
-                        network = default_network
+                        networks = [default_network]
                     body["addresses"].append({
                         "address": address.strip(),
-                        "network": network
+                        "networks": networks  # Note: plural, array format
                     })
 
                 if "page_size" in table_options:
                     body["pageSize"] = int(table_options["page_size"])
                 if "page_key" in table_options:
                     body["pageKey"] = table_options["page_key"]
-                if "from_block" in table_options:
-                    body["fromBlock"] = table_options["from_block"]
-                if "to_block" in table_options:
-                    body["toBlock"] = table_options["to_block"]
-                if "from_timestamp" in table_options:
-                    body["fromTimestamp"] = table_options["from_timestamp"]
-                if "to_timestamp" in table_options:
-                    body["toTimestamp"] = table_options["to_timestamp"]
-                if "category" in table_options:
-                    body["category"] = table_options["category"].split(",")
-                if "order" in table_options:
-                    body["order"] = table_options["order"]
 
         def _process_api_response(self, table_name: str, data: Dict, table_options: Dict[str, str]) -> List[Dict]:
             """
@@ -1237,17 +1227,14 @@ def register_lakeflow_source(spark):
                 return records
 
             elif table_name == "wallet_transactions":
+                # Response is {"transactions": [...]} - transactions include network info
+                transactions = data.get("transactions", [])
                 records = []
-                for wallet_data in data:
-                    wallet_address = wallet_data.get("address")
-                    network = wallet_data.get("network", table_options.get("network", self.default_network))
-                    for tx in wallet_data.get("transactions", []):
-                        record = {
-                            "wallet_address": wallet_address,
-                            "network": network,
-                            **tx
-                        }
-                        records.append(record)
+                for tx in transactions:
+                    # Ensure network field exists (may come from tx or default)
+                    if "network" not in tx:
+                        tx["network"] = table_options.get("network", self.default_network)
+                    records.append(tx)
                 return records
 
             elif table_name == "webhooks":
