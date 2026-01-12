@@ -212,3 +212,121 @@ class LakeflowConnectTestUtils:
             column_mapping[column] = f"properties.{column}"
 
         return column_mapping
+
+    def list_deletable_tables(self) -> List[str]:
+        """
+        List all tables that support delete functionality for testing read_table_deletes.
+        """
+        return ["contacts"]
+
+    def delete_rows(
+        self, table_name: str, number_of_rows: int
+    ) -> Tuple[bool, List[Dict], Dict[str, str]]:
+        """
+        Insert N records, then delete any N random records for testing read_table_deletes.
+
+        Returns only the primary key of deleted records for verification.
+
+        Args:
+            table_name: Name of the table to delete from
+            number_of_rows: Number of rows to insert and delete
+
+        Returns:
+            Tuple containing:
+            - Boolean indicating success
+            - List of deleted rows with primary keys
+            - Dictionary mapping column names
+        """
+        try:
+            if table_name not in self.list_deletable_tables():
+                print(f"Table {table_name} does not support delete testing")
+                return False, [], {}
+
+            # Step 1: Insert N records to maintain data balance
+            success, _, _ = self.generate_rows_and_write(table_name, number_of_rows)
+            if not success:
+                print("Failed to insert records before deletion")
+                return False, [], {}
+
+            # Step 2: Fetch any N existing non-archived contacts
+            contacts = self._fetch_contacts(number_of_rows)
+            if not contacts:
+                print("No contacts found to delete")
+                return False, [], {}
+
+            # Step 3: Delete each contact and collect primary keys
+            deleted_rows = []
+            for contact in contacts:
+                contact_id = contact["id"]
+                if self._delete_contact(contact_id):
+                    # Only return primary key
+                    deleted_rows.append({"hs_object_id": contact_id})
+
+            if not deleted_rows:
+                return False, [], {}
+
+            # Step 4: Wait for eventual consistency
+            print(f"Deleted {len(deleted_rows)} contacts. Waiting 60 seconds...")
+            time.sleep(60)
+
+            # Column mapping: hs_object_id in deleted_rows maps to properties.hs_object_id in returned records
+            column_mapping = {"hs_object_id": "properties.hs_object_id"}
+            return True, deleted_rows, column_mapping
+
+        except Exception as e:
+            print(f"Error in delete_rows for {table_name}: {e}")
+            return False, [], {}
+
+    def _fetch_contacts(self, limit: int) -> List[Dict]:
+        """
+        Fetch existing non-archived contacts from HubSpot.
+
+        Args:
+            limit: Maximum number of contacts to fetch
+
+        Returns:
+            List of contact records
+        """
+        url = f"{self.base_url}/crm/v3/objects/contacts"
+        params = {
+            "limit": limit,
+            "archived": "false"
+        }
+
+        try:
+            response = requests.get(url, headers=self.auth_header, params=params)
+            if response.status_code == 200:
+                results = response.json().get("results", [])
+                print(f"Fetched {len(results)} non-archived contacts")
+                return results
+            print(f"Failed to fetch contacts: {response.status_code} {response.text}")
+            return []
+        except Exception as e:
+            print(f"Error fetching contacts: {e}")
+            return []
+
+    def _delete_contact(self, contact_id: str) -> bool:
+        """
+        Delete (archive) a contact by ID.
+
+        Uses DELETE /crm/v3/objects/contacts/{contactId} which archives the contact,
+        making it retrievable via the archived=true API for read_table_deletes testing.
+
+        Args:
+            contact_id: HubSpot contact ID to delete
+
+        Returns:
+            Boolean indicating success
+        """
+        url = f"{self.base_url}/crm/v3/objects/contacts/{contact_id}"
+
+        try:
+            response = requests.delete(url, headers=self.auth_header)
+            if response.status_code == 204:
+                print(f"Deleted contact {contact_id}")
+                return True
+            print(f"Failed to delete contact {contact_id}: {response.status_code} {response.text}")
+            return False
+        except Exception as e:
+            print(f"Error deleting contact {contact_id}: {e}")
+            return False
