@@ -1211,6 +1211,32 @@ def register_lakeflow_source(spark):
                     # Rename 'address' to 'wallet_address' for schema compatibility
                     if "address" in token and "wallet_address" not in token:
                         token["wallet_address"] = token.pop("address")
+                    # Rename 'tokenAddress' to 'contractAddress' for schema compatibility
+                    if "tokenAddress" in token and "contractAddress" not in token:
+                        token["contractAddress"] = token.pop("tokenAddress")
+                    # Extract nested tokenMetadata fields
+                    if "tokenMetadata" in token:
+                        metadata = token.get("tokenMetadata", {})
+                        if isinstance(metadata, dict):
+                            if "decimals" not in token:
+                                token["decimals"] = metadata.get("decimals")
+                            if "name" not in token:
+                                token["name"] = metadata.get("name")
+                            if "symbol" not in token:
+                                token["symbol"] = metadata.get("symbol")
+                            if "logo" not in token:
+                                token["logo"] = metadata.get("logo")
+                    # Extract price from tokenPrices array (first USD price)
+                    if "tokenPrices" in token and "price" not in token:
+                        prices = token.get("tokenPrices", [])
+                        if prices and isinstance(prices, list):
+                            for p in prices:
+                                if p.get("currency") == "usd":
+                                    try:
+                                        token["price"] = float(p.get("value", 0))
+                                    except (ValueError, TypeError):
+                                        token["price"] = None
+                                    break
                     records.append(token)
                 return records
 
