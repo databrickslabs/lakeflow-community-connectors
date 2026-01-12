@@ -1034,6 +1034,11 @@ class LakeflowConnect:
                 # Rename 'address' to 'wallet_address' for schema compatibility
                 if "address" in nft and "wallet_address" not in nft:
                     nft["wallet_address"] = nft.pop("address")
+                # Extract contractAddress from nested contract object
+                if "contractAddress" not in nft and "contract" in nft:
+                    contract = nft.get("contract", {})
+                    if isinstance(contract, dict):
+                        nft["contractAddress"] = contract.get("address")
                 records.append(nft)
             return records
 
