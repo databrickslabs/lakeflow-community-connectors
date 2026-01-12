@@ -992,8 +992,9 @@ class LakeflowConnect:
             return [{**record, "symbol": symbol} for record in records]
 
         elif table_name == "tokens_by_wallet":
-            # Response has "tokens" array with token data including network
-            tokens = data.get("tokens", [])
+            # Response has data.tokens array with token data including network
+            inner_data = data.get("data", data)
+            tokens = inner_data.get("tokens", [])
             records = []
             default_network = table_options.get("network", self.default_network)
             for token in tokens:
@@ -1003,28 +1004,27 @@ class LakeflowConnect:
             return records
 
         elif table_name == "token_balances_by_wallet":
-            # Response has "balances" or "tokenBalances" array
-            balances = data.get("balances", data.get("tokenBalances", []))
+            # Response has data.tokens array
+            inner_data = data.get("data", data)
+            tokens = inner_data.get("tokens", inner_data.get("balances", []))
             records = []
             default_network = table_options.get("network", self.default_network)
-            for balance in balances:
-                if "network" not in balance:
-                    balance["network"] = default_network
-                records.append(balance)
+            for token in tokens:
+                if "network" not in token:
+                    token["network"] = default_network
+                records.append(token)
             return records
 
         elif table_name == "nfts_by_wallet":
-            # Response may have "nfts" array or nested structure
+            # Response has data.ownedNfts array
+            inner_data = data.get("data", data)
+            nfts = inner_data.get("ownedNfts", inner_data.get("nfts", []))
             records = []
-            nfts = data.get("nfts", data if isinstance(data, list) else [])
             default_network = table_options.get("network", self.default_network)
             for nft in nfts:
                 # Ensure network field exists
                 if "network" not in nft:
                     nft["network"] = default_network
-                # Add wallet_address if present in data
-                if "wallet_address" not in nft and "address" in data:
-                    nft["wallet_address"] = data.get("address")
                 records.append(nft)
             return records
 
