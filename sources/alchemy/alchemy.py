@@ -184,7 +184,7 @@ class LakeflowConnect:
                 "optional_params": ["include_native_tokens", "include_erc20_tokens"]
             },
             "nfts_by_wallet": {
-                "endpoint": "/getNftsByWallet",
+                "endpoint": "/assets/nfts/by-address",
                 "api_type": "portfolio",
                 "method": "POST",
                 "primary_keys": ["wallet_address", "network", "contractAddress", "tokenId"],
@@ -883,20 +883,22 @@ class LakeflowConnect:
                 body["includeErc20Tokens"] = table_options["include_erc20_tokens"].lower() == "true"
 
         elif table_name == "nfts_by_wallet":
+            # This endpoint uses networks (plural, array) per address
             body["addresses"] = []
             addresses_str = table_options["addresses"]
-            default_network = self._convert_network_format(table_options.get("network", self.default_network))
+            default_network = table_options.get("network", self.default_network)
             for addr_spec in addresses_str.split(","):
                 addr_spec = addr_spec.strip()
                 if "@" in addr_spec:
-                    address, network_str = addr_spec.split("@", 1)
-                    network = self._convert_network_format(network_str.strip())
+                    address, networks_str = addr_spec.split("@", 1)
+                    # Support multiple networks with | separator
+                    networks = [n.strip() for n in networks_str.split("|")]
                 else:
                     address = addr_spec
-                    network = default_network
+                    networks = [default_network]
                 body["addresses"].append({
                     "address": address.strip(),
-                    "network": network
+                    "networks": networks  # Note: plural, array format
                 })
 
             body["withMetadata"] = table_options.get("with_metadata", "true").lower() == "true"
@@ -1005,17 +1007,18 @@ class LakeflowConnect:
             return records
 
         elif table_name == "nfts_by_wallet":
+            # Response may have "nfts" array or nested structure
             records = []
-            for wallet_data in data:
-                wallet_address = wallet_data.get("address")
-                network = wallet_data.get("network", table_options.get("network", self.default_network))
-                for nft in wallet_data.get("nfts", []):
-                    record = {
-                        "wallet_address": wallet_address,
-                        "network": network,
-                        **nft
-                    }
-                    records.append(record)
+            nfts = data.get("nfts", data if isinstance(data, list) else [])
+            default_network = table_options.get("network", self.default_network)
+            for nft in nfts:
+                # Ensure network field exists
+                if "network" not in nft:
+                    nft["network"] = default_network
+                # Add wallet_address if present in data
+                if "wallet_address" not in nft and "address" in data:
+                    nft["wallet_address"] = data.get("address")
+                records.append(nft)
             return records
 
         elif table_name == "wallet_transactions":
