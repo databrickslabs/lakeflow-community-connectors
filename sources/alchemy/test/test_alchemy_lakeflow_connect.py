@@ -565,7 +565,7 @@ def test_token_balances_by_wallet():
 
 
 def test_nfts_by_wallet():
-    """Test the nfts_by_wallet endpoint (POST /getNftsByWallet)"""
+    """Test the nfts_by_wallet endpoint (POST /assets/nfts/by-address)"""
     parent_dir = Path(__file__).parent.parent
     config = load_config(parent_dir / "configs" / "dev_config.json")
     connector = LakeflowConnect(config)
@@ -576,17 +576,19 @@ def test_nfts_by_wallet():
         nonlocal captured_body
         captured_body = json or {}
         
-        assert "getNftsByWallet" in url
+        assert "assets/nfts/by-address" in url
         response = mock.MagicMock()
-        response.json.return_value = [
-            {
-                "address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-                "network": "ETH_MAINNET",
-                "nfts": [
-                    {"contractAddress": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D", "tokenId": "1234", "balance": "1"}
-                ]
-            }
-        ]
+        # New API returns flat nfts array
+        response.json.return_value = {
+            "nfts": [
+                {
+                    "contractAddress": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D",
+                    "tokenId": "1234",
+                    "balance": "1",
+                    "network": "eth-mainnet"
+                }
+            ]
+        }
         response.raise_for_status = mock.MagicMock()
         return response
     
@@ -596,7 +598,9 @@ def test_nfts_by_wallet():
         records_list = list(records)
         
         assert "addresses" in captured_body
-        assert captured_body["addresses"][0]["network"] == "ETH_MAINNET"
+        # New API uses networks (plural, array)
+        assert "networks" in captured_body["addresses"][0]
+        assert captured_body["addresses"][0]["networks"] == ["eth-mainnet"]
         assert len(records_list) == 1
         print("✅ nfts_by_wallet test passed")
 
