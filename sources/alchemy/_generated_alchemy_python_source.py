@@ -1310,7 +1310,15 @@ def register_lakeflow_source(spark):
                     record["rawMetadata"] = None
             if "tokenUri" in record and isinstance(record["tokenUri"], str):
                 record["tokenUri"] = {"raw": record["tokenUri"], "gateway": record["tokenUri"]}
-            if "contract" in record and isinstance(record["contract"], str):
+            # Handle contract field - might be string, dict, or missing (use contractAddress)
+            if "contract" not in record:
+                # Try to build contract from contractAddress if available
+                contract_addr = record.get("contractAddress") or record.get("contract_address")
+                if contract_addr:
+                    record["contract"] = {"address": contract_addr, "name": None, "symbol": None, "totalSupply": None, "tokenType": None}
+                else:
+                    record["contract"] = {"address": "", "name": None, "symbol": None, "totalSupply": None, "tokenType": None}
+            elif isinstance(record["contract"], str):
                 record["contract"] = {"address": record["contract"], "name": None, "symbol": None, "totalSupply": None, "tokenType": None}
             if "media" in record and isinstance(record["media"], str):
                 try:
