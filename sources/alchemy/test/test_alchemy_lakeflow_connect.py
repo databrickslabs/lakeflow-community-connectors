@@ -490,7 +490,7 @@ def test_token_prices_historical():
 # =============================================================================
 
 def test_tokens_by_wallet():
-    """Test the tokens_by_wallet endpoint (POST /getTokensByWallet)"""
+    """Test the tokens_by_wallet endpoint (POST /assets/tokens/by-address)"""
     parent_dir = Path(__file__).parent.parent
     config = load_config(parent_dir / "configs" / "dev_config.json")
     connector = LakeflowConnect(config)
@@ -501,17 +501,19 @@ def test_tokens_by_wallet():
         nonlocal captured_body
         captured_body = json or {}
         
-        assert "getTokensByWallet" in url
+        assert "assets/tokens/by-address" in url
         response = mock.MagicMock()
-        response.json.return_value = [
-            {
-                "address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-                "network": "ETH_MAINNET",
-                "tokenBalances": [
-                    {"contractAddress": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "tokenBalance": "1000000000"}
-                ]
-            }
-        ]
+        # New API returns flat tokens array
+        response.json.return_value = {
+            "tokens": [
+                {
+                    "contractAddress": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                    "balance": "1000000000",
+                    "symbol": "USDC",
+                    "network": "eth-mainnet"
+                }
+            ]
+        }
         response.raise_for_status = mock.MagicMock()
         return response
     
@@ -522,7 +524,9 @@ def test_tokens_by_wallet():
         
         assert "addresses" in captured_body
         assert len(captured_body["addresses"]) == 1
-        assert captured_body["addresses"][0]["network"] == "ETH_MAINNET"
+        # New API uses networks (plural, array)
+        assert "networks" in captured_body["addresses"][0]
+        assert captured_body["addresses"][0]["networks"] == ["eth-mainnet"]
         assert len(records_list) == 1
         print("✅ tokens_by_wallet test passed")
 
@@ -841,13 +845,10 @@ def test_portfolio_with_network_override():
         captured_body = json or {}
         
         response = mock.MagicMock()
-        response.json.return_value = [
-            {
-                "address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-                "network": "POLYGON_MAINNET",
-                "tokenBalances": []
-            }
-        ]
+        # New API returns tokens array
+        response.json.return_value = {
+            "tokens": []
+        }
         response.raise_for_status = mock.MagicMock()
         return response
     
@@ -857,8 +858,8 @@ def test_portfolio_with_network_override():
         records, offset = connector.read_table("tokens_by_wallet", {}, table_options)
         list(records)
         
-        # Should use the overridden network, not the default
-        assert captured_body["addresses"][0]["network"] == "POLYGON_MAINNET"
+        # Should use the overridden network (now uses networks plural array)
+        assert captured_body["addresses"][0]["networks"] == ["polygon-mainnet"]
         print("✅ Network override test passed!")
 
 
