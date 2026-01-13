@@ -9,21 +9,30 @@ Lakeflow Community Connectors enable data ingestion from various source systems 
 ## Project Structure
 
 ```
-sources/                 # Source connectors (github/, zendesk/, stripe/, etc.)
-  interface/             # LakeflowConnect base interface
-  {source}/              # Each connector has: {source}.py, README.md, test/, configs/
-libs/                    # Shared utilities (spec_parser.py, utils.py, source_loader.py)
-pipeline/                # Core ingestion logic (PySpark Data Source, SDP orchestration)
+src/databricks/labs/community_connector/
+  sources/               # Source connectors (github/, zendesk/, stripe/, etc.)
+    interface/           # LakeflowConnect base interface
+    {source}/            # Each connector has: {source}.py, README.md
+  libs/                  # Shared utilities (spec_parser.py, utils.py, source_loader.py)
+  pipeline/              # Core ingestion logic (PySpark Data Source, SDP orchestration)
 tools/
   community_connector/   # CLI tool to set up and run community connectors in Databricks workspace.
   scripts/               # Build tools (merge_python_source.py)
-tests/                   # Generic test suites (test_suite.py, lakeflow_connect_test_utils.py)
+tests/
+  unit/
+    libs/                # Unit tests for shared libs
+    pipeline/            # Unit tests for pipeline
+    sources/             # Connector tests and test utilities
+      {source}/          # Per-connector test files
+      test_suite.py      # Shared test harness
+      test_utils.py      # Test utilities
+      lakeflow_connect_test_utils.py  # Write-back test utilities
 prompts/                 # Templates for AI-assisted development
 ```
 
 ## Core Interface
 
-All connectors implement the `LakeflowConnect` class in `sources/interface/lakeflow_connect.py`:
+All connectors implement the `LakeflowConnect` class in `src/databricks/labs/community_connector/sources/interface/lakeflow_connect.py`:
 
 ```python
 class LakeflowConnect:
@@ -50,10 +59,10 @@ class LakeflowConnect:
 
 ```bash
 # Run tests for a specific connector
-pytest sources/{source_name}/test/test_{source_name}_lakeflow_connect.py -v
+pytest tests/unit/sources/{source_name}/test_{source_name}_lakeflow_connect.py -v
 
-# Run all tests
-pytest -v
+# Run all unit tests
+pytest tests/unit/ -v
 
 # Generate deployable file (temporary workaround)
 python tools/scripts/merge_python_source.py {source_name}
@@ -70,23 +79,24 @@ python tools/scripts/merge_python_source.py {source_name}
 
 ## Implementation Guidelines
 
-- When developing a new connector, only modify `{source_name}.py` — do **not** change the library, pipeline, or interface code.
+- When developing a new connector, only modify `src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py` — do **not** change the library, pipeline, or interface code.
 - Shared code (libs, pipeline, interface) should only be updated when explicitly instructed to add new features or improvements to the framework itself.
 
 ## Testing Conventions
 
-- Tests use `tests/test_suite.py` via `LakeflowConnectTester`
-- Load credentials from `sources/{source_name}/configs/dev_config.json`
+- Tests use `tests/unit/sources/test_suite.py` via `LakeflowConnectTester`
+- Load credentials from `tests/unit/sources/{source_name}/configs/dev_config.json`
 - Never mock data - tests connect to real source systems
-- Optional write-back testing via `LakeflowConnectTestUtils` in `tests/lakeflow_connect_test_utils.py`
+- Optional write-back testing via `LakeflowConnectTestUtils` in `tests/unit/sources/lakeflow_connect_test_utils.py`
 
 ## Key Files to Reference
 
-- `sources/interface/lakeflow_connect.py` - Base interface definition
-- `sources/zendesk/zendesk.py` - Reference implementation
-- `sources/example/example.py` - Reference implementation
-- `tests/test_suite.py` - Test harness
+- `src/databricks/labs/community_connector/sources/interface/lakeflow_connect.py` - Base interface definition
+- `src/databricks/labs/community_connector/sources/zendesk/zendesk.py` - Reference implementation
+- `src/databricks/labs/community_connector/sources/example/example.py` - Reference implementation
+- `tests/unit/sources/test_suite.py` - Test harness
+- `tests/unit/sources/example/test_example_lakeflow_connect.py` - Reference test implementation
 - `prompts/README.md` - Detailed development guide
-- `prompts/template/source_api_doc_template.md` - API documentation template
-- `prompts/template/community_connector_doc_template.md` - User documentation template
+- `prompts/templates/source_api_doc_template.md` - API documentation template
+- `prompts/templates/community_connector_doc_template.md` - User documentation template
 

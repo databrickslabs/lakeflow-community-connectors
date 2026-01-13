@@ -1,5 +1,5 @@
-from pipeline.ingestion_pipeline import ingest
-from libs.source_loader import get_register_function
+from databricks.labs.community_connector.pipeline.ingestion_pipeline import ingest
+from databricks.labs.community_connector.libs.source_loader import get_register_function
 
 # Connector source name
 source_name = "{SOURCE_NAME}"
