@@ -7,6 +7,7 @@ Databricks Lakeflow community connectors.
 Configuration Precedence:
     CLI arguments → --config file → default_config.yaml → code defaults
 """
+# pylint: disable=too-many-lines
 
 import base64
 import json
@@ -775,6 +776,37 @@ def _extract_source_name_from_ingest(content: str) -> Optional[str]:
     return None
 
 
+def _generate_ingest_content(source_name: str, pipeline_spec: dict) -> str:
+    """
+    Generate the ingest.py content from a pipeline spec.
+
+    Args:
+        source_name: The connector source name.
+        pipeline_spec: The parsed pipeline spec dictionary.
+
+    Returns:
+        The generated ingest.py content.
+    """
+    content = _load_ingest_template("ingest_template_base.py")
+    content = content.replace("{SOURCE_NAME}", source_name)
+    spec_json = json.dumps(pipeline_spec, indent=4)
+    return content.replace("{PIPELINE_SPEC}", spec_json)
+
+
+def _print_pipeline_success(workspace_client, pipeline_id: str) -> None:
+    """Print success message with pipeline URL."""
+    workspace_host = workspace_client.config.host
+    if workspace_host and workspace_host.endswith("/"):
+        workspace_host = workspace_host[:-1]
+    pipeline_url = f"{workspace_host}/pipelines/{pipeline_id}"
+
+    click.echo(f"\n{'=' * 60}")
+    click.echo("Pipeline updated successfully!")
+    click.echo(f"View pipeline: {pipeline_url}")
+    click.echo(f"{'=' * 60}")
+    click.echo("\nNote: Run the pipeline to apply the new configuration.")
+
+
 @main.command("update_pipeline")
 @click.argument("pipeline_name")
 @click.option(
@@ -797,8 +829,9 @@ def update_pipeline(ctx: click.Context, pipeline_name: str, pipeline_spec_input:
 
     \b
     Example:
-        community-connector update_pipeline my_github_pipeline -ps spec.yaml
-        community-connector update_pipeline my_github_pipeline -ps '{"connection_name": "conn", "objects": []}'
+        community-connector update_pipeline my_pipeline -ps spec.yaml
+        community-connector update_pipeline my_pipeline \\
+            -ps '{"connection_name": "conn", "objects": []}'
     """
     debug = ctx.obj.get("debug", False)
 
@@ -847,29 +880,14 @@ def update_pipeline(ctx: click.Context, pipeline_name: str, pipeline_spec_input:
         if debug:
             click.echo(f"[DEBUG] New pipeline spec: {pipeline_spec}")
 
-        # Step 5: Generate new ingest.py content
+        # Step 5: Generate and write new ingest.py content
         click.echo("\nUpdating ingest.py...")
-        ingest_content = _load_ingest_template("ingest_template_base.py")
-        ingest_content = ingest_content.replace("{SOURCE_NAME}", source_name)
-        spec_json = json.dumps(pipeline_spec, indent=4)
-        ingest_content = ingest_content.replace("{PIPELINE_SPEC}", spec_json)
-
-        # Step 6: Write the updated ingest.py
+        ingest_content = _generate_ingest_content(source_name, pipeline_spec)
         _create_workspace_file(workspace_client, ingest_path, ingest_content)
         click.echo(f"  ✓ Updated: {ingest_path}")
 
-        # Build the pipeline URL
-        workspace_host = workspace_client.config.host
-        if workspace_host and workspace_host.endswith("/"):
-            workspace_host = workspace_host[:-1]
-        pipeline_url = f"{workspace_host}/pipelines/{pipeline_id}"
-
-        click.echo(f"\n{'=' * 60}")
-        click.echo("Pipeline updated successfully!")
-        click.echo(f"View pipeline: {pipeline_url}")
-        click.echo(f"{'=' * 60}")
-
-        click.echo("\nNote: Run the pipeline to apply the new configuration.")
+        # Step 6: Print success message
+        _print_pipeline_success(workspace_client, pipeline_id)
 
     except click.ClickException:
         raise
