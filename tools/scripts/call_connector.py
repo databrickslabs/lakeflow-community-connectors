@@ -25,8 +25,21 @@ Examples:
     # Read table data
     python tools/scripts/call_connector.py aha read_table ideas
 
+    # Read with table options
+    python tools/scripts/call_connector.py aha read_table ideas --opt max_ideas=50 --opt status=Open
+
+    # Read with offset (for incremental sync)
+    python tools/scripts/call_connector.py aha read_table ideas \\
+        --offset '{"updated_since": "2024-01-01T00:00:00Z"}'
+
+    # Read with config file (table options + offset)
+    python tools/scripts/call_connector.py aha read_table ideas --config config.json
+
     # Read table deletes
     python tools/scripts/call_connector.py aha read_table_deletes ideas
+
+    # JSON output for programmatic use
+    python tools/scripts/call_connector.py aha read_table ideas --json
 """
 
 import argparse
@@ -267,7 +280,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Call LakeflowConnect methods for any source connector.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog="""\
 Methods:
   list_tables          List all available tables
   get_table_schema     Get the PySpark schema for a table
@@ -276,28 +289,11 @@ Methods:
   read_table_deletes   Read deleted records (if supported)
 
 Examples:
-  # List tables
-  python tools/scripts/call_connector.py aha list_tables
+  python tools/scripts/call_connector.py aha read_table ideas --config config.json
 
-  # Get schema
-  python tools/scripts/call_connector.py aha get_table_schema ideas
-
-  # Get metadata
-  python tools/scripts/call_connector.py aha read_table_metadata ideas
-
-  # Read table with options
-  python tools/scripts/call_connector.py aha read_table ideas --opt max_ideas=50
-
-  # Read with offset
-  python tools/scripts/call_connector.py aha read_table ideas \\
-      --offset '{"updated_since": "2024-01-01T00:00:00Z"}'
-
-  # Read deletes
-  python tools/scripts/call_connector.py aha read_table_deletes ideas
-
-  # Use config file with table options and offset
-  python tools/scripts/call_connector.py aha read_table ideas --config table_config.json
-        """,
+Config file format (--config):
+  {"table_name": {"option1": "value1", "offset": {"cursor_key": "value"}}}
+""",
     )
 
     parser.add_argument(
