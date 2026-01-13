@@ -1,0 +1,115 @@
+{
+  "_comment": "Petrinex Pipeline Specification Examples",
+
+  "minimal_example": {
+    "_description": "Minimal configuration with defaults (last 6 months)",
+    "connection_name": "petrinex_connector",
+    "objects": [
+      {
+        "table": {
+          "source_table": "volumetrics"
+        }
+      }
+    ]
+  },
+  
+  "standard_example": {
+    "_description": "Standard configuration for production workloads",
+    "connection_name": "petrinex_connector",
+    "objects": [
+      {
+        "table": {
+          "source_table": "volumetrics",
+          "destination_catalog": "main",
+          "destination_schema": "energy",
+          "destination_table": "petrinex_volumetrics",
+          "table_configuration": {
+            "scd_type": "SCD_TYPE_1",
+            "from_date": "2023-01"
+          }
+        }
+      }
+    ]
+  },
+  
+  "incremental_only": {
+    "_description": "For incremental updates without historical backfill",
+    "connection_name": "petrinex_realtime",
+    "objects": [
+      {
+        "table": {
+          "source_table": "volumetrics",
+          "destination_schema": "energy_updates",
+          "destination_table": "petrinex_volumetrics",
+          "table_configuration": {
+            "scd_type": "SCD_TYPE_1",
+            "updated_after": "2025-01-01",
+            "request_timeout_s": "120"
+          }
+        }
+      }
+    ]
+  },
+  
+  "historical_backfill": {
+    "_description": "For loading large historical datasets (10+ years)",
+    "connection_name": "petrinex_history",
+    "objects": [
+      {
+        "table": {
+          "source_table": "volumetrics",
+          "destination_catalog": "main",
+          "destination_schema": "energy_historical",
+          "destination_table": "petrinex_volumetrics",
+          "table_configuration": {
+            "scd_type": "SCD_TYPE_1",
+            "from_date": "2015-01",
+            "request_timeout_s": "120"
+          }
+        }
+      }
+    ]
+  },
+  
+  "scd_type2_example": {
+    "_description": "Track historical changes with SCD Type 2",
+    "connection_name": "petrinex_connector",
+    "objects": [
+      {
+        "table": {
+          "source_table": "volumetrics",
+          "destination_catalog": "main",
+          "destination_schema": "energy",
+          "destination_table": "petrinex_volumetrics_history",
+          "table_configuration": {
+            "scd_type": "SCD_TYPE_2",
+            "from_date": "2024-01"
+          }
+        }
+      }
+    ]
+  },
+  
+  "_configuration_notes": {
+    "connection_level": {
+      "authentication": "Not required. Petrinex PublicData is freely accessible."
+    },
+    "table_configuration": {
+      "scd_type": "Optional. 'SCD_TYPE_1' (default, latest overwrites) or 'SCD_TYPE_2' (track history).",
+      "from_date": "Optional. Format: YYYY-MM (e.g., '2023-01'). Default: 6 months ago. Used for initial historical load.",
+      "updated_after": "Optional. Format: YYYY-MM-DD (e.g., '2025-01-01'). Load only files updated after this date. For incremental updates.",
+      "request_timeout_s": "Optional. Default: 60. HTTP timeout in seconds (increase for slow networks)."
+    },
+    "auto_configured": {
+      "sequence_by": "Automatically set to 'ingestion_time' by connector metadata. No need to specify.",
+      "cursor_field": "Automatically set to 'file_updated_ts' by connector. No need to specify.",
+      "primary_keys": "Automatically set by connector (composite key). No need to specify."
+    },
+    "performance_notes": {
+      "memory": "Petrinex files are large (GB-scale). Ensure 16-32 GB driver memory for historical loads.",
+      "schedule": "Daily or weekly is recommended. Petrinex publishes monthly, so more frequent schedules are rarely needed.",
+      "continuous": "Supported but rarely needed - Petrinex updates are infrequent (monthly publications)."
+    }
+  }
+}
+

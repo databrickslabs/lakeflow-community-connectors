@@ -1,0 +1,8 @@
+{
+  "volumetrics": {
+    "from_date": "2024-01",
+    "updated_after": "2025-01-01",
+    "request_timeout_s": "60"
+  }
+}
+

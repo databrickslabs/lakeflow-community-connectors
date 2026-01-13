@@ -1,0 +1,7 @@
+petrinex>=0.2.0
+requests>=2.26.0
+pyspark>=3.0.0
+pandas>=1.2.0
+beautifulsoup4>=4.9.0
+lxml>=4.6.0
+
