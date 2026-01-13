@@ -63,6 +63,27 @@ community-connector create_pipeline github my_pipeline \
 | `--repo-url` | `-r` | Git repository URL (overrides default) |
 | `--config` | `-f` | Path to custom config file |
 
+### `update_pipeline`
+
+Update the `ingest.py` configuration for an existing pipeline. This command modifies only the pipeline spec in the workspace file; other pipeline settings remain unchanged.
+
+```bash
+# Update with a YAML spec file
+community-connector update_pipeline my_github_pipeline -ps pipeline_spec.yaml
+
+# Update with a JSON spec file
+community-connector update_pipeline my_github_pipeline -ps pipeline_spec.json
+
+# Update with inline JSON spec
+community-connector update_pipeline my_github_pipeline \
+  -ps '{"connection_name": "my_conn", "objects": [{"table": {"source_table": "users"}}]}'
+```
+
+**Options:**
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--pipeline-spec` | `-ps` | Pipeline spec as JSON string or path to .yaml/.json file (required) |
+
 ### `run_pipeline`
 
 Run an existing pipeline by name.

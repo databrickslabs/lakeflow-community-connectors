@@ -7,9 +7,11 @@ Databricks Lakeflow community connectors.
 Configuration Precedence:
     CLI arguments → --config file → default_config.yaml → code defaults
 """
+# pylint: disable=too-many-lines
 
 import base64
 import json
+import re
 import traceback
 from pathlib import Path
 from typing import Optional, List, Set
@@ -693,6 +695,206 @@ def create_pipeline(
         source_name,
         debug,
     )
+
+
+def _get_ingest_path_from_pipeline(pipeline_info) -> Optional[str]:
+    """
+    Extract the ingest.py path from the pipeline's library configuration or root_path.
+
+    Args:
+        pipeline_info: The GetPipelineResponse from the pipelines API.
+
+    Returns:
+        The workspace path to ingest.py, or None if not found.
+    """
+    # Try to get the path from spec
+    if hasattr(pipeline_info, "spec") and pipeline_info.spec:
+        spec = pipeline_info.spec
+
+        # First, try to find ingest.py in the libraries
+        if hasattr(spec, "libraries") and spec.libraries:
+            for lib in spec.libraries:
+                # Check file library
+                if hasattr(lib, "file") and lib.file and hasattr(lib.file, "path"):
+                    path = lib.file.path
+                    if path and "ingest.py" in path:
+                        return path
+                # Check notebook library (less likely but possible)
+                if hasattr(lib, "notebook") and lib.notebook and hasattr(lib.notebook, "path"):
+                    path = lib.notebook.path
+                    if path and "ingest" in path:
+                        # For notebook, append .py extension assumption
+                        return path + ".py" if not path.endswith(".py") else path
+
+        # Fall back to root_path + /ingest.py
+        if hasattr(spec, "root_path") and spec.root_path:
+            return f"{spec.root_path}/ingest.py"
+
+    return None
+
+
+def _read_workspace_file(workspace_client, path: str) -> str:
+    """
+    Read a file from the Databricks workspace.
+
+    Args:
+        workspace_client: The WorkspaceClient instance.
+        path: The workspace path to the file.
+
+    Returns:
+        The file contents as a string.
+
+    Raises:
+        click.ClickException: If the file cannot be read.
+    """
+    try:
+        export_response = workspace_client.workspace.export(path=path)
+        if export_response.content:
+            content_bytes = base64.b64decode(export_response.content)
+            return content_bytes.decode("utf-8")
+        raise click.ClickException(f"File is empty: {path}")
+    except Exception as e:
+        if "RESOURCE_DOES_NOT_EXIST" in str(e) or "does not exist" in str(e).lower():
+            raise click.ClickException(f"File not found: {path}")
+        raise click.ClickException(f"Failed to read file {path}: {e}")
+
+
+def _extract_source_name_from_ingest(content: str) -> Optional[str]:
+    """
+    Extract the source_name from an existing ingest.py file.
+
+    Args:
+        content: The content of the ingest.py file.
+
+    Returns:
+        The source_name value, or None if not found.
+    """
+    # Match: source_name = "github" or source_name = 'github'
+    match = re.search(r'source_name\s*=\s*["\']([^"\']+)["\']', content)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _generate_ingest_content(source_name: str, pipeline_spec: dict) -> str:
+    """
+    Generate the ingest.py content from a pipeline spec.
+
+    Args:
+        source_name: The connector source name.
+        pipeline_spec: The parsed pipeline spec dictionary.
+
+    Returns:
+        The generated ingest.py content.
+    """
+    content = _load_ingest_template("ingest_template_base.py")
+    content = content.replace("{SOURCE_NAME}", source_name)
+    spec_json = json.dumps(pipeline_spec, indent=4)
+    return content.replace("{PIPELINE_SPEC}", spec_json)
+
+
+def _print_pipeline_success(workspace_client, pipeline_id: str) -> None:
+    """Print success message with pipeline URL."""
+    workspace_host = workspace_client.config.host
+    if workspace_host and workspace_host.endswith("/"):
+        workspace_host = workspace_host[:-1]
+    pipeline_url = f"{workspace_host}/pipelines/{pipeline_id}"
+
+    click.echo(f"\n{'=' * 60}")
+    click.echo("Pipeline updated successfully!")
+    click.echo(f"View pipeline: {pipeline_url}")
+    click.echo(f"{'=' * 60}")
+    click.echo("\nNote: Run the pipeline to apply the new configuration.")
+
+
+@main.command("update_pipeline")
+@click.argument("pipeline_name")
+@click.option(
+    "--pipeline-spec",
+    "-ps",
+    "pipeline_spec_input",
+    required=True,
+    help="Pipeline spec as JSON string or path to .yaml/.json file (must include connection_name)",
+)
+@click.pass_context
+def update_pipeline(ctx: click.Context, pipeline_name: str, pipeline_spec_input: str):
+    """
+    Update the ingest.py for an existing community connector pipeline.
+
+    PIPELINE_NAME is the name of the pipeline to update.
+
+    This command updates the ingest.py file in the workspace with the new
+    pipeline spec. Only the ingest.py file is modified; other pipeline
+    settings remain unchanged.
+
+    \b
+    Example:
+        community-connector update_pipeline my_pipeline -ps spec.yaml
+        community-connector update_pipeline my_pipeline \\
+            -ps '{"connection_name": "conn", "objects": []}'
+    """
+    debug = ctx.obj.get("debug", False)
+
+    workspace_client = WorkspaceClient()
+    pipeline_client = PipelineClient(workspace_client)
+
+    try:
+        # Step 1: Find pipeline by name
+        click.echo(f"Finding pipeline: {pipeline_name}")
+        pipeline_id = _find_pipeline_by_name(workspace_client, pipeline_name)
+        click.echo(f"  ✓ Found pipeline ID: {pipeline_id}")
+
+        # Step 2: Get pipeline info to find ingest.py path
+        pipeline_info = pipeline_client.get(pipeline_id)
+
+        if debug:
+            click.echo(f"[DEBUG] Pipeline spec: {pipeline_info.spec}")
+
+        ingest_path = _get_ingest_path_from_pipeline(pipeline_info)
+        if not ingest_path:
+            raise click.ClickException(
+                "Could not determine ingest.py path from pipeline configuration. "
+                "Please ensure the pipeline was created with community-connector CLI."
+            )
+
+        click.echo(f"  ✓ Found ingest.py at: {ingest_path}")
+
+        # Step 3: Read existing ingest.py to get source_name
+        click.echo("\nReading existing ingest.py...")
+        existing_content = _read_workspace_file(workspace_client, ingest_path)
+        source_name = _extract_source_name_from_ingest(existing_content)
+
+        if not source_name:
+            raise click.ClickException(
+                "Could not extract source_name from existing ingest.py. "
+                "Please ensure the file was created with community-connector CLI."
+            )
+
+        click.echo(f"  ✓ Detected source: {source_name}")
+
+        # Step 4: Parse and validate the new pipeline spec
+        click.echo("\nValidating pipeline spec...")
+        pipeline_spec = _parse_pipeline_spec(pipeline_spec_input)
+        click.echo("  ✓ Pipeline spec is valid")
+
+        if debug:
+            click.echo(f"[DEBUG] New pipeline spec: {pipeline_spec}")
+
+        # Step 5: Generate and write new ingest.py content
+        click.echo("\nUpdating ingest.py...")
+        ingest_content = _generate_ingest_content(source_name, pipeline_spec)
+        _create_workspace_file(workspace_client, ingest_path, ingest_content)
+        click.echo(f"  ✓ Updated: {ingest_path}")
+
+        # Step 6: Print success message
+        _print_pipeline_success(workspace_client, pipeline_id)
+
+    except click.ClickException:
+        raise
+    except Exception as e:
+        if debug:
+            click.echo(f"\n[DEBUG] Full exception: {traceback.format_exc()}", err=True)
+        raise click.ClickException(f"Failed to update pipeline: {e}")
 
 
 @main.command("run_pipeline")
