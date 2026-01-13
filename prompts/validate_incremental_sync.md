@@ -158,36 +158,54 @@ If the test_suite passes and shows `offset_keys`, proceed to Step 3 to verify **
 
 Verify that passing a midpoint cursor value filters records correctly.
 
-### 3.1 Read Without Offset
+### 3.1 Setup
 
-```bash
-python tools/scripts/call_connector.py {source} read_table {table}
+```python
+import json
+from sources.{source}.{source} import LakeflowConnect
+
+config = json.load(open('sources/{source}/configs/dev_config.json'))
+connector = LakeflowConnect(config)
 ```
 
-Note:
-- Record count (e.g., 100)
-- The cursor values in records (e.g., `updated_at` field)
-- The offset keys returned (e.g., `updated_since`)
+### 3.2 Read Without Offset
 
-### 3.2 Pick a Midpoint Cursor Value
+```python
+table = '{table}'
+table_options = {}  # Add options if needed
 
-From the records, pick a cursor value roughly in the middle:
+records, offset = connector.read_table(table, {}, table_options)
+all_records = list(records)
 
-```bash
-# Example: if records span 2024-01 to 2024-12, pick 2024-06
-MIDPOINT="2024-06-15T00:00:00Z"
+print(f"Record count: {len(all_records)}")
+print(f"Offset: {offset}")
+
+# Get cursor values
+cursor_field = 'updated_at'  # From metadata
+cursors = sorted([r.get(cursor_field) for r in all_records if r.get(cursor_field)])
+print(f"Cursor range: {cursors[0]} to {cursors[-1]}")
 ```
 
-### 3.3 Read With Midpoint Offset
+### 3.3 Pick Midpoint and Test Filtering
 
-```bash
-# Single cursor field
-python tools/scripts/call_connector.py {source} read_table {table} \
-  --offset '{"updated_since": "2024-06-15T00:00:00Z"}'
+```python
+# Pick midpoint
+midpoint = cursors[len(cursors) // 2]
+print(f"Midpoint: {midpoint}")
 
-# Multi-field offset (keep other fields, change cursor)
-python tools/scripts/call_connector.py {source} read_table {table} \
-  --offset '{"team_id": "abc", "updated_since": "2024-06-15T00:00:00Z"}'
+# Read with midpoint offset
+offset_key = list(offset.keys())[0]  # e.g., 'updated_since'
+filtered_records, _ = connector.read_table(table, {offset_key: midpoint}, table_options)
+filtered = list(filtered_records)
+
+print(f"Filtered count: {len(filtered)} (was {len(all_records)})")
+
+# Validate
+violations = [r for r in filtered if r.get(cursor_field) < midpoint]
+if len(filtered) < len(all_records) and not violations:
+    print("✅ Filtering works correctly")
+else:
+    print(f"❌ Issues: {len(violations)} records before midpoint")
 ```
 
 ### 3.4 Validate
@@ -285,49 +303,6 @@ return {..., OFFSET_KEY: max_val}
 
 ---
 
-## Using call_connector.py
-
-`call_connector.py` is useful for:
-- **Testing filtering** (Step 3) - read with a custom offset
-- **Debugging** - inspect specific tables or records
-- **Ad-hoc queries** - when you need data outside of test_suite
-
-### Basic Commands
-
-```bash
-# List tables
-python tools/scripts/call_connector.py {source} list_tables
-
-# Get metadata
-python tools/scripts/call_connector.py {source} read_table_metadata {table}
-
-# Read table
-python tools/scripts/call_connector.py {source} read_table {table}
-
-# Read with offset
-python tools/scripts/call_connector.py {source} read_table {table} \
-  --offset '{"updated_since": "2024-06-15T00:00:00Z"}'
-
-# Read with config file (includes table options + offset)
-python tools/scripts/call_connector.py {source} read_table {table} --config config.json
-
-# JSON output
-python tools/scripts/call_connector.py {source} read_table {table} --json
-```
-
-### Config File Format
-
-```json
-{
-  "ideas": {
-    "max_ideas": "100",
-    "offset": {"updated_since": "2024-06-15T00:00:00Z"}
-  }
-}
-```
-
----
-
 ## When to Use This Prompt
 
 1. **After running test_suite.py** - Use test output to identify CDC tables
@@ -347,33 +322,36 @@ python tools/scripts/call_connector.py {source} read_table {table} --json
 3. Read connector code (Step 1)
    └── Understand: offset key, how it's calculated, server-side filtering
 
-4. Validate offset matches max cursor (Step 2)
-   └── Use call_connector.py --json, then validate in Python
+4. Validate from test output (Step 2)
+   └── Check offset_keys are returned for CDC tables
 
 5. Test incremental filtering (Step 3)
-   └── Use call_connector.py --offset, then compare counts in Python
+   └── Use simple Python: connector.read_table() with midpoint offset
 ```
 
-### call_connector.py Quick Reference
+### Quick Python Reference
 
-```bash
+```python
+import json
+from sources.{source}.{source} import LakeflowConnect
+
+# Load config and create connector
+config = json.load(open('sources/{source}/configs/dev_config.json'))
+connector = LakeflowConnect(config)
+
 # List tables
-python tools/scripts/call_connector.py {source} list_tables
+connector.list_tables()
 
-# Check metadata
-python tools/scripts/call_connector.py {source} read_table_metadata {table}
+# Get metadata
+connector.read_table_metadata('table_name', {})
 
-# Read full table
-python tools/scripts/call_connector.py {source} read_table {table}
+# Read table
+records, offset = connector.read_table('table_name', {}, {})
 
-# Read with offset
-python tools/scripts/call_connector.py {source} read_table {table} \
-  --offset '{"updated_since": "2024-01-01T00:00:00Z"}'
+# Read with offset (for filtering test)
+records, offset = connector.read_table('table_name', {'updated_since': '2024-06-01'}, {})
 
-# Read with config file (includes offset)
-python tools/scripts/call_connector.py {source} read_table {table} --config file.json
-
-# JSON output for programmatic use
-python tools/scripts/call_connector.py {source} read_table {table} --json
+# Read with table options
+records, offset = connector.read_table('table_name', {}, {'max_items': '50'})
 ```
 
