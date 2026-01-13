@@ -4,6 +4,7 @@ Unit tests for the community connector CLI.
 Tests CLI helper functions, argument validation, and command invocation
 using Click's CliRunner and mocks for Databricks SDK.
 """
+# pylint: disable=too-many-lines
 
 import base64
 import json
