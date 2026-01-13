@@ -63,7 +63,7 @@ def discover_source(repo_path: Path, source_name: str) -> Optional[Path]:
     """Discover the source module in the given repository."""
     source_dir = repo_path / "sources" / source_name
     source_file = source_dir / f"{source_name}.py"
-    
+
     if source_file.exists():
         return source_file
     return None
@@ -73,7 +73,7 @@ def load_connector(repo_path: Path, source_name: str):
     """Dynamically load the LakeflowConnect class from the source module."""
     if str(repo_path) not in sys.path:
         sys.path.insert(0, str(repo_path))
-    
+
     module = importlib.import_module(f"sources.{source_name}.{source_name}")
     return module.LakeflowConnect
 
@@ -81,21 +81,21 @@ def load_connector(repo_path: Path, source_name: str):
 def load_configs(repo_path: Path, source_name: str) -> tuple:
     """Load dev_config.json and dev_table_config.json for the source."""
     config_dir = repo_path / "sources" / source_name / "configs"
-    
+
     config_path = config_dir / "dev_config.json"
     if not config_path.exists():
         print(f"Error: Config file not found: {config_path}", file=sys.stderr)
         sys.exit(1)
-    
+
     with open(config_path, "r") as f:
         config = json.load(f)
-    
+
     table_config_path = config_dir / "dev_table_config.json"
     table_configs = {}
     if table_config_path.exists():
         with open(table_config_path, "r") as f:
             table_configs = json.load(f)
-    
+
     return config, table_configs
 
 
@@ -135,13 +135,13 @@ def call_get_table_schema(connector, args, table_options) -> Dict[str, Any]:
     """Call get_table_schema method."""
     if not args.table:
         raise ValueError("Table name required for get_table_schema")
-    
+
     # Try with table_options first, fall back to without if not supported
     try:
         schema = connector.get_table_schema(args.table, table_options)
     except TypeError:
         schema = connector.get_table_schema(args.table)
-    
+
     return {
         "method": "get_table_schema",
         "table": args.table,
@@ -155,7 +155,7 @@ def call_read_table_metadata(connector, args, table_options) -> Dict[str, Any]:
     """Call read_table_metadata method."""
     if not args.table:
         raise ValueError("Table name required for read_table_metadata")
-    
+
     metadata = connector.read_table_metadata(args.table, table_options)
     return {
         "method": "read_table_metadata",
@@ -169,10 +169,10 @@ def call_read_table(connector, args, table_options, offset) -> Dict[str, Any]:
     """Call read_table method."""
     if not args.table:
         raise ValueError("Table name required for read_table")
-    
+
     records_iter, returned_offset = connector.read_table(args.table, offset, table_options)
     records = list(records_iter)
-    
+
     result = {
         "method": "read_table",
         "table": args.table,
@@ -181,13 +181,13 @@ def call_read_table(connector, args, table_options, offset) -> Dict[str, Any]:
         "returned_offset": returned_offset,
         "record_count": len(records),
     }
-    
+
     if args.limit:
         result["records"] = records[:args.limit]
         result["records_limited"] = args.limit < len(records)
     else:
         result["records"] = records
-    
+
     return result
 
 
@@ -195,17 +195,17 @@ def call_read_table_deletes(connector, args, table_options, offset) -> Dict[str,
     """Call read_table_deletes method."""
     if not args.table:
         raise ValueError("Table name required for read_table_deletes")
-    
+
     if not hasattr(connector, "read_table_deletes"):
         return {
             "method": "read_table_deletes",
             "table": args.table,
             "error": "Connector does not implement read_table_deletes",
         }
-    
+
     records_iter, returned_offset = connector.read_table_deletes(args.table, offset, table_options)
     records = list(records_iter)
-    
+
     result = {
         "method": "read_table_deletes",
         "table": args.table,
@@ -214,13 +214,13 @@ def call_read_table_deletes(connector, args, table_options, offset) -> Dict[str,
         "returned_offset": returned_offset,
         "record_count": len(records),
     }
-    
+
     if args.limit:
         result["records"] = records[:args.limit]
         result["records_limited"] = args.limit < len(records)
     else:
         result["records"] = records
-    
+
     return result
 
 
@@ -229,25 +229,25 @@ def print_result(result: Dict[str, Any], json_output: bool = False) -> None:
     if json_output:
         print(json.dumps(result, indent=2, default=str))
         return
-    
+
     method = result.get("method", "unknown")
     print(f"\n{'='*60}")
     print(f"Method: {method}")
     print(f"{'='*60}")
-    
+
     if "error" in result:
         print(f"\n❌ Error: {result['error']}")
         return
-    
+
     if method == "list_tables":
         print(f"\nTables ({result['count']}):")
         for table in result["tables"]:
             print(f"  - {table}")
-    
+
     elif method == "get_table_schema":
         print(f"\nTable: {result['table']}")
         print(f"\nSchema:\n{result['schema']}")
-    
+
     elif method == "read_table_metadata":
         print(f"\nTable: {result['table']}")
         if result.get("table_options"):
@@ -255,7 +255,7 @@ def print_result(result: Dict[str, Any], json_output: bool = False) -> None:
         print(f"\nMetadata:")
         for key, value in result["metadata"].items():
             print(f"  {key}: {value}")
-    
+
     elif method in ("read_table", "read_table_deletes"):
         print(f"\nTable: {result['table']}")
         if result.get("table_options"):
@@ -263,19 +263,19 @@ def print_result(result: Dict[str, Any], json_output: bool = False) -> None:
         print(f"Input Offset: {json.dumps(result['input_offset'])}")
         print(f"Returned Offset: {json.dumps(result['returned_offset'], default=str)}")
         print(f"Record Count: {result['record_count']}")
-        
+
         if result.get("records_limited"):
             print(f"\n(Showing first {len(result['records'])} of {result['record_count']} records)")
-        
+
         print(f"\n{'-'*60}")
         print("Records:")
         print(f"{'-'*60}")
-        
+
         for i, record in enumerate(result.get("records", [])):
             print(f"\n[{i+1}] {json.dumps(record, indent=2, default=str)}")
 
 
-def main():
+def main():  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """Main entry point for the script."""
     parser = argparse.ArgumentParser(
         description="Call LakeflowConnect methods for any source connector.",
@@ -400,7 +400,7 @@ Config file format (--config):
         print(f"Repository: {repo_path}", file=sys.stderr)
 
     try:
-        LakeflowConnect = load_connector(repo_path, args.source)
+        LakeflowConnect = load_connector(repo_path, args.source)  # pylint: disable=invalid-name
         config, table_configs = load_configs(repo_path, args.source)
         connector = LakeflowConnect(config)
     except Exception as e:
@@ -411,11 +411,11 @@ Config file format (--config):
     # Priority: CLI > config file > dev_table_config.json
     table_options = {}
     offset = cli_offset
-    
+
     if args.table:
         # Start with dev_table_config.json
         table_options = {**table_configs.get(args.table, {})}
-        
+
         # Merge config file options (if provided)
         if args.table in config_file_options:
             file_opts = config_file_options[args.table].copy()
@@ -426,7 +426,7 @@ Config file format (--config):
                 else:
                     file_opts.pop("offset")  # Remove offset, use CLI version
             table_options.update(file_opts)
-        
+
         # CLI options take highest precedence
         table_options.update(cli_options)
 
