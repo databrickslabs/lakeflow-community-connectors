@@ -36,6 +36,10 @@ If you need comprehensive end-to-end validation:
 - [Source API Document Template](templates/source_api_doc_template.md): Used in Step 1 to document the researched API endpoints.
 - [Community Connector Documentation Template](templates/community_connector_doc_template.md): Used to create consistent, public-facing documentation across different connectors.
 
+## Quality Review & Validation
+This prompt is useful for both **development** (testing during implementation) and **quality review** (validating existing connectors):
+
+- **[Validate Incremental Sync](validate_incremental_sync.md)**: Manual validation process to verify CDC implementation by checking offset structure, validating offset matches max cursor, and testing incremental filtering. See the **validate-incremental-sync** Claude skill.
 
 ## Notes & Tips
 - The **context window** grows larger as you proceed through each step. Consider starting a new session for each step to maintain explicit context isolation—this way, each step only references the output from previous ones, conserving context space.
