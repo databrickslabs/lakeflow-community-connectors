@@ -1,0 +1,93 @@
+# Gmail Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+#
+# This connector provides 100% Gmail API coverage with 10 tables:
+# - messages, threads, labels, drafts (core email data)
+# - profile (user info)
+# - settings, filters, forwarding_addresses, send_as, delegates (configuration)
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+connection:
+  parameters:
+    - name: client_id
+      type: string
+      required: true
+      description: >
+        OAuth 2.0 client ID from Google Cloud Console.
+        Create this in APIs & Services → Credentials → OAuth 2.0 Client IDs.
+
+    - name: client_secret
+      type: string
+      required: true
+      description: >
+        OAuth 2.0 client secret from Google Cloud Console.
+        Obtained alongside the client_id when creating OAuth credentials.
+
+    - name: refresh_token
+      type: string
+      required: true
+      description: >
+        Long-lived OAuth 2.0 refresh token obtained via the OAuth consent flow.
+        Use Google OAuth Playground or implement OAuth flow to obtain this token.
+        Required scope: https://www.googleapis.com/auth/gmail.readonly
+
+    - name: user_id
+      type: string
+      required: false
+      description: >
+        The user's email address or 'me' for the authenticated user.
+        Defaults to 'me' if not specified. For service accounts with
+        domain-wide delegation, specify the user email to impersonate.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# ============================================================================
+external_options_allowlist: "q,labelIds,maxResults,includeSpamTrash,format"
+
+# ============================================================================
+# Supported Tables (10 tables - 100% Gmail API coverage)
+# ============================================================================
+# Core Email Data:
+#   - messages:              Email messages (CDC with historyId cursor)
+#   - threads:               Email threads (CDC with historyId cursor)
+#   - labels:                Gmail labels (snapshot)
+#   - drafts:                Draft messages (snapshot)
+#
+# Account Information:
+#   - profile:               User profile and mailbox stats (snapshot)
+#
+# Settings & Configuration:
+#   - settings:              Combined settings (IMAP, POP, vacation, etc.)
+#   - filters:               Email filter rules (snapshot)
+#   - forwarding_addresses:  Forwarding destinations (snapshot)
+#   - send_as:               Send-as aliases (snapshot)
+#   - delegates:             Delegated access users (snapshot)
+
+# ============================================================================
+# Table Options Documentation
+# ============================================================================
+# q:               Gmail search query (same syntax as Gmail web UI)
+#                  Example: "newer_than:7d", "from:user@example.com"
+#
+# labelIds:        Filter by label ID (e.g., INBOX, SENT, DRAFT, SPAM, TRASH)
+#                  For user labels, use the label ID (e.g., Label_1)
+#
+# maxResults:      Maximum items per page (default: 100, max: 500)
+#
+# includeSpamTrash: Include messages from SPAM and TRASH folders
+#                   Values: "true" or "false" (default: "false")
+#
+# format:          Message format to retrieve
+#                  Values: "full" (default), "metadata", "minimal", "raw"
+#                  - full: Returns full email content including body
+#                  - metadata: Returns only headers, no body
+#                  - minimal: Returns only id and threadId
+#                  - raw: Returns full email in RFC 2822 format (base64)
+
