@@ -49,7 +49,8 @@ def _create_cdc_table(
 
     # Delete flow - only enabled for cdc_with_deletes ingestion type
     if config.with_deletes:
-        delete_view_name = config.source_table + "_delete_staging"
+        # Use destination table name for unique delete view names
+        delete_view_name = config.destination_table.replace(".", "_") + "_delete_staging"
 
         @sdp.view(name=delete_view_name)
         def delete_view():
@@ -154,9 +155,10 @@ def ingest(spark, pipeline_spec: dict) -> None:
         primary_keys = metadata[table].get("primary_keys")
         cursor_field = metadata[table].get("cursor_field")
         ingestion_type = metadata[table].get("ingestion_type", "cdc")
-        view_name = table + "_staging"
         table_config = spec.get_table_configuration(table)
         destination_table = spec.get_full_destination_table_name(table)
+        # Use destination table name for unique view names (supports multiple configs per source)
+        view_name = destination_table.replace(".", "_") + "_staging"
 
         # Override parameters with spec values if available
         primary_keys = spec.get_primary_keys(table) or primary_keys
