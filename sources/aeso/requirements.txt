@@ -1,0 +1,5 @@
+aeso-python-api>=0.2.1
+requests>=2.26.0
+pyspark>=3.0.0
+
+
