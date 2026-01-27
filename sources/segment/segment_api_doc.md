@@ -83,8 +83,8 @@ The object list for the Segment connector is **static** (defined by the connecto
 | Object Name | Description | Primary Endpoint | Ingestion Type |
 |-------------|-------------|------------------|----------------|
 | `sources` | Data sources configured in the workspace | `GET /sources` | `snapshot` |
-| `destinations` | Destinations configured in the workspace | `GET /destinations` | `snapshot` |
-| `warehouses` | Data warehouses connected to the workspace | `GET /warehouses` | `snapshot` |
+| `destinations` | **Event streaming** destinations (Mixpanel, Amplitude, etc.) | `GET /destinations` | `snapshot` |
+| `warehouses` | **Storage** destinations (Databricks, BigQuery, Snowflake, etc.) | `GET /warehouses` | `snapshot` |
 | `catalog_sources` | Available source integrations in the catalog | `GET /catalog/sources` | `snapshot` |
 | `catalog_destinations` | Available destination integrations in the catalog | `GET /catalog/destinations` | `snapshot` |
 | `catalog_warehouses` | Available warehouse integrations in the catalog | `GET /catalog/warehouses` | `snapshot` |
@@ -97,6 +97,18 @@ The object list for the Segment connector is **static** (defined by the connecto
 | `transformations` | Transformation configurations | `GET /transformations` | `snapshot` |
 | `usage_api_calls_daily` | Daily API call usage metrics | `GET /usage/api-calls/daily` | `cdc` |
 | `usage_mtu_daily` | Daily MTU (Monthly Tracked Users) usage | `GET /usage/mtu/daily` | `cdc` |
+
+**Important: Destinations vs Warehouses in Segment's API**
+
+In the Segment UI, all outbound connections appear under "My destinations", but the API separates them:
+
+| UI Category | API Endpoint | Connector Table | Examples |
+|-------------|--------------|-----------------|----------|
+| Event streams | `/destinations` | `destinations` | Mixpanel, Amplitude, Google Analytics |
+| **Storage** | `/warehouses` | `warehouses` | Databricks, BigQuery, Snowflake, Redshift |
+| Reverse ETL | `/reverse-etl-models` | `reverse_etl_models` | Reverse ETL sync configurations |
+
+If you're looking for a "Storage" destination (like Databricks) and the `destinations` table is empty, check the `warehouses` table instead.
 
 ### Event Data Objects (Future Extension via Webhooks/S3)
 
@@ -200,6 +212,8 @@ curl -X GET \
 **Source endpoint**:  
 `GET /destinations`
 
+> **Note**: This table contains **event streaming destinations** only (e.g., Mixpanel, Amplitude, Google Analytics). For **storage destinations** (e.g., Databricks, BigQuery, Snowflake), see the `warehouses` table.
+
 **High-level schema (connector view)**:
 
 | Column Name | Type | Description |
@@ -239,12 +253,14 @@ curl -X GET \
 **Source endpoint**:  
 `GET /warehouses`
 
+> **Note**: This table contains **storage destinations** (data warehouses) such as Databricks, BigQuery, Snowflake, and Redshift. In the Segment UI, these appear under "My destinations" with connection type "Storage". For event streaming destinations, see the `destinations` table.
+
 **High-level schema (connector view)**:
 
 | Column Name | Type | Description |
 |-------------|------|-------------|
 | `id` | string | Unique identifier for the warehouse |
-| `name` | string | Display name of the warehouse |
+| `name` | string | Display name of the warehouse (found in `settings.name` in API response) |
 | `workspaceId` | string | ID of the workspace containing this warehouse |
 | `enabled` | boolean | Whether the warehouse is enabled |
 | `metadata` | struct | Metadata about the warehouse integration |
@@ -938,6 +954,14 @@ Some resources have relationship endpoints:
   - Catalog endpoints (`/catalog/*`) return available integration types
   - Workspace endpoints (`/sources`, `/destinations`, etc.) return configured instances
   - These are separate concepts and should not be confused
+
+- **Destinations vs Warehouses (Storage destinations)**:
+  - In the Segment UI, all outbound connections appear under "My destinations"
+  - However, the API separates them into different endpoints:
+    - `/destinations` → Event streaming destinations (Mixpanel, Amplitude, Google Analytics)
+    - `/warehouses` → Storage destinations (Databricks, BigQuery, Snowflake, Redshift)
+  - If looking for a "Storage" type destination and `/destinations` is empty, check `/warehouses`
+  - This is a common source of confusion when the UI shows destinations but the API returns empty
 
 - **Metadata structure**:
   - The `metadata` field contains information about the integration type from the catalog

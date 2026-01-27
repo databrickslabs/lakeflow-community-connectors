@@ -206,7 +206,7 @@ def register_lakeflow_source(spark):
     # sources/segment/segment.py
     ########################################################
 
-    Segment Public API Connector for Lakeflow Connect.
+    """Segment Public API Connector for Lakeflow Connect.
 
     This connector implements the LakeflowConnect interface to ingest data from
     Segment's Public API, which provides access to workspace configuration and metadata.
