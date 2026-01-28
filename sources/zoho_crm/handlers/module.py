@@ -55,7 +55,10 @@ class ModuleHandler(TableHandler):
 
         # Filter for API-supported modules
         supported = [
-            m for m in modules if m.get("api_supported") and m.get("generated_type") in ("default", "custom") and m.get("api_name") not in self.EXCLUDED_MODULES
+            m for m in modules
+            if m.get("api_supported")
+            and m.get("generated_type") in ("default", "custom")
+            and m.get("api_name") not in self.EXCLUDED_MODULES
         ]
 
         self._modules_cache = supported
@@ -90,7 +93,10 @@ class ModuleHandler(TableHandler):
             Set of field API names with json_type 'jsonobject' or 'jsonarray'
         """
         fields = self.get_fields(module_name)
-        return {f.get("api_name") for f in fields if f.get("json_type") in ("jsonobject", "jsonarray")}
+        return {
+            f.get("api_name") for f in fields
+            if f.get("json_type") in ("jsonobject", "jsonarray")
+        }
 
     def get_schema(self, table_name: str, config: dict) -> StructType:
         """
