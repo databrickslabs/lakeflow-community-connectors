@@ -522,7 +522,11 @@ class ModuleHandler(TableHandler):
         modules = response.get("modules", [])
 
         supported = [
-            m for m in modules if m.get("api_supported") and m.get("generated_type") in ("default", "custom") and m.get("api_name") not in self.EXCLUDED_MODULES
+            m
+            for m in modules
+            if m.get("api_supported")
+            and m.get("generated_type") in ("default", "custom")
+            and m.get("api_name") not in self.EXCLUDED_MODULES
         ]
 
         self._modules_cache = supported
@@ -546,7 +550,9 @@ class ModuleHandler(TableHandler):
     def get_json_fields(self, module_name: str) -> set:
         """Get field names that should be serialized as JSON strings."""
         fields = self.get_fields(module_name)
-        return {f.get("api_name") for f in fields if f.get("json_type") in ("jsonobject", "jsonarray")}
+        return {
+            f.get("api_name") for f in fields if f.get("json_type") in ("jsonobject", "jsonarray")
+        }
 
     def get_schema(self, table_name: str, config: dict) -> StructType:
         """Get Spark schema for a standard CRM module."""
@@ -879,7 +885,9 @@ class RelatedHandler(TableHandler):
             parent_ids = list(self._get_parent_ids(parent_module))
 
             for parent_id in parent_ids:
-                related_records = self._get_related_records(parent_module, parent_id, related_module, related_fields)
+                related_records = self._get_related_records(
+                    parent_module, parent_id, related_module, related_fields
+                )
                 for record in related_records:
                     record["_junction_id"] = f"{parent_id}_{record.get('id')}"
                     record["_parent_id"] = parent_id
@@ -944,7 +952,10 @@ class LakeflowConnect:
         refresh_token = options.get("refresh_value_tmp")
 
         if not all([client_id, client_secret, refresh_token]):
-            raise ValueError("Zoho CRM connector requires 'client_id', 'client_value_tmp', " "and 'refresh_value_tmp' in the UC connection")
+            raise ValueError(
+                "Zoho CRM connector requires 'client_id', 'client_value_tmp', "
+                "and 'refresh_value_tmp' in the UC connection"
+            )
 
         self.initial_load_start_date = options.get("initial_load_start_date")
         accounts_url = options.get("base_url", "https://accounts.zoho.com")
@@ -1024,4 +1035,7 @@ class LakeflowConnect:
 
         available_tables = self.list_tables()
         if table_name not in available_tables:
-            raise ValueError(f"Table '{table_name}' is not supported. " f"Available tables: {', '.join(available_tables)}")
+            raise ValueError(
+                f"Table '{table_name}' is not supported. "
+                f"Available tables: {', '.join(available_tables)}"
+            )
