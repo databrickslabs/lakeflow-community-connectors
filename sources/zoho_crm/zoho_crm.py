@@ -908,8 +908,8 @@ class RelatedHandler(TableHandler):
 
         try:
             yield from self.client.paginate(endpoint, params=params)
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code in (204, 400, 404):
+        except ZohoAPIError as e:
+            if e.status_code in (204, 400, 404):
                 return
             raise
 
