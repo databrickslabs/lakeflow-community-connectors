@@ -18,8 +18,8 @@ To configure the connector, provide the following parameters in your connector o
 | Parameter | Type | Required | Description | Example |
 |-----------|------|----------|-------------|---------|
 | `client_id` | string | Yes | OAuth Client ID from Zoho API Console | `1000.XXXXX...` |
-| `client_value_tmp` | string | Yes | OAuth Client Secret from Zoho API Console | `abc123...` |
-| `refresh_value_tmp` | string | Yes | OAuth Refresh Token (never expires) | `1000.YYYYY...` |
+| `client_secret` | string | Yes | OAuth Client Secret from Zoho API Console | `abc123...` |
+| `refresh_token` | string | Yes | OAuth Refresh Token (never expires) | `1000.YYYYY...` |
 | `base_url` | string | No | Zoho accounts URL for your data center | `https://accounts.zoho.com` |
 | `initial_load_start_date` | string | No | Starting point for the first sync. If omitted, syncs all historical data. (ISO 8601 format) | `2024-01-01T00:00:00Z` |
 

@@ -1132,20 +1132,20 @@ def register_lakeflow_source(spark):
 
             Expected options:
                 - client_id: OAuth Client ID from Zoho API Console
-                - client_value_tmp: OAuth Client Secret from Zoho API Console
-                - refresh_value_tmp: Long-lived refresh token obtained from OAuth flow
+                - client_secret: OAuth Client Secret from Zoho API Console
+                - refresh_token: Long-lived refresh token obtained from OAuth flow
                 - base_url (optional): Zoho accounts URL for OAuth.
                   Defaults to https://accounts.zoho.com
                 - initial_load_start_date (optional): Starting point for the first sync.
             """
             client_id = options.get("client_id")
-            client_secret = options.get("client_value_tmp")
-            refresh_token = options.get("refresh_value_tmp")
+            client_secret = options.get("client_secret")
+            refresh_token = options.get("refresh_token")
 
             if not all([client_id, client_secret, refresh_token]):
                 raise ValueError(
-                    "Zoho CRM connector requires 'client_id', 'client_value_tmp', "
-                    "and 'refresh_value_tmp' in the UC connection"
+                    "Zoho CRM connector requires 'client_id', 'client_secret', "
+                    "and 'refresh_token' in the UC connection"
                 )
 
             self.initial_load_start_date = options.get("initial_load_start_date")

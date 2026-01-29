@@ -158,8 +158,8 @@ import json
 
 uc_config = {
     "client_id": CLIENT_ID[0:10] + "...",
-    "client_value_tmp": CLIENT_SECRET[0:10] + "...",
-    "refresh_value_tmp": REFRESH_TOKEN[0:10] + "...",
+    "client_secret": CLIENT_SECRET[0:10] + "...",
+    "refresh_token": REFRESH_TOKEN[0:10] + "...",
     "base_url": DATA_CENTER,
 }
 

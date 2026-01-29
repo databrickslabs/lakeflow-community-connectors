@@ -22,14 +22,14 @@ connection:
         OAuth Client ID from Zoho API Console. Obtain this by creating a
         Server-based Application at https://api-console.zoho.com/
 
-    - name: client_value_tmp
+    - name: client_secret
       type: string
       required: true
       description: >
         OAuth Client Secret from Zoho API Console. This is the secret
         associated with your Client ID.
 
-    - name: refresh_value_tmp
+    - name: refresh_token
       type: string
       required: true
       description: >
