@@ -1,0 +1,66 @@
+# Zoho CRM Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+#
+# This connector uses OAuth2 authentication with Zoho API. A single
+# authentication method is supported using client credentials and a
+# refresh token obtained through the OAuth flow.
+# ============================================================================
+connection:
+  # ---------------------------------------------------------------------------
+  # Single Authentication Method: OAuth2 with Refresh Token
+  # ---------------------------------------------------------------------------
+  parameters:
+    - name: client_id
+      type: string
+      required: true
+      description: >
+        OAuth Client ID from Zoho API Console. Obtain this by creating a
+        Server-based Application at https://api-console.zoho.com/
+
+    - name: client_secret
+      type: string
+      required: true
+      description: >
+        OAuth Client Secret from Zoho API Console. This is the secret
+        associated with your Client ID.
+
+    - name: refresh_token
+      type: string
+      required: true
+      description: >
+        OAuth Refresh Token obtained from the authorization flow. This is a
+        long-lived token that never expires and is used to obtain access tokens.
+        Follow the OAuth setup guide in the README to generate this token.
+
+    - name: base_url
+      type: string
+      required: false
+      description: >
+        Zoho accounts URL for OAuth authentication. Defaults to
+        https://accounts.zoho.com (US data center). Use region-specific URLs
+        for other data centers: accounts.zoho.eu (EU), accounts.zoho.in (IN),
+        accounts.zoho.com.au (AU), accounts.zoho.com.cn (CN), accounts.zoho.jp (JP).
+
+    - name: initial_load_start_date
+      type: string
+      required: false
+      description: >
+        ISO 8601 formatted date for the starting point of the first sync.
+        If omitted, the connector syncs all historical data.
+        Example: 2024-01-01T00:00:00Z
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+#
+# This connector does not use any table-specific options - all configuration
+# is handled at the connection level. Table names are dynamically discovered
+# from the Zoho CRM Modules API.
+# ============================================================================
+external_options_allowlist: ""
