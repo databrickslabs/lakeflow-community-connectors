@@ -48,6 +48,7 @@ def register_lakeflow_source(spark):
                 raise ValueError(f"Field {field.name} is not nullable but not found in the input")
         return Row(**field_dict)
 
+
     def _parse_array(value: Any, field_type: ArrayType) -> list:
         """Parse a list into a PySpark array based on ArrayType schema."""
         if not isinstance(value, list):
@@ -55,6 +56,7 @@ def register_lakeflow_source(spark):
                 return [parse_value(value, field_type.elementType)]
             raise ValueError(f"Expected a list for ArrayType, got {type(value)}")
         return [parse_value(v, field_type.elementType) for v in value]
+
 
     def _parse_map(value: Any, field_type: MapType) -> dict:
         """Parse a dictionary into a PySpark map based on MapType schema."""
@@ -65,9 +67,11 @@ def register_lakeflow_source(spark):
             for k, v in value.items()
         }
 
+
     def _parse_string(value: Any) -> str:
         """Convert value to string."""
         return str(value)
+
 
     def _parse_integer(value: Any) -> int:
         """Convert value to integer."""
@@ -77,13 +81,16 @@ def register_lakeflow_source(spark):
             return int(value)
         raise ValueError(f"Cannot convert {value} to integer")
 
+
     def _parse_float(value: Any) -> float:
         """Convert value to float."""
         return float(value)
 
+
     def _parse_decimal(value: Any) -> Decimal:
         """Convert value to Decimal."""
         return Decimal(value) if isinstance(value, str) and value.strip() else Decimal(str(value))
+
 
     def _parse_boolean(value: Any) -> bool:
         """Convert value to boolean."""
@@ -94,6 +101,7 @@ def register_lakeflow_source(spark):
             if lowered in ("false", "f", "no", "n", "0"):
                 return False
         return bool(value)
+
 
     def _parse_date(value: Any) -> datetime.date:
         """Convert value to date."""
@@ -107,6 +115,7 @@ def register_lakeflow_source(spark):
         if isinstance(value, datetime):
             return value.date()
         raise ValueError(f"Cannot convert {value} to date")
+
 
     def _parse_timestamp(value: Any) -> datetime:
         """Convert value to timestamp."""
@@ -126,6 +135,7 @@ def register_lakeflow_source(spark):
             return value
         raise ValueError(f"Cannot convert {value} to timestamp")
 
+
     def _decode_string_to_bytes(value: str) -> bytes:
         """Try to decode a string as base64, then hex, then UTF-8."""
         try:
@@ -138,6 +148,7 @@ def register_lakeflow_source(spark):
             pass
         return value.encode("utf-8")
 
+
     def _parse_binary(value: Any) -> bytes:
         """Convert value to bytes. Tries base64, then hex, then UTF-8 for strings."""
         if isinstance(value, bytes):
@@ -149,6 +160,7 @@ def register_lakeflow_source(spark):
         if isinstance(value, list):
             return bytes(value)
         return str(value).encode("utf-8")
+
 
     # Mapping of primitive types to their parser functions
     _PRIMITIVE_PARSERS = {
@@ -163,6 +175,7 @@ def register_lakeflow_source(spark):
         TimestampType: _parse_timestamp,
         BinaryType: _parse_binary,
     }
+
 
     def parse_value(value: Any, field_type: DataType) -> Any:
         """
@@ -191,15 +204,15 @@ def register_lakeflow_source(spark):
 
             raise TypeError(f"Unsupported field type: {field_type}")
         except (ValueError, TypeError) as e:
-            raise ValueError(
-                f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}"
-            )
+            raise ValueError(f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}")
+
 
     ########################################################
     # sources/zoho_crm/zoho_crm.py
     ########################################################
 
     logger = logging.getLogger(__name__)
+
 
     # =============================================================================
     # Type Mappings and Schema Definitions (from zoho_types.py)
@@ -384,6 +397,7 @@ def register_lakeflow_source(spark):
         "Contact_Roles": "id,Contact_Role,name,Email",
     }
 
+
     def zoho_field_to_spark_type(field: dict) -> StructField:
         """Convert a Zoho CRM field definition to a Spark StructField."""
         api_name = field["api_name"]
@@ -415,10 +429,12 @@ def register_lakeflow_source(spark):
 
         return StructField(api_name, spark_type, nullable)
 
+
     def get_related_table_schema(related_module: str) -> StructType:
         """Build schema for a junction/related table."""
         related_fields = RELATED_MODULE_FIELDS.get(related_module, DEFAULT_RELATED_FIELDS)
         return StructType(JUNCTION_BASE_FIELDS + related_fields)
+
 
     def normalize_record(record: dict, json_fields: set) -> dict:
         """Normalize a record for Spark compatibility."""
@@ -432,9 +448,11 @@ def register_lakeflow_source(spark):
                 normalized[key] = value
         return normalized
 
+
     # =============================================================================
     # Zoho API Client (from zoho_client.py)
     # =============================================================================
+
 
     class ZohoAPIError(Exception):
         """Exception for Zoho CRM API errors."""
@@ -495,6 +513,7 @@ def register_lakeflow_source(spark):
                 message = cls.KNOWN_ERRORS[error_code]
 
             return cls(response.status_code, message)
+
 
     class ZohoAPIClient:
         """HTTP client for Zoho CRM API with OAuth2 authentication."""
@@ -638,9 +657,11 @@ def register_lakeflow_source(spark):
 
                 page += 1
 
+
     # =============================================================================
     # Table Handlers (from handlers/*.py)
     # =============================================================================
+
 
     class TableHandler(ABC):
         """Abstract base class for handling different types of Zoho CRM tables."""
@@ -664,6 +685,7 @@ def register_lakeflow_source(spark):
             start_offset: dict,
         ) -> tuple[Iterator[dict], dict]:
             """Read records from a table."""
+
 
     class ModuleHandler(TableHandler):
         """Handler for standard Zoho CRM modules."""
@@ -720,9 +742,7 @@ def register_lakeflow_source(spark):
             """Get field names that should be serialized as JSON strings."""
             fields = self.get_fields(module_name)
             return {
-                f.get("api_name")
-                for f in fields
-                if f.get("json_type") in ("jsonobject", "jsonarray")
+                f.get("api_name") for f in fields if f.get("json_type") in ("jsonobject", "jsonarray")
             }
 
         def get_schema(self, table_name: str, config: dict) -> StructType:
@@ -800,18 +820,14 @@ def register_lakeflow_source(spark):
 
                 for record in self._read_records(table_name, field_names, cursor_time, json_fields):
                     modified_time = record.get("Modified_Time")
-                    if modified_time and (
-                        not max_modified_time or modified_time > max_modified_time
-                    ):
+                    if modified_time and (not max_modified_time or modified_time > max_modified_time):
                         max_modified_time = modified_time
                     yield record
 
                 if metadata.get("ingestion_type") == "cdc" and cursor_time:
                     for record in self._read_deleted_records(table_name, cursor_time):
                         deleted_time = record.get("deleted_time")
-                        if deleted_time and (
-                            not max_modified_time or deleted_time > max_modified_time
-                        ):
+                        if deleted_time and (not max_modified_time or deleted_time > max_modified_time):
                             max_modified_time = deleted_time
                         yield record
 
@@ -860,6 +876,7 @@ def register_lakeflow_source(spark):
                     record["_zoho_deleted"] = True
                     yield record
 
+
     # Settings tables configuration
     SETTINGS_TABLES = {
         "Users": {
@@ -878,6 +895,7 @@ def register_lakeflow_source(spark):
             "supports_cdc": False,
         },
     }
+
 
     class SettingsHandler(TableHandler):
         """Handler for Zoho CRM settings/organization tables."""
@@ -929,8 +947,10 @@ def register_lakeflow_source(spark):
 
             return records_generator(), {}
 
+
     # Subform tables configuration (disabled by default - requires Zoho Inventory/Books)
     SUBFORM_TABLES: dict[str, dict] = {}
+
 
     class SubformHandler(TableHandler):
         """Handler for Zoho CRM subform/line item tables."""
@@ -981,9 +1001,7 @@ def register_lakeflow_source(spark):
                 if field_names:
                     params["fields"] = ",".join(field_names)
 
-                for parent_record in self.client.paginate(
-                    f"/crm/v8/{parent_module}", params=params
-                ):
+                for parent_record in self.client.paginate(f"/crm/v8/{parent_module}", params=params):
                     parent_id = parent_record.get("id")
                     subform_items = parent_record.get(subform_field, [])
 
@@ -1002,6 +1020,7 @@ def register_lakeflow_source(spark):
                 return [f["api_name"] for f in fields] if fields else []
             return []
 
+
     # Related/Junction tables configuration
     RELATED_TABLES = {
         "Campaigns_Leads": {
@@ -1017,6 +1036,7 @@ def register_lakeflow_source(spark):
             "related_module": "Contact_Roles",
         },
     }
+
 
     class RelatedHandler(TableHandler):
         """Handler for Zoho CRM junction/related record tables."""
@@ -1092,9 +1112,11 @@ def register_lakeflow_source(spark):
                     return
                 raise
 
+
     # =============================================================================
     # Main LakeflowConnect Class
     # =============================================================================
+
 
     class LakeflowConnect:
         """
@@ -1209,6 +1231,7 @@ def register_lakeflow_source(spark):
                     f"Available tables: {', '.join(available_tables)}"
                 )
 
+
     ########################################################
     # pipeline/lakeflow_python_source.py
     ########################################################
@@ -1218,6 +1241,7 @@ def register_lakeflow_source(spark):
     TABLE_NAME_LIST = "tableNameList"
     TABLE_CONFIGS = "tableConfigs"
     IS_DELETE_FLOW = "isDeleteFlow"
+
 
     class LakeflowStreamReader(SimpleDataSourceStreamReader):
         """
@@ -1243,7 +1267,9 @@ def register_lakeflow_source(spark):
         def read(self, start: dict) -> (Iterator[tuple], dict):
             is_delete_flow = self.options.get(IS_DELETE_FLOW) == "true"
             # Strip delete flow options before passing to connector
-            table_options = {k: v for k, v in self.options.items() if k != IS_DELETE_FLOW}
+            table_options = {
+                k: v for k, v in self.options.items() if k != IS_DELETE_FLOW
+            }
 
             if is_delete_flow:
                 records, offset = self.lakeflow_connect.read_table_deletes(
@@ -1263,6 +1289,7 @@ def register_lakeflow_source(spark):
             # For tables ingested as incremental CDC, it is only necessary that no new changes
             # are missed in the returned records.
             return self.read(start)[0]
+
 
     class LakeflowBatchReader(DataSourceReader):
         def __init__(
@@ -1300,6 +1327,7 @@ def register_lakeflow_source(spark):
                 all_records.append({TABLE_NAME: table, **metadata})
             return all_records
 
+
     class LakeflowSource(DataSource):
         def __init__(self, options):
             self.options = options
@@ -1329,5 +1357,6 @@ def register_lakeflow_source(spark):
 
         def simpleStreamReader(self, schema: StructType):
             return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
+
 
     spark.dataSource.register(LakeflowSource)  # pylint: disable=undefined-variable
