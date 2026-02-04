@@ -44,8 +44,11 @@ jobs:
           cd tools/community_connector
           python -m build
 
-      - name: Build lakeflow-community-connectors package
-        run: python -m build
+      - name: Build lakeflow-community-connectors package (includes src packages)
+        run: |
+          python -m build
+          echo "Package contents:"
+          python -c "import zipfile; zf = zipfile.ZipFile(list(__import__('pathlib').Path('dist').glob('*.whl'))[0]); print('\n'.join(sorted(zf.namelist())))"
 
       - name: Publish community_connector to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1

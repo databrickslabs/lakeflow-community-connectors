@@ -24,7 +24,7 @@ where = ["src"]
 include = ["databricks*"]
 
 [tool.setuptools.package-data]
-"*" = ["*.json", "*.md"]
+"*" = ["*.json", "*.md", "*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
