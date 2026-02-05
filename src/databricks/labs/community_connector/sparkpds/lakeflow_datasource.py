@@ -10,6 +10,25 @@ from databricks.labs.community_connector.interface.lakeflow_connect import Lakef
 from databricks.labs.community_connector.libs.utils import parse_value
 
 
+# =============================================================================
+# TEMPORARY WORKAROUND: Placeholder for merge script replacement
+# =============================================================================
+# Due to current Spark Declarative Pipeline (SDP) limitations, Python Data Source
+# implementations cannot use module imports. The merge script (tools/scripts/
+# merge_python_source.py) combines this file with source connector implementations
+# into a single deployable file.
+#
+# The line below is replaced during merge:
+#   - The marker `# __LAKEFLOW_CONNECT_IMPL__` is detected by the merge script
+#   - `LakeflowConnect` is replaced with the actual implementation class name
+#     (e.g., GithubLakeflowConnect, or the source's own LakeflowConnect class)
+#
+# This workaround will be removed once SDP supports proper module imports.
+# =============================================================================
+# fmt: off
+LakeflowConnectImpl = LakeflowConnect  # __LAKEFLOW_CONNECT_IMPL__
+# fmt: on
+
 # Constant option or column names
 METADATA_TABLE = "_lakeflow_metadata"
 TABLE_NAME = "tableName"
@@ -110,8 +129,9 @@ class LakeflowSource(DataSource):
 
     def __init__(self, options):
         self.options = options
-        # This needs to replaced or overridden as LakeflowConnect is an interface.
-        self.lakeflow_connect = LakeflowConnect(options)
+        # TEMPORARY: LakeflowConnectImpl is replaced with the actual implementation
+        # class during merge. See the placeholder comment at the top of this file.
+        self.lakeflow_connect = LakeflowConnectImpl(options)
 
     @classmethod
     def name(cls):

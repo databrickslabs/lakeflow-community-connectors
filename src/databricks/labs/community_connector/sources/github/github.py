@@ -12,9 +12,10 @@ from pyspark.sql.types import (
     ArrayType,
     MapType,
 )
+from databricks.labs.community_connector.interface.lakeflow_connect import LakeflowConnect
 
 
-class LakeflowConnect:
+class GithubLakeflowConnect(LakeflowConnect):
     def __init__(self, options: dict[str, str]) -> None:
         """
         Initialize the GitHub connector with connection-level options.

@@ -680,9 +680,13 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
-    # src/databricks/labs/community_connector/pipeline/lakeflow_python_source.py
+    # src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py
     ########################################################
 
+    LakeflowConnectImpl = LakeflowConnect
+    # fmt: on
+
+    # Constant option or column names
     METADATA_TABLE = "_lakeflow_metadata"
     TABLE_NAME = "tableName"
     TABLE_NAME_LIST = "tableNameList"
@@ -776,9 +780,14 @@ def register_lakeflow_source(spark):
 
 
     class LakeflowSource(DataSource):
+        """
+        PySpark DataSource implementation for Lakeflow Connect.
+        """
+
         def __init__(self, options):
             self.options = options
-            self.lakeflow_connect = LakeflowConnect(options)
+            # LakeflowConnectImpl is aliased to the actual implementation class during merge.
+            self.lakeflow_connect = LakeflowConnectImpl(options)
 
         @classmethod
         def name(cls):
@@ -796,7 +805,6 @@ def register_lakeflow_source(spark):
                     ]
                 )
             else:
-                # Assuming the LakeflowConnect interface uses get_table_schema, not get_table_details
                 return self.lakeflow_connect.get_table_schema(table, self.options)
 
         def reader(self, schema: StructType):
@@ -804,6 +812,3 @@ def register_lakeflow_source(spark):
 
         def simpleStreamReader(self, schema: StructType):
             return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
-
-
-    spark.dataSource.register(LakeflowSource)  # pylint: disable=undefined-variable

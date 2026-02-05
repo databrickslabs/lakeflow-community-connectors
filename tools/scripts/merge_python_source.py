@@ -17,6 +17,7 @@ Usage:
 """
 
 import argparse
+import re
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -24,6 +25,45 @@ from typing import List, Optional
 # Get the project root directory
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
+
+
+def find_lakeflow_connect_class(source_content: str, source_name: str) -> str:
+    """
+    Find the LakeflowConnect implementation class name in the source file.
+
+    Source connectors must define a class that inherits from LakeflowConnect:
+        class MyConnectorLakeflowConnect(LakeflowConnect):
+            ...
+
+    Args:
+        source_content: The content of the source connector file.
+        source_name: The name of the source (for error messages).
+
+    Returns:
+        The name of the LakeflowConnect implementation class.
+
+    Raises:
+        ValueError: If no LakeflowConnect implementation is found.
+        ValueError: If multiple LakeflowConnect implementations are found.
+    """
+    # Pattern: class SomeName(LakeflowConnect):
+    # Matches classes that inherit from LakeflowConnect
+    subclass_pattern = r"^class\s+(\w+)\s*\(\s*LakeflowConnect\s*\)\s*:"
+    matches = re.findall(subclass_pattern, source_content, re.MULTILINE)
+
+    if len(matches) == 0:
+        raise ValueError(
+            f"No LakeflowConnect implementation found in {source_name}.py. "
+            f"Expected a class definition like: class MyLakeflowConnect(LakeflowConnect):"
+        )
+
+    if len(matches) > 1:
+        raise ValueError(
+            f"Multiple LakeflowConnect implementations found in {source_name}.py: {matches}. "
+            f"Expected exactly one class that inherits from LakeflowConnect."
+        )
+
+    return matches[0]
 
 
 def get_all_sources() -> List[str]:
@@ -345,10 +385,36 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # Find the LakeflowConnect implementation class name in the source
+    lakeflow_connect_class = find_lakeflow_connect_class(source_content, source_name)
+    print(f"- LakeflowConnect implementation: {lakeflow_connect_class}", file=sys.stderr)
+
     # Extract imports and code from each file
     utils_imports, utils_code = extract_imports_and_code(utils_content)
     source_imports, source_code = extract_imports_and_code(source_content)
     lakeflow_imports, lakeflow_code = extract_imports_and_code(lakeflow_source_content)
+
+    # Replace the LakeflowConnectImpl alias with the actual implementation class.
+    # The placeholder line in lakeflow_datasource.py is:
+    #   LakeflowConnectImpl = LakeflowConnect  # __LAKEFLOW_CONNECT_IMPL__
+    # We replace it with:
+    #   LakeflowConnectImpl = ActualClassName
+    placeholder_pattern = (
+        r"LakeflowConnectImpl\s*=\s*LakeflowConnect\s*#\s*__LAKEFLOW_CONNECT_IMPL__"
+    )
+    replacement = f"LakeflowConnectImpl = {lakeflow_connect_class}"
+    lakeflow_code, num_replacements = re.subn(placeholder_pattern, replacement, lakeflow_code)
+
+    if num_replacements == 0:
+        raise ValueError(
+            "Failed to find the LakeflowConnectImpl placeholder in lakeflow_datasource.py. "
+            "Expected line: LakeflowConnectImpl = LakeflowConnect  # __LAKEFLOW_CONNECT_IMPL__"
+        )
+    if num_replacements > 1:
+        raise ValueError(
+            f"Found {num_replacements} LakeflowConnectImpl placeholders in lakeflow_datasource.py. "
+            "Expected exactly one placeholder."
+        )
 
     # Deduplicate and organize all imports
     all_imports = deduplicate_imports([utils_imports, source_imports, lakeflow_imports])
