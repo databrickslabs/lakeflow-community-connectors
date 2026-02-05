@@ -6,7 +6,7 @@ from pyspark.sql.datasource import (
     SimpleDataSourceStreamReader,
     DataSourceReader,
 )
-from databricks.labs.community_connector.sources.interface.lakeflow_connect import LakeflowConnect
+from databricks.labs.community_connector.interface.lakeflow_connect import LakeflowConnect
 from databricks.labs.community_connector.libs.utils import parse_value
 
 
@@ -104,8 +104,13 @@ class LakeflowBatchReader(DataSourceReader):
 
 
 class LakeflowSource(DataSource):
+    """
+    PySpark DataSource implementation for Lakeflow Connect.
+    """
+
     def __init__(self, options):
         self.options = options
+        # This needs to replaced or overridden as LakeflowConnect is an interface.
         self.lakeflow_connect = LakeflowConnect(options)
 
     @classmethod
@@ -124,7 +129,6 @@ class LakeflowSource(DataSource):
                 ]
             )
         else:
-            # Assuming the LakeflowConnect interface uses get_table_schema, not get_table_details
             return self.lakeflow_connect.get_table_schema(table, self.options)
 
     def reader(self, schema: StructType):
@@ -132,6 +136,3 @@ class LakeflowSource(DataSource):
 
     def simpleStreamReader(self, schema: StructType):
         return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
-
-
-spark.dataSource.register(LakeflowSource)  # pylint: disable=undefined-variable

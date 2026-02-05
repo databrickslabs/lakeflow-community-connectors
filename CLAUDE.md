@@ -10,11 +10,12 @@ Lakeflow Community Connectors enable data ingestion from various source systems 
 
 ```
 src/databricks/labs/community_connector/
+  interface/             # LakeflowConnect base interface
   sources/               # Source connectors (github/, zendesk/, stripe/, etc.)
-    interface/           # LakeflowConnect base interface
     {source}/            # Each connector has: {source}.py, README.md
   libs/                  # Shared utilities (spec_parser.py, utils.py, source_loader.py)
-  pipeline/              # Core ingestion logic (PySpark Data Source, SDP orchestration)
+  pipeline/              # SDP orchestration (ingestion_pipeline.py)
+  sparkpds/              # PySpark Data Source generic implementation and registry API. 
 tools/
   community_connector/   # CLI tool to set up and run community connectors in Databricks workspace.
   scripts/               # Build tools (merge_python_source.py)
@@ -32,7 +33,7 @@ prompts/                 # Templates for AI-assisted development
 
 ## Core Interface
 
-All connectors implement the `LakeflowConnect` class in `src/databricks/labs/community_connector/sources/interface/lakeflow_connect.py`:
+All connectors implement the `LakeflowConnect` class in `src/databricks/labs/community_connector/interface/lakeflow_connect.py`:
 
 ```python
 class LakeflowConnect:
@@ -91,7 +92,7 @@ python tools/scripts/merge_python_source.py {source_name}
 
 ## Key Files to Reference
 
-- `src/databricks/labs/community_connector/sources/interface/lakeflow_connect.py` - Base interface definition
+- `src/databricks/labs/community_connector/interface/lakeflow_connect.py` - Base interface definition
 - `src/databricks/labs/community_connector/sources/zendesk/zendesk.py` - Reference implementation
 - `src/databricks/labs/community_connector/sources/example/example.py` - Reference implementation
 - `tests/unit/sources/test_suite.py` - Test harness

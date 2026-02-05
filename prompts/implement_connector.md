@@ -2,7 +2,7 @@
 
 ## Goal
 Implement the Python connector for **{{source_name}}** that conforms exactly to the interface defined in  
-[lakeflow_connect.py](../src/databricks/labs/community_connector/sources/interface/lakeflow_connect.py). The implementation should be based on the source API documentation in `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md` produced by "understand-source".
+[lakeflow_connect.py](../src/databricks/labs/community_connector/interface/lakeflow_connect.py). The implementation should be based on the source API documentation in `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md` produced by "understand-source".
 
 ## Implementation Requirements
 - Implement all methods declared in the interface.

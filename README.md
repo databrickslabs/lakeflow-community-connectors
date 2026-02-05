@@ -13,7 +13,9 @@ Developers only need to implement or modify the source connector logic, while co
 ## Project Structure
 
 Core modules live under `src/databricks/labs/community_connector/`:
-- `sources/` — Source connectors (e.g., `github/`, `zendesk/`, `stripe/`). The `interface/` subfolder defines the `LakeflowConnect` base interface.
+- `interface/` — The `LakeflowConnect` base interface definition
+- `sources/` — Source connectors (e.g., `github/`, `zendesk/`, `stripe/`)
+- `sparkpds/` — PySpark Data Source implementation (`lakeflow_datasource.py`, `registry.py`)
 - `libs/` — Shared utilities for data type parsing, spec parsing, and module loading
 - `pipeline/` — Core ingestion logic: PySpark Data Source implementation and SDP orchestration
 
@@ -43,7 +45,7 @@ TODO: Add instructions and good practise of using Claude Code.
 Connectors are built on the [Python Data Source API](https://spark.apache.org/docs/latest/api/python/tutorial/sql/python_data_source.html), with an abstraction layer (`LakeflowConnect`) that simplifies development. 
 Developers can also choose to directly implement Python Data Source API (not recommended) as long as the implementation meets the API contracts of the community connectors.
 
-**Please see more details under** [`src/databricks/labs/community_connector/sources/interface/README.md`](src/databricks/labs/community_connector/sources/interface/README.md).
+**Please see more details under** [`src/databricks/labs/community_connector/interface/README.md`](src/databricks/labs/community_connector/interface/README.md).
 
 ```python
 class LakeflowConnect:

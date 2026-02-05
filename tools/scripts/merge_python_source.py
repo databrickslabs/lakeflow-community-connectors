@@ -7,7 +7,7 @@ support module imports for Python Data Source implementations.
 This script combines:
 1. src/databricks/labs/community_connector/libs/utils.py (parsing utilities)
 2. src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py (source connector implementation)
-3. src/databricks/labs/community_connector/pipeline/lakeflow_python_source.py (PySpark data source registration)
+3. src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py (PySpark data source registration)
 
 Usage:
     python tools/scripts/merge_python_source.py <source_name>
@@ -144,8 +144,9 @@ def deduplicate_imports(import_lists: List[List[str]]) -> List[str]:
     # Imports to skip (internal imports that won't work in merged file)
     skip_patterns = [
         "from databricks.labs.community_connector.libs.utils import",
-        "from databricks.labs.community_connector.pipeline.lakeflow_python_source import",
+        "from databricks.labs.community_connector.sparkpds.lakeflow_datasource import",
         "from databricks.labs.community_connector.sources.",
+        "from databricks.labs.community_connector.interface.",
     ]
 
     # Track 'from X import Y' style imports to merge them
@@ -321,7 +322,7 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     src_base = PROJECT_ROOT / "src" / "databricks" / "labs" / "community_connector"
     utils_path = src_base / "libs" / "utils.py"
     source_path = src_base / "sources" / source_name / f"{source_name}.py"
-    lakeflow_source_path = src_base / "pipeline" / "lakeflow_python_source.py"
+    lakeflow_source_path = src_base / "sparkpds" / "lakeflow_datasource.py"
 
     # If no output path specified, use default location in source directory
     if output_path is None:
@@ -333,7 +334,7 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     print(f"Merging files for source: {source_name}", file=sys.stderr)
     print(f"- utils.py: {utils_path}", file=sys.stderr)
     print(f"- {source_name}.py: {source_path}", file=sys.stderr)
-    print(f"- lakeflow_python_source.py: {lakeflow_source_path}", file=sys.stderr)
+    print(f"- lakeflow_datasource.py: {lakeflow_source_path}", file=sys.stderr)
 
     try:
         # Read all files
@@ -409,10 +410,10 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     merged_lines.append("")
     merged_lines.append("")
 
-    # Section 3: src/databricks/labs/community_connector/pipeline/lakeflow_python_source.py code
+    # Section 3: src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py code
     merged_lines.append("    " + "#" * 56)
     merged_lines.append(
-        "    # src/databricks/labs/community_connector/pipeline/lakeflow_python_source.py"
+        "    # src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py"
     )
     merged_lines.append("    " + "#" * 56)
     merged_lines.append("")

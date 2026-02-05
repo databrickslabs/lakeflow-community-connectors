@@ -14,7 +14,7 @@ The script combines three essential components into one file:
 
 1. **src/databricks/labs/community_connector/libs/utils.py** - Parsing utilities for converting JSON data to PySpark types
 2. **src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py** - The source connector implementation (LakeflowConnect class)
-3. **src/databricks/labs/community_connector/pipeline/lakeflow_python_source.py** - PySpark DataSource registration code
+3. **src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py** - PySpark DataSource registration code
 
 ### Usage
 
@@ -89,11 +89,11 @@ def register_lakeflow_source(spark):
         # ... content from sources/{source_name}/{source_name}.py ...
 
     ########################################################
-    # src/databricks/labs/community_connector/pipeline/lakeflow_python_source.py
+    # src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py
     ########################################################
 
     class LakeflowSource(DataSource):
-        # ... content from pipeline/lakeflow_python_source.py ...
+        # ... content from sparkpds/lakeflow_datasource.py ...
     
     # Register the data source with Spark
     spark.dataSource.register(LakeflowSource)
