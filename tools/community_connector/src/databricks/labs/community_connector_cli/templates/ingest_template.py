@@ -1,3 +1,5 @@
+# pylint: disable=undefined-variable,invalid-name,no-name-in-module
+# This is a template file - variables like `spark` are defined at runtime in Databricks
 from databricks.labs.community_connector.pipeline import ingest
 from databricks.labs.community_connector import register
 

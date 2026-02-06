@@ -1,2 +1,1 @@
 """Zendesk connector tests."""
-

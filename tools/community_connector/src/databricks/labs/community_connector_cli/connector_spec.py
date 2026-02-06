@@ -212,7 +212,10 @@ def load_connector_spec(
     # Remove trailing slash if present
     repo_raw_url = repo_raw_url.rstrip("/")
 
-    spec_url = f"{repo_raw_url}/src/databricks/labs/community_connector/sources/{source_name}/connector_spec.yaml"
+    spec_url = (
+        f"{repo_raw_url}/src/databricks/labs/community_connector/"
+        f"sources/{source_name}/connector_spec.yaml"
+    )
     try:
         with urllib.request.urlopen(spec_url, timeout=10) as response:
             content = response.read().decode("utf-8")

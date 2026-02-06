@@ -1,2 +1,1 @@
 """HubSpot connector tests."""
-
