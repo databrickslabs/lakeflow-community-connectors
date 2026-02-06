@@ -1989,7 +1989,6 @@ def register_lakeflow_source(spark):
     ########################################################
 
     LakeflowConnectImpl = GithubLakeflowConnect
-
     # Constant option or column names
     METADATA_TABLE = "_lakeflow_metadata"
     TABLE_NAME = "tableName"
