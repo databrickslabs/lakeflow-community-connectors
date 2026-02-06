@@ -8,6 +8,7 @@ or a custom DataSource with Spark, making it available as a Python Data Source.
 import importlib
 from types import ModuleType
 from typing import Type, Union
+from pyspark.sql import SparkSession
 from pyspark.sql.datasource import DataSource
 
 from databricks.labs.community_connector.interface import LakeflowConnect
@@ -64,7 +65,7 @@ def _get_register_function(source_name: str):
 
 
 def register(
-    spark,
+    spark: SparkSession,
     source: Union[str, Type[DataSource], Type[LakeflowConnect]],
 ) -> None:
     """
