@@ -19,7 +19,6 @@ import yaml
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.workspace import ImportFormat, Language
 
-from databricks.labs.community_connector import __version__
 from databricks.labs.community_connector.config import build_config, load_default_config
 from databricks.labs.community_connector.pipeline_client import PipelineClient
 from databricks.labs.community_connector.pipeline_spec_validator import (
@@ -540,7 +539,6 @@ def _create_and_show_pipeline(
 
 
 @click.group(cls=OrderedGroup)
-@click.version_option(version=__version__, prog_name="community-connector")
 @click.option("--debug", is_flag=True, help="Enable debug output")
 @click.pass_context
 def main(ctx: click.Context, debug: bool):
