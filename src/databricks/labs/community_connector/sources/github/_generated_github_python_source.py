@@ -207,7 +207,7 @@ def register_lakeflow_source(spark):
     # src/databricks/labs/community_connector/sources/github/github.py
     ########################################################
 
-    class GithubLakeflowConnect(LakeflowConnect):
+    class GithubLakeflowConnect:
         def __init__(self, options: dict[str, str]) -> None:
             """
             Initialize the GitHub connector with connection-level options.

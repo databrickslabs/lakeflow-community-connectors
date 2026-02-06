@@ -394,6 +394,15 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     source_imports, source_code = extract_imports_and_code(source_content)
     lakeflow_imports, lakeflow_code = extract_imports_and_code(lakeflow_source_content)
 
+    # Remove LakeflowConnect inheritance from the source connector class.
+    # The merged file doesn't have access to the LakeflowConnect base class,
+    # so we remove the inheritance: class Foo(LakeflowConnect): -> class Foo:
+    source_code = re.sub(
+        rf"class\s+{re.escape(lakeflow_connect_class)}\s*\(\s*LakeflowConnect\s*\)\s*:",
+        f"class {lakeflow_connect_class}:",
+        source_code,
+    )
+
     # Replace the LakeflowConnectImpl alias with the actual implementation class.
     # The placeholder line in lakeflow_datasource.py is:
     #   LakeflowConnectImpl = LakeflowConnect  # __LAKEFLOW_CONNECT_IMPL__
