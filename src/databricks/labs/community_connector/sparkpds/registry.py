@@ -5,72 +5,36 @@ This module provides functions to register a LakeflowConnect implementation
 with Spark, making it available as a Python Data Source.
 """
 
-from typing import Type, Optional
-from pyspark.sql.types import StructType
+import importlib
+from typing import Type
 from pyspark.sql.datasource import DataSource
 
 from databricks.labs.community_connector.interface.lakeflow_connect import LakeflowConnect
-from databricks.labs.community_connector.sparkpds.lakeflow_datasource import (
-    LakeflowSource,
-    LakeflowStreamReader,
-    LakeflowBatchReader,
-)
+from databricks.labs.community_connector.sparkpds.lakeflow_datasource import LakeflowSource
 
 
-# Module-level variable to hold the active LakeflowConnect implementation class.
-_lakeflow_connect_cls: Optional[Type[LakeflowConnect]] = None
+def _get_class_fqn(cls: Type) -> str:
+    """Get the fully qualified name of a class (module.ClassName)."""
+    return f"{cls.__module__}.{cls.__name__}"
 
 
-def set_lakeflow_connect_class(cls: Type[LakeflowConnect]) -> None:
+def _import_class(fqn: str) -> Type:
     """
-    Set the active LakeflowConnect implementation class.
-
-    This should be called before registering RegisterableLakeflowSource with Spark.
+    Dynamically import a class from its fully qualified name.
 
     Args:
-        cls: The LakeflowConnect implementation class to use.
-    """
-    global _lakeflow_connect_cls
-    _lakeflow_connect_cls = cls
-
-
-def get_lakeflow_connect_class() -> Type[LakeflowConnect]:
-    """
-    Get the active LakeflowConnect implementation class.
+        fqn: Fully qualified class name (e.g., 'module.submodule.ClassName')
 
     Returns:
-        The currently registered LakeflowConnect class.
+        The imported class.
 
     Raises:
-        RuntimeError: If no LakeflowConnect class has been registered.
+        ImportError: If the module cannot be imported.
+        AttributeError: If the class doesn't exist in the module.
     """
-    if _lakeflow_connect_cls is None:
-        raise RuntimeError(
-            "No LakeflowConnect implementation has been registered. "
-            "Call register() before using RegisterableLakeflowSource."
-        )
-    return _lakeflow_connect_cls
-
-
-class RegisterableLakeflowSource(LakeflowSource):
-    """
-    A subclass of LakeflowSource that uses a dynamically registered LakeflowConnect class.
-
-    This class is used when registering a connector via the registry.register() function.
-    It overrides __init__ to use the LakeflowConnect class that was set via
-    set_lakeflow_connect_class() instead of importing it directly.
-    """
-
-    def __init__(self, options):
-        self.options = options
-        lakeflow_connect_cls = get_lakeflow_connect_class()
-        self.lakeflow_connect = lakeflow_connect_cls(options)
-
-    def reader(self, schema: StructType):
-        return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)
-
-    def simpleStreamReader(self, schema: StructType):
-        return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
+    module_name, class_name = fqn.rsplit(".", 1)
+    module = importlib.import_module(module_name)
+    return getattr(module, class_name)
 
 
 def register_pds(
@@ -107,15 +71,16 @@ def register(
     """
     Register a LakeflowConnect implementation with Spark's DataSource API.
 
-    This function sets the active LakeflowConnect class and registers
-    RegisterableLakeflowSource with Spark.
+    This function creates a DataSource wrapper that automatically injects
+    the LakeflowConnect class reference into options, allowing the class
+    to be dynamically imported on Spark executors.
 
     Args:
         spark: The SparkSession instance.
         lakeflow_connect_cls: The LakeflowConnect class implementation to use.
 
     Returns:
-        The registered RegisterableLakeflowSource class.
+        The registered DataSource class.
 
     Example:
         >>> from my_connector import MyLakeflowConnect
@@ -123,8 +88,24 @@ def register(
         >>> # Now you can use it in Spark:
         >>> df = spark.read.format("lakeflow_connect").options(...).load()
     """
-    # Set the active LakeflowConnect class
-    set_lakeflow_connect_class(lakeflow_connect_cls)
+    # Get the fully qualified class name.
+    class_fqn = _get_class_fqn(lakeflow_connect_cls)
 
-    # Register RegisterableLakeflowSource with Spark
+    # Create a wrapper class that dynamically imports the LakeflowConnect class
+    class RegisterableLakeflowSource(LakeflowSource):
+        """
+        A LakeflowSource that dynamically imports the LakeflowConnect class.
+
+        This class is used when registering a connector via the registry.register()
+        function. It dynamically imports the LakeflowConnect class from the fully
+        qualified name, allowing it to work across Spark driver and executor processes.
+        """
+
+        def __init__(self, options):
+            self.options = options
+            # Dynamically import the LakeflowConnect class from FQN
+            lakeflow_connect_cls = _import_class(class_fqn)
+            self.lakeflow_connect = lakeflow_connect_cls(options)
+
+    # Register the wrapper with Spark
     return register_pds(spark, RegisterableLakeflowSource)

@@ -29,6 +29,7 @@ from databricks.labs.community_connector.libs.utils import parse_value
 LakeflowConnectImpl = LakeflowConnect  # __LAKEFLOW_CONNECT_IMPL__
 # fmt: on
 
+
 # Constant option or column names
 METADATA_TABLE = "_lakeflow_metadata"
 TABLE_NAME = "tableName"
