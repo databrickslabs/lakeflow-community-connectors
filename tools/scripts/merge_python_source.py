@@ -6,8 +6,9 @@ support module imports for Python Data Source implementations.
 
 This script combines:
 1. src/databricks/labs/community_connector/libs/utils.py (parsing utilities)
-2. src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py (source connector implementation)
-3. src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py (PySpark data source registration)
+2. src/databricks/labs/community_connector/interface/lakeflow_connect.py (LakeflowConnect base class)
+3. src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py (source connector implementation)
+4. src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py (PySpark data source registration)
 
 Usage:
     python tools/scripts/merge_python_source.py <source_name>
@@ -361,6 +362,7 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     # Define file paths
     src_base = PROJECT_ROOT / "src" / "databricks" / "labs" / "community_connector"
     utils_path = src_base / "libs" / "utils.py"
+    interface_path = src_base / "interface" / "lakeflow_connect.py"
     source_path = src_base / "sources" / source_name / f"{source_name}.py"
     lakeflow_source_path = src_base / "sparkpds" / "lakeflow_datasource.py"
 
@@ -373,12 +375,14 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     # Verify all files exist
     print(f"Merging files for source: {source_name}", file=sys.stderr)
     print(f"- utils.py: {utils_path}", file=sys.stderr)
+    print(f"- lakeflow_connect.py: {interface_path}", file=sys.stderr)
     print(f"- {source_name}.py: {source_path}", file=sys.stderr)
     print(f"- lakeflow_datasource.py: {lakeflow_source_path}", file=sys.stderr)
 
     try:
         # Read all files
         utils_content = read_file_content(utils_path)
+        interface_content = read_file_content(interface_path)
         source_content = read_file_content(source_path)
         lakeflow_source_content = read_file_content(lakeflow_source_path)
     except FileNotFoundError as e:
@@ -391,17 +395,9 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
 
     # Extract imports and code from each file
     utils_imports, utils_code = extract_imports_and_code(utils_content)
+    interface_imports, interface_code = extract_imports_and_code(interface_content)
     source_imports, source_code = extract_imports_and_code(source_content)
     lakeflow_imports, lakeflow_code = extract_imports_and_code(lakeflow_source_content)
-
-    # Remove LakeflowConnect inheritance from the source connector class.
-    # The merged file doesn't have access to the LakeflowConnect base class,
-    # so we remove the inheritance: class Foo(LakeflowConnect): -> class Foo:
-    source_code = re.sub(
-        rf"class\s+{re.escape(lakeflow_connect_class)}\s*\(\s*LakeflowConnect\s*\)\s*:",
-        f"class {lakeflow_connect_class}:",
-        source_code,
-    )
 
     # Replace the LakeflowConnectImpl alias with the actual implementation class.
     # The placeholder line in lakeflow_datasource.py is:
@@ -442,7 +438,9 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     lakeflow_code = "\n".join(filtered_lines)
 
     # Deduplicate and organize all imports
-    all_imports = deduplicate_imports([utils_imports, source_imports, lakeflow_imports])
+    all_imports = deduplicate_imports(
+        [utils_imports, interface_imports, source_imports, lakeflow_imports]
+    )
 
     # Build the merged content
     merged_lines = []
@@ -486,7 +484,22 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     merged_lines.append("")
     merged_lines.append("")
 
-    # Section 2: src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py code
+    # Section 2: src/databricks/labs/community_connector/interface/lakeflow_connect.py code
+    merged_lines.append("    " + "#" * 56)
+    merged_lines.append(
+        "    # src/databricks/labs/community_connector/interface/lakeflow_connect.py"
+    )
+    merged_lines.append("    " + "#" * 56)
+    merged_lines.append("")
+    for line in interface_code.strip().split("\n"):
+        if line.strip():
+            merged_lines.append("    " + line)
+        else:
+            merged_lines.append("")
+    merged_lines.append("")
+    merged_lines.append("")
+
+    # Section 3: src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py code
     merged_lines.append("    " + "#" * 56)
     merged_lines.append(
         f"    # src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py"
@@ -501,7 +514,7 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     merged_lines.append("")
     merged_lines.append("")
 
-    # Section 3: src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py code
+    # Section 4: src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py code
     merged_lines.append("    " + "#" * 56)
     merged_lines.append(
         "    # src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py"

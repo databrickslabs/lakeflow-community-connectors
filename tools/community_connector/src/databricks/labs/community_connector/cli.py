@@ -463,7 +463,7 @@ def _create_ingest_file(
         click.ClickException: If file creation fails.
     """
     click.echo("\nStep 2: Creating ingest.py...")
-    ingest_path = f"{workspace_path}/ingest.py"
+    ingest_path = f"{workspace_path}/src/ingest.py"
     try:
         if pipeline_spec_input:
             pipeline_spec = _parse_pipeline_spec(pipeline_spec_input)

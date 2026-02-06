@@ -23,7 +23,7 @@ repo:
   provider: gitHub
 
   # Branch to checkout (null uses default branch)
-  branch: master 
+  branch: build_pkg 
 
   # Sparse checkout to only clone necessary directories
   # Pattern format: folder path without leading slash (Databricks Repos API requirement)
@@ -31,6 +31,7 @@ repo:
   sparse_checkout:
     patterns:
       - src/databricks/labs/community_connector/libs
+      - src/databricks/labs/community_connector/interface
       - src/databricks/labs/community_connector/pipeline
       - "src/databricks/labs/community_connector/sources/{SOURCE_NAME}"
 
@@ -47,12 +48,13 @@ repo:
 # Pipeline configuration
 pipeline:
   # Workspace root path for the pipeline.
-  root_path: "{WORKSPACE_PATH}"
+  # Set to src/ so Python can import databricks.labs.community_connector
+  root_path: "{WORKSPACE_PATH}/src"
 
   # Libraries or code needed by this pipeline deployment
   libraries:
     - glob:
-        include: "{WORKSPACE_PATH}/ingest.py"
+        include: "{WORKSPACE_PATH}/src/ingest.py"
 
   # Release channel: CURRENT or PREVIEW
   channel: PREVIEW 
