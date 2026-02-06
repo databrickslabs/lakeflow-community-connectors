@@ -6,7 +6,7 @@ connection options against the spec.
 
 Supports two connection parameter structures:
 - Option A: Flat 'parameters' list (single auth method)
-- Option B: 'auth_methods' with 'common_parameters' (multiple auth methods)
+- Option B: 'auth_methods' with 'parameters' for shared params (multiple auth methods)
 """
 
 import urllib.request
@@ -253,7 +253,7 @@ def parse_connector_spec(spec: dict) -> ParsedConnectorSpec:
 
     Supports two structures:
     - Option A: Flat 'parameters' list under 'connection'
-    - Option B: 'auth_methods' with 'common_parameters' under 'connection'
+    - Option B: 'auth_methods' with 'parameters' for shared params under 'connection'
 
     Args:
         spec: Parsed connector spec dictionary.
@@ -281,8 +281,8 @@ def parse_connector_spec(spec: dict) -> ParsedConnectorSpec:
                     )
                 )
 
-        # Parse common_parameters
-        common_params = connection.get("common_parameters", [])
+        # Parse shared parameters (previously called common_parameters)
+        common_params = connection.get("parameters", [])
         parsed.common_required_params, parsed.common_optional_params = parse_parameters(
             common_params
         )

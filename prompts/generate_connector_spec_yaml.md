@@ -25,7 +25,7 @@ connection:
 ```
 
 #### Option B: Multiple Authentication Methods
-Use `auth_methods` and `common_parameters` when the connector supports multiple ways to authenticate (e.g., API key vs. OAuth, or service account vs. API secret):
+Use `auth_methods` when the connector supports multiple ways to authenticate (e.g., API key vs. OAuth, or service account vs. API secret). Shared parameters go in `parameters` at the connection level:
 
 ```yaml
 connection:
@@ -50,7 +50,8 @@ connection:
           required: true
           description: OAuth 2.0 access token.
 
-  common_parameters:
+  # Shared parameters (apply to all authentication methods)
+  parameters:
     - name: subdomain
       type: string
       required: true

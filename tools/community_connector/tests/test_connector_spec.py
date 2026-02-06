@@ -212,7 +212,7 @@ class TestParseConnectorSpec:
                         ],
                     },
                 ],
-                "common_parameters": [
+                "parameters": [
                     {"name": "project_id", "type": "string", "required": False},
                     {"name": "region", "type": "string", "required": False},
                 ],
@@ -245,7 +245,7 @@ class TestParseConnectorSpec:
                         ],
                     },
                 ],
-                "common_parameters": [
+                "parameters": [
                     {"name": "subdomain", "type": "string", "required": True},
                 ],
             },
@@ -340,7 +340,7 @@ class TestParseConnectorSpecLegacy:
                         "parameters": [{"name": "param1", "required": True}],
                     },
                 ],
-                "common_parameters": [
+                "parameters": [
                     {"name": "common_req", "required": True},
                 ],
             },

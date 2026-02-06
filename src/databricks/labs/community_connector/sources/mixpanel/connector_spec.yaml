@@ -51,7 +51,7 @@ connection:
   # ---------------------------------------------------------------------------
   # Common Parameters (shared across all authentication methods)
   # ---------------------------------------------------------------------------
-  common_parameters:
+  parameters:
     - name: project_id
       type: string
       required: false
