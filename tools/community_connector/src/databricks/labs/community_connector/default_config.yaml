@@ -33,6 +33,7 @@ repo:
       - src/databricks/labs/community_connector/libs
       - src/databricks/labs/community_connector/interface
       - src/databricks/labs/community_connector/pipeline
+      - src/databricks/labs/community_connector/sparkpds
       - "src/databricks/labs/community_connector/sources/{SOURCE_NAME}"
 
   # Root files to exclude after checkout (cone mode always includes root files)
