@@ -11,7 +11,7 @@ from typing import Optional
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.workspace import RepoInfo, SparseCheckout
 
-from databricks.labs.community_connector.config import RepoConfig
+from databricks.labs.community_connector_cli.config import RepoConfig
 
 
 class RepoClient:

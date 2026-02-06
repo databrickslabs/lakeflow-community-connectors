@@ -6,7 +6,7 @@ Tests connector spec parsing, validation, and helper functions.
 
 import pytest
 
-from databricks.labs.community_connector.connector_spec import (
+from databricks.labs.community_connector_cli.connector_spec import (
     AuthMethod,
     ParsedConnectorSpec,
     ValidationResult,

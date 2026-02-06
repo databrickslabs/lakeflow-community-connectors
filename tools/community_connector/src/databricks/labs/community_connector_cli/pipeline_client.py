@@ -19,7 +19,7 @@ from databricks.sdk.service.pipelines import (
     StartUpdateResponse,
 )
 
-from databricks.labs.community_connector.config import PipelineConfig
+from databricks.labs.community_connector_cli.config import PipelineConfig
 
 
 class PipelineClient:

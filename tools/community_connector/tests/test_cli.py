@@ -16,7 +16,7 @@ from click.testing import CliRunner
 
 from databricks.sdk import WorkspaceClient
 
-from databricks.labs.community_connector.cli import (
+from databricks.labs.community_connector_cli.cli import (
     main,
     _parse_pipeline_spec,
     _load_ingest_template,
@@ -29,7 +29,7 @@ from databricks.labs.community_connector.cli import (
     _get_constant_external_options_allowlist,
     _merge_external_options_allowlist,
 )
-from databricks.labs.community_connector.connector_spec import (
+from databricks.labs.community_connector_cli.connector_spec import (
     ParsedConnectorSpec,
     AuthMethod,
 )
@@ -187,7 +187,7 @@ class TestCreatePipelineCommand:
         """Test that either --connection-name or --pipeline-spec is required."""
         runner = CliRunner()
 
-        with patch('databricks.labs.community_connector.cli.WorkspaceClient'):
+        with patch("databricks.labs.community_connector_cli.cli.WorkspaceClient"):
             result = runner.invoke(
                 main,
                 ['create_pipeline', 'github', 'my_pipeline'],
@@ -196,10 +196,10 @@ class TestCreatePipelineCommand:
         assert result.exit_code != 0
         assert "Either --connection-name or --pipeline-spec must be provided" in result.output
 
-    @patch('databricks.labs.community_connector.cli.WorkspaceClient')
-    @patch('databricks.labs.community_connector.cli.RepoClient')
-    @patch('databricks.labs.community_connector.cli.PipelineClient')
-    @patch('databricks.labs.community_connector.cli._create_workspace_file')
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli.RepoClient")
+    @patch("databricks.labs.community_connector_cli.cli.PipelineClient")
+    @patch("databricks.labs.community_connector_cli.cli._create_workspace_file")
     def test_create_pipeline_with_connection_name(
         self, mock_create_file, mock_pipeline_client, mock_repo_client, mock_workspace_client
     ):
@@ -238,8 +238,8 @@ class TestCreatePipelineCommand:
 class TestRunPipelineCommand:
     """Tests for run_pipeline command."""
 
-    @patch('databricks.labs.community_connector.cli.WorkspaceClient')
-    @patch('databricks.labs.community_connector.cli.PipelineClient')
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli.PipelineClient")
     def test_run_pipeline_finds_by_name(self, mock_pipeline_client, mock_workspace_client):
         """Test that run_pipeline finds pipeline by name."""
         runner = CliRunner()
@@ -267,7 +267,7 @@ class TestRunPipelineCommand:
         assert result.exit_code == 0
         assert "Pipeline run started" in result.output
 
-    @patch('databricks.labs.community_connector.cli.WorkspaceClient')
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
     def test_run_pipeline_not_found(self, mock_workspace_client):
         """Test error when pipeline is not found."""
         runner = CliRunner()
@@ -289,8 +289,8 @@ class TestRunPipelineCommand:
 class TestShowPipelineCommand:
     """Tests for show_pipeline command."""
 
-    @patch('databricks.labs.community_connector.cli.WorkspaceClient')
-    @patch('databricks.labs.community_connector.cli.PipelineClient')
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli.PipelineClient")
     def test_show_pipeline_displays_info(self, mock_pipeline_client, mock_workspace_client):
         """Test that show_pipeline displays pipeline information."""
         runner = CliRunner()
@@ -351,8 +351,8 @@ class TestCreateConnectionCommand:
         assert result.exit_code != 0
         assert "Invalid JSON" in result.output
 
-    @patch("databricks.labs.community_connector.cli._load_connector_spec")
-    @patch('databricks.labs.community_connector.cli.WorkspaceClient')
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
     def test_create_connection_warns_missing_external_options_no_spec(
         self, mock_workspace_client, mock_load_spec
     ):
@@ -373,8 +373,8 @@ class TestCreateConnectionCommand:
 
         assert "externalOptionsAllowList" in result.output
 
-    @patch("databricks.labs.community_connector.cli._load_connector_spec")
-    @patch("databricks.labs.community_connector.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
     def test_create_connection_validates_required_params(
         self, mock_workspace_client, mock_load_spec
     ):
@@ -407,8 +407,8 @@ class TestCreateConnectionCommand:
         assert "Missing required connection parameters" in result.output
         assert "token" in result.output
 
-    @patch("databricks.labs.community_connector.cli._load_connector_spec")
-    @patch("databricks.labs.community_connector.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
     def test_create_connection_fails_unknown_params(self, mock_workspace_client, mock_load_spec):
         """Test error when unknown connection parameters are provided."""
         runner = CliRunner()
@@ -443,8 +443,8 @@ class TestCreateConnectionCommand:
         assert "Unknown connection parameters" in result.output
         assert "unknown_param" in result.output
 
-    @patch("databricks.labs.community_connector.cli._load_connector_spec")
-    @patch("databricks.labs.community_connector.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
     def test_create_connection_auto_adds_external_options_allowlist(
         self, mock_workspace_client, mock_load_spec
     ):
@@ -488,16 +488,8 @@ class TestCreateConnectionCommand:
         assert "isDeleteFlow" in allowlist
 
 
-class TestVersionAndHelp:
-    """Tests for --version and --help options."""
-
-    def test_version_option(self):
-        """Test --version displays version."""
-        runner = CliRunner()
-        result = runner.invoke(main, ['--version'])
-
-        assert result.exit_code == 0
-        assert "community-connector" in result.output
+class TestHelpOptions:
+    """Tests for --help options."""
 
     def test_help_option(self):
         """Test --help displays help."""

@@ -3,14 +3,14 @@ from pathlib import Path
 from tests.unit.sources import test_suite
 from tests.unit.sources.test_suite import LakeflowConnectTester
 from tests.unit.sources.test_utils import load_config
-from databricks.labs.community_connector.sources.zendesk.zendesk import LakeflowConnect
+from databricks.labs.community_connector.sources.zendesk.zendesk import ZendeskLakeflowConnect
 
 
 def test_zendesk_connector():
     """Test the zendesk connector using the test suite"""
     # Inject the LakeflowConnect class into test_suite module's namespace
     # This is required because test_suite.py expects LakeflowConnect to be available
-    test_suite.LakeflowConnect = LakeflowConnect
+    test_suite.LakeflowConnect = ZendeskLakeflowConnect
 
     # Load configuration
     config_dir = Path(__file__).parent / "configs"

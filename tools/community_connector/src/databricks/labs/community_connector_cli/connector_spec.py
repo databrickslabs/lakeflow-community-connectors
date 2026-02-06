@@ -164,7 +164,7 @@ def load_connector_spec(
             / "src"
             / "databricks"
             / "labs"
-            / "community_connector"
+            / "community_connector_cli"
             / "sources"
             / source_name
             / "connector_spec.yaml"
@@ -176,7 +176,7 @@ def load_connector_spec(
         / "src"
         / "databricks"
         / "labs"
-        / "community_connector"
+        / "community_connector_cli"
         / "sources"
         / source_name
         / "connector_spec.yaml"
@@ -187,7 +187,7 @@ def load_connector_spec(
         / "src"
         / "databricks"
         / "labs"
-        / "community_connector"
+        / "community_connector_cli"
         / "sources"
         / source_name
         / "connector_spec.yaml"

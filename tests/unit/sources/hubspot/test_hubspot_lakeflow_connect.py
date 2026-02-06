@@ -5,7 +5,7 @@ from pathlib import Path
 # Import test suite and connector
 import tests.unit.sources.test_suite as test_suite
 from tests.unit.sources.test_suite import LakeflowConnectTester
-from databricks.labs.community_connector.sources.hubspot.hubspot import LakeflowConnect
+from databricks.labs.community_connector.sources.hubspot.hubspot import HubspotLakeflowConnect
 from databricks.labs.community_connector.sources.hubspot.hubspot_test_utils import LakeflowConnectTestUtils
 
 
@@ -20,7 +20,7 @@ def test_hubspot_connector():
     """Test the hubspot connector using the test suite"""
     # Inject the LakeflowConnect class into test_suite module's namespace
     # This is required because test_suite.py expects LakeflowConnect to be available
-    test_suite.LakeflowConnect = LakeflowConnect
+    test_suite.LakeflowConnect = HubspotLakeflowConnect
     test_suite.LakeflowConnectTestUtils = LakeflowConnectTestUtils
 
     # Load configuration

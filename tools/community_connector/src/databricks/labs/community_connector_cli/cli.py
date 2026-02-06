@@ -19,14 +19,14 @@ import yaml
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.workspace import ImportFormat, Language
 
-from databricks.labs.community_connector.config import build_config, load_default_config
-from databricks.labs.community_connector.pipeline_client import PipelineClient
-from databricks.labs.community_connector.pipeline_spec_validator import (
+from databricks.labs.community_connector_cli.config import build_config, load_default_config
+from databricks.labs.community_connector_cli.pipeline_client import PipelineClient
+from databricks.labs.community_connector_cli.pipeline_spec_validator import (
     PipelineSpecValidationError,
     validate_pipeline_spec,
 )
-from databricks.labs.community_connector.repo_client import RepoClient
-from databricks.labs.community_connector.connector_spec import (
+from databricks.labs.community_connector_cli.repo_client import RepoClient
+from databricks.labs.community_connector_cli.connector_spec import (
     ParsedConnectorSpec,
     convert_github_url_to_raw,
     load_connector_spec,

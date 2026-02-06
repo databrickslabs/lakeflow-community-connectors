@@ -3,14 +3,14 @@ from pathlib import Path
 from tests.unit.sources import test_suite
 from tests.unit.sources.test_suite import LakeflowConnectTester
 from tests.unit.sources.test_utils import load_config
-from databricks.labs.community_connector.sources.github.github import LakeflowConnect
+from databricks.labs.community_connector.sources.github.github import GithubLakeflowConnect
 
 
 def test_github_connector():
     """Test the GitHub connector using the shared LakeflowConnect test suite."""
     # Inject the GitHub LakeflowConnect class into the shared test_suite namespace
     # so that LakeflowConnectTester can instantiate it.
-    test_suite.LakeflowConnect = LakeflowConnect
+    test_suite.LakeflowConnect = GithubLakeflowConnect
 
     # Load connection-level configuration
     config_dir = Path(__file__).parent / "configs"

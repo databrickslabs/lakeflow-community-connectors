@@ -239,7 +239,7 @@ pytest tests/ -v
 
 ### Project Structure
 
-The main source code is organized under `src/databricks/labs/community_connector/`:
+The main source code is organized under `src/databricks/labs/community_connector_cli/`:
 - `libs/` — Shared utilities (spec_parser.py, utils.py, source_loader.py)
 - `pipeline/` — Core ingestion logic (PySpark Data Source, SDP orchestration)
 - `sources/` — Source connectors (github/, zendesk/, stripe/, etc.)
@@ -248,7 +248,7 @@ The main source code is organized under `src/databricks/labs/community_connector
 
 ```
 tools/community_connector/
-├── src/databricks/labs/community_connector/
+├── src/databricks/labs/community_connector_cli/
 │   ├── cli.py                    # Main CLI entry point
 │   ├── config.py                 # Configuration management
 │   ├── repo_client.py            # Databricks Repos API client

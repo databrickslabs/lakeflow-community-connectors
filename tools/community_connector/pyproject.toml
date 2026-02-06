@@ -34,10 +34,10 @@ dev = [
 ]
 
 [project.scripts]
-community-connector = "databricks.labs.community_connector.cli:main"
+community-connector = "databricks.labs.community_connector_cli.cli:main"
 
 [project.entry-points."databricks.labs"]
-community_connector = "databricks.labs.community_connector"
+community_connector_cli = "databricks.labs.community_connector_cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -47,6 +47,6 @@ namespaces = true
 "" = "src"
 
 [tool.setuptools.package-data]
-"databricks.labs.community_connector" = ["*.yaml"]
-"databricks.labs.community_connector.templates" = ["*.py"]
+"databricks.labs.community_connector_cli" = ["*.yaml"]
+"databricks.labs.community_connector_cli.templates" = ["*.py"]
 

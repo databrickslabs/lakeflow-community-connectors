@@ -5,7 +5,7 @@ from pathlib import Path
 # Import test suite and connector
 import tests.unit.sources.test_suite as test_suite
 from tests.unit.sources.test_suite import LakeflowConnectTester
-from databricks.labs.community_connector.sources.stripe.stripe import LakeflowConnect
+from databricks.labs.community_connector.sources.stripe.stripe import StripeLakeflowConnect
 
 
 def load_config():
@@ -19,7 +19,7 @@ def test_stripe_connector():
     """Test the stripe connector using the test suite"""
     # Inject the LakeflowConnect class into test_suite module's namespace
     # This is required because test_suite.py expects LakeflowConnect to be available
-    test_suite.LakeflowConnect = LakeflowConnect
+    test_suite.LakeflowConnect = StripeLakeflowConnect
 
     # Load configuration
     config = load_config()
