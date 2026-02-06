@@ -416,6 +416,22 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
             "Expected exactly one placeholder."
         )
 
+    # Remove # fmt: off and # fmt: on comments (and any immediately following empty lines)
+    # These are only needed in the source file to prevent formatter issues
+    lakeflow_code_lines = lakeflow_code.split("\n")
+    filtered_lines = []
+    skip_next_empty = False
+    for line in lakeflow_code_lines:
+        if line.strip() in ("# fmt: off", "# fmt: on"):
+            skip_next_empty = True
+            continue
+        if skip_next_empty and not line.strip():
+            skip_next_empty = False
+            continue
+        skip_next_empty = False
+        filtered_lines.append(line)
+    lakeflow_code = "\n".join(filtered_lines)
+
     # Deduplicate and organize all imports
     all_imports = deduplicate_imports([utils_imports, source_imports, lakeflow_imports])
 
@@ -488,6 +504,12 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
             merged_lines.append("    " + line)
         else:
             merged_lines.append("")
+    merged_lines.append("")
+
+    # Register the data source with Spark
+    merged_lines.append(
+        "\n    spark.dataSource.register(LakeflowSource)  # pylint: disable=undefined-variable"
+    )
     merged_lines.append("")
 
     merged_content = "\n".join(merged_lines)

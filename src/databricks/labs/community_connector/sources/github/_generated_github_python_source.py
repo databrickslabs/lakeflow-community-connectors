@@ -1869,7 +1869,6 @@ def register_lakeflow_source(spark):
     ########################################################
 
     LakeflowConnectImpl = GithubLakeflowConnect
-    # fmt: on
 
     # Constant option or column names
     METADATA_TABLE = "_lakeflow_metadata"
@@ -1998,3 +1997,6 @@ def register_lakeflow_source(spark):
 
         def simpleStreamReader(self, schema: StructType):
             return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
+
+
+    spark.dataSource.register(LakeflowSource)  # pylint: disable=undefined-variable
