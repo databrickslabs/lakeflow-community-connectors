@@ -1,4 +1,5 @@
 """Lakeflow Community Connectors - Built on Spark Python Data Source API."""
 
-__version__ = "0.1.0"
+from databricks.labs.community_connector.sparkpds.registry import register
 
+__all__ = ["register"]

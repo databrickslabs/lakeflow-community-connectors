@@ -3,9 +3,10 @@ from datetime import datetime
 from typing import Dict, List, Iterator
 import requests
 from pyspark.sql.types import *
+from databricks.labs.community_connector.interface import LakeflowConnect
 
 
-class LakeflowConnect:
+class ZendeskLakeflowConnect(LakeflowConnect):
     def __init__(self, options: dict) -> None:
         self.subdomain = options["subdomain"]
         self.email = options["email"]

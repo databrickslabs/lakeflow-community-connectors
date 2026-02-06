@@ -1,5 +1,5 @@
-from databricks.labs.community_connector.pipeline.ingestion_pipeline import ingest
-from databricks.labs.community_connector.sparkpds import register
+from databricks.labs.community_connector.pipeline import ingest
+from databricks.labs.community_connector import register
 
 # Connector source name
 source_name = "{SOURCE_NAME}"

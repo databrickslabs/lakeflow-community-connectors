@@ -10,7 +10,7 @@ from types import ModuleType
 from typing import Type, Union
 from pyspark.sql.datasource import DataSource
 
-from databricks.labs.community_connector.interface.lakeflow_connect import LakeflowConnect
+from databricks.labs.community_connector.interface import LakeflowConnect
 from databricks.labs.community_connector.sparkpds.lakeflow_datasource import LakeflowSource
 
 

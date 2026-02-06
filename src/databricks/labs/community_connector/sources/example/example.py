@@ -3,6 +3,7 @@ from typing import Dict, List, Iterator
 
 from pydantic import BaseModel, PositiveInt, ConfigDict
 from pyspark.sql.types import StructType, StructField, LongType, StringType
+from databricks.labs.community_connector.interface import LakeflowConnect
 
 
 class ExampleTableOptions(BaseModel):
@@ -12,8 +13,7 @@ class ExampleTableOptions(BaseModel):
 
 
 # This is an example implementation of the LakeflowConnect class.
-# Test a change 123
-class LakeflowConnect:
+class ExampleLakeflowConnect(LakeflowConnect):
     def __init__(self, options: Dict[str, str]) -> None:
         """
         Initialize source parameters. Options may include authentication or other configs.

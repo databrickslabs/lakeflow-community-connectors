@@ -12,11 +12,6 @@ from databricks.labs.community_connector.sparkpds.lakeflow_datasource import (
     LakeflowSource,
     LakeflowStreamReader,
     LakeflowBatchReader,
-    METADATA_TABLE,
-    TABLE_NAME,
-    TABLE_NAME_LIST,
-    TABLE_CONFIGS,
-    IS_DELETE_FLOW,
 )
 
 __all__ = [
@@ -26,10 +21,4 @@ __all__ = [
     "LakeflowSource",
     "LakeflowStreamReader",
     "LakeflowBatchReader",
-    # Constants
-    "METADATA_TABLE",
-    "TABLE_NAME",
-    "TABLE_NAME_LIST",
-    "TABLE_CONFIGS",
-    "IS_DELETE_FLOW",
 ]

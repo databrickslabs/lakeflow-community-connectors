@@ -5,9 +5,10 @@ from datetime import datetime
 import time
 import random
 from typing import Dict, List, Tuple, Iterator, Any
+from databricks.labs.community_connector.interface import LakeflowConnect
 
 
-class LakeflowConnect:
+class HubspotLakeflowConnect(LakeflowConnect):
     def __init__(self, options: dict) -> None:
         self.access_token = options["access_token"]
         self.base_url = "https://api.hubapi.com"

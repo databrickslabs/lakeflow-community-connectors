@@ -121,10 +121,7 @@ class TestLoadIngestTemplate:
         """Test loading the default ingest template."""
         content = _load_ingest_template()
 
-        assert (
-            "from databricks.labs.community_connector.pipeline.ingestion_pipeline import ingest"
-            in content
-        )
+        assert "from databricks.labs.community_connector.pipeline import ingest" in content
         assert "{SOURCE_NAME}" in content
         assert "{CONNECTION_NAME}" in content
 
@@ -132,10 +129,7 @@ class TestLoadIngestTemplate:
         """Test loading the base ingest template."""
         content = _load_ingest_template("ingest_template_base.py")
 
-        assert (
-            "from databricks.labs.community_connector.pipeline.ingestion_pipeline import ingest"
-            in content
-        )
+        assert "from databricks.labs.community_connector.pipeline import ingest" in content
         assert "{SOURCE_NAME}" in content
         assert "{PIPELINE_SPEC}" in content
 

@@ -81,8 +81,8 @@ Each connector must include tests that run the **generic test suite** against a 
 Each connector runs as a configurable SDP. Define a **pipeline spec** to specify which tables to ingest and where to store them. See more details in this [example](pipeline-spec/example_ingest.py). You don't need to manually create files below, as both UI and CLI tool will automatically generate these files when setting the connector.
 
 ```python
-from databricks.labs.community_connector.pipeline.ingestion_pipeline import ingest
-from databricks.labs.community_connector.libs.source_loader import get_register_function
+from databricks.labs.community_connector.pipeline import ingest
+from databricks.labs.community_connector import register
 
 source_name = "github"  # or "zendesk", "stripe", etc.
 pipeline_spec = {

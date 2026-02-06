@@ -12,7 +12,7 @@ from pyspark.sql.types import (
     ArrayType,
     MapType,
 )
-from databricks.labs.community_connector.interface.lakeflow_connect import LakeflowConnect
+from databricks.labs.community_connector.interface import LakeflowConnect
 
 
 class GithubLakeflowConnect(LakeflowConnect):

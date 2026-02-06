@@ -5,9 +5,10 @@ from pyspark.sql.types import *
 from datetime import datetime, timedelta
 from typing import Iterator, Any
 import time
+from databricks.labs.community_connector.interface import LakeflowConnect
 
 
-class LakeflowConnect:
+class MixpanelLakeflowConnect(LakeflowConnect):
     # Constants
     BATCH_SIZE_DAYS = 7  # Number of days to fetch in a single API call
 

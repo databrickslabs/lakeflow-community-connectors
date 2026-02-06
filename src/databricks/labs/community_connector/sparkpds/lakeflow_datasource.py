@@ -6,7 +6,7 @@ from pyspark.sql.datasource import (
     SimpleDataSourceStreamReader,
     DataSourceReader,
 )
-from databricks.labs.community_connector.interface.lakeflow_connect import LakeflowConnect
+from databricks.labs.community_connector.interface import LakeflowConnect
 from databricks.labs.community_connector.libs.utils import parse_value
 
 
@@ -28,7 +28,6 @@ from databricks.labs.community_connector.libs.utils import parse_value
 # fmt: off
 LakeflowConnectImpl = LakeflowConnect  # __LAKEFLOW_CONNECT_IMPL__
 # fmt: on
-
 
 # Constant option or column names
 METADATA_TABLE = "_lakeflow_metadata"

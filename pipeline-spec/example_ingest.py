@@ -1,5 +1,5 @@
-from databricks.labs.community_connector.pipeline.ingestion_pipeline import ingest
-from databricks.labs.community_connector.sparkpds import register
+from databricks.labs.community_connector.pipeline import ingest
+from databricks.labs.community_connector import register
 
 # Connector source name. Update this to the name of the connector source you want to use.
 source_name = "<YOUR_SOURCE_NAME>"  # e.g., "github", "salesforce"

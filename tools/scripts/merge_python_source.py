@@ -187,7 +187,7 @@ def deduplicate_imports(import_lists: List[List[str]]) -> List[str]:
         "from databricks.labs.community_connector.libs.utils import",
         "from databricks.labs.community_connector.sparkpds.lakeflow_datasource import",
         "from databricks.labs.community_connector.sources.",
-        "from databricks.labs.community_connector.interface.",
+        "from databricks.labs.community_connector.interface",
     ]
 
     # Track 'from X import Y' style imports to merge them

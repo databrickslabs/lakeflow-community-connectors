@@ -12,9 +12,10 @@ from pyspark.sql.types import (
 from datetime import datetime
 import time
 from typing import Dict, List, Tuple, Iterator, Any
+from databricks.labs.community_connector.interface import LakeflowConnect
 
 
-class LakeflowConnect:
+class StripeLakeflowConnect(LakeflowConnect):
     def __init__(self, options: dict) -> None:
         """
         Initialize the Stripe connector with API credentials.

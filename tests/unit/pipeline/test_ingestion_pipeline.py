@@ -28,7 +28,7 @@ sys.modules["pyspark.sql.functions"] = mock_pyspark.sql.functions
 
 # Now import the module under test
 # pylint: disable=wrong-import-position
-from databricks.labs.community_connector.pipeline.ingestion_pipeline import ingest  # noqa: E402
+from databricks.labs.community_connector.pipeline import ingest  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
