@@ -20,6 +20,8 @@ from pyspark.sql.types import (
     ArrayType,
 )
 
+from databricks.labs.community_connector.sources.lakeflow_connect import LakeflowConnect
+
 logger = logging.getLogger(__name__)
 
 
@@ -927,7 +929,7 @@ class RelatedHandler(TableHandler):
 # =============================================================================
 
 
-class LakeflowConnect:
+class ZohoCRMLakeflowConnect(LakeflowConnect):
     """
     Zoho CRM connector for Lakeflow/Databricks.
 
