@@ -7,7 +7,6 @@ data sources with Spark.
 
 from databricks.labs.community_connector.sparkpds.registry import (
     register,
-    register_pds,
 )
 from databricks.labs.community_connector.sparkpds.lakeflow_datasource import (
     LakeflowSource,
@@ -23,7 +22,6 @@ from databricks.labs.community_connector.sparkpds.lakeflow_datasource import (
 __all__ = [
     # Registry
     "register",
-    "register_pds",
     # Core classes
     "LakeflowSource",
     "LakeflowStreamReader",

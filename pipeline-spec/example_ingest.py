@@ -1,5 +1,5 @@
 from databricks.labs.community_connector.pipeline.ingestion_pipeline import ingest
-from databricks.labs.community_connector.libs.source_loader import get_register_function
+from databricks.labs.community_connector.sparkpds import register
 
 # Connector source name. Update this to the name of the connector source you want to use.
 source_name = "<YOUR_SOURCE_NAME>"  # e.g., "github", "salesforce"
@@ -52,8 +52,7 @@ pipeline_spec = {
 
 
 # Dynamically import and register the LakeFlow source
-register_lakeflow_source = get_register_function(source_name)
-register_lakeflow_source(spark)
+register(spark, source_name)
 
 # Ingest the tables specified in the pipeline spec
 ingest(spark, pipeline_spec)

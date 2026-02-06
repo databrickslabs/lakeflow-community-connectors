@@ -2,15 +2,19 @@
 Registry module for registering LakeflowSource with Spark's DataSource API.
 
 This module provides functions to register a LakeflowConnect implementation
-with Spark, making it available as a Python Data Source.
+or a custom DataSource with Spark, making it available as a Python Data Source.
 """
 
 import importlib
-from typing import Type
+from types import ModuleType
+from typing import Type, Union
 from pyspark.sql.datasource import DataSource
 
 from databricks.labs.community_connector.interface.lakeflow_connect import LakeflowConnect
 from databricks.labs.community_connector.sparkpds.lakeflow_datasource import LakeflowSource
+
+
+_BASE_PKG = "databricks.labs.community_connector.sources"
 
 
 def _get_class_fqn(cls: Type) -> str:
@@ -19,93 +23,108 @@ def _get_class_fqn(cls: Type) -> str:
 
 
 def _import_class(fqn: str) -> Type:
-    """
-    Dynamically import a class from its fully qualified name.
-
-    Args:
-        fqn: Fully qualified class name (e.g., 'module.submodule.ClassName')
-
-    Returns:
-        The imported class.
-
-    Raises:
-        ImportError: If the module cannot be imported.
-        AttributeError: If the class doesn't exist in the module.
-    """
+    """Import a class from its fully qualified name (e.g., 'module.ClassName')."""
     module_name, class_name = fqn.rsplit(".", 1)
     module = importlib.import_module(module_name)
     return getattr(module, class_name)
 
 
-def register_pds(
-    spark,
-    pds_class: Type[DataSource],
-) -> Type[DataSource]:
-    """
-    Register a Python Data Source (PDS) class directly with Spark's DataSource API.
+def _get_source_module(source_name: str, module_name: str) -> ModuleType:
+    """Import a module from a source package."""
+    try:
+        importlib.import_module(f"{_BASE_PKG}.{source_name}")
+    except ModuleNotFoundError:
+        raise ValueError(
+            f"Source '{source_name}' not found. "
+            f"Make sure the directory 'src/databricks/labs/community_connector/sources/{source_name}/' exists."
+        )
 
-    This is the low-level registration function that takes a pre-built PDS class
-    and registers it with Spark.
+    module_path = f"{_BASE_PKG}.{source_name}.{module_name}"
+    try:
+        return importlib.import_module(module_path)
+    except ModuleNotFoundError:
+        raise ImportError(
+            f"Could not import '{module_name}.py' from source '{source_name}'. "
+            f"Please ensure 'src/databricks/labs/community_connector/sources/{source_name}/{module_name}.py' exists."
+        )
 
-    Args:
-        spark: The SparkSession instance.
-        pds_class: The DataSource class to register (must implement name() classmethod).
 
-    Returns:
-        The registered DataSource class.
+def _get_register_function(source_name: str):
+    """Get the register_lakeflow_source function from a generated source module."""
+    module_name = f"_generated_{source_name}_python_source"
+    module = _get_source_module(source_name, module_name)
 
-    Example:
-        >>> from my_pds import MyCustomPDS
-        >>> register_pds(spark, MyCustomPDS)
-        >>> # Now you can use it in Spark:
-        >>> df = spark.read.format(MyCustomPDS.name()).options(...).load()
-    """
-    spark.dataSource.register(pds_class)
-    return pds_class
+    if not hasattr(module, "register_lakeflow_source"):
+        raise ImportError(
+            f"Module '{module_name}' does not have a 'register_lakeflow_source' function. "
+            f"Please ensure the module defines this function."
+        )
+
+    return module.register_lakeflow_source
 
 
 def register(
     spark,
-    lakeflow_connect_cls: Type[LakeflowConnect],
-) -> Type[DataSource]:
+    source: Union[str, Type[DataSource], Type[LakeflowConnect]],
+) -> None:
     """
-    Register a LakeflowConnect implementation with Spark's DataSource API.
+    Register a source with Spark's DataSource API.
 
-    This function creates a DataSource wrapper that automatically injects
-    the LakeflowConnect class reference into options, allowing the class
-    to be dynamically imported on Spark executors.
+    This unified registration function handles:
+    - String source names: Dynamically loads and registers the generated source module.
+    - DataSource subclasses: Registered directly with Spark.
+    - LakeflowConnect subclasses: Wrapped in a LakeflowSource and registered.
 
     Args:
         spark: The SparkSession instance.
-        lakeflow_connect_cls: The LakeflowConnect class implementation to use.
+        source: A source name string (e.g., "zendesk", "github"), a DataSource subclass,
+                or a LakeflowConnect subclass.
 
-    Returns:
-        The registered DataSource class.
+    Raises:
+        TypeError: If source is not a string, DataSource subclass, or LakeflowConnect subclass.
+        ValueError: If a string source name is provided but the source module doesn't exist.
 
-    Example:
+    Examples:
+        >>> # Register a source by name:
+        >>> register(spark, "zendesk")
+        >>> df = spark.read.format("lakeflow_connect").options(...).load()
+
+        >>> # Register a LakeflowConnect implementation:
         >>> from my_connector import MyLakeflowConnect
         >>> register(spark, MyLakeflowConnect)
-        >>> # Now you can use it in Spark:
         >>> df = spark.read.format("lakeflow_connect").options(...).load()
+
+        >>> # Register a custom DataSource directly:
+        >>> from my_pds import MyCustomPDS
+        >>> register(spark, MyCustomPDS)
+        >>> df = spark.read.format(MyCustomPDS.name()).options(...).load()
     """
-    # Get the fully qualified class name.
-    class_fqn = _get_class_fqn(lakeflow_connect_cls)
+    # String source name: dynamically load and register
+    if isinstance(source, str):
+        register_fn = _get_register_function(source)
+        register_fn(spark)
+        return
 
-    # Create a wrapper class that dynamically imports the LakeflowConnect class
-    class RegisterableLakeflowSource(LakeflowSource):
-        """
-        A LakeflowSource that dynamically imports the LakeflowConnect class.
+    # DataSource subclass: register directly
+    if isinstance(source, type) and issubclass(source, DataSource):
+        spark.dataSource.register(source)
+        return
 
-        This class is used when registering a connector via the registry.register()
-        function. It dynamically imports the LakeflowConnect class from the fully
-        qualified name, allowing it to work across Spark driver and executor processes.
-        """
+    # LakeflowConnect subclass: wrap and register
+    if isinstance(source, type) and issubclass(source, LakeflowConnect):
+        class_fqn = _get_class_fqn(source)
 
-        def __init__(self, options):
-            self.options = options
-            # Dynamically import the LakeflowConnect class from FQN
-            lakeflow_connect_cls = _import_class(class_fqn)
-            self.lakeflow_connect = lakeflow_connect_cls(options)
+        class RegisterableLakeflowSource(LakeflowSource):
+            """Wrapper that dynamically imports the LakeflowConnect class by FQN."""
 
-    # Register the wrapper with Spark
-    return register_pds(spark, RegisterableLakeflowSource)
+            def __init__(self, options):
+                self.options = options
+                lakeflow_connect_cls = _import_class(class_fqn)
+                self.lakeflow_connect = lakeflow_connect_cls(options)
+
+        spark.dataSource.register(RegisterableLakeflowSource)
+        return
+
+    raise TypeError(
+        f"source must be a string, DataSource subclass, or LakeflowConnect subclass, got {type(source)}"
+    )
