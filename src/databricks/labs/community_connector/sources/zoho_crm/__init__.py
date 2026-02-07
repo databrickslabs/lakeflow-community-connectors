@@ -1,6 +1,5 @@
-"""Zoho CRM connector package for Lakeflow/Databricks."""
+"""Zoho CRM source connector."""
 
-from .zoho_crm import LakeflowConnect
-from .zoho_client import ZohoAPIError
+from databricks.labs.community_connector.sources.zoho_crm.zoho_crm import ZohoCRMLakeflowConnect
 
-__all__ = ["LakeflowConnect", "ZohoAPIError"]
+__all__ = ["ZohoCRMLakeflowConnect"]

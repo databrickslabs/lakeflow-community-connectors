@@ -6,7 +6,8 @@ on:
     paths:
       - 'src/databricks/labs/community_connector/sources/**/*.py'
       - 'src/databricks/labs/community_connector/libs/utils.py'
-      - 'src/databricks/labs/community_connector/pipeline/lakeflow_python_source.py'
+      - 'src/databricks/labs/community_connector/interface/lakeflow_connect.py'
+      - 'src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py'
       - '!src/databricks/labs/community_connector/sources/**/test/**'
   push:
     branches:
@@ -14,7 +15,8 @@ on:
     paths:
       - 'src/databricks/labs/community_connector/sources/**/*.py'
       - 'src/databricks/labs/community_connector/libs/utils.py'
-      - 'src/databricks/labs/community_connector/pipeline/lakeflow_python_source.py'
+      - 'src/databricks/labs/community_connector/interface/lakeflow_connect.py'
+      - 'src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py'
       - '!src/databricks/labs/community_connector/sources/**/test/**'
 
 permissions:
@@ -39,7 +41,8 @@ jobs:
           files: |
             src/databricks/labs/community_connector/sources/**/*.py
             src/databricks/labs/community_connector/libs/utils.py
-            src/databricks/labs/community_connector/pipeline/lakeflow_python_source.py
+            src/databricks/labs/community_connector/interface/lakeflow_connect.py
+            src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py
           files_ignore: |
             src/databricks/labs/community_connector/sources/**/_generated_*.py
             src/databricks/labs/community_connector/sources/**/test/**
@@ -60,7 +63,9 @@ jobs:
           # Check if shared files changed (affects all sources)
           SHARED_CHANGED="false"
           for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
-            if [[ "$file" == "src/databricks/labs/community_connector/libs/utils.py" ]] || [[ "$file" == "src/databricks/labs/community_connector/pipeline/lakeflow_python_source.py" ]]; then
+            if [[ "$file" == "src/databricks/labs/community_connector/libs/utils.py" ]] || \
+               [[ "$file" == "src/databricks/labs/community_connector/interface/lakeflow_connect.py" ]] || \
+               [[ "$file" == "src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py" ]]; then
               SHARED_CHANGED="true"
               break
             fi

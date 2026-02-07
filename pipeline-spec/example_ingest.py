@@ -52,7 +52,19 @@ pipeline_spec = {
 
 
 # Dynamically import and register the LakeFlow source
+# Register through source name. Run the pipeline with the source code.
 register(spark, source_name)
+
+# register the LakeflowConnect
+from databricks.labs.community_connector.sources.github import GithubLakeflowConnect
+
+register(spark, GithubLakeflowConnect)
+
+# register the Python DataSource implementation
+from my_source import MyDataSource
+
+register(spark, MyDataSource)
+
 
 # Ingest the tables specified in the pipeline spec
 ingest(spark, pipeline_spec)
