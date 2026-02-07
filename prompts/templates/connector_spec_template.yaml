@@ -13,7 +13,7 @@
 #
 # Option B: Multiple authentication methods
 #   Use 'auth_methods' to define each method with its own parameters,
-#   and 'common_parameters' for shared parameters across all methods.
+#   and 'parameters' for shared parameters across all methods.
 #
 # When multiple auth_methods are defined, the user must choose ONE method
 # and provide all its required parameters. Common parameters apply to all methods.
@@ -65,8 +65,8 @@ connection:
   #         description: >
   #           Service account secret.
   #
-  # # Parameters shared across all authentication methods
-  # common_parameters:
+  # # Shared parameters (apply to all authentication methods)
+  # parameters:
   #   - name: region
   #     type: string
   #     required: false

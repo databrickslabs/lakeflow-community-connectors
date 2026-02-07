@@ -12,9 +12,9 @@ from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.workspace import RepoInfo
 from databricks.sdk.service.pipelines import CreatePipelineResponse, StartUpdateResponse
 
-from databricks.labs.community_connector.config import RepoConfig, PipelineConfig
-from databricks.labs.community_connector.repo_client import RepoClient
-from databricks.labs.community_connector.pipeline_client import PipelineClient
+from databricks.labs.community_connector_cli.config import RepoConfig, PipelineConfig
+from databricks.labs.community_connector_cli.repo_client import RepoClient
+from databricks.labs.community_connector_cli.pipeline_client import PipelineClient
 
 
 class TestRepoClient:

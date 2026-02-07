@@ -1,1 +1,1 @@
-# Tests for community_connector
+# Tests for community_connector_cli

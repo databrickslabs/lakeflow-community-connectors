@@ -48,21 +48,21 @@ jobs:
           echo "$CHANGED_FILES"
 
           # Check libs
-          if echo "$CHANGED_FILES" | grep -q '^libs/'; then
+          if echo "$CHANGED_FILES" | grep -qE '^(src/databricks/labs/community_connector/libs/|tests/unit/libs/)'; then
             echo "libs=true" >> $GITHUB_OUTPUT
           else
             echo "libs=false" >> $GITHUB_OUTPUT
           fi
 
           # Check pipeline
-          if echo "$CHANGED_FILES" | grep -q '^pipeline/'; then
+          if echo "$CHANGED_FILES" | grep -qE '^(src/databricks/labs/community_connector/pipeline/|tests/unit/pipeline/)'; then
             echo "pipeline=true" >> $GITHUB_OUTPUT
           else
             echo "pipeline=false" >> $GITHUB_OUTPUT
           fi
 
           # Check example (also triggers on interface changes)
-          if echo "$CHANGED_FILES" | grep -qE '^sources/(example|interface)/'; then
+          if echo "$CHANGED_FILES" | grep -qE '^(src/databricks/labs/community_connector/sources/(example|interface)/|tests/unit/sources/(example/|test_suite\.py|test_utils\.py|lakeflow_connect_test_utils\.py))'; then
             echo "example=true" >> $GITHUB_OUTPUT
           else
             echo "example=false" >> $GITHUB_OUTPUT
@@ -95,7 +95,7 @@ jobs:
           pip install -e ".[dev]"
       - name: Run libs tests
         run: |
-          pytest libs/test/ -v
+          pytest tests/unit/libs/ -v
 
   # Test pipeline
   test-pipeline:
@@ -117,7 +117,7 @@ jobs:
           pip install -e ".[dev]"
       - name: Run pipeline tests
         run: |
-          pytest pipeline/test/ -v
+          pytest tests/unit/pipeline/ -v
 
   # Test example source
   test-example:
@@ -139,7 +139,7 @@ jobs:
           pip install -e ".[dev]"
       - name: Run example tests
         run: |
-          pytest sources/example/test/ -v
+          pytest tests/unit/sources/example/ -v
 
   # Test community connector tool
   test-community-connector:
