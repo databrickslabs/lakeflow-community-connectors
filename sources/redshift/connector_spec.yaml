@@ -1,0 +1,118 @@
+# Amazon Redshift Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+connection:
+  parameters:
+    # AWS Region (required)
+    region:
+      type: string
+      required: true
+      description: "AWS region where your Redshift cluster/workgroup is located (e.g., us-east-1, eu-west-1)"
+      example: "us-east-1"
+
+    # Database name (required)
+    database:
+      type: string
+      required: true
+      description: "Database name to connect to"
+      example: "dev"
+
+    # Cluster identifier (conditional - for provisioned clusters)
+    cluster_identifier:
+      type: string
+      required: false
+      description: "Redshift cluster identifier (required for provisioned clusters; mutually exclusive with workgroup_name)"
+      example: "my-redshift-cluster"
+
+    # Workgroup name (conditional - for serverless)
+    workgroup_name:
+      type: string
+      required: false
+      description: "Redshift Serverless workgroup name (required for serverless; mutually exclusive with cluster_identifier)"
+      example: "my-workgroup"
+
+    # AWS access key ID (conditional)
+    access_key_id:
+      type: string
+      required: false
+      description: "AWS access key ID (required if not using IAM role authentication)"
+      example: "AKIAIOSFODNN7EXAMPLE" # gitleaks:allow
+
+    # AWS secret access key (conditional)
+    secret_access_key:
+      type: string
+      required: false
+      secret: true
+      description: "AWS secret access key (required if not using IAM role authentication)"
+      example: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+
+    # Database user (optional for clusters)
+    db_user:
+      type: string
+      required: false
+      description: "Database user for provisioned clusters (uses IAM if omitted; not used for serverless)"
+      example: "admin"
+
+    # Secret ARN (optional)
+    secret_arn:
+      type: string
+      required: false
+      description: "ARN of AWS Secrets Manager secret containing database credentials"
+      example: "arn:aws:secretsmanager:us-east-1:123456789012:secret:my-secret"
+
+    # Schema filter (optional)
+    schema_filter:
+      type: string
+      required: false
+      description: "Comma-separated list of schema names to include (default: all except system schemas)"
+      example: "public,analytics,reporting"
+
+    # Poll interval (optional)
+    poll_interval:
+      type: string
+      required: false
+      description: "Seconds between query status polls (default: 2)"
+      example: "2"
+      default: "2"
+
+    # Max poll attempts (optional)
+    max_poll_attempts:
+      type: string
+      required: false
+      description: "Maximum number of polling attempts before timeout (default: 300, approximately 10 minutes)"
+      example: "300"
+      default: "300"
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# ============================================================================
+external_options_allowlist: "limit,where_clause"
+
+# ============================================================================
+# Notes
+# ============================================================================
+# 1. Authentication:
+#    - Either provide access_key_id + secret_access_key, or
+#    - Use IAM role attached to Databricks workspace, or
+#    - Provide secret_arn pointing to AWS Secrets Manager
+#
+# 2. Cluster vs Serverless:
+#    - Provide exactly ONE of: cluster_identifier OR workgroup_name
+#    - For provisioned clusters: cluster_identifier + db_user (optional)
+#    - For serverless: workgroup_name only
+#
+# 3. Schema Filtering:
+#    - By default, excludes system schemas: pg_catalog, information_schema, pg_internal
+#    - Use schema_filter to limit to specific schemas
+#
+# 4. Table Options:
+#    - limit: Restrict number of rows (useful for testing)
+#    - where_clause: SQL WHERE clause for filtering (future enhancement)
