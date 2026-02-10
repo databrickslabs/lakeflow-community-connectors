@@ -328,6 +328,750 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
+    # src/databricks/labs/community_connector/sources/zoho_crm/zoho_client.py
+    ########################################################
+
+    class ZohoAPIError(Exception):
+        """Exception for Zoho CRM API errors."""
+
+        # Friendly messages for common Zoho error codes
+        # See: https://www.zoho.com/developer/help/api/error-messages.html
+        KNOWN_ERRORS = {
+            # OAuth/Auth errors
+            "INVALID_TOKEN": "Access token expired or invalid.",
+            "INVALID_CLIENT": "Invalid client_id or client_secret.",
+            "AUTHENTICATION_FAILURE": "Authentication failed. Check OAuth credentials.",
+            "NO_PERMISSION": "Missing required OAuth scopes.",
+            "OAUTH_SCOPE_MISMATCH": "OAuth scope mismatch. Re-authorize with correct scopes.",
+            # Zoho API error codes
+            "4000": "Use OAuth token instead of API ticket.",
+            "4001": "No API permission for this operation.",
+            "4101": "Zoho CRM is disabled for this account.",
+            "4102": "No CRM account found.",
+            "4103": "Record not found with the specified ID.",
+            "4401": "Mandatory field missing in request.",
+            "4420": "Invalid search parameter or value.",
+            "4421": "API call limit exceeded.",
+            "4422": "No records available in this module.",
+            "4423": "Exceeded record search limit.",
+            "4500": "Internal server error.",
+            "4501": "API Key is inactive.",
+            "4502": "This module is not supported in your Zoho CRM edition.",
+            "4600": "Invalid API parameter or spelling error in API URL.",
+            "4807": "File size limit exceeded.",
+            "4809": "Storage space limit exceeded.",
+            "4820": "Rate limit exceeded. Wait before retrying.",
+            "4831": "Missing required parameters.",
+            "4832": "Invalid data type (text given for integer field).",
+            "4834": "Invalid or expired ticket.",
+            "4890": "Wrong API Key.",
+            # Permission errors
+            "401": "No module permission.",
+            "401.1": "No permission to create records.",
+            "401.2": "No permission to edit records.",
+            "401.3": "No permission to delete records.",
+            # Module errors
+            "INVALID_MODULE": "Module not available in your Zoho CRM edition.",
+            "MODULE_NOT_SUPPORTED": "This module is not accessible via API.",
+        }
+
+        def __init__(self, status_code: int, message: str):
+            self.status_code = status_code
+            super().__init__(f"Zoho API error ({status_code}): {message}")
+
+        @classmethod
+        def from_response(cls, response: requests.Response) -> "ZohoAPIError":
+            """Create exception from HTTP response."""
+            error_code = None
+            message = response.text[:200]
+
+            # Try to parse Zoho's JSON error response
+            try:
+                data = response.json()
+                error_code = data.get("code") or data.get("error")
+                message = data.get("message") or data.get("error_description") or message
+            except ValueError:
+                pass
+
+            # Use friendly message if we recognize the error code
+            if error_code and error_code in cls.KNOWN_ERRORS:
+                message = cls.KNOWN_ERRORS[error_code]
+
+            return cls(response.status_code, message)
+
+
+    class ZohoAPIClient:
+        """
+        HTTP client for Zoho CRM API with OAuth2 authentication.
+
+        Handles:
+        - OAuth2 token refresh
+        - Rate limiting with exponential backoff
+        - Paginated API responses
+        """
+
+        def __init__(
+            self,
+            client_id: str,
+            client_secret: str,
+            refresh_token: str,
+            accounts_url: str = "https://accounts.zoho.com",
+        ) -> None:
+            """
+            Initialize the API client.
+
+            Args:
+                client_id: OAuth Client ID from Zoho API Console
+                client_secret: OAuth Client Secret from Zoho API Console
+                refresh_token: Long-lived refresh token from OAuth flow
+                accounts_url: Zoho accounts URL for OAuth (region-specific)
+            """
+            self.client_id = client_id
+            self.client_secret = client_secret
+            self.refresh_token = refresh_token
+            self.accounts_url = accounts_url.rstrip("/")
+
+            # Derive API URL from accounts URL
+            # https://accounts.zoho.eu -> https://www.zohoapis.eu
+            match = re.search(r"accounts\.zoho\.(.+)$", self.accounts_url)
+            domain_suffix = match.group(1) if match else "com"
+            self.api_url = f"https://www.zohoapis.{domain_suffix}"
+
+            # Token management
+            self._access_token: Optional[str] = None
+            self._token_expires_at: Optional[datetime] = None
+
+            # HTTP session for connection pooling
+            self._session = requests.Session()
+
+        def _get_access_token(self) -> str:
+            """
+            Get a valid access token, refreshing if necessary.
+            Access tokens expire after 1 hour (3600 seconds).
+            """
+            # Check if we have a valid token (with 5-minute buffer)
+            if self._access_token and self._token_expires_at:
+                if datetime.now() < self._token_expires_at - timedelta(minutes=5):
+                    return self._access_token
+
+            # Refresh the token
+            token_url = f"{self.accounts_url}/oauth/v2/token"
+            data = {
+                "refresh_token": self.refresh_token,
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "grant_type": "refresh_token",
+            }
+
+            response = requests.post(token_url, data=data, timeout=30)
+
+            if response.status_code >= 400:
+                raise ZohoAPIError.from_response(response)
+
+            token_data = response.json()
+
+            if "access_token" not in token_data:
+                raise ZohoAPIError(200, "Token refresh failed. Check your OAuth credentials.")
+
+            self._access_token = token_data["access_token"]
+            expires_in = token_data.get("expires_in", 3600)
+            self._token_expires_at = datetime.now() + timedelta(seconds=expires_in)
+
+            return self._access_token
+
+        def request(
+            self,
+            method: str,
+            endpoint: str,
+            params: Optional[dict] = None,
+            data: Optional[dict] = None,
+            max_retries: int = 3,
+        ) -> dict:
+            """
+            Make an authenticated API request to Zoho CRM.
+
+            Args:
+                method: HTTP method (GET, POST, PUT, DELETE)
+                endpoint: API endpoint path (e.g., "/crm/v8/Leads")
+                params: Query parameters
+                data: Request body for POST/PUT
+                max_retries: Maximum retry attempts for rate limiting
+
+            Returns:
+                Parsed JSON response as dictionary
+
+            Raises:
+                Exception: On API errors after retries exhausted
+            """
+            access_token = self._get_access_token()
+            url = f"{self.api_url}{endpoint}"
+            headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
+
+            if data:
+                headers["Content-Type"] = "application/json"
+
+            for attempt in range(max_retries):
+                response = self._make_http_request(method, url, headers, params, data)
+
+                # Handle rate limiting with retry
+                if response.status_code == 429:
+                    if attempt < max_retries - 1:
+                        wait_time = 2**attempt
+                        time.sleep(wait_time)
+                        continue
+                    raise ZohoAPIError.from_response(response)
+
+                # Handle 401 with token refresh retry
+                if response.status_code == 401 and attempt == 0:
+                    self._access_token = None
+                    access_token = self._get_access_token()
+                    headers["Authorization"] = f"Zoho-oauthtoken {access_token}"
+                    continue
+
+                # Handle other errors
+                if response.status_code >= 400:
+                    raise ZohoAPIError.from_response(response)
+
+                # Handle empty responses
+                if not response.text or response.text.strip() == "":
+                    return {}
+
+                return response.json()
+
+            raise ZohoAPIError(0, f"Failed after {max_retries} retries")
+
+        def _make_http_request(
+            self,
+            method: str,
+            url: str,
+            headers: dict,
+            params: Optional[dict],
+            data: Optional[dict],
+        ) -> requests.Response:
+            """
+            Execute the actual HTTP request.
+
+            Args:
+                method: HTTP method (GET, POST, PUT, DELETE)
+                url: Full URL to request
+                headers: Request headers including Authorization
+                params: Query parameters
+                data: Request body for POST/PUT
+
+            Returns:
+                requests.Response object
+
+            Raises:
+                ValueError: For unsupported HTTP methods
+            """
+            method = method.upper()
+            if method == "GET":
+                return self._session.get(url, headers=headers, params=params)
+            elif method == "POST":
+                return self._session.post(url, headers=headers, json=data, params=params)
+            elif method == "PUT":
+                return self._session.put(url, headers=headers, json=data, params=params)
+            elif method == "DELETE":
+                return self._session.delete(url, headers=headers, params=params)
+            else:
+                raise ValueError(f"Unsupported HTTP method: {method}")
+
+        def paginate(
+            self,
+            endpoint: str,
+            params: Optional[dict] = None,
+            data_key: str = "data",
+            per_page: int = 200,
+        ) -> Iterator[dict]:
+            """
+            Iterate through paginated API responses.
+
+            Args:
+                endpoint: API endpoint path
+                params: Base query parameters (page/per_page will be added)
+                data_key: Key in response containing the data array
+                per_page: Number of records per page (max 200 for Zoho)
+
+            Yields:
+                Individual records from each page
+            """
+            params = dict(params) if params else {}
+            page = 1
+
+            while True:
+                params["page"] = page
+                params["per_page"] = per_page
+
+                response = self.request("GET", endpoint, params=params)
+                data = response.get(data_key, [])
+                info = response.get("info", {})
+
+                yield from data
+
+                if not info.get("more_records", False) or not data:
+                    break
+
+                page += 1
+
+        def paginate_with_info(
+            self,
+            endpoint: str,
+            params: Optional[dict] = None,
+            data_key: str = "data",
+            per_page: int = 200,
+        ) -> Iterator[tuple[list[dict], dict]]:
+            """
+            Iterate through paginated API responses, yielding page data with info.
+
+            Useful when you need access to pagination metadata.
+
+            Args:
+                endpoint: API endpoint path
+                params: Base query parameters
+                data_key: Key in response containing the data array
+                per_page: Number of records per page
+
+            Yields:
+                Tuples of (records_list, info_dict) for each page
+            """
+            params = dict(params) if params else {}
+            page = 1
+
+            while True:
+                params["page"] = page
+                params["per_page"] = per_page
+
+                response = self.request("GET", endpoint, params=params)
+                data = response.get(data_key, [])
+                info = response.get("info", {})
+
+                yield data, info
+
+                if not info.get("more_records", False) or not data:
+                    break
+
+                page += 1
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/sources/zoho_crm/zoho_crm_oauth_setup.py
+    ########################################################
+
+    CLIENT_ID = ""  # From Zoho API Console
+    CLIENT_SECRET = ""  # From Zoho API Console
+    REDIRECT_URI = ""  # e.g., https://your-workspace.cloud.databricks.com/login/oauth/zoho_crm.html
+
+    # Data Center - uncomment your region:
+    DATA_CENTER = "https://accounts.zoho.com"  # US (default)
+    # DATA_CENTER = "https://accounts.zoho.eu"  # EU
+    # DATA_CENTER = "https://accounts.zoho.in"  # India
+    # DATA_CENTER = "https://accounts.zoho.com.au"  # Australia
+    # DATA_CENTER = "https://accounts.zoho.jp"  # Japan
+
+    # OAuth Scopes (default covers all CRM data)
+    SCOPES = "ZohoCRM.modules.ALL,ZohoCRM.settings.ALL,ZohoCRM.users.READ"
+
+    # COMMAND ----------
+
+    # MAGIC %md
+    # MAGIC ## Step 2: Generate Authorization URL
+    # MAGIC
+    # MAGIC Run this cell, then open the URL in your browser to authorize.
+
+    # COMMAND ----------
+
+    from urllib.parse import quote
+
+    if not all([CLIENT_ID, CLIENT_SECRET, REDIRECT_URI]):
+        raise ValueError("Please fill in CLIENT_ID, CLIENT_SECRET, and REDIRECT_URI above")
+
+    auth_url = (
+        f"{DATA_CENTER}/oauth/v2/auth"
+        f"?response_type=code"
+        f"&client_id={quote(CLIENT_ID)}"
+        f"&scope={quote(SCOPES)}"
+        f"&redirect_uri={quote(REDIRECT_URI)}"
+        f"&access_type=offline"
+        f"&prompt=consent"
+    )
+
+    print("Open this URL in your browser:\n")
+    print(auth_url)
+    print("\n" + "=" * 80)
+    print("After authorizing, copy the ENTIRE redirect URL and paste it below.")
+    print("⚠️ The code expires in 2 MINUTES!")
+
+    # COMMAND ----------
+
+    # MAGIC %md
+    # MAGIC ## Step 3: Exchange Code for Refresh Token
+    # MAGIC
+    # MAGIC Paste the redirect URL below and run:
+
+    # COMMAND ----------
+
+    # DBTITLE 1,Paste Redirect URL Here
+    REDIRECT_URL_WITH_CODE = ""  # Paste the full URL from your browser
+
+    # COMMAND ----------
+
+    import requests
+    from urllib.parse import urlparse, parse_qs
+
+    if not REDIRECT_URL_WITH_CODE:
+        raise ValueError("Please paste the redirect URL above")
+
+    # Extract code from URL
+    params = parse_qs(urlparse(REDIRECT_URL_WITH_CODE).query)
+    if "code" not in params:
+        raise ValueError("No 'code' found in URL. Copy the complete redirect URL.")
+
+    AUTHORIZATION_CODE = params["code"][0]
+    print(f"✅ Code extracted: {AUTHORIZATION_CODE[:30]}...")
+
+    # Exchange for refresh token
+    response = requests.post(
+        f"{DATA_CENTER}/oauth/v2/token",
+        data={
+            "grant_type": "authorization_code",
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "redirect_uri": REDIRECT_URI,
+            "code": AUTHORIZATION_CODE,
+        },
+    )
+
+    if response.status_code != 200 or "refresh_token" not in response.json():
+        error = response.text
+        if "invalid_code" in error:
+            raise ValueError("Code expired. Re-run Step 2.")
+        raise ValueError(f"Failed: {error}")
+
+    tokens = response.json()
+    REFRESH_TOKEN = tokens["refresh_token"]
+    API_DOMAIN = tokens.get("api_domain", DATA_CENTER.replace("accounts.zoho", "www.zohoapis"))
+    print(f"✅ Refresh token obtained!")
+
+    # Test the connection
+    test_response = requests.post(
+        f"{DATA_CENTER}/oauth/v2/token",
+        data={
+            "grant_type": "refresh_token",
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "refresh_token": REFRESH_TOKEN,
+        },
+    )
+
+    if test_response.status_code != 200 or "access_token" not in test_response.json():
+        raise ValueError(f"Token refresh failed: {test_response.text}")
+
+    access_token = test_response.json()["access_token"]
+
+    # Test API
+    modules_response = requests.get(
+        f"{API_DOMAIN}/crm/v8/settings/modules",
+        headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
+    )
+    if modules_response.status_code != 200:
+        raise ValueError(f"API test failed: {modules_response.text[:200]}")
+
+    modules = modules_response.json().get("modules", [])
+    print(f"✅ Connection verified! Found {len(modules)} modules.\n")
+
+    # Print UC Connection config
+    import json
+
+    uc_config = {
+        "client_id": CLIENT_ID[0:10] + "...",
+        "client_secret": CLIENT_SECRET[0:10] + "...",
+        "refresh_token": REFRESH_TOKEN[0:10] + "...",
+        "base_url": DATA_CENTER,
+    }
+
+    print("=" * 80)
+    print("UNITY CATALOG CONNECTION CONFIGURATION")
+    print("=" * 80)
+    print("\nUse these values when creating your UC Connection:\n")
+    print(json.dumps(uc_config, indent=2))
+    print("\n" + "=" * 80)
+    print("🎉 Done! Create a Unity Catalog Connection with these credentials.")
+
+    # COMMAND ----------
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/sources/zoho_crm/zoho_types.py
+    ########################################################
+
+    SIMPLE_TYPE_MAP = {
+        "bigint": LongType(),
+        "text": StringType(),
+        "textarea": StringType(),
+        "email": StringType(),
+        "phone": StringType(),
+        "website": StringType(),
+        "autonumber": StringType(),
+        "picklist": StringType(),
+        "integer": LongType(),
+        "double": DoubleType(),
+        "currency": DoubleType(),
+        "percent": DoubleType(),
+        "boolean": BooleanType(),
+        "date": StringType(),  # Stored as ISO 8601 string
+        "datetime": StringType(),  # Stored as ISO 8601 string
+        "fileupload": StringType(),
+        "imageupload": StringType(),
+        "profileimage": StringType(),
+        "event_reminder": StringType(),
+    }
+
+
+    # =============================================================================
+    # Reusable Schema Components
+    # =============================================================================
+
+    # Basic lookup field structure (id + name)
+    BASIC_LOOKUP_SCHEMA = StructType([
+        StructField("id", StringType(), True),
+        StructField("name", StringType(), True),
+    ])
+
+    # Extended lookup field structure (id + name + email)
+    EXTENDED_LOOKUP_SCHEMA = StructType([
+        StructField("id", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("email", StringType(), True),
+    ])
+
+    # RRULE field for recurring events
+    RRULE_SCHEMA = StructType([
+        StructField("FREQ", StringType(), True),
+        StructField("INTERVAL", StringType(), True),
+    ])
+
+    # ALARM field for event reminders
+    ALARM_SCHEMA = StructType([
+        StructField("ACTION", StringType(), True),
+    ])
+
+    # Basic subform item structure
+    BASIC_SUBFORM_SCHEMA = StructType([
+        StructField("id", StringType(), True),
+    ])
+
+
+    # =============================================================================
+    # Settings Table Schemas
+    # =============================================================================
+
+    USERS_SCHEMA = StructType([
+        StructField("id", StringType(), False),
+        StructField("name", StringType(), True),
+        StructField("email", StringType(), True),
+        StructField("first_name", StringType(), True),
+        StructField("last_name", StringType(), True),
+        StructField("role", BASIC_LOOKUP_SCHEMA, True),
+        StructField("profile", BASIC_LOOKUP_SCHEMA, True),
+        StructField("status", StringType(), True),
+        StructField("created_time", StringType(), True),
+        StructField("Modified_Time", StringType(), True),
+        StructField("confirm", BooleanType(), True),
+        StructField("territories", ArrayType(BASIC_LOOKUP_SCHEMA), True),
+    ])
+
+    ROLES_SCHEMA = StructType([
+        StructField("id", StringType(), False),
+        StructField("name", StringType(), True),
+        StructField("display_label", StringType(), True),
+        StructField("reporting_to", BASIC_LOOKUP_SCHEMA, True),
+        StructField("admin_user", BooleanType(), True),
+    ])
+
+    PROFILES_SCHEMA = StructType([
+        StructField("id", StringType(), False),
+        StructField("name", StringType(), True),
+        StructField("display_label", StringType(), True),
+        StructField("default", BooleanType(), True),
+        StructField("description", StringType(), True),
+        StructField("created_time", StringType(), True),
+        StructField("Modified_Time", StringType(), True),
+    ])
+
+    SETTINGS_SCHEMAS = {
+        "Users": USERS_SCHEMA,
+        "Roles": ROLES_SCHEMA,
+        "Profiles": PROFILES_SCHEMA,
+    }
+
+
+    # =============================================================================
+    # Subform/Line Item Schema
+    # =============================================================================
+
+    SUBFORM_BASE_FIELDS = [
+        StructField("id", StringType(), False),
+        StructField("_parent_id", StringType(), False),
+        StructField("_parent_module", StringType(), False),
+    ]
+
+    SUBFORM_COMMON_FIELDS = [
+        StructField("Product_Name", BASIC_LOOKUP_SCHEMA, True),
+        StructField("Quantity", DoubleType(), True),
+        StructField("Unit_Price", DoubleType(), True),
+        StructField("List_Price", DoubleType(), True),
+        StructField("Net_Total", DoubleType(), True),
+        StructField("Total", DoubleType(), True),
+        StructField("Discount", DoubleType(), True),
+        StructField("Total_After_Discount", DoubleType(), True),
+        StructField("Tax", DoubleType(), True),
+        StructField("Description", StringType(), True),
+        StructField("Sequence_Number", LongType(), True),
+    ]
+
+    LINE_ITEM_SCHEMA = StructType(SUBFORM_BASE_FIELDS + SUBFORM_COMMON_FIELDS)
+
+
+    # =============================================================================
+    # Junction/Related Table Schemas
+    # =============================================================================
+
+    JUNCTION_BASE_FIELDS = [
+        StructField("_junction_id", StringType(), False),
+        StructField("_parent_id", StringType(), False),
+        StructField("_parent_module", StringType(), False),
+        StructField("id", StringType(), False),
+    ]
+
+    LEADS_RELATED_FIELDS = [
+        StructField("First_Name", StringType(), True),
+        StructField("Last_Name", StringType(), True),
+        StructField("Email", StringType(), True),
+        StructField("Company", StringType(), True),
+        StructField("Phone", StringType(), True),
+        StructField("Lead_Status", StringType(), True),
+    ]
+
+    CONTACTS_RELATED_FIELDS = [
+        StructField("First_Name", StringType(), True),
+        StructField("Last_Name", StringType(), True),
+        StructField("Email", StringType(), True),
+        StructField("Phone", StringType(), True),
+        StructField("Account_Name", BASIC_LOOKUP_SCHEMA, True),
+    ]
+
+    CONTACT_ROLES_RELATED_FIELDS = [
+        StructField("Contact_Role", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("Email", StringType(), True),
+    ]
+
+    DEFAULT_RELATED_FIELDS = [
+        StructField("name", StringType(), True),
+    ]
+
+    # Map related module names to their field schemas
+    RELATED_MODULE_FIELDS = {
+        "Leads": LEADS_RELATED_FIELDS,
+        "Contacts": CONTACTS_RELATED_FIELDS,
+        "Contact_Roles": CONTACT_ROLES_RELATED_FIELDS,
+    }
+
+    # API field names for related record queries
+    RELATED_MODULE_API_FIELDS = {
+        "Leads": "id,First_Name,Last_Name,Email,Company,Phone,Lead_Status",
+        "Contacts": "id,First_Name,Last_Name,Email,Phone,Account_Name",
+        "Deals": "id,Deal_Name,Stage,Amount,Closing_Date,Account_Name",
+        "Contact_Roles": "id,Contact_Role,name,Email",
+    }
+
+
+    # =============================================================================
+    # Type Conversion Functions
+    # =============================================================================
+
+    def zoho_field_to_spark_type(field: dict) -> StructField:
+        """
+        Convert a Zoho CRM field definition to a Spark StructField.
+
+        Args:
+            field: Zoho field metadata dictionary containing api_name, data_type, etc.
+
+        Returns:
+            A Spark StructField representing the field.
+        """
+        api_name = field["api_name"]
+        data_type = field.get("data_type", "text")
+        json_type = field.get("json_type")
+        nullable = not field.get("required", False)
+
+        # Check simple type map first
+        if data_type in SIMPLE_TYPE_MAP:
+            spark_type = SIMPLE_TYPE_MAP[data_type]
+        # Handle complex/nested types
+        elif data_type == "multiselectpicklist":
+            spark_type = ArrayType(StringType(), True)
+        elif data_type in ("lookup", "ownerlookup"):
+            spark_type = EXTENDED_LOOKUP_SCHEMA
+        elif data_type == "multiselectlookup":
+            spark_type = ArrayType(BASIC_LOOKUP_SCHEMA, True)
+        elif data_type == "subform":
+            spark_type = ArrayType(BASIC_SUBFORM_SCHEMA, True)
+        elif data_type == "consent_lookup":
+            spark_type = BASIC_LOOKUP_SCHEMA
+        elif data_type == "RRULE":
+            spark_type = RRULE_SCHEMA
+        elif data_type == "ALARM":
+            spark_type = ALARM_SCHEMA
+        else:
+            # Default to StringType for unknown types
+            spark_type = StringType()
+
+        # Handle special JSON types - store as JSON strings for flexibility
+        if json_type in ("jsonarray", "jsonobject"):
+            spark_type = StringType()
+
+        return StructField(api_name, spark_type, nullable)
+
+
+    def get_related_table_schema(related_module: str) -> StructType:
+        """
+        Build schema for a junction/related table.
+
+        Args:
+            related_module: Name of the related module (e.g., "Leads", "Contacts")
+
+        Returns:
+            A StructType representing the junction table schema.
+        """
+        related_fields = RELATED_MODULE_FIELDS.get(related_module, DEFAULT_RELATED_FIELDS)
+        return StructType(JUNCTION_BASE_FIELDS + related_fields)
+
+
+    def normalize_record(record: dict, json_fields: set) -> dict:
+        """
+        Normalize a record for Spark compatibility.
+        Only serializes fields that are declared as JSON strings in schema.
+
+        Args:
+            record: Raw record from Zoho API
+            json_fields: Set of field names that should be JSON-serialized
+
+        Returns:
+            Normalized record dictionary
+        """
+        normalized = {}
+        for key, value in record.items():
+            if value is None:
+                normalized[key] = None
+            elif key in json_fields and isinstance(value, (dict, list)):
+                normalized[key] = json.dumps(value)
+            else:
+                normalized[key] = value
+        return normalized
+
+
+    ########################################################
     # src/databricks/labs/community_connector/sources/zoho_crm/zoho_crm.py
     ########################################################
 
@@ -1486,4 +2230,4 @@ def register_lakeflow_source(spark):
             return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
 
 
-    spark.dataSource.register(LakeflowSource)  # pylint: disable=undefined-variable
+    spark.dataSource.register(LakeflowSource)

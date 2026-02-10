@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lakeflow-community-connectors-stripe"
+version = "0.1.0"
+description = "Stripe connector for Lakeflow Community Connectors"
+requires-python = ">=3.10"
+dependencies = [
+    "pyspark>=3.5.0",
+    "pydantic>=2.0.0",
+    "lakeflow-community-connectors>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[tool.setuptools]
+packages = ["databricks.labs.community_connector.sources.stripe"]
+
+[tool.setuptools.package-dir]
+"databricks.labs.community_connector.sources.stripe" = "."
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.md", "*.yaml"]

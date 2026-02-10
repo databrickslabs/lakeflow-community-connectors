@@ -22,6 +22,7 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["databricks*"]
+exclude = ["databricks.labs.community_connector.sources*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.json", "*.md", "*.yaml"]

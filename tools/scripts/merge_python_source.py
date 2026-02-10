@@ -7,8 +7,13 @@ support module imports for Python Data Source implementations.
 This script combines:
 1. src/databricks/labs/community_connector/libs/utils.py (parsing utilities)
 2. src/databricks/labs/community_connector/interface/lakeflow_connect.py (LakeflowConnect base class)
-3. src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py (source connector implementation)
-4. src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py (PySpark data source registration)
+3. src/databricks/labs/community_connector/sources/{source_name}/*.py (source library files, in dependency order)
+4. src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py (main source connector implementation)
+5. src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py (PySpark data source registration)
+
+Source library files (e.g., github_utils.py, github_schemas.py) are automatically discovered
+and included before the main source file. The script analyzes import dependencies to determine
+the correct ordering. Cross-file imports within the source directory are automatically removed.
 
 Usage:
     python tools/scripts/merge_python_source.py <source_name>
@@ -86,6 +91,126 @@ def get_all_sources() -> List[str]:
     return sorted(sources)
 
 
+def get_source_lib_files(source_name: str) -> List[Path]:
+    """
+    Discover additional Python library files in a source directory.
+    
+    These are Python files other than __init__.py, the main source file,
+    and generated files (_generated_*).
+    
+    Args:
+        source_name: Name of the source (e.g., "github")
+        
+    Returns:
+        List of Path objects for library files, ordered by import dependencies.
+    """
+    source_dir = (
+        PROJECT_ROOT / "src" / "databricks" / "labs" / "community_connector" 
+        / "sources" / source_name
+    )
+    
+    lib_files = []
+    main_file = f"{source_name}.py"
+    
+    for py_file in source_dir.glob("*.py"):
+        filename = py_file.name
+        # Skip main source file, __init__.py, and generated files
+        if (filename == main_file 
+            or filename == "__init__.py" 
+            or filename.startswith("_generated_")):
+            continue
+        lib_files.append(py_file)
+    
+    if not lib_files:
+        return []
+    
+    # Order files by import dependencies using topological sort
+    return order_by_dependencies(lib_files, source_name)
+
+
+def order_by_dependencies(files: List[Path], source_name: str) -> List[Path]:
+    """
+    Order files by their import dependencies (topological sort).
+    
+    Files that are imported by others come first. This ensures that when
+    merged, all dependencies are defined before they are used.
+    
+    Args:
+        files: List of Python file paths to order.
+        source_name: Name of the source (for import pattern matching).
+        
+    Returns:
+        List of files in dependency order (dependencies first).
+    """
+    # Build a map of module name -> file path
+    module_to_file = {}
+    for f in files:
+        # Convert filename to module name (e.g., "github_utils.py" -> "github_utils")
+        module_name = f.stem
+        module_to_file[module_name] = f
+    
+    # Build dependency graph: file -> set of files it depends on
+    dependencies = {f: set() for f in files}
+    
+    # Pattern to match imports from this source's modules
+    # e.g., "from databricks.labs.community_connector.sources.github.github_utils import ..."
+    import_pattern = re.compile(
+        rf"from\s+databricks\.labs\.community_connector\.sources\.{source_name}\.(\w+)"
+    )
+    
+    for f in files:
+        content = read_file_content(f)
+        matches = import_pattern.findall(content)
+        for module_name in matches:
+            if module_name in module_to_file:
+                dep_file = module_to_file[module_name]
+                if dep_file != f:  # Don't add self-dependency
+                    dependencies[f].add(dep_file)
+    
+    # Topological sort using Kahn's algorithm
+    # Calculate in-degree (number of files that depend on each file)
+    in_degree = {f: 0 for f in files}
+    for f, deps in dependencies.items():
+        for dep in deps:
+            # dep is depended upon by f, so dep should come first
+            pass  # We need reverse: who depends on whom
+    
+    # Reverse the graph: file -> set of files that depend on it
+    depended_by = {f: set() for f in files}
+    for f, deps in dependencies.items():
+        for dep in deps:
+            depended_by[dep].add(f)
+    
+    # Calculate in-degree based on dependencies
+    in_degree = {f: len(deps) for f, deps in dependencies.items()}
+    
+    # Start with files that have no dependencies
+    queue = [f for f in files if in_degree[f] == 0]
+    result = []
+    
+    while queue:
+        # Sort queue for deterministic output
+        queue.sort(key=lambda x: x.name)
+        current = queue.pop(0)
+        result.append(current)
+        
+        # Reduce in-degree for files that depend on current
+        for dependent in depended_by[current]:
+            in_degree[dependent] -= 1
+            if in_degree[dependent] == 0:
+                queue.append(dependent)
+    
+    # Check for cycles
+    if len(result) != len(files):
+        remaining = [f.name for f in files if f not in result]
+        raise ValueError(
+            f"Circular import dependency detected in source '{source_name}' "
+            f"involving files: {remaining}"
+        )
+    
+    return result
+
+
 def read_file_content(file_path: Path) -> str:
     """Read and return the content of a file."""
     if not file_path.exists():
@@ -117,9 +242,22 @@ def extract_imports_and_code(content: str) -> tuple:
         # "import section" (in_imports == True). Once we have seen real
         # code, docstrings are kept as-is.
         if stripped.startswith('"""') or stripped.startswith("'''"):
+            quote = '"""' if stripped.startswith('"""') else "'''"
             if in_imports:
-                # Skip leading module docstring lines entirely
+                # Skip leading module docstring entirely (may be multi-line)
+                # Check if docstring closes on the same line (after the opening quotes)
+                rest_of_line = stripped[3:]
+                if quote in rest_of_line:
+                    # Single-line docstring like """Some text"""
+                    i += 1
+                    continue
+                # Multi-line docstring: skip until we find closing quotes
                 i += 1
+                while i < len(lines):
+                    if quote in lines[i]:
+                        i += 1
+                        break
+                    i += 1
                 continue
             else:
                 # Inner/function/class docstrings are part of the code
@@ -350,7 +488,7 @@ def deduplicate_imports(import_lists: List[List[str]]) -> List[str]:
 
 def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     """
-    Merge the three files into a single file.
+    Merge source files into a single file.
 
     Args:
         source_name: Name of the source (e.g., "zendesk", "example")
@@ -372,10 +510,16 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
             src_base / "sources" / source_name / f"_generated_{source_name}_python_source.py"
         )
 
+    # Discover additional library files in the source directory
+    lib_files = get_source_lib_files(source_name)
+
     # Verify all files exist
     print(f"Merging files for source: {source_name}", file=sys.stderr)
     print(f"- utils.py: {utils_path}", file=sys.stderr)
     print(f"- lakeflow_connect.py: {interface_path}", file=sys.stderr)
+    if lib_files:
+        for lib_file in lib_files:
+            print(f"- {lib_file.name}: {lib_file}", file=sys.stderr)
     print(f"- {source_name}.py: {source_path}", file=sys.stderr)
     print(f"- lakeflow_datasource.py: {lakeflow_source_path}", file=sys.stderr)
 
@@ -385,6 +529,11 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
         interface_content = read_file_content(interface_path)
         source_content = read_file_content(source_path)
         lakeflow_source_content = read_file_content(lakeflow_source_path)
+        
+        # Read library files
+        lib_contents = []
+        for lib_file in lib_files:
+            lib_contents.append((lib_file, read_file_content(lib_file)))
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -398,6 +547,12 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     interface_imports, interface_code = extract_imports_and_code(interface_content)
     source_imports, source_code = extract_imports_and_code(source_content)
     lakeflow_imports, lakeflow_code = extract_imports_and_code(lakeflow_source_content)
+    
+    # Extract imports and code from library files
+    lib_imports_and_code = []
+    for lib_file, content in lib_contents:
+        lib_imports, lib_code = extract_imports_and_code(content)
+        lib_imports_and_code.append((lib_file, lib_imports, lib_code))
 
     # Replace the LakeflowConnectImpl alias with the actual implementation class.
     # The placeholder line in lakeflow_datasource.py is:
@@ -438,9 +593,11 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     lakeflow_code = "\n".join(filtered_lines)
 
     # Deduplicate and organize all imports
-    all_imports = deduplicate_imports(
-        [utils_imports, interface_imports, source_imports, lakeflow_imports]
-    )
+    all_import_lists = [utils_imports, interface_imports]
+    for _, lib_imports, _ in lib_imports_and_code:
+        all_import_lists.append(lib_imports)
+    all_import_lists.extend([source_imports, lakeflow_imports])
+    all_imports = deduplicate_imports(all_import_lists)
 
     # Build the merged content
     merged_lines = []
@@ -499,7 +656,24 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     merged_lines.append("")
     merged_lines.append("")
 
-    # Section 3: src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py code
+    # Section 3+: Source library files (in dependency order)
+    section_num = 3
+    for lib_file, _, lib_code in lib_imports_and_code:
+        rel_path = lib_file.relative_to(PROJECT_ROOT / "src")
+        merged_lines.append("    " + "#" * 56)
+        merged_lines.append(f"    # src/{rel_path}")
+        merged_lines.append("    " + "#" * 56)
+        merged_lines.append("")
+        for line in lib_code.strip().split("\n"):
+            if line.strip():
+                merged_lines.append("    " + line)
+            else:
+                merged_lines.append("")
+        merged_lines.append("")
+        merged_lines.append("")
+        section_num += 1
+
+    # Main source file: src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py code
     merged_lines.append("    " + "#" * 56)
     merged_lines.append(
         f"    # src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py"
@@ -514,7 +688,7 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     merged_lines.append("")
     merged_lines.append("")
 
-    # Section 4: src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py code
+    # Final section: Spark DataSource registration
     merged_lines.append("    " + "#" * 56)
     merged_lines.append(
         "    # src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py"
@@ -529,9 +703,7 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     merged_lines.append("")
 
     # Register the data source with Spark
-    merged_lines.append(
-        "\n    spark.dataSource.register(LakeflowSource)  # pylint: disable=undefined-variable"
-    )
+    merged_lines.append("\n    spark.dataSource.register(LakeflowSource)")
     merged_lines.append("")
 
     merged_content = "\n".join(merged_lines)
