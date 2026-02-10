@@ -4,6 +4,19 @@
 Implement the Python connector for **{{source_name}}** that conforms exactly to the interface defined in  
 [lakeflow_connect.py](../src/databricks/labs/community_connector/interface/lakeflow_connect.py). The implementation should be based on the source API documentation in `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md` produced by "understand-source".
 
+## File Organization
+
+For simple connectors, keeping everything in a single `{source_name}.py` file is perfectly fine. If the main file grows beyond **1000 lines**, consider splitting into multiple files for better maintainability. 
+
+When using multiple files, use absolute imports:
+```python
+from databricks.labs.community_connector.sources.{source_name}.{util_file_name} import some_helper
+```
+
+The merge script (`tools/scripts/merge_python_source.py`) automatically discovers and includes all Python files in the source directory, ordering them by import dependencies.
+
+See `src/databricks/labs/community_connector/sources/github/` for an example of a multi-file connector.
+
 ## Implementation Requirements
 - Implement all methods declared in the interface.
 - At the beginning of each function, check if the provided `table_name` exists in the list of supported tables. If it does not, raise an explicit exception to inform that the table is not supported.
