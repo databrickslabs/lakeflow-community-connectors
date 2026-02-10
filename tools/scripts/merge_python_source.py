@@ -15,6 +15,12 @@ Source library files (e.g., github_utils.py, github_schemas.py) are automaticall
 and included before the main source file. The script analyzes import dependencies to determine
 the correct ordering. Cross-file imports within the source directory are automatically removed.
 
+File Exclusion:
+    Files can be excluded from merging via merge_exclude_config.json in this directory.
+    The config supports:
+    - global_exclude: Glob patterns applied to all sources (e.g., "*_test*.py", "*_oauth_setup.py")
+    - source_exclude: Per-source exclusion patterns (e.g., {"zoho_crm": ["zoho_crm_oauth_setup.py"]})
+
 Usage:
     python tools/scripts/merge_python_source.py <source_name>
     python tools/scripts/merge_python_source.py zendesk
@@ -23,6 +29,8 @@ Usage:
 """
 
 import argparse
+import fnmatch
+import json
 import re
 import sys
 from pathlib import Path
@@ -31,6 +39,56 @@ from typing import List, Optional
 # Get the project root directory
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
+EXCLUDE_CONFIG_PATH = SCRIPT_DIR / "merge_exclude_config.json"
+
+
+def load_exclude_config() -> dict:
+    """
+    Load the exclusion configuration from merge_exclude_config.json.
+
+    Returns:
+        Dictionary with 'global_exclude' and 'source_exclude' keys.
+        Returns empty config if file doesn't exist.
+    """
+    if not EXCLUDE_CONFIG_PATH.exists():
+        return {"global_exclude": [], "source_exclude": {}}
+
+    try:
+        with open(EXCLUDE_CONFIG_PATH, "r") as f:
+            config = json.load(f)
+        return {
+            "global_exclude": config.get("global_exclude", []),
+            "source_exclude": config.get("source_exclude", {}),
+        }
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"Warning: Failed to load exclude config: {e}", file=sys.stderr)
+        return {"global_exclude": [], "source_exclude": {}}
+
+
+def should_exclude_file(filename: str, source_name: str, exclude_config: dict) -> bool:
+    """
+    Check if a file should be excluded based on the exclusion configuration.
+
+    Args:
+        filename: Name of the file to check.
+        source_name: Name of the source connector.
+        exclude_config: Exclusion configuration dictionary.
+
+    Returns:
+        True if the file should be excluded, False otherwise.
+    """
+    # Check global exclusions
+    for pattern in exclude_config.get("global_exclude", []):
+        if fnmatch.fnmatch(filename, pattern):
+            return True
+
+    # Check source-specific exclusions
+    source_excludes = exclude_config.get("source_exclude", {}).get(source_name, [])
+    for pattern in source_excludes:
+        if fnmatch.fnmatch(filename, pattern):
+            return True
+
+    return False
 
 
 def find_lakeflow_connect_class(source_content: str, source_name: str) -> str:
@@ -94,13 +152,17 @@ def get_all_sources() -> List[str]:
 def get_source_lib_files(source_name: str) -> List[Path]:
     """
     Discover additional Python library files in a source directory.
-    
+
     These are Python files other than __init__.py, the main source file,
-    and generated files (_generated_*).
-    
+    generated files (_generated_*), and files matching exclusion patterns
+    from merge_exclude_config.json.
+
+    Recursively searches subdirectories to support organized code structures
+    like handlers/, utils/, etc.
+
     Args:
         source_name: Name of the source (e.g., "github")
-        
+
     Returns:
         List of Path objects for library files, ordered by import dependencies.
     """
@@ -108,16 +170,23 @@ def get_source_lib_files(source_name: str) -> List[Path]:
         PROJECT_ROOT / "src" / "databricks" / "labs" / "community_connector" 
         / "sources" / source_name
     )
-    
+
+    # Load exclusion configuration
+    exclude_config = load_exclude_config()
+
     lib_files = []
     main_file = f"{source_name}.py"
-    
-    for py_file in source_dir.glob("*.py"):
+
+    # Recursively find all Python files (**.py pattern)
+    for py_file in source_dir.rglob("*.py"):
         filename = py_file.name
         # Skip main source file, __init__.py, and generated files
         if (filename == main_file 
             or filename == "__init__.py" 
             or filename.startswith("_generated_")):
+            continue
+        # Skip files matching exclusion patterns
+        if should_exclude_file(filename, source_name, exclude_config):
             continue
         lib_files.append(py_file)
     
@@ -125,46 +194,68 @@ def get_source_lib_files(source_name: str) -> List[Path]:
         return []
     
     # Order files by import dependencies using topological sort
-    return order_by_dependencies(lib_files, source_name)
+    return order_by_dependencies(lib_files, source_name, source_dir)
 
 
-def order_by_dependencies(files: List[Path], source_name: str) -> List[Path]:
+def order_by_dependencies(files: List[Path], source_name: str, source_dir: Path) -> List[Path]:
     """
     Order files by their import dependencies (topological sort).
-    
+
     Files that are imported by others come first. This ensures that when
     merged, all dependencies are defined before they are used.
-    
+
     Args:
         files: List of Python file paths to order.
         source_name: Name of the source (for import pattern matching).
-        
+        source_dir: Path to the source directory.
+
     Returns:
         List of files in dependency order (dependencies first).
     """
-    # Build a map of module name -> file path
+    # Build a map of module path -> file path
+    # Module path includes subdirectory (e.g., "handlers.base" for handlers/base.py)
     module_to_file = {}
     for f in files:
-        # Convert filename to module name (e.g., "github_utils.py" -> "github_utils")
-        module_name = f.stem
-        module_to_file[module_name] = f
+        # Get relative path from source_dir and convert to module notation
+        rel_path = f.relative_to(source_dir)
+        # Convert path to module: handlers/base.py -> handlers.base
+        module_path = str(rel_path.with_suffix("")).replace("/", ".").replace("\\", ".")
+        module_to_file[module_path] = f
+        # Also add just the stem for simple imports (e.g., "zoho_types")
+        module_to_file[f.stem] = f
     
     # Build dependency graph: file -> set of files it depends on
     dependencies = {f: set() for f in files}
     
     # Pattern to match imports from this source's modules
-    # e.g., "from databricks.labs.community_connector.sources.github.github_utils import ..."
+    # Matches both flat and nested imports:
+    # - "from databricks.labs.community_connector.sources.zoho_crm.zoho_types import ..."
+    # - "from databricks.labs.community_connector.sources.zoho_crm.handlers.base import ..."
     import_pattern = re.compile(
-        rf"from\s+databricks\.labs\.community_connector\.sources\.{source_name}\.(\w+)"
+        rf"from\s+databricks\.labs\.community_connector\.sources\.{source_name}\.([\w.]+)"
     )
+    # Also match relative imports like "from .base import TableHandler" or "from ..zoho_types import ..."
+    relative_import_pattern = re.compile(r"from\s+\.+([\w.]+)\s+import")
     
     for f in files:
         content = read_file_content(f)
+
+        # Check absolute imports
         matches = import_pattern.findall(content)
-        for module_name in matches:
-            if module_name in module_to_file:
-                dep_file = module_to_file[module_name]
+        for module_path in matches:
+            # module_path could be "zoho_types" or "handlers.base"
+            if module_path in module_to_file:
+                dep_file = module_to_file[module_path]
                 if dep_file != f:  # Don't add self-dependency
+                    dependencies[f].add(dep_file)
+
+        # Check relative imports
+        rel_matches = relative_import_pattern.findall(content)
+        for rel_module in rel_matches:
+            # Try to resolve relative import
+            if rel_module in module_to_file:
+                dep_file = module_to_file[rel_module]
+                if dep_file != f:
                     dependencies[f].add(dep_file)
     
     # Topological sort using Kahn's algorithm

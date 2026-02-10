@@ -8,11 +8,14 @@ that represent many-to-many relationships between modules.
 import logging
 from typing import Iterator
 
-import requests
 from pyspark.sql.types import StructType
 
-from .base import TableHandler
-from ..zoho_types import get_related_table_schema, RELATED_MODULE_API_FIELDS
+from databricks.labs.community_connector.sources.zoho_crm.handlers.base import TableHandler
+from databricks.labs.community_connector.sources.zoho_crm.zoho_client import ZohoAPIError
+from databricks.labs.community_connector.sources.zoho_crm.zoho_types import (
+    get_related_table_schema,
+    RELATED_MODULE_API_FIELDS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +40,10 @@ RELATED_TABLES = {
 class RelatedHandler(TableHandler):
     """
     Handler for Zoho CRM junction/related record tables.
-    
+
     Junction tables represent many-to-many relationships by fetching
     related records for each parent record via the Related Records API.
-    
+
     These tables:
     - Use the Related Records API (/crm/v8/{parent}/{id}/{related})
     - Include junction metadata (_junction_id, _parent_id, _parent_module)
@@ -55,14 +58,14 @@ class RelatedHandler(TableHandler):
     def get_schema(self, table_name: str, config: dict) -> StructType:
         """
         Get Spark schema for a junction table.
-        
+
         Junction table schemas include standard junction metadata fields
         (_junction_id, _parent_id, _parent_module) plus related module fields.
-        
+
         Args:
             table_name: Name of the junction table
             config: Table configuration (unused for junction tables)
-        
+
         Returns:
             Spark StructType representing the junction table schema
         """
@@ -73,14 +76,14 @@ class RelatedHandler(TableHandler):
     def get_metadata(self, table_name: str, config: dict) -> dict:
         """
         Get ingestion metadata for a junction table.
-        
+
         Junction tables use snapshot ingestion with a composite key since
         relationships can be created/deleted without timestamps.
-        
+
         Args:
             table_name: Name of the junction table
             config: Table configuration (unused for junction tables)
-        
+
         Returns:
             Dictionary with primary_keys=['_junction_id'] and ingestion_type='snapshot'
         """
@@ -98,16 +101,16 @@ class RelatedHandler(TableHandler):
     ) -> tuple[Iterator[dict], dict]:
         """
         Read records from a junction table.
-        
+
         Iterates through all parent records and fetches their related records
         using the Zoho CRM Related Records API. Each junction record includes
         the related record data plus metadata (_junction_id, _parent_id, _parent_module).
-        
+
         Args:
             table_name: Name of the junction table
             config: Table configuration with parent_module and related_module
             start_offset: Offset dictionary (unused - junction tables use snapshot)
-        
+
         Returns:
             Tuple of (records iterator, empty offset dict)
         """
@@ -139,10 +142,10 @@ class RelatedHandler(TableHandler):
     def _get_parent_ids(self, parent_module: str) -> Iterator[str]:
         """
         Get all record IDs from a parent module.
-        
+
         Args:
             parent_module: Name of the parent Zoho CRM module
-        
+
         Yields:
             Record IDs as strings
         """
@@ -160,16 +163,16 @@ class RelatedHandler(TableHandler):
     ) -> Iterator[dict]:
         """
         Get related records for a specific parent record.
-        
+
         Uses the Zoho CRM Related Records API to fetch records linked
         to a parent record via a many-to-many relationship.
-        
+
         Args:
             parent_module: Name of the parent module (e.g., "Campaigns")
             parent_id: ID of the parent record
             related_module: Name of the related module (e.g., "Leads")
             fields: Comma-separated field names to retrieve
-        
+
         Yields:
             Related record dictionaries
         """
@@ -178,8 +181,8 @@ class RelatedHandler(TableHandler):
 
         try:
             yield from self.client.paginate(endpoint, params=params)
-        except requests.exceptions.HTTPError as e:
+        except ZohoAPIError as e:
             # 204/400/404 means no related records - not an error
-            if e.response.status_code in (204, 400, 404):
+            if e.status_code in (204, 400, 404):
                 return
             raise
