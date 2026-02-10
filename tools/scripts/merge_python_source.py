@@ -177,8 +177,16 @@ def get_source_lib_files(source_name: str) -> List[Path]:
     lib_files = []
     main_file = f"{source_name}.py"
 
+    # Directories to skip (build artifacts, virtual environments, etc.)
+    skip_dirs = {"build", "dist", ".venv", "venv", "__pycache__", ".eggs"}
+
     # Recursively find all Python files (**.py pattern)
     for py_file in source_dir.rglob("*.py"):
+        # Skip files in build artifact directories
+        rel_parts = py_file.relative_to(source_dir).parts
+        if any(part in skip_dirs or part.endswith(".egg-info") for part in rel_parts):
+            continue
+
         filename = py_file.name
         # Skip main source file, __init__.py, and generated files
         if (filename == main_file 

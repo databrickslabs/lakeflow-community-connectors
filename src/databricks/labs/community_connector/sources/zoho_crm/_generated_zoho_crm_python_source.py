@@ -1081,9 +1081,7 @@ def register_lakeflow_source(spark):
             """
             fields = self.get_fields(module_name)
             return {
-                f.get("api_name")
-                for f in fields
-                if f.get("json_type") in ("jsonobject", "jsonarray")
+                f.get("api_name") for f in fields if f.get("json_type") in ("jsonobject", "jsonarray")
             }
 
         def get_schema(self, table_name: str, config: dict) -> StructType:
