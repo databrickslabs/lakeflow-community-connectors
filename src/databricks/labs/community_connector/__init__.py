@@ -11,4 +11,4 @@ def __getattr__(name):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["register"]
+__all__ = ["register"]  # pylint: disable=undefined-all-variable
