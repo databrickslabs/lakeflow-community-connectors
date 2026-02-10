@@ -23,14 +23,56 @@ Usage:
 """
 
 import argparse
+import fnmatch
+import json
 import re
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 # Get the project root directory
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
+EXCLUDE_CONFIG_PATH = SCRIPT_DIR / "merge_exclude_config.json"
+
+
+def load_exclude_config() -> Dict:
+    """
+    Load the exclude configuration from merge_exclude_config.json.
+
+    Returns:
+        Dictionary with 'global_exclude' and 'source_exclude' keys.
+    """
+    if not EXCLUDE_CONFIG_PATH.exists():
+        return {"global_exclude": [], "source_exclude": {}}
+
+    with open(EXCLUDE_CONFIG_PATH, "r") as f:
+        return json.load(f)
+
+
+def should_exclude_file(filename: str, source_name: str, exclude_config: Dict) -> bool:
+    """
+    Check if a file should be excluded from merging.
+
+    Args:
+        filename: The name of the file to check.
+        source_name: The name of the source connector.
+        exclude_config: The loaded exclude configuration.
+
+    Returns:
+        True if the file should be excluded, False otherwise.
+    """
+    # Check global exclude patterns
+    for pattern in exclude_config.get("global_exclude", []):
+        if fnmatch.fnmatch(filename, pattern):
+            return True
+
+    # Check source-specific excludes
+    source_excludes = exclude_config.get("source_exclude", {}).get(source_name, [])
+    if filename in source_excludes:
+        return True
+
+    return False
 
 
 def find_lakeflow_connect_class(source_content: str, source_name: str) -> str:
@@ -94,13 +136,13 @@ def get_all_sources() -> List[str]:
 def get_source_lib_files(source_name: str) -> List[Path]:
     """
     Discover additional Python library files in a source directory.
-    
+
     These are Python files other than __init__.py, the main source file,
-    and generated files (_generated_*).
-    
+    generated files (_generated_*), and files excluded via merge_exclude_config.json.
+
     Args:
         source_name: Name of the source (e.g., "github")
-        
+
     Returns:
         List of Path objects for library files, ordered by import dependencies.
     """
@@ -111,6 +153,7 @@ def get_source_lib_files(source_name: str) -> List[Path]:
     
     lib_files = []
     main_file = f"{source_name}.py"
+    exclude_config = load_exclude_config()
     
     for py_file in source_dir.glob("*.py"):
         filename = py_file.name
@@ -118,6 +161,9 @@ def get_source_lib_files(source_name: str) -> List[Path]:
         if (filename == main_file 
             or filename == "__init__.py" 
             or filename.startswith("_generated_")):
+            continue
+        # Skip files matching exclude patterns from config
+        if should_exclude_file(filename, source_name, exclude_config):
             continue
         lib_files.append(py_file)
     
