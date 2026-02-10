@@ -1094,4 +1094,4 @@ def register_lakeflow_source(spark):
             return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
 
 
-    spark.dataSource.register(LakeflowSource)  # pylint: disable=undefined-variable
+    spark.dataSource.register(LakeflowSource)

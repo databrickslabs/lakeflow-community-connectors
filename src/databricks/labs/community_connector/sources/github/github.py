@@ -1,18 +1,23 @@
 # pylint: disable=too-many-lines
-from datetime import datetime, timedelta
 from typing import Iterator, Any
 
 import requests
-from pyspark.sql.types import (
-    StructType,
-    StructField,
-    LongType,
-    StringType,
-    BooleanType,
-    ArrayType,
-    MapType,
-)
+from pyspark.sql.types import StructType
+
 from databricks.labs.community_connector.interface import LakeflowConnect
+from databricks.labs.community_connector.sources.github.github_schemas import (
+    TABLE_SCHEMAS,
+    TABLE_METADATA,
+    SUPPORTED_TABLES,
+)
+from databricks.labs.community_connector.sources.github.github_utils import (
+    PaginationOptions,
+    parse_pagination_options,
+    extract_next_link,
+    compute_next_cursor,
+    get_cursor_from_offset,
+    require_owner_repo,
+)
 
 
 class GithubLakeflowConnect(LakeflowConnect):
@@ -45,399 +50,7 @@ class GithubLakeflowConnect(LakeflowConnect):
         List names of all tables supported by this connector.
 
         """
-        return [
-            "issues",
-            "repositories",
-            "pull_requests",
-            "comments",
-            "commits",
-            "assignees",
-            "branches",
-            "collaborators",
-            "organizations",
-            "teams",
-            "users",
-            "reviews",
-        ]
-
-    def _get_user_struct(self) -> StructType:
-        """Return the nested user/assignee struct schema."""
-        return StructType(
-            [
-                StructField("login", StringType(), True),
-                StructField("id", LongType(), True),
-                StructField("node_id", StringType(), True),
-                StructField("type", StringType(), True),
-                StructField("site_admin", BooleanType(), True),
-            ]
-        )
-
-    def _get_permissions_struct(self) -> StructType:
-        """Return the permissions struct schema."""
-        return StructType(
-            [
-                StructField("admin", BooleanType(), True),
-                StructField("push", BooleanType(), True),
-                StructField("pull", BooleanType(), True),
-            ]
-        )
-
-    def _get_issues_schema(self) -> StructType:
-        """Return the issues table schema."""
-        user_struct = self._get_user_struct()
-        label_struct = StructType(
-            [
-                StructField("id", LongType(), True),
-                StructField("node_id", StringType(), True),
-                StructField("name", StringType(), True),
-                StructField("color", StringType(), True),
-                StructField("description", StringType(), True),
-                StructField("default", BooleanType(), True),
-            ]
-        )
-        milestone_struct = StructType(
-            [
-                StructField("id", LongType(), True),
-                StructField("number", LongType(), True),
-                StructField("title", StringType(), True),
-                StructField("description", StringType(), True),
-                StructField("state", StringType(), True),
-                StructField("created_at", StringType(), True),
-                StructField("updated_at", StringType(), True),
-                StructField("due_on", StringType(), True),
-            ]
-        )
-        return StructType(
-            [
-                StructField("id", LongType(), False),
-                StructField("node_id", StringType(), True),
-                StructField("number", LongType(), False),
-                StructField("repository_owner", StringType(), False),
-                StructField("repository_name", StringType(), False),
-                StructField("title", StringType(), True),
-                StructField("body", StringType(), True),
-                StructField("state", StringType(), True),
-                StructField("locked", BooleanType(), True),
-                StructField("comments", LongType(), True),
-                StructField("created_at", StringType(), True),
-                StructField("updated_at", StringType(), True),
-                StructField("closed_at", StringType(), True),
-                StructField("author_association", StringType(), True),
-                StructField("url", StringType(), True),
-                StructField("html_url", StringType(), True),
-                StructField("labels_url", StringType(), True),
-                StructField("comments_url", StringType(), True),
-                StructField("events_url", StringType(), True),
-                StructField("timeline_url", StringType(), True),
-                StructField("state_reason", StringType(), True),
-                StructField("user", user_struct, True),
-                StructField("assignee", user_struct, True),
-                StructField("assignees", ArrayType(user_struct, True), True),
-                StructField("labels", ArrayType(label_struct, True), True),
-                StructField("milestone", milestone_struct, True),
-                StructField("pull_request", MapType(StringType(), StringType(), True), True),
-                StructField("reactions", MapType(StringType(), StringType(), True), True),
-            ]
-        )
-
-    def _get_repositories_schema(self) -> StructType:
-        """Return the repositories table schema."""
-        user_struct = self._get_user_struct()
-        permissions_struct = self._get_permissions_struct()
-        license_struct = StructType(
-            [
-                StructField("key", StringType(), True),
-                StructField("name", StringType(), True),
-                StructField("spdx_id", StringType(), True),
-                StructField("url", StringType(), True),
-                StructField("node_id", StringType(), True),
-            ]
-        )
-        template_repository_struct = StructType(
-            [
-                StructField("id", LongType(), True),
-                StructField("node_id", StringType(), True),
-                StructField("name", StringType(), True),
-                StructField("full_name", StringType(), True),
-            ]
-        )
-        return StructType(
-            [
-                StructField("id", LongType(), False),
-                StructField("node_id", StringType(), True),
-                StructField("repository_owner", StringType(), False),
-                StructField("repository_name", StringType(), False),
-                StructField("name", StringType(), True),
-                StructField("full_name", StringType(), True),
-                StructField("owner", user_struct, True),
-                StructField("private", BooleanType(), True),
-                StructField("html_url", StringType(), True),
-                StructField("description", StringType(), True),
-                StructField("fork", BooleanType(), True),
-                StructField("url", StringType(), True),
-                StructField("archive_url", StringType(), True),
-                StructField("assignees_url", StringType(), True),
-                StructField("blobs_url", StringType(), True),
-                StructField("branches_url", StringType(), True),
-                StructField("collaborators_url", StringType(), True),
-                StructField("comments_url", StringType(), True),
-                StructField("commits_url", StringType(), True),
-                StructField("compare_url", StringType(), True),
-                StructField("contents_url", StringType(), True),
-                StructField("contributors_url", StringType(), True),
-                StructField("deployments_url", StringType(), True),
-                StructField("downloads_url", StringType(), True),
-                StructField("events_url", StringType(), True),
-                StructField("forks_url", StringType(), True),
-                StructField("git_commits_url", StringType(), True),
-                StructField("git_refs_url", StringType(), True),
-                StructField("git_tags_url", StringType(), True),
-                StructField("git_url", StringType(), True),
-                StructField("issue_comment_url", StringType(), True),
-                StructField("issue_events_url", StringType(), True),
-                StructField("issues_url", StringType(), True),
-                StructField("keys_url", StringType(), True),
-                StructField("labels_url", StringType(), True),
-                StructField("languages_url", StringType(), True),
-                StructField("merges_url", StringType(), True),
-                StructField("milestones_url", StringType(), True),
-                StructField("notifications_url", StringType(), True),
-                StructField("pulls_url", StringType(), True),
-                StructField("releases_url", StringType(), True),
-                StructField("ssh_url", StringType(), True),
-                StructField("stargazers_url", StringType(), True),
-                StructField("statuses_url", StringType(), True),
-                StructField("subscribers_url", StringType(), True),
-                StructField("subscription_url", StringType(), True),
-                StructField("tags_url", StringType(), True),
-                StructField("teams_url", StringType(), True),
-                StructField("trees_url", StringType(), True),
-                StructField("clone_url", StringType(), True),
-                StructField("mirror_url", StringType(), True),
-                StructField("hooks_url", StringType(), True),
-                StructField("svn_url", StringType(), True),
-                StructField("homepage", StringType(), True),
-                StructField("language", StringType(), True),
-                StructField("forks_count", LongType(), True),
-                StructField("stargazers_count", LongType(), True),
-                StructField("watchers_count", LongType(), True),
-                StructField("size", LongType(), True),
-                StructField("default_branch", StringType(), True),
-                StructField("open_issues_count", LongType(), True),
-                StructField("is_template", BooleanType(), True),
-                StructField("topics", ArrayType(StringType(), True), True),
-                StructField("has_issues", BooleanType(), True),
-                StructField("has_projects", BooleanType(), True),
-                StructField("has_wiki", BooleanType(), True),
-                StructField("has_pages", BooleanType(), True),
-                StructField("has_downloads", BooleanType(), True),
-                StructField("archived", BooleanType(), True),
-                StructField("disabled", BooleanType(), True),
-                StructField("visibility", StringType(), True),
-                StructField("pushed_at", StringType(), True),
-                StructField("created_at", StringType(), True),
-                StructField("updated_at", StringType(), True),
-                StructField("permissions", permissions_struct, True),
-                StructField("allow_rebase_merge", BooleanType(), True),
-                StructField("template_repository", template_repository_struct, True),
-                StructField("temp_clone_token", StringType(), True),
-                StructField("allow_squash_merge", BooleanType(), True),
-                StructField("allow_merge_commit", BooleanType(), True),
-                StructField("subscribers_count", LongType(), True),
-                StructField("network_count", LongType(), True),
-                StructField("license", license_struct, True),
-            ]
-        )
-
-    def _get_pull_requests_schema(self) -> StructType:
-        """Return the pull_requests table schema."""
-        user_struct = self._get_user_struct()
-        return StructType(
-            [
-                StructField("id", LongType(), False),
-                StructField("node_id", StringType(), True),
-                StructField("number", LongType(), False),
-                StructField("repository_owner", StringType(), False),
-                StructField("repository_name", StringType(), False),
-                StructField("state", StringType(), True),
-                StructField("title", StringType(), True),
-                StructField("body", StringType(), True),
-                StructField("draft", BooleanType(), True),
-                StructField("created_at", StringType(), True),
-                StructField("updated_at", StringType(), True),
-                StructField("closed_at", StringType(), True),
-                StructField("merged_at", StringType(), True),
-                StructField("merge_commit_sha", StringType(), True),
-                StructField("user", user_struct, True),
-                StructField("base", MapType(StringType(), StringType(), True), True),
-                StructField("head", MapType(StringType(), StringType(), True), True),
-                StructField("html_url", StringType(), True),
-                StructField("url", StringType(), True),
-            ]
-        )
-
-    def _get_comments_schema(self) -> StructType:
-        """Return the comments table schema."""
-        user_struct = self._get_user_struct()
-        return StructType(
-            [
-                StructField("id", LongType(), False),
-                StructField("node_id", StringType(), True),
-                StructField("repository_owner", StringType(), False),
-                StructField("repository_name", StringType(), False),
-                StructField("issue_url", StringType(), True),
-                StructField("html_url", StringType(), True),
-                StructField("body", StringType(), True),
-                StructField("user", user_struct, True),
-                StructField("created_at", StringType(), True),
-                StructField("updated_at", StringType(), True),
-                StructField("author_association", StringType(), True),
-            ]
-        )
-
-    def _get_commits_schema(self) -> StructType:
-        """Return the commits table schema."""
-        user_struct = self._get_user_struct()
-        return StructType(
-            [
-                StructField("sha", StringType(), False),
-                StructField("node_id", StringType(), True),
-                StructField("repository_owner", StringType(), False),
-                StructField("repository_name", StringType(), False),
-                StructField("commit_message", StringType(), True),
-                StructField("commit_author_name", StringType(), True),
-                StructField("commit_author_email", StringType(), True),
-                StructField("commit_author_date", StringType(), True),
-                StructField("commit_committer_name", StringType(), True),
-                StructField("commit_committer_email", StringType(), True),
-                StructField("commit_committer_date", StringType(), True),
-                StructField("html_url", StringType(), True),
-                StructField("url", StringType(), True),
-                StructField("author", user_struct, True),
-                StructField("committer", user_struct, True),
-            ]
-        )
-
-    def _get_users_schema(self) -> StructType:
-        """Return the users table schema."""
-        return StructType(
-            [
-                StructField("id", LongType(), False),
-                StructField("login", StringType(), False),
-                StructField("node_id", StringType(), True),
-                StructField("type", StringType(), True),
-                StructField("site_admin", BooleanType(), True),
-                StructField("name", StringType(), True),
-                StructField("company", StringType(), True),
-                StructField("blog", StringType(), True),
-                StructField("location", StringType(), True),
-                StructField("email", StringType(), True),
-                StructField("created_at", StringType(), True),
-                StructField("updated_at", StringType(), True),
-            ]
-        )
-
-    def _get_organizations_schema(self) -> StructType:
-        """Return the organizations table schema."""
-        return StructType(
-            [
-                StructField("id", LongType(), False),
-                StructField("login", StringType(), False),
-                StructField("node_id", StringType(), True),
-                StructField("url", StringType(), True),
-                StructField("repos_url", StringType(), True),
-                StructField("events_url", StringType(), True),
-                StructField("hooks_url", StringType(), True),
-                StructField("issues_url", StringType(), True),
-                StructField("members_url", StringType(), True),
-                StructField("public_members_url", StringType(), True),
-                StructField("avatar_url", StringType(), True),
-                StructField("description", StringType(), True),
-            ]
-        )
-
-    def _get_teams_schema(self) -> StructType:
-        """Return the teams table schema."""
-        return StructType(
-            [
-                StructField("id", LongType(), False),
-                StructField("node_id", StringType(), True),
-                StructField("organization_login", StringType(), False),
-                StructField("name", StringType(), True),
-                StructField("slug", StringType(), True),
-                StructField("description", StringType(), True),
-                StructField("privacy", StringType(), True),
-                StructField("permission", StringType(), True),
-            ]
-        )
-
-    def _get_assignees_schema(self) -> StructType:
-        """Return the assignees table schema."""
-        return StructType(
-            [
-                StructField("repository_owner", StringType(), False),
-                StructField("repository_name", StringType(), False),
-                StructField("login", StringType(), False),
-                StructField("id", LongType(), False),
-                StructField("node_id", StringType(), True),
-                StructField("type", StringType(), True),
-                StructField("site_admin", BooleanType(), True),
-            ]
-        )
-
-    def _get_collaborators_schema(self) -> StructType:
-        """Return the collaborators table schema."""
-        permissions_struct = self._get_permissions_struct()
-        return StructType(
-            [
-                StructField("repository_owner", StringType(), False),
-                StructField("repository_name", StringType(), False),
-                StructField("login", StringType(), False),
-                StructField("id", LongType(), False),
-                StructField("node_id", StringType(), True),
-                StructField("type", StringType(), True),
-                StructField("site_admin", BooleanType(), True),
-                StructField("permissions", permissions_struct, True),
-            ]
-        )
-
-    def _get_branches_schema(self) -> StructType:
-        """Return the branches table schema."""
-        commit_ref_struct = StructType(
-            [
-                StructField("sha", StringType(), True),
-                StructField("url", StringType(), True),
-            ]
-        )
-        return StructType(
-            [
-                StructField("repository_owner", StringType(), False),
-                StructField("repository_name", StringType(), False),
-                StructField("name", StringType(), False),
-                StructField("commit", commit_ref_struct, True),
-                StructField("protected", BooleanType(), True),
-                StructField("protection_url", StringType(), True),
-            ]
-        )
-
-    def _get_reviews_schema(self) -> StructType:
-        """Return the reviews table schema."""
-        user_struct = self._get_user_struct()
-        return StructType(
-            [
-                StructField("id", LongType(), False),
-                StructField("node_id", StringType(), True),
-                StructField("repository_owner", StringType(), False),
-                StructField("repository_name", StringType(), False),
-                StructField("pull_number", LongType(), False),
-                StructField("state", StringType(), True),
-                StructField("body", StringType(), True),
-                StructField("user", user_struct, True),
-                StructField("commit_id", StringType(), True),
-                StructField("submitted_at", StringType(), True),
-                StructField("html_url", StringType(), True),
-            ]
-        )
+        return SUPPORTED_TABLES.copy()
 
     def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
         """
@@ -446,28 +59,11 @@ class GithubLakeflowConnect(LakeflowConnect):
         The schema is static and derived from the GitHub REST API documentation
         and connector design for the `issues` object.
         """
-        schema_map = {
-            "issues": self._get_issues_schema,
-            "repositories": self._get_repositories_schema,
-            "pull_requests": self._get_pull_requests_schema,
-            "comments": self._get_comments_schema,
-            "commits": self._get_commits_schema,
-            "users": self._get_users_schema,
-            "organizations": self._get_organizations_schema,
-            "teams": self._get_teams_schema,
-            "assignees": self._get_assignees_schema,
-            "collaborators": self._get_collaborators_schema,
-            "branches": self._get_branches_schema,
-            "reviews": self._get_reviews_schema,
-        }
-
-        if table_name not in schema_map:
+        if table_name not in TABLE_SCHEMAS:
             raise ValueError(f"Unsupported table: {table_name!r}")
-        return schema_map[table_name]()
+        return TABLE_SCHEMAS[table_name]
 
-    def read_table_metadata(
-        self, table_name: str, table_options: dict[str, str]
-    ) -> dict:
+    def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
         """
         Fetch metadata for the given table.
 
@@ -476,63 +72,9 @@ class GithubLakeflowConnect(LakeflowConnect):
             - primary_keys: ["id"]
             - cursor_field: updated_at
         """
-        metadata_map = {
-            "issues": {
-                "primary_keys": ["id"],
-                "cursor_field": "updated_at",
-                "ingestion_type": "cdc",
-            },
-            "repositories": {
-                "primary_keys": ["id"],
-                "ingestion_type": "snapshot",
-            },
-            "pull_requests": {
-                "primary_keys": ["id"],
-                "cursor_field": "updated_at",
-                "ingestion_type": "cdc",
-            },
-            "comments": {
-                "primary_keys": ["id"],
-                "cursor_field": "updated_at",
-                "ingestion_type": "cdc",
-            },
-            "commits": {
-                "primary_keys": ["sha"],
-                "ingestion_type": "append",
-            },
-            "users": {
-                "primary_keys": ["id"],
-                "ingestion_type": "snapshot",
-            },
-            "organizations": {
-                "primary_keys": ["id"],
-                "ingestion_type": "snapshot",
-            },
-            "teams": {
-                "primary_keys": ["id"],
-                "ingestion_type": "snapshot",
-            },
-            "assignees": {
-                "primary_keys": ["repository_owner", "repository_name", "id"],
-                "ingestion_type": "snapshot",
-            },
-            "collaborators": {
-                "primary_keys": ["repository_owner", "repository_name", "id"],
-                "ingestion_type": "snapshot",
-            },
-            "branches": {
-                "primary_keys": ["repository_owner", "repository_name", "name"],
-                "ingestion_type": "snapshot",
-            },
-            "reviews": {
-                "primary_keys": ["id"],
-                "ingestion_type": "append",
-            },
-        }
-
-        if table_name not in metadata_map:
+        if table_name not in TABLE_METADATA:
             raise ValueError(f"Unsupported table: {table_name!r}")
-        return metadata_map[table_name]
+        return TABLE_METADATA[table_name]
 
     def read_table(
         self, table_name: str, start_offset: dict, table_options: dict[str, str]
@@ -578,89 +120,48 @@ class GithubLakeflowConnect(LakeflowConnect):
             raise ValueError(f"Unsupported table: {table_name!r}")
         return reader_map[table_name](start_offset, table_options)
 
-    def _read_issues(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
-        self, start_offset: dict, table_options: dict[str, str]
-    ) -> (Iterator[dict], dict):
-        """Internal implementation for reading the `issues` table."""
-        owner = table_options.get("owner")
-        repo = table_options.get("repo")
-        if not owner or not repo:
-            raise ValueError(
-                "table_configuration for 'issues' must include non-empty 'owner' and 'repo'"
-            )
+    def _paginated_fetch(
+        self,
+        url: str,
+        params: dict,
+        pagination: PaginationOptions,
+        entity_name: str,
+    ) -> list[dict]:
+        """
+        Generic paginated fetch from GitHub API.
 
-        state = table_options.get("state", "all")
+        Args:
+            url: The API endpoint URL.
+            params: Query parameters for the request.
+            pagination: Pagination configuration.
+            entity_name: Name of the entity being fetched (for error messages).
 
-        # Page size and safety limits
-        try:
-            per_page = int(table_options.get("per_page", 100))
-        except (TypeError, ValueError):
-            per_page = 100
-        per_page = max(1, min(per_page, 100))
-
-        try:
-            max_pages_per_batch = int(table_options.get("max_pages_per_batch", 50))
-        except (TypeError, ValueError):
-            max_pages_per_batch = 50
-
-        try:
-            lookback_seconds = int(table_options.get("lookback_seconds", 300))
-        except (TypeError, ValueError):
-            lookback_seconds = 300
-
-        # Determine the starting cursor (ISO 8601 string)
-        cursor = None
-        if start_offset and isinstance(start_offset, dict):
-            cursor = start_offset.get("cursor")
-        if not cursor:
-            cursor = table_options.get("start_date")
-
-        # Build initial request
-        url = f"{self.base_url}/repos/{owner}/{repo}/issues"
-        params = {
-            "state": state,
-            "per_page": per_page,
-            "sort": "updated",
-            "direction": "asc",
-        }
-        if cursor:
-            params["since"] = cursor
-
-        records: list[dict[str, Any]] = []
-        max_updated_at: str | None = None
-
+        Returns:
+            List of raw JSON objects from all fetched pages.
+        """
+        results: list[dict] = []
         pages_fetched = 0
         next_url: str | None = url
-        next_params = params
+        next_params: dict | None = params
 
-        while next_url and pages_fetched < max_pages_per_batch:
+        while next_url and pages_fetched < pagination.max_pages_per_batch:
             response = self._session.get(next_url, params=next_params, timeout=30)
             if response.status_code != 200:
                 raise RuntimeError(
-                    f"GitHub API error for issues: {response.status_code} {response.text}"
+                    f"GitHub API error for {entity_name}: {response.status_code} {response.text}"
                 )
 
-            issues = response.json() or []
-            if not isinstance(issues, list):
+            data = response.json() or []
+            if not isinstance(data, list):
                 raise ValueError(
-                    f"Unexpected response format for issues: {type(issues).__name__}"
+                    f"Unexpected response format for {entity_name}: {type(data).__name__}"
                 )
 
-            for issue in issues:
-                # Shallow-copy the raw JSON and add connector-derived fields.
-                record: dict[str, Any] = dict(issue)
-                record["repository_owner"] = owner
-                record["repository_name"] = repo
-                records.append(record)
-
-                updated_at = record.get("updated_at")
-                if isinstance(updated_at, str):
-                    if max_updated_at is None or updated_at > max_updated_at:
-                        max_updated_at = updated_at
+            results.extend(data)
 
             # Handle pagination via Link header
             link_header = response.headers.get("Link", "")
-            next_link = self._extract_next_link(link_header)
+            next_link = extract_next_link(link_header)
             if not next_link:
                 break
 
@@ -669,18 +170,49 @@ class GithubLakeflowConnect(LakeflowConnect):
             next_params = None
             pages_fetched += 1
 
-        # Compute the next cursor with a small lookback window to avoid missing records
-        next_cursor = cursor
-        if max_updated_at:
-            try:
-                dt = datetime.strptime(max_updated_at, "%Y-%m-%dT%H:%M:%SZ")
-                dt_with_lookback = dt - timedelta(seconds=lookback_seconds)
-                next_cursor = dt_with_lookback.strftime("%Y-%m-%dT%H:%M:%SZ")
-            except Exception:
-                # Fallback: if parsing fails, just reuse the raw max_updated_at
-                next_cursor = max_updated_at
+        return results
 
-        # If no new records, return the same offset to indicate end of stream for this batch
+    def _read_issues(
+        self, start_offset: dict, table_options: dict[str, str]
+    ) -> (Iterator[dict], dict):
+        """Internal implementation for reading the `issues` table."""
+        owner, repo = require_owner_repo(table_options, "issues")
+        pagination = parse_pagination_options(table_options)
+        state = table_options.get("state", "all")
+        cursor = get_cursor_from_offset(start_offset, table_options)
+
+        # Build initial request
+        url = f"{self.base_url}/repos/{owner}/{repo}/issues"
+        params = {
+            "state": state,
+            "per_page": pagination.per_page,
+            "sort": "updated",
+            "direction": "asc",
+        }
+        if cursor:
+            params["since"] = cursor
+
+        raw_issues = self._paginated_fetch(url, params, pagination, "issues")
+
+        # Process records and track max updated_at
+        records: list[dict[str, Any]] = []
+        max_updated_at: str | None = None
+
+        for issue in raw_issues:
+            record: dict[str, Any] = dict(issue)
+            record["repository_owner"] = owner
+            record["repository_name"] = repo
+            records.append(record)
+
+            updated_at = record.get("updated_at")
+            if isinstance(updated_at, str):
+                if max_updated_at is None or updated_at > max_updated_at:
+                    max_updated_at = updated_at
+
+        # Compute next cursor with lookback
+        next_cursor = compute_next_cursor(max_updated_at, cursor, pagination.lookback_seconds)
+
+        # If no new records, return the same offset to indicate end of stream
         if not records and start_offset:
             next_offset = start_offset
         else:
@@ -688,7 +220,7 @@ class GithubLakeflowConnect(LakeflowConnect):
 
         return iter(records), next_offset
 
-    def _read_repositories(  # pylint: disable=too-many-locals
+    def _read_repositories(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
@@ -719,70 +251,37 @@ class GithubLakeflowConnect(LakeflowConnect):
 
         if owner and org:
             raise ValueError(
-                "table_configuration for 'repositories' must not include both 'owner' and 'org'; "
-                "specify only one."
+                "table_configuration for 'repositories' must not include both "
+                "'owner' and 'org'; specify only one."
             )
         if not owner and not org:
             raise ValueError(
-                "table_configuration for 'repositories' must include either 'owner' (username) "
-                "or 'org' (organization login)"
+                "table_configuration for 'repositories' must include either "
+                "'owner' (username) or 'org' (organization login)"
             )
 
-        try:
-            per_page = int(table_options.get("per_page", 100))
-        except (TypeError, ValueError):
-            per_page = 100
-        per_page = max(1, min(per_page, 100))
-
-        try:
-            max_pages_per_batch = int(table_options.get("max_pages_per_batch", 50))
-        except (TypeError, ValueError):
-            max_pages_per_batch = 50
+        pagination = parse_pagination_options(table_options)
 
         if org:
             url = f"{self.base_url}/orgs/{org}/repos"
         else:
             url = f"{self.base_url}/users/{owner}/repos"
 
-        params = {"per_page": per_page}
+        params = {"per_page": pagination.per_page}
+
+        raw_repos = self._paginated_fetch(url, params, pagination, "repositories")
 
         records: list[dict[str, Any]] = []
-        pages_fetched = 0
-        next_url: str | None = url
-        next_params = params
-
-        while next_url and pages_fetched < max_pages_per_batch:
-            response = self._session.get(next_url, params=next_params, timeout=30)
-            if response.status_code != 200:
-                raise RuntimeError(
-                    f"GitHub API error for repositories: {response.status_code} {response.text}"
-                )
-
-            repos = response.json() or []
-            if not isinstance(repos, list):
-                raise ValueError(
-                    f"Unexpected response format for repositories: {type(repos).__name__}"
-                )
-
-            for repo_obj in repos:
-                record: dict[str, Any] = dict(repo_obj)
-                owner_obj = repo_obj.get("owner") or {}
-                record["repository_owner"] = owner_obj.get("login")
-                record["repository_name"] = repo_obj.get("name")
-                records.append(record)
-
-            link_header = response.headers.get("Link", "")
-            next_link = self._extract_next_link(link_header)
-            if not next_link:
-                break
-
-            next_url = next_link
-            next_params = None
-            pages_fetched += 1
+        for repo_obj in raw_repos:
+            record: dict[str, Any] = dict(repo_obj)
+            owner_obj = repo_obj.get("owner") or {}
+            record["repository_owner"] = owner_obj.get("login")
+            record["repository_name"] = repo_obj.get("name")
+            records.append(record)
 
         return iter(records), {}
 
-    def _read_pull_requests(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+    def _read_pull_requests(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
@@ -793,95 +292,38 @@ class GithubLakeflowConnect(LakeflowConnect):
         but for now this implementation always performs a forward read
         from the provided (optional) cursor.
         """
-        owner = table_options.get("owner")
-        repo = table_options.get("repo")
-        if not owner or not repo:
-            raise ValueError(
-                "table_configuration for 'pull_requests' must include non-empty 'owner' and 'repo'"
-            )
-
+        owner, repo = require_owner_repo(table_options, "pull_requests")
+        pagination = parse_pagination_options(table_options)
         state = table_options.get("state", "all")
-
-        try:
-            per_page = int(table_options.get("per_page", 100))
-        except (TypeError, ValueError):
-            per_page = 100
-        per_page = max(1, min(per_page, 100))
-
-        try:
-            max_pages_per_batch = int(table_options.get("max_pages_per_batch", 50))
-        except (TypeError, ValueError):
-            max_pages_per_batch = 50
-
-        try:
-            lookback_seconds = int(table_options.get("lookback_seconds", 300))
-        except (TypeError, ValueError):
-            lookback_seconds = 300
-
-        cursor = None
-        if start_offset and isinstance(start_offset, dict):
-            cursor = start_offset.get("cursor")
-        if not cursor:
-            cursor = table_options.get("start_date")
+        cursor = get_cursor_from_offset(start_offset, table_options)
 
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls"
         params = {
             "state": state,
-            "per_page": per_page,
+            "per_page": pagination.per_page,
             "sort": "updated",
             "direction": "asc",
         }
         if cursor:
             params["since"] = cursor
 
+        raw_prs = self._paginated_fetch(url, params, pagination, "pull_requests")
+
         records: list[dict[str, Any]] = []
         max_updated_at: str | None = None
 
-        pages_fetched = 0
-        next_url: str | None = url
-        next_params = params
+        for pr in raw_prs:
+            record: dict[str, Any] = dict(pr)
+            record["repository_owner"] = owner
+            record["repository_name"] = repo
+            records.append(record)
 
-        while next_url and pages_fetched < max_pages_per_batch:
-            response = self._session.get(next_url, params=next_params, timeout=30)
-            if response.status_code != 200:
-                raise RuntimeError(
-                    f"GitHub API error for pull_requests: {response.status_code} {response.text}"
-                )
+            updated_at = record.get("updated_at")
+            if isinstance(updated_at, str):
+                if max_updated_at is None or updated_at > max_updated_at:
+                    max_updated_at = updated_at
 
-            pull_requests = response.json() or []
-            if not isinstance(pull_requests, list):
-                raise ValueError(
-                    f"Unexpected response format for pull_requests: {type(pull_requests).__name__}"
-                )
-
-            for pr in pull_requests:
-                record: dict[str, Any] = dict(pr)
-                record["repository_owner"] = owner
-                record["repository_name"] = repo
-                records.append(record)
-
-                updated_at = record.get("updated_at")
-                if isinstance(updated_at, str):
-                    if max_updated_at is None or updated_at > max_updated_at:
-                        max_updated_at = updated_at
-
-            link_header = response.headers.get("Link", "")
-            next_link = self._extract_next_link(link_header)
-            if not next_link:
-                break
-
-            next_url = next_link
-            next_params = None
-            pages_fetched += 1
-
-        next_cursor = cursor
-        if max_updated_at:
-            try:
-                dt = datetime.strptime(max_updated_at, "%Y-%m-%dT%H:%M:%SZ")
-                dt_with_lookback = dt - timedelta(seconds=lookback_seconds)
-                next_cursor = dt_with_lookback.strftime("%Y-%m-%dT%H:%M:%SZ")
-            except Exception:
-                next_cursor = max_updated_at
+        next_cursor = compute_next_cursor(max_updated_at, cursor, pagination.lookback_seconds)
 
         if not records and start_offset:
             next_offset = start_offset
@@ -890,99 +332,43 @@ class GithubLakeflowConnect(LakeflowConnect):
 
         return iter(records), next_offset
 
-    def _read_comments(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+    def _read_comments(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
         Read the `comments` cdc table using:
             GET /repos/{owner}/{repo}/issues/comments
         """
-        owner = table_options.get("owner")
-        repo = table_options.get("repo")
-        if not owner or not repo:
-            raise ValueError(
-                "table_configuration for 'comments' must include non-empty 'owner' and 'repo'"
-            )
-
-        try:
-            per_page = int(table_options.get("per_page", 100))
-        except (TypeError, ValueError):
-            per_page = 100
-        per_page = max(1, min(per_page, 100))
-
-        try:
-            max_pages_per_batch = int(table_options.get("max_pages_per_batch", 50))
-        except (TypeError, ValueError):
-            max_pages_per_batch = 50
-
-        try:
-            lookback_seconds = int(table_options.get("lookback_seconds", 300))
-        except (TypeError, ValueError):
-            lookback_seconds = 300
-
-        cursor = None
-        if start_offset and isinstance(start_offset, dict):
-            cursor = start_offset.get("cursor")
-        if not cursor:
-            cursor = table_options.get("start_date")
+        owner, repo = require_owner_repo(table_options, "comments")
+        pagination = parse_pagination_options(table_options)
+        cursor = get_cursor_from_offset(start_offset, table_options)
 
         url = f"{self.base_url}/repos/{owner}/{repo}/issues/comments"
         params = {
-            "per_page": per_page,
+            "per_page": pagination.per_page,
             "sort": "updated",
             "direction": "asc",
         }
         if cursor:
             params["since"] = cursor
 
+        raw_comments = self._paginated_fetch(url, params, pagination, "comments")
+
         records: list[dict[str, Any]] = []
         max_updated_at: str | None = None
 
-        pages_fetched = 0
-        next_url: str | None = url
-        next_params = params
+        for comment in raw_comments:
+            record: dict[str, Any] = dict(comment)
+            record["repository_owner"] = owner
+            record["repository_name"] = repo
+            records.append(record)
 
-        while next_url and pages_fetched < max_pages_per_batch:
-            response = self._session.get(next_url, params=next_params, timeout=30)
-            if response.status_code != 200:
-                raise RuntimeError(
-                    f"GitHub API error for comments: {response.status_code} {response.text}"
-                )
+            updated_at = record.get("updated_at")
+            if isinstance(updated_at, str):
+                if max_updated_at is None or updated_at > max_updated_at:
+                    max_updated_at = updated_at
 
-            comments = response.json() or []
-            if not isinstance(comments, list):
-                raise ValueError(
-                    f"Unexpected response format for comments: {type(comments).__name__}"
-                )
-
-            for comment in comments:
-                record: dict[str, Any] = dict(comment)
-                record["repository_owner"] = owner
-                record["repository_name"] = repo
-                records.append(record)
-
-                updated_at = record.get("updated_at")
-                if isinstance(updated_at, str):
-                    if max_updated_at is None or updated_at > max_updated_at:
-                        max_updated_at = updated_at
-
-            link_header = response.headers.get("Link", "")
-            next_link = self._extract_next_link(link_header)
-            if not next_link:
-                break
-
-            next_url = next_link
-            next_params = None
-            pages_fetched += 1
-
-        next_cursor = cursor
-        if max_updated_at:
-            try:
-                dt = datetime.strptime(max_updated_at, "%Y-%m-%dT%H:%M:%SZ")
-                dt_with_lookback = dt - timedelta(seconds=lookback_seconds)
-                next_cursor = dt_with_lookback.strftime("%Y-%m-%dT%H:%M:%SZ")
-            except Exception:
-                next_cursor = max_updated_at
+        next_cursor = compute_next_cursor(max_updated_at, cursor, pagination.lookback_seconds)
 
         if not records and start_offset:
             next_offset = start_offset
@@ -991,106 +377,58 @@ class GithubLakeflowConnect(LakeflowConnect):
 
         return iter(records), next_offset
 
-    def _read_commits(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+    def _read_commits(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
         Read the `commits` append-only table using:
             GET /repos/{owner}/{repo}/commits
         """
-        owner = table_options.get("owner")
-        repo = table_options.get("repo")
-        if not owner or not repo:
-            raise ValueError(
-                "table_configuration for 'commits' must include non-empty 'owner' and 'repo'"
-            )
-
-        try:
-            per_page = int(table_options.get("per_page", 100))
-        except (TypeError, ValueError):
-            per_page = 100
-        per_page = max(1, min(per_page, 100))
-
-        try:
-            max_pages_per_batch = int(table_options.get("max_pages_per_batch", 50))
-        except (TypeError, ValueError):
-            max_pages_per_batch = 50
-
-        cursor = None
-        if start_offset and isinstance(start_offset, dict):
-            cursor = start_offset.get("cursor")
-        if not cursor:
-            cursor = table_options.get("start_date")
+        owner, repo = require_owner_repo(table_options, "commits")
+        pagination = parse_pagination_options(table_options)
+        cursor = get_cursor_from_offset(start_offset, table_options)
 
         url = f"{self.base_url}/repos/{owner}/{repo}/commits"
-        params = {
-            "per_page": per_page,
-        }
+        params = {"per_page": pagination.per_page}
         if cursor:
             params["since"] = cursor
+
+        raw_commits = self._paginated_fetch(url, params, pagination, "commits")
 
         records: list[dict[str, Any]] = []
         max_commit_date: str | None = None
 
-        pages_fetched = 0
-        next_url: str | None = url
-        next_params = params
+        for commit_obj in raw_commits:
+            commit_info = commit_obj.get("commit", {}) or {}
+            commit_author = commit_info.get("author", {}) or {}
+            commit_committer = commit_info.get("committer", {}) or {}
 
-        while next_url and pages_fetched < max_pages_per_batch:
-            response = self._session.get(next_url, params=next_params, timeout=30)
-            if response.status_code != 200:
-                raise RuntimeError(
-                    f"GitHub API error for commits: {response.status_code} {response.text}"
-                )
+            record: dict[str, Any] = {
+                "sha": commit_obj.get("sha"),
+                "node_id": commit_obj.get("node_id"),
+                "repository_owner": owner,
+                "repository_name": repo,
+                "commit_message": commit_info.get("message"),
+                "commit_author_name": commit_author.get("name"),
+                "commit_author_email": commit_author.get("email"),
+                "commit_author_date": commit_author.get("date"),
+                "commit_committer_name": commit_committer.get("name"),
+                "commit_committer_email": commit_committer.get("email"),
+                "commit_committer_date": commit_committer.get("date"),
+                "html_url": commit_obj.get("html_url"),
+                "url": commit_obj.get("url"),
+                "author": commit_obj.get("author"),
+                "committer": commit_obj.get("committer"),
+            }
+            records.append(record)
 
-            commits = response.json() or []
-            if not isinstance(commits, list):
-                raise ValueError(
-                    f"Unexpected response format for commits: {type(commits).__name__}"
-                )
+            author_date = record.get("commit_author_date")
+            if isinstance(author_date, str):
+                if max_commit_date is None or author_date > max_commit_date:
+                    max_commit_date = author_date
 
-            for commit_obj in commits:
-                commit_info = commit_obj.get("commit", {}) or {}
-                commit_author = commit_info.get("author", {}) or {}
-                commit_committer = commit_info.get("committer", {}) or {}
-
-                record: dict[str, Any] = {
-                    "sha": commit_obj.get("sha"),
-                    "node_id": commit_obj.get("node_id"),
-                    "repository_owner": owner,
-                    "repository_name": repo,
-                    "commit_message": commit_info.get("message"),
-                    "commit_author_name": commit_author.get("name"),
-                    "commit_author_email": commit_author.get("email"),
-                    "commit_author_date": commit_author.get("date"),
-                    "commit_committer_name": commit_committer.get("name"),
-                    "commit_committer_email": commit_committer.get("email"),
-                    "commit_committer_date": commit_committer.get("date"),
-                    "html_url": commit_obj.get("html_url"),
-                    "url": commit_obj.get("url"),
-                    "author": commit_obj.get("author"),
-                    "committer": commit_obj.get("committer"),
-                }
-                records.append(record)
-
-                author_date = record.get("commit_author_date")
-                if isinstance(author_date, str):
-                    if max_commit_date is None or author_date > max_commit_date:
-                        max_commit_date = author_date
-
-            link_header = response.headers.get("Link", "")
-            next_link = self._extract_next_link(link_header)
-            if not next_link:
-                break
-
-            next_url = next_link
-            next_params = None
-            pages_fetched += 1
-
-        next_cursor = cursor
-        if max_commit_date:
-            # For commits we simply reuse the max commit author date as the next cursor.
-            next_cursor = max_commit_date
+        # For commits we simply reuse the max commit author date as the next cursor.
+        next_cursor = max_commit_date if max_commit_date else cursor
 
         if not records and start_offset:
             next_offset = start_offset
@@ -1099,214 +437,97 @@ class GithubLakeflowConnect(LakeflowConnect):
 
         return iter(records), next_offset
 
-    def _read_assignees(  # pylint: disable=too-many-locals
+    def _read_assignees(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
         Read the `assignees` snapshot table using:
             GET /repos/{owner}/{repo}/assignees
         """
-        owner = table_options.get("owner")
-        repo = table_options.get("repo")
-        if not owner or not repo:
-            raise ValueError(
-                "table_configuration for 'assignees' must include non-empty 'owner' and 'repo'"
-            )
-
-        try:
-            per_page = int(table_options.get("per_page", 100))
-        except (TypeError, ValueError):
-            per_page = 100
-        per_page = max(1, min(per_page, 100))
-
-        try:
-            max_pages_per_batch = int(table_options.get("max_pages_per_batch", 50))
-        except (TypeError, ValueError):
-            max_pages_per_batch = 50
+        owner, repo = require_owner_repo(table_options, "assignees")
+        pagination = parse_pagination_options(table_options)
 
         url = f"{self.base_url}/repos/{owner}/{repo}/assignees"
-        params = {"per_page": per_page}
+        params = {"per_page": pagination.per_page}
+
+        raw_assignees = self._paginated_fetch(url, params, pagination, "assignees")
 
         records: list[dict[str, Any]] = []
-        pages_fetched = 0
-        next_url: str | None = url
-        next_params = params
-
-        while next_url and pages_fetched < max_pages_per_batch:
-            response = self._session.get(next_url, params=next_params, timeout=30)
-            if response.status_code != 200:
-                raise RuntimeError(
-                    f"GitHub API error for assignees: {response.status_code} {response.text}"
-                )
-
-            assignees = response.json() or []
-            if not isinstance(assignees, list):
-                raise ValueError(
-                    f"Unexpected response format for assignees: {type(assignees).__name__}"
-                )
-
-            for assignee in assignees:
-                record: dict[str, Any] = {
-                    "repository_owner": owner,
-                    "repository_name": repo,
-                    "login": assignee.get("login"),
-                    "id": assignee.get("id"),
-                    "node_id": assignee.get("node_id"),
-                    "type": assignee.get("type"),
-                    "site_admin": assignee.get("site_admin"),
-                }
-                records.append(record)
-
-            link_header = response.headers.get("Link", "")
-            next_link = self._extract_next_link(link_header)
-            if not next_link:
-                break
-
-            next_url = next_link
-            next_params = None
-            pages_fetched += 1
+        for assignee in raw_assignees:
+            record: dict[str, Any] = {
+                "repository_owner": owner,
+                "repository_name": repo,
+                "login": assignee.get("login"),
+                "id": assignee.get("id"),
+                "node_id": assignee.get("node_id"),
+                "type": assignee.get("type"),
+                "site_admin": assignee.get("site_admin"),
+            }
+            records.append(record)
 
         return iter(records), {}
 
-    def _read_branches(  # pylint: disable=too-many-locals
+    def _read_branches(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
         Read the `branches` snapshot table using:
             GET /repos/{owner}/{repo}/branches
         """
-        owner = table_options.get("owner")
-        repo = table_options.get("repo")
-        if not owner or not repo:
-            raise ValueError(
-                "table_configuration for 'branches' must include non-empty 'owner' and 'repo'"
-            )
-
-        try:
-            per_page = int(table_options.get("per_page", 100))
-        except (TypeError, ValueError):
-            per_page = 100
-        per_page = max(1, min(per_page, 100))
-
-        try:
-            max_pages_per_batch = int(table_options.get("max_pages_per_batch", 50))
-        except (TypeError, ValueError):
-            max_pages_per_batch = 50
+        owner, repo = require_owner_repo(table_options, "branches")
+        pagination = parse_pagination_options(table_options)
 
         url = f"{self.base_url}/repos/{owner}/{repo}/branches"
-        params = {"per_page": per_page}
+        params = {"per_page": pagination.per_page}
+
+        raw_branches = self._paginated_fetch(url, params, pagination, "branches")
 
         records: list[dict[str, Any]] = []
-        pages_fetched = 0
-        next_url: str | None = url
-        next_params = params
-
-        while next_url and pages_fetched < max_pages_per_batch:
-            response = self._session.get(next_url, params=next_params, timeout=30)
-            if response.status_code != 200:
-                raise RuntimeError(
-                    f"GitHub API error for branches: {response.status_code} {response.text}"
-                )
-
-            branches = response.json() or []
-            if not isinstance(branches, list):
-                raise ValueError(
-                    f"Unexpected response format for branches: {type(branches).__name__}"
-                )
-
-            for branch in branches:
-                record: dict[str, Any] = {
-                    "repository_owner": owner,
-                    "repository_name": repo,
-                    "name": branch.get("name"),
-                    "commit": branch.get("commit"),
-                    "protected": branch.get("protected"),
-                    "protection_url": branch.get("protection_url"),
-                }
-                records.append(record)
-
-            link_header = response.headers.get("Link", "")
-            next_link = self._extract_next_link(link_header)
-            if not next_link:
-                break
-
-            next_url = next_link
-            next_params = None
-            pages_fetched += 1
+        for branch in raw_branches:
+            record: dict[str, Any] = {
+                "repository_owner": owner,
+                "repository_name": repo,
+                "name": branch.get("name"),
+                "commit": branch.get("commit"),
+                "protected": branch.get("protected"),
+                "protection_url": branch.get("protection_url"),
+            }
+            records.append(record)
 
         return iter(records), {}
 
-    def _read_collaborators(  # pylint: disable=too-many-locals
+    def _read_collaborators(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
         Read the `collaborators` snapshot table using:
             GET /repos/{owner}/{repo}/collaborators
         """
-        owner = table_options.get("owner")
-        repo = table_options.get("repo")
-        if not owner or not repo:
-            raise ValueError(
-                "table_configuration for 'collaborators' must include non-empty 'owner' and 'repo'"
-            )
-
-        try:
-            per_page = int(table_options.get("per_page", 100))
-        except (TypeError, ValueError):
-            per_page = 100
-        per_page = max(1, min(per_page, 100))
-
-        try:
-            max_pages_per_batch = int(table_options.get("max_pages_per_batch", 50))
-        except (TypeError, ValueError):
-            max_pages_per_batch = 50
+        owner, repo = require_owner_repo(table_options, "collaborators")
+        pagination = parse_pagination_options(table_options)
 
         url = f"{self.base_url}/repos/{owner}/{repo}/collaborators"
-        params = {"per_page": per_page}
+        params = {"per_page": pagination.per_page}
+
+        raw_collaborators = self._paginated_fetch(url, params, pagination, "collaborators")
 
         records: list[dict[str, Any]] = []
-        pages_fetched = 0
-        next_url: str | None = url
-        next_params = params
-
-        while next_url and pages_fetched < max_pages_per_batch:
-            response = self._session.get(next_url, params=next_params, timeout=30)
-            if response.status_code != 200:
-                raise RuntimeError(
-                    f"GitHub API error for collaborators: {response.status_code} {response.text}"
-                )
-
-            collaborators = response.json() or []
-            if not isinstance(collaborators, list):
-                raise ValueError(
-                    f"Unexpected response format for collaborators: {type(collaborators).__name__}"
-                )
-
-            for collaborator in collaborators:
-                record: dict[str, Any] = {
-                    "repository_owner": owner,
-                    "repository_name": repo,
-                    "login": collaborator.get("login"),
-                    "id": collaborator.get("id"),
-                    "node_id": collaborator.get("node_id"),
-                    "type": collaborator.get("type"),
-                    "site_admin": collaborator.get("site_admin"),
-                    "permissions": collaborator.get("permissions"),
-                }
-                records.append(record)
-
-            link_header = response.headers.get("Link", "")
-            next_link = self._extract_next_link(link_header)
-            if not next_link:
-                break
-
-            next_url = next_link
-            next_params = None
-            pages_fetched += 1
+        for collaborator in raw_collaborators:
+            record: dict[str, Any] = {
+                "repository_owner": owner,
+                "repository_name": repo,
+                "login": collaborator.get("login"),
+                "id": collaborator.get("id"),
+                "node_id": collaborator.get("node_id"),
+                "type": collaborator.get("type"),
+                "site_admin": collaborator.get("site_admin"),
+                "permissions": collaborator.get("permissions"),
+            }
+            records.append(record)
 
         return iter(records), {}
 
-    def _read_organizations(  # pylint: disable=too-many-locals
+    def _read_organizations(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
@@ -1322,76 +543,37 @@ class GithubLakeflowConnect(LakeflowConnect):
         the detail endpoint. The table therefore exposes the summary
         metadata returned directly by `GET /user/orgs`.
         """
-        try:
-            per_page = int(table_options.get("per_page", 100))
-        except (TypeError, ValueError):
-            per_page = 100
-        per_page = max(1, min(per_page, 100))
+        pagination = parse_pagination_options(table_options)
 
-        try:
-            max_pages_per_batch = int(table_options.get("max_pages_per_batch", 50))
-        except (TypeError, ValueError):
-            max_pages_per_batch = 50
-
-        # List organizations visible to the authenticated user
         url = f"{self.base_url}/user/orgs"
-        params = {"per_page": per_page}
+        params = {"per_page": pagination.per_page}
+
+        raw_orgs = self._paginated_fetch(url, params, pagination, "organizations")
 
         records: list[dict[str, Any]] = []
-        pages_fetched = 0
-        next_url: str | None = url
-        next_params = params
+        for org_summary in raw_orgs:
+            if not isinstance(org_summary, dict):
+                continue
 
-        while next_url and pages_fetched < max_pages_per_batch:
-            response = self._session.get(next_url, params=next_params, timeout=30)
-            if response.status_code != 200:
-                raise RuntimeError(
-                    f"GitHub API error for organizations: {response.status_code} {response.text}"
-                )
+            record: dict[str, Any] = {
+                "id": org_summary.get("id"),
+                "login": org_summary.get("login"),
+                "node_id": org_summary.get("node_id"),
+                "url": org_summary.get("url"),
+                "repos_url": org_summary.get("repos_url"),
+                "events_url": org_summary.get("events_url"),
+                "hooks_url": org_summary.get("hooks_url"),
+                "issues_url": org_summary.get("issues_url"),
+                "members_url": org_summary.get("members_url"),
+                "public_members_url": org_summary.get("public_members_url"),
+                "avatar_url": org_summary.get("avatar_url"),
+                "description": org_summary.get("description"),
+            }
+            records.append(record)
 
-            orgs = response.json() or []
-            if not isinstance(orgs, list):
-                raise ValueError(
-                    f"Unexpected response format for organizations list: {type(orgs).__name__}"
-                )
-
-            # Use the summary objects returned directly by GET /user/orgs
-            # without further expansion. Map the response into the schema
-            # defined in `get_table_schema`.
-            for org_summary in orgs:
-                if not isinstance(org_summary, dict):
-                    # Skip malformed entries instead of failing the whole batch
-                    continue
-
-                record: dict[str, Any] = {
-                    "id": org_summary.get("id"),
-                    "login": org_summary.get("login"),
-                    "node_id": org_summary.get("node_id"),
-                    "url": org_summary.get("url"),
-                    "repos_url": org_summary.get("repos_url"),
-                    "events_url": org_summary.get("events_url"),
-                    "hooks_url": org_summary.get("hooks_url"),
-                    "issues_url": org_summary.get("issues_url"),
-                    "members_url": org_summary.get("members_url"),
-                    "public_members_url": org_summary.get("public_members_url"),
-                    "avatar_url": org_summary.get("avatar_url"),
-                    "description": org_summary.get("description"),
-                }
-                records.append(record)
-
-            link_header = response.headers.get("Link", "")
-            next_link = self._extract_next_link(link_header)
-            if not next_link:
-                break
-
-            next_url = next_link
-            next_params = None
-            pages_fetched += 1
-
-        # Snapshot table – no incremental cursor at the moment.
         return iter(records), {}
 
-    def _read_teams(  # pylint: disable=too-many-locals
+    def _read_teams(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
@@ -1406,78 +588,39 @@ class GithubLakeflowConnect(LakeflowConnect):
         The connector also adds `organization_login` to each record to match
         the declared schema.
         """
-        try:
-            per_page = int(table_options.get("per_page", 100))
-        except (TypeError, ValueError):
-            per_page = 100
-        per_page = max(1, min(per_page, 100))
+        pagination = parse_pagination_options(table_options)
 
-        try:
-            max_pages_per_batch = int(table_options.get("max_pages_per_batch", 50))
-        except (TypeError, ValueError):
-            max_pages_per_batch = 50
-
-        # List teams visible to the authenticated user
         url = f"{self.base_url}/user/teams"
-        params = {"per_page": per_page}
+        params = {"per_page": pagination.per_page}
+
+        raw_teams = self._paginated_fetch(url, params, pagination, "teams")
 
         records: list[dict[str, Any]] = []
-        pages_fetched = 0
-        next_url: str | None = url
-        next_params = params
+        for team_summary in raw_teams:
+            org_obj = team_summary.get("organization") or {}
+            org_login = org_obj.get("login")
+            team_slug = team_summary.get("slug")
+            if not org_login or not team_slug:
+                continue
 
-        while next_url and pages_fetched < max_pages_per_batch:
-            response = self._session.get(next_url, params=next_params, timeout=30)
-            if response.status_code != 200:
+            detail_url = f"{self.base_url}/orgs/{org_login}/teams/{team_slug}"
+            detail_resp = self._session.get(detail_url, timeout=30)
+            if detail_resp.status_code != 200:
                 raise RuntimeError(
-                    f"GitHub API error for teams: {response.status_code} {response.text}"
+                    f"GitHub API error for team {org_login!r}/{team_slug!r}: "
+                    f"{detail_resp.status_code} {detail_resp.text}"
                 )
 
-            teams = response.json() or []
-            if not isinstance(teams, list):
+            team_obj = detail_resp.json() or {}
+            if not isinstance(team_obj, dict):
                 raise ValueError(
-                    f"Unexpected response format for teams list: {type(teams).__name__}"
+                    f"Unexpected response format for team detail: {type(team_obj).__name__}"
                 )
 
-            # Expand each team via GET /orgs/{org}/teams/{team_slug}
-            for team_summary in teams:
-                org_obj = team_summary.get("organization") or {}
-                org_login = org_obj.get("login")
-                team_slug = team_summary.get("slug")
-                if not org_login or not team_slug:
-                    # Skip malformed entries instead of failing the whole batch
-                    continue
+            record: dict[str, Any] = dict(team_obj)
+            record["organization_login"] = org_login
+            records.append(record)
 
-                detail_url = f"{self.base_url}/orgs/{org_login}/teams/{team_slug}"
-                detail_resp = self._session.get(detail_url, timeout=30)
-                if detail_resp.status_code != 200:
-                    raise RuntimeError(
-                        "GitHub API error for team "
-                        f"{org_login!r}/{team_slug!r}: "
-                        f"{detail_resp.status_code} {detail_resp.text}"
-                    )
-
-                team_obj = detail_resp.json() or {}
-                if not isinstance(team_obj, dict):
-                    raise ValueError(
-                        "Unexpected response format for team detail: "
-                        f"{type(team_obj).__name__}"
-                    )
-
-                record: dict[str, Any] = dict(team_obj)
-                record["organization_login"] = org_login
-                records.append(record)
-
-            link_header = response.headers.get("Link", "")
-            next_link = self._extract_next_link(link_header)
-            if not next_link:
-                break
-
-            next_url = next_link
-            next_params = None
-            pages_fetched += 1
-
-        # Snapshot table – no incremental cursor at the moment.
         return iter(records), {}
 
     def _read_users(
@@ -1507,7 +650,7 @@ class GithubLakeflowConnect(LakeflowConnect):
         record: dict[str, Any] = dict(user_obj)
         return iter([record]), {}
 
-    def _read_reviews(  # pylint: disable=too-many-locals,too-many-statements
+    def _read_reviews(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
@@ -1522,151 +665,51 @@ class GithubLakeflowConnect(LakeflowConnect):
               Then for each pull request, call the reviews API above and
               combine all reviews into a single logical table.
         """
-        owner = table_options.get("owner")
-        repo = table_options.get("repo")
-        if not owner or not repo:
-            raise ValueError(
-                "table_configuration for 'reviews' must include non-empty 'owner' and 'repo'"
-            )
-
-        # Page size and safety limits for listing parent pull requests and
-        # paginating through reviews.
-        try:
-            per_page = int(table_options.get("per_page", 100))
-        except (TypeError, ValueError):
-            per_page = 100
-        per_page = max(1, min(per_page, 100))
-
-        try:
-            max_pages_per_batch = int(table_options.get("max_pages_per_batch", 50))
-        except (TypeError, ValueError):
-            max_pages_per_batch = 50
-
+        owner, repo = require_owner_repo(table_options, "reviews")
+        pagination = parse_pagination_options(table_options)
         pull_number_opt = table_options.get("pull_number")
 
         records: list[dict[str, Any]] = []
 
         def _fetch_reviews_for_pull(pull_number: int) -> None:
-            """
-            Fetch reviews for a single pull request and append them to `records`.
-            This uses the list API and respects pagination, combining all pages.
-            """
+            """Fetch reviews for a single pull request and append to records."""
             url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}/reviews"
-            params = {"per_page": per_page}
+            params = {"per_page": pagination.per_page}
 
-            pages_fetched = 0
-            next_url: str | None = url
-            next_params = params
+            raw_reviews = self._paginated_fetch(
+                url, params, pagination, f"reviews for PR #{pull_number}"
+            )
 
-            while next_url and pages_fetched < max_pages_per_batch:
-                response = self._session.get(next_url, params=next_params, timeout=30)
-                if response.status_code != 200:
-                    raise RuntimeError(
-                        "GitHub API error for reviews "
-                        f"for pull_request {pull_number}: "
-                        f"{response.status_code} {response.text}"
-                    )
+            for review in raw_reviews:
+                record: dict[str, Any] = dict(review)
+                record["repository_owner"] = owner
+                record["repository_name"] = repo
+                record["pull_number"] = int(pull_number)
+                records.append(record)
 
-                reviews = response.json() or []
-                if not isinstance(reviews, list):
-                    raise ValueError(
-                        "Unexpected response format for reviews: "
-                        f"{type(reviews).__name__}"
-                    )
-
-                for review in reviews:
-                    record: dict[str, Any] = dict(review)
-                    record["repository_owner"] = owner
-                    record["repository_name"] = repo
-                    record["pull_number"] = int(pull_number)
-                    records.append(record)
-
-                link_header = response.headers.get("Link", "")
-                next_link = self._extract_next_link(link_header)
-                if not next_link:
-                    break
-
-                next_url = next_link
-                next_params = None
-                pages_fetched += 1
-
-        # If a specific pull_number is provided, preserve the original behavior
-        # while now also supporting pagination of the reviews list.
+        # If a specific pull_number is provided, fetch reviews for that PR only
         if pull_number_opt is not None:
             try:
                 pull_number_int = int(pull_number_opt)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError) as exc:
                 raise ValueError(
                     f"table_options['pull_number'] must be an int-compatible value, "
                     f"got {pull_number_opt!r}"
-                )
+                ) from exc
 
             _fetch_reviews_for_pull(pull_number_int)
             return iter(records), {}
 
-        # If no specific pull_number is provided, list all pull requests for the
-        # repository and fetch reviews for each, combining them into a single
-        # logical table. This follows the recommended pattern for child objects
-        # when parent identifiers are optional (see Step 3 of the coding guide).
+        # Otherwise, list all pull requests and fetch reviews for each
         pr_state = table_options.get("state", "all")
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls"
-        params = {
-            "state": pr_state,
-            "per_page": per_page,
-        }
+        params = {"state": pr_state, "per_page": pagination.per_page}
 
-        pages_fetched = 0
-        next_url: str | None = url
-        next_params = params
+        raw_prs = self._paginated_fetch(url, params, pagination, "pull_requests")
 
-        while next_url and pages_fetched < max_pages_per_batch:
-            response = self._session.get(next_url, params=next_params, timeout=30)
-            if response.status_code != 200:
-                raise RuntimeError(
-                    f"GitHub API error for pull_requests while discovering reviews: "
-                    f"{response.status_code} {response.text}"
-                )
+        for pr in raw_prs:
+            number = pr.get("number")
+            if isinstance(number, int):
+                _fetch_reviews_for_pull(number)
 
-            pull_requests = response.json() or []
-            if not isinstance(pull_requests, list):
-                raise ValueError(
-                    "Unexpected response format for pull_requests when discovering "
-                    f"reviews: {type(pull_requests).__name__}"
-                )
-
-            for pr in pull_requests:
-                number = pr.get("number")
-                if isinstance(number, int):
-                    _fetch_reviews_for_pull(number)
-
-            link_header = response.headers.get("Link", "")
-            next_link = self._extract_next_link(link_header)
-            if not next_link:
-                break
-
-            next_url = next_link
-            next_params = None
-            pages_fetched += 1
-
-        # Snapshot append-only table – we currently do not track an incremental
-        # cursor for reviews, so the offset is always an empty dict.
         return iter(records), {}
-
-    @staticmethod
-    def _extract_next_link(link_header: str | None) -> str | None:
-        """
-        Parse the GitHub Link header to extract the URL with rel="next".
-        """
-        if not link_header:
-            return None
-
-        parts = link_header.split(",")
-        for part in parts:
-            section = part.strip()
-            if 'rel="next"' in section:
-                # Format: <url>; rel="next"
-                start = section.find("<")
-                end = section.find(">", start + 1)
-                if start != -1 and end != -1:
-                    return section[start + 1 : end]
-        return None

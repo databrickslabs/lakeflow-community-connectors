@@ -6,7 +6,7 @@ from pathlib import Path
 import tests.unit.sources.test_suite as test_suite
 from tests.unit.sources.test_suite import LakeflowConnectTester
 from databricks.labs.community_connector.sources.hubspot.hubspot import HubspotLakeflowConnect
-from databricks.labs.community_connector.sources.hubspot.hubspot_test_utils import LakeflowConnectTestUtils
+from tests.unit.sources.hubspot.hubspot_test_utils import LakeflowConnectTestUtils
 
 
 def load_config():
