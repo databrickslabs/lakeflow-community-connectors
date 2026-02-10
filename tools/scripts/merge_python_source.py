@@ -140,6 +140,8 @@ def get_source_lib_files(source_name: str) -> List[Path]:
     These are Python files other than __init__.py, the main source file,
     generated files (_generated_*), and files excluded via merge_exclude_config.json.
 
+    This function also recursively discovers files in subdirectories (e.g., handlers/).
+
     Args:
         source_name: Name of the source (e.g., "github")
 
@@ -154,22 +156,27 @@ def get_source_lib_files(source_name: str) -> List[Path]:
     lib_files = []
     main_file = f"{source_name}.py"
     exclude_config = load_exclude_config()
-    
-    for py_file in source_dir.glob("*.py"):
+
+    # Use rglob to recursively find all Python files
+    for py_file in source_dir.rglob("*.py"):
         filename = py_file.name
+        # Get relative path from source_dir for checking subdirectories
+        rel_path = py_file.relative_to(source_dir)
+
         # Skip main source file, __init__.py, and generated files
-        if (filename == main_file 
-            or filename == "__init__.py" 
-            or filename.startswith("_generated_")):
+        if filename == main_file or filename == "__init__.py" or filename.startswith("_generated_"):
             continue
         # Skip files matching exclude patterns from config
         if should_exclude_file(filename, source_name, exclude_config):
             continue
+        # Skip files in special directories (configs, etc.)
+        if any(part.startswith(".") or part == "configs" for part in rel_path.parts):
+            continue
         lib_files.append(py_file)
-    
+
     if not lib_files:
         return []
-    
+
     # Order files by import dependencies using topological sort
     return order_by_dependencies(lib_files, source_name)
 
@@ -177,41 +184,67 @@ def get_source_lib_files(source_name: str) -> List[Path]:
 def order_by_dependencies(files: List[Path], source_name: str) -> List[Path]:
     """
     Order files by their import dependencies (topological sort).
-    
+
     Files that are imported by others come first. This ensures that when
     merged, all dependencies are defined before they are used.
-    
+
     Args:
         files: List of Python file paths to order.
         source_name: Name of the source (for import pattern matching).
-        
+
     Returns:
         List of files in dependency order (dependencies first).
     """
-    # Build a map of module name -> file path
+    source_dir = (
+        PROJECT_ROOT
+        / "src"
+        / "databricks"
+        / "labs"
+        / "community_connector"
+        / "sources"
+        / source_name
+    )
+
+    # Build a map of module path -> file path
+    # e.g., "github_utils" -> Path(...), "handlers.base" -> Path(...)
     module_to_file = {}
     for f in files:
-        # Convert filename to module name (e.g., "github_utils.py" -> "github_utils")
-        module_name = f.stem
-        module_to_file[module_name] = f
-    
+        # Get relative path from source_dir without .py extension
+        rel_path = f.relative_to(source_dir)
+        # Convert path to module notation (e.g., "handlers/base.py" -> "handlers.base")
+        module_path = str(rel_path.with_suffix("")).replace("/", ".").replace("\\", ".")
+        module_to_file[module_path] = f
+        # Also add just the filename stem for backward compatibility with simple imports
+        module_to_file[f.stem] = f
+
     # Build dependency graph: file -> set of files it depends on
     dependencies = {f: set() for f in files}
-    
-    # Pattern to match imports from this source's modules
+
+    # Pattern to match imports from this source's modules (including submodules)
     # e.g., "from databricks.labs.community_connector.sources.github.github_utils import ..."
+    # e.g., "from databricks.labs.community_connector.sources.zoho_crm.handlers.base import ..."
     import_pattern = re.compile(
-        rf"from\s+databricks\.labs\.community_connector\.sources\.{source_name}\.(\w+)"
+        rf"from\s+databricks\.labs\.community_connector\.sources\.{source_name}\.([\w.]+)"
     )
     
     for f in files:
         content = read_file_content(f)
         matches = import_pattern.findall(content)
-        for module_name in matches:
-            if module_name in module_to_file:
-                dep_file = module_to_file[module_name]
-                if dep_file != f:  # Don't add self-dependency
-                    dependencies[f].add(dep_file)
+        for module_path in matches:
+            # module_path could be "handlers.base" or just "zoho_client"
+            # We need to find the actual module file (strip any class/function imports)
+            # For "handlers.base", we want "handlers.base" -> handlers/base.py
+            # For "handlers", we might be importing from __init__.py which we skip
+
+            # Try full path first, then progressively shorter paths
+            parts = module_path.split(".")
+            for i in range(len(parts), 0, -1):
+                candidate = ".".join(parts[:i])
+                if candidate in module_to_file:
+                    dep_file = module_to_file[candidate]
+                    if dep_file != f:  # Don't add self-dependency
+                        dependencies[f].add(dep_file)
+                    break
     
     # Topological sort using Kahn's algorithm
     # Calculate in-degree (number of files that depend on each file)
