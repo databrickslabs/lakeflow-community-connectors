@@ -5,9 +5,9 @@ Validate the generated connector for **{{source_name}}** by executing the provid
 
 ## Instructions
 
-1. Create a `test_{source_name}_lakeflow_connect.py` under `sources/{source_name}/test/` directory.
-2. Use `test/test_suite.py` to run test and follow `sources/example/test/test_example_lakeflow_connect.py` or other sources as an example.
-3. Use the configuration file `sources/{source_name}/configs/dev_config.json` and `sources/{source_name}/configs/dev_table_config.json` to initialize your tests.
+1. Create a `test_{source_name}_lakeflow_connect.py` under `tests/unit/sources/{source_name}/` directory.
+2. Use `tests/unit/sources/test_suite.py` to run test and follow `tests/unit/sources/example/test_example_lakeflow_connect.py` or other sources as an example.
+3. Use the configuration file `tests/unit/sources/{source_name}/configs/dev_config.json` and `tests/unit/sources/{source_name}/configs/dev_table_config.json` to initialize your tests.
    - example:
 ```json
 {
@@ -19,8 +19,8 @@ Validate the generated connector for **{{source_name}}** by executing the provid
    - If `dev_config.json` does not exist, create it and ask the developers to provide the required parameters to connect to a test instance of the source.
    - If needed, create `dev_table_config.json` and ask developers to supply the necessary table_options parameters for testing different cases.
    - Be sure to remove these config files after testing is complete and before committing any changes.
-4. Run the tests using: `pytest sources/{source_name}/test/test_{source_name}_lakeflow_connect.py -v`
-5. Based on test failures, update the implementation under `sources/{source_name}` as needed. Use both the test results and the source API documentation, as well as any relevant libraries and test code, to guide your corrections.
+4. Run the tests using: `pytest tests/unit/sources/{source_name}/test_{source_name}_lakeflow_connect.py -v`
+5. Based on test failures, update the implementation under `src/databricks/labs/community_connector/sources/{source_name}` as needed. Use both the test results and the source API documentation, as well as any relevant libraries and test code, to guide your corrections.
 
 ## Notes
 

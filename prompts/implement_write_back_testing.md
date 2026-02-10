@@ -31,7 +31,7 @@ This ensures:
 
 ### Step 1: Create Test Utils File
 
-Create `sources/{source_name}/{source_name}_test_utils.py` implementing the interface defined in [lakeflow_connect_test_utils.py](../tests/lakeflow_connect_test_utils.py).
+Create `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_test_utils.py` implementing the interface defined in [lakeflow_connect_test_utils.py](../tests/unit/sources/lakeflow_connect_test_utils.py).
 
 **Use the write-back API documentation as your implementation guide:**
 - Write endpoints and payload structure from the "Write-Back APIs" section
@@ -46,7 +46,7 @@ Create `sources/{source_name}/{source_name}_test_utils.py` implementing the inte
 - `list_deletable_tables()`: List tables that support delete testing — only for tables with `cdc_with_deletes` ingestion type
 - `delete_rows()`: Delete records and return deleted row info for verification via `read_table_deletes`
 
-**Reference Implementation:** See `sources/hubspot/hubspot_test_utils.py` for a complete working example.
+**Reference Implementation:** See `src/databricks/labs/community_connector/sources/hubspot/hubspot_test_utils.py` for a complete working example.
 
 **Implementation Tips:**
 - Initialize API client for write operations in `__init__`
@@ -58,11 +58,11 @@ Create `sources/{source_name}/{source_name}_test_utils.py` implementing the inte
 
 ### Step 2: Update Test File
 
-Modify `sources/{source_name}/test/test_{source_name}_lakeflow_connect.py` to import test utils:
+Modify `tests/unit/sources/{source_name}/test_{source_name}_lakeflow_connect.py` to import test utils:
 
 ```python
 # Add this import
-from sources.{source_name}.{source_name}_test_utils import LakeflowConnectTestUtils
+from databricks.labs.community_connector.sources.{source_name}.{source_name}_test_utils import LakeflowConnectTestUtils
 
 def test_{source_name}_connector():
     test_suite.LakeflowConnect = LakeflowConnect
@@ -70,12 +70,12 @@ def test_{source_name}_connector():
     
     # Rest remains the same...
 ```
-**Reference Implementation:** See `sources/hubspot/test/test_hubspot_lakeflow_connect.py` for an example implementation.
+**Reference Implementation:** See `tests/unit/sources/hubspot/test_hubspot_lakeflow_connect.py` for an example implementation.
 
 ### Step 3: Run Tests with Write Validation
 
 ```bash
-pytest sources/{source_name}/test/test_{source_name}_lakeflow_connect.py -v
+pytest tests/unit/sources/{source_name}/test_{source_name}_lakeflow_connect.py -v
 ```
 
 **Additional Tests Now Executed:**

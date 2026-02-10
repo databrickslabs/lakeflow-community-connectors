@@ -5,9 +5,10 @@ Due to current limitations, the Spark Declarative Pipeline (SDP) does not
 support module imports for Python Data Source implementations.
 
 This script combines:
-1. libs/utils.py (parsing utilities)
-2. sources/{source_name}/{source_name}.py (source connector implementation)
-3. pipeline/lakeflow_python_source.py (PySpark data source registration)
+1. src/databricks/labs/community_connector/libs/utils.py (parsing utilities)
+2. src/databricks/labs/community_connector/interface/lakeflow_connect.py (LakeflowConnect base class)
+3. src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py (source connector implementation)
+4. src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py (PySpark data source registration)
 
 Usage:
     python tools/scripts/merge_python_source.py <source_name>
@@ -17,6 +18,7 @@ Usage:
 """
 
 import argparse
+import re
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -26,6 +28,45 @@ SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
 
 
+def find_lakeflow_connect_class(source_content: str, source_name: str) -> str:
+    """
+    Find the LakeflowConnect implementation class name in the source file.
+
+    Source connectors must define a class that inherits from LakeflowConnect:
+        class MyConnectorLakeflowConnect(LakeflowConnect):
+            ...
+
+    Args:
+        source_content: The content of the source connector file.
+        source_name: The name of the source (for error messages).
+
+    Returns:
+        The name of the LakeflowConnect implementation class.
+
+    Raises:
+        ValueError: If no LakeflowConnect implementation is found.
+        ValueError: If multiple LakeflowConnect implementations are found.
+    """
+    # Pattern: class SomeName(LakeflowConnect):
+    # Matches classes that inherit from LakeflowConnect
+    subclass_pattern = r"^class\s+(\w+)\s*\(\s*LakeflowConnect\s*\)\s*:"
+    matches = re.findall(subclass_pattern, source_content, re.MULTILINE)
+
+    if len(matches) == 0:
+        raise ValueError(
+            f"No LakeflowConnect implementation found in {source_name}.py. "
+            f"Expected a class definition like: class MyLakeflowConnect(LakeflowConnect):"
+        )
+
+    if len(matches) > 1:
+        raise ValueError(
+            f"Multiple LakeflowConnect implementations found in {source_name}.py: {matches}. "
+            f"Expected exactly one class that inherits from LakeflowConnect."
+        )
+
+    return matches[0]
+
+
 def get_all_sources() -> List[str]:
     """
     Discover all available source connectors.
@@ -33,7 +74,7 @@ def get_all_sources() -> List[str]:
     Returns a list of source names that have a {source_name}.py file
     in their directory (excluding 'interface').
     """
-    sources_dir = PROJECT_ROOT / "sources"
+    sources_dir = PROJECT_ROOT / "src" / "databricks" / "labs" / "community_connector" / "sources"
     sources = []
     
     for source_dir in sources_dir.iterdir():
@@ -143,9 +184,10 @@ def deduplicate_imports(import_lists: List[List[str]]) -> List[str]:
     """
     # Imports to skip (internal imports that won't work in merged file)
     skip_patterns = [
-        "from libs.utils import",
-        "from pipeline.lakeflow_python_source import",
-        "from sources.",
+        "from databricks.labs.community_connector.libs.utils import",
+        "from databricks.labs.community_connector.sparkpds.lakeflow_datasource import",
+        "from databricks.labs.community_connector.sources.",
+        "from databricks.labs.community_connector.interface",
     ]
 
     # Track 'from X import Y' style imports to merge them
@@ -318,41 +360,87 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
         The merged content as a string
     """
     # Define file paths
-    utils_path = PROJECT_ROOT / "libs" / "utils.py"
-    source_path = PROJECT_ROOT / "sources" / source_name / f"{source_name}.py"
-    lakeflow_source_path = PROJECT_ROOT / "pipeline" / "lakeflow_python_source.py"
+    src_base = PROJECT_ROOT / "src" / "databricks" / "labs" / "community_connector"
+    utils_path = src_base / "libs" / "utils.py"
+    interface_path = src_base / "interface" / "lakeflow_connect.py"
+    source_path = src_base / "sources" / source_name / f"{source_name}.py"
+    lakeflow_source_path = src_base / "sparkpds" / "lakeflow_datasource.py"
 
     # If no output path specified, use default location in source directory
     if output_path is None:
         output_path = (
-            PROJECT_ROOT
-            / "sources"
-            / source_name
-            / f"_generated_{source_name}_python_source.py"
+            src_base / "sources" / source_name / f"_generated_{source_name}_python_source.py"
         )
 
     # Verify all files exist
     print(f"Merging files for source: {source_name}", file=sys.stderr)
     print(f"- utils.py: {utils_path}", file=sys.stderr)
+    print(f"- lakeflow_connect.py: {interface_path}", file=sys.stderr)
     print(f"- {source_name}.py: {source_path}", file=sys.stderr)
-    print(f"- lakeflow_python_source.py: {lakeflow_source_path}", file=sys.stderr)
+    print(f"- lakeflow_datasource.py: {lakeflow_source_path}", file=sys.stderr)
 
     try:
         # Read all files
         utils_content = read_file_content(utils_path)
+        interface_content = read_file_content(interface_path)
         source_content = read_file_content(source_path)
         lakeflow_source_content = read_file_content(lakeflow_source_path)
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # Find the LakeflowConnect implementation class name in the source
+    lakeflow_connect_class = find_lakeflow_connect_class(source_content, source_name)
+    print(f"- LakeflowConnect implementation: {lakeflow_connect_class}", file=sys.stderr)
+
     # Extract imports and code from each file
     utils_imports, utils_code = extract_imports_and_code(utils_content)
+    interface_imports, interface_code = extract_imports_and_code(interface_content)
     source_imports, source_code = extract_imports_and_code(source_content)
     lakeflow_imports, lakeflow_code = extract_imports_and_code(lakeflow_source_content)
 
+    # Replace the LakeflowConnectImpl alias with the actual implementation class.
+    # The placeholder line in lakeflow_datasource.py is:
+    #   LakeflowConnectImpl = LakeflowConnect  # __LAKEFLOW_CONNECT_IMPL__
+    # We replace it with:
+    #   LakeflowConnectImpl = ActualClassName
+    placeholder_pattern = (
+        r"LakeflowConnectImpl\s*=\s*LakeflowConnect\s*#\s*__LAKEFLOW_CONNECT_IMPL__"
+    )
+    replacement = f"LakeflowConnectImpl = {lakeflow_connect_class}"
+    lakeflow_code, num_replacements = re.subn(placeholder_pattern, replacement, lakeflow_code)
+
+    if num_replacements == 0:
+        raise ValueError(
+            "Failed to find the LakeflowConnectImpl placeholder in lakeflow_datasource.py. "
+            "Expected line: LakeflowConnectImpl = LakeflowConnect  # __LAKEFLOW_CONNECT_IMPL__"
+        )
+    if num_replacements > 1:
+        raise ValueError(
+            f"Found {num_replacements} LakeflowConnectImpl placeholders in lakeflow_datasource.py. "
+            "Expected exactly one placeholder."
+        )
+
+    # Remove # fmt: off and # fmt: on comments (and any immediately following empty lines)
+    # These are only needed in the source file to prevent formatter issues
+    lakeflow_code_lines = lakeflow_code.split("\n")
+    filtered_lines = []
+    skip_next_empty = False
+    for line in lakeflow_code_lines:
+        if line.strip() in ("# fmt: off", "# fmt: on"):
+            skip_next_empty = True
+            continue
+        if skip_next_empty and not line.strip():
+            skip_next_empty = False
+            continue
+        skip_next_empty = False
+        filtered_lines.append(line)
+    lakeflow_code = "\n".join(filtered_lines)
+
     # Deduplicate and organize all imports
-    all_imports = deduplicate_imports([utils_imports, source_imports, lakeflow_imports])
+    all_imports = deduplicate_imports(
+        [utils_imports, interface_imports, source_imports, lakeflow_imports]
+    )
 
     # Build the merged content
     merged_lines = []
@@ -382,9 +470,9 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     merged_lines.append('    """Register the Lakeflow Python source with Spark."""')
     merged_lines.append("")
 
-    # Section 1: libs/utils.py code
+    # Section 1: src/databricks/labs/community_connector/libs/utils.py code
     merged_lines.append("    " + "#" * 56)
-    merged_lines.append("    # libs/utils.py")
+    merged_lines.append("    # src/databricks/labs/community_connector/libs/utils.py")
     merged_lines.append("    " + "#" * 56)
     merged_lines.append("")
     # Indent the code
@@ -396,9 +484,26 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     merged_lines.append("")
     merged_lines.append("")
 
-    # Section 2: sources/{source_name}/{source_name}.py code
+    # Section 2: src/databricks/labs/community_connector/interface/lakeflow_connect.py code
     merged_lines.append("    " + "#" * 56)
-    merged_lines.append(f"    # sources/{source_name}/{source_name}.py")
+    merged_lines.append(
+        "    # src/databricks/labs/community_connector/interface/lakeflow_connect.py"
+    )
+    merged_lines.append("    " + "#" * 56)
+    merged_lines.append("")
+    for line in interface_code.strip().split("\n"):
+        if line.strip():
+            merged_lines.append("    " + line)
+        else:
+            merged_lines.append("")
+    merged_lines.append("")
+    merged_lines.append("")
+
+    # Section 3: src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py code
+    merged_lines.append("    " + "#" * 56)
+    merged_lines.append(
+        f"    # src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py"
+    )
     merged_lines.append("    " + "#" * 56)
     merged_lines.append("")
     for line in source_code.strip().split("\n"):
@@ -409,9 +514,11 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     merged_lines.append("")
     merged_lines.append("")
 
-    # Section 3: pipeline/lakeflow_python_source.py code
+    # Section 4: src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py code
     merged_lines.append("    " + "#" * 56)
-    merged_lines.append("    # pipeline/lakeflow_python_source.py")
+    merged_lines.append(
+        "    # src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py"
+    )
     merged_lines.append("    " + "#" * 56)
     merged_lines.append("")
     for line in lakeflow_code.strip().split("\n"):
@@ -419,6 +526,12 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
             merged_lines.append("    " + line)
         else:
             merged_lines.append("")
+    merged_lines.append("")
+
+    # Register the data source with Spark
+    merged_lines.append(
+        "\n    spark.dataSource.register(LakeflowSource)  # pylint: disable=undefined-variable"
+    )
     merged_lines.append("")
 
     merged_content = "\n".join(merged_lines)
@@ -436,7 +549,10 @@ def merge_all_sources() -> None:
     """Merge all available source connectors."""
     sources = get_all_sources()
     print(f"Regenerating {len(sources)} sources: {', '.join(sources)}", file=sys.stderr)
-    print("Output: sources/<source>/_generated_<source>_python_source.py", file=sys.stderr)
+    print(
+        "Output: src/databricks/labs/community_connector/sources/<source>/_generated_<source>_python_source.py",
+        file=sys.stderr,
+    )
     print("", file=sys.stderr)
     
     for source in sources:
@@ -457,10 +573,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Merge zendesk source (saves to sources/zendesk/_generated_zendesk_python_source.py)
+  # Merge zendesk source (saves to src/databricks/labs/community_connector/sources/zendesk/_generated_zendesk_python_source.py)
   python tools/scripts/merge_python_source.py zendesk
 
-  # Merge example source (saves to sources/example/_generated_example_python_source.py)
+  # Merge example source (saves to src/databricks/labs/community_connector/sources/example/_generated_example_python_source.py)
   python tools/scripts/merge_python_source.py example
 
   # Merge zendesk source and save to custom location
@@ -480,7 +596,7 @@ Examples:
         "-o",
         "--output",
         type=Path,
-        help="Output file path (default: sources/{source_name}/_generated_{source_name}_python_source.py). Not applicable when using 'all'.",
+        help="Output file path (default: src/databricks/labs/community_connector/sources/{source_name}/_generated_{source_name}_python_source.py). Not applicable when using 'all'.",
     )
 
     args = parser.parse_args()

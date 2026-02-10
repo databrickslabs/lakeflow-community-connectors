@@ -23,7 +23,7 @@ Research and document the write/create APIs for the source system to enable writ
 - Access to source API documentation
 
 ## Output
-Add a new section `## Write-Back APIs (For Testing Only)` to your existing `sources/{source_name}/{source_name}_api_doc.md` file.
+Add a new section `## Write-Back APIs (For Testing Only)` to your existing `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md` file.
 
 ## Documentation Template for Write-Back APIs Section
 
