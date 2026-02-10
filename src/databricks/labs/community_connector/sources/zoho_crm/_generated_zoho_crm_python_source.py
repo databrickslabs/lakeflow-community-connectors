@@ -654,75 +654,150 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
-    # src/databricks/labs/community_connector/sources/zoho_crm/handlers/base.py
+    # src/databricks/labs/community_connector/sources/zoho_crm/zoho_crm_oauth_setup.py
     ########################################################
 
-    class TableHandler(ABC):
-        """
-        Abstract base class for handling different types of Zoho CRM tables.
+    CLIENT_ID = ""  # From Zoho API Console
+    CLIENT_SECRET = ""  # From Zoho API Console
+    REDIRECT_URI = ""  # e.g., https://your-workspace.cloud.databricks.com/login/oauth/zoho_crm.html
 
-        Each handler is responsible for:
-        - Returning the table schema
-        - Returning table metadata (primary keys, ingestion type, etc.)
-        - Reading records from the table
-        """
+    # Data Center - uncomment your region:
+    DATA_CENTER = "https://accounts.zoho.com"  # US (default)
+    # DATA_CENTER = "https://accounts.zoho.eu"  # EU
+    # DATA_CENTER = "https://accounts.zoho.in"  # India
+    # DATA_CENTER = "https://accounts.zoho.com.au"  # Australia
+    # DATA_CENTER = "https://accounts.zoho.jp"  # Japan
 
-        def __init__(self, client: ZohoAPIClient) -> None:
-            """
-            Initialize the handler with an API client.
+    # OAuth Scopes (default covers all CRM data)
+    SCOPES = "ZohoCRM.modules.ALL,ZohoCRM.settings.ALL,ZohoCRM.users.READ"
 
-            Args:
-                client: ZohoAPIClient instance for making API requests
-            """
-            self.client = client
+    # COMMAND ----------
 
-        @abstractmethod
-        def get_schema(self, table_name: str, config: dict) -> StructType:
-            """
-            Get the Spark schema for a table.
+    # MAGIC %md
+    # MAGIC ## Step 2: Generate Authorization URL
+    # MAGIC
+    # MAGIC Run this cell, then open the URL in your browser to authorize.
 
-            Args:
-                table_name: Name of the table
-                config: Table configuration dictionary
+    # COMMAND ----------
 
-            Returns:
-                Spark StructType representing the table schema
-            """
+    from urllib.parse import quote
 
-        @abstractmethod
-        def get_metadata(self, table_name: str, config: dict) -> dict:
-            """
-            Get metadata for a table.
+    if not all([CLIENT_ID, CLIENT_SECRET, REDIRECT_URI]):
+        raise ValueError("Please fill in CLIENT_ID, CLIENT_SECRET, and REDIRECT_URI above")
 
-            Args:
-                table_name: Name of the table
-                config: Table configuration dictionary
+    auth_url = (
+        f"{DATA_CENTER}/oauth/v2/auth"
+        f"?response_type=code"
+        f"&client_id={quote(CLIENT_ID)}"
+        f"&scope={quote(SCOPES)}"
+        f"&redirect_uri={quote(REDIRECT_URI)}"
+        f"&access_type=offline"
+        f"&prompt=consent"
+    )
 
-            Returns:
-                Dictionary with keys:
-                    - primary_keys: List of primary key column names
-                    - cursor_field: (optional) Field name for incremental loading
-                    - ingestion_type: "snapshot", "cdc", "cdc_with_deletes", or "append"
-            """
+    print("Open this URL in your browser:\n")
+    print(auth_url)
+    print("\n" + "=" * 80)
+    print("After authorizing, copy the ENTIRE redirect URL and paste it below.")
+    print("⚠️ The code expires in 2 MINUTES!")
 
-        @abstractmethod
-        def read(
-            self,
-            table_name: str,
-            config: dict,
-            start_offset: dict,
-        ) -> tuple[Iterator[dict], dict]:
-            """
-            Read records from a table.
+    # COMMAND ----------
 
-            Args:
-                table_name: Name of the table
-                config: Table configuration dictionary
-                start_offset: Offset to start reading from
+    # MAGIC %md
+    # MAGIC ## Step 3: Exchange Code for Refresh Token
+    # MAGIC
+    # MAGIC Paste the redirect URL below and run:
 
-            Returns:
-                Tuple of (records_iterator, next_offset)
-            """
+    # COMMAND ----------
+
+    # DBTITLE 1,Paste Redirect URL Here
+    REDIRECT_URL_WITH_CODE = ""  # Paste the full URL from your browser
+
+    # COMMAND ----------
+
+    import requests
+    from urllib.parse import urlparse, parse_qs
+
+    if not REDIRECT_URL_WITH_CODE:
+        raise ValueError("Please paste the redirect URL above")
+
+    # Extract code from URL
+    params = parse_qs(urlparse(REDIRECT_URL_WITH_CODE).query)
+    if "code" not in params:
+        raise ValueError("No 'code' found in URL. Copy the complete redirect URL.")
+
+    AUTHORIZATION_CODE = params["code"][0]
+    print(f"✅ Code extracted: {AUTHORIZATION_CODE[:30]}...")
+
+    # Exchange for refresh token
+    response = requests.post(
+        f"{DATA_CENTER}/oauth/v2/token",
+        data={
+            "grant_type": "authorization_code",
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "redirect_uri": REDIRECT_URI,
+            "code": AUTHORIZATION_CODE,
+        },
+    )
+
+    if response.status_code != 200 or "refresh_token" not in response.json():
+        error = response.text
+        if "invalid_code" in error:
+            raise ValueError("Code expired. Re-run Step 2.")
+        raise ValueError(f"Failed: {error}")
+
+    tokens = response.json()
+    REFRESH_TOKEN = tokens["refresh_token"]
+    API_DOMAIN = tokens.get("api_domain", DATA_CENTER.replace("accounts.zoho", "www.zohoapis"))
+    print(f"✅ Refresh token obtained!")
+
+    # Test the connection
+    test_response = requests.post(
+        f"{DATA_CENTER}/oauth/v2/token",
+        data={
+            "grant_type": "refresh_token",
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "refresh_token": REFRESH_TOKEN,
+        },
+    )
+
+    if test_response.status_code != 200 or "access_token" not in test_response.json():
+        raise ValueError(f"Token refresh failed: {test_response.text}")
+
+    access_token = test_response.json()["access_token"]
+
+    # Test API
+    modules_response = requests.get(
+        f"{API_DOMAIN}/crm/v8/settings/modules",
+        headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
+    )
+    if modules_response.status_code != 200:
+        raise ValueError(f"API test failed: {modules_response.text[:200]}")
+
+    modules = modules_response.json().get("modules", [])
+    print(f"✅ Connection verified! Found {len(modules)} modules.\n")
+
+    # Print UC Connection config
+    import json
+
+    uc_config = {
+        "client_id": CLIENT_ID[0:10] + "...",
+        "client_secret": CLIENT_SECRET[0:10] + "...",
+        "refresh_token": REFRESH_TOKEN[0:10] + "...",
+        "base_url": DATA_CENTER,
+    }
+
+    print("=" * 80)
+    print("UNITY CATALOG CONNECTION CONFIGURATION")
+    print("=" * 80)
+    print("\nUse these values when creating your UC Connection:\n")
+    print(json.dumps(uc_config, indent=2))
+    print("\n" + "=" * 80)
+    print("🎉 Done! Create a Unity Catalog Connection with these credentials.")
+
+    # COMMAND ----------
 
 
     ########################################################
@@ -997,49 +1072,510 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
-    # src/databricks/labs/community_connector/sources/zoho_crm/handlers/module.py
+    # src/databricks/labs/community_connector/sources/zoho_crm/zoho_crm.py
     ########################################################
 
     logger = logging.getLogger(__name__)
 
 
-    class ModuleHandler(TableHandler):
-        """
-        Handler for standard Zoho CRM modules.
+    # =============================================================================
+    # Type Mappings and Schema Definitions (from zoho_types.py)
+    # =============================================================================
 
-        Standard modules:
-        - Support the Records API (/crm/v8/{module})
-        - Have a Modified_Time field for CDC
-        - Support the Deleted Records API for tracking deletions
-        """
+    # Maps Zoho data types to Spark types for simple (non-nested) fields
+    SIMPLE_TYPE_MAP = {
+        "bigint": LongType(),
+        "text": StringType(),
+        "textarea": StringType(),
+        "email": StringType(),
+        "phone": StringType(),
+        "website": StringType(),
+        "autonumber": StringType(),
+        "picklist": StringType(),
+        "integer": LongType(),
+        "double": DoubleType(),
+        "currency": DoubleType(),
+        "percent": DoubleType(),
+        "boolean": BooleanType(),
+        "date": StringType(),  # Stored as ISO 8601 string
+        "datetime": StringType(),  # Stored as ISO 8601 string
+        "fileupload": StringType(),
+        "imageupload": StringType(),
+        "profileimage": StringType(),
+        "event_reminder": StringType(),
+    }
 
-        # Modules to exclude from listing
-        EXCLUDED_MODULES = {
-            "Visits",  # No fields available
-            "Actions_Performed",  # No fields available
-            "Email_Sentiment",  # Analytics module with different API
-            "Email_Analytics",  # Analytics module with different API
-            "Email_Template_Analytics",  # Analytics module with different API
-            "Locking_Information__s",  # System module (403 forbidden)
+    # Basic lookup field structure (id + name)
+    BASIC_LOOKUP_SCHEMA = StructType(
+        [
+            StructField("id", StringType(), True),
+            StructField("name", StringType(), True),
+        ]
+    )
+
+    # Extended lookup field structure (id + name + email)
+    EXTENDED_LOOKUP_SCHEMA = StructType(
+        [
+            StructField("id", StringType(), True),
+            StructField("name", StringType(), True),
+            StructField("email", StringType(), True),
+        ]
+    )
+
+    # RRULE field for recurring events
+    RRULE_SCHEMA = StructType(
+        [
+            StructField("FREQ", StringType(), True),
+            StructField("INTERVAL", StringType(), True),
+        ]
+    )
+
+    # ALARM field for event reminders
+    ALARM_SCHEMA = StructType(
+        [
+            StructField("ACTION", StringType(), True),
+        ]
+    )
+
+    # Basic subform item structure
+    BASIC_SUBFORM_SCHEMA = StructType(
+        [
+            StructField("id", StringType(), True),
+        ]
+    )
+
+    # Settings Table Schemas
+    USERS_SCHEMA = StructType(
+        [
+            StructField("id", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("email", StringType(), True),
+            StructField("first_name", StringType(), True),
+            StructField("last_name", StringType(), True),
+            StructField("role", BASIC_LOOKUP_SCHEMA, True),
+            StructField("profile", BASIC_LOOKUP_SCHEMA, True),
+            StructField("status", StringType(), True),
+            StructField("created_time", StringType(), True),
+            StructField("Modified_Time", StringType(), True),
+            StructField("confirm", BooleanType(), True),
+            StructField("territories", ArrayType(BASIC_LOOKUP_SCHEMA), True),
+        ]
+    )
+
+    ROLES_SCHEMA = StructType(
+        [
+            StructField("id", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("display_label", StringType(), True),
+            StructField("reporting_to", BASIC_LOOKUP_SCHEMA, True),
+            StructField("admin_user", BooleanType(), True),
+        ]
+    )
+
+    PROFILES_SCHEMA = StructType(
+        [
+            StructField("id", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("display_label", StringType(), True),
+            StructField("default", BooleanType(), True),
+            StructField("description", StringType(), True),
+            StructField("created_time", StringType(), True),
+            StructField("Modified_Time", StringType(), True),
+        ]
+    )
+
+    SETTINGS_SCHEMAS = {
+        "Users": USERS_SCHEMA,
+        "Roles": ROLES_SCHEMA,
+        "Profiles": PROFILES_SCHEMA,
+    }
+
+    # Subform/Line Item Schema
+    SUBFORM_BASE_FIELDS = [
+        StructField("id", StringType(), False),
+        StructField("_parent_id", StringType(), False),
+        StructField("_parent_module", StringType(), False),
+    ]
+
+    SUBFORM_COMMON_FIELDS = [
+        StructField("Product_Name", BASIC_LOOKUP_SCHEMA, True),
+        StructField("Quantity", DoubleType(), True),
+        StructField("Unit_Price", DoubleType(), True),
+        StructField("List_Price", DoubleType(), True),
+        StructField("Net_Total", DoubleType(), True),
+        StructField("Total", DoubleType(), True),
+        StructField("Discount", DoubleType(), True),
+        StructField("Total_After_Discount", DoubleType(), True),
+        StructField("Tax", DoubleType(), True),
+        StructField("Description", StringType(), True),
+        StructField("Sequence_Number", LongType(), True),
+    ]
+
+    LINE_ITEM_SCHEMA = StructType(SUBFORM_BASE_FIELDS + SUBFORM_COMMON_FIELDS)
+
+    # Junction/Related Table Schemas
+    JUNCTION_BASE_FIELDS = [
+        StructField("_junction_id", StringType(), False),
+        StructField("_parent_id", StringType(), False),
+        StructField("_parent_module", StringType(), False),
+        StructField("id", StringType(), False),
+    ]
+
+    LEADS_RELATED_FIELDS = [
+        StructField("First_Name", StringType(), True),
+        StructField("Last_Name", StringType(), True),
+        StructField("Email", StringType(), True),
+        StructField("Company", StringType(), True),
+        StructField("Phone", StringType(), True),
+        StructField("Lead_Status", StringType(), True),
+    ]
+
+    CONTACTS_RELATED_FIELDS = [
+        StructField("First_Name", StringType(), True),
+        StructField("Last_Name", StringType(), True),
+        StructField("Email", StringType(), True),
+        StructField("Phone", StringType(), True),
+        StructField("Account_Name", BASIC_LOOKUP_SCHEMA, True),
+    ]
+
+    CONTACT_ROLES_RELATED_FIELDS = [
+        StructField("Contact_Role", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("Email", StringType(), True),
+    ]
+
+    DEFAULT_RELATED_FIELDS = [
+        StructField("name", StringType(), True),
+    ]
+
+    RELATED_MODULE_FIELDS = {
+        "Leads": LEADS_RELATED_FIELDS,
+        "Contacts": CONTACTS_RELATED_FIELDS,
+        "Contact_Roles": CONTACT_ROLES_RELATED_FIELDS,
+    }
+
+    RELATED_MODULE_API_FIELDS = {
+        "Leads": "id,First_Name,Last_Name,Email,Company,Phone,Lead_Status",
+        "Contacts": "id,First_Name,Last_Name,Email,Phone,Account_Name",
+        "Deals": "id,Deal_Name,Stage,Amount,Closing_Date,Account_Name",
+        "Contact_Roles": "id,Contact_Role,name,Email",
+    }
+
+
+    def zoho_field_to_spark_type(field: dict) -> StructField:
+        """Convert a Zoho CRM field definition to a Spark StructField."""
+        api_name = field["api_name"]
+        data_type = field.get("data_type", "text")
+        json_type = field.get("json_type")
+        nullable = not field.get("required", False)
+
+        if data_type in SIMPLE_TYPE_MAP:
+            spark_type = SIMPLE_TYPE_MAP[data_type]
+        elif data_type == "multiselectpicklist":
+            spark_type = ArrayType(StringType(), True)
+        elif data_type in ("lookup", "ownerlookup"):
+            spark_type = EXTENDED_LOOKUP_SCHEMA
+        elif data_type == "multiselectlookup":
+            spark_type = ArrayType(BASIC_LOOKUP_SCHEMA, True)
+        elif data_type == "subform":
+            spark_type = ArrayType(BASIC_SUBFORM_SCHEMA, True)
+        elif data_type == "consent_lookup":
+            spark_type = BASIC_LOOKUP_SCHEMA
+        elif data_type == "RRULE":
+            spark_type = RRULE_SCHEMA
+        elif data_type == "ALARM":
+            spark_type = ALARM_SCHEMA
+        else:
+            spark_type = StringType()
+
+        if json_type in ("jsonarray", "jsonobject"):
+            spark_type = StringType()
+
+        return StructField(api_name, spark_type, nullable)
+
+
+    def get_related_table_schema(related_module: str) -> StructType:
+        """Build schema for a junction/related table."""
+        related_fields = RELATED_MODULE_FIELDS.get(related_module, DEFAULT_RELATED_FIELDS)
+        return StructType(JUNCTION_BASE_FIELDS + related_fields)
+
+
+    def normalize_record(record: dict, json_fields: set) -> dict:
+        """Normalize a record for Spark compatibility."""
+        normalized = {}
+        for key, value in record.items():
+            if value is None:
+                normalized[key] = None
+            elif key in json_fields and isinstance(value, (dict, list)):
+                normalized[key] = json.dumps(value)
+            else:
+                normalized[key] = value
+        return normalized
+
+
+    # =============================================================================
+    # Zoho API Client (from zoho_client.py)
+    # =============================================================================
+
+
+    class ZohoAPIError(Exception):
+        """Exception for Zoho CRM API errors."""
+
+        KNOWN_ERRORS = {
+            "INVALID_TOKEN": "Access token expired or invalid.",
+            "INVALID_CLIENT": "Invalid client_id or client_secret.",
+            "AUTHENTICATION_FAILURE": "Authentication failed. Check OAuth credentials.",
+            "NO_PERMISSION": "Missing required OAuth scopes.",
+            "OAUTH_SCOPE_MISMATCH": "OAuth scope mismatch. Re-authorize with correct scopes.",
+            "4000": "Use OAuth token instead of API ticket.",
+            "4001": "No API permission for this operation.",
+            "4101": "Zoho CRM is disabled for this account.",
+            "4102": "No CRM account found.",
+            "4103": "Record not found with the specified ID.",
+            "4401": "Mandatory field missing in request.",
+            "4420": "Invalid search parameter or value.",
+            "4421": "API call limit exceeded.",
+            "4422": "No records available in this module.",
+            "4423": "Exceeded record search limit.",
+            "4500": "Internal server error.",
+            "4501": "API Key is inactive.",
+            "4502": "This module is not supported in your Zoho CRM edition.",
+            "4600": "Invalid API parameter or spelling error in API URL.",
+            "4807": "File size limit exceeded.",
+            "4809": "Storage space limit exceeded.",
+            "4820": "Rate limit exceeded. Wait before retrying.",
+            "4831": "Missing required parameters.",
+            "4832": "Invalid data type (text given for integer field).",
+            "4834": "Invalid or expired ticket.",
+            "4890": "Wrong API Key.",
+            "401": "No module permission.",
+            "401.1": "No permission to create records.",
+            "401.2": "No permission to edit records.",
+            "401.3": "No permission to delete records.",
+            "INVALID_MODULE": "Module not available in your Zoho CRM edition.",
+            "MODULE_NOT_SUPPORTED": "This module is not accessible via API.",
         }
 
-        def __init__(self, client) -> None:
+        def __init__(self, status_code: int, message: str):
+            self.status_code = status_code
+            super().__init__(f"Zoho API error ({status_code}): {message}")
+
+        @classmethod
+        def from_response(cls, response: requests.Response) -> "ZohoAPIError":
+            """Create exception from HTTP response."""
+            error_code = None
+            message = response.text[:200]
+
+            try:
+                data = response.json()
+                error_code = data.get("code") or data.get("error")
+                message = data.get("message") or data.get("error_description") or message
+            except ValueError:
+                pass
+
+            if error_code and error_code in cls.KNOWN_ERRORS:
+                message = cls.KNOWN_ERRORS[error_code]
+
+            return cls(response.status_code, message)
+
+
+    class ZohoAPIClient:
+        """HTTP client for Zoho CRM API with OAuth2 authentication."""
+
+        def __init__(
+            self,
+            client_id: str,
+            client_secret: str,
+            refresh_token: str,
+            accounts_url: str = "https://accounts.zoho.com",
+        ) -> None:
+            self.client_id = client_id
+            self.client_secret = client_secret
+            self.refresh_token = refresh_token
+            self.accounts_url = accounts_url.rstrip("/")
+
+            match = re.search(r"accounts\.zoho\.(.+)$", self.accounts_url)
+            domain_suffix = match.group(1) if match else "com"
+            self.api_url = f"https://www.zohoapis.{domain_suffix}"
+
+            self._access_token: Optional[str] = None
+            self._token_expires_at: Optional[datetime] = None
+            self._session = requests.Session()
+
+        def _get_access_token(self) -> str:
+            """Get a valid access token, refreshing if necessary."""
+            if self._access_token and self._token_expires_at:
+                if datetime.now() < self._token_expires_at - timedelta(minutes=5):
+                    return self._access_token
+
+            token_url = f"{self.accounts_url}/oauth/v2/token"
+            data = {
+                "refresh_token": self.refresh_token,
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "grant_type": "refresh_token",
+            }
+
+            response = requests.post(token_url, data=data, timeout=30)
+
+            if response.status_code >= 400:
+                raise ZohoAPIError.from_response(response)
+
+            token_data = response.json()
+
+            if "access_token" not in token_data:
+                raise ZohoAPIError(200, "Token refresh failed. Check your OAuth credentials.")
+
+            self._access_token = token_data["access_token"]
+            expires_in = token_data.get("expires_in", 3600)
+            self._token_expires_at = datetime.now() + timedelta(seconds=expires_in)
+
+            return self._access_token
+
+        def request(
+            self,
+            method: str,
+            endpoint: str,
+            params: Optional[dict] = None,
+            data: Optional[dict] = None,
+            max_retries: int = 3,
+        ) -> dict:
+            """Make an authenticated API request to Zoho CRM."""
+            access_token = self._get_access_token()
+            url = f"{self.api_url}{endpoint}"
+            headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
+
+            if data:
+                headers["Content-Type"] = "application/json"
+
+            for attempt in range(max_retries):
+                response = self._make_http_request(method, url, headers, params, data)
+
+                if response.status_code == 429:
+                    if attempt < max_retries - 1:
+                        wait_time = 2**attempt
+                        time.sleep(wait_time)
+                        continue
+                    raise ZohoAPIError.from_response(response)
+
+                if response.status_code == 401 and attempt == 0:
+                    self._access_token = None
+                    access_token = self._get_access_token()
+                    headers["Authorization"] = f"Zoho-oauthtoken {access_token}"
+                    continue
+
+                if response.status_code >= 400:
+                    raise ZohoAPIError.from_response(response)
+
+                if not response.text or response.text.strip() == "":
+                    return {}
+
+                return response.json()
+
+            raise ZohoAPIError(0, f"Failed after {max_retries} retries")
+
+        def _make_http_request(
+            self,
+            method: str,
+            url: str,
+            headers: dict,
+            params: Optional[dict],
+            data: Optional[dict],
+        ) -> requests.Response:
+            """Execute the actual HTTP request."""
+            method = method.upper()
+            if method == "GET":
+                return self._session.get(url, headers=headers, params=params)
+            elif method == "POST":
+                return self._session.post(url, headers=headers, json=data, params=params)
+            elif method == "PUT":
+                return self._session.put(url, headers=headers, json=data, params=params)
+            elif method == "DELETE":
+                return self._session.delete(url, headers=headers, params=params)
+            else:
+                raise ValueError(f"Unsupported HTTP method: {method}")
+
+        def paginate(
+            self,
+            endpoint: str,
+            params: Optional[dict] = None,
+            data_key: str = "data",
+            per_page: int = 200,
+        ) -> Iterator[dict]:
+            """Iterate through paginated API responses."""
+            params = dict(params) if params else {}
+            page = 1
+
+            while True:
+                params["page"] = page
+                params["per_page"] = per_page
+
+                response = self.request("GET", endpoint, params=params)
+                data = response.get(data_key, [])
+                info = response.get("info", {})
+
+                yield from data
+
+                if not info.get("more_records", False) or not data:
+                    break
+
+                page += 1
+
+
+    # =============================================================================
+    # Table Handlers (from handlers/*.py)
+    # =============================================================================
+
+
+    class TableHandler(ABC):
+        """Abstract base class for handling different types of Zoho CRM tables."""
+
+        def __init__(self, client: ZohoAPIClient) -> None:
+            self.client = client
+
+        @abstractmethod
+        def get_schema(self, table_name: str, config: dict) -> StructType:
+            """Get the Spark schema for a table."""
+
+        @abstractmethod
+        def get_metadata(self, table_name: str, config: dict) -> dict:
+            """Get metadata for a table."""
+
+        @abstractmethod
+        def read(
+            self,
+            table_name: str,
+            config: dict,
+            start_offset: dict,
+        ) -> tuple[Iterator[dict], dict]:
+            """Read records from a table."""
+
+
+    class ModuleHandler(TableHandler):
+        """Handler for standard Zoho CRM modules."""
+
+        EXCLUDED_MODULES = {
+            "Visits",
+            "Actions_Performed",
+            "Email_Sentiment",
+            "Email_Analytics",
+            "Email_Template_Analytics",
+            "Locking_Information__s",
+        }
+
+        def __init__(self, client: ZohoAPIClient) -> None:
             super().__init__(client)
             self._modules_cache: Optional[list[dict]] = None
             self._fields_cache: dict[str, list[dict]] = {}
 
         def get_modules(self) -> list[dict]:
-            """
-            Retrieve all available modules from Zoho CRM.
-            Results are cached to avoid repeated API calls.
-            """
+            """Retrieve all available modules from Zoho CRM."""
             if self._modules_cache is not None:
                 return self._modules_cache
 
             response = self.client.request("GET", "/crm/v8/settings/modules")
             modules = response.get("modules", [])
 
-            # Filter for API-supported modules
             supported = [
                 m
                 for m in modules
@@ -1052,10 +1588,7 @@ def register_lakeflow_source(spark):
             return supported
 
         def get_fields(self, module_name: str) -> list[dict]:
-            """
-            Retrieve field metadata for a specific module.
-            Results are cached per module.
-            """
+            """Retrieve field metadata for a specific module."""
             if module_name in self._fields_cache:
                 return self._fields_cache[module_name]
 
@@ -1070,34 +1603,14 @@ def register_lakeflow_source(spark):
             return fields
 
         def get_json_fields(self, module_name: str) -> set:
-            """
-            Get field names that should be serialized as JSON strings.
-
-            Args:
-                module_name: Name of the Zoho CRM module
-
-            Returns:
-                Set of field API names with json_type 'jsonobject' or 'jsonarray'
-            """
+            """Get field names that should be serialized as JSON strings."""
             fields = self.get_fields(module_name)
             return {
                 f.get("api_name") for f in fields if f.get("json_type") in ("jsonobject", "jsonarray")
             }
 
         def get_schema(self, table_name: str, config: dict) -> StructType:
-            """
-            Get Spark schema for a standard CRM module.
-
-            Dynamically builds the schema by fetching field metadata from the
-            Zoho CRM Fields API and converting each field to a Spark StructField.
-
-            Args:
-                table_name: Name of the Zoho CRM module
-                config: Table configuration (unused for standard modules)
-
-            Returns:
-                Spark StructType representing the module schema
-            """
+            """Get Spark schema for a standard CRM module."""
             fields = self.get_fields(table_name)
 
             if not fields:
@@ -1115,41 +1628,24 @@ def register_lakeflow_source(spark):
             return StructType(struct_fields)
 
         def get_metadata(self, table_name: str, config: dict) -> dict:
-            """
-            Get ingestion metadata for a standard CRM module.
-
-            Determines the appropriate ingestion strategy based on available fields:
-            - CDC for modules with Modified_Time field
-            - Append for Attachments
-            - Snapshot for modules without Modified_Time
-
-            Args:
-                table_name: Name of the Zoho CRM module
-                config: Table configuration (unused for standard modules)
-
-            Returns:
-                Dictionary with primary_keys, cursor_field, and ingestion_type
-            """
+            """Get ingestion metadata for a standard CRM module."""
             schema = self.get_schema(table_name, config)
             field_names = schema.fieldNames()
             has_modified_time = "Modified_Time" in field_names
             has_id = "id" in field_names
 
-            # Attachments are append-only
             if table_name == "Attachments":
                 return {
                     "primary_keys": ["id"] if has_id else [],
                     "ingestion_type": "append",
                 }
 
-            # Modules without Modified_Time use snapshot
             if not has_modified_time:
                 return {
                     "primary_keys": ["id"] if has_id else [],
                     "ingestion_type": "snapshot",
                 }
 
-            # Standard modules support CDC
             return {
                 "primary_keys": ["id"],
                 "cursor_field": "Modified_Time",
@@ -1162,40 +1658,22 @@ def register_lakeflow_source(spark):
             config: dict,
             start_offset: dict,
         ) -> tuple[Iterator[dict], dict]:
-            """
-            Read records from a standard CRM module.
-
-            Supports incremental reads using Modified_Time cursor with a 5-minute
-            lookback window to catch late updates. For CDC modules, also fetches
-            deleted records via the Deleted Records API.
-
-            Args:
-                table_name: Name of the Zoho CRM module
-                config: Table configuration with optional initial_load_start_date
-                start_offset: Dictionary with cursor_time for incremental reads
-
-            Returns:
-                Tuple of (records iterator, next offset dictionary)
-            """
-            # Determine cursor time for incremental reads
+            """Read records from a standard CRM module."""
             cursor_time = start_offset.get("cursor_time") if start_offset else None
             initial_load_start_date = config.get("initial_load_start_date")
 
             if not cursor_time and initial_load_start_date:
                 cursor_time = initial_load_start_date
 
-            # Apply 5-minute lookback window to catch late updates
             if cursor_time:
                 cursor_dt = datetime.fromisoformat(cursor_time.replace("Z", "+00:00"))
                 lookback_dt = cursor_dt - timedelta(minutes=5)
                 cursor_time = lookback_dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
-            # Check if this is a snapshot table (no cursor support)
             metadata = self.get_metadata(table_name, config)
             if metadata.get("ingestion_type") == "snapshot":
                 cursor_time = None
 
-            # Track max modified time for next offset
             max_modified_time = cursor_time
 
             def records_generator():
@@ -1204,14 +1682,12 @@ def register_lakeflow_source(spark):
                 fields = self.get_fields(table_name)
                 field_names = [f["api_name"] for f in fields] if fields else []
 
-                # Read regular records
                 for record in self._read_records(table_name, field_names, cursor_time, json_fields):
                     modified_time = record.get("Modified_Time")
                     if modified_time and (not max_modified_time or modified_time > max_modified_time):
                         max_modified_time = modified_time
                     yield record
 
-                # Read deleted records for CDC
                 if metadata.get("ingestion_type") == "cdc" and cursor_time:
                     for record in self._read_deleted_records(table_name, cursor_time):
                         deleted_time = record.get("deleted_time")
@@ -1219,7 +1695,6 @@ def register_lakeflow_source(spark):
                             max_modified_time = deleted_time
                         yield record
 
-            # Materialize generator to get final max_modified_time
             records = list(records_generator())
 
             if max_modified_time:
@@ -1261,195 +1736,12 @@ def register_lakeflow_source(spark):
             for record in self.client.paginate(f"/crm/v8/{module_name}/deleted", params=params):
                 deleted_time = record.get("deleted_time")
 
-                # Only include records deleted after cursor_time
                 if deleted_time and deleted_time >= cursor_time:
                     record["_zoho_deleted"] = True
                     yield record
 
 
-    ########################################################
-    # src/databricks/labs/community_connector/sources/zoho_crm/handlers/related.py
-    ########################################################
-
-    logger = logging.getLogger(__name__)
-
-
-    # Configuration for related/junction tables
-    RELATED_TABLES = {
-        "Campaigns_Leads": {
-            "parent_module": "Campaigns",
-            "related_module": "Leads",
-        },
-        "Campaigns_Contacts": {
-            "parent_module": "Campaigns",
-            "related_module": "Contacts",
-        },
-        "Contacts_X_Deals": {
-            "parent_module": "Deals",
-            "related_module": "Contact_Roles",
-        },
-    }
-
-
-    class RelatedHandler(TableHandler):
-        """
-        Handler for Zoho CRM junction/related record tables.
-
-        Junction tables represent many-to-many relationships by fetching
-        related records for each parent record via the Related Records API.
-
-        These tables:
-        - Use the Related Records API (/crm/v8/{parent}/{id}/{related})
-        - Include junction metadata (_junction_id, _parent_id, _parent_module)
-        - Use snapshot ingestion (relationships can change without timestamp)
-        """
-
-        @staticmethod
-        def get_tables() -> dict[str, dict]:
-            """Return configuration for all related tables."""
-            return RELATED_TABLES
-
-        def get_schema(self, table_name: str, config: dict) -> StructType:
-            """
-            Get Spark schema for a junction table.
-
-            Junction table schemas include standard junction metadata fields
-            (_junction_id, _parent_id, _parent_module) plus related module fields.
-
-            Args:
-                table_name: Name of the junction table
-                config: Table configuration (unused for junction tables)
-
-            Returns:
-                Spark StructType representing the junction table schema
-            """
-            table_config = RELATED_TABLES.get(table_name, {})
-            related_module = table_config.get("related_module", "")
-            return get_related_table_schema(related_module)
-
-        def get_metadata(self, table_name: str, config: dict) -> dict:
-            """
-            Get ingestion metadata for a junction table.
-
-            Junction tables use snapshot ingestion with a composite key since
-            relationships can be created/deleted without timestamps.
-
-            Args:
-                table_name: Name of the junction table
-                config: Table configuration (unused for junction tables)
-
-            Returns:
-                Dictionary with primary_keys=['_junction_id'] and ingestion_type='snapshot'
-            """
-            # Junction tables use snapshot with composite key
-            return {
-                "primary_keys": ["_junction_id"],
-                "ingestion_type": "snapshot",
-            }
-
-        def read(
-            self,
-            table_name: str,
-            config: dict,
-            start_offset: dict,
-        ) -> tuple[Iterator[dict], dict]:
-            """
-            Read records from a junction table.
-
-            Iterates through all parent records and fetches their related records
-            using the Zoho CRM Related Records API. Each junction record includes
-            the related record data plus metadata (_junction_id, _parent_id, _parent_module).
-
-            Args:
-                table_name: Name of the junction table
-                config: Table configuration with parent_module and related_module
-                start_offset: Offset dictionary (unused - junction tables use snapshot)
-
-            Returns:
-                Tuple of (records iterator, empty offset dict)
-            """
-            table_config = RELATED_TABLES.get(table_name, {})
-            parent_module = table_config.get("parent_module", "")
-            related_module = table_config.get("related_module", "")
-
-            # Get API fields for related module
-            related_fields = RELATED_MODULE_API_FIELDS.get(related_module, "id,name")
-
-            def records_generator():
-                # First, collect all parent IDs
-                parent_ids = list(self._get_parent_ids(parent_module))
-
-                # Fetch related records for each parent
-                for parent_id in parent_ids:
-                    related_records = self._get_related_records(
-                        parent_module, parent_id, related_module, related_fields
-                    )
-                    for record in related_records:
-                        record["_junction_id"] = f"{parent_id}_{record.get('id')}"
-                        record["_parent_id"] = parent_id
-                        record["_parent_module"] = parent_module
-                        yield record
-
-            # Junction tables use snapshot - no cursor tracking
-            return records_generator(), {}
-
-        def _get_parent_ids(self, parent_module: str) -> Iterator[str]:
-            """
-            Get all record IDs from a parent module.
-
-            Args:
-                parent_module: Name of the parent Zoho CRM module
-
-            Yields:
-                Record IDs as strings
-            """
-            params = {"fields": "id"}
-            for record in self.client.paginate(f"/crm/v8/{parent_module}", params=params):
-                if record.get("id"):
-                    yield record["id"]
-
-        def _get_related_records(
-            self,
-            parent_module: str,
-            parent_id: str,
-            related_module: str,
-            fields: str,
-        ) -> Iterator[dict]:
-            """
-            Get related records for a specific parent record.
-
-            Uses the Zoho CRM Related Records API to fetch records linked
-            to a parent record via a many-to-many relationship.
-
-            Args:
-                parent_module: Name of the parent module (e.g., "Campaigns")
-                parent_id: ID of the parent record
-                related_module: Name of the related module (e.g., "Leads")
-                fields: Comma-separated field names to retrieve
-
-            Yields:
-                Related record dictionaries
-            """
-            endpoint = f"/crm/v8/{parent_module}/{parent_id}/{related_module}"
-            params = {"fields": fields}
-
-            try:
-                yield from self.client.paginate(endpoint, params=params)
-            except ZohoAPIError as e:
-                # 204/400/404 means no related records - not an error
-                if e.status_code in (204, 400, 404):
-                    return
-                raise
-
-
-    ########################################################
-    # src/databricks/labs/community_connector/sources/zoho_crm/handlers/settings.py
-    ########################################################
-
-    logger = logging.getLogger(__name__)
-
-
-    # Configuration for settings tables
+    # Settings tables configuration
     SETTINGS_TABLES = {
         "Users": {
             "endpoint": "/crm/v8/users",
@@ -1470,16 +1762,7 @@ def register_lakeflow_source(spark):
 
 
     class SettingsHandler(TableHandler):
-        """
-        Handler for Zoho CRM settings/organization tables.
-
-        Settings tables:
-        - Users: All users in the organization (requires ZohoCRM.users.READ scope)
-        - Roles: User roles hierarchy
-        - Profiles: Permission profiles
-
-        These tables use different API endpoints than standard modules.
-        """
+        """Handler for Zoho CRM settings/organization tables."""
 
         @staticmethod
         def get_tables() -> dict[str, dict]:
@@ -1487,38 +1770,13 @@ def register_lakeflow_source(spark):
             return SETTINGS_TABLES
 
         def get_schema(self, table_name: str, config: dict) -> StructType:
-            """
-            Get Spark schema for a settings table.
-
-            Settings tables have predefined schemas since they have fixed structures.
-
-            Args:
-                table_name: Name of the settings table (Users, Roles, or Profiles)
-                config: Table configuration (unused for settings)
-
-            Returns:
-                Spark StructType representing the table schema
-            """
+            """Get Spark schema for a settings table."""
             if table_name in SETTINGS_SCHEMAS:
                 return SETTINGS_SCHEMAS[table_name]
-
-            # Fallback minimal schema
             return StructType([StructField("id", StringType(), False)])
 
         def get_metadata(self, table_name: str, config: dict) -> dict:
-            """
-            Get ingestion metadata for a settings table.
-
-            Users supports CDC via Modified_Time. Roles and Profiles use snapshot
-            since they don't have modification timestamps.
-
-            Args:
-                table_name: Name of the settings table
-                config: Table configuration (unused for settings)
-
-            Returns:
-                Dictionary with primary_keys, cursor_field (if CDC), and ingestion_type
-            """
+            """Get ingestion metadata for a settings table."""
             table_config = SETTINGS_TABLES.get(table_name, {})
 
             if table_config.get("supports_cdc"):
@@ -1539,20 +1797,7 @@ def register_lakeflow_source(spark):
             config: dict,
             start_offset: dict,
         ) -> tuple[Iterator[dict], dict]:
-            """
-            Read records from a settings table.
-
-            Uses the appropriate Zoho settings API endpoint based on table type.
-            Users endpoint requires the ZohoCRM.users.READ OAuth scope.
-
-            Args:
-                table_name: Name of the settings table
-                config: Table configuration with endpoint and data_key
-                start_offset: Offset dictionary (unused - settings use snapshot)
-
-            Returns:
-                Tuple of (records iterator, empty offset dict)
-            """
+            """Read records from a settings table."""
             table_config = SETTINGS_TABLES.get(table_name, {})
             endpoint = table_config.get("endpoint", "")
             data_key = table_config.get("data_key", "data")
@@ -1564,55 +1809,17 @@ def register_lakeflow_source(spark):
 
                 yield from self.client.paginate(endpoint, params=params, data_key=data_key)
 
-            # Settings tables use snapshot - no cursor tracking
             return records_generator(), {}
 
 
-    ########################################################
-    # src/databricks/labs/community_connector/sources/zoho_crm/handlers/subform.py
-    ########################################################
-
-    logger = logging.getLogger(__name__)
-
-
-    # Configuration for subform tables
-    # NOTE: Inventory/Order Management tables are commented out - see module docstring
-    SUBFORM_TABLES: dict[str, dict] = {
-        # Uncomment if you have Zoho Inventory or Zoho Books enabled:
-        # "Quoted_Items": {
-        #     "parent_module": "Quotes",
-        #     "subform_field": "Quoted_Items",
-        # },
-        # "Ordered_Items": {
-        #     "parent_module": "Sales_Orders",
-        #     "subform_field": "Ordered_Items",
-        # },
-        # "Invoiced_Items": {
-        #     "parent_module": "Invoices",
-        #     "subform_field": "Invoiced_Items",
-        # },
-        # "Purchase_Items": {
-        #     "parent_module": "Purchase_Orders",
-        #     "subform_field": "Purchased_Items",
-        # },
-    }
+    # Subform tables configuration (disabled by default - requires Zoho Inventory/Books)
+    SUBFORM_TABLES: dict[str, dict] = {}
 
 
     class SubformHandler(TableHandler):
-        """
-        Handler for Zoho CRM subform/line item tables.
+        """Handler for Zoho CRM subform/line item tables."""
 
-        Subform tables are extracted from array fields within parent records.
-        For example, Quoted_Items are extracted from Quotes.Quoted_Items.
-
-        These tables:
-        - Don't exist as standalone API endpoints
-        - Are extracted by reading parent records and their subform fields
-        - Use snapshot ingestion (no individual CDC tracking)
-        - Include _parent_id and _parent_module for traceability
-        """
-
-        def __init__(self, client, module_handler=None) -> None:
+        def __init__(self, client: ZohoAPIClient, module_handler: ModuleHandler = None) -> None:
             super().__init__(client)
             self._module_handler = module_handler
             self._schema_cache: dict[str, StructType] = {}
@@ -1623,41 +1830,15 @@ def register_lakeflow_source(spark):
             return SUBFORM_TABLES
 
         def get_schema(self, table_name: str, config: dict) -> StructType:
-            """
-            Get Spark schema for a subform table.
-
-            All line item tables share the LINE_ITEM_SCHEMA since they have
-            the same structure (product, quantity, pricing, etc.).
-
-            Args:
-                table_name: Name of the subform table
-                config: Table configuration (unused for subforms)
-
-            Returns:
-                Spark StructType representing the line item schema
-            """
+            """Get Spark schema for a subform table."""
             if table_name in self._schema_cache:
                 return self._schema_cache[table_name]
 
-            # All line item tables share the same schema
             self._schema_cache[table_name] = LINE_ITEM_SCHEMA
             return LINE_ITEM_SCHEMA
 
         def get_metadata(self, table_name: str, config: dict) -> dict:
-            """
-            Get ingestion metadata for a subform table.
-
-            Subform tables use snapshot ingestion since individual items
-            don't have their own modification timestamps.
-
-            Args:
-                table_name: Name of the subform table
-                config: Table configuration (unused for subforms)
-
-            Returns:
-                Dictionary with primary_keys and ingestion_type='snapshot'
-            """
-            # Subforms use snapshot (no individual CDC tracking)
+            """Get ingestion metadata for a subform table."""
             return {
                 "primary_keys": ["id"],
                 "ingestion_type": "snapshot",
@@ -1669,27 +1850,12 @@ def register_lakeflow_source(spark):
             config: dict,
             start_offset: dict,
         ) -> tuple[Iterator[dict], dict]:
-            """
-            Read records from a subform table by extracting from parent records.
-
-            Iterates through all parent records and extracts items from the
-            corresponding subform array field. Each item is enriched with
-            _parent_id and _parent_module for traceability.
-
-            Args:
-                table_name: Name of the subform table
-                config: Table configuration with parent_module and subform_field
-                start_offset: Offset dictionary (unused - subforms use snapshot)
-
-            Returns:
-                Tuple of (records iterator, empty offset dict)
-            """
+            """Read records from a subform table."""
             table_config = SUBFORM_TABLES.get(table_name, {})
             parent_module = table_config.get("parent_module", "")
             subform_field = table_config.get("subform_field", "")
 
             def records_generator():
-                # Get field names for parent module
                 field_names = self._get_parent_field_names(parent_module)
 
                 params = {
@@ -1709,33 +1875,111 @@ def register_lakeflow_source(spark):
                             item["_parent_module"] = parent_module
                             yield item
 
-            # Subforms use snapshot - no cursor tracking
             return records_generator(), {}
 
         def _get_parent_field_names(self, parent_module: str) -> list[str]:
-            """
-            Get field API names for a parent module.
-
-            Used to request all fields when fetching parent records so that
-            subform data is included in the response.
-
-            Args:
-                parent_module: Name of the parent Zoho CRM module
-
-            Returns:
-                List of field API names, or empty list if unavailable
-            """
+            """Get field API names for a parent module."""
             if self._module_handler:
                 fields = self._module_handler.get_fields(parent_module)
                 return [f["api_name"] for f in fields] if fields else []
             return []
 
 
-    ########################################################
-    # src/databricks/labs/community_connector/sources/zoho_crm/zoho_crm.py
-    ########################################################
+    # Related/Junction tables configuration
+    RELATED_TABLES = {
+        "Campaigns_Leads": {
+            "parent_module": "Campaigns",
+            "related_module": "Leads",
+        },
+        "Campaigns_Contacts": {
+            "parent_module": "Campaigns",
+            "related_module": "Contacts",
+        },
+        "Contacts_X_Deals": {
+            "parent_module": "Deals",
+            "related_module": "Contact_Roles",
+        },
+    }
 
-    logger = logging.getLogger(__name__)
+
+    class RelatedHandler(TableHandler):
+        """Handler for Zoho CRM junction/related record tables."""
+
+        @staticmethod
+        def get_tables() -> dict[str, dict]:
+            """Return configuration for all related tables."""
+            return RELATED_TABLES
+
+        def get_schema(self, table_name: str, config: dict) -> StructType:
+            """Get Spark schema for a junction table."""
+            table_config = RELATED_TABLES.get(table_name, {})
+            related_module = table_config.get("related_module", "")
+            return get_related_table_schema(related_module)
+
+        def get_metadata(self, table_name: str, config: dict) -> dict:
+            """Get ingestion metadata for a junction table."""
+            return {
+                "primary_keys": ["_junction_id"],
+                "ingestion_type": "snapshot",
+            }
+
+        def read(
+            self,
+            table_name: str,
+            config: dict,
+            start_offset: dict,
+        ) -> tuple[Iterator[dict], dict]:
+            """Read records from a junction table."""
+            table_config = RELATED_TABLES.get(table_name, {})
+            parent_module = table_config.get("parent_module", "")
+            related_module = table_config.get("related_module", "")
+
+            related_fields = RELATED_MODULE_API_FIELDS.get(related_module, "id,name")
+
+            def records_generator():
+                parent_ids = list(self._get_parent_ids(parent_module))
+
+                for parent_id in parent_ids:
+                    related_records = self._get_related_records(
+                        parent_module, parent_id, related_module, related_fields
+                    )
+                    for record in related_records:
+                        record["_junction_id"] = f"{parent_id}_{record.get('id')}"
+                        record["_parent_id"] = parent_id
+                        record["_parent_module"] = parent_module
+                        yield record
+
+            return records_generator(), {}
+
+        def _get_parent_ids(self, parent_module: str) -> Iterator[str]:
+            """Get all record IDs from a parent module."""
+            params = {"fields": "id"}
+            for record in self.client.paginate(f"/crm/v8/{parent_module}", params=params):
+                if record.get("id"):
+                    yield record["id"]
+
+        def _get_related_records(
+            self,
+            parent_module: str,
+            parent_id: str,
+            related_module: str,
+            fields: str,
+        ) -> Iterator[dict]:
+            """Get related records for a specific parent record."""
+            endpoint = f"/crm/v8/{parent_module}/{parent_id}/{related_module}"
+            params = {"fields": fields}
+
+            try:
+                yield from self.client.paginate(endpoint, params=params)
+            except ZohoAPIError as e:
+                if e.status_code in (204, 400, 404):
+                    return
+                raise
+
+
+    # =============================================================================
+    # Main LakeflowConnect Class
+    # =============================================================================
 
 
     class ZohoCRMLakeflowConnect(LakeflowConnect):
