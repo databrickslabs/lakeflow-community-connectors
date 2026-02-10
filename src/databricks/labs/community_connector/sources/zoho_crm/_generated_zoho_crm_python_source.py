@@ -5,6 +5,8 @@
 # Do not edit manually. Make changes to the source files instead.
 # ==============================================================================
 
+from __future__ import annotations
+
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Iterator, Optional
@@ -379,7 +381,7 @@ def register_lakeflow_source(spark):
             super().__init__(f"Zoho API error ({status_code}): {message}")
 
         @classmethod
-        def from_response(cls, response: requests.Response) -> "ZohoAPIError":
+        def from_response(cls, response: requests.Response) -> ZohoAPIError:
             """Create exception from HTTP response."""
             error_code = None
             message = response.text[:200]

@@ -12,7 +12,7 @@ from typing import Iterator
 
 from pyspark.sql.types import StructType
 
-from databricks.labs.community_connector.sources.lakeflow_connect import LakeflowConnect
+from databricks.labs.community_connector.interface import LakeflowConnect
 from databricks.labs.community_connector.sources.zoho_crm.zoho_client import ZohoAPIClient
 from databricks.labs.community_connector.sources.zoho_crm.handlers import (
     ModuleHandler,
