@@ -6,23 +6,18 @@ Extends LakeflowConnectTester to support filtering tests by table groups.
 
 import json
 import os
-import sys
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-# Add project root to path
-project_root = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
-sys.path.insert(0, project_root)
-
 from pyspark.sql.types import StructType, IntegerType
 
-from libs.utils import parse_value
-from sources.sap_successfactors.sap_successfactors import LakeflowConnect
-from sources.sap_successfactors.test.table_groups import (
+from databricks.labs.community_connector.libs.utils import parse_value
+from databricks.labs.community_connector.sources.sap_successfactors.sap_successfactors import (
+    SapSuccessFactorsLakeflowConnect,
+)
+from tests.unit.sources.sap_successfactors.table_groups import (
     TABLE_GROUPS,
     GROUP_DESCRIPTIONS,
     get_group_tables,
@@ -93,13 +88,13 @@ class GroupTestRunner:
     def __init__(self, init_options: dict):
         """Initialize with connection options."""
         self.init_options = init_options
-        self.connector: Optional[LakeflowConnect] = None
+        self.connector: Optional[SapSuccessFactorsLakeflowConnect] = None
         self.results: List[TableTestResult] = []
 
     def initialize_connector(self) -> bool:
         """Initialize the connector."""
         try:
-            self.connector = LakeflowConnect(self.init_options)
+            self.connector = SapSuccessFactorsLakeflowConnect(self.init_options)
             return True
         except Exception as e:
             print(f"ERROR: Failed to initialize connector: {e}")
@@ -526,6 +521,7 @@ def run_all_groups(config_path: str = None, output_dir: str = None, verbose: boo
 
 if __name__ == "__main__":
     import argparse
+    import sys
 
     parser = argparse.ArgumentParser(description="Run SAP SuccessFactors connector tests by group")
     parser.add_argument("--group", "-g", help="Group name to test (e.g., EC-Core)")

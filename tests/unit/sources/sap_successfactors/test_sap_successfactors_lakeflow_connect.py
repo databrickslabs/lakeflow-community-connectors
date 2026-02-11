@@ -5,57 +5,42 @@ This test file uses the standard LakeflowConnectTester to validate
 the SAP SuccessFactors connector against a real SuccessFactors instance.
 
 To run tests:
-    pytest sources/sap_successfactors/test/test_sap_successfactors_lakeflow_connect.py -v
+    pytest tests/unit/sources/sap_successfactors/test_sap_successfactors_lakeflow_connect.py -v
 """
 
 import json
-import os
-import sys
+from pathlib import Path
 
-# Add project root to path for imports
-project_root = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import tests.unit.sources.test_suite as test_suite
+from tests.unit.sources.test_suite import LakeflowConnectTester
+from tests.unit.sources.test_utils import load_config
+from databricks.labs.community_connector.sources.sap_successfactors.sap_successfactors import (
+    SapSuccessFactorsLakeflowConnect,
 )
-sys.path.insert(0, project_root)
-
-# Import the connector class and inject into test_suite namespace
-from sources.sap_successfactors.sap_successfactors import LakeflowConnect
-import tests.test_suite as test_suite
-test_suite.LakeflowConnect = LakeflowConnect
-
-from tests.test_suite import LakeflowConnectTester
 
 
-def load_config():
-    """Load the dev configuration."""
-    config_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "configs",
-        "dev_config.json",
-    )
+def test_sap_successfactors_connector():
+    """Test the SAP SuccessFactors connector using the test suite."""
+    # Inject the LakeflowConnect class into test_suite module's namespace
+    # This is required because test_suite.py expects LakeflowConnect to be available
+    test_suite.LakeflowConnect = SapSuccessFactorsLakeflowConnect
 
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Config file not found: {config_path}")
+    # Load configuration
+    config_dir = Path(__file__).parent / "configs"
+    config_path = config_dir / "dev_config.json"
 
-    with open(config_path, "r") as f:
-        return json.load(f)
+    config = load_config(config_path)
 
-
-def run_tests():
-    """Run the connector test suite."""
-    config = load_config()
-
-    # Create tester with init_options (the connection credentials)
+    # Create tester with the config
     tester = LakeflowConnectTester(init_options=config)
 
     # Run all tests
     report = tester.run_all_tests()
 
-    # Print report
-    tester.print_report(report)
+    # Print the report
+    tester.print_report(report, show_details=True)
 
-    return report
-
-
-if __name__ == "__main__":
-    run_tests()
+    # Assert that all tests passed
+    assert report.passed_tests == report.total_tests, (
+        f"Test suite had failures: {report.failed_tests} failed, {report.error_tests} errors"
+    )

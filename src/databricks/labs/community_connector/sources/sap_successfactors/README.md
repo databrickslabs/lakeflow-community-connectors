@@ -428,8 +428,8 @@ Most common use case - core employee data including employment, jobs, compensati
 """
 SAP SuccessFactors - Employee Central Core HR
 """
-from pipeline.ingestion_pipeline import ingest
-from libs.source_loader import get_register_function
+from databricks.labs.community_connector.pipeline import ingest
+from databricks.labs.community_connector import register
 
 source_name = "sap_successfactors"
 connection_name = "sap_successfactors_connection"
@@ -448,8 +448,7 @@ pipeline_spec = {
     ]
 }
 
-register_lakeflow_source = get_register_function(source_name)
-register_lakeflow_source(spark)
+register(spark, source_name)
 ingest(spark, pipeline_spec)
 ```
 
@@ -461,8 +460,8 @@ Organization hierarchy and structure - companies, departments, locations, job co
 """
 SAP SuccessFactors - Foundation Objects
 """
-from pipeline.ingestion_pipeline import ingest
-from libs.source_loader import get_register_function
+from databricks.labs.community_connector.pipeline import ingest
+from databricks.labs.community_connector import register
 
 source_name = "sap_successfactors"
 connection_name = "sap_successfactors_connection"
@@ -483,8 +482,7 @@ pipeline_spec = {
     ]
 }
 
-register_lakeflow_source = get_register_function(source_name)
-register_lakeflow_source(spark)
+register(spark, source_name)
 ingest(spark, pipeline_spec)
 ```
 
@@ -496,8 +494,8 @@ Complete recruiting pipeline - requisitions, candidates, applications, offers.
 """
 SAP SuccessFactors - Recruiting
 """
-from pipeline.ingestion_pipeline import ingest
-from libs.source_loader import get_register_function
+from databricks.labs.community_connector.pipeline import ingest
+from databricks.labs.community_connector import register
 
 source_name = "sap_successfactors"
 connection_name = "sap_successfactors_connection"
@@ -517,8 +515,7 @@ pipeline_spec = {
     ]
 }
 
-register_lakeflow_source = get_register_function(source_name)
-register_lakeflow_source(spark)
+register(spark, source_name)
 ingest(spark, pipeline_spec)
 ```
 
@@ -530,8 +527,8 @@ Performance management - forms, goals, talent pools.
 """
 SAP SuccessFactors - Performance & Goals
 """
-from pipeline.ingestion_pipeline import ingest
-from libs.source_loader import get_register_function
+from databricks.labs.community_connector.pipeline import ingest
+from databricks.labs.community_connector import register
 
 source_name = "sap_successfactors"
 connection_name = "sap_successfactors_connection"
@@ -549,8 +546,7 @@ pipeline_spec = {
     ]
 }
 
-register_lakeflow_source = get_register_function(source_name)
-register_lakeflow_source(spark)
+register(spark, source_name)
 ingest(spark, pipeline_spec)
 ```
 
@@ -562,8 +558,8 @@ Payroll data for downstream processing.
 """
 SAP SuccessFactors - Payroll
 """
-from pipeline.ingestion_pipeline import ingest
-from libs.source_loader import get_register_function
+from databricks.labs.community_connector.pipeline import ingest
+from databricks.labs.community_connector import register
 
 source_name = "sap_successfactors"
 connection_name = "sap_successfactors_connection"
@@ -582,8 +578,7 @@ pipeline_spec = {
     ]
 }
 
-register_lakeflow_source = get_register_function(source_name)
-register_lakeflow_source(spark)
+register(spark, source_name)
 ingest(spark, pipeline_spec)
 ```
 

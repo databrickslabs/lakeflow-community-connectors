@@ -29,6 +29,7 @@ from pyspark.sql.types import (
     ArrayType,
     BinaryType,
 )
+from databricks.labs.community_connector.interface import LakeflowConnect
 
 
 # === TABLE_CONFIG_START ===
@@ -6382,7 +6383,7 @@ _TABLE_SCHEMAS: Dict[str, StructType] = {
 
 
 
-class LakeflowConnect:
+class SapSuccessFactorsLakeflowConnect(LakeflowConnect):
     """
     SAP SuccessFactors connector implementing the LakeflowConnect interface.
 

@@ -1,5 +1,7 @@
 """SAP SuccessFactors connector for Lakeflow Connect."""
 
-from .sap_successfactors import LakeflowConnect
+from databricks.labs.community_connector.sources.sap_successfactors.sap_successfactors import (
+    SapSuccessFactorsLakeflowConnect,
+)
 
-__all__ = ["LakeflowConnect"]
+__all__ = ["SapSuccessFactorsLakeflowConnect"]

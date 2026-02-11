@@ -5,18 +5,9 @@ Groups tables by SuccessFactors module for parallel test execution.
 """
 
 # Import table config to derive table names
-import sys
-import os
-
-# Add project root to path
-project_root = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from databricks.labs.community_connector.sources.sap_successfactors.sap_successfactors import (
+    _TABLE_CONFIG,
 )
-sys.path.insert(0, project_root)
-
-# pylint: disable=wrong-import-position
-from sources.sap_successfactors.sap_successfactors import _TABLE_CONFIG
-# pylint: enable=wrong-import-position
 
 # Get all table names
 ALL_TABLES = list(_TABLE_CONFIG.keys())
