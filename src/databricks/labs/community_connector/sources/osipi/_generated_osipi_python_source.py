@@ -1376,7 +1376,7 @@ def register_lakeflow_source(spark):
             self._oidc_access_token: Optional[str] = None
             self._oidc_token_expires_at: Optional[datetime] = None
 
-        def ensure_auth(self) -> None:
+        def ensure_auth(self) -> None:  # pylint: disable=too-many-return-statements,too-many-branches
             """Authenticate using UC Connection-injected options."""
             # If already resolved, check OIDC token expiry
             if self._auth_resolved:
@@ -1641,7 +1641,7 @@ def register_lakeflow_source(spark):
         return None
 
 
-    def build_streamset_params(
+    def build_streamset_params(  # pylint: disable=too-many-arguments
         webids: List[str],
         *,
         start_str: str,
@@ -1678,7 +1678,7 @@ def register_lakeflow_source(spark):
         return params
 
 
-    def paginate_time_series(
+    def paginate_time_series(  # pylint: disable=too-many-branches,too-many-statements,too-many-nested-blocks
         get_data_func,
         start_str: str,
         end_str: str,
@@ -1720,8 +1720,7 @@ def register_lakeflow_source(spark):
                     yield stream
             else:
                 page_record_count = len(items_container)
-                for item in items_container:
-                    yield item
+                yield from items_container
 
             if page_record_count < max_count:
                 break
@@ -2196,7 +2195,7 @@ def register_lakeflow_source(spark):
                 return iterator(), next_offset
 
             # Fallback: Batch execute
-            def iterator() -> Iterator[dict]:
+            def batch_iterator() -> Iterator[dict]:
                 for group in groups:
                     if not group:
                         continue
@@ -2236,7 +2235,7 @@ def register_lakeflow_source(spark):
                                 "ingestion_timestamp": ingest_ts,
                             }
 
-            return iterator(), next_offset
+            return batch_iterator(), next_offset
 
         def _read_streamset_recorded(
             self, start_offset: dict, table_options: Dict[str, str]
@@ -2328,7 +2327,7 @@ def register_lakeflow_source(spark):
                         "ingestion_timestamp": ingest_ts,
                     }
 
-            def iterator() -> Iterator[dict]:
+            def iterator() -> Iterator[dict]:  # pylint: disable=too-many-branches
                 for group in groups:
                     if not group:
                         continue
@@ -2445,7 +2444,7 @@ def register_lakeflow_source(spark):
 
             return iterator(), {"offset": end_str}
 
-        def _read_streamset_plot(
+        def _read_streamset_plot(  # pylint: disable=too-many-statements
             self, start_offset: dict, table_options: Dict[str, str]
         ) -> Tuple[Iterator[dict], dict]:
             """Read plot values via StreamSet endpoint."""
@@ -2481,7 +2480,7 @@ def register_lakeflow_source(spark):
             tags_per_request = int(table_options.get("tags_per_request", 0) or 0)
             groups = chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
 
-            def iterator() -> Iterator[dict]:
+            def iterator() -> Iterator[dict]:  # pylint: disable=too-many-branches
                 for group in groups:
                     if not group:
                         continue
@@ -3483,7 +3482,7 @@ def register_lakeflow_source(spark):
         # Event Frame readers
         # =========================================================================
 
-        def _read_event_frames(
+        def _read_event_frames(  # pylint: disable=too-many-locals
             self, start_offset: dict, table_options: Dict[str, str]
         ) -> Tuple[Iterator[dict], dict]:
             """Read event frames."""
