@@ -1,5 +1,11 @@
 # Lakeflow SAP SuccessFactors Community Connector
 
+## Authors
+
+- wonseok.choi@databricks.com
+- insung.lee@databricks.com
+- sudong.lee@databricks.com
+
 This documentation provides setup instructions and reference information for the SAP SuccessFactors source connector.
 
 The Lakeflow SAP SuccessFactors Connector enables you to extract HR and talent management data from your SAP SuccessFactors instance and load it into Databricks. SAP SuccessFactors is a cloud-based Human Capital Management (HCM) suite that provides comprehensive HR solutions including employee data, organizational structures, compensation, performance, and learning management. This connector leverages the SAP SuccessFactors OData v2 API to synchronize data efficiently using incremental ingestion patterns.
