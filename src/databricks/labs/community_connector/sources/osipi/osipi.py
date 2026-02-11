@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 # OSIPI Lakeflow Community Connector (Python Data Source)
 #
 # Implements the LakeflowConnect interface expected by the Lakeflow Community Connectors template.
@@ -559,7 +560,7 @@ class OsipiLakeflowConnect(LakeflowConnect):
             return iterator(), next_offset
 
         # Fallback: Batch execute
-        def iterator() -> Iterator[dict]:
+        def batch_iterator() -> Iterator[dict]:
             for group in groups:
                 if not group:
                     continue
@@ -599,7 +600,7 @@ class OsipiLakeflowConnect(LakeflowConnect):
                             "ingestion_timestamp": ingest_ts,
                         }
 
-        return iterator(), next_offset
+        return batch_iterator(), next_offset
 
     def _read_streamset_recorded(
         self, start_offset: dict, table_options: Dict[str, str]
@@ -691,7 +692,7 @@ class OsipiLakeflowConnect(LakeflowConnect):
                     "ingestion_timestamp": ingest_ts,
                 }
 
-        def iterator() -> Iterator[dict]:
+        def iterator() -> Iterator[dict]:  # pylint: disable=too-many-branches
             for group in groups:
                 if not group:
                     continue
@@ -808,7 +809,7 @@ class OsipiLakeflowConnect(LakeflowConnect):
 
         return iterator(), {"offset": end_str}
 
-    def _read_streamset_plot(
+    def _read_streamset_plot(  # pylint: disable=too-many-statements
         self, start_offset: dict, table_options: Dict[str, str]
     ) -> Tuple[Iterator[dict], dict]:
         """Read plot values via StreamSet endpoint."""
@@ -844,7 +845,7 @@ class OsipiLakeflowConnect(LakeflowConnect):
         tags_per_request = int(table_options.get("tags_per_request", 0) or 0)
         groups = chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
 
-        def iterator() -> Iterator[dict]:
+        def iterator() -> Iterator[dict]:  # pylint: disable=too-many-branches
             for group in groups:
                 if not group:
                     continue
@@ -1846,7 +1847,7 @@ class OsipiLakeflowConnect(LakeflowConnect):
     # Event Frame readers
     # =========================================================================
 
-    def _read_event_frames(
+    def _read_event_frames(  # pylint: disable=too-many-locals
         self, start_offset: dict, table_options: Dict[str, str]
     ) -> Tuple[Iterator[dict], dict]:
         """Read event frames."""

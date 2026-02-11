@@ -78,7 +78,7 @@ class PiWebApiClient:
         self._oidc_access_token: Optional[str] = None
         self._oidc_token_expires_at: Optional[datetime] = None
 
-    def ensure_auth(self) -> None:
+    def ensure_auth(self) -> None:  # pylint: disable=too-many-return-statements,too-many-branches
         """Authenticate using UC Connection-injected options."""
         # If already resolved, check OIDC token expiry
         if self._auth_resolved:
@@ -343,7 +343,7 @@ def _start_dt_from_offset(start_offset: dict) -> Optional[datetime]:
     return None
 
 
-def build_streamset_params(
+def build_streamset_params(  # pylint: disable=too-many-arguments
     webids: List[str],
     *,
     start_str: str,
@@ -380,7 +380,7 @@ def build_streamset_params(
     return params
 
 
-def paginate_time_series(
+def paginate_time_series(  # pylint: disable=too-many-branches,too-many-statements,too-many-nested-blocks
     get_data_func,
     start_str: str,
     end_str: str,
@@ -422,8 +422,7 @@ def paginate_time_series(
                 yield stream
         else:
             page_record_count = len(items_container)
-            for item in items_container:
-                yield item
+            yield from items_container
 
         if page_record_count < max_count:
             break
