@@ -1,25 +1,27 @@
 from pathlib import Path
 
-from tests import test_suite
-from tests.test_suite import LakeflowConnectTester
-from tests.test_utils import load_config
-from sources.qualtrics.qualtrics import LakeflowConnect
-from sources.qualtrics.qualtrics_test_utils import LakeflowConnectTestUtils
+import tests.unit.sources.test_suite as test_suite
+from tests.unit.sources.test_suite import LakeflowConnectTester
+from tests.unit.sources.test_utils import load_config
+from databricks.labs.community_connector.sources.qualtrics.qualtrics import QualtricsLakeflowConnect
+from databricks.labs.community_connector.sources.qualtrics.qualtrics_test_utils import (
+    LakeflowConnectTestUtils,
+)
 
 
 def test_qualtrics_connector():
     """Test the Qualtrics connector using the shared LakeflowConnect test suite."""
     # Inject the Qualtrics LakeflowConnect class into the shared test_suite namespace
     # so that LakeflowConnectTester can instantiate it.
-    test_suite.LakeflowConnect = LakeflowConnect
+    test_suite.LakeflowConnect = QualtricsLakeflowConnect
 
     # Inject the Qualtrics test utils for write-back testing
     test_suite.LakeflowConnectTestUtils = LakeflowConnectTestUtils
 
     # Load connection-level configuration (e.g. api_token, datacenter_id)
-    parent_dir = Path(__file__).parent.parent
-    config_path = parent_dir / "configs" / "dev_config.json"
-    table_config_path = parent_dir / "configs" / "dev_table_config.json"
+    config_dir = Path(__file__).parent / "configs"
+    config_path = config_dir / "dev_config.json"
+    table_config_path = config_dir / "dev_table_config.json"
 
     config = load_config(config_path)
     table_config = load_config(table_config_path)

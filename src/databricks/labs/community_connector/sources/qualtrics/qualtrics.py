@@ -2,7 +2,6 @@
 import io
 import json
 import logging
-import re
 import sys
 import time
 import zipfile
@@ -11,14 +10,17 @@ from datetime import datetime
 from typing import Iterator
 
 import requests
-from pyspark.sql.types import (
-    ArrayType,
-    BooleanType,
-    LongType,
-    MapType,
-    StringType,
-    StructField,
-    StructType,
+from pyspark.sql.types import StructType
+
+from databricks.labs.community_connector.interface import LakeflowConnect
+from databricks.labs.community_connector.sources.qualtrics.qualtrics_schemas import (
+    TABLE_SCHEMAS,
+    TABLE_METADATA,
+    SUPPORTED_TABLES,
+)
+from databricks.labs.community_connector.sources.qualtrics.qualtrics_utils import (
+    QualtricsConfig,
+    normalize_keys,
 )
 
 # Configure logging for DLT/Lakeflow compatibility (stderr works best in Databricks)
@@ -32,52 +34,7 @@ if not logger.handlers:
     logger.addHandler(_handler)
 
 
-class QualtricsConfig:
-    """Configuration constants for Qualtrics connector."""
-
-    # Export polling configuration
-    MAX_EXPORT_POLL_ATTEMPTS = 60  # Max polling attempts (2 min total at 2s/attempt)
-    EXPORT_POLL_INTERVAL_FAST = 1  # seconds (when >50% complete)
-    EXPORT_POLL_INTERVAL_SLOW = 2  # seconds (when <50% complete)
-
-    # HTTP retry configuration (uses exponential backoff: 2^attempt)
-    MAX_HTTP_RETRIES = 3  # Results in 1s, 2s, 4s waits = 7s total max
-
-    # Rate limiting
-    RATE_LIMIT_DEFAULT_WAIT = 60  # seconds (when Retry-After header missing)
-
-    # Pagination
-    DEFAULT_PAGE_SIZE = 100
-
-    # Request timeout
-    REQUEST_TIMEOUT = 30  # seconds per HTTP request
-
-    # Auto-consolidation configuration (when surveyId not provided)
-    DEFAULT_MAX_SURVEYS = 50  # Default limit for auto-consolidation
-    CONSOLIDATION_DELAY_BETWEEN_SURVEYS = 0.5  # seconds (to respect rate limits)
-
-    # Parallel processing configuration
-    # Qualtrics allows 3000 requests/minute per brand (some endpoints have lower limits)
-    # We use 5 workers as a conservative default to avoid overwhelming the API
-    # Reference: https://api.qualtrics.com/a5e9a1a304902-limits
-    MAX_PARALLEL_WORKERS = 5
-
-    @staticmethod
-    def get_poll_interval(progress_percent: float) -> float:
-        """Get polling interval based on export progress."""
-        return (
-            QualtricsConfig.EXPORT_POLL_INTERVAL_FAST
-            if progress_percent >= 50
-            else QualtricsConfig.EXPORT_POLL_INTERVAL_SLOW
-        )
-
-    @staticmethod
-    def get_retry_wait(attempt: int) -> float:
-        """Calculate exponential backoff wait time for HTTP retries."""
-        return 2 ** attempt
-
-
-class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
+class QualtricsLakeflowConnect(LakeflowConnect):  # pylint: disable=too-many-instance-attributes
     def __init__(self, options: dict[str, str]) -> None:
         """
         Initialize the Qualtrics source connector with authentication parameters.
@@ -124,26 +81,6 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
             )
             self.max_surveys = QualtricsConfig.DEFAULT_MAX_SURVEYS
 
-        # Supported tables
-        self.tables = [
-            "surveys", "survey_definitions", "survey_responses",
-            "distributions", "mailing_lists", "mailing_list_contacts",
-            "directory_contacts", "directories", "users"
-        ]
-
-        # Schema method mappings
-        self._schema_methods = {
-            "surveys": self._get_surveys_schema,
-            "survey_definitions": self._get_survey_definitions_schema,
-            "survey_responses": self._get_survey_responses_schema,
-            "distributions": self._get_distributions_schema,
-            "mailing_lists": self._get_mailing_lists_schema,
-            "mailing_list_contacts": self._get_mailing_list_contacts_schema,
-            "directory_contacts": self._get_directory_contacts_schema,
-            "directories": self._get_directories_schema,
-            "users": self._get_users_schema,
-        }
-
         # Reader method mappings
         self._reader_methods = {
             "surveys": self._read_surveys,
@@ -155,55 +92,6 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
             "directory_contacts": self._read_directory_contacts,
             "directories": self._read_directories,
             "users": self._read_users,
-        }
-
-        # Table metadata mappings
-        self._table_metadata = {
-            "surveys": {
-                "primary_keys": ["id"],
-                "cursor_field": "last_modified",
-                "ingestion_type": "cdc"
-            },
-            "survey_definitions": {
-                "primary_keys": ["survey_id"],
-                "cursor_field": "last_modified",
-                "ingestion_type": "cdc"
-            },
-            "survey_responses": {
-                "primary_keys": ["response_id"],
-                "cursor_field": "recorded_date",
-                "ingestion_type": "append"
-            },
-            "distributions": {
-                "primary_keys": ["id"],
-                "cursor_field": "modified_date",
-                "ingestion_type": "cdc"
-            },
-            "mailing_lists": {
-                "primary_keys": ["mailing_list_id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot"
-            },
-            "mailing_list_contacts": {
-                "primary_keys": ["contact_id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot"
-            },
-            "directory_contacts": {
-                "primary_keys": ["contact_id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot"
-            },
-            "directories": {
-                "primary_keys": ["directory_id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot"
-            },
-            "users": {
-                "primary_keys": ["id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot"
-            },
         }
 
     def _validate_credentials(self) -> None:
@@ -256,10 +144,10 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
         Returns:
             List of table names
         """
-        return self.tables
+        return SUPPORTED_TABLES.copy()
 
     # =========================================================================
-    # Schema Definitions
+    # Schema and Metadata (delegated to qualtrics_schemas module)
     # =========================================================================
 
     def get_table_schema(
@@ -275,210 +163,11 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
         Returns:
             StructType representing the table schema
         """
-        if table_name not in self._schema_methods:
+        if table_name not in TABLE_SCHEMAS:
             raise ValueError(
-                f"Unsupported table: {table_name}. Supported tables are: {self.tables}"
+                f"Unsupported table: {table_name}. Supported tables are: {SUPPORTED_TABLES}"
             )
-
-        return self._schema_methods[table_name]()
-
-    def _get_surveys_schema(self) -> StructType:
-        """Get schema for surveys table."""
-        return StructType([
-            StructField("id", StringType(), True),
-            StructField("name", StringType(), True),
-            StructField("owner_id", StringType(), True),
-            StructField("is_active", BooleanType(), True),
-            StructField("creation_date", StringType(), True),
-            StructField("last_modified", StringType(), True)
-        ])
-
-    def _get_survey_definitions_schema(self) -> StructType:
-        """Get schema for survey_definitions table.
-
-        Returns full survey structure including questions, blocks, and flow.
-        Complex nested structures are stored as JSON strings for flexibility.
-        """
-        return StructType([
-            # Survey identification - these are consistently typed
-            StructField("survey_id", StringType(), True),
-            StructField("survey_name", StringType(), True),
-            StructField("survey_status", StringType(), True),
-            StructField("owner_id", StringType(), True),
-            StructField("creator_id", StringType(), True),
-            StructField("brand_id", StringType(), True),
-            StructField("brand_base_url", StringType(), True),
-            StructField("last_modified", StringType(), True),
-            StructField("last_accessed", StringType(), True),
-            StructField("last_activated", StringType(), True),
-            StructField("question_count", StringType(), True),
-            # Complex nested structures - stored as StringType (JSON)
-            # These fields have variable structure depending on survey configuration
-            StructField("questions", StringType(), True),
-            StructField("blocks", StringType(), True),
-            StructField("survey_flow", StringType(), True),
-            StructField("survey_options", StringType(), True),
-            StructField("response_sets", StringType(), True),
-            StructField("scoring", StringType(), True),
-            StructField("project_info", StringType(), True)
-        ])
-
-    def _get_survey_responses_schema(self) -> StructType:
-        """Get schema for survey_responses table."""
-        return StructType([
-            StructField("response_id", StringType(), True),
-            StructField("survey_id", StringType(), True),
-            StructField("recorded_date", StringType(), True),
-            StructField("start_date", StringType(), True),
-            StructField("end_date", StringType(), True),
-            StructField("status", LongType(), True),
-            StructField("ip_address", StringType(), True),
-            StructField("progress", LongType(), True),
-            StructField("duration", LongType(), True),
-            StructField("finished", BooleanType(), True),
-            StructField("distribution_channel", StringType(), True),
-            StructField("user_language", StringType(), True),
-            StructField("location_latitude", StringType(), True),
-            StructField("location_longitude", StringType(), True),
-            StructField("values", MapType(
-                StringType(),
-                StructType([
-                    StructField("choice_text", StringType(), True),
-                    StructField("choice_id", StringType(), True),
-                    StructField("text_entry", StringType(), True)
-                ])
-            ), True),
-            StructField("labels", MapType(StringType(), StringType()), True),
-            StructField("displayed_fields", ArrayType(StringType()), True),
-            StructField("displayed_values", MapType(StringType(), StringType()), True),
-            StructField("embedded_data", MapType(StringType(), StringType()), True)
-        ])
-
-    def _get_distributions_schema(self) -> StructType:
-        """Get schema for distributions table.
-
-        Includes nested structures for surveyLink, recipients, message, and stats.
-        """
-        return StructType([
-            StructField("id", StringType(), True),
-            StructField("parent_distribution_id", StringType(), True),
-            StructField("owner_id", StringType(), True),
-            StructField("organization_id", StringType(), True),
-            StructField("request_type", StringType(), True),
-            StructField("request_status", StringType(), True),
-            StructField("send_date", StringType(), True),
-            StructField("created_date", StringType(), True),
-            StructField("modified_date", StringType(), True),
-            StructField("headers", StructType([
-                StructField("from_email", StringType(), True),
-                StructField("from_name", StringType(), True),
-                StructField("reply_to_email", StringType(), True),
-                StructField("subject", StringType(), True)
-            ]), True),
-            StructField("recipients", StructType([
-                StructField("mailing_list_id", StringType(), True),
-                StructField("contact_id", StringType(), True),
-                StructField("library_id", StringType(), True),
-                StructField("sample_id", StringType(), True)
-            ]), True),
-            StructField("message", StructType([
-                StructField("library_id", StringType(), True),
-                StructField("message_id", StringType(), True),
-                StructField("message_type", StringType(), True)
-            ]), True),
-            StructField("survey_link", StructType([
-                StructField("survey_id", StringType(), True),
-                StructField("expiration_date", StringType(), True),
-                StructField("link_type", StringType(), True)
-            ]), True),
-            StructField("stats", StructType([
-                StructField("sent", LongType(), True),
-                StructField("failed", LongType(), True),
-                StructField("started", LongType(), True),
-                StructField("bounced", LongType(), True),
-                StructField("opened", LongType(), True),
-                StructField("skipped", LongType(), True),
-                StructField("finished", LongType(), True),
-                StructField("complaints", LongType(), True),
-                StructField("blocked", LongType(), True)
-            ]), True)
-        ])
-
-    def _get_mailing_lists_schema(self) -> StructType:
-        """Get schema for mailing_lists table.
-
-        Returns mailing list metadata with dates as ISO 8601 strings (consistent with surveys).
-        """
-        return StructType([
-            StructField("mailing_list_id", StringType(), True),
-            StructField("name", StringType(), True),
-            StructField("owner_id", StringType(), True),
-            StructField("creation_date", StringType(), True),
-            StructField("last_modified_date", StringType(), True),
-            StructField("contact_count", LongType(), True)
-        ])
-
-    def _get_mailing_list_contacts_schema(self) -> StructType:
-        """Get schema for mailing_list_contacts table."""
-        return StructType([
-            StructField("contact_id", StringType(), True),
-            StructField("first_name", StringType(), True),
-            StructField("last_name", StringType(), True),
-            StructField("email", StringType(), True),
-            StructField("phone", StringType(), True),
-            StructField("ext_ref", StringType(), True),
-            StructField("language", StringType(), True),
-            StructField("unsubscribed", BooleanType(), True),
-            StructField("mailing_list_unsubscribed", BooleanType(), True),
-            StructField("contact_lookup_id", StringType(), True)
-        ])
-
-    def _get_directory_contacts_schema(self) -> StructType:
-        """Get schema for directory_contacts table."""
-        return StructType([
-            StructField("contact_id", StringType(), True),
-            StructField("first_name", StringType(), True),
-            StructField("last_name", StringType(), True),
-            StructField("email", StringType(), True),
-            StructField("phone", StringType(), True),
-            StructField("ext_ref", StringType(), True),
-            StructField("language", StringType(), True),
-            StructField("unsubscribed", BooleanType(), True),
-            StructField("embedded_data", MapType(StringType(), StringType()), True)
-        ])
-
-    def _get_directories_schema(self) -> StructType:
-        """Get schema for directories table."""
-        return StructType([
-            StructField("directory_id", StringType(), True),
-            StructField("name", StringType(), True),
-            StructField("contact_count", LongType(), True),
-            StructField("is_default", BooleanType(), True),
-            StructField("deduplication_criteria", StructType([
-                StructField("email", BooleanType(), True),
-                StructField("first_name", BooleanType(), True),
-                StructField("last_name", BooleanType(), True),
-                StructField("external_data_reference", BooleanType(), True),
-                StructField("phone", BooleanType(), True)
-            ]), True)
-        ])
-
-    def _get_users_schema(self) -> StructType:
-        """Get schema for users table."""
-        return StructType([
-            StructField("id", StringType(), True),
-            StructField("username", StringType(), True),
-            StructField("email", StringType(), True),
-            StructField("first_name", StringType(), True),
-            StructField("last_name", StringType(), True),
-            StructField("user_type", StringType(), True),
-            StructField("division_id", StringType(), True),
-            StructField("account_status", StringType(), True),
-        ])
-
-    # =========================================================================
-    # Table Metadata and Routing
-    # =========================================================================
+        return TABLE_SCHEMAS[table_name]
 
     def read_table_metadata(
         self, table_name: str, table_options: dict[str, str]
@@ -493,12 +182,15 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
         Returns:
             Dictionary containing primary_keys, cursor_field, and ingestion_type
         """
-        if table_name not in self._table_metadata:
+        if table_name not in TABLE_METADATA:
             raise ValueError(
-                f"Unsupported table: {table_name}. Supported tables are: {self.tables}"
+                f"Unsupported table: {table_name}. Supported tables are: {SUPPORTED_TABLES}"
             )
+        return TABLE_METADATA[table_name]
 
-        return self._table_metadata[table_name]
+    # =========================================================================
+    # Table Reading (routing)
+    # =========================================================================
 
     def read_table(
         self, table_name: str, start_offset: dict, table_options: dict[str, str]
@@ -516,7 +208,7 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
         """
         if table_name not in self._reader_methods:
             raise ValueError(
-                f"Unsupported table: {table_name}. Supported tables are: {self.tables}"
+                f"Unsupported table: {table_name}. Supported tables are: {SUPPORTED_TABLES}"
             )
 
         reader_method = self._reader_methods[table_name]
@@ -528,53 +220,8 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
         return reader_method(start_offset, table_options)
 
     # =========================================================================
-    # Helpers
+    # HTTP Helpers
     # =========================================================================
-
-    def _to_snake_case(self, name: str) -> str:
-        """
-        Convert camelCase or PascalCase to snake_case.
-
-        Args:
-            name: Field name in camelCase or PascalCase
-
-        Returns:
-            Field name in snake_case
-        """
-        # Insert underscore before uppercase letters that follow lowercase letters
-        s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
-        # Insert underscore before uppercase letters that follow numbers or lowercase letters
-        s2 = re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1)
-        return s2.lower()
-
-    def _normalize_keys(self, data: dict) -> dict:
-        """
-        Recursively transform all keys in a dict to snake_case.
-
-        Args:
-            data: Dictionary with API field names (camelCase or PascalCase)
-
-        Returns:
-            Dictionary with snake_case field names
-        """
-        if not isinstance(data, dict):
-            return data
-
-        normalized = {}
-        for key, value in data.items():
-            snake_key = self._to_snake_case(key)
-
-            if isinstance(value, dict):
-                normalized[snake_key] = self._normalize_keys(value)
-            elif isinstance(value, list):
-                normalized[snake_key] = [
-                    self._normalize_keys(item) if isinstance(item, dict) else item
-                    for item in value
-                ]
-            else:
-                normalized[snake_key] = value
-
-        return normalized
 
     def _fetch_paginated_list(  # pylint: disable=too-many-locals,too-many-branches
         self,
@@ -646,7 +293,7 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
             elif cursor_value:
                 new_offset[cursor_field] = cursor_value
 
-        normalized = (self._normalize_keys(item) for item in all_items)
+        normalized = (normalize_keys(item) for item in all_items)
         return normalized, new_offset
 
     def _iterate_all_surveys(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
@@ -848,7 +495,7 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
                     try:
                         error_detail = response.json()
                         logger.error(f"API Error Response: {error_detail}")
-                    except:
+                    except Exception:
                         logger.error(f"API Error Response (raw): {response.text}")
 
                 response.raise_for_status()
@@ -977,23 +624,23 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
                 "BrandID", "BrandBaseURL", "LastModified", "LastAccessed",
                 "LastActivated", "QuestionCount"
             ]
-            for field in simple_fields:
-                processed[field] = result.get(field)
+            for field_name in simple_fields:
+                processed[field_name] = result.get(field_name)
 
             # Serialize complex nested fields as JSON strings
             complex_fields = [
                 "Questions", "Blocks", "SurveyFlow", "SurveyOptions",
                 "ResponseSets", "Scoring", "ProjectInfo"
             ]
-            for field in complex_fields:
-                value = result.get(field)
+            for field_name in complex_fields:
+                value = result.get(field_name)
                 if value is not None:
-                    processed[field] = json.dumps(value)
+                    processed[field_name] = json.dumps(value)
                 else:
-                    processed[field] = None
+                    processed[field_name] = None
 
             # Normalize all keys to snake_case before returning
-            normalized = self._normalize_keys(processed)
+            normalized = normalize_keys(processed)
 
             # Calculate new offset based on this definition's last_modified
             new_offset = {}
@@ -1263,8 +910,8 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
 
             # Process responses to handle nested structures correctly
             processed_responses = []
-            for response in responses:
-                processed_response = self._process_response_record(response, survey_id)
+            for resp in responses:
+                processed_response = self._process_response_record(resp, survey_id)
                 processed_responses.append(processed_response)
 
             return processed_responses
@@ -1294,7 +941,7 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
         processed["embeddedData"] = self._extract_embedded_data(record)
 
         # Normalize all keys to snake_case before returning
-        return self._normalize_keys(processed)
+        return normalize_keys(processed)
 
     def _extract_simple_fields(self, record: dict) -> dict:
         """Extract simple metadata fields from response record."""
@@ -1307,19 +954,19 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
 
         values_map = record.get("values", {})
 
-        for field in simple_fields:
+        for field_name in simple_fields:
             # Try top-level first
-            if field in record and record[field] is not None:
-                processed[field] = record[field]
+            if field_name in record and record[field_name] is not None:
+                processed[field_name] = record[field_name]
             # Fallback to values map (Qualtrics sometimes puts metadata here)
-            elif field in values_map:
-                value_obj = values_map[field]
+            elif field_name in values_map:
+                value_obj = values_map[field_name]
                 if isinstance(value_obj, dict):
-                    processed[field] = value_obj.get("textEntry")
+                    processed[field_name] = value_obj.get("textEntry")
                 else:
-                    processed[field] = value_obj
+                    processed[field_name] = value_obj
             else:
-                processed[field] = None
+                processed[field_name] = None
 
         # Handle responseId field
         if not processed.get("responseId") and "_recordId" in values_map:
@@ -1553,14 +1200,14 @@ class LakeflowConnect:  # pylint: disable=too-many-instance-attributes
 
         def convert_timestamps(record):
             """Convert epoch ms to ISO 8601 for consistency with surveys table."""
-            for field in ["creation_date", "last_modified_date"]:
-                if field in record and record[field] is not None:
+            for ts_field in ["creation_date", "last_modified_date"]:
+                if ts_field in record and record[ts_field] is not None:
                     try:
-                        record[field] = datetime.utcfromtimestamp(
-                            record[field] / 1000
+                        record[ts_field] = datetime.utcfromtimestamp(
+                            record[ts_field] / 1000
                         ).strftime("%Y-%m-%dT%H:%M:%SZ")
                     except (ValueError, TypeError, OSError):
-                        record[field] = None
+                        record[ts_field] = None
             return record
 
         return (convert_timestamps(r) for r in raw_iter), offset
