@@ -1,0 +1,253 @@
+{
+    "Leads": {
+        "primary_keys": [
+            "id"
+        ]
+    },
+    "Contacts": {
+        "primary_keys": [
+            "id"
+        ],
+        "foreign_keys": {
+            "Account_Name.id": "Accounts.id",
+            "Reporting_To.id": "Contacts.id",
+            "Vendor_Name.id": "Vendors.id"
+        }
+    },
+    "Accounts": {
+        "primary_keys": [
+            "id"
+        ],
+        "foreign_keys": {
+            "Parent_Account.id": "Accounts.id"
+        }
+    },
+    "Deals": {
+        "primary_keys": [
+            "id"
+        ],
+        "foreign_keys": {
+            "Account_Name.id": "Accounts.id",
+            "Contact_Name.id": "Contacts.id",
+            "Campaign_Source.id": "Campaigns.id"
+        }
+    },
+    "Tasks": {
+        "primary_keys": [
+            "id"
+        ],
+        "foreign_keys": {
+            "Who_Id.id": "Contacts.id|Leads.id",
+            "What_Id.id": "Accounts.id|Deals.id"
+        }
+    },
+    "Events": {
+        "primary_keys": [
+            "id"
+        ],
+        "foreign_keys": {
+            "Who_Id.id": "Contacts.id|Leads.id",
+            "What_Id.id": "Accounts.id|Deals.id"
+        }
+    },
+    "Calls": {
+        "primary_keys": [
+            "id"
+        ],
+        "foreign_keys": {
+            "Who_Id.id": "Contacts.id|Leads.id",
+            "What_Id.id": "Accounts.id|Deals.id"
+        }
+    },
+    "Notes": {
+        "primary_keys": [
+            "id"
+        ],
+        "foreign_keys": {
+            "Parent_Id.id": "Leads.id|Contacts.id|Accounts.id|Deals.id"
+        }
+    },
+    "Attachments": {
+        "primary_keys": [
+            "id"
+        ],
+        "scd_type": "APPEND_ONLY",
+        "foreign_keys": {
+            "Parent_Id.id": "Leads.id|Contacts.id|Accounts.id|Deals.id"
+        }
+    },
+    "Products": {
+        "primary_keys": [
+            "id"
+        ],
+        "foreign_keys": {
+            "Vendor_Name.id": "Vendors.id"
+        }
+    },
+    "Vendors": {
+        "primary_keys": [
+            "id"
+        ]
+    },
+    "Price_Books": {
+        "primary_keys": [
+            "id"
+        ]
+    },
+    "Quotes": {
+        "primary_keys": [
+            "id"
+        ],
+        "foreign_keys": {
+            "Account_Name.id": "Accounts.id",
+            "Contact_Name.id": "Contacts.id",
+            "Deal_Name.id": "Deals.id"
+        }
+    },
+    "Sales_Orders": {
+        "primary_keys": [
+            "id"
+        ],
+        "foreign_keys": {
+            "Account_Name.id": "Accounts.id",
+            "Contact_Name.id": "Contacts.id",
+            "Deal_Name.id": "Deals.id",
+            "Quote_Name.id": "Quotes.id"
+        }
+    },
+    "Purchase_Orders": {
+        "primary_keys": [
+            "id"
+        ],
+        "foreign_keys": {
+            "Vendor_Name.id": "Vendors.id",
+            "Contact_Name.id": "Contacts.id"
+        }
+    },
+    "Invoices": {
+        "primary_keys": [
+            "id"
+        ],
+        "foreign_keys": {
+            "Account_Name.id": "Accounts.id",
+            "Contact_Name.id": "Contacts.id",
+            "Sales_Order.id": "Sales_Orders.id"
+        }
+    },
+    "Campaigns": {
+        "primary_keys": [
+            "id"
+        ],
+        "foreign_keys": {
+            "Parent_Campaign.id": "Campaigns.id"
+        }
+    },
+    "Cases": {
+        "primary_keys": [
+            "id"
+        ],
+        "foreign_keys": {
+            "Account_Name.id": "Accounts.id",
+            "Contact_Name.id": "Contacts.id"
+        }
+    },
+    "Solutions": {
+        "primary_keys": [
+            "id"
+        ]
+    },
+    "Quoted_Items": {
+        "primary_keys": [
+            "id"
+        ],
+        "scd_type": "SCD_TYPE_1",
+        "foreign_keys": {
+            "_parent_id": "Quotes.id",
+            "Product_Name.id": "Products.id"
+        }
+    },
+    "Ordered_Items": {
+        "primary_keys": [
+            "id"
+        ],
+        "scd_type": "SCD_TYPE_1",
+        "foreign_keys": {
+            "_parent_id": "Sales_Orders.id",
+            "Product_Name.id": "Products.id"
+        }
+    },
+    "Invoiced_Items": {
+        "primary_keys": [
+            "id"
+        ],
+        "scd_type": "SCD_TYPE_1",
+        "foreign_keys": {
+            "_parent_id": "Invoices.id",
+            "Product_Name.id": "Products.id"
+        }
+    },
+    "Purchase_Items": {
+        "primary_keys": [
+            "id"
+        ],
+        "scd_type": "SCD_TYPE_1",
+        "foreign_keys": {
+            "_parent_id": "Purchase_Orders.id",
+            "Product_Name.id": "Products.id"
+        }
+    },
+    "Campaigns_Leads": {
+        "primary_keys": [
+            "_junction_id"
+        ],
+        "scd_type": "SCD_TYPE_1",
+        "foreign_keys": {
+            "_parent_id": "Campaigns.id",
+            "id": "Leads.id"
+        }
+    },
+    "Campaigns_Contacts": {
+        "primary_keys": [
+            "_junction_id"
+        ],
+        "scd_type": "SCD_TYPE_1",
+        "foreign_keys": {
+            "_parent_id": "Campaigns.id",
+            "id": "Contacts.id"
+        }
+    },
+    "Contacts_X_Deals": {
+        "primary_keys": [
+            "_junction_id"
+        ],
+        "scd_type": "SCD_TYPE_1",
+        "foreign_keys": {
+            "_parent_id": "Deals.id",
+            "id": "Contacts.id"
+        }
+    },
+    "Users": {
+        "primary_keys": [
+            "id"
+        ],
+        "foreign_keys": {
+            "role.id": "Roles.id",
+            "profile.id": "Profiles.id"
+        }
+    },
+    "Roles": {
+        "primary_keys": [
+            "id"
+        ],
+        "scd_type": "SCD_TYPE_1",
+        "foreign_keys": {
+            "reporting_to.id": "Roles.id"
+        }
+    },
+    "Profiles": {
+        "primary_keys": [
+            "id"
+        ],
+        "scd_type": "SCD_TYPE_1"
+    }
+}

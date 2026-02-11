@@ -11,8 +11,11 @@ from typing import Iterator, Optional
 
 from pyspark.sql.types import StructType, StructField, LongType
 
-from .base import TableHandler
-from ..zoho_types import zoho_field_to_spark_type, normalize_record
+from databricks.labs.community_connector.sources.zoho_crm.handlers.base import TableHandler
+from databricks.labs.community_connector.sources.zoho_crm.zoho_types import (
+    zoho_field_to_spark_type,
+    normalize_record,
+)
 
 logger = logging.getLogger(__name__)
 

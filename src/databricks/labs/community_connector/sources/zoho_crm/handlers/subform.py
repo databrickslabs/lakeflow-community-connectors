@@ -27,12 +27,12 @@ See: https://www.zoho.com/inventory/api/v1/
 """
 
 import logging
-from typing import Iterator
+from typing import Iterator, Optional
 
 from pyspark.sql.types import StructType
 
-from .base import TableHandler
-from ..zoho_types import LINE_ITEM_SCHEMA
+from databricks.labs.community_connector.sources.zoho_crm.handlers.base import TableHandler
+from databricks.labs.community_connector.sources.zoho_crm.zoho_types import LINE_ITEM_SCHEMA
 
 logger = logging.getLogger(__name__)
 

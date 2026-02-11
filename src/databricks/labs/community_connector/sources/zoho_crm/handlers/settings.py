@@ -10,8 +10,8 @@ from typing import Iterator
 
 from pyspark.sql.types import StructType, StructField, StringType
 
-from .base import TableHandler
-from ..zoho_types import SETTINGS_SCHEMAS
+from databricks.labs.community_connector.sources.zoho_crm.handlers.base import TableHandler
+from databricks.labs.community_connector.sources.zoho_crm.zoho_types import SETTINGS_SCHEMAS
 
 logger = logging.getLogger(__name__)
 

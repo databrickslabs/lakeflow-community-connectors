@@ -5,12 +5,11 @@ Defines the interface that all table handlers must implement.
 """
 
 from abc import ABC, abstractmethod
-from typing import Iterator, TYPE_CHECKING
+from typing import Iterator
 
 from pyspark.sql.types import StructType
 
-if TYPE_CHECKING:
-    from ..zoho_client import ZohoAPIClient
+from databricks.labs.community_connector.sources.zoho_crm.zoho_client import ZohoAPIClient
 
 
 class TableHandler(ABC):
@@ -23,7 +22,7 @@ class TableHandler(ABC):
     - Reading records from the table
     """
 
-    def __init__(self, client: "ZohoAPIClient") -> None:
+    def __init__(self, client: ZohoAPIClient) -> None:
         """
         Initialize the handler with an API client.
 
