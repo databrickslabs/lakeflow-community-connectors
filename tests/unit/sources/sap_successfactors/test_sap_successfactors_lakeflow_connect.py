@@ -8,7 +8,6 @@ To run tests:
     pytest tests/unit/sources/sap_successfactors/test_sap_successfactors_lakeflow_connect.py -v
 """
 
-import json
 from pathlib import Path
 
 import tests.unit.sources.test_suite as test_suite

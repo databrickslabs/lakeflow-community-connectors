@@ -11,6 +11,10 @@
 #     - Handles __next continuation links for pagination
 #     - Handles $top/$skip offset pagination as fallback
 #     - Parses SAP DateTime format: /Date(milliseconds)/
+#
+# Metadata Modes:
+#     - "static": Uses hardcoded TABLE_CONFIG and TABLE_SCHEMAS (default)
+#     - "dynamic": Fetches tables and schemas from OData $metadata API at runtime
 
 import base64
 import re
@@ -27,6 +31,11 @@ from databricks.labs.community_connector.sources.sap_successfactors.table_metada
     TABLE_CONFIG,
     DEDUPE_TABLES,
 )
+from databricks.labs.community_connector.sources.sap_successfactors.odata_metadata import (
+    fetch_odata_metadata,
+    build_schema_from_metadata,
+    build_table_config_from_metadata,
+)
 
 
 class SapSuccessFactorsLakeflowConnect(LakeflowConnect):
@@ -38,6 +47,9 @@ class SapSuccessFactorsLakeflowConnect(LakeflowConnect):
     - OData v2 API with full pagination support
     - Both CDC (incremental) and snapshot ingestion types
     - SAP DateTime format parsing
+    - Two metadata modes:
+        - "static": Uses hardcoded TABLE_CONFIG and TABLE_SCHEMAS (default)
+        - "dynamic": Fetches tables and schemas from OData $metadata API at runtime
     """
 
     # Default page size for OData queries
@@ -60,10 +72,19 @@ class SapSuccessFactorsLakeflowConnect(LakeflowConnect):
                 - username: Username in format username@companyId
                     (e.g., "sfadmin@SFPART067615")
                 - password: User password
+                - metadata_mode: "static" (default) or "dynamic"
+                    - static: Uses hardcoded table definitions
+                    - dynamic: Fetches from OData $metadata API
         """
         self.endpoint_url = options["endpoint_url"].rstrip("/")
         self.username = options["username"]
         self.password = options["password"]
+        self.metadata_mode = options.get("metadata_mode", "static").lower()
+
+        if self.metadata_mode not in ("static", "dynamic"):
+            raise ValueError(
+                f"Invalid metadata_mode: '{self.metadata_mode}'. Must be 'static' or 'dynamic'."
+            )
 
         # Build the OData API base URL
         self.base_url = f"{self.endpoint_url}/odata/v2"
@@ -82,13 +103,22 @@ class SapSuccessFactorsLakeflowConnect(LakeflowConnect):
         self.session = requests.Session()
         self.session.headers.update(self.headers)
 
+        # Cache for dynamically fetched metadata (populated lazily)
+        self._metadata_cache: Optional[Dict[str, Any]] = None
+
     def list_tables(self) -> List[str]:
         """
         List all available tables supported by this connector.
 
+        In static mode, returns table names from the hardcoded TABLE_CONFIG.
+        In dynamic mode, fetches entity sets from the OData $metadata API.
+
         Returns:
-            List of table names from TABLE_CONFIG
+            List of table names
         """
+        if self.metadata_mode == "dynamic":
+            metadata = self._get_metadata()
+            return list(metadata["entity_sets"].keys())
         return list(TABLE_CONFIG.keys())
 
     def get_table_schema(
@@ -96,6 +126,9 @@ class SapSuccessFactorsLakeflowConnect(LakeflowConnect):
     ) -> StructType:
         """
         Get the Spark schema for a table.
+
+        In static mode, returns the schema from the hardcoded TABLE_SCHEMAS.
+        In dynamic mode, builds the schema from the OData $metadata API.
 
         Args:
             table_name: Name of the table
@@ -107,6 +140,15 @@ class SapSuccessFactorsLakeflowConnect(LakeflowConnect):
         Raises:
             ValueError: If table is not supported
         """
+        if self.metadata_mode == "dynamic":
+            metadata = self._get_metadata()
+            entity_sets = metadata["entity_sets"]
+            if table_name not in entity_sets:
+                supported = list(entity_sets.keys())
+                raise ValueError(f"Unsupported table: {table_name}. Supported tables: {supported}")
+            entity_info = entity_sets[table_name]
+            return build_schema_from_metadata(entity_info)
+
         if table_name not in TABLE_SCHEMAS:
             supported = list(TABLE_SCHEMAS.keys())
             raise ValueError(
@@ -119,6 +161,12 @@ class SapSuccessFactorsLakeflowConnect(LakeflowConnect):
     ) -> Dict[str, Any]:
         """
         Get metadata for a table including primary keys, cursor field, and ingestion type.
+
+        In static mode, returns metadata from the hardcoded TABLE_CONFIG.
+        In dynamic mode, derives metadata from the OData $metadata API:
+            - primary_keys: Extracted from EntityType Key/PropertyRef elements
+            - cursor_field: Auto-detected if lastModifiedDateTime (or similar) exists
+            - ingestion_type: "cdc" if a cursor field is detected, otherwise "snapshot"
 
         Args:
             table_name: Name of the table
@@ -133,6 +181,15 @@ class SapSuccessFactorsLakeflowConnect(LakeflowConnect):
         Raises:
             ValueError: If table is not supported
         """
+        if self.metadata_mode == "dynamic":
+            metadata = self._get_metadata()
+            entity_sets = metadata["entity_sets"]
+            if table_name not in entity_sets:
+                supported = list(entity_sets.keys())
+                raise ValueError(f"Unsupported table: {table_name}. Supported tables: {supported}")
+            entity_info = entity_sets[table_name]
+            return build_table_config_from_metadata(entity_info)
+
         if table_name not in TABLE_CONFIG:
             supported = list(TABLE_CONFIG.keys())
             raise ValueError(
@@ -171,19 +228,46 @@ class SapSuccessFactorsLakeflowConnect(LakeflowConnect):
         Raises:
             ValueError: If table is not supported
         """
-        if table_name not in TABLE_CONFIG:
-            supported = list(TABLE_CONFIG.keys())
-            raise ValueError(
-                f"Unsupported table: {table_name}. Supported tables: {supported}"
-            )
-
-        config = TABLE_CONFIG[table_name]
+        config = self._resolve_table_config(table_name)
         ingestion_type = config.get("ingestion_type", "snapshot")
 
         if ingestion_type == "cdc":
             return self._read_table_cdc(table_name, config, start_offset)
         else:
             return self._read_table_snapshot(table_name, config)
+
+    def _resolve_table_config(self, table_name: str) -> Dict[str, Any]:
+        """
+        Resolve the table configuration, using either static or dynamic metadata.
+
+        In static mode, looks up TABLE_CONFIG.
+        In dynamic mode, builds configuration from the OData $metadata API.
+
+        Args:
+            table_name: Name of the table
+
+        Returns:
+            Dictionary with entity_set, primary_keys, cursor_field, ingestion_type
+
+        Raises:
+            ValueError: If table is not supported
+        """
+        if self.metadata_mode == "dynamic":
+            metadata = self._get_metadata()
+            entity_sets = metadata["entity_sets"]
+            if table_name not in entity_sets:
+                supported = list(entity_sets.keys())
+                raise ValueError(f"Unsupported table: {table_name}. Supported tables: {supported}")
+            entity_info = entity_sets[table_name]
+            table_meta = build_table_config_from_metadata(entity_info)
+            # Add entity_set which is the EntitySet name (same as table_name in dynamic mode)
+            table_meta["entity_set"] = entity_info["entity_set_name"]
+            return table_meta
+
+        if table_name not in TABLE_CONFIG:
+            supported = list(TABLE_CONFIG.keys())
+            raise ValueError(f"Unsupported table: {table_name}. Supported tables: {supported}")
+        return TABLE_CONFIG[table_name]
 
     def _read_table_cdc(
         self, table_name: str, config: Dict[str, Any], start_offset: Dict
@@ -519,6 +603,24 @@ class SapSuccessFactorsLakeflowConnect(LakeflowConnect):
         except (ValueError, OSError):
             # Handle dates outside valid range
             return sap_datetime
+
+    # ----------------------------------------------------------------
+    # Dynamic metadata support (OData $metadata API)
+    # ----------------------------------------------------------------
+
+    def _get_metadata(self) -> Dict[str, Any]:
+        """
+        Get the parsed OData metadata, fetching and caching it on first call.
+
+        Delegates to :func:`odata_metadata.fetch_odata_metadata` for the
+        actual HTTP request and EDMX parsing.
+
+        Returns:
+            Parsed metadata dictionary (see :func:`odata_metadata.parse_edmx`).
+        """
+        if self._metadata_cache is None:
+            self._metadata_cache = fetch_odata_metadata(self.session, self.base_url, self.headers)
+        return self._metadata_cache
 
     def test_connection(self) -> Dict[str, str]:
         """

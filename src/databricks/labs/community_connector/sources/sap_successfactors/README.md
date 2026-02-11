@@ -25,8 +25,9 @@ To configure the connector, provide the following parameters in your connector o
 | `endpoint_url` | string | Yes | SAP SuccessFactors API endpoint URL. This is typically the OData API base URL for your datacenter region. | `https://api.successfactors.com/` |
 | `username` | string | Yes | Username in the format `username@companyId`. The Company ID identifies your SAP SuccessFactors tenant. | `sfadmin@COMPANY123` |
 | `password` | string | Yes | Password for the user account with API access permissions. | `********` |
+| `metadata_mode` | string | No | Controls how table listings and schemas are resolved. `"static"` (default) uses hardcoded definitions; `"dynamic"` fetches them at runtime from the OData `$metadata` API. See [Metadata Modes](#metadata-modes) for details. | `static` |
 
-**Note:** The `externalOptionsAllowList` must include `tableConfigs,tableNameList` - these are required framework options that the pipeline uses for metadata retrieval.
+**Note:** The `externalOptionsAllowList` must include `tableConfigs,tableNameList` — these are required framework options that the pipeline uses for metadata retrieval. If you use dynamic metadata mode, also include `metadata_mode` in the allow list.
 
 ### Getting Your Credentials
 
@@ -114,6 +115,7 @@ databricks connections create \
 
 - `sourceName`: Must be set to `"sap_successfactors"` exactly as shown. This identifies the connector to use.
 - `externalOptionsAllowList`: Must include `"tableConfigs,tableNameList"` - these are **required framework options** that the pipeline uses for metadata retrieval. Without these, the pipeline will fail with `DATA_SOURCE_OPTION_NOT_ALLOWED_BY_CONNECTION` error.
+- To use **dynamic metadata mode**, add `"metadata_mode": "dynamic"` to the options and append `metadata_mode` to the allow list (e.g. `"tableConfigs,tableNameList,metadata_mode"`). See [Metadata Modes](#metadata-modes) for details.
 
 #### Managing Connections
 
@@ -372,21 +374,113 @@ Additional configuration and reference data.
 
 ---
 
+## Metadata Modes
+
+The connector supports two metadata modes that control how available tables, schemas, and table metadata (primary keys, CDC cursor fields) are resolved. Set the mode via the `metadata_mode` connection parameter.
+
+### Static Mode (default)
+
+```
+"metadata_mode": "static"
+```
+
+- Tables, schemas, and metadata are sourced from **hardcoded definitions** bundled with the connector (`table_metadata.py` and `table_schemas.py`).
+- No additional API calls are required — the connector works fully offline for metadata operations.
+- Best for **production workloads** where the set of tables is known and stable.
+- Supports all **149 pre-defined tables** listed in [Supported Objects](#supported-objects).
+
+### Dynamic Mode
+
+```
+"metadata_mode": "dynamic"
+```
+
+- Tables, schemas, and metadata are discovered at runtime by querying the SAP SuccessFactors OData **`$metadata`** endpoint (`{endpoint_url}/odata/v2/$metadata`).
+- The `$metadata` response is an EDMX XML document that describes every EntityType (with properties, types, and keys) and every EntitySet available on the instance.
+- The connector parses this document once and **caches the result** for the lifetime of the connector instance — only one additional HTTP call is made.
+- **Primary keys** are extracted from the EDMX `<Key>/<PropertyRef>` elements.
+- **CDC cursor fields** are auto-detected: if an entity has a property named `lastModifiedDateTime`, `lastModifiedDate`, or `lastModifiedOn`, the table is classified as CDC; otherwise it defaults to Snapshot.
+- Best for **discovery workflows** — find every entity available on your instance without code changes, or ingest tables that are not part of the hardcoded list.
+
+#### Example: Using Dynamic Mode
+
+```python
+"""
+SAP SuccessFactors - Dynamic discovery
+"""
+from databricks.labs.community_connector.pipeline import ingest
+from databricks.labs.community_connector import register
+
+source_name = "sap_successfactors"
+connection_name = "sap_successfactors_connection_dynamic"
+
+pipeline_spec = {
+    "connection_name": connection_name,
+    "objects": [
+        # Any EntitySet name reported by $metadata can be used here,
+        # even if it is not in the static table list.
+        {"table": {"source_table": "User"}},
+        {"table": {"source_table": "EmpEmployment"}},
+    ]
+}
+
+register(spark, source_name)
+ingest(spark, pipeline_spec)
+```
+
+> **Note:** When creating the connection for dynamic mode, add `"metadata_mode": "dynamic"` to the connection options and include `metadata_mode` in the `externalOptionsAllowList`:
+>
+> ```bash
+> databricks connections create \
+>   --json '{
+>     "name": "sap_successfactors_connection_dynamic",
+>     "connection_type": "GENERIC_LAKEFLOW_CONNECT",
+>     "options": {
+>       "sourceName": "sap_successfactors",
+>       "endpoint_url": "https://api.successfactors.com/",
+>       "username": "your-username@COMPANY_ID",
+>       "password": "your-password",
+>       "metadata_mode": "dynamic",
+>       "externalOptionsAllowList": "tableConfigs,tableNameList,metadata_mode"
+>     }
+>   }'
+> ```
+
+### Choosing a Mode
+
+| Aspect | Static | Dynamic |
+|--------|--------|---------|
+| Startup speed | Fastest — no API call for metadata | One extra HTTP call on first use (cached) |
+| Table coverage | 149 pre-defined tables | All EntitySets on the instance |
+| Schema accuracy | Matches bundled definitions | Reflects the live instance schema |
+| CDC detection | Manually curated per table | Auto-detected from property names |
+| Offline capable | Yes | No — requires API connectivity |
+
+You can switch between modes at any time by changing the `metadata_mode` parameter. Both modes use the same underlying OData v2 API for data reads.
+
+---
+
 ## Data Type Mapping
 
-The following table shows how SAP SuccessFactors OData types are mapped to Spark/Databricks types:
+The following table shows how SAP SuccessFactors OData types are mapped to Spark/Databricks types. This mapping is used by both static mode (hardcoded schemas) and dynamic mode (EDMX metadata parsing).
 
 | SAP SuccessFactors Type | Databricks Type | Notes |
 |------------------------|-----------------|-------|
 | Edm.String | STRING | Text fields, IDs, codes |
+| Edm.Guid | STRING | Globally unique identifiers |
 | Edm.Int64 | BIGINT | Numeric IDs, large counts |
-| Edm.Int32 | BIGINT | Always use BIGINT for safety |
+| Edm.Int32 | BIGINT | Mapped to BIGINT for safety |
+| Edm.Int16 | BIGINT | Mapped to BIGINT for safety |
+| Edm.Byte / Edm.SByte | BIGINT | Small integers mapped to BIGINT |
 | Edm.Double | DOUBLE | Decimal values, percentages |
-| Edm.Boolean | BOOLEAN | True/false flags |
-| Edm.DateTime | TIMESTAMP | SAP format: `/Date(milliseconds)/` - automatically converted |
-| Edm.Binary | BINARY | Attachment content, binary data |
+| Edm.Single / Edm.Float | DOUBLE | Single-precision floats mapped to DOUBLE |
 | Edm.Decimal | DOUBLE | Compensation values, monetary amounts |
-| Navigation Property | STRING | JSON-serialized nested objects |
+| Edm.Boolean | BOOLEAN | True/false flags |
+| Edm.DateTime | STRING | SAP format: `/Date(milliseconds)/` — automatically converted to ISO 8601 |
+| Edm.DateTimeOffset | STRING | Date-time with timezone offset — converted to ISO 8601 |
+| Edm.Time | STRING | Time-of-day values |
+| Edm.Binary | BINARY | Attachment content, binary data |
+| Navigation Property | *(skipped)* | Deferred navigation properties are excluded from the schema |
 
 ### Date/Time Handling
 
