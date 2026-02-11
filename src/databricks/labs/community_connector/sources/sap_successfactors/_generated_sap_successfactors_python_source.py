@@ -23,7 +23,9 @@ from pyspark.sql import Row
 from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
 from pyspark.sql.types import *
 import base64
+import logging
 import requests
+import xml.etree.ElementTree as ET
 
 
 def register_lakeflow_source(spark):
@@ -333,10 +335,267 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
-    # src/databricks/labs/community_connector/sources/sap_successfactors/sap_successfactors.py
+    # src/databricks/labs/community_connector/sources/sap_successfactors/odata_metadata.py
     ########################################################
 
-    _TABLE_CONFIG: Dict[str, Dict[str, Any]] = {
+    logger = logging.getLogger(__name__)
+
+    # ----------------------------------------------------------------
+    # Constants
+    # ----------------------------------------------------------------
+
+    # Mapping from OData EDM primitive types to PySpark type constructors.
+    EDM_TYPE_MAP = {
+        "Edm.String": StringType,
+        "Edm.Int64": LongType,
+        "Edm.Int32": LongType,
+        "Edm.Int16": LongType,
+        "Edm.Byte": LongType,
+        "Edm.SByte": LongType,
+        "Edm.Boolean": BooleanType,
+        "Edm.Double": DoubleType,
+        "Edm.Decimal": DoubleType,
+        "Edm.Single": DoubleType,
+        "Edm.Float": DoubleType,
+        "Edm.DateTime": StringType,
+        "Edm.DateTimeOffset": StringType,
+        "Edm.Time": StringType,
+        "Edm.Binary": BinaryType,
+        "Edm.Guid": StringType,
+    }
+
+    # Common cursor field names used for CDC detection (checked in priority order).
+    CDC_CURSOR_CANDIDATES: List[str] = [
+        "lastModifiedDateTime",
+        "lastModifiedDate",
+        "lastModifiedOn",
+    ]
+
+    # EDMX / OData v2 XML namespaces.
+    EDMX_NS = {
+        "edmx": "http://schemas.microsoft.com/ado/2007/06/edmx",
+        "edm": "http://schemas.microsoft.com/ado/2008/09/edm",
+        "m": "http://schemas.microsoft.com/ado/2007/08/dataservices/metadata",
+    }
+
+
+    # ----------------------------------------------------------------
+    # EDMX parsing
+    # ----------------------------------------------------------------
+
+
+    def parse_edmx(xml_text: str) -> Dict[str, Any]:
+        """
+        Parse an EDMX XML document into a structured metadata dictionary.
+
+        EDMX structure (OData v2)::
+
+            <edmx:Edmx>
+              <edmx:DataServices>
+                <Schema Namespace="...">
+                  <EntityType Name="...">
+                    <Key><PropertyRef Name="..."/></Key>
+                    <Property Name="..." Type="Edm.String" Nullable="false"/>
+                  </EntityType>
+                  <EntityContainer>
+                    <EntitySet Name="..." EntityType="Namespace.TypeName"/>
+                  </EntityContainer>
+                </Schema>
+              </edmx:DataServices>
+            </edmx:Edmx>
+
+        Args:
+            xml_text: Raw XML string of the EDMX document.
+
+        Returns:
+            Dictionary with structure::
+
+                {
+                    "entity_sets": {
+                        "<EntitySetName>": {
+                            "entity_set_name": str,
+                            "entity_type_name": str,
+                            "primary_keys": [str, ...],
+                            "properties": [
+                                {"name": str, "type": str, "nullable": bool}, ...
+                            ],
+                        },
+                        ...
+                    }
+                }
+        """
+        root = ET.fromstring(xml_text)
+
+        # Collect all EntityType definitions keyed by their fully-qualified name
+        entity_types: Dict[str, Dict[str, Any]] = {}
+
+        for schema_elem in root.findall(".//edm:Schema", EDMX_NS):
+            namespace = schema_elem.attrib.get("Namespace", "")
+
+            for et_elem in schema_elem.findall("edm:EntityType", EDMX_NS):
+                et_name = et_elem.attrib.get("Name", "")
+                fq_name = f"{namespace}.{et_name}" if namespace else et_name
+
+                # Extract primary keys
+                primary_keys: List[str] = []
+                key_elem = et_elem.find("edm:Key", EDMX_NS)
+                if key_elem is not None:
+                    for prop_ref in key_elem.findall("edm:PropertyRef", EDMX_NS):
+                        pk_name = prop_ref.attrib.get("Name")
+                        if pk_name:
+                            primary_keys.append(pk_name)
+
+                # Extract properties (skip NavigationProperty)
+                properties: List[Dict[str, Any]] = []
+                for prop_elem in et_elem.findall("edm:Property", EDMX_NS):
+                    prop_name = prop_elem.attrib.get("Name", "")
+                    prop_type = prop_elem.attrib.get("Type", "Edm.String")
+                    nullable_str = prop_elem.attrib.get("Nullable", "true")
+                    nullable = nullable_str.lower() != "false"
+                    properties.append(
+                        {
+                            "name": prop_name,
+                            "type": prop_type,
+                            "nullable": nullable,
+                        }
+                    )
+
+                entity_types[fq_name] = {
+                    "name": et_name,
+                    "primary_keys": primary_keys,
+                    "properties": properties,
+                }
+
+        # Collect EntitySet → EntityType mappings
+        entity_sets: Dict[str, Dict[str, Any]] = {}
+
+        for es_elem in root.findall(".//edm:EntityContainer/edm:EntitySet", EDMX_NS):
+            es_name = es_elem.attrib.get("Name", "")
+            et_fq_name = es_elem.attrib.get("EntityType", "")
+
+            if et_fq_name in entity_types:
+                et_info = entity_types[et_fq_name]
+                entity_sets[es_name] = {
+                    "entity_set_name": es_name,
+                    "entity_type_name": et_info["name"],
+                    "primary_keys": et_info["primary_keys"],
+                    "properties": et_info["properties"],
+                }
+
+        logger.info(
+            "Parsed OData metadata: %d entity types, %d entity sets",
+            len(entity_types),
+            len(entity_sets),
+        )
+
+        return {"entity_sets": entity_sets}
+
+
+    # ----------------------------------------------------------------
+    # Schema / config builders
+    # ----------------------------------------------------------------
+
+
+    def build_schema_from_metadata(entity_info: Dict[str, Any]) -> StructType:
+        """
+        Build a PySpark StructType from dynamically fetched entity metadata.
+
+        Args:
+            entity_info: Entity information dict containing a ``properties`` list.
+
+        Returns:
+            StructType with fields mapped from EDM types to PySpark types.
+        """
+        fields = []
+        for prop in entity_info["properties"]:
+            edm_type = prop["type"]
+            spark_type_cls = EDM_TYPE_MAP.get(edm_type, StringType)
+            nullable = prop["nullable"]
+            fields.append(StructField(prop["name"], spark_type_cls(), nullable))
+        return StructType(fields)
+
+
+    def build_table_config_from_metadata(entity_info: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Build a table configuration dict from dynamically fetched entity metadata.
+
+        Infers CDC capability by checking if common cursor fields
+        (e.g., ``lastModifiedDateTime``) are present among the properties.
+
+        Args:
+            entity_info: Entity information dict from parsed metadata.
+
+        Returns:
+            Dictionary with ``primary_keys``, ``cursor_field``, ``ingestion_type``.
+        """
+        property_names = {p["name"] for p in entity_info["properties"]}
+
+        # Auto-detect cursor field for CDC
+        cursor_field: Optional[str] = None
+        for candidate in CDC_CURSOR_CANDIDATES:
+            if candidate in property_names:
+                cursor_field = candidate
+                break
+
+        ingestion_type = "cdc" if cursor_field else "snapshot"
+
+        return {
+            "primary_keys": entity_info["primary_keys"],
+            "cursor_field": cursor_field,
+            "ingestion_type": ingestion_type,
+        }
+
+
+    # ----------------------------------------------------------------
+    # HTTP fetch
+    # ----------------------------------------------------------------
+
+
+    def fetch_odata_metadata(
+        session: requests.Session,
+        base_url: str,
+        headers: Dict[str, str],
+    ) -> Dict[str, Any]:
+        """
+        Fetch the OData ``$metadata`` endpoint and parse the EDMX XML.
+
+        The SAP SuccessFactors ``$metadata`` endpoint returns an EDMX document with:
+
+        - EntityType definitions (with Key/PropertyRef and Property elements)
+        - EntityContainer with EntitySet elements mapping set names to types
+
+        Args:
+            session: An authenticated :class:`requests.Session`.
+            base_url: OData service base URL (e.g. ``https://host/odata/v2``).
+            headers: Base HTTP headers (Authorization, etc.).
+
+        Returns:
+            Parsed metadata dictionary (same shape as :func:`parse_edmx`).
+
+        Raises:
+            Exception: If the metadata request fails.
+        """
+        url = f"{base_url}/$metadata"
+        logger.info("Fetching OData metadata from %s", url)
+
+        # Use Accept: application/xml for the metadata endpoint
+        metadata_headers = headers.copy()
+        metadata_headers["Accept"] = "application/xml"
+
+        response = session.get(url, headers=metadata_headers, timeout=120)
+        if response.status_code != 200:
+            raise Exception(
+                f"Failed to fetch OData metadata: {response.status_code} - {response.text}"
+            )
+
+        return parse_edmx(response.text)
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/sources/sap_successfactors/table_metadata.py
+    ########################################################
+
+    TABLE_CONFIG: Dict[str, Dict[str, Any]] = {
         "Advance": {
             "entity_set": "Advance",
             "primary_keys": ["NonRecurringPayment_externalCode", "externalCode"],
@@ -1901,14 +2160,15 @@ def register_lakeflow_source(spark):
             "ingestion_type": "snapshot",
         },
     }
-    # === TABLE_CONFIG_END ===
 
-    # Tables that require de-duplication due to SAP API returning identical rows
-    _DEDUPE_TABLES = {"PicklistOption", "TalentRatings"}
+    DEDUPE_TABLES = {"PicklistOption", "TalentRatings"}
 
-    # === TABLE_SCHEMAS_START ===
-    # Spark schemas for each table
-    _TABLE_SCHEMAS: Dict[str, StructType] = {
+
+    ########################################################
+    # src/databricks/labs/community_connector/sources/sap_successfactors/table_schemas.py
+    ########################################################
+
+    TABLE_SCHEMAS: Dict[str, StructType] = {
         "Advance": StructType([
             StructField("NonRecurringPayment_externalCode", StringType(), False),
             StructField("externalCode", StringType(), False),
@@ -6681,9 +6941,11 @@ def register_lakeflow_source(spark):
             StructField("canRequestFeedbackAboutTargetUser", BooleanType(), True)
         ]),
     }
-    # === TABLE_SCHEMAS_END ===
 
 
+    ########################################################
+    # src/databricks/labs/community_connector/sources/sap_successfactors/sap_successfactors.py
+    ########################################################
 
     class SapSuccessFactorsLakeflowConnect(LakeflowConnect):
         """
@@ -6694,6 +6956,9 @@ def register_lakeflow_source(spark):
         - OData v2 API with full pagination support
         - Both CDC (incremental) and snapshot ingestion types
         - SAP DateTime format parsing
+        - Two metadata modes:
+            - "static": Uses hardcoded TABLE_CONFIG and TABLE_SCHEMAS (default)
+            - "dynamic": Fetches tables and schemas from OData $metadata API at runtime
         """
 
         # Default page size for OData queries
@@ -6716,10 +6981,19 @@ def register_lakeflow_source(spark):
                     - username: Username in format username@companyId
                         (e.g., "sfadmin@SFPART067615")
                     - password: User password
+                    - metadata_mode: "static" (default) or "dynamic"
+                        - static: Uses hardcoded table definitions
+                        - dynamic: Fetches from OData $metadata API
             """
             self.endpoint_url = options["endpoint_url"].rstrip("/")
             self.username = options["username"]
             self.password = options["password"]
+            self.metadata_mode = options.get("metadata_mode", "static").lower()
+
+            if self.metadata_mode not in ("static", "dynamic"):
+                raise ValueError(
+                    f"Invalid metadata_mode: '{self.metadata_mode}'. Must be 'static' or 'dynamic'."
+                )
 
             # Build the OData API base URL
             self.base_url = f"{self.endpoint_url}/odata/v2"
@@ -6738,20 +7012,32 @@ def register_lakeflow_source(spark):
             self.session = requests.Session()
             self.session.headers.update(self.headers)
 
+            # Cache for dynamically fetched metadata (populated lazily)
+            self._metadata_cache: Optional[Dict[str, Any]] = None
+
         def list_tables(self) -> List[str]:
             """
             List all available tables supported by this connector.
 
+            In static mode, returns table names from the hardcoded TABLE_CONFIG.
+            In dynamic mode, fetches entity sets from the OData $metadata API.
+
             Returns:
-                List of table names from _TABLE_CONFIG
+                List of table names
             """
-            return list(_TABLE_CONFIG.keys())
+            if self.metadata_mode == "dynamic":
+                metadata = self._get_metadata()
+                return list(metadata["entity_sets"].keys())
+            return list(TABLE_CONFIG.keys())
 
         def get_table_schema(
             self, table_name: str, table_options: Dict[str, str]
         ) -> StructType:
             """
             Get the Spark schema for a table.
+
+            In static mode, returns the schema from the hardcoded TABLE_SCHEMAS.
+            In dynamic mode, builds the schema from the OData $metadata API.
 
             Args:
                 table_name: Name of the table
@@ -6763,18 +7049,33 @@ def register_lakeflow_source(spark):
             Raises:
                 ValueError: If table is not supported
             """
-            if table_name not in _TABLE_SCHEMAS:
-                supported = list(_TABLE_SCHEMAS.keys())
+            if self.metadata_mode == "dynamic":
+                metadata = self._get_metadata()
+                entity_sets = metadata["entity_sets"]
+                if table_name not in entity_sets:
+                    supported = list(entity_sets.keys())
+                    raise ValueError(f"Unsupported table: {table_name}. Supported tables: {supported}")
+                entity_info = entity_sets[table_name]
+                return build_schema_from_metadata(entity_info)
+
+            if table_name not in TABLE_SCHEMAS:
+                supported = list(TABLE_SCHEMAS.keys())
                 raise ValueError(
                     f"Unsupported table: {table_name}. Supported tables: {supported}"
                 )
-            return _TABLE_SCHEMAS[table_name]
+            return TABLE_SCHEMAS[table_name]
 
         def read_table_metadata(
             self, table_name: str, table_options: Dict[str, str]
         ) -> Dict[str, Any]:
             """
             Get metadata for a table including primary keys, cursor field, and ingestion type.
+
+            In static mode, returns metadata from the hardcoded TABLE_CONFIG.
+            In dynamic mode, derives metadata from the OData $metadata API:
+                - primary_keys: Extracted from EntityType Key/PropertyRef elements
+                - cursor_field: Auto-detected if lastModifiedDateTime (or similar) exists
+                - ingestion_type: "cdc" if a cursor field is detected, otherwise "snapshot"
 
             Args:
                 table_name: Name of the table
@@ -6789,13 +7090,22 @@ def register_lakeflow_source(spark):
             Raises:
                 ValueError: If table is not supported
             """
-            if table_name not in _TABLE_CONFIG:
-                supported = list(_TABLE_CONFIG.keys())
+            if self.metadata_mode == "dynamic":
+                metadata = self._get_metadata()
+                entity_sets = metadata["entity_sets"]
+                if table_name not in entity_sets:
+                    supported = list(entity_sets.keys())
+                    raise ValueError(f"Unsupported table: {table_name}. Supported tables: {supported}")
+                entity_info = entity_sets[table_name]
+                return build_table_config_from_metadata(entity_info)
+
+            if table_name not in TABLE_CONFIG:
+                supported = list(TABLE_CONFIG.keys())
                 raise ValueError(
                     f"Unsupported table: {table_name}. Supported tables: {supported}"
                 )
 
-            config = _TABLE_CONFIG[table_name]
+            config = TABLE_CONFIG[table_name]
             return {
                 "primary_keys": config["primary_keys"],
                 "cursor_field": config.get("cursor_field"),
@@ -6827,19 +7137,46 @@ def register_lakeflow_source(spark):
             Raises:
                 ValueError: If table is not supported
             """
-            if table_name not in _TABLE_CONFIG:
-                supported = list(_TABLE_CONFIG.keys())
-                raise ValueError(
-                    f"Unsupported table: {table_name}. Supported tables: {supported}"
-                )
-
-            config = _TABLE_CONFIG[table_name]
+            config = self._resolve_table_config(table_name)
             ingestion_type = config.get("ingestion_type", "snapshot")
 
             if ingestion_type == "cdc":
                 return self._read_table_cdc(table_name, config, start_offset)
             else:
                 return self._read_table_snapshot(table_name, config)
+
+        def _resolve_table_config(self, table_name: str) -> Dict[str, Any]:
+            """
+            Resolve the table configuration, using either static or dynamic metadata.
+
+            In static mode, looks up TABLE_CONFIG.
+            In dynamic mode, builds configuration from the OData $metadata API.
+
+            Args:
+                table_name: Name of the table
+
+            Returns:
+                Dictionary with entity_set, primary_keys, cursor_field, ingestion_type
+
+            Raises:
+                ValueError: If table is not supported
+            """
+            if self.metadata_mode == "dynamic":
+                metadata = self._get_metadata()
+                entity_sets = metadata["entity_sets"]
+                if table_name not in entity_sets:
+                    supported = list(entity_sets.keys())
+                    raise ValueError(f"Unsupported table: {table_name}. Supported tables: {supported}")
+                entity_info = entity_sets[table_name]
+                table_meta = build_table_config_from_metadata(entity_info)
+                # Add entity_set which is the EntitySet name (same as table_name in dynamic mode)
+                table_meta["entity_set"] = entity_info["entity_set_name"]
+                return table_meta
+
+            if table_name not in TABLE_CONFIG:
+                supported = list(TABLE_CONFIG.keys())
+                raise ValueError(f"Unsupported table: {table_name}. Supported tables: {supported}")
+            return TABLE_CONFIG[table_name]
 
         def _read_table_cdc(
             self, table_name: str, config: Dict[str, Any], start_offset: Dict
@@ -6849,7 +7186,7 @@ def register_lakeflow_source(spark):
 
             Args:
                 table_name: Name of the table
-                config: Table configuration from _TABLE_CONFIG
+                config: Table configuration from TABLE_CONFIG
                 start_offset: Previous offset with cursor_value
 
             Returns:
@@ -6902,7 +7239,7 @@ def register_lakeflow_source(spark):
 
             Args:
                 table_name: Name of the table
-                config: Table configuration from _TABLE_CONFIG
+                config: Table configuration from TABLE_CONFIG
 
             Returns:
                 Tuple of (records_iterator, empty_offset)
@@ -6932,7 +7269,7 @@ def register_lakeflow_source(spark):
             all_records, max_cursor = self._fetch_all_pages(url, params, cursor_field)
 
             # De-duplicate records for tables known to have identical duplicates from SAP API
-            if table_name in _DEDUPE_TABLES:
+            if table_name in DEDUPE_TABLES:
                 all_records = self._deduplicate_records(all_records)
 
             # For snapshot, we can optionally track the max cursor for future CDC
@@ -7175,6 +7512,24 @@ def register_lakeflow_source(spark):
             except (ValueError, OSError):
                 # Handle dates outside valid range
                 return sap_datetime
+
+        # ----------------------------------------------------------------
+        # Dynamic metadata support (OData $metadata API)
+        # ----------------------------------------------------------------
+
+        def _get_metadata(self) -> Dict[str, Any]:
+            """
+            Get the parsed OData metadata, fetching and caching it on first call.
+
+            Delegates to :func:`odata_metadata.fetch_odata_metadata` for the
+            actual HTTP request and EDMX parsing.
+
+            Returns:
+                Parsed metadata dictionary (see :func:`odata_metadata.parse_edmx`).
+            """
+            if self._metadata_cache is None:
+                self._metadata_cache = fetch_odata_metadata(self.session, self.base_url, self.headers)
+            return self._metadata_cache
 
         def test_connection(self) -> Dict[str, str]:
             """
