@@ -4,9 +4,7 @@ import tests.unit.sources.test_suite as test_suite
 from tests.unit.sources.test_suite import LakeflowConnectTester
 from tests.unit.sources.test_utils import load_config
 from databricks.labs.community_connector.sources.qualtrics.qualtrics import QualtricsLakeflowConnect
-from databricks.labs.community_connector.sources.qualtrics.qualtrics_test_utils import (
-    LakeflowConnectTestUtils,
-)
+from tests.unit.sources.qualtrics.qualtrics_test_utils import LakeflowConnectTestUtils
 
 
 def test_qualtrics_connector():

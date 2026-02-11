@@ -715,8 +715,8 @@ Survey response exports take 30-90 seconds depending on response count. The conn
 
 ## References
 
-- **Connector Implementation**: `sources/qualtrics/qualtrics.py`
-- **API Documentation**: `sources/qualtrics/qualtrics_api_doc.md`
+- **Connector Implementation**: `src/databricks/labs/community_connector/sources/qualtrics/qualtrics.py`
+- **API Documentation**: `src/databricks/labs/community_connector/sources/qualtrics/qualtrics_api_doc.md`
 - **Official Qualtrics API Documentation**:
   - Main API Reference: https://api.qualtrics.com/
   - Getting Started: https://www.qualtrics.com/support/integrations/api-integration/overview/
