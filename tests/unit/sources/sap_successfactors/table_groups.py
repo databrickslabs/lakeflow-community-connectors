@@ -6,11 +6,11 @@ Groups tables by SuccessFactors module for parallel test execution.
 
 # Import table config to derive table names
 from databricks.labs.community_connector.sources.sap_successfactors.sap_successfactors import (
-    _TABLE_CONFIG,
+    TABLE_CONFIG,
 )
 
 # Get all table names
-ALL_TABLES = list(_TABLE_CONFIG.keys())
+ALL_TABLES = list(TABLE_CONFIG.keys())
 
 
 def _categorize_tables():
