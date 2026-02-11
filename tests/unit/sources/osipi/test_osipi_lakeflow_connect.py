@@ -35,7 +35,7 @@ import pytest
 from tests.unit.sources import test_suite
 from tests.unit.sources.test_suite import LakeflowConnectTester
 from tests.unit.sources.test_utils import load_config
-from databricks.labs.community_connector.sources.osipi.osipi import LakeflowConnect
+from databricks.labs.community_connector.sources.osipi.osipi import OsipiLakeflowConnect
 
 
 def _is_blank(value: object) -> bool:
@@ -108,7 +108,7 @@ def test_osipi_connector_generic_suite_live():
         )
 
     # Inject into the shared test_suite namespace so LakeflowConnectTester can instantiate it.
-    test_suite.LakeflowConnect = LakeflowConnect
+    test_suite.LakeflowConnect = OsipiLakeflowConnect
 
     table_config = _load_table_config()
 
