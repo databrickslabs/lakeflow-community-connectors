@@ -68,8 +68,8 @@ Example with table_configuration:
 }
 """
 
-from pipeline.ingestion_pipeline import ingest
-from libs.source_loader import get_register_function
+from databricks.labs.community_connector.pipeline import ingest
+from databricks.labs.community_connector import register
 
 # ==============================================================================
 # CONFIGURATION
@@ -242,8 +242,7 @@ print("=" * 80)
 print()
 
 # Dynamically import and register the LakeFlow source
-register_lakeflow_source = get_register_function(SOURCE_NAME)
-register_lakeflow_source(spark)
+register(spark, SOURCE_NAME)
 
 # Execute ingestion
 ingest(spark, pipeline_spec)
