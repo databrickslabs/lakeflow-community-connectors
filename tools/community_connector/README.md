@@ -121,7 +121,7 @@ community-connector create_connection github my_github_conn \
 community-connector create_connection github my_github_conn \
   -o '{"token": "ghp_xxxx"}' --spec ./my_connector_spec.yaml
 
-# With a custom GitHub repo (fetches spec from sources/{source}/connector_spec.yaml)
+# With a custom GitHub repo (fetches spec from src/databricks/labs/community_connector/sources/{source}/connector_spec.yaml)
 community-connector create_connection github my_github_conn \
   -o '{"token": "ghp_xxxx"}' --spec https://github.com/myorg/my-connectors
 ```
