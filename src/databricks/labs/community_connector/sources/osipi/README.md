@@ -258,5 +258,5 @@ This notebook provides:
 ## References
 
 - **PI Web API Documentation**: https://docs.osisoft.com/bundle/pi-web-api
-- **Connector Implementation**: `sources/osipi/osipi.py`
+- **Connector Implementation**: `src/databricks/labs/community_connector/sources/osipi/osipi.py`
 - **Load-Balanced Deployment**: `tools/load_balanced_deployment/`

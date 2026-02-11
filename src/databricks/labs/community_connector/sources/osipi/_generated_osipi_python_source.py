@@ -159,7 +159,7 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
-    # sources/osipi/osipi.py
+    # src/databricks/labs/community_connector/sources/osipi/osipi.py
     ########################################################
 
     def _utcnow() -> datetime:

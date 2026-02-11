@@ -21,27 +21,21 @@ Notes:
 - We intentionally do NOT require UC Connections here; the generic test suite
   operates by instantiating the connector class directly.
 - If you want to validate UC Connections wiring, use the Databricks notebook
-  `sources/osipi/examples/uc_connection/test_uc_connection.py`.
+  examples in the connector's examples directory.
 """
 
 from __future__ import annotations
 
-import json
 import os
-import sys
 from pathlib import Path
 from typing import Any, Dict
 
 import pytest
 
-# Ensure repo root is importable under different pytest import modes.
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(_REPO_ROOT))
-
-from tests import test_suite
-from tests.test_suite import LakeflowConnectTester
-from tests.test_utils import load_config
-from sources.osipi.osipi import LakeflowConnect
+from tests.unit.sources import test_suite
+from tests.unit.sources.test_suite import LakeflowConnectTester
+from tests.unit.sources.test_utils import load_config
+from databricks.labs.community_connector.sources.osipi.osipi import LakeflowConnect
 
 
 def _is_blank(value: object) -> bool:
@@ -82,9 +76,9 @@ def _load_live_init_options() -> Dict[str, Any] | None:
         return opts
 
     # 2) Local dev fallback: dev_config.json (gitignored) or dev_config.local.json
-    parent_dir = Path(__file__).parent.parent
+    config_dir = Path(__file__).parent / "configs"
     for fname in ("dev_config.json", "dev_config.local.json"):
-        p = parent_dir / "configs" / fname
+        p = config_dir / fname
         if p.exists():
             cfg = load_config(p)
             if not isinstance(cfg, dict):
@@ -97,8 +91,8 @@ def _load_live_init_options() -> Dict[str, Any] | None:
 
 
 def _load_table_config() -> Dict[str, Dict[str, Any]]:
-    parent_dir = Path(__file__).parent.parent
-    table_config_path = parent_dir / "configs" / "dev_table_config.json"
+    config_dir = Path(__file__).parent / "configs"
+    table_config_path = config_dir / "dev_table_config.json"
     return load_config(table_config_path)
 
 
@@ -110,7 +104,7 @@ def test_osipi_connector_generic_suite_live():
     if not init_options:
         pytest.skip(
             "Missing live OSI PI config. Set OSIPI_PI_BASE_URL (+ auth), or create "
-            "sources/osipi/configs/dev_config.local.json (gitignored)."
+            "tests/unit/sources/osipi/configs/dev_config.local.json (gitignored)."
         )
 
     # Inject into the shared test_suite namespace so LakeflowConnectTester can instantiate it.

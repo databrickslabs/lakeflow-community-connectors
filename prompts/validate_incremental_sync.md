@@ -162,9 +162,9 @@ Verify that passing a midpoint cursor value filters records correctly.
 
 ```python
 import json
-from sources.{source}.{source} import LakeflowConnect
+from databricks.labs.community_connector.sources.{source}.{source} import LakeflowConnect
 
-config = json.load(open('sources/{source}/configs/dev_config.json'))
+config = json.load(open('tests/unit/sources/{source}/configs/dev_config.json'))
 connector = LakeflowConnect(config)
 ```
 
@@ -333,10 +333,10 @@ return {..., OFFSET_KEY: max_val}
 
 ```python
 import json
-from sources.{source}.{source} import LakeflowConnect
+from databricks.labs.community_connector.sources.{source}.{source} import LakeflowConnect
 
 # Load config and create connector
-config = json.load(open('sources/{source}/configs/dev_config.json'))
+config = json.load(open('tests/unit/sources/{source}/configs/dev_config.json'))
 connector = LakeflowConnect(config)
 
 # List tables
