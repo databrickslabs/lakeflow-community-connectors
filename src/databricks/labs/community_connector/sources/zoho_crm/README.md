@@ -106,7 +106,7 @@ The connector is organized into modular components:
 
 ```
 zoho_crm/
-├── zoho_crm.py          # Main orchestrator (LakeflowConnect class)
+├── zoho_crm.py          # Main orchestrator (ZohoCRMLakeflowConnect class)
 ├── zoho_client.py       # API client: auth, HTTP, pagination
 ├── zoho_types.py        # Spark type mappings and schema definitions
 └── handlers/
@@ -153,6 +153,29 @@ All custom modules created in your Zoho CRM instance are automatically discovere
 - Use `id` as the primary key
 - Support CDC ingestion with `Modified_Time` cursor
 - Have dynamically discovered schemas
+
+### Organization/Settings Tables
+
+| Table | Primary Key | Ingestion Type | Description |
+|-------|-------------|----------------|-------------|
+| `Users` | `id` | CDC | All users in the organization |
+| `Roles` | `id` | Snapshot | User roles hierarchy |
+| `Profiles` | `id` | Snapshot | Permission profiles |
+
+These tables use separate API endpoints from standard CRM modules and are included in `list_tables()` output.
+
+### Junction/Related Tables
+
+| Table | Primary Key | Ingestion Type | Description |
+|-------|-------------|----------------|-------------|
+| `Campaigns_Leads` | `_junction_id` | Snapshot | Leads associated with Campaigns |
+| `Campaigns_Contacts` | `_junction_id` | Snapshot | Contacts associated with Campaigns |
+| `Contacts_X_Deals` | `_junction_id` | Snapshot | Contact Roles for Deals |
+
+Junction tables represent many-to-many relationships. Each record includes:
+- `_junction_id`: Composite key (`{parent_id}_{related_id}`)
+- `_parent_id`: ID of the parent record
+- `_parent_module`: Name of the parent module
 
 ### Ingestion Types
 
