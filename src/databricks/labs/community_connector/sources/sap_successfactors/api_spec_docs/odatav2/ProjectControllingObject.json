@@ -1,0 +1,860 @@
+{
+  "x-odata-version": "4.0",
+  "swagger": "2.0",
+  "info": {
+    "version": "1.0.0",
+    "title": "Project Controlling Object",
+    "description": "You can use this API to create, update, read and delete project controlling object information. Project controlling object is one of the standard accounting objects supported for employees in an organization. This API is implemented based on OData version 2 specification.\n\n You can find your company's API server in [List of API Servers in SAP SuccessFactors.](https://help.sap.com/viewer/d599f15995d348a1b45ba5603e2aba9b/LATEST/en-US/af2b8d5437494b12be88fe374eba75b6.html)"
+  },
+  "x-sap-shortText": "Query and manage public sector cost object Project Controlling Object.",
+  "security": [
+    {
+      "basicAuthentication": []
+    }
+  ],
+  "securityDefinitions": {
+    "basicAuthentication": {
+      "type": "basic"
+    }
+  },
+  "externalDocs": {
+    "description": "More information available in help.sap.com",
+    "url": "https://help.sap.com/viewer/b2b06831c2cb4d5facd1dfde49a7aab5/latest"
+  },
+  "x-sap-api-type": "ODATA",
+  "schemes": ["https"],
+  "x-servers": [
+    {
+      "url": "https://{api-server}/odata/v2",
+      "description": "OData APIs for the SuccessFactors Data Centers"
+    },
+    {
+      "url":"https://sandbox.api.sap.com:443/SFPublicSectorManagement_Odata",
+      "description":"Sandbox URL"
+    }
+  ],
+  "basePath": "/odata/v2",
+  "consumes": ["application/json"],
+  "produces": ["application/json"],
+  "tags": [
+    {
+      "name": "Project Controlling Object"
+    }
+  ],
+  "definitions": {
+    "odata.error": {
+      "type": "object",
+      "required": ["error"],
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/odata.error.main"
+        }
+      }
+    },
+    "odata.error.main": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/odata.error.detail"
+          }
+        },
+        "innererror": {
+          "type": "object",
+          "description": "The structure of this object is service-specific"
+        }
+      }
+    },
+    "odata.error.detail": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      }
+    },
+    "SFOData.ProjectControllingObject": {
+      "type": "object",
+      "title": "ProjectControllingObject",
+      "required": ["effectiveStartDate", "effectiveStatus", "externalCode"],
+      "properties": {
+        "company": {
+          "type": "string",
+          "example": null,
+          "maxLength": 128
+        },
+        "createdBy": {
+          "type": "string",
+          "example": "string",
+          "maxLength": 100
+        },
+        "createdDateTime": {
+          "type": ["string", "null"],
+          "example": "/Date(1492098664000)/"
+        },
+        "description_defaultValue": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 128
+        },
+        "description_en_US": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 128
+        },
+        "description_localized": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 128
+        },
+        "effectiveEndDate": {
+          "type": ["string", "null"],
+          "readOnly": true,
+          "example": "/Date(1492098664000)/"
+        },
+        "effectiveStartDate": {
+          "type": "string",
+          "example": "/Date(1492098664000)/"
+        },
+        "effectiveStatus": {
+          "type": "string",
+          "enum": ["A", "I"],
+          "description": "Status codes: \n A - Active \n I - InActive",
+          "example": "I",
+          "maxLength": 128
+        },
+        "entityOID": {
+          "type": ["string", "null"],
+          "example": "string",
+          "readOnly": true,
+          "maxLength": 32
+        },
+        "externalCode": {
+          "type": "string",
+          "example": "string",
+          "maxLength": 50
+        },
+        "isStatistical": {
+          "type": ["boolean", "null"],
+          "example": true
+        },
+        "lastModifiedBy": {
+          "type": ["string", "null"],
+          "example": "string",
+          "readOnly": true,
+          "maxLength": 100
+        },
+        "lastModifiedDateTime": {
+          "type": ["string", "null"],
+          "readOnly": true,
+          "example": "/Date(1492098664000)/"
+        },
+        "mdfSystemRecordStatus": {
+          "type": "string",
+          "enum": ["C", "D","F","N","P","PH"],
+          "description": "Status codes:\n C - Correction\n D - Soft deleted record \n F - Full Purge Import in Progress \n N - Normal record \n P - Pending record \n PH - Pending history record",
+          "example": "N",
+          "readOnly": true,
+          "maxLength": 255
+        },
+        "name_defaultValue": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 60
+        },
+        "name_en_US": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 60
+        },
+        "name_localized": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 32
+        },
+        "projectControllingObjectType": {
+          "type": ["string", "null"],
+          "description" : "Project controlling object type value only WBS element(PRN) is supported",
+          "example": "PRN",
+          "maxLength": 128
+        }
+      }
+    },
+    "SFOData.ProjectControllingObject-create": {
+      "type": "object",
+      "title": "ProjectControllingObject (for create)",
+      "required": ["effectiveStartDate", "effectiveStatus", "externalCode"],
+      "properties": {
+        "company": {
+          "type": "string",
+          "example": null,
+          "maxLength": 128
+        },
+        "description_defaultValue": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 128
+        },
+        "description_en_US": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 128
+        },
+        "effectiveStartDate": {
+          "type": "string",
+          "example": "/Date(1492098664000)/"
+        },
+        "effectiveStatus": {
+          "type": "string",
+          "enum": ["A", "I"],
+          "description": "A - Active, I - InActive",
+          "example": "I",
+          "maxLength": 128
+        },
+        "externalCode": {
+          "type": "string",
+          "example": "string",
+          "maxLength": 50
+        },
+        "isStatistical": {
+          "type": ["boolean", "null"],
+          "example": true
+        },
+        "name_defaultValue": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 60
+        },
+        "name_en_US": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 60
+        },
+        "projectControllingObjectType": {
+          "type": ["string", "null"],
+          "description" : "Project controlling object type value only WBS element(PRN) is supported",
+          "example": "PRN",
+          "maxLength": 128
+        }
+      }
+    },
+    "SFOData.ProjectControllingObject-update": {
+      "type": "object",
+      "title": "ProjectControllingObject (for update)",
+      "required": ["effectiveStartDate", "effectiveStatus", "externalCode"],
+      "properties": {
+        "company": {
+          "type": "string",
+          "example": null,
+          "maxLength": 128
+        },
+        "description_defaultValue": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 128
+        },
+        "description_en_US": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 128
+        },
+        "effectiveStartDate": {
+          "type": "string",
+          "example": "/Date(1492098664000)/"
+        },
+        "effectiveStatus": {
+          "type": "string",
+          "enum": ["A", "I"],
+          "description": "A - Active, I - InActive",
+          "example": "I",
+          "maxLength": 128
+        },
+        "externalCode": {
+          "type": "string",
+          "example": "string",
+          "maxLength": 50
+        },
+        "isStatistical": {
+          "type": ["boolean", "null"],
+          "example": true
+        },
+        "name_defaultValue": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 60
+        },
+        "name_en_US": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 60
+        },
+        "projectControllingObjectType": {
+          "type": ["string", "null"],
+          "description" : "Project controlling object type value only WBS element(PRN) is supported",
+          "example": "PRN",
+          "maxLength": 128
+        }
+      }
+    }
+  },
+  "paths": {
+    "/ProjectControllingObject": {
+      "get": {
+        "summary": "Get all project controlling objects",
+        "description": "You can use the following request to get all the project controlling objects. <br>For further details, refer to the SAP Help Portal documentation [OData API: Project Controlling Object](https://help.sap.com/viewer/b2b06831c2cb4d5facd1dfde49a7aab5/latest)",
+        "tags": ["Project Controlling Object"],
+        "parameters": [
+          {
+            "$ref": "#/parameters/top"
+          },
+          {
+            "$ref": "#/parameters/skip"
+          },
+          {
+            "$ref": "#/parameters/filter"
+          },
+          {
+            "$ref": "#/parameters/count"
+          },
+          {
+            "name": "$orderby",
+            "in": "query",
+            "description": "Order items by property values, see [Sorting](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionorderby)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "company",
+                "company desc",
+                "createdBy",
+                "createdBy desc",
+                "createdDateTime",
+                "createdDateTime desc",
+                "description_defaultValue",
+                "description_defaultValue desc",
+                "description_en_US",
+                "description_en_US desc",
+                "effectiveEndDate",
+                "effectiveEndDate desc",
+                "effectiveStartDate",
+                "effectiveStartDate desc",
+                "effectiveStatus",
+                "effectiveStatus desc",
+                "entityOID",
+                "entityOID desc",
+                "externalCode",
+                "externalCode desc",
+                "isStatistical",
+                "isStatistical desc",
+                "lastModifiedBy",
+                "lastModifiedBy desc",
+                "lastModifiedDateTime",
+                "lastModifiedDateTime desc",
+                "mdfSystemRecordStatus",
+                "mdfSystemRecordStatus desc",
+                "name_defaultValue",
+                "name_defaultValue desc",
+                "projectControllingObjectType",
+                "projectControllingObjectType desc"
+              ]
+            }
+          },
+          {
+            "name": "$select",
+            "in": "query",
+            "description": "Select properties to be returned, see [Select](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionselect)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "company",
+                "createdBy",
+                "createdDateTime",
+                "description_defaultValue",
+                "description_en_US",
+                "description_localized",
+                "effectiveEndDate",
+                "effectiveStartDate",
+                "effectiveStatus",
+                "entityOID",
+                "externalCode",
+                "isStatistical",
+                "lastModifiedBy",
+                "lastModifiedDateTime",
+                "mdfSystemRecordStatus",
+                "name_defaultValue",
+                "name_en_US",
+                "name_localized",
+                "projectControllingObjectType"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retrieved project controlling objects.",
+            "schema": {
+              "type": "object",
+              "title": "Wrapper",
+              "properties": {
+                "d": {
+                  "type": "object",
+                  "title": "Collection of project controlling object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/SFOData.ProjectControllingObject"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/responses/401"
+          }
+        }
+      },
+      "post": {
+        "summary": "create new project controlling object",
+        "description": "You can use the following request to create a new project controlling object. <br>For further details, refer to the SAP Help Portal documentation [OData API: Project Controlling Object](https://help.sap.com/viewer/b2b06831c2cb4d5facd1dfde49a7aab5/latest)",
+        "tags": ["Project Controlling Object"],
+        "parameters": [
+          {
+            "name": "ProjectControllingObject",
+            "in": "body",
+            "description": "Attributes of new project controlling object.",
+            "schema": {
+              "$ref": "#/definitions/SFOData.ProjectControllingObject-create"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Project controlling object successfully created.",
+            "schema": {
+              "title": "Created ProjectControllingObject",
+              "type": "object",
+              "properties": {
+                "d": {
+                  "$ref": "#/definitions/SFOData.ProjectControllingObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - wrong name or body is not provided in the expected JSON format.",
+            "schema": {
+              "$ref": "#/definitions/odata.error"
+            },
+            "examples": {
+              "application/json": {
+                "error": {
+                  "code": "BadRequestException",
+                  "message": {
+                    "lang": "en-US",
+                    "value": "unknown property newProperty for ProjectControllingObject"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/responses/401"
+          },
+          "403": {
+            "description": "Access forbidden - you did not have the required permissions to access the resource.",
+            "schema": {
+              "$ref": "#/definitions/odata.error"
+            },
+            "examples": {
+              "application/json": {
+                "error": {
+                  "code": "COE_GENERAL_FORBIDDEN",
+                  "message": {
+                    "lang": "en-US",
+                    "value": "No permission to create object!"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/responses/500"
+          }
+        }
+      }
+    },
+    "/ProjectControllingObject(effectiveStartDate=datetime'{effectiveStartDate}',externalCode='{externalCode}')": {
+      "get": {
+        "summary": "Get project controlling object by key",
+        "description": "You can use the following request to get a project controlling object by effective start date and external code. <br>For further details, refer to the SAP Help Portal documentation [OData API: Project Controlling Object](https://help.sap.com/viewer/b2b06831c2cb4d5facd1dfde49a7aab5/latest)",
+        "tags": ["Project Controlling Object"],
+        "parameters": [
+          {
+            "name": "effectiveStartDate",
+            "in": "path",
+            "required": true,
+            "description": "key: effectiveStartDate, format: <YYYY-MM-DD>T<HH:MM:SS>  <br>\nExample: ```2021-01-01T00:00:00```",
+            "type": "string",
+            "format": "date-time"
+          },
+          {
+            "name": "externalCode",
+            "in": "path",
+            "required": true,
+            "description": "key: externalCode, format: externalCode <br>\nExample: ```string```",
+            "type": "string"
+          },
+          {
+            "name": "$select",
+            "in": "query",
+            "description": "Select properties to be returned, see [Select](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionselect)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "company",
+                "createdBy",
+                "createdDateTime",
+                "description_defaultValue",
+                "description_en_US",
+                "description_localized",
+                "effectiveEndDate",
+                "effectiveStartDate",
+                "effectiveStatus",
+                "entityOID",
+                "externalCode",
+                "isStatistical",
+                "lastModifiedBy",
+                "lastModifiedDateTime",
+                "mdfSystemRecordStatus",
+                "name_defaultValue",
+                "name_en_US",
+                "name_localized",
+                "projectControllingObjectType"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retrieved project controlling object.",
+            "schema": {
+              "title": "Project Controlling Object",
+              "type": "object",
+              "properties": {
+                "d": {
+                  "$ref": "#/definitions/SFOData.ProjectControllingObject"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/responses/401"
+          },
+          "404": {
+            "description": "Not found - ProjectControllingObjectGO is not found with the given key.",
+            "schema": {
+              "$ref": "#/definitions/odata.error"
+            },
+            "examples": {
+              "application/json": {
+                "error": {
+                  "code": "NotFoundException",
+                  "message": {
+                    "lang": "en-US",
+                    "value": "Entity ProjectControllingObject with the given key effectiveStartDate=datetime'2020-01-01T00:00:00',externalCode='string', is not found."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Update project controlling object by key",
+        "description": "You can use the following request to update a project controlling object by effective start date and external code. <br>For further details, refer to the SAP Help Portal documentation [OData API: Project Controlling Object](https://help.sap.com/viewer/b2b06831c2cb4d5facd1dfde49a7aab5/latest)",
+        "tags": ["Project Controlling Object"],
+        "parameters": [
+          {
+            "name": "effectiveStartDate",
+            "in": "path",
+            "required": true,
+            "description": "key: effectiveStartDate, format: <YYYY-MM-DD>T<HH:MM:SS>  <br>\nExample: ```2021-01-01T00:00:00```",
+            "type": "string",
+            "format": "date-time"
+          },
+          {
+            "name": "externalCode",
+            "in": "path",
+            "required": true,
+            "description": "key: externalCode, format: externalCode <br>\nExample: ```string```",
+            "type": "string"
+          },
+          {
+            "name": "ProjectControllingObject",
+            "in": "body",
+            "description": "New property values",
+            "schema": {
+              "$ref": "#/definitions/SFOData.ProjectControllingObject-update"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project controlling object updated successfully."
+          },
+          "400": {
+            "description": "Bad request - wrong name or body is not provided in the expected JSON format.",
+            "schema": {
+              "$ref": "#/definitions/odata.error"
+            },
+            "examples": {
+              "application/json": {
+                "error": {
+                  "code": "BadRequestException",
+                  "message": {
+                    "lang": "en-US",
+                    "value": "unknown property newProperty for ProjectControllingObject"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/responses/401"
+          },
+          "403": {
+            "description": "Access forbidden - you did not have the required permissions to access the resource.",
+            "schema": {
+              "$ref": "#/definitions/odata.error"
+            },
+            "examples": {
+              "application/json": {
+                "error": {
+                  "code": "COE_GENERAL_FORBIDDEN",
+                  "message": {
+                    "lang": "en-US",
+                    "value": "No permission to change object!"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found - ProjectControllingObjectGO is not found with the given key.",
+            "schema": {
+              "$ref": "#/definitions/odata.error"
+            },
+            "examples": {
+              "application/json": {
+                "error": {
+                  "code": "NotFoundException",
+                  "message": {
+                    "lang": "en-US",
+                    "value": "Entity ProjectControllingObject with the given key effectiveStartDate=datetime'2020-01-01T00:00:00',externalCode='string', is not found."
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/responses/500"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete project controlling object by key",
+        "description": "You can use the following request to delete a project controlling object by effective and start date. <br>For further details, refer to the SAP Help Portal documentation [OData API: Project Controlling Object](https://help.sap.com/viewer/b2b06831c2cb4d5facd1dfde49a7aab5/latest)",
+        "tags": ["Project Controlling Object"],
+        "parameters": [
+          {
+            "name": "effectiveStartDate",
+            "in": "path",
+            "required": true,
+            "description": "key: effectiveStartDate, format: <YYYY-MM-DD>T<HH:MM:SS>  <br>\nExample: ```2021-01-01T00:00:00```",
+            "type": "string",
+            "format": "date-time"
+          },
+          {
+            "name": "externalCode",
+            "in": "path",
+            "required": true,
+            "description": "key: externalCode, format: externalCode <br>\nExample: ```string```",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project controlling object deleted successfully."
+          },
+          "400": {
+            "description": "Bad request - wrong name or body is not provided in the expected JSON format.",
+            "schema": {
+              "$ref": "#/definitions/odata.error"
+            },
+            "examples": {
+              "application/json": {
+                "error": {
+                  "code": "BadRequestException",
+                  "message": {
+                    "lang": "en-US",
+                    "value": "unknown property newProperty for ProjectControllingObject"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/responses/401"
+          },
+          "404": {
+            "description": "Not found - ProjectControllingObjectGO is not found with the given key.",
+            "schema": {
+              "$ref": "#/definitions/odata.error"
+            },
+            "examples": {
+              "application/json": {
+                "error": {
+                  "code": "NotFoundException",
+                  "message": {
+                    "lang": "en-US",
+                    "value": "Entity ProjectControllingObject with the given key effectiveStartDate=datetime'2020-01-01T00:00:00',externalCode='string', is not found."
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/responses/500"
+          }
+        }
+      }
+    }
+  },
+  "parameters": {
+    "top": {
+      "name": "$top",
+      "in": "query",
+      "description": "Show only the first n items, see [OData Paging - Top](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374630)",
+      "type": "integer",
+      "default": 20
+    },
+    "skip": {
+      "name": "$skip",
+      "in": "query",
+      "description": "Skip the first n items, see [OData Paging - Skip](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374631)",
+      "type": "integer"
+    },
+    "count": {
+      "name": "$count",
+      "in": "query",
+      "description": "Include count of items, see [OData Count](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374632)",
+      "type": "boolean"
+    },
+    "filter": {
+      "name": "$filter",
+      "in": "query",
+      "description": "Filter items by property values, see [OData Filtering](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374625)",
+      "type": "string"
+    },
+    "search": {
+      "name": "$search",
+      "in": "query",
+      "description": "Search items by search phrases, see [OData Searching](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374633)",
+      "type": "string"
+    }
+  },
+  "responses": {
+    "400": {
+      "description": "Bad request - wrong name or body is not provided in the expected JSON format.",
+      "schema": {
+        "$ref": "#/definitions/odata.error"
+      },
+      "examples": {
+        "application/json": {
+          "error": {
+            "code": "BadRequestException",
+            "message": {
+              "lang": "en-US",
+              "value": "unknown property newProperty for ProjectControllingObject"
+            }
+          }
+        }
+      }
+    },
+    "401": {
+      "description": "Unauthorized - authorization information is missing or invalid."
+    },
+    "403": {
+      "description": "Access forbidden - you did not have the required permissions to access the resource.",
+      "schema": {
+        "$ref": "#/definitions/odata.error"
+      }
+    },
+    "404": {
+      "description": "Not found",
+      "schema": {
+        "$ref": "#/definitions/odata.error"
+      }
+    },
+    "500": {
+      "description": "Internal server error - the requested operation led to an error during execution.",
+      "schema": {
+        "$ref": "#/definitions/odata.error"
+      },
+      "examples": {
+        "application/json": {
+          "error": {
+            "code": "ServerErrorException",
+            "message": {
+              "lang": "en-US",
+              "value": "HTTP 405 Method Not Allowed"
+            }
+          }
+        }
+      }
+    },
+    "error": {
+      "description": "Error",
+      "schema": {
+        "$ref": "#/definitions/odata.error"
+      },
+      "examples": {
+        "application/json": {
+          "error": {
+            "code": "<error code>",
+            "message": {
+              "lang": "en-US",
+              "value": "<error text>"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,4566 @@
+{
+	"swagger": "2.0",
+	"security": [
+        {
+            "basicAuthentication": []
+        }
+    ],
+    "securityDefinitions": {
+        "basicAuthentication": {
+            "type": "basic"
+        }
+    },
+    "x-sap-shortText":"API to query and manage Onboarding process and integrations.",
+	"x-servers": [{
+		"url": "https://{api-server}/odata/v2",
+		"description": "OData APIs for the SuccessFactors Data Centers",
+		"templates": {
+			"api-server": {
+				"description": "SuccessFactors Data Center host",
+				"default": "apisalesdemo8.successfactors.com"
+			}
+		}
+	},
+		{
+			"url":"https://sandbox.api.sap.com/successfactorsfoundation/odata/v2",
+			"description":"Sandbox URL"
+		}
+	],
+	"info": {
+		"title": "Onboarding",
+		"version": "1.0",
+		"description": "Use these APIs to manage onboarding activities for candidates. Actionable onboarding participants can select office equipment, set goals and arrange meetings for candidates before being hired.\n\n You can find your company's API server in [List of API Servers in SAP SuccessFactors.](https://help.sap.com/viewer/d599f15995d348a1b45ba5603e2aba9b/LATEST/en-US/af2b8d5437494b12be88fe374eba75b6.html)"
+	},
+	"externalDocs": {
+		"description": "Onboarding APIs on SAP Help Portal",
+		"url": "https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/d599f15995d348a1b45ba5603e2aba9b/2435145dfc84462db9bdf2bb536dc5aa.html"
+	},
+	"schemes": ["https"],
+	"host": "sandbox.api.sap.com",
+	"basePath": "/successfactors/odata/v2",
+	"consumes": ["application/json"],
+	"produces": ["application/json"],
+	"tags": [{
+		"name": "ONB2EquipmentTypeValue"
+	}, {
+		"name": "ComplianceFormDataFieldValue"
+	}, {
+		"name": "ONB2Process"
+	}, {
+		"name": "ONB2DataCollectionUserConfig"
+	}, {
+		"name": "ONB2ProcessTask"
+	}, {
+		"name": "ONB2EquipmentType"
+	}, {
+		"name": "ONB2ProcessTrigger"
+	}, {
+		"name": "ComplianceUserFormData"
+	}, {
+		"name": "ONB2EquipmentActivity"
+	}, {
+    "name": "ComplianceProcess"
+	}, {
+	  "name": "ComplianceProcessTask"
+	}, {
+	  "name": "AssignedComplianceForm"
+	}, {
+	"name": "ComplianceDocumentFlow"
+	}, {
+	  "name": "ComplianceFormSignature"
+	}, {
+	"name": "ComplianceFormData"
+	} ],
+	"definitions": {
+		"odata.error": {
+			"type": "object",
+			"required": ["error"],
+			"properties": {
+				"error": {
+					"$ref": "#/definitions/odata.error.main"
+				}
+			}
+		},
+		"odata.error.main": {
+			"type": "object",
+			"required": ["code", "message"],
+			"properties": {
+				"code": {
+					"type": "string"
+				},
+				"message": {
+					"type": "string"
+				},
+				"target": {
+					"type": "string"
+				},
+				"details": {
+					"type": "array",
+					"items": {
+						"$ref": "#/definitions/odata.error.detail"
+					}
+				},
+				"innererror": {
+					"type": "object",
+					"description": "The structure of this object is service-specific"
+				}
+			}
+		},
+		"odata.error.detail": {
+			"type": "object",
+			"required": ["code", "message"],
+			"properties": {
+				"code": {
+					"type": "string"
+				},
+				"message": {
+					"type": "string"
+				},
+				"target": {
+					"type": "string"
+				}
+			}
+		},
+		"SFOData.ONB2EquipmentTypeValue": {
+			"type": "object",
+			"properties": {
+				"code": {
+					"type": "string",
+					"maxLength": 128
+				},
+				"createdBy": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"createdDateTime": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"description_ar_SA": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_bs_ID": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_de_DE": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_defaultValue": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_el_GR": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_en_DEBUG": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_en_GB": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_en_RTL": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_en_SAP_SLS": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_en_US": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_es_ES": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_hu_HU": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_ja_JP": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_localized": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_pl_PL": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_pt_BR": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_referencingField": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_ru_RU": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_th_TH": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_tl_PH": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_vi_VN": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_zh_CN": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_zh_TW": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"inUse": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"lastModifiedBy": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"lastModifiedDateTime": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"mdfSystemRecordStatus": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"type": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"typeNav": {
+					"$ref": "#/definitions/SFOData.ONB2EquipmentType"
+				}
+			},
+			"title": "ONB2EquipmentTypeValue"
+		},
+		"SFOData.ComplianceFormDataFieldValue": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string"
+				},
+				"value": {
+					"type": ["string", "null"]
+				}
+			},
+			"title": "ComplianceFormDataFieldValue"
+		},
+		"SFOData.ONB2Process": {
+			"type": "object",
+			"properties": {
+				"activitiesConfig": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"activitiesStatus": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"bpeProcessInstanceId": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"cancelEventReason": {
+					"type": ["string", "null"],
+					"maxLength": 32
+				},
+				"cancelOffboardingReason": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"cancelOnboardingReason": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"cancellationComment": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"cancellationDate": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"cancelledDueToRestart": {
+					"type": ["boolean", "null"]
+				},
+				"createdBy": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"createdDateTime": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"customDataCollectionConfig": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"employeePersonId": {
+					"type": ["string", "null"],
+					"format": "int64"
+				},
+				"endDate": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"lastModifiedBy": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"lastModifiedDateTime": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"locale": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"manager": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"managerPersonId": {
+					"type": ["string", "null"],
+					"format": "int64"
+				},
+				"mdfSystemRecordStatus": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"offboardingActivitiesConfig": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"onb2MasterId": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"onboardingHireStatus": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"onboardingHiredDate": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"onboardingInternalHire": {
+					"type": ["boolean", "null"]
+				},
+				"processId": {
+					"type": "string",
+					"maxLength": 128
+				},
+				"processRestarted": {
+					"type": ["boolean", "null"]
+				},
+				"processStatus": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"processTrigger": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"processType": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"processVariant": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"startDate": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"targetDate": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"targetSystem": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"user": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"processTasks": {
+					"title": "Related Collection(SFOData.ONB2ProcessTask)",
+					"type": "object",
+					"properties": {
+						"results": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/SFOData.ONB2ProcessTask"
+							}
+						}
+					}
+				},
+				"processTriggerNav": {
+					"$ref": "#/definitions/SFOData.ONB2ProcessTrigger"
+				},
+				"toDataCollectionUserConfig": {
+					"$ref": "#/definitions/SFOData.ONB2DataCollectionUserConfig"
+				},
+				"toEquipmentActivity": {
+					"title": "Related Collection(SFOData.ONB2EquipmentActivity)",
+					"type": "object",
+					"properties": {
+						"results": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/SFOData.ONB2EquipmentActivity"
+							}
+						}
+					}
+				}
+			},
+			"title": "ONB2Process"
+		},
+		"SFOData.ONB2DataCollectionUserConfig": {
+			"type": "object",
+			"properties": {
+				"createdBy": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"createdDateTime": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"id": {
+					"type": "string",
+					"maxLength": 128
+				},
+				"lastModifiedBy": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"lastModifiedDateTime": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"mdfSystemRecordStatus": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"process": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"subjectUser": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"processNav": {
+					"$ref": "#/definitions/SFOData.ONB2Process"
+				}
+			},
+			"title": "ONB2DataCollectionUserConfig"
+		},
+		"SFOData.ONB2ProcessTask": {
+			"type": "object",
+			"properties": {
+				"ONB2Process_processId": {
+					"type": "string",
+					"maxLength": 128
+				},
+				"completedBy": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"createdBy": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"createdDateTime": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"endDate": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"lastModifiedBy": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"lastModifiedDateTime": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"mdfSystemRecordStatus": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"responsibilityConfig": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"startDate": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"status": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"taskId": {
+					"type": "string",
+					"maxLength": 128
+				},
+				"type": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				}
+			},
+			"title": "ONB2ProcessTask"
+		},
+		"SFOData.ONB2EquipmentType": {
+			"type": "object",
+			"properties": {
+				"code": {
+					"type": "string",
+					"maxLength": 128
+				},
+				"createdBy": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"createdDateTime": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"description_ar_SA": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_bs_ID": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_de_DE": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_defaultValue": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_el_GR": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_en_DEBUG": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_en_GB": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_en_RTL": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_en_SAP_SLS": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_en_US": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_es_ES": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_hu_HU": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_ja_JP": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_localized": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_pl_PL": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_pt_BR": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_referencingField": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_ru_RU": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_th_TH": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_tl_PH": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_vi_VN": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_zh_CN": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"description_zh_TW": {
+					"type": ["string", "null"],
+					"maxLength": 300
+				},
+				"inUse": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"lastModifiedBy": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"lastModifiedDateTime": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"mdfSystemRecordStatus": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"ui5StandardIconId": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"toEquipmentTypeValue": {
+					"title": "Related Collection(SFOData.ONB2EquipmentTypeValue)",
+					"type": "object",
+					"properties": {
+						"results": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/SFOData.ONB2EquipmentTypeValue"
+							}
+						}
+					}
+				}
+			},
+			"title": "ONB2EquipmentType"
+		},
+		"SFOData.ONB2ProcessTrigger": {
+			"type": "object",
+			"properties": {
+				"atsApplicationId": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"atsUserId": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"bpeProcessInstanceId": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"createdBy": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"createdDateTime": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"hireType": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"lastModifiedBy": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"lastModifiedDateTime": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"mdfSystemRecordStatus": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"rcmApplicationId": {
+					"type": ["string", "null"],
+					"format": "int64"
+				},
+				"rcmCandidateId": {
+					"type": ["string", "null"],
+					"format": "int64"
+				},
+				"rcmCompany": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"rcmHiringMgr": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"rcmJobReqId": {
+					"type": ["string", "null"],
+					"format": "int64"
+				},
+				"rcmOfferId": {
+					"type": ["string", "null"],
+					"format": "int64"
+				},
+				"rcmPrimaryEmail": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"rcmStartDate": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"rehireUser": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"triggerId": {
+					"type": "string",
+					"maxLength": 38
+				},
+				"triggerStatus": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"triggerType": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"toProcess": {
+					"$ref": "#/definitions/SFOData.ONB2Process"
+				}
+			},
+			"title": "ONB2ProcessTrigger"
+		},
+		"SFOData.ComplianceUserFormData": {
+			"type": "object",
+			"properties": {
+				"country": {
+					"type": "string"
+				},
+				"createdDate": {
+					"type": "string",
+					"example": "/Date(1492098664000)/"
+				},
+				"dataLastModifiedBy": {
+					"type": ["string", "null"]
+				},
+				"dataLastModifiedDate": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"documentFlowStatus": {
+					"type": "string"
+				},
+				"formId": {
+					"type": ["string", "null"]
+				},
+				"formVersion": {
+					"type": ["string", "null"],
+					"format": "int64"
+				},
+				"id": {
+					"type": "string"
+				},
+				"initiatorId": {
+					"type": "string"
+				},
+				"initiatorType": {
+					"type": "string"
+				},
+				"name": {
+					"type": ["string", "null"]
+				},
+				"processId": {
+					"type": "string"
+				},
+				"processStatus": {
+					"type": "string"
+				},
+				"state": {
+					"type": ["string", "null"]
+				},
+				"user": {
+					"type": "string"
+				},
+				"year": {
+					"type": "string",
+					"format": "int64"
+				},
+				"data": {
+					"title": "Related Collection(SFOData.ComplianceFormDataFieldValue)",
+					"type": "object",
+					"properties": {
+						"results": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/SFOData.ComplianceFormDataFieldValue"
+							}
+						}
+					}
+				}
+			},
+			"title": "ComplianceUserFormData"
+		},
+		"SFOData.ONB2EquipmentActivity": {
+			"type": "object",
+			"properties": {
+				"activityId": {
+					"type": "string",
+					"maxLength": 128
+				},
+				"activityStatus": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"activityStatusDate": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"activityTitle": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"activityType": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"createdBy": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"createdDateTime": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"dueDate": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"equipmentComment": {
+					"type": ["string", "null"],
+					"maxLength": 2000
+				},
+				"equipmentStatus": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"equipmentType": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"equipmentValue": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"lastModifiedBy": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"lastModifiedDateTime": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"lastNudgedBy": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"lastNudgedDate": {
+					"type": ["string", "null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"mdfSystemRecordStatus": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"notNeededComment": {
+					"type": ["string", "null"],
+					"maxLength": 2000
+				},
+				"optional": {
+					"type": ["boolean", "null"]
+				},
+				"process": {
+					"type": ["string", "null"],
+					"maxLength": 128
+				},
+				"responsibleUsers": {
+					"type": ["string", "null"],
+					"maxLength": 255
+				},
+				"subjectUser": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"equipmentTypeNav": {
+					"$ref": "#/definitions/SFOData.ONB2EquipmentType"
+				},
+				"equipmentValueNav": {
+					"$ref": "#/definitions/SFOData.ONB2EquipmentTypeValue"
+				},
+				"processNav": {
+					"$ref": "#/definitions/SFOData.ONB2Process"
+				}
+			},
+			"title": "ONB2EquipmentActivity"
+		},
+		"SFOData.ONB2RehireCheckParams": {
+			"type": "object",
+			"properties": {
+				"dateOfBirth": {
+					"type": ["string", "null"]
+				},
+				"firstName": {
+					"type": ["string", "null"]
+				},
+				"lastName": {
+					"type": ["string", "null"]
+				},
+				"nationalIdDetails": {
+					"type": "object",
+		            "additionalProperties" : {
+		                "type": "string"
+		            }  
+				}
+			},
+			"title": "ONB2RehireCheckParams",
+			"description": "Rehire Check Params complex type.  \nComplex type to hold the rehire params which determines if the user is rehire or not."
+		},
+		"SFOData.ONB2OnboardeeDetails": {
+			"type": "object",
+			"properties": {
+				"applicationId": {
+					"type": "string"
+				},
+				"email": {
+					"type": "string"
+				},
+				"rehireCheckParams": {
+					"$ref": "#/definitions/SFOData.ONB2RehireCheckParams"
+				},
+				"rehireUser": {
+					"type": ["string", "null"]
+				},
+				"shouldCancelOnboarding": {
+					"type": ["boolean", "null"]
+				},
+				"shouldCreateNewHire": {
+					"type": ["boolean", "null"]
+				},
+				"userId": {
+					"type": "string"
+				},
+				"userName": {
+					"type": "string"
+				}
+			},
+			"title": "ONB2OnboardeeDetails",
+			"description": "Onboardee Details complex type.  \nComplex type to hold the information of Onboardee to be created."
+		},
+		"SFOData.ONB2ExternalHRISHiringUpdate": {
+			"type": "object",
+			"properties": {
+				"assignmentIdExternal": {
+					"type": ["string", "null"]
+				},
+				"personIdExternal": {
+					"type": ["string", "null"]
+				},
+				"processId": {
+					"type": "string"
+				},
+				"sourceOfRecord": {
+					"type": "string"
+				},
+				"userName": {
+					"type": ["string", "null"]
+				},
+				"userStatus": {
+					"type": "string"
+				}
+			},
+			"title": "ONB2ExternalHRISHiringUpdate",
+			"description": "Complex type of the External HRIS Hiring Update  \nComplex type represents the employee's details in the External HRIS system for whom the update is to be made."
+		},
+		 
+		"SFOData.ComplianceProcess": {
+		  "type": "object",
+		  "properties": {
+			"complianceMasterId": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"correctDataTriggered": {
+			  "type": [
+				"boolean",
+				"null"
+			  ]
+			},
+			"createdBy": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"createdDateTime": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "example": "/Date(1492098664000)/"
+			},
+			"eVerifyData": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"i9UserData": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"lastModifiedBy": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"lastModifiedDateTime": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "example": "/Date(1492098664000)/"
+			},
+			"mdfSystemRecordStatus": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 255
+			},
+			"onboardingProcess": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"processId": {
+			  "type": "string",
+			  "maxLength": 128
+			},
+			"processInitiatorId": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"processInitiatorType": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"processStatus": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"processType": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"startDate": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "example": "/Date(1492098664000)/"
+			},
+			"user": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"onboardingProcessNav": {
+			  "$ref": "#/definitions/SFOData.ONB2Process"
+			},
+			"processTasks": {
+			  "title": "Related Collection(SFOData.ComplianceProcessTask)",
+			  "type": "object",
+			  "properties": {
+				"results": {
+				  "type": "array",
+				  "items": {
+					"$ref": "#/definitions/SFOData.ComplianceProcessTask"
+				  }
+				}
+			  }
+			},
+			"toDocumentFlow": {
+			  "$ref": "#/definitions/SFOData.ComplianceDocumentFlow"
+			},
+			"toFormData": {
+			  "title": "Related Collection(SFOData.ComplianceFormData)",
+			  "type": "object",
+			  "properties": {
+				"results": {
+				  "type": "array",
+				  "items": {
+					"$ref": "#/definitions/SFOData.ComplianceFormData"
+				  }
+				}
+			  }
+			}
+		  },
+		  "title": "ComplianceProcess"
+		},
+		"SFOData.ComplianceProcessTask": {
+		  "type": "object",
+		  "properties": {
+			"category": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"completedBy": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"createdBy": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"createdDateTime": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "example": "/Date(1492098664000)/"
+			},
+			"dueDate": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "example": "/Date(1492098664000)/"
+			},
+			"endDate": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "example": "/Date(1492098664000)/"
+			},
+			"lastModifiedBy": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"lastModifiedDateTime": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "example": "/Date(1492098664000)/"
+			},
+			"mdfSystemRecordStatus": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 255
+			},
+			"process": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"startDate": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "example": "/Date(1492098664000)/"
+			},
+			"status": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"subjectUser": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"taskId": {
+			  "type": "string",
+			  "maxLength": 128
+			},
+			"type": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"processNav": {
+			  "$ref": "#/definitions/SFOData.ComplianceProcess"
+			}
+		  },
+		  "title": "ComplianceProcessTask"
+		},
+		"SFOData.AssignedComplianceForm": {
+		  "type": "object",
+		  "properties": {
+			"bpeUserTaskId": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 255
+			},
+			"complianceFormName": {
+			  "type": [
+				"string",
+				"null"
+			  ]
+			},
+			"createdBy": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"createdDateTime": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "example": "/Date(1492098664000)/"
+			},
+			"dueDate": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "example": "/Date(1492098664000)/"
+			},
+			"form": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"id": {
+			  "type": "string",
+			  "maxLength": 128
+			},
+			"lastModifiedBy": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"lastModifiedDateTime": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "example": "/Date(1492098664000)/"
+			},
+			"mdfSystemRecordStatus": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 255
+			},
+			"order": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "format": "int64"
+			},
+			"participantType": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"preRequisiteFormNames": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 255
+			},
+			"process": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"rank": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "format": "int64"
+			},
+			"responsibleUser": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"status": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"subjectUser": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"processNav": {
+			  "$ref": "#/definitions/SFOData.ComplianceProcess"
+			}
+		  },
+		  "title": "AssignedComplianceForm"
+		},
+		"SFOData.ComplianceFormData": {
+		  "type": "object",
+		  "properties": {
+			"createdBy": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"createdDateTime": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "example": "/Date(1492098664000)/"
+			},
+			"documentAttachmentId": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "format": "int64"
+			},
+			"documentFlow": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"envelopeId": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"externalCode": {
+			  "type": "string",
+			  "maxLength": 128
+			},
+			"form": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"lastModifiedBy": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"lastModifiedDateTime": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "example": "/Date(1492098664000)/"
+			},
+			"mdfSystemRecordStatus": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 255
+			},
+			"pdfId": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 255
+			},
+			"pdfLocaleMetadata": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"process": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"sensitiveDataIncluded": {
+			  "type": [
+				"boolean",
+				"null"
+			  ]
+			},
+			"subjectUser": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"documentFlowNav": {
+			  "$ref": "#/definitions/SFOData.ComplianceDocumentFlow"
+			},
+			"formSignatures": {
+			  "title": "Related Collection(SFOData.ComplianceFormSignature)",
+			  "type": "object",
+			  "properties": {
+				"results": {
+				  "type": "array",
+				  "items": {
+					"$ref": "#/definitions/SFOData.ComplianceFormSignature"
+				  }
+				}
+			  }
+			},
+			"processNav": {
+			  "$ref": "#/definitions/SFOData.ComplianceProcess"
+			}
+		  },
+		  "title": "ComplianceFormData"
+		},
+		"SFOData.ComplianceDocumentFlow": {
+		  "type": "object",
+		  "properties": {
+			"createdBy": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"createdDateTime": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "example": "/Date(1492098664000)/"
+			},
+			"declinedBy": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"declinedDocuments": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 255
+			},
+			"declinedReason": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 255
+			},
+			"docFlowBpeUserTaskId": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 255
+			},
+			"documentFlowCode": {
+			  "type": "string",
+			  "maxLength": 128
+			},
+			"documentFlowStatus": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"lastModifiedBy": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"lastModifiedDateTime": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "example": "/Date(1492098664000)/"
+			},
+			"mdfSystemRecordStatus": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 255
+			},
+			"process": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"subjectUser": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"processNav": {
+			  "$ref": "#/definitions/SFOData.ComplianceProcess"
+			}
+		  },
+		  "title": "ComplianceDocumentFlow"
+		},
+		"SFOData.ComplianceFormSignature": {
+		  "type": "object",
+		  "properties": {
+			"ComplianceFormData_externalCode": {
+			  "type": "string",
+			  "maxLength": 128
+			},
+			"createdBy": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"createdDateTime": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "example": "/Date(1492098664000)/"
+			},
+			"externalCode": {
+			  "type": "string",
+			  "maxLength": 128
+			},
+			"lastModifiedBy": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"lastModifiedDateTime": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "example": "/Date(1492098664000)/"
+			},
+			"mdfSystemRecordStatus": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 255
+			},
+			"signatureStatus": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			},
+			"signatureUser": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 100
+			},
+			"signatureUserFullName": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 255
+			},
+			"signatureUserRole": {
+			  "type": [
+				"string",
+				"null"
+			  ],
+			  "maxLength": 128
+			}
+		  },
+		  "title": "ComplianceFormSignature"
+		}
+	},
+	"paths": {
+		"/ONB2EquipmentTypeValue": {
+			"get": {
+				"summary": "Get entities from ONB2EquipmentTypeValue",
+				"tags": ["ONB2EquipmentTypeValue"],
+				"parameters": [{
+					"$ref": "#/parameters/top"
+				}, {
+					"$ref": "#/parameters/skip"
+				}, {
+					"$ref": "#/parameters/search"
+				}, {
+					"$ref": "#/parameters/filter"
+				}, {
+					"$ref": "#/parameters/count"
+				}, {
+					"name": "$orderby",
+					"in": "query",
+					"description": "Order items by property values, see [OData Sorting](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["code", "code desc", "createdBy", "createdBy desc", "createdDateTime", "createdDateTime desc", "description_ar_SA", "description_ar_SA desc", "description_bs_ID", "description_bs_ID desc", "description_de_DE", "description_de_DE desc", "description_defaultValue", "description_defaultValue desc", "description_el_GR", "description_el_GR desc", "description_en_DEBUG", "description_en_DEBUG desc", "description_en_GB", "description_en_GB desc", "description_en_RTL", "description_en_RTL desc", "description_en_SAP_SLS", "description_en_SAP_SLS desc", "description_en_US", "description_en_US desc", "description_es_ES", "description_es_ES desc", "description_hu_HU", "description_hu_HU desc", "description_ja_JP", "description_ja_JP desc", "description_localized", "description_localized desc", "description_pl_PL", "description_pl_PL desc", "description_pt_BR", "description_pt_BR desc", "description_referencingField", "description_referencingField desc", "description_ru_RU", "description_ru_RU desc", "description_th_TH", "description_th_TH desc", "description_tl_PH", "description_tl_PH desc", "description_vi_VN", "description_vi_VN desc", "description_zh_CN", "description_zh_CN desc", "description_zh_TW", "description_zh_TW desc", "inUse", "inUse desc", "lastModifiedBy", "lastModifiedBy desc", "lastModifiedDateTime", "lastModifiedDateTime desc", "mdfSystemRecordStatus", "mdfSystemRecordStatus desc", "type", "type desc"]
+					}
+				}, {
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["code", "createdBy", "createdDateTime", "description_ar_SA", "description_bs_ID", "description_de_DE", "description_defaultValue", "description_el_GR", "description_en_DEBUG", "description_en_GB", "description_en_RTL", "description_en_SAP_SLS", "description_en_US", "description_es_ES", "description_hu_HU", "description_ja_JP", "description_localized", "description_pl_PL", "description_pt_BR", "description_referencingField", "description_ru_RU", "description_th_TH", "description_tl_PH", "description_vi_VN", "description_zh_CN", "description_zh_TW", "inUse", "lastModifiedBy", "lastModifiedDateTime", "mdfSystemRecordStatus", "type"]
+					}
+				}, {
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*", "typeNav"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entities",
+						"schema": {
+							"type": "object",
+							"title": "Wrapper",
+							"properties": {
+								"d": {
+									"type": "object",
+									"title": "Collection of ONB2EquipmentTypeValue",
+									"properties": {
+										"results": {
+											"type": "array",
+											"items": {
+												"$ref": "#/definitions/SFOData.ONB2EquipmentTypeValue"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			},
+			"post": {
+				"summary": "Add new entity to ONB2EquipmentTypeValue",
+				"tags": ["ONB2EquipmentTypeValue"],
+				"parameters": [{
+					"name": "ONB2EquipmentTypeValue",
+					"in": "body",
+					"description": "New entity",
+					"schema": {
+						"$ref": "#/definitions/SFOData.ONB2EquipmentTypeValue"
+					}
+				}],
+				"responses": {
+					"201": {
+						"description": "Created entity",
+						"schema": {
+							"title": "Created ONB2EquipmentTypeValue",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.ONB2EquipmentTypeValue"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Not found",
+						"schema": {
+							"$ref": "#/definitions/odata.error"
+						},
+						"examples": {
+							"application/json": {
+								"error": {
+									"code": "Not Found",
+									"message": {
+										"lang": "en",
+										"value": "Requested entity could not be found."
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ONB2EquipmentTypeValue('{code}')": {
+			"get": {
+				"summary": "Get entity from ONB2EquipmentTypeValue by key",
+				"tags": ["ONB2EquipmentTypeValue"],
+				"parameters": [{
+					"name": "code",
+					"in": "path",
+					"required": true,
+					"description": "key: code",
+					"type": "string"
+				}, {
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["code", "createdBy", "createdDateTime", "description_ar_SA", "description_bs_ID", "description_de_DE", "description_defaultValue", "description_el_GR", "description_en_DEBUG", "description_en_GB", "description_en_RTL", "description_en_SAP_SLS", "description_en_US", "description_es_ES", "description_hu_HU", "description_ja_JP", "description_localized", "description_pl_PL", "description_pt_BR", "description_referencingField", "description_ru_RU", "description_th_TH", "description_tl_PH", "description_vi_VN", "description_zh_CN", "description_zh_TW", "inUse", "lastModifiedBy", "lastModifiedDateTime", "mdfSystemRecordStatus", "type"]
+					}
+				}, {
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*", "typeNav"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entity",
+						"schema": {
+							"title": "ONB2EquipmentTypeValue",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.ONB2EquipmentTypeValue"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			},
+			"put": {
+				"summary": "Update entity in ONB2EquipmentTypeValue",
+				"tags": ["ONB2EquipmentTypeValue"],
+				"parameters": [{
+					"name": "code",
+					"in": "path",
+					"required": true,
+					"description": "key: code",
+					"type": "string"
+				}, {
+					"name": "ONB2EquipmentTypeValue",
+					"in": "body",
+					"description": "New property values",
+					"schema": {
+						"title": "Modified ONB2EquipmentTypeValue",
+						"type": "object",
+						"properties": {
+							"d": {
+								"$ref": "#/definitions/SFOData.ONB2EquipmentTypeValue"
+							}
+						}
+					}
+				}],
+				"responses": {
+					"204": {
+						"description": "Success"
+					},
+					"404": {
+						"description": "Not found",
+						"schema": {
+							"$ref": "#/definitions/odata.error"
+						},
+						"examples": {
+							"application/json": {
+								"error": {
+									"code": "Not Found",
+									"message": {
+										"lang": "en",
+										"value": "Requested entity could not be found."
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			},
+			"delete": {
+				"summary": "Delete entity from ONB2EquipmentTypeValue",
+				"tags": ["ONB2EquipmentTypeValue"],
+				"parameters": [{
+					"name": "code",
+					"in": "path",
+					"required": true,
+					"description": "key: code",
+					"type": "string"
+				}, {
+					"name": "If-Match",
+					"in": "header",
+					"description": "ETag",
+					"type": "string"
+				}],
+				"responses": {
+					"204": {
+						"description": "Success"
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ComplianceFormDataFieldValue": {
+			"get": {
+				"summary": "This entity stores the compliance form data for the new hire.",
+				"tags": ["ComplianceFormDataFieldValue"],
+				"parameters": [{
+					"$ref": "#/parameters/top"
+				}, {
+					"$ref": "#/parameters/skip"
+				}, {
+					"$ref": "#/parameters/search"
+				}, {
+					"$ref": "#/parameters/filter"
+				}, {
+					"$ref": "#/parameters/count"
+				}, {
+					"name": "$orderby",
+					"in": "query",
+					"description": "Order items by property values, see [OData Sorting](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["id", "id desc", "value", "value desc"]
+					}
+				}, {
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["id", "value"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entities",
+						"schema": {
+							"type": "object",
+							"title": "Wrapper",
+							"properties": {
+								"d": {
+									"type": "object",
+									"title": "Collection of ComplianceFormDataFieldValue",
+									"properties": {
+										"results": {
+											"type": "array",
+											"items": {
+												"$ref": "#/definitions/SFOData.ComplianceFormDataFieldValue"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ComplianceFormDataFieldValue('{id}')": {
+			"get": {
+				"summary": "Get entity from ComplianceFormDataFieldValue by key",
+				"tags": ["ComplianceFormDataFieldValue"],
+				"parameters": [{
+					"name": "id",
+					"in": "path",
+					"required": true,
+					"description": "key: id",
+					"type": "string"
+				}, {
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["id", "value"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entity",
+						"schema": {
+							"title": "ComplianceFormDataFieldValue",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.ComplianceFormDataFieldValue"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ONB2Process": {
+			"get": {
+				"summary": "Get entities from ONB2Process",
+				"tags": ["ONB2Process"],
+				"parameters": [{
+					"$ref": "#/parameters/top"
+				}, {
+					"$ref": "#/parameters/skip"
+				}, {
+					"$ref": "#/parameters/search"
+				}, {
+					"$ref": "#/parameters/filter"
+				}, {
+					"$ref": "#/parameters/count"
+				}, {
+					"name": "$orderby",
+					"in": "query",
+					"description": "Order items by property values, see [OData Sorting](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["activitiesConfig", "activitiesConfig desc", "activitiesStatus", "activitiesStatus desc", "bpeProcessInstanceId", "bpeProcessInstanceId desc", "cancelEventReason", "cancelEventReason desc", "cancelOffboardingReason", "cancelOffboardingReason desc", "cancelOnboardingReason", "cancelOnboardingReason desc", "cancellationComment", "cancellationComment desc", "cancellationDate", "cancellationDate desc", "cancelledDueToRestart", "cancelledDueToRestart desc", "createdBy", "createdBy desc", "createdDateTime", "createdDateTime desc", "customDataCollectionConfig", "customDataCollectionConfig desc", "employeePersonId", "employeePersonId desc", "endDate", "endDate desc", "lastModifiedBy", "lastModifiedBy desc", "lastModifiedDateTime", "lastModifiedDateTime desc", "locale", "locale desc", "manager", "manager desc", "managerPersonId", "managerPersonId desc", "mdfSystemRecordStatus", "mdfSystemRecordStatus desc", "offboardingActivitiesConfig", "offboardingActivitiesConfig desc", "onb2MasterId", "onb2MasterId desc", "onboardingHireStatus", "onboardingHireStatus desc", "onboardingHiredDate", "onboardingHiredDate desc", "onboardingInternalHire", "onboardingInternalHire desc", "processId", "processId desc", "processRestarted", "processRestarted desc", "processStatus", "processStatus desc", "processTrigger", "processTrigger desc", "processType", "processType desc", "processVariant", "processVariant desc", "startDate", "startDate desc", "targetDate", "targetDate desc", "targetSystem", "targetSystem desc", "user", "user desc"]
+					}
+				}, {
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["activitiesConfig", "activitiesStatus", "bpeProcessInstanceId", "cancelEventReason", "cancelOffboardingReason", "cancelOnboardingReason", "cancellationComment", "cancellationDate", "cancelledDueToRestart", "createdBy", "createdDateTime", "customDataCollectionConfig", "employeePersonId", "endDate", "lastModifiedBy", "lastModifiedDateTime", "locale", "manager", "managerPersonId", "mdfSystemRecordStatus", "offboardingActivitiesConfig", "onb2MasterId", "onboardingHireStatus", "onboardingHiredDate", "onboardingInternalHire", "processId", "processRestarted", "processStatus", "processTrigger", "processType", "processVariant", "startDate", "targetDate", "targetSystem", "user"]
+					}
+				}, {
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*", "processTasks", "processTriggerNav", "toDataCollectionUserConfig", "toEquipmentActivity"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entities",
+						"schema": {
+							"type": "object",
+							"title": "Wrapper",
+							"properties": {
+								"d": {
+									"type": "object",
+									"title": "Collection of ONB2Process",
+									"properties": {
+										"results": {
+											"type": "array",
+											"items": {
+												"$ref": "#/definitions/SFOData.ONB2Process"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ONB2Process('{processId}')": {
+			"get": {
+				"summary": "Get entity from ONB2Process by key",
+				"tags": ["ONB2Process"],
+				"parameters": [{
+					"name": "processId",
+					"in": "path",
+					"required": true,
+					"description": "key: processId",
+					"type": "string"
+				}, {
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["activitiesConfig", "activitiesStatus", "bpeProcessInstanceId", "cancelEventReason", "cancelOffboardingReason", "cancelOnboardingReason", "cancellationComment", "cancellationDate", "cancelledDueToRestart", "createdBy", "createdDateTime", "customDataCollectionConfig", "employeePersonId", "endDate", "lastModifiedBy", "lastModifiedDateTime", "locale", "manager", "managerPersonId", "mdfSystemRecordStatus", "offboardingActivitiesConfig", "onb2MasterId", "onboardingHireStatus", "onboardingHiredDate", "onboardingInternalHire", "processId", "processRestarted", "processStatus", "processTrigger", "processType", "processVariant", "startDate", "targetDate", "targetSystem", "user"]
+					}
+				}, {
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*", "processTasks", "processTriggerNav", "toDataCollectionUserConfig", "toEquipmentActivity"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entity",
+						"schema": {
+							"title": "ONB2Process",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.ONB2Process"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			},
+			"put": {
+				"summary": "Update entity in ONB2Process",
+				"tags": ["ONB2Process"],
+				"parameters": [{
+					"name": "processId",
+					"in": "path",
+					"required": true,
+					"description": "key: processId",
+					"type": "string"
+				}, {
+					"name": "ONB2Process",
+					"in": "body",
+					"description": "New property values",
+					"schema": {
+						"title": "Modified ONB2Process",
+						"type": "object",
+						"properties": {
+							"d": {
+								"$ref": "#/definitions/SFOData.ONB2Process"
+							}
+						}
+					}
+				}],
+				"responses": {
+					"204": {
+						"description": "Success"
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ONB2DataCollectionUserConfig": {
+			"get": {
+				"summary": "Get entities from ONB2DataCollectionUserConfig",
+				"tags": ["ONB2DataCollectionUserConfig"],
+				"parameters": [{
+					"$ref": "#/parameters/top"
+				}, {
+					"$ref": "#/parameters/skip"
+				}, {
+					"$ref": "#/parameters/search"
+				}, {
+					"$ref": "#/parameters/filter"
+				}, {
+					"$ref": "#/parameters/count"
+				}, {
+					"name": "$orderby",
+					"in": "query",
+					"description": "Order items by property values, see [OData Sorting](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["createdBy", "createdBy desc", "createdDateTime", "createdDateTime desc", "id", "id desc", "lastModifiedBy", "lastModifiedBy desc", "lastModifiedDateTime", "lastModifiedDateTime desc", "mdfSystemRecordStatus", "mdfSystemRecordStatus desc", "process", "process desc", "subjectUser", "subjectUser desc"]
+					}
+				}, {
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["createdBy", "createdDateTime", "id", "lastModifiedBy", "lastModifiedDateTime", "mdfSystemRecordStatus", "process", "subjectUser"]
+					}
+				}, {
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*", "processNav"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entities",
+						"schema": {
+							"type": "object",
+							"title": "Wrapper",
+							"properties": {
+								"d": {
+									"type": "object",
+									"title": "Collection of ONB2DataCollectionUserConfig",
+									"properties": {
+										"results": {
+											"type": "array",
+											"items": {
+												"$ref": "#/definitions/SFOData.ONB2DataCollectionUserConfig"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ONB2DataCollectionUserConfig('{id}')": {
+			"get": {
+				"summary": "Get entity from ONB2DataCollectionUserConfig by key",
+				"tags": ["ONB2DataCollectionUserConfig"],
+				"parameters": [{
+					"name": "id",
+					"in": "path",
+					"required": true,
+					"description": "key: id",
+					"type": "string"
+				}, {
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["createdBy", "createdDateTime", "id", "lastModifiedBy", "lastModifiedDateTime", "mdfSystemRecordStatus", "process", "subjectUser"]
+					}
+				}, {
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*", "processNav"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entity",
+						"schema": {
+							"title": "ONB2DataCollectionUserConfig",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.ONB2DataCollectionUserConfig"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ONB2ProcessTask": {
+			"get": {
+				"summary": "Get entities from ONB2ProcessTask",
+				"tags": ["ONB2ProcessTask"],
+				"parameters": [{
+					"$ref": "#/parameters/top"
+				}, {
+					"$ref": "#/parameters/skip"
+				}, {
+					"$ref": "#/parameters/search"
+				}, {
+					"$ref": "#/parameters/filter"
+				}, {
+					"$ref": "#/parameters/count"
+				}, {
+					"name": "$orderby",
+					"in": "query",
+					"description": "Order items by property values, see [OData Sorting](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["ONB2Process_processId", "ONB2Process_processId desc", "completedBy", "completedBy desc", "createdBy", "createdBy desc", "createdDateTime", "createdDateTime desc", "endDate", "endDate desc", "lastModifiedBy", "lastModifiedBy desc", "lastModifiedDateTime", "lastModifiedDateTime desc", "mdfSystemRecordStatus", "mdfSystemRecordStatus desc", "responsibilityConfig", "responsibilityConfig desc", "startDate", "startDate desc", "status", "status desc", "taskId", "taskId desc", "type", "type desc"]
+					}
+				}, {
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["ONB2Process_processId", "completedBy", "createdBy", "createdDateTime", "endDate", "lastModifiedBy", "lastModifiedDateTime", "mdfSystemRecordStatus", "responsibilityConfig", "startDate", "status", "taskId", "type"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entities",
+						"schema": {
+							"type": "object",
+							"title": "Wrapper",
+							"properties": {
+								"d": {
+									"type": "object",
+									"title": "Collection of ONB2ProcessTask",
+									"properties": {
+										"results": {
+											"type": "array",
+											"items": {
+												"$ref": "#/definitions/SFOData.ONB2ProcessTask"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ONB2ProcessTask(ONB2Process_processId='{ONB2Process_processId}',taskId='{taskId}')": {
+			"get": {
+				"summary": "Get entity from ONB2ProcessTask by key",
+				"tags": ["ONB2ProcessTask"],
+				"parameters": [{
+					"name": "ONB2Process_processId",
+					"in": "path",
+					"required": true,
+					"description": "key: ONB2Process_processId",
+					"type": "string"
+				}, {
+					"name": "taskId",
+					"in": "path",
+					"required": true,
+					"description": "key: taskId",
+					"type": "string"
+				}, {
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["ONB2Process_processId", "completedBy", "createdBy", "createdDateTime", "endDate", "lastModifiedBy", "lastModifiedDateTime", "mdfSystemRecordStatus", "responsibilityConfig", "startDate", "status", "taskId", "type"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entity",
+						"schema": {
+							"title": "ONB2ProcessTask",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.ONB2ProcessTask"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ONB2EquipmentType": {
+			"get": {
+				"summary": "Get entities from ONB2EquipmentType",
+				"tags": ["ONB2EquipmentType"],
+				"parameters": [{
+					"$ref": "#/parameters/top"
+				}, {
+					"$ref": "#/parameters/skip"
+				}, {
+					"$ref": "#/parameters/search"
+				}, {
+					"$ref": "#/parameters/filter"
+				}, {
+					"$ref": "#/parameters/count"
+				}, {
+					"name": "$orderby",
+					"in": "query",
+					"description": "Order items by property values, see [OData Sorting](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["code", "code desc", "createdBy", "createdBy desc", "createdDateTime", "createdDateTime desc", "description_ar_SA", "description_ar_SA desc", "description_bs_ID", "description_bs_ID desc", "description_de_DE", "description_de_DE desc", "description_defaultValue", "description_defaultValue desc", "description_el_GR", "description_el_GR desc", "description_en_DEBUG", "description_en_DEBUG desc", "description_en_GB", "description_en_GB desc", "description_en_RTL", "description_en_RTL desc", "description_en_SAP_SLS", "description_en_SAP_SLS desc", "description_en_US", "description_en_US desc", "description_es_ES", "description_es_ES desc", "description_hu_HU", "description_hu_HU desc", "description_ja_JP", "description_ja_JP desc", "description_localized", "description_localized desc", "description_pl_PL", "description_pl_PL desc", "description_pt_BR", "description_pt_BR desc", "description_referencingField", "description_referencingField desc", "description_ru_RU", "description_ru_RU desc", "description_th_TH", "description_th_TH desc", "description_tl_PH", "description_tl_PH desc", "description_vi_VN", "description_vi_VN desc", "description_zh_CN", "description_zh_CN desc", "description_zh_TW", "description_zh_TW desc", "inUse", "inUse desc", "lastModifiedBy", "lastModifiedBy desc", "lastModifiedDateTime", "lastModifiedDateTime desc", "mdfSystemRecordStatus", "mdfSystemRecordStatus desc", "ui5StandardIconId", "ui5StandardIconId desc"]
+					}
+				}, {
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["code", "createdBy", "createdDateTime", "description_ar_SA", "description_bs_ID", "description_de_DE", "description_defaultValue", "description_el_GR", "description_en_DEBUG", "description_en_GB", "description_en_RTL", "description_en_SAP_SLS", "description_en_US", "description_es_ES", "description_hu_HU", "description_ja_JP", "description_localized", "description_pl_PL", "description_pt_BR", "description_referencingField", "description_ru_RU", "description_th_TH", "description_tl_PH", "description_vi_VN", "description_zh_CN", "description_zh_TW", "inUse", "lastModifiedBy", "lastModifiedDateTime", "mdfSystemRecordStatus", "ui5StandardIconId"]
+					}
+				}, {
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*", "toEquipmentTypeValue"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entities",
+						"schema": {
+							"type": "object",
+							"title": "Wrapper",
+							"properties": {
+								"d": {
+									"type": "object",
+									"title": "Collection of ONB2EquipmentType",
+									"properties": {
+										"results": {
+											"type": "array",
+											"items": {
+												"$ref": "#/definitions/SFOData.ONB2EquipmentType"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			},
+			"post": {
+				"summary": "Add new entity to ONB2EquipmentType",
+				"tags": ["ONB2EquipmentType"],
+				"parameters": [{
+					"name": "ONB2EquipmentType",
+					"in": "body",
+					"description": "New entity",
+					"schema": {
+						"$ref": "#/definitions/SFOData.ONB2EquipmentType"
+					}
+				}],
+				"responses": {
+					"201": {
+						"description": "Created entity",
+						"schema": {
+							"title": "Created ONB2EquipmentType",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.ONB2EquipmentType"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Not found",
+						"schema": {
+							"$ref": "#/definitions/odata.error"
+						},
+						"examples": {
+							"application/json": {
+								"error": {
+									"code": "Not Found",
+									"message": {
+										"lang": "en",
+										"value": "Requested entity could not be found."
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ONB2EquipmentType('{code}')": {
+			"get": {
+				"summary": "Get entity from ONB2EquipmentType by key",
+				"tags": ["ONB2EquipmentType"],
+				"parameters": [{
+					"name": "code",
+					"in": "path",
+					"required": true,
+					"description": "key: code",
+					"type": "string"
+				}, {
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["code", "createdBy", "createdDateTime", "description_ar_SA", "description_bs_ID", "description_de_DE", "description_defaultValue", "description_el_GR", "description_en_DEBUG", "description_en_GB", "description_en_RTL", "description_en_SAP_SLS", "description_en_US", "description_es_ES", "description_hu_HU", "description_ja_JP", "description_localized", "description_pl_PL", "description_pt_BR", "description_referencingField", "description_ru_RU", "description_th_TH", "description_tl_PH", "description_vi_VN", "description_zh_CN", "description_zh_TW", "inUse", "lastModifiedBy", "lastModifiedDateTime", "mdfSystemRecordStatus", "ui5StandardIconId"]
+					}
+				}, {
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*", "toEquipmentTypeValue"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entity",
+						"schema": {
+							"title": "ONB2EquipmentType",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.ONB2EquipmentType"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			},
+			"put": {
+				"summary": "Update entity in ONB2EquipmentType",
+				"tags": ["ONB2EquipmentType"],
+				"parameters": [{
+					"name": "code",
+					"in": "path",
+					"required": true,
+					"description": "key: code",
+					"type": "string"
+				}, {
+					"name": "ONB2EquipmentType",
+					"in": "body",
+					"description": "New property values",
+					"schema": {
+						"title": "Modified ONB2EquipmentType",
+						"type": "object",
+						"properties": {
+							"d": {
+								"$ref": "#/definitions/SFOData.ONB2EquipmentType"
+							}
+						}
+					}
+				}],
+				"responses": {
+					"204": {
+						"description": "Success"
+					},
+					"404": {
+						"description": "Not found",
+						"schema": {
+							"$ref": "#/definitions/odata.error"
+						},
+						"examples": {
+							"application/json": {
+								"error": {
+									"code": "Not Found",
+									"message": {
+										"lang": "en",
+										"value": "Requested entity could not be found."
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			},
+			"delete": {
+				"summary": "Delete entity from ONB2EquipmentType",
+				"tags": ["ONB2EquipmentType"],
+				"parameters": [{
+					"name": "code",
+					"in": "path",
+					"required": true,
+					"description": "key: code",
+					"type": "string"
+				}, {
+					"name": "If-Match",
+					"in": "header",
+					"description": "ETag",
+					"type": "string"
+				}],
+				"responses": {
+					"204": {
+						"description": "Success"
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ONB2ProcessTrigger": {
+			"get": {
+				"summary": "Get entities from ONB2ProcessTrigger",
+				"tags": ["ONB2ProcessTrigger"],
+				"parameters": [{
+					"$ref": "#/parameters/top"
+				}, {
+					"$ref": "#/parameters/skip"
+				}, {
+					"$ref": "#/parameters/search"
+				}, {
+					"$ref": "#/parameters/filter"
+				}, {
+					"$ref": "#/parameters/count"
+				}, {
+					"name": "$orderby",
+					"in": "query",
+					"description": "Order items by property values, see [OData Sorting](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["atsApplicationId", "atsApplicationId desc", "atsUserId", "atsUserId desc", "bpeProcessInstanceId", "bpeProcessInstanceId desc", "createdBy", "createdBy desc", "createdDateTime", "createdDateTime desc", "hireType", "hireType desc", "lastModifiedBy", "lastModifiedBy desc", "lastModifiedDateTime", "lastModifiedDateTime desc", "mdfSystemRecordStatus", "mdfSystemRecordStatus desc", "rcmApplicationId", "rcmApplicationId desc", "rcmCandidateId", "rcmCandidateId desc", "rcmCompany", "rcmCompany desc", "rcmHiringMgr", "rcmHiringMgr desc", "rcmJobReqId", "rcmJobReqId desc", "rcmOfferId", "rcmOfferId desc", "rcmPrimaryEmail", "rcmPrimaryEmail desc", "rcmStartDate", "rcmStartDate desc", "rehireUser", "rehireUser desc", "triggerId", "triggerId desc", "triggerStatus", "triggerStatus desc", "triggerType", "triggerType desc"]
+					}
+				}, {
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["atsApplicationId", "atsUserId", "bpeProcessInstanceId", "createdBy", "createdDateTime", "hireType", "lastModifiedBy", "lastModifiedDateTime", "mdfSystemRecordStatus", "rcmApplicationId", "rcmCandidateId", "rcmCompany", "rcmHiringMgr", "rcmJobReqId", "rcmOfferId", "rcmPrimaryEmail", "rcmStartDate", "rehireUser", "triggerId", "triggerStatus", "triggerType"]
+					}
+				}, {
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*", "toProcess"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entities",
+						"schema": {
+							"type": "object",
+							"title": "Wrapper",
+							"properties": {
+								"d": {
+									"type": "object",
+									"title": "Collection of ONB2ProcessTrigger",
+									"properties": {
+										"results": {
+											"type": "array",
+											"items": {
+												"$ref": "#/definitions/SFOData.ONB2ProcessTrigger"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ONB2ProcessTrigger('{triggerId}')": {
+			"get": {
+				"summary": "Get entity from ONB2ProcessTrigger by key",
+				"tags": ["ONB2ProcessTrigger"],
+				"parameters": [{
+					"name": "triggerId",
+					"in": "path",
+					"required": true,
+					"description": "key: triggerId",
+					"type": "string"
+				}, {
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["atsApplicationId", "atsUserId", "bpeProcessInstanceId", "createdBy", "createdDateTime", "hireType", "lastModifiedBy", "lastModifiedDateTime", "mdfSystemRecordStatus", "rcmApplicationId", "rcmCandidateId", "rcmCompany", "rcmHiringMgr", "rcmJobReqId", "rcmOfferId", "rcmPrimaryEmail", "rcmStartDate", "rehireUser", "triggerId", "triggerStatus", "triggerType"]
+					}
+				}, {
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*", "toProcess"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entity",
+						"schema": {
+							"title": "ONB2ProcessTrigger",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.ONB2ProcessTrigger"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			},
+			"put": {
+				"summary": "Update entity in ONB2ProcessTrigger",
+				"tags": ["ONB2ProcessTrigger"],
+				"parameters": [{
+					"name": "triggerId",
+					"in": "path",
+					"required": true,
+					"description": "key: triggerId",
+					"type": "string"
+				}, {
+					"name": "ONB2ProcessTrigger",
+					"in": "body",
+					"description": "New property values",
+					"schema": {
+						"title": "Modified ONB2ProcessTrigger",
+						"type": "object",
+						"properties": {
+							"d": {
+								"$ref": "#/definitions/SFOData.ONB2ProcessTrigger"
+							}
+						}
+					}
+				}],
+				"responses": {
+					"204": {
+						"description": "Success"
+					},
+					"404": {
+						"description": "Not found",
+						"schema": {
+							"$ref": "#/definitions/odata.error"
+						},
+						"examples": {
+							"application/json": {
+								"error": {
+									"code": "Not Found",
+									"message": {
+										"lang": "en",
+										"value": "Requested entity could not be found."
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ComplianceUserFormData": {
+			"get": {
+				"summary": "This entity contains information related to compliance forms and compliance-related user data.",
+				"tags": ["ComplianceUserFormData"],
+				"parameters": [{
+					"$ref": "#/parameters/top"
+				}, {
+					"$ref": "#/parameters/skip"
+				}, {
+					"$ref": "#/parameters/search"
+				}, {
+					"$ref": "#/parameters/filter"
+				}, {
+					"$ref": "#/parameters/count"
+				}, {
+					"name": "$orderby",
+					"in": "query",
+					"description": "Order items by property values, see [OData Sorting](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["country", "country desc", "createdDate", "createdDate desc", "dataLastModifiedBy", "dataLastModifiedBy desc", "dataLastModifiedDate", "dataLastModifiedDate desc", "documentFlowStatus", "documentFlowStatus desc", "formId", "formId desc", "formVersion", "formVersion desc", "id", "id desc", "initiatorId", "initiatorId desc", "initiatorType", "initiatorType desc", "name", "name desc", "processId", "processId desc", "processStatus", "processStatus desc", "state", "state desc", "user", "user desc", "year", "year desc"]
+					}
+				}, {
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["country", "createdDate", "dataLastModifiedBy", "dataLastModifiedDate", "documentFlowStatus", "formId", "formVersion", "id", "initiatorId", "initiatorType", "name", "processId", "processStatus", "state", "user", "year"]
+					}
+				}, {
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*", "data"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entities",
+						"schema": {
+							"type": "object",
+							"title": "Wrapper",
+							"properties": {
+								"d": {
+									"type": "object",
+									"title": "Collection of ComplianceUserFormData",
+									"properties": {
+										"results": {
+											"type": "array",
+											"items": {
+												"$ref": "#/definitions/SFOData.ComplianceUserFormData"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ComplianceUserFormData('{id}')": {
+			"get": {
+				"summary": "This entity contains information related to compliance forms and compliance-related user data.",
+				"tags": ["ComplianceUserFormData"],
+				"parameters": [{
+					"name": "id",
+					"in": "path",
+					"required": true,
+					"description": "key: id",
+					"type": "string"
+				}, {
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["country", "createdDate", "dataLastModifiedBy", "dataLastModifiedDate", "documentFlowStatus", "formId", "formVersion", "id", "initiatorId", "initiatorType", "name", "processId", "processStatus", "state", "user", "year"]
+					}
+				}, {
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*", "data"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entity",
+						"schema": {
+							"title": "ComplianceUserFormData",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.ComplianceUserFormData"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ONB2EquipmentActivity": {
+			"get": {
+				"summary": "Get entities from ONB2EquipmentActivity",
+				"tags": ["ONB2EquipmentActivity"],
+				"parameters": [{
+					"$ref": "#/parameters/top"
+				}, {
+					"$ref": "#/parameters/skip"
+				}, {
+					"$ref": "#/parameters/search"
+				}, {
+					"$ref": "#/parameters/filter"
+				}, {
+					"$ref": "#/parameters/count"
+				}, {
+					"name": "$orderby",
+					"in": "query",
+					"description": "Order items by property values, see [OData Sorting](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["activityId", "activityId desc", "activityStatus", "activityStatus desc", "activityStatusDate", "activityStatusDate desc", "activityTitle", "activityTitle desc", "activityType", "activityType desc", "createdBy", "createdBy desc", "createdDateTime", "createdDateTime desc", "dueDate", "dueDate desc", "equipmentComment", "equipmentComment desc", "equipmentStatus", "equipmentStatus desc", "equipmentType", "equipmentType desc", "equipmentValue", "equipmentValue desc", "lastModifiedBy", "lastModifiedBy desc", "lastModifiedDateTime", "lastModifiedDateTime desc", "lastNudgedBy", "lastNudgedBy desc", "lastNudgedDate", "lastNudgedDate desc", "mdfSystemRecordStatus", "mdfSystemRecordStatus desc", "notNeededComment", "notNeededComment desc", "optional", "optional desc", "process", "process desc", "responsibleUsers", "responsibleUsers desc", "subjectUser", "subjectUser desc"]
+					}
+				}, {
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["activityId", "activityStatus", "activityStatusDate", "activityTitle", "activityType", "createdBy", "createdDateTime", "dueDate", "equipmentComment", "equipmentStatus", "equipmentType", "equipmentValue", "lastModifiedBy", "lastModifiedDateTime", "lastNudgedBy", "lastNudgedDate", "mdfSystemRecordStatus", "notNeededComment", "optional", "process", "responsibleUsers", "subjectUser"]
+					}
+				}, {
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*", "equipmentTypeNav", "equipmentValueNav", "processNav"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entities",
+						"schema": {
+							"type": "object",
+							"title": "Wrapper",
+							"properties": {
+								"d": {
+									"type": "object",
+									"title": "Collection of ONB2EquipmentActivity",
+									"properties": {
+										"results": {
+											"type": "array",
+											"items": {
+												"$ref": "#/definitions/SFOData.ONB2EquipmentActivity"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ONB2EquipmentActivity('{activityId}')": {
+			"get": {
+				"summary": "Get entity from ONB2EquipmentActivity by key",
+				"tags": ["ONB2EquipmentActivity"],
+				"parameters": [{
+					"name": "activityId",
+					"in": "path",
+					"required": true,
+					"description": "key: activityId",
+					"type": "string"
+				}, {
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["activityId", "activityStatus", "activityStatusDate", "activityTitle", "activityType", "createdBy", "createdDateTime", "dueDate", "equipmentComment", "equipmentStatus", "equipmentType", "equipmentValue", "lastModifiedBy", "lastModifiedDateTime", "lastNudgedBy", "lastNudgedDate", "mdfSystemRecordStatus", "notNeededComment", "optional", "process", "responsibleUsers", "subjectUser"]
+					}
+				}, {
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*", "equipmentTypeNav", "equipmentValueNav", "processNav"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entity",
+						"schema": {
+							"title": "ONB2EquipmentActivity",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.ONB2EquipmentActivity"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			},
+			"put": {
+				"summary": "Update entity in ONB2EquipmentActivity",
+				"tags": ["ONB2EquipmentActivity"],
+				"parameters": [{
+					"name": "activityId",
+					"in": "path",
+					"required": true,
+					"description": "key: activityId",
+					"type": "string"
+				}, {
+					"name": "ONB2EquipmentActivity",
+					"in": "body",
+					"description": "New property values",
+					"schema": {
+						"title": "Modified ONB2EquipmentActivity",
+						"type": "object",
+						"properties": {
+							"d": {
+								"$ref": "#/definitions/SFOData.ONB2EquipmentActivity"
+							}
+						}
+					}
+				}],
+				"responses": {
+					"204": {
+						"description": "Success"
+					},
+					"404": {
+						"description": "Not found",
+						"schema": {
+							"$ref": "#/definitions/odata.error"
+						},
+						"examples": {
+							"application/json": {
+								"error": {
+									"code": "Not Found",
+									"message": {
+										"lang": "en",
+										"value": "Requested entity could not be found."
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/initiateOnboardingForUser": {
+			"post": {
+				"summary": "After an external user record is created and Employee Central data is added to the record, you can use this funtion import to initiate onboarding process from an external Application Tracking System. It modifies the ONB2Process and ONB2ProcessTrigger MDF objects. All Employee Central entities (PerPerson, EmpJob, EmpEmployment) should be upserted prior to this call.",
+				"tags": ["Service Operations"],
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"schema": {
+							"title": "Result",
+							"type": "object",
+							"properties": {
+								"d": {
+									"type": "string"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Not found",
+						"schema": {
+							"$ref": "#/definitions/odata.error"
+						},
+						"examples": {
+							"application/json": {
+								"error": {
+									"code": "Not Found",
+									"message": {
+										"lang": "en",
+										"value": "Requested entity could not be found."
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/createOnboardee": {
+			"post": {
+				"summary": "This function import enables you to create an onboarding external user record in the system with information collected from your external Applicant Tracking System (ATS). It also enables you to perform preliminary checks to understand if the onboardee is a new hire or a rehire and take actions as necessary.",
+				"tags": ["Service Operations"],
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"schema": {
+							"title": "Result",
+							"type": "object",
+							"properties": {
+								"d": {
+									"type": "string"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Not found",
+						"schema": {
+							"$ref": "#/definitions/odata.error"
+						},
+						"examples": {
+							"application/json": {
+								"error": {
+									"code": "Not Found",
+									"message": {
+										"lang": "en",
+										"value": "Requested entity could not be found."
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/updateFromExternalHrisONB": {
+			"post": {
+				"summary": "After a candidate is hired in the external Human Resources Information System (HRIS), you can use this function import to update the hiring data from the External HRIS system.",
+				"tags": ["Service Operations"],
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"schema": {
+							"title": "Result",
+							"type": "object",
+							"properties": {
+								"d": {
+									"type": "string"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Not found",
+						"schema": {
+							"$ref": "#/definitions/odata.error"
+						},
+						"examples": {
+							"application/json": {
+								"error": {
+									"code": "Not Found",
+									"message": {
+										"lang": "en",
+										"value": "Requested entity could not be found."
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		}, 
+		    "/ComplianceProcess": {
+      "get": {
+        "summary": "This entity represents the compliance workflow assigned to a new hire.",
+        "tags": [
+          "ComplianceProcess"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/parameters/top"
+          },
+          {
+            "$ref": "#/parameters/skip"
+          },
+          {
+            "$ref": "#/parameters/search"
+          },
+          {
+            "$ref": "#/parameters/filter"
+          },
+          {
+            "$ref": "#/parameters/count"
+          },
+          {
+            "name": "$orderby",
+            "in": "query",
+            "description": "Order items by property values, see [OData Sorting](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "complianceMasterId",
+                "complianceMasterId desc",
+                "correctDataTriggered",
+                "correctDataTriggered desc",
+                "createdBy",
+                "createdBy desc",
+                "createdDateTime",
+                "createdDateTime desc",
+                "eVerifyData",
+                "eVerifyData desc",
+                "i9UserData",
+                "i9UserData desc",
+                "lastModifiedBy",
+                "lastModifiedBy desc",
+                "lastModifiedDateTime",
+                "lastModifiedDateTime desc",
+                "mdfSystemRecordStatus",
+                "mdfSystemRecordStatus desc",
+                "onboardingProcess",
+                "onboardingProcess desc",
+                "processId",
+                "processId desc",
+                "processInitiatorId",
+                "processInitiatorId desc",
+                "processInitiatorType",
+                "processInitiatorType desc",
+                "processStatus",
+                "processStatus desc",
+                "processType",
+                "processType desc",
+                "startDate",
+                "startDate desc",
+                "user",
+                "user desc"
+              ]
+            }
+          },
+          {
+            "name": "$select",
+            "in": "query",
+            "description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "complianceMasterId",
+                "correctDataTriggered",
+                "createdBy",
+                "createdDateTime",
+                "eVerifyData",
+                "i9UserData",
+                "lastModifiedBy",
+                "lastModifiedDateTime",
+                "mdfSystemRecordStatus",
+                "onboardingProcess",
+                "processId",
+                "processInitiatorId",
+                "processInitiatorType",
+                "processStatus",
+                "processType",
+                "startDate",
+                "user"
+              ]
+            }
+          },
+          {
+            "name": "$expand",
+            "in": "query",
+            "description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "*",
+                "onboardingProcessNav",
+                "processTasks",
+                "toDocumentFlow",
+                "toFormData"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retrieved entities",
+            "schema": {
+              "type": "object",
+              "title": "Wrapper",
+              "properties": {
+                "d": {
+                  "type": "object",
+                  "title": "Collection of ComplianceProcess",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/SFOData.ComplianceProcess"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
+    "/ComplianceProcess('{processId}')": {
+      "get": {
+        "summary": "Get entity from ComplianceProcess by key",
+        "tags": [
+          "ComplianceProcess"
+        ],
+        "parameters": [
+          {
+            "name": "processId",
+            "in": "path",
+            "required": true,
+            "description": "key: processId",
+            "type": "string"
+          },
+          {
+            "name": "$select",
+            "in": "query",
+            "description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "complianceMasterId",
+                "correctDataTriggered",
+                "createdBy",
+                "createdDateTime",
+                "eVerifyData",
+                "i9UserData",
+                "lastModifiedBy",
+                "lastModifiedDateTime",
+                "mdfSystemRecordStatus",
+                "onboardingProcess",
+                "processId",
+                "processInitiatorId",
+                "processInitiatorType",
+                "processStatus",
+                "processType",
+                "startDate",
+                "user"
+              ]
+            }
+          },
+          {
+            "name": "$expand",
+            "in": "query",
+            "description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "*",
+                "onboardingProcessNav",
+                "processTasks",
+                "toDocumentFlow",
+                "toFormData"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retrieved entity",
+            "schema": {
+              "title": "ComplianceProcess",
+              "type": "object",
+              "properties": {
+                "d": {
+                  "$ref": "#/definitions/SFOData.ComplianceProcess"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
+    "/ComplianceProcessTask": {
+      "get": {
+        "summary": "This entity allows you to store the start time, end time, and the status of a particular compliance task.",
+        "tags": [
+          "ComplianceProcessTask"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/parameters/top"
+          },
+          {
+            "$ref": "#/parameters/skip"
+          },
+          {
+            "$ref": "#/parameters/search"
+          },
+          {
+            "$ref": "#/parameters/filter"
+          },
+          {
+            "$ref": "#/parameters/count"
+          },
+          {
+            "name": "$orderby",
+            "in": "query",
+            "description": "Order items by property values, see [OData Sorting](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "category",
+                "category desc",
+                "completedBy",
+                "completedBy desc",
+                "createdBy",
+                "createdBy desc",
+                "createdDateTime",
+                "createdDateTime desc",
+                "dueDate",
+                "dueDate desc",
+                "endDate",
+                "endDate desc",
+                "lastModifiedBy",
+                "lastModifiedBy desc",
+                "lastModifiedDateTime",
+                "lastModifiedDateTime desc",
+                "mdfSystemRecordStatus",
+                "mdfSystemRecordStatus desc",
+                "process",
+                "process desc",
+                "startDate",
+                "startDate desc",
+                "status",
+                "status desc",
+                "subjectUser",
+                "subjectUser desc",
+                "taskId",
+                "taskId desc",
+                "type",
+                "type desc"
+              ]
+            }
+          },
+          {
+            "name": "$select",
+            "in": "query",
+            "description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "category",
+                "completedBy",
+                "createdBy",
+                "createdDateTime",
+                "dueDate",
+                "endDate",
+                "lastModifiedBy",
+                "lastModifiedDateTime",
+                "mdfSystemRecordStatus",
+                "process",
+                "startDate",
+                "status",
+                "subjectUser",
+                "taskId",
+                "type"
+              ]
+            }
+          },
+          {
+            "name": "$expand",
+            "in": "query",
+            "description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "*",
+                "processNav"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retrieved entities",
+            "schema": {
+              "type": "object",
+              "title": "Wrapper",
+              "properties": {
+                "d": {
+                  "type": "object",
+                  "title": "Collection of ComplianceProcessTask",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/SFOData.ComplianceProcessTask"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
+    "/ComplianceProcessTask('{taskId}')": {
+      "get": {
+        "summary": "Get entity from ComplianceProcessTask by key",
+        "tags": [
+          "ComplianceProcessTask"
+        ],
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "description": "key: taskId",
+            "type": "string"
+          },
+          {
+            "name": "$select",
+            "in": "query",
+            "description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "category",
+                "completedBy",
+                "createdBy",
+                "createdDateTime",
+                "dueDate",
+                "endDate",
+                "lastModifiedBy",
+                "lastModifiedDateTime",
+                "mdfSystemRecordStatus",
+                "process",
+                "startDate",
+                "status",
+                "subjectUser",
+                "taskId",
+                "type"
+              ]
+            }
+          },
+          {
+            "name": "$expand",
+            "in": "query",
+            "description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "*",
+                "processNav"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retrieved entity",
+            "schema": {
+              "title": "ComplianceProcessTask",
+              "type": "object",
+              "properties": {
+                "d": {
+                  "$ref": "#/definitions/SFOData.ComplianceProcessTask"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
+    "/AssignedComplianceForm": {
+      "get": {
+        "summary": "This entity contains the compliance forms assigned to new hires.",
+        "tags": [
+          "AssignedComplianceForm"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/parameters/top"
+          },
+          {
+            "$ref": "#/parameters/skip"
+          },
+          {
+            "$ref": "#/parameters/search"
+          },
+          {
+            "$ref": "#/parameters/filter"
+          },
+          {
+            "$ref": "#/parameters/count"
+          },
+          {
+            "name": "$orderby",
+            "in": "query",
+            "description": "Order items by property values, see [OData Sorting](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "bpeUserTaskId",
+                "bpeUserTaskId desc",
+                "complianceFormName",
+                "complianceFormName desc",
+                "createdBy",
+                "createdBy desc",
+                "createdDateTime",
+                "createdDateTime desc",
+                "dueDate",
+                "dueDate desc",
+                "form",
+                "form desc",
+                "id",
+                "id desc",
+                "lastModifiedBy",
+                "lastModifiedBy desc",
+                "lastModifiedDateTime",
+                "lastModifiedDateTime desc",
+                "mdfSystemRecordStatus",
+                "mdfSystemRecordStatus desc",
+                "order",
+                "order desc",
+                "participantType",
+                "participantType desc",
+                "preRequisiteFormNames",
+                "preRequisiteFormNames desc",
+                "process",
+                "process desc",
+                "rank",
+                "rank desc",
+                "responsibleUser",
+                "responsibleUser desc",
+                "status",
+                "status desc",
+                "subjectUser",
+                "subjectUser desc"
+              ]
+            }
+          },
+          {
+            "name": "$select",
+            "in": "query",
+            "description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "bpeUserTaskId",
+                "complianceFormName",
+                "createdBy",
+                "createdDateTime",
+                "dueDate",
+                "form",
+                "id",
+                "lastModifiedBy",
+                "lastModifiedDateTime",
+                "mdfSystemRecordStatus",
+                "order",
+                "participantType",
+                "preRequisiteFormNames",
+                "process",
+                "rank",
+                "responsibleUser",
+                "status",
+                "subjectUser"
+              ]
+            }
+          },
+          {
+            "name": "$expand",
+            "in": "query",
+            "description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "*",
+                "processNav"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retrieved entities",
+            "schema": {
+              "type": "object",
+              "title": "Wrapper",
+              "properties": {
+                "d": {
+                  "type": "object",
+                  "title": "Collection of AssignedComplianceForm",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/SFOData.AssignedComplianceForm"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
+    "/AssignedComplianceForm('{id}')": {
+      "get": {
+        "summary": "Get entity from AssignedComplianceForm by key",
+        "tags": [
+          "AssignedComplianceForm"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "key: id",
+            "type": "string"
+          },
+          {
+            "name": "$select",
+            "in": "query",
+            "description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "bpeUserTaskId",
+                "complianceFormName",
+                "createdBy",
+                "createdDateTime",
+                "dueDate",
+                "form",
+                "id",
+                "lastModifiedBy",
+                "lastModifiedDateTime",
+                "mdfSystemRecordStatus",
+                "order",
+                "participantType",
+                "preRequisiteFormNames",
+                "process",
+                "rank",
+                "responsibleUser",
+                "status",
+                "subjectUser"
+              ]
+            }
+          },
+          {
+            "name": "$expand",
+            "in": "query",
+            "description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "*",
+                "processNav"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retrieved entity",
+            "schema": {
+              "title": "AssignedComplianceForm",
+              "type": "object",
+              "properties": {
+                "d": {
+                  "$ref": "#/definitions/SFOData.AssignedComplianceForm"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
+    "/ComplianceFormData": {
+      "get": {
+        "summary": "This entity stores the compliance form data for the new hire.",
+        "tags": [
+          "ComplianceFormData"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/parameters/top"
+          },
+          {
+            "$ref": "#/parameters/skip"
+          },
+          {
+            "$ref": "#/parameters/search"
+          },
+          {
+            "$ref": "#/parameters/filter"
+          },
+          {
+            "$ref": "#/parameters/count"
+          },
+          {
+            "name": "$orderby",
+            "in": "query",
+            "description": "Order items by property values, see [OData Sorting](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "createdBy",
+                "createdBy desc",
+                "createdDateTime",
+                "createdDateTime desc",
+                "documentAttachmentId",
+                "documentAttachmentId desc",
+                "documentFlow",
+                "documentFlow desc",
+                "envelopeId",
+                "envelopeId desc",
+                "externalCode",
+                "externalCode desc",
+                "form",
+                "form desc",
+                "lastModifiedBy",
+                "lastModifiedBy desc",
+                "lastModifiedDateTime",
+                "lastModifiedDateTime desc",
+                "mdfSystemRecordStatus",
+                "mdfSystemRecordStatus desc",
+                "pdfId",
+                "pdfId desc",
+                "pdfLocaleMetadata",
+                "pdfLocaleMetadata desc",
+                "process",
+                "process desc",
+                "sensitiveDataIncluded",
+                "sensitiveDataIncluded desc",
+                "subjectUser",
+                "subjectUser desc"
+              ]
+            }
+          },
+          {
+            "name": "$select",
+            "in": "query",
+            "description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "createdBy",
+                "createdDateTime",
+                "documentAttachmentId",
+                "documentFlow",
+                "envelopeId",
+                "externalCode",
+                "form",
+                "lastModifiedBy",
+                "lastModifiedDateTime",
+                "mdfSystemRecordStatus",
+                "pdfId",
+                "pdfLocaleMetadata",
+                "process",
+                "sensitiveDataIncluded",
+                "subjectUser"
+              ]
+            }
+          },
+          {
+            "name": "$expand",
+            "in": "query",
+            "description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "*",
+                "documentFlowNav",
+                "formSignatures",
+                "processNav"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retrieved entities",
+            "schema": {
+              "type": "object",
+              "title": "Wrapper",
+              "properties": {
+                "d": {
+                  "type": "object",
+                  "title": "Collection of ComplianceFormData",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/SFOData.ComplianceFormData"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
+    "/ComplianceFormData('{externalCode}')": {
+      "get": {
+        "summary": "Get entity from ComplianceFormData by key",
+        "tags": [
+          "ComplianceFormData"
+        ],
+        "parameters": [
+          {
+            "name": "externalCode",
+            "in": "path",
+            "required": true,
+            "description": "key: externalCode",
+            "type": "string"
+          },
+          {
+            "name": "$select",
+            "in": "query",
+            "description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "createdBy",
+                "createdDateTime",
+                "documentAttachmentId",
+                "documentFlow",
+                "envelopeId",
+                "externalCode",
+                "form",
+                "lastModifiedBy",
+                "lastModifiedDateTime",
+                "mdfSystemRecordStatus",
+                "pdfId",
+                "pdfLocaleMetadata",
+                "process",
+                "sensitiveDataIncluded",
+                "subjectUser"
+              ]
+            }
+          },
+          {
+            "name": "$expand",
+            "in": "query",
+            "description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "*",
+                "documentFlowNav",
+                "formSignatures",
+                "processNav"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retrieved entity",
+            "schema": {
+              "title": "ComplianceFormData",
+              "type": "object",
+              "properties": {
+                "d": {
+                  "$ref": "#/definitions/SFOData.ComplianceFormData"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
+    "/ComplianceDocumentFlow": {
+      "get": {
+        "summary": "This entity stores the Compliance document flow assigned to the new hire.",
+        "tags": [
+          "ComplianceDocumentFlow"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/parameters/top"
+          },
+          {
+            "$ref": "#/parameters/skip"
+          },
+          {
+            "$ref": "#/parameters/search"
+          },
+          {
+            "$ref": "#/parameters/filter"
+          },
+          {
+            "$ref": "#/parameters/count"
+          },
+          {
+            "name": "$orderby",
+            "in": "query",
+            "description": "Order items by property values, see [OData Sorting](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "createdBy",
+                "createdBy desc",
+                "createdDateTime",
+                "createdDateTime desc",
+                "declinedBy",
+                "declinedBy desc",
+                "declinedDocuments",
+                "declinedDocuments desc",
+                "declinedReason",
+                "declinedReason desc",
+                "docFlowBpeUserTaskId",
+                "docFlowBpeUserTaskId desc",
+                "documentFlowCode",
+                "documentFlowCode desc",
+                "documentFlowStatus",
+                "documentFlowStatus desc",
+                "lastModifiedBy",
+                "lastModifiedBy desc",
+                "lastModifiedDateTime",
+                "lastModifiedDateTime desc",
+                "mdfSystemRecordStatus",
+                "mdfSystemRecordStatus desc",
+                "process",
+                "process desc",
+                "subjectUser",
+                "subjectUser desc"
+              ]
+            }
+          },
+          {
+            "name": "$select",
+            "in": "query",
+            "description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "createdBy",
+                "createdDateTime",
+                "declinedBy",
+                "declinedDocuments",
+                "declinedReason",
+                "docFlowBpeUserTaskId",
+                "documentFlowCode",
+                "documentFlowStatus",
+                "lastModifiedBy",
+                "lastModifiedDateTime",
+                "mdfSystemRecordStatus",
+                "process",
+                "subjectUser"
+              ]
+            }
+          },
+          {
+            "name": "$expand",
+            "in": "query",
+            "description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "*",
+                "processNav"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retrieved entities",
+            "schema": {
+              "type": "object",
+              "title": "Wrapper",
+              "properties": {
+                "d": {
+                  "type": "object",
+                  "title": "Collection of ComplianceDocumentFlow",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/SFOData.ComplianceDocumentFlow"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
+    "/ComplianceDocumentFlow('{documentFlowCode}')": {
+      "get": {
+        "summary": "Get entity from ComplianceDocumentFlow by key",
+        "tags": [
+          "ComplianceDocumentFlow"
+        ],
+        "parameters": [
+          {
+            "name": "documentFlowCode",
+            "in": "path",
+            "required": true,
+            "description": "key: documentFlowCode",
+            "type": "string"
+          },
+          {
+            "name": "$select",
+            "in": "query",
+            "description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "createdBy",
+                "createdDateTime",
+                "declinedBy",
+                "declinedDocuments",
+                "declinedReason",
+                "docFlowBpeUserTaskId",
+                "documentFlowCode",
+                "documentFlowStatus",
+                "lastModifiedBy",
+                "lastModifiedDateTime",
+                "mdfSystemRecordStatus",
+                "process",
+                "subjectUser"
+              ]
+            }
+          },
+          {
+            "name": "$expand",
+            "in": "query",
+            "description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "*",
+                "processNav"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retrieved entity",
+            "schema": {
+              "title": "ComplianceDocumentFlow",
+              "type": "object",
+              "properties": {
+                "d": {
+                  "$ref": "#/definitions/SFOData.ComplianceDocumentFlow"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
+    "/ComplianceFormSignature": {
+      "get": {
+        "summary": "This entity stores the Compliance form signature assigned to the new hire.",
+        "tags": [
+          "ComplianceFormSignature"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/parameters/top"
+          },
+          {
+            "$ref": "#/parameters/skip"
+          },
+          {
+            "$ref": "#/parameters/search"
+          },
+          {
+            "$ref": "#/parameters/filter"
+          },
+          {
+            "$ref": "#/parameters/count"
+          },
+          {
+            "name": "$orderby",
+            "in": "query",
+            "description": "Order items by property values, see [OData Sorting](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "ComplianceFormData_externalCode",
+                "ComplianceFormData_externalCode desc",
+                "createdBy",
+                "createdBy desc",
+                "createdDateTime",
+                "createdDateTime desc",
+                "externalCode",
+                "externalCode desc",
+                "lastModifiedBy",
+                "lastModifiedBy desc",
+                "lastModifiedDateTime",
+                "lastModifiedDateTime desc",
+                "mdfSystemRecordStatus",
+                "mdfSystemRecordStatus desc",
+                "signatureStatus",
+                "signatureStatus desc",
+                "signatureUser",
+                "signatureUser desc",
+                "signatureUserFullName",
+                "signatureUserFullName desc",
+                "signatureUserRole",
+                "signatureUserRole desc"
+              ]
+            }
+          },
+          {
+            "name": "$select",
+            "in": "query",
+            "description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "ComplianceFormData_externalCode",
+                "createdBy",
+                "createdDateTime",
+                "externalCode",
+                "lastModifiedBy",
+                "lastModifiedDateTime",
+                "mdfSystemRecordStatus",
+                "signatureStatus",
+                "signatureUser",
+                "signatureUserFullName",
+                "signatureUserRole"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retrieved entities",
+            "schema": {
+              "type": "object",
+              "title": "Wrapper",
+              "properties": {
+                "d": {
+                  "type": "object",
+                  "title": "Collection of ComplianceFormSignature",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/SFOData.ComplianceFormSignature"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
+    "/ComplianceFormSignature(ComplianceFormData_externalCode='{ComplianceFormData_externalCode}',externalCode='{externalCode}')": {
+      "get": {
+        "summary": "Get entity from ComplianceFormSignature by key",
+        "tags": [
+          "ComplianceFormSignature"
+        ],
+        "parameters": [
+          {
+            "name": "ComplianceFormData_externalCode",
+            "in": "path",
+            "required": true,
+            "description": "key: ComplianceFormData_externalCode",
+            "type": "string"
+          },
+          {
+            "name": "externalCode",
+            "in": "path",
+            "required": true,
+            "description": "key: externalCode",
+            "type": "string"
+          },
+          {
+            "name": "$select",
+            "in": "query",
+            "description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "ComplianceFormData_externalCode",
+                "createdBy",
+                "createdDateTime",
+                "externalCode",
+                "lastModifiedBy",
+                "lastModifiedDateTime",
+                "mdfSystemRecordStatus",
+                "signatureStatus",
+                "signatureUser",
+                "signatureUserFullName",
+                "signatureUserRole"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retrieved entity",
+            "schema": {
+              "title": "ComplianceFormSignature",
+              "type": "object",
+              "properties": {
+                "d": {
+                  "$ref": "#/definitions/SFOData.ComplianceFormSignature"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    }
+	},
+	"parameters": {
+		"top": {
+			"name": "$top",
+			"in": "query",
+			"description": "Show only the first n items, see [OData Paging - Top](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+			"type": "integer",
+			"default": 5
+		},
+		"skip": {
+			"name": "$skip",
+			"in": "query",
+			"description": "Skip the first n items, see [OData Paging - Skip](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+			"type": "integer"
+		},
+		"count": {
+			"name": "$count",
+			"in": "query",
+			"description": "Include count of items, see [OData Count](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+			"type": "boolean"
+		},
+		"filter": {
+			"name": "$filter",
+			"in": "query",
+			"description": "Filter items by property values, see [OData Filtering](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+			"type": "string"
+		},
+		"search": {
+			"name": "$search",
+			"in": "query",
+			"description": "Search items by search phrases, see [OData Searching](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+			"type": "string"
+		}
+	},
+	"responses": {
+		"error": {
+			"description": "Error",
+			"schema": {
+				"$ref": "#/definitions/odata.error"
+			}
+		}
+	}
+}

@@ -1,0 +1,326 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Time Off Available Time Types",
+    "description": "You can use this API to read the available time types of the login user.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://{api-server}",
+      "description": "REST APIs for the SuccessFactors Data Centers",
+      "variables": {
+        "api-server": {
+          "description": "SuccessFactors Data Center host",
+          "default": "apisalesdemo2.successfactors.eu"
+        }
+      }
+    }
+  ],
+  "paths": {
+    "/rest/timemanagement/absence/v1/availableTimeTypes": {
+      "get": {
+        "summary": "Gets the available time types for the login user.",
+        "description": "Gets the available time types for the login user. The list is based on the Time Profile assigned to the user in Job Information.",
+        "tags": [
+          "Available Time Types"
+        ],
+        "parameters": [
+          {
+            "name": "$at",
+            "in": "query",
+            "required": true,
+            "description": "The date for which the available time types are requested. The date must be in the format YYYY-MM-DD.",
+            "schema": {
+              "type": "string",
+              "example": "2020-03-17"
+            }
+          },
+          {
+            "name": "absenceRequestCode",
+            "in": "query",
+            "required": false,
+            "description": "The external code of an existing absence which is used to filter the list of available time type.",
+            "schema": {
+              "type": "string",
+              "example": "b80d6c95369f415dafe13c5f7527513c"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "It indicates that the request is successful and returns the list of available time types.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AvailableTimeType"
+                      }
+                    }
+                  },
+                  "example": {
+                    "value": [
+                      {
+                        "externalCode": "VAC-DAYS",
+                        "externalName": "Vacation (Days)",
+                        "unit": "Day(s)",
+                        "undeterminedEndDateAllowed": false,
+                        "leaveOfAbsence": false,
+                        "mainAbsenceTimeType": true,
+                        "flexibleRequestingAllowed": false,
+                        "allowedFractions": "QUARTER_DAY"
+                      },
+                      {
+                        "externalCode": "SICKNESS",
+                        "externalName": "Sick Leave",
+                        "unit": "Day(s)",
+                        "undeterminedEndDateAllowed": false,
+                        "leaveOfAbsence": false,
+                        "mainAbsenceTimeType": false,
+                        "flexibleRequestingAllowed": false,
+                        "allowedFractions": "HALF_DAY"
+                      },
+                      {
+                        "externalCode": "LEAVE-UNPAID",
+                        "externalName": "Unpaid Leave",
+                        "unit": "Hour(s)",
+                        "undeterminedEndDateAllowed": false,
+                        "leaveOfAbsence": false,
+                        "mainAbsenceTimeType": false,
+                        "flexibleRequestingAllowed": false,
+                        "allowedFractions": "HOURS_MINUTES"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "sfOauth": {
+        "type": "oauth2",
+        "description": "Successfactors OAuth 2.0 flow. More information is available [here](https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/9f5f060351034d98990213d077dab38a/d9a9545305004187986c866de2b66987.html?locale=en-US)",
+        "flows": {
+          "clientCredentials": {
+            "tokenUrl": "https://{api-server}/oauth/token",
+            "scopes": {}
+          }
+        }
+      }
+    },
+    "schemas": {
+      "AllowedFraction": {
+        "type": "string",
+        "enum": [
+          "FULL_DAY",
+          "HALF_DAY",
+          "QUARTER_DAY",
+          "FULL_HOURS",
+          "HOURS_MINUTES"
+        ],
+        "example": "FULL_DAY"
+      },
+      "AvailableTimeType": {
+        "type": "object",
+        "properties": {
+          "externalCode": {
+            "type": "string",
+            "example": "VAC-DAYS"
+          },
+          "externalName": {
+            "type": "string",
+            "example": "Vacation (Days)"
+          },
+          "unit": {
+            "type": "string",
+            "example": "Day(s)"
+          },
+          "undeterminedEndDateAllowed": {
+            "type": "boolean",
+            "example": false
+          },
+          "leaveOfAbsence": {
+            "type": "boolean",
+            "example": true
+          },
+          "mainAbsenceTimeType": {
+            "type": "boolean",
+            "example": true
+          },
+          "flexibleRequestingAllowed": {
+            "type": "boolean",
+            "example": false
+          },
+          "allowedFractions": {
+            "$ref": "#/components/schemas/AllowedFraction"
+          }
+        }
+      },
+      "BadRequest": {
+        "title": "Bad Request",
+        "description": "Response body",
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "object",
+            "properties": {
+              "code": {
+                "title": "Code",
+                "type": "string",
+                "example": "BadRequest"
+              },
+              "message": {
+                "title": "Message",
+                "type": "string",
+                "example": "Please enter a valid date."
+              }
+            }
+          }
+        },
+        "type": "object"
+      },
+      "Forbidden": {
+        "type": "object",
+        "title": "Forbidden Exception",
+        "description": "Response body",
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "object",
+            "properties": {
+              "code": {
+                "title": "Code",
+                "type": "string",
+                "example": "Forbidden"
+              },
+              "message": {
+                "title": "Message",
+                "type": "string",
+                "example": "You can't access the requested resource."
+              }
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "type": "object",
+        "title": "Not Found Exception",
+        "description": "Response body",
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "object",
+            "properties": {
+              "code": {
+                "title": "Code",
+                "type": "string",
+                "example": "NotFound"
+              },
+              "message": {
+                "title": "Message",
+                "type": "string",
+                "example": "The requested resource can't be found."
+              }
+            }
+          }
+        }
+      },
+      "InternalServerError": {
+        "title": "InternalServerError",
+        "description": "Response body",
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "object",
+            "properties": {
+              "code": {
+                "title": "Code",
+                "type": "string",
+                "example": "InternalError"
+              },
+              "message": {
+                "title": "Message",
+                "type": "string",
+                "example": "An unexpected error has occurred. Please contact the system administrator."
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "400": {
+        "description": "It indicates that the server cannot process the request due to something that is perceived to be a client error. For example, any validation error in the request.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/BadRequest"
+            }
+          }
+        }
+      },
+      "403": {
+        "description": "It indicates that the server cannot process the request as the user does not have the required permission to access the resource.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Forbidden"
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "It indicates that the server has not found anything matching the request URI or the requested resource doesn't exist.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/NotFound"
+            }
+          }
+        }
+      },
+      "500": {
+        "description": "It indicates that the server encountered an unexpected condition that prevented it from fulfilling the request.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/InternalServerError"
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "sfOauth": []
+    }
+  ],
+  "externalDocs": {
+    "description": "More information about this API is available in help.sap.com",
+    "url": "https://help.sap.com/docs/SAP_SUCCESSFACTORS_EMPLOYEE_CENTRAL/68de09dff990417b9f0acf6ccc13a14d/4db5c8fb7d644fd187d556ea712927f6.html?state=LATEST"
+  },
+  "x-sap-api-type": "REST",
+  "x-sap-shortText": "APIs for SAP SuccessFactors Time Management."
+}

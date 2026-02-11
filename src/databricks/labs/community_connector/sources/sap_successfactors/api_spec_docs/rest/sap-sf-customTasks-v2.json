@@ -1,0 +1,318 @@
+{
+    "openapi": "3.0.2",
+    "info": {
+        "title": "Onboarding and Offboarding Custom Tasks",
+        "description": "The Onboarding Custom Tasks API enables you to extract data from Onboarding and Offboarding custom tasks and complete the custom tasks using a third-party integration.",
+        "version": "2.0.0"
+    },
+    "servers": [
+        {
+            "url": "https://{api-server}",
+            "description": "REST APIs for the SuccessFactors Data Centers",
+            "variables": {
+                "api-server": {
+                    "description": "SuccessFactors Data Center host",
+                    "default": "apisalesdemo2.successfactors.com"
+                }
+            }
+        },
+        {
+            "url":"https://sandbox.api.sap.com/successfactorsfoundation",
+            "description":"Sandbox URL"
+        }
+    ],
+    "tags": [
+        {
+            "name": "Custom Tasks"
+        }
+    ],
+    "paths": {
+        "/rest/onboarding/customtasks/v2/customTasks/{taskDataId}": {
+            "patch": {
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "taskDataId",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "required": true,
+                        "description": "id of Custom Task"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "400": {
+                        "description": "Bad Request"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "500": {
+                        "description": "Internal Server Error"
+                    }
+                },
+                "summary": "API to update custom task status.",
+                "description": "Use this API to update the status of a Custom Task to \"COMPLETED\".",
+                "tags": [
+                    "Custom Tasks"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "title": "root node",
+                                "description": "root node",
+                                "properties": {
+                                    "status": {
+                                        "x-insertable": true,
+                                        "description": "Status of task. Valid Values OPEN, COMPLETED",
+                                        "type": "string"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                }
+            },
+            "get": {
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "taskDataId",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "required": true,
+                        "description": "id of Custom Task"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/customTasks"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "403": {
+                        "description": "Forbidden"
+                    },
+                    "404": {
+                        "description": "Not Found"
+                    }
+                },
+                "summary": "Gets custom task information by task ID.",
+                "description": "Use this API to retrieve information for a Custom Task by its ID.",
+                "tags": [
+                    "Custom Tasks"
+                ]
+            }
+        },
+        "/rest/onboarding/customtasks/v2/customTasks?$filter=processId eq 'processId'": {
+            "get": {
+                "parameters": [
+                    {
+                        "in": "query",
+                        "name": "$filter",
+                        "description": "processId eq '{processId}'",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "required": false
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Custom Tasks",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/components/schemas/customTasks"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "summary": "Gets custom task information for process ID.",
+                "description": "This API provides information on all Custom Tasks associated with a given Onboarding/Offboarding Process ID.",
+                "tags": [
+                    "Custom Tasks"
+                ]
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "customTasks": {
+                "title": "customTasks",
+                "description": "Custom Tasks Object",
+                "properties": {
+                    "id": {
+                        "title": "Id of Custom Task",
+                        "type": "string"
+                    },
+                    "title": {
+                        "title": "Title of Custom Task",
+                        "type": "string"
+                    },
+                    "config": {
+                        "title": "Config id",
+                        "type": "string"
+                    },
+                    "status": {
+                        "title": "Status of Task",
+                        "type": "string"
+                    },
+                    "user": {
+                        "$ref": "#/components/schemas/user"
+                    },
+                    "processId": {
+                        "title": "Onboarding Process ID",
+                        "type": "string"
+                    },
+                    "dueDate": {
+                        "title": "Due Date",
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "optional": {
+                        "title": "Optional Task",
+                        "type": "boolean"
+                    },
+                    "responsibleUsers": {
+                        "title": "Responsible Users",
+                        "items": {
+                            "$ref": "#/components/schemas/user"
+                        },
+                        "type": "array"
+                    },
+                    "completedDate": {
+                        "title": "Completed Date",
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "completedBy": {
+                        "$ref": "#/components/schemas/user"
+                    },
+                    "customResource": {
+                        "$ref": "#/components/schemas/customResource"
+                    }
+                },
+                "type": "object"
+            },
+            "user": {
+                "title": "user",
+                "description": "user type properties",
+                "properties": {
+                    "id": {
+                        "title": "User ID",
+                        "type": "string"
+                    },
+                    "displayName": {
+                        "title": "Display Name",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "customResource": {
+                "title": "customResource",
+                "properties": {
+                    "id": {
+                        "title": "Custom MDF Internal Id",
+                        "type": "string"
+                    },
+                    "type": {
+                        "title": "Custom MDF Type",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "error": {
+                "title": "error",
+                "description": "Error",
+                "properties": {
+                    "code": {
+                        "title": "Error Code",
+                        "type": "string"
+                    },
+                    "message": {
+                        "title": "Detailed Error Message",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            }
+        },
+        "parameters": {},
+        "responses": {},
+        "securitySchemes": {
+            "BasicAuth": {
+                "type": "http",
+                "scheme": "X.509"
+            }
+        }
+    },
+    "externalDocs": {
+        "description": "ONB Custom Tasks API on SAP Help Portal",
+        "url": "https://help.sap.com/docs/SAP_SUCCESSFACTORS_RELEASE_INFORMATION/8e0d540f96474717bbf18df51e54e522/a262abc93c9b49ae8ef8a0e6653f5f48.html"
+    },
+    "x-sap-api-type": "REST",
+    "x-sap-shortText": "APIs for Managing Custom Tasks in SuccessFactors Onboarding and Offboarding",
+    "x-servers": [
+        {
+            "url": "https://{api-server}/",
+            "description": "Onboarding and Offboarding Custom Tasks",
+            "templates": {
+                "api-server": {
+                    "description": "SuccessFactors Data Center host",
+                    "default": "apisalesdemo8.successfactors.com"
+                }
+            }
+        }
+    ],
+    "security": [
+        {
+            "BasicAuth": []
+        }
+    ]
+}

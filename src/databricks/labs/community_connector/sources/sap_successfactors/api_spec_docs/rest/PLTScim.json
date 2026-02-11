@@ -1,0 +1,2911 @@
+{
+	"x-sap-shortText": "Manage identity in SuccessFactors",
+	"openapi": "3.0.2",
+	"info": {
+		"title": "System for Cross-domain Identity Management for Workforce in SuccessFactors",
+		"description": "SuccessFactors Workforce SCIM API provides a System for Cross-domain Identity Management (SCIM) 2.0 REST API for managing resources (users and groups). Consumers of this REST API should be familiar with System for Cross-domain Identity Management Protocol before managing their own resources. Our API has a rate limit of 20 calls per second per user account. If a user makes more than 20 calls per second, then the API may not be able to respond in a timely manner and the service may be degraded or unavailable. For more information, see [RFC 7643](https://tools.ietf.org/html/rfc7644).\n\n You can find your company's API server in [List of API Servers in SAP SuccessFactors.](https://help.sap.com/viewer/d599f15995d348a1b45ba5603e2aba9b/LATEST/en-US/af2b8d5437494b12be88fe374eba75b6.html)",
+		"version": "2.0.0"
+	},
+	"externalDocs": {
+		"description": "SCIM APIs on SAP Help Portal",
+		"url": "https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/534356acc0ab4b0e8977ebfb2eb432f7/895a0d10d4984152b9f6d0cd9f9f850c.html"
+	},
+	"tags": [{
+		"name": "Users",
+		"description": "Retrieve, create, modify and delete a user resource."
+	},{
+		"name": "Groups",
+		"description": "Retrieve permission group resources."
+	}],
+	"x-sap-api-type": "REST",
+	"servers": [
+        {
+            "url": "https://{api-server}",
+            "description": "Rest APIs for the SuccessFactors Data Centers",
+            "variables": {
+                "api-server": {
+                    "description": "SuccessFactors Data Center host",
+                    "default": "apisalesdemo4.successfactors.com"
+                }
+            }
+        },
+        {
+            "url": "https://sandbox.api.sap.com/successfactorsfoundation",
+            "description": "Sandbox Server"
+		}
+    ],
+	"paths": {
+		"/rest/iam/scim/v2/Users": {
+			"post": {
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "The user was created.",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"title": "User",
+									"allOf": [{
+										"$ref": "#/components/schemas/User"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:schemas:extension:successfactors:2.0:User",
+										"urn:ietf:params:scim:schemas:core:2.0:User",
+										"urn:ietf:params:scim:schemas:extension:sap.odm:2.0:User",
+										"urn:ietf:params:scim:schemas:extension:sap.workforce:2.0:User",
+										"urn:ietf:params:scim:schemas:extension:sap:2.0:User",
+										"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+									],
+									"meta": {
+										"resourceType": "User",
+										"created": "2022-08-23T02:11:00Z",
+										"lastModified": "2022-08-23T02:11:00Z",
+										"location": "/rest/iam/scim/v2/Users/4a28f075-2524-42ac-a0f1-5c3da4dbb072",
+										"version": "2.0.0"
+									},
+									"id": "4a28f075-2524-42ac-a0f1-5c3da4dbb072",
+									"externalId": "externalId",
+									"userName": "username_1",
+									"name": {},
+									"locale": "en_US",
+									"userType": "EMPLOYEE",
+									"active": false,
+									"emails": [{
+										"type": "work",
+										"value": "aaron@example.com",
+										"primary": true
+									}],
+									"urn:ietf:params:scim:schemas:extension:successfactors:2.0:User": {
+										"perPersonUuid": "3AE061AF8F8244DA99582941C7C4A5916",
+										"loginMethod": "sso",
+										"personIdExternal": "jrsap"
+									},
+									"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": {
+										"manager": {},
+										"employeeNumber": "jrsap"
+									},
+									"phoneNumbers": [{
+										"value": "555-123-333",
+										"type": "mobile",
+										"primary": true
+									}],
+									"urn:ietf:params:scim:schemas:extension:sap.odm:2.0:User": {
+										"workforcePersonId": "5049de0e-954d-4d67-82b2-f205127c1900"
+									},
+									"urn:ietf:params:scim:schemas:extension:sap:2.0:User": {
+										"userUuid": "abcd",
+										"sourceSystem": "SuccessFactors"
+									},
+									"urn:ietf:params:scim:schemas:extension:sap.workforce:2.0:User": {}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad request. Possible reasons:\n- A required field is missing.\n- A given value is invalid.\n- A mandatory attribute is missing.\n- Global User ID (userUuid) is invalid or in conflict with existing data.\n- The format of the request body is invalid.\n",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"scimType": "invalidValue",
+									"detail": "The username field is required.",
+									"status": 400
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "You don’t have permission to update the user.",
+									"status": 403
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Conflict with existing data. Possible fields:\n- userName.\n- perPersonUuid\n- personIdExternal\n",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"scimType": "uniqueness",
+									"detail": "Duplicated user resource detected.",
+									"status": 409
+								}
+							}
+						}
+					}
+				},
+				"summary": "Create a User",
+				"description": "Schemas and userName are required in the request body.",
+				"tags": ["Users"],
+				"requestBody": {
+					"content": {
+						"application/scim+json": {
+							"schema": {
+								"allOf": [{
+									"$ref": "#/components/schemas/User"
+								}]
+							},
+							"example": {
+								"schemas": [
+									"urn:ietf:params:scim:schemas:extension:successfactors:2.0:User",
+									"urn:ietf:params:scim:schemas:core:2.0:User",
+									"urn:ietf:params:scim:schemas:extension:sap.workforce:2.0:User",
+									"urn:ietf:params:scim:schemas:extension:sap:2.0:User",
+									"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+								],
+								"externalId": "externalId",
+								"userName": "username_1",
+								"active": true,
+								"locale": "en_US",
+								"userType": "employee",
+								"emails": [{
+									"type": "work",
+									"value": "aaron@example.com",
+									"primary": true
+								}],
+								"phoneNumbers": [{
+									"value": "555-123-333",
+									"primary": true,
+									"type": "mobile"
+								}],
+								"urn:ietf:params:scim:schemas:extension:successfactors:2.0:User": {
+									"perPersonUuid": "3AE061AF8F8244DA99582941C7C4A5916",
+									"loginMethod": "sso",
+									"personIdExternal": "jrsap"
+								},
+								"urn:ietf:params:scim:schemas:extension:sap:2.0:User": {
+									"userUuid": "abcd"
+								}
+							}
+						}
+					}
+				}
+			},
+			"get": {
+				"parameters": [{
+					"in": "query",
+					"name": "filter",
+					"description": "Defines the search criteria.\nSupported operators:\n| Operator | Behavior |\n|---- | ------------- |\n| eq | The attribute and operator values must be identical for a match.|\n| ne | The attribute and operator values are not identical.|\n| gt | If the attribute value is greater than the operator value, there is a match. The actual comparison is dependent on the attribute type. For string attribute types, this is a lexicographical comparison, and for DateTime types, it is a chronological comparison. For integer attributes, it is a comparison by numeric value.|\n| co | The entire operator value must be a substring of the attribute value for a match.|\n| sw | The entire operator value must be a substring of the attribute value, starting at the beginning of the attribute value. This criterion is satisfied if the two strings are identical.|\n| ew | The entire operator value must be a substring of the attribute value, matching at the end of the attribute value. This criterion is satisfied if the two strings are identical.|\n and | The filter is only a match if both expressions evaluate to true.|\n or | The filter is a match if one of both expressions evaluate to true.|\n### Supported Filter Attributes:\n#### Core schema\n  * id\n * userName\n * userType\n  * active\n\n#### Meta\n  * lastModified\n\n#### SAP extension schema\n  * userUuid\n* groupDomains\n\nAll SAP extension schema attributes require the schema URI urn:ietf:params:scim:schemas:extension:sap:2.0:User and the attribute name. For example: urn:ietf:params:scim:schemas:extension:sap:2.0:User:userUuid\n#### SAP SuccessFactors extension schema (to be deprecated)\n  * perPersonUuid\n\nThe schema will be retired. All below attributes will be moved to a new schema, SAP Workforce. All SAP Successfactors extension schema attributes require the schema URI urn:ietf:params:scim:schemas:extension:successfactors:2.0:User and the attribute name. For example: urn:ietf:params:scim:schemas:extension:successfactors:2.0:User:perPersonUuid\n#### SAP Successfactors extension schema\n  * lastDeactivated\n\nAll SAP Successfactors extension schema attributes require the schema URI urn:ietf:params:scim:schemas:extension:sap.workforce:2.0:User and the attribute name. For example: urn:ietf:params:scim:schemas:extension:sap.workforce:2.0:User:lastDeactivated\n\nAll SAP One Data Model extension schema attributes require the schema URI urn:ietf:params:scim:schemas:extension:sap.odm:2.0:User and the attribute name. For example: urn:ietf:params:scim:schemas:extension:sap.odm:2.0:User:workforcePersonId\n",
+					"required": false,
+					"schema": {
+						"type": "string"
+					},
+					"examples": {
+						"smith": {
+							"value": "userType eq \"ONBOARDEE\" and active eq trsapue",
+							"summary": "Search by userType and active."
+						},
+						"costCenter": {
+							"value": "urn:ietf:params:scim:schemas:extension:successfactors:2.0:User:perPersonUuid eq \"1234\"",
+							"summary": "Search by perPersonUuid."
+						}
+					}
+				}, {
+					"in": "query",
+					"name": "startIndex",
+					"description": "Represents the start index from which the results are returned. Default value is 1. A value less than 1 is interpreted as 1.\n",
+					"required": false,
+					"schema": {
+						"type": "integer"
+					},
+					"examples": {
+						"initial": {
+							"value": "startIndex=6",
+							"summary": "Search using start index."
+						}
+					}
+				}, {
+					"name": "startId",
+					"in": "query",
+					"description": "Used for Id-Based pagination. Page through users by specifying `startId` parameter.\nPossible values:\n| Value | Description |\n|------------ | ------------- |\n| `initial`| If initial value is specified, the initial user is returned as the first entry of the query result. |\n| `<user ID>` | If `<user id>` value is specified, the user with this user ID is returned as the first entry of the query result.|\n",
+					"required": false,
+					"schema": {
+						"type": "string"
+					},
+					"examples": {
+						"initial": {
+							"value": "startId=initial",
+							"summary": "Search by initial id."
+						},
+						"userId": {
+							"value": "startId=ffffd4b9-7cc1-43d0-9272-ec70ce20ddad",
+							"summary": "Search by known user id."
+						}
+					}
+				}, {
+					"in": "query",
+					"name": "count",
+					"description": "Represents the number of items which will be returned per page. A negative value is interpreted as 0. A value of 0 indicates that no resource results are to be returned. Default value is 100.",
+					"required": false,
+					"schema": {
+						"type": "integer"
+					}
+				}, {
+					"in": "query",
+					"name": "excludedAttributes",
+					"description": "A multi-valued list that indicates attributes names in standard notation to exclude from the response.",
+					"schema": {
+						"type": "string"
+					},
+					"required": false
+				}, {
+					"in": "query",
+					"name": "attributes",
+					"description": "A multi-valued list that indicates attributes names in standard notation to return in the response.",
+					"schema": {
+						"type": "string"
+					},
+					"required": false
+				}],
+				"responses": {
+					"200": {
+						"description": "The users were retrieved",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/UserQueryResponse"
+									}]
+								},
+								"examples": {
+									"searchByIndex": {
+										"description": "The following paging attributes are returned in the response:\n| Value | Description |\n|------------ | ------------- |\n| totalResults | Specifies the total number of results matching the query, for example: 100. |\n| itemsPerPage | Specifies the number of query results returned in a query response page, for example: 3.|\n| startIndex | The 1-based index of the first result in the current set of query results, for example: 1.|\n",
+										"value": {
+											"schemas": [
+												"urn:ietf:params:scim:api:messages:2.0:ListResponse"
+											],
+											"totalResults": 1,
+											"itemsPerPage": 1,
+											"startIndex": 1,
+											"Resources": [{
+												"schemas": [
+													"urn:ietf:params:scim:schemas:extension:successfactors:2.0:User",
+													"urn:ietf:params:scim:schemas:core:2.0:User",
+													"urn:ietf:params:scim:schemas:extension:sap.workforce:2.0:User",
+													"urn:ietf:params:scim:schemas:extension:sap.odm:2.0:User",
+													"urn:ietf:params:scim:schemas:extension:sap:2.0:User",
+													"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+												],
+												"meta": {
+													"resourceType": "User",
+													"created": "2022-05-19T07:41:39Z",
+													"lastModified": "2022-06-01T03:43:17Z",
+													"location": "/rest/iam/scim/v2/Users/34c182f3-ba70-4d84-915a-33081c4cf7a1",
+													"version": "2.0.0"
+												},
+												"id": "34c182f3-ba70-4d84-915a-33081c4cf7a1",
+												"externalId": "external",
+												"userName": "jrsap",
+												"name": {
+													"formatted": "Alex",
+													"familyName": "Thompson",
+													"givenName": "Alexander",
+													"middleName": "Doe",
+													"honorificPrefix": "Mr.",
+													"honorificSuffix": "l"
+												},
+												"locale": "en_US",
+												"userType": "EMPLOYEE",
+												"active": true,
+												"nickName": "alex",
+												"displayName": "Alex",
+												"preferredLanguage": "en_US",
+												"emails": [{
+													"type": "work",
+													"value": "aaron.zhang04@sap.com",
+													"primary": true
+												}],
+												"title": "Sales",
+												"urn:ietf:params:scim:schemas:extension:successfactors:2.0:User": {
+													"perPersonUuid": "3AE061AF8F8244DA99582941C7C4A596",
+													"loginMethod": "sso",
+													"personIdExternal": "jrsap",
+													"customFields": [{
+															"value": "c1",
+															"customFieldName": "custom01",
+															"display": "Customizable Field 1"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom02",
+															"display": "isOnBoardingUser"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom03",
+															"display": "Customizable Field 3"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom04",
+															"display": "Customizable Field 4"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom05",
+															"display": "Customizable Field 5"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom06",
+															"display": "Customizable Field 6"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom07",
+															"display": "Customizable Field 7"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom08",
+															"display": "Customizable Field 8"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom09",
+															"display": "Customizable Field 9"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom10",
+															"display": "Customizable Field 10"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom11",
+															"display": "Customizable Field 11"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom12",
+															"display": "Customizable Field 12"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom13",
+															"display": "Customizable Field 13"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom14",
+															"display": "Customizable Field 14"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom15",
+															"display": "Customizable Field 15"
+														}
+													]
+												},
+												"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": {
+													"department": "ACE Department (ACE Department)",
+													"division": "ACE Software",
+													"manager": {
+														"value": "ff77175f-2327-c212-e12c-00000a746432",
+														"displayName": "Robert Allen",
+														"$ref": "/rest/iam/scim/v2/Users/ff77175f-2327-c212-e12c-00000a746432"
+													},
+													"employeeNumber": "jrsap"
+												},
+												"phoneNumbers": [{
+													"value": "555-123-333",
+													"primary": true,
+													"type": "mobile"
+												}],
+												"urn:ietf:params:scim:schemas:extension:sap:2.0:User": {
+													"userUuid": "4609edbc-679e-428b-a06d-11e1f57443aa",
+													"groupDomains": [
+														{
+															"value": "userGroup"
+														}
+													],
+													"sourceSystem": "SuccessFactors"
+												},
+												"urn:ietf:params:scim:schemas:extension:sap.workforce:2.0:User": {
+													"lastDeactivated": "2021-09-13T06:30:03Z"
+												},
+												"urn:ietf:params:scim:schemas:extension:sap.odm:2.0:User": {
+													"workforcePersonId": "5049de0e-954d-4d67-82b2-f205127c1900"
+												}
+											}]
+										}
+									},
+									"searchById": {
+										"description": "The following paging attributes are returned in the response:\n| Value | Description |\n|------------ | ------------- |\n| totalResults | Specifies the total number of results matching the query, for example: 100. |\n| itemsPerPage | Specifies the number of query results returned in a query response page, for example: 3.|\n| startId | Specifies the first entry of the query result, for example: initial or `<user id>`.|\n| nextId | Specifies the next user id (that is, the id of the first user on the next page). For example: `<user id>` or `<end>`. The `<end>` value indicates that the last user of the total number of users matching the query is returned. |\n",
+										"value": {
+											"schemas": [
+												"urn:ietf:params:scim:api:messages:2.0:ListResponse"
+											],
+											"totalResults": 1,
+											"itemsPerPage": 1,
+											"startId": "ffffd4b9-7cc1-43d0-9272-ec70ce20ddad",
+											"nextId": "end",
+											"Resources": [{
+												"schemas": [
+													"urn:ietf:params:scim:schemas:extension:successfactors:2.0:User",
+													"urn:ietf:params:scim:schemas:core:2.0:User",
+													"urn:ietf:params:scim:schemas:extension:sap.workforce:2.0:User",
+													"urn:ietf:params:scim:schemas:extension:sap.odm:2.0:User",
+													"urn:ietf:params:scim:schemas:extension:sap:2.0:User",
+													"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+												],
+												"meta": {
+													"resourceType": "User",
+													"created": "2022-05-19T07:41:39Z",
+													"lastModified": "2022-06-01T03:43:17Z",
+													"location": "/rest/iam/scim/v2/Users/34c182f3-ba70-4d84-915a-33081c4cf7a1",
+													"version": "2.0.0"
+												},
+												"id": "34c182f3-ba70-4d84-915a-33081c4cf7a1",
+												"externalId": "external",
+												"userName": "jrsap",
+												"name": {
+													"formatted": "Alex",
+													"familyName": "Thompson",
+													"givenName": "Alexander",
+													"middleName": "Doe",
+													"honorificPrefix": "Mr.",
+													"honorificSuffix": "l"
+												},
+												"locale": "en_US",
+												"userType": "EMPLOYEE",
+												"active": true,
+												"nickName": "alex",
+												"displayName": "Alex",
+												"preferredLanguage": "en_US",
+												"emails": [{
+													"type": "work",
+													"value": "aaron.zhang04@sap.com",
+													"primary": true
+												}],
+												"title": "Sales",
+												"urn:ietf:params:scim:schemas:extension:successfactors:2.0:User": {
+													"perPersonUuid": "3AE061AF8F8244DA99582941C7C4A596",
+													"loginMethod": "sso",
+													"personIdExternal": "jrsap",
+													"customFields": [{
+															"value": "c1",
+															"customFieldName": "custom01",
+															"display": "Customizable Field 1"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom02",
+															"display": "isOnBoardingUser"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom03",
+															"display": "Customizable Field 3"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom04",
+															"display": "Customizable Field 4"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom05",
+															"display": "Customizable Field 5"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom06",
+															"display": "Customizable Field 6"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom07",
+															"display": "Customizable Field 7"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom08",
+															"display": "Customizable Field 8"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom09",
+															"display": "Customizable Field 9"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom10",
+															"display": "Customizable Field 10"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom11",
+															"display": "Customizable Field 11"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom12",
+															"display": "Customizable Field 12"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom13",
+															"display": "Customizable Field 13"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom14",
+															"display": "Customizable Field 14"
+														},
+														{
+															"value": "c1",
+															"customFieldName": "custom15",
+															"display": "Customizable Field 15"
+														}
+													]
+												},
+												"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": {
+													"department": "ACE Department (ACE Department)",
+													"division": "ACE Software",
+													"manager": {
+														"value": "ff77175f-2327-c212-e12c-00000a746432",
+														"displayName": "Robert Allen",
+														"$ref": "/rest/iam/scim/v2/Users/ff77175f-2327-c212-e12c-00000a746432"
+													},
+													"employeeNumber": "jrsap"
+												},
+												"phoneNumbers": [{
+													"value": "555-123-333",
+													"primary": true,
+													"type": "mobile"
+												}],
+												"urn:ietf:params:scim:schemas:extension:sap:2.0:User": {
+													"userUuid": "4609edbc-679e-428b-a06d-11e1f57443aa",
+													"groupDomains": [
+														{
+														  "value": "userGroup"
+														}
+													  ],
+													"sourceSystem": "SuccessFactors"
+												},
+												"urn:ietf:params:scim:schemas:extension:sap.odm:2.0:User": {
+													"workforcePersonId": "5049de0e-954d-4d67-82b2-f205127c1900"
+												},
+												"urn:ietf:params:scim:schemas:extension:sap.workforce:2.0:User": {
+												  "lastDeactivated": "2021-09-13T06:30:03Z"
+												}
+											}]
+										}
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"scimType": "invalidFilter",
+									"detail": "The filter expression is invalid.id aa \"0795175f-2327-c212-e12c-00000a746432\"",
+									"status": 400
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "You don’t have permission to view the user.",
+									"status": 403
+								}
+							}
+						}
+					}
+				},
+				"summary": "Get Users by Criteria",
+				"description": "Retrieves a list of users. Filter and paging parameters can be combined.",
+				"tags": ["Users"]
+			}
+		},
+		"/rest/iam/scim/v2/Users/{id}": {
+			"get": {
+				"parameters": [{
+					"in": "path",
+					"name": "id",
+					"schema": {
+						"type": "string"
+					},
+					"required": true,
+					"description": "The ID of the user to be retrieved."
+				}],
+				"responses": {
+					"200": {
+						"description": "The user was retrieved.",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"title": "User",
+									"allOf": [{
+										"$ref": "#/components/schemas/User"
+									}]
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "You don’t have permission to view the user.",
+									"status": 403
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Not Found",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+
+									"detail": "Invalid user.",
+									"status": 404
+								}
+							}
+						}
+					}
+				},
+				"summary": "Get a User by ID",
+				"description": "Retrieves a specific user by id.",
+				"tags": ["Users"]
+			},
+			"put": {
+				"parameters": [{
+					"in": "path",
+					"name": "id",
+					"schema": {
+						"type": "string"
+					},
+					"required": true,
+					"description": "The ID of the user to be replaced."
+				}],
+				"responses": {
+					"200": {
+						"description": "The user was replaced.",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"title": "ScimUser",
+									"allOf": [{
+										"$ref": "#/components/schemas/User"
+									}]
+								},
+															"example": {
+								"schemas": [
+									"urn:ietf:params:scim:schemas:extension:successfactors:2.0:User",
+									"urn:ietf:params:scim:schemas:core:2.0:User",
+									"urn:ietf:params:scim:schemas:extension:sap.workforce:2.0:User",
+									"urn:ietf:params:scim:schemas:extension:sap.odm:2.0:User",
+									"urn:ietf:params:scim:schemas:extension:sap:2.0:User",
+									"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+								],
+								"meta": {
+										"resourceType": "User",
+										"created": "2022-05-19T07:41:39Z",
+										"lastModified": "2022-06-01T03:43:17Z",
+										"location": "/rest/iam/scim/v2/Users/34c182f3-ba70-4d84-915a-33081c4cf7a1",
+										"version": "2.0.0"
+									},
+								"externalId": "externalId",
+								"userName": "username_1",
+								"active": true,
+								"locale": "en_US",
+								"userType": "employee",
+								"emails": [{
+									"type": "work",
+									"value": "aaron@example.com",
+									"primary": true
+								}],
+								"phoneNumbers": [{
+									"value": "555-123-333",
+									"primary": true,
+									"type": "mobile"
+								}],
+								"urn:ietf:params:scim:schemas:extension:successfactors:2.0:User": {
+									"perPersonUuid": "3AE061AF8F8244DA99582941C7C4A5916",
+									"loginMethod": "sso",
+									"personIdExternal": "jrsap"
+								},
+								"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": {
+								  "manager": {},
+								  "employeeNumber": "jrsap"
+
+								},
+								"urn:ietf:params:scim:schemas:extension:sap:2.0:User": {
+								  "userUuid": "abcd",
+								  "sourceSystem":"SuccessFactors"
+								},
+								"urn:ietf:params:scim:schemas:extension:sap.odm:2.0:User": {
+									"workforcePersonId": "5049de0e-954d-4d67-82b2-f205127c1900"
+								},
+								"urn:ietf:params:scim:schemas:extension:sap.workforce:2.0:User": {}
+							}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad request. Possible reasons:\n- A required field is missing.\n- A given value is invalid.\n- A mandatory attribute is missing.\n- Global User ID (userUuid) is invalid or in conflict with existing data.\n- The format of the request body is invalid.\n",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"scimType": "invalidValue",
+									"detail": "The username field is required.",
+									"status": 400
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "You don’t have permission to update the user.",
+									"status": 403
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Not Found",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "Invalid user.",
+									"status": 404
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Conflict with existing data. Possible fields:\n- userName.\n- perPersonUuid\n- personIdExternal\n",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"scimType": "uniqueness",
+									"detail": "Duplicated user resource detected.",
+									"status": 409
+								}
+							}
+						}
+					}
+				},
+				"summary": "Replace a User",
+				"description": "When you replace a user, include all fields and their values in the request body. Fields not included in the request body are updated with value \"**null**\".",
+				"tags": ["Users"],
+				"requestBody": {
+					"content": {
+						"application/scim+json": {
+							"schema": {
+								"allOf": [{
+									"$ref": "#/components/schemas/User"
+								}]
+							},
+							"example": {
+								"schemas": [
+									"urn:ietf:params:scim:schemas:extension:successfactors:2.0:User",
+									"urn:ietf:params:scim:schemas:core:2.0:User",
+									"urn:ietf:params:scim:schemas:extension:sap.workforce:2.0:User",
+									"urn:ietf:params:scim:schemas:extension:sap:2.0:User",
+									"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+								],
+								"externalId": "externalId",
+								"userName": "username_1",
+								"active": true,
+								"locale": "en_US",
+								"userType": "employee",
+								"emails": [{
+									"type": "work",
+									"value": "aaron@example.com",
+									"primary": true
+								}],
+								"phoneNumbers": [{
+									"value": "555-123-333",
+									"primary": true,
+									"type": "mobile"
+								}],
+								"urn:ietf:params:scim:schemas:extension:successfactors:2.0:User": {
+									"perPersonUuid": "3AE061AF8F8244DA99582941C7C4A5916",
+									"loginMethod": "sso",
+									"personIdExternal": "jrsap"
+								},
+								"urn:ietf:params:scim:schemas:extension:sap:2.0:User": {
+									"userUuid": "abcd"
+								}
+							}
+						}
+					}
+				}
+			},
+			"patch": {
+				"parameters": [{
+					"in": "path",
+					"name": "id",
+					"schema": {
+						"type": "string"
+					},
+					"description": "The ID of the user to be modified.",
+					"required": true
+				}],
+				"responses": {
+					"200": {
+						"description": "The user was modified.",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/User"
+									}]
+								},
+																							"example": {
+								"schemas": [
+									"urn:ietf:params:scim:schemas:extension:successfactors:2.0:User",
+									"urn:ietf:params:scim:schemas:core:2.0:User",
+									"urn:ietf:params:scim:schemas:extension:sap.workforce:2.0:User",
+									"urn:ietf:params:scim:schemas:extension:sap.odm:2.0:User",
+									"urn:ietf:params:scim:schemas:extension:sap:2.0:User",
+									"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User"
+								],
+								"meta": {
+										"resourceType": "User",
+										"created": "2022-05-19T07:41:39Z",
+										"lastModified": "2022-06-01T03:43:17Z",
+										"location": "/rest/iam/scim/v2/Users/34c182f3-ba70-4d84-915a-33081c4cf7a1",
+										"version": "2.0.0"
+									},
+								"externalId": "externalId",
+								"userName": "username_1",
+								"active": true,
+								"locale": "en_US",
+								"userType": "employee",
+								"emails": [{
+									"type": "work",
+									"value": "test1@testmail.com",
+									"primary": true
+								}],
+								"phoneNumbers": [{
+									"value": "555-123-333",
+									"primary": true,
+									"type": "mobile"
+								}],
+								"urn:ietf:params:scim:schemas:extension:successfactors:2.0:User": {
+									"perPersonUuid": "3AE061AF8F8244DA99582941C7C4A5916",
+									"loginMethod": "sso",
+									"personIdExternal": "jrsap"
+								},
+								"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": {
+									"manager": {}
+								},
+								"urn:ietf:params:scim:schemas:extension:sap:2.0:User": {
+									"userUuid": "abcd",
+									"sourceSystem":"SuccessFactors"
+								},
+								"urn:ietf:params:scim:schemas:extension:sap.odm:2.0:User": {
+									"workforcePersonId": "5049de0e-954d-4d67-82b2-f205127c1900"
+								},
+								"urn:ietf:params:scim:schemas:extension:sap.workforce:2.0:User": {}
+							}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad request. Possible reasons:\n- A required field is missing.\n- A given value is invalid.\n- A mandatory attribute is missing.\n- Global User ID (userUuid) is invalid or in conflict with existing data.\n- The format of the request body is invalid.\n",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"scimType": "invalidValue",
+									"detail": "The username field is required.",
+									"status": 400
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "You don’t have permission to update the user.",
+									"status": 403
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Not Found",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "Invalid user.",
+									"status": 404
+								}
+							}
+						}
+					},
+					"409": {
+						"description": "Conflict with existing data. Possible fields:\n- userName.\n- perPersonUuid\n- personIdExternal\n",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"scimType": "uniqueness",
+									"detail": "Duplicated user resource detected.",
+									"status": 409
+								}
+							}
+						}
+					}
+				},
+				"summary": "Modify a User",
+				"description": "The PATCH method updates one or more fields of a user.",
+				"tags": ["Users"],
+				"requestBody": {
+					"content": {
+						"application/scim+json": {
+							"schema": {
+								"allOf": [{
+									"$ref": "#/components/schemas/ScimUserModifyRequest"
+								}]
+							},
+							"examples": {
+								"add": {
+									"value": {
+										"schemas": [
+											"urn:ietf:params:scim:api:messages:2.0:PatchOp"
+										],
+										"Operations": [{
+											"op": "add",
+											"path": "emails",
+											"value": [{
+												"value": "test1@testmail.com",
+												"type": "work",
+												"primary": "true"
+											}]
+										}]
+									},
+									"summary": "Add work email."
+								},
+								"remove": {
+									"value": {
+										"schemas": [
+											"urn:ietf:params:scim:api:messages:2.0:PatchOp"
+										],
+										"Operations": [{
+												"op": "remove",
+												"path": "emails[type eq \"work\"]"
+											},
+											{
+												"op": "remove",
+												"path": "phoneNumbers[type eq \"home\"]"
+											}
+										]
+									},
+									"summary": "Remove work email and home phone number."
+								},
+								"replace": {
+									"value": {
+										"schemas": [
+											"urn:ietf:params:scim:api:messages:2.0:PatchOp"
+										],
+										"Operations": [{
+												"op": "replace",
+												"path": "emails",
+												"value": [{
+													"type": "work",
+													"value": "test2@testmail.com",
+													"primary": "true"
+												}]
+											},
+											{
+												"op": "replace",
+												"path": "externalId",
+												"value": "testScimExternalIdUpdate"
+											}
+										]
+									},
+									"summary": "Replace email and externalId."
+								},
+								"replace_userUuid": {
+									"value": {
+										"schemas": [
+											"urn:ietf:params:scim:api:messages:2.0:PatchOp"
+										],
+										"Operations": [
+											{
+											"op": "replace",
+											"path": "urn:ietf:params:scim:schemas:extension:sap:2.0:User:userUuid",
+											"value": "1111-2222-3333-4444"
+											}
+										]
+									},
+									"summary": "Replace userUuid of SAP extension schema."
+								}
+							}
+						}
+					}
+				}
+			},
+			"delete": {
+				"parameters": [{
+					"in": "path",
+					"name": "id",
+					"schema": {
+						"type": "string"
+					},
+					"required": true,
+					"description": "The ID of the user to be deleted."
+				}],
+				"responses": {
+					"204": {
+						"description": "The user was deleted."
+					},
+					"403": {
+						"description": "Forbidden",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "You don’t have permission to update the user.",
+									"status": 403
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Not Found.",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "Invalid user.",
+									"status": 404
+								}
+							}
+						}
+					}
+				},
+				"summary": "Delete a User",
+				"description": "Deletes a specific user by id and all his membership assignments.",
+				"tags": ["Users"]
+			}
+		},
+		"/rest/iam/scim/v2/Users/.search": {
+			"post": {
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "The users were retrieved.",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/UserQueryResponse"
+									}]
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"scimType": "invalidFilter",
+									"detail": "The filter expression is invalid.id aa \"0795175f-2327-c212-e12c-00000a746432\"",
+									"status": 400
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "You don’t have permission to view the user.",
+									"status": 403
+								}
+							}
+						}
+					}
+				},
+				"summary": "Get Users by Search",
+				"description": "Search from system root or within a resource endpoint for one or more resource types using POST.",
+				"tags": ["Users"],
+				"requestBody": {
+					"content": {
+						"application/scim+json": {
+							"schema": {
+								"allOf": [{
+									"$ref": "#/components/schemas/ScimPostQueryRequest"
+								}]
+							}
+						}
+					}
+				}
+			}
+		},
+		"/rest/iam/scim/v2/Groups": {
+			"get": {
+				"parameters": [{
+					"in": "query",
+					"name": "filter",
+					"description": "Defines the search criteria.\nSupported operators:\n| Operator | Behavior |\n|---- | ------------- |\n| eq | The attribute and operator values must be identical for a match.|\n| ne | The attribute and operator values are not identical.|\n| gt | If the attribute value is greater than the operator value, there is a match. The actual comparison is dependent on the attribute type. For string attribute types, this is a lexicographical comparison, and for DateTime types, it is a chronological comparison. For integer attributes, it is a comparison by numeric value.|\n| ge | If the attribute value is greater than or equal to the operator value, there is a match.  The actual comparison is dependent on the attribute type. For string attribute types, this is a lexicographical comparison, and for DateTime types, it is a chronological comparison.  For integer attributes, it is a comparison by numeric value. Boolean and Binary attributes SHALL cause a failed response (HTTP status code 400) with \"scimType\" of \"invalidFilter\".|\n| lt | operator value, there is a match. The actual comparison is dependent on the attribute type. For string attribute types, this is a lexicographical comparison, and for DateTime types, it is a chronological comparison. For integer attributes, it is a comparison by numeric value. Boolean and Binary attributes SHALL cause a failed response (HTTP status code 400) with \"scimType\" of \"invalidFilter\".|\n| le | equal to the operator value, there is amatch. The actual comparison is dependent on the attribute type. For string attribute types, this is a lexicographical comparison, and for DateTime types, it is a chronological comparison. For integer attributes, itis a comparison by numeric value. Boolean and Binary attributes SHALL cause a failed response (HTTP status code 400) with \"scimType\" of \"invalidFilter\".|\n| co | The entire operator value must be a substring of the attribute value for a match.|\n| sw | The entire operator value must be substring of the attribute value, starting at the beginning of the attribute value. This criterion is satisfied if the two strings are identical.|\n| ew | The entire operator value must be a substring of the attribute value, matching at the end of the attribute value. This criterion is satisfied if the two strings are identical.|\n| and | The filter is only a match if both expressions evaluate to true.|\n| or | The filter is a match if the expression evaluates to false. |\n### Supported filter Attributes:\n#### Core Schema\n  * displayName\n\n#### Meta\n  * lastModified\n\n#### SAP extension schema\n  * type\n\n",
+					"required": false,
+					"schema": {
+						"type": "string"
+					},
+					"examples": {
+						"smith": {
+							"value": "displayName eq \"ExternalUserCompany\"",
+							"summary": "Search by group displayName."
+						},
+						"costCenter": {
+							"value": "meta.lastModified ge \"2021-03-22T07:19:38\"",
+							"summary": "Search by last modified date."
+						},
+						"groupType": {
+							"value": "urn:ietf:params:scim:schemas:extension:sap:2.0:Group:type eq \"userGroup\"",
+							"summary": "Search by group type."
+						}
+					}
+				}, {
+					"in": "query",
+					"name": "startIndex",
+					"description": "Represents the start index from which the results are returned. Default value is 1. A value less than 1 is interpreted as 1.\n",
+					"required": false,
+					"schema": {
+						"type": "integer"
+					},
+					"examples": {
+						"initial": {
+							"value": "startIndex=6",
+							"summary": "Search using start index."
+						}
+					}
+				}, {
+					"name": "startId",
+					"in": "query",
+					"description": "Used for Id-Based pagination. Page through groups by specifying `startId` parameter.\nPossible values:\n| Value | Description |\n|------------ | ------------- |\n| `initial`| If initial value is specified, the initial group is returned as the first entry of the query result. |\n| `<group id>` | If `<group id>` value is specified, the group with this group ID is returned as the first entry of the query result.|\n",
+					"required": false,
+					"schema": {
+						"type": "string"
+					},
+					"examples": {
+						"initial": {
+							"value": "startId=initial",
+							"summary": "Search by initial id."
+						},
+						"groupId": {
+							"value": "startId=1401",
+							"summary": "Search by known group id."
+						}
+					}
+				}, {
+					"in": "query",
+					"name": "count",
+					"description": "Represents the number of items which will be returned per page. A negative value is interpreted as 0. A value of 0 indicates that no resource results are to be returned. Default value is 100. Max value is 100",
+					"required": false,
+					"schema": {
+						"type": "integer"
+					},
+					"examples": {
+						"normal": {
+							"value": "count=30",
+							"summary": "Query 30 groups per page."
+						}
+					}
+				}, {
+					"in": "query",
+					"name": "attributes",
+					"description": "This parameter is used for member pagination, Legal format is like \"attributes=members[startId=initial&count=10]\".Currently only support to fetch the first page for the members of each group, so the only vaild value of startId is \"initial\". Max count value supported is 100. Please note that \"[\", \"]\", and \"&\" should be percent-encoded if you pass them as URL parameters.",
+					"schema": {
+						"type": "string"
+					},
+					"examples": {
+						"normal": {
+							"value": "attributes=members[startId=initial&count=100]",
+							"summary": "Query first 100 members for each group."
+						}
+					},
+					"required": false
+				}],
+				"responses": {
+					"200": {
+						"description": "OK",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/GroupResourceResponse"
+									}]
+								},
+								"examples": {
+									"searchByIndex": {
+										"description": "The following paging attributes are returned in the response:\n| Value | Description |\n|------------ | ------------- |\n| totalResults | Specifies the total number of results matching the query, for example: 100. |\n| itemsPerPage | Specifies the number of query results returned in a query response page, for example: 3.|\n| startIndex | The 1-based index of the first result in the current set of query results, for example: 1.|\n",
+										"value": {
+                                                "schemas": [
+                                                    "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+                                                ],
+                                                "totalResults": 38,
+                                                "itemsPerPage": 1,
+                                                "Resources": [
+                                                    {
+                                                        "schemas": [
+                                                            "urn:ietf:params:scim:schemas:core:2.0:Group",
+															"urn:ietf:params:scim:schemas:extension:sap:2.0:Group"
+                                                        ],
+                                                        "id": "2439",
+                                                        "displayName": "login access",
+                                                        "members": [
+                                                            {
+                                                                "value": "6e94175f-2327-c212-e12c-00000a746432",
+                                                                "type": "User",
+                                                                "$ref": "/rest/iam/scim/v2/Users/6e94175f-2327-c212-e12c-00000a746432"
+                                                            },
+                                                            {
+                                                                "value": "9497175f-2327-c212-e12c-00000a746432",
+                                                                "type": "User",
+                                                                "$ref": "/rest/iam/scim/v2/Users/9497175f-2327-c212-e12c-00000a746432"
+                                                            },
+                                                            {
+                                                                "value": "a599175f-2327-c212-e12c-00000a746432",
+                                                                "type": "User",
+                                                                "$ref": "/rest/iam/scim/v2/Users/a599175f-2327-c212-e12c-00000a746432"
+                                                            },
+                                                            {
+                                                                "value": "b898175f-2327-c212-e12c-00000a746432",
+                                                                "type": "User",
+                                                                "$ref": "/rest/iam/scim/v2/Users/b898175f-2327-c212-e12c-00000a746432"
+                                                            }
+                                                        ],
+                                                        "meta": {
+                                                            "resourceType": "Group",
+                                                            "created": "2021-03-22T07:19:38",
+                                                            "lastModified": "2021-03-22T07:19:38",
+                                                            "location": "/rest/iam/scim/v2/Groups/2439",
+                                                            "version": "1.0.0",
+                                                            "members.cnt": 4
+                                                        },
+														"urn:ietf:params:scim:schemas:extension:sap:2.0:Group": {
+															"type": "userGroup",
+															"supportedOperations": "readWrite"
+														}
+                                                    }
+                                                ],
+                                                "startIndex": 1
+										}
+									},
+									"searchById": {
+										"description": "The following paging attributes are returned in the response:\n| Value | Description |\n|------------ | ------------- |\n| totalResults | Specifies the total number of results matching the query, for example: 100. |\n| itemsPerPage | Specifies the number of query results returned in a query response page, for example: 3.|\n| startId | Specifies the first entry of the query result, for example: initial or `<group id>`.|\n| nextId | Specifies the next group id (that is, the id of the first group on the next page). For example: `<group id>` or `<end>`. The `<end>` value indicates that the last group of the total number of group matching the query is returned. |\n",
+										"value": {
+                                                "schemas": [
+                                                    "urn:ietf:params:scim:api:messages:2.0:ListResponse"
+                                                ],
+                                                "totalResults": 38,
+                                                "itemsPerPage": 1,
+                                                "startId": "2439",
+                                                "Resources": [
+                                                    {
+                                                        "schemas": [
+                                                            "urn:ietf:params:scim:schemas:core:2.0:Group"
+                                                        ],
+                                                        "id": "2439",
+                                                        "displayName": "login access",
+                                                        "members": [
+                                                            {
+                                                                "value": "6e94175f-2327-c212-e12c-00000a746432",
+                                                                "type": "User",
+                                                                "$ref": "/rest/iam/scim/v2/Users/6e94175f-2327-c212-e12c-00000a746432"
+                                                            },
+                                                            {
+                                                                "value": "9497175f-2327-c212-e12c-00000a746432",
+                                                                "type": "User",
+                                                                "$ref": "/rest/iam/scim/v2/Users/9497175f-2327-c212-e12c-00000a746432"
+                                                            },
+                                                            {
+                                                                "value": "a599175f-2327-c212-e12c-00000a746432",
+                                                                "type": "User",
+                                                                "$ref": "/rest/iam/scim/v2/Users/a599175f-2327-c212-e12c-00000a746432"
+                                                            },
+                                                            {
+                                                                "value": "b898175f-2327-c212-e12c-00000a746432",
+                                                                "type": "User",
+                                                                "$ref": "/rest/iam/scim/v2/Users/b898175f-2327-c212-e12c-00000a746432"
+                                                            }
+                                                        ],
+                                                        "meta": {
+                                                            "resourceType": "Group",
+                                                            "created": "2021-03-22T07:19:38",
+                                                            "lastModified": "2021-03-22T07:19:38",
+                                                            "location": "/rest/iam/scim/v2/Groups/2439",
+                                                            "version": "1.0.0",
+                                                            "members.cnt": 4
+                                                        }
+                                                    }
+                                                ],
+                                                "nextId": "2457"
+										}
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "Invalid number format!",
+									"status": 400
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "You don’t have read access to the group.",
+									"status": 403
+								}
+							}
+						}
+					}
+				},
+				"summary": "Query Permission Groups.",
+				"description": "Retrieve a list of groups. Paging parameters are supported.",
+				"tags": ["Groups"]
+			}
+		},
+		"/rest/iam/scim/v2/Groups/{id}": {
+			"get": {
+				"parameters": [{
+					"in": "path",
+					"name": "id",
+					"schema": {
+						"type": "string"
+					},
+					"examples": {
+						"normal": {
+							"value": "2001",
+							"summary": "Query the permission group whose ID is \"2001\"."
+						}
+					},
+					"required": true,
+					"description": "The ID of the group to be retrieved."
+				}, {
+					"in": "query",
+					"name": "attributes",
+					"description": "This parameter is used for member pagination, Legal format is like \"attributes=members[startId=2000&count=10]\". Max count value supported is 1000. Please note that \"[\", \"]\", and \"&\" should be percent-encoded if you pass them as URL parameters.",
+					"schema": {
+						"type": "string"
+					},
+					"examples": {
+						"normal": {
+							"value": "attributes=members[startId=1001&count=500]",
+							"summary": "Query 500 members start from the member whose id is \"1001\" for this group."
+						}
+					},
+					"required": false
+				}],
+				"responses": {
+					"200": {
+						"description": "The identified group is retrieved successfully.",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"title": "Group",
+									"allOf": [{
+										"$ref": "#/components/schemas/Group"
+									}]
+								},
+								"example": {
+                                        "schemas": [
+                                            "urn:ietf:params:scim:schemas:core:2.0:Group",
+											"urn:ietf:params:scim:schemas:extension:sap:2.0:Group"
+                                        ],
+                                        "id": "2439",
+                                        "displayName": "login access",
+                                        "members": [
+                                            {
+                                                "value": "6e94175f-2327-c212-e12c-00000a746432",
+                                                "type": "User",
+                                                "$ref": "/rest/iam/scim/v2/Users/6e94175f-2327-c212-e12c-00000a746432"
+                                            },
+                                            {
+                                                "value": "9497175f-2327-c212-e12c-00000a746432",
+                                                "type": "User",
+                                                "$ref": "/rest/iam/scim/v2/Users/9497175f-2327-c212-e12c-00000a746432"
+                                            },
+                                            {
+                                                "value": "a599175f-2327-c212-e12c-00000a746432",
+                                                "type": "User",
+                                                "$ref": "/rest/iam/scim/v2/Users/a599175f-2327-c212-e12c-00000a746432"
+                                            },
+                                            {
+                                                "value": "b898175f-2327-c212-e12c-00000a746432",
+                                                "type": "User",
+                                                "$ref": "/rest/iam/scim/v2/Users/b898175f-2327-c212-e12c-00000a746432"
+                                            }
+                                        ],
+                                        "meta": {
+                                            "resourceType": "Group",
+                                            "created": "2021-03-22T07:19:38",
+                                            "lastModified": "2021-03-22T07:19:38",
+                                            "location": "/rest/iam/scim/v2/Groups/2439",
+                                            "version": "1.0.0",
+                                            "members.nextId": "end",
+                                            "members.cnt": 4
+                                        },
+										"urn:ietf:params:scim:schemas:extension:sap:2.0:Group": {
+											"type": "userGroup",
+											"supportedOperations": "readWrite"
+										}
+                                }
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "You don’t have read access to the group.",
+									"status": 403
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Not Found",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+
+									"detail": "No SCIM group can be found.",
+									"status": 404
+								}
+							}
+						}
+					}
+				},
+				"summary": "Retrieve a Known Permission Group",
+				"description": "Retrieve a group by group ID. Member paging parameters are supported.",
+				"tags": ["Groups"]
+			},
+			"put": {
+				"parameters": [{
+					"in": "path",
+					"name": "id",
+					"schema": {
+						"type": "string"
+					},
+					"required": true,
+					"description": "The ID of the permission group to be modified."
+				}],
+				"responses": {
+					"200": {
+						"description": "OK. The identified group is modified successfully and the modified group will be returned.",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"title": "Group",
+									"allOf": [{
+										"$ref": "#/components/schemas/Group"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:schemas:core:2.0:Group",
+										"urn:ietf:params:scim:schemas:extension:sap:2.0:Group"
+									],
+									"id": "2439",
+									"displayName": "login access",
+									"members": [
+										{
+											"value": "6e94175f-2327-c212-e12c-00000a746432",
+											"type": "User",
+											"$ref": "/rest/iam/scim/v2/Users/6e94175f-2327-c212-e12c-00000a746432"
+										},
+										{
+											"value": "9497175f-2327-c212-e12c-00000a746432",
+											"type": "User",
+											"$ref": "/rest/iam/scim/v2/Users/9497175f-2327-c212-e12c-00000a746432"
+										}
+									],
+									"meta": {
+										"resourceType": "Group",
+										"created": "2021-03-22T07:19:38",
+										"lastModified": "2021-03-22T07:19:38",
+										"location": "/rest/iam/scim/v2/Groups/2439",
+										"version": "1.0.0",
+										"members.nextId": "end",
+										"members.cnt": 2
+									},
+									"urn:ietf:params:scim:schemas:extension:sap:2.0:Group": {
+										"type": "userGroup",
+										"supportedOperations": "readWrite"
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request. Possible reasons:\n- A required field is missing.\n- A given value is invalid.\n- The format of the request body is invalid.\n",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "The members field is required.",
+									"status": 400
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden.",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "You don't have write access to the group.",
+									"status": 403
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Not Found. Possible reasons, no group can be found.",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "No SCIM group can be found.",
+									"status": 404
+								}
+							}
+						}
+					},
+					"413": {
+						"description": "Payload Too Large. Possible reasons, the number of user accounts replaced is too large.",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "You can replace up to 10000 user accounts.",
+									"status": 413
+								}
+							}
+						}
+					},
+					"422": {
+						"description": "Unprocessable Entity. Possible reasons, modification of read-only groups is not supported.",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "Unable to update the group. This group type is read-only.",
+									"status": 422
+								}
+							}
+						}
+					}
+				},
+				"summary": "Replace members of a Known Permission Group.",
+				"description": "Replace members from an existing permission group by group ID. The modified permission groups should support both read and write (readWrite) operations. Static permission groups are the only permission group type that support these operations.\n\n**Limitations**: \n- Upon your request, all employments of this user will be added to the permission group. However, after the user was added, new employments of this user will not be automatically added. You can call the API again to add the new employments. \n- You can replace up to 10,000 user accounts. \n- You can only update \"members\" field.",
+				"tags": ["Groups"],
+				"requestBody": {
+					"content": {
+						"application/scim+json": {
+							"schema": {
+								"allOf": [{
+									"$ref": "#/components/schemas/Group"
+								}]
+							},
+							"examples": {
+								"replace": {
+									"value": {
+										"schemas": [
+											"urn:ietf:params:scim:schemas:core:2.0:Group"
+										],
+										"members": [
+											{
+												"value": "6e94175f-2327-c212-e12c-00000a746432"
+											},
+											{
+												"value": "9497175f-2327-c212-e12c-00000a746432"
+											}
+										]
+									},
+									"summary": "Replace members of a group."
+								},
+								"remove": {
+									"value": {
+										"schemas": [
+											"urn:ietf:params:scim:schemas:core:2.0:Group"
+										],
+										"members": []
+									},
+									"summary": "Remove all members from a group."
+								}
+							}
+						}
+					}
+				}
+			},
+			"patch": {
+				"parameters": [{
+					"in": "path",
+					"name": "id",
+					"schema": {
+						"type": "string"
+					},
+					"required": true,
+					"description": "The ID of the permission group to be modified."
+				}],
+				"responses": {
+					"200": {
+						"description": "OK. The identified group is modified successfully and the modified group will be returned.",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"title": "Group",
+									"allOf": [{
+										"$ref": "#/components/schemas/Group"
+									}]
+								},
+								"example": {
+                                        "schemas": [
+                                            "urn:ietf:params:scim:schemas:core:2.0:Group",
+											"urn:ietf:params:scim:schemas:extension:sap:2.0:Group"
+                                        ],
+                                        "id": "2439",
+                                        "displayName": "login access",
+                                        "members": [
+                                            {
+                                                "value": "6e94175f-2327-c212-e12c-00000a746432",
+                                                "type": "User",
+                                                "$ref": "/rest/iam/scim/v2/Users/6e94175f-2327-c212-e12c-00000a746432"
+                                            },
+                                            {
+                                                "value": "9497175f-2327-c212-e12c-00000a746432",
+                                                "type": "User",
+                                                "$ref": "/rest/iam/scim/v2/Users/9497175f-2327-c212-e12c-00000a746432"
+                                            },
+                                            {
+                                                "value": "a599175f-2327-c212-e12c-00000a746432",
+                                                "type": "User",
+                                                "$ref": "/rest/iam/scim/v2/Users/a599175f-2327-c212-e12c-00000a746432"
+                                            },
+                                            {
+                                                "value": "b898175f-2327-c212-e12c-00000a746432",
+                                                "type": "User",
+                                                "$ref": "/rest/iam/scim/v2/Users/b898175f-2327-c212-e12c-00000a746432"
+                                            }
+                                        ],
+                                        "meta": {
+                                            "resourceType": "Group",
+                                            "created": "2021-03-22T07:19:38",
+                                            "lastModified": "2021-03-22T07:19:38",
+                                            "location": "/rest/iam/scim/v2/Groups/2439",
+                                            "version": "1.0.0",
+                                            "members.nextId": "end",
+                                            "members.cnt": 4
+                                        },
+										"urn:ietf:params:scim:schemas:extension:sap:2.0:Group": {
+											"type": "userGroup",
+											"supportedOperations": "readWrite"
+										}
+                                }
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request. Possible reasons:\n- A required field is missing.\n- A given value is invalid.\n- The format of the request body is invalid.\n",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "Members value is required.",
+									"status": 400
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "Forbidden.",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "You don't have write access to the group.",
+									"status": 403
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "Not Found. Possible reasons, no group can be found.",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "No SCIM group can be found.",
+									"status": 404
+								}
+							}
+						}
+					},
+					"413": {
+						"description": "Payload Too Large. Possible reasons, the number of user accounts added or removed is too large.",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "You can batch add or remove up to 1000 user accounts.",
+									"status": 413
+								}
+							}
+						}
+					},
+					"422": {
+						"description": "Unprocessable Entity. Possible reasons, modification of read-only groups is not supported.",
+						"content": {
+							"application/scim+json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/ScimErrorResponse"
+									}]
+								},
+								"example": {
+									"schemas": [
+										"urn:ietf:params:scim:api:messages:2.0:Error"
+									],
+									"detail": "Unable to update the group. This group type is read-only.",
+									"status": 422
+								}
+							}
+						}
+					}
+				},
+				"summary": "Modify Members of a Known Permission Group.",
+				"description": "Add or remove members from an existing permission group by group ID. The modified permission groups should support both read and write (readWrite) operations. Static permission groups are the only permission group type that support these operations. Use user ID to add or remove members. Replacing members of a group is not supported.\n\n**Limitations**: \n- Upon your request, all employments of this user will be added to the permission group. However, after the user was added, new employments of this user will not be automatically added. You can call the API again to add the new employments. \n- You can batch add or remove up to 1000 user accounts.",
+				"tags": ["Groups"],
+				"requestBody": {
+					"content": {
+						"application/scim+json": {
+							"schema": {
+								"allOf": [{
+									"$ref": "#/components/schemas/ScimUserModifyRequest"
+								}]
+							},
+							"examples": {
+								"add": {
+									"value": {
+										"schemas": [
+											"urn:ietf:params:scim:api:messages:2.0:PatchOp"
+										],
+										"Operations": [
+											{
+												"op": "add",
+												"path": "members",
+												"value": [
+													{
+														"value": "6e94175f-2327-c212-e12c-00000a746432"
+													},
+													{
+														"value": "9497175f-2327-c212-e12c-00000a746432"
+													}
+												]
+											}
+										]
+									},
+									"summary": "Add members to a group."
+								},
+								"remove": {
+									"value": {
+										"schemas": [
+											"urn:ietf:params:scim:api:messages:2.0:PatchOp"
+										],
+										"Operations": [
+											{
+												"op": "remove",
+												"path": "members[value eq \"a599175f-2327-c212-e12c-00000a746432\"]"
+											},
+											{
+												"op": "remove",
+												"path": "members[value eq \"b898175f-2327-c212-e12c-00000a746432\"]"
+											}
+										]
+									},
+									"summary": "Remove members from a group."
+								},
+								"batch": {
+									"value": {
+										"schemas": [
+											"urn:ietf:params:scim:api:messages:2.0:PatchOp"
+										],
+										"Operations": [
+											{
+												"op": "add",
+												"path": "members",
+												"value": [
+													{
+														"value": "6e94175f-2327-c212-e12c-00000a746432"
+													},
+													{
+														"value": "9497175f-2327-c212-e12c-00000a746432"
+													}
+												]
+											},
+											{
+												"op": "remove",
+												"path": "members[value eq \"a599175f-2327-c212-e12c-00000a746432\"]"
+											},
+											{
+												"op": "add",
+												"path": "members",
+												"value": [
+													{
+														"value": "b898175f-2327-c212-e12c-00000a746432"
+													}
+												]
+											}
+										]
+									},
+									"summary": "Batch add and remove members."
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	},
+	"components": {
+		"schemas": {
+			"Meta": {
+				"title": "Meta",
+				"required": ["resourceType", "created", "lastModified", "location", "version"],
+				"properties": {
+					"resourceType": {
+						"type": "string",
+						"description": "The type of the resource.",
+						"example": "User, Group"
+					},
+					"created": {
+						"type": "string",
+						"format": "date-time",
+						"description": "The date and time when the resource was created.",
+						"example": "2022-05-19T07:41:39Z"
+					},
+					"lastModified": {
+						"type": "string",
+						"format": "date-time",
+						"description": "The most recent date and time when the resource was updated.",
+						"example": "2022-05-19T07:41:39Z"
+					},
+					"location": {
+						"type": "string",
+						"description": "The URI path of the resource being returned.",
+						"example": "/rest/iam/scim/v2/Users/34c182f3-ba70-4d84-915a-33081c4cf7a1"
+					},
+					"version": {
+						"type": "string",
+						"description": "The version of the resource being returned.",
+						"example": "2.0.0"
+					}
+				},
+				"type": "object"
+			},
+			"User": {
+				"title": "User",
+				"required": ["userName", "schemas"],
+				"properties": {
+					"schemas": {
+						"description": "A list of one or more URIs which are used to indicate the SCIM schemas that define the allowed attributes for a resource.",
+						"type": "array",
+						"items": {
+						  "type": "string",
+						  "enum": ["urn:ietf:params:scim:schemas:extension:successfactors:2.0:User",
+							"urn:ietf:params:scim:schemas:core:2.0:User",
+							"urn:ietf:params:scim:schemas:extension:sap.workforce:2.0:User",
+							"urn:ietf:params:scim:schemas:extension:sap:2.0:User",
+							"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
+							"urn:ietf:params:scim:schemas:extension:sap.workforce:2.0:User",
+							"urn:ietf:params:scim:schemas:extension:sap.odm:2.0:User"
+						  ]
+						},
+						"example": ["urn:ietf:params:scim:schemas:extension:successfactors:2.0:User",
+						"urn:ietf:params:scim:schemas:core:2.0:User",
+						"urn:ietf:params:scim:schemas:extension:sap.workforce:2.0:User",
+						"urn:ietf:params:scim:schemas:extension:sap:2.0:User",
+						"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User",
+						"urn:ietf:params:scim:schemas:extension:sap.workforce:2.0:User",
+						"urn:ietf:params:scim:schemas:extension:sap.odm:2.0:User"
+						]
+					},
+					"meta": {
+						"description": "A complex attribute containing resource metadata.",
+						"allOf": [{
+						  "$ref": "#/components/schemas/Meta"
+						}]
+					},
+					"id": {
+						"description": "A unique identifier for a user as defined by the service provider.",
+						"type": "string",
+						"example": "4a28f075-2524-42ac-a0f1-5c3da4dbb072"
+					},
+					"externalId": {
+						"description": "An identifier for the user as defined by the provisioning client.",
+						"type": "string",
+						"example": "jrsap ext"
+					},
+					"userName": {
+						"description": "A unique identifier for the user as defined by a service provider.",
+						"type": "string",
+						"example": "jrsap"
+					},
+					"name": {
+						"description": "The components of the user's name.",
+						"allOf": [{
+							"$ref": "#/components/schemas/Name"
+						}]
+					},
+					"displayName": {
+						"description": "The name of the user that is suitable for display to end users.",
+						"type": "string",
+						"example": "jrsap"
+					},
+					"nickName": {
+						"description": "The nickname of the user.",
+						"type": "string",
+						"example": "alex"
+					},
+					"title": {
+						"description": "The title of the user.",
+						"type": "string",
+						"example": "Sales"
+					},
+					"userType": {
+						"description": "Indicates the relationship between the user and the organization. Only “employee” and “onboardee” are supported.",
+						"type": "string",
+						"example": "EMPLOYEE"
+					},
+					"preferredLanguage": {
+						"description": "The user's preferred written or spoken languages. Used to select a localized user interface.",
+						"type": "string",
+						"example": "en_US"
+					},
+					"locale": {
+						"description": "The user’s default location. Used to localize currency, date and time formats, or numerical representations.",
+						"type": "string",
+						"example": "en_US"
+					},
+					"active": {
+						"description": "Indicates whether the user has an active status.",
+						"type": "boolean",
+						"example": true
+					},
+					"emails": {
+						"description": "The email addresses of the user.",
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/Emails"
+						}
+					},
+					"phoneNumbers": {
+						"description": "Phone numbers for the User.",
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/PhoneNumbers"
+						},
+						"example": [
+						  {
+						    "value": "phone01",
+							"type": "work",
+							"primary": true
+						  }
+						  ]
+					},
+					"groups": {
+						"description": "A list of groups to which the user (including active and inactive employments) belongs, either through direct membership, through nested groups, or dynamically calculated.",
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/Groups"
+						}
+					},
+					"urn:ietf:params:scim:schemas:extension:successfactors:2.0:User": {
+						"allOf": [{
+							"$ref": "#/components/schemas/Extension"
+						}]
+					},
+					"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User": {
+						"allOf": [{
+							"$ref": "#/components/schemas/Enterprise"
+						}]
+					},
+					"urn:ietf:params:scim:schemas:extension:sap:2.0:User": {
+						"allOf": [{
+							"$ref": "#/components/schemas/SapExtendedAttributes"
+						}]
+					},
+					"urn:ietf:params:scim:schemas:extension:sap.workforce:2.0:User": {
+					  "allOf": [{
+						"$ref": "#/components/schemas/Workforce"
+					  }]
+					},
+					"urn:ietf:params:scim:schemas:extension:sap.odm:2.0:User": {
+						"allOf": [{
+						  "$ref": "#/components/schemas/ODM"
+						}]
+					}
+				},
+				"type": "object"
+			},
+			"Name": {
+				"title": "Name",
+				"properties": {
+					"formatted": {
+						"description": "The formatted name of the user that includes initials, middle names, or suffixes as appropriate.",
+						"type": "string",
+						"example": "Alex"
+					},
+					"familyName": {
+						"description": "The family name of the user.",
+						"type": "string",
+						"example": "Thompson"
+					},
+					"givenName": {
+						"description": "The given name of the user.",
+						"type": "string",
+						"example": "Alexander"
+					},
+					"middleName": {
+						"description": "The middle names of the user.",
+						"type": "string",
+						"example": "Doe"
+					},
+					"honorificPrefix": {
+						"description": "The honorific prefixes of the user.",
+						"type": "string",
+						"example": "MR"
+					},
+					"honorificSuffix": {
+						"description": "The honorific suffixes of the user.",
+						"type": "string",
+						"example": "l"
+					}
+				},
+				"type": "object"
+			},
+			"Extension": {
+				"title": "SuccessFactorsExtendedAttributes(To be deprecated)",
+				"properties": {
+					"perPersonUuid": {
+						"description": "UUID, a unique identifier generated when person data is created in the system.",
+						"type": "string",
+						"example": "3AE061AF8F8244DA99582941C7C4A596"
+					},
+					"loginMethod": {
+						"description": "Login method for the user.",
+						"type": "string",
+						"example": "sso"
+					},
+					"personIdExternal": {
+						"description": "Person ID, a unique identifier of a person in Employee Central.",
+						"type": "string",
+						"example": "jrsap"
+					},
+					"customFields": {
+						"description": "Fields that can be customized as elements in the Succession Data Model.",
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/CustomFields"
+						},
+						"example": [
+							{
+								"value": "CF1_001",
+								"customFieldName": "custom01",
+								"display": null
+							},
+							{
+								"value": "CF2_001",
+								"customFieldName": "custom02",
+								"display": null
+							}
+						]
+					}
+				},
+				"type": "object"
+			},
+			"Workforce": {
+				"title": "SuccessFactorsExtendedAttributes",
+				"properties": {
+					"lastDeactivated": {
+						"description": "The most recent date and time when the resource was deactived.",
+						"type": "string",
+						"example": "2021-09-13T06:00:00Z"
+					}
+				},
+				"type": "object"
+			},
+			"Enterprise": {
+				"title": "EnterpriseExtendedAttributes",
+				"properties": {
+					"department": {
+						"description": "The department of the user.",
+						"type": "string",
+						"example": "ACE Department (ACE Department)"
+					},
+					"division": {
+						"description": "The division of the user.",
+						"type": "string",
+						"example": "ACE Software"
+					},
+					"manager": {
+						"description": "The user's manager.",
+						"allOf": [{
+							"$ref": "#/components/schemas/Manager"
+						}]
+					},
+					"employeeNumber": {
+						"description": "A string identifier, typically numeric or alphanumeric, assigned to a person, typically based on order of hire or association with an organization.",
+					   "type": "string",
+					   "example": "jrsap"
+					}
+				},
+				"type": "object"
+			},
+			"GroupDomains": {
+				"title": "GroupDomains",
+				"properties": {
+				  "value": {
+					"description": "groupDomains is a filter attribute to search a subset of users relevant for a specific integration scenario. This integration scenarios require only a subset of users which must replicated to the destination and filtered at the SCIM service provider source by this attribute. This applies for embedded analytics scenarios or central launchpad integrations.",
+					"type": "string",
+					"example": "userGroup"
+				  }
+				},
+				"type": "object"
+			},
+			"Emails": {
+				"title": "Emails",
+				"properties": {
+					"value": {
+						"description": "An Email.",
+						"type": "string",
+						"example": "work"
+					},
+					"type": {
+						"description": "The type of the email. Only “work” is supported.",
+						"type": "string",
+						"example": "jrsap@sap.com"
+					},
+					"primary": {
+						"description": "Indicates whether the email is the primary or preferred one of the user.",
+						"type": "boolean",
+						"example": true
+					}
+				},
+				"type": "object"
+			},
+			"CustomFields": {
+				"title": "CustomFields",
+				"properties": {
+					"value": {
+						"description": "The custom field value",
+						"type": "string"
+					},
+					"customFieldName": {
+						"description": "This attribute assumes a value in one of 'custom01'~'custom15'.",
+						"type": "string"
+					},
+					"display": {
+						"description": "Default label of the custom field.",
+						"type": "string"
+					}
+				},
+				"type": "object"
+			},
+			"PhoneNumbers": {
+				"title": "PhoneNumbers",
+				"properties": {
+					"value": {
+						"description": "A phone number",
+						"type": "string"
+					},
+					"type": {
+						"description": "The type of the phone number. Only “work” and “fax” are supported.",
+						"type": "string"
+					},
+					"display": {
+						"description": "The standard representation of the phone number value.",
+						"type": "string"
+					},
+					"primary": {
+						"description": "Indicates whether the phone number is the primary or preferred one of the user.",
+						"type": "string"
+					}
+				},
+				"type": "object"
+			},
+			"Groups": {
+				"title": "Groups",
+				"properties": {
+					"value": {
+						"description": "The ID of the group to which the user belongs.",
+						"type": "string",
+						"example": "1126"
+					},
+					"$ref": {
+						"description": "The URI of the group.",
+						"type": "string",
+						"example": "https://mock.successfactors.com/rest/iam/scim/v2/Groups/1126"
+					},
+					"display": {
+						"description": "The name for the group.",
+						"type": "string",
+						"example": "Employees - Germany"
+					},
+					"type": {
+						"description": "The type for the group.",
+						"type": "string",
+						"example": "indirect"
+					}
+				},
+				"type": "object"
+			},
+			"Manager": {
+				"title": "Manager",
+				"properties": {
+					"value": {
+						"description": "The ID of the SCIM resource representing the user's manager.",
+						"type": "string",
+						"example": "ff77175f-2327-c212-e12c-00000a746432"
+					},
+					"$ref": {
+						"description": "The URI of the SCIM resource representing the user's manager.",
+						"type": "string",
+						"example": "/rest/iam/scim/v2/Users/ff77175f-2327-c212-e12c-00000a746432"
+					},
+					"displayName": {
+						"description": "The display name of the user’s manager.",
+						"type": "string",
+						"example": "Robert Allen"
+					}
+				},
+				"type": "object"
+			},
+			"SapExtendedAttributes": {
+				"title": "SapExtendedAttributes",
+				"properties": {
+					"userUuid": {
+						"type": "string",
+						"description": "Global User ID that uniquely identifies a user across SAP business applications and services.",
+						"example": "4609edbc-679e-428b-a06d-11e1f57443aa"
+					},
+					"groupDomains": {
+						"type": "array",
+						"items": {
+						"$ref": "#/components/schemas/GroupDomains"
+						},
+						"description": "The group domains of user."
+					},
+					"sourceSystem": {
+						"type": "string",
+						"description": "The source system (IdDs-specific) for integration between SuccessFactors Employee Central and other HCM products. Not relevant for LoBs. The value is SuccessFactors (by default) or any values for each external system where user is recorded. ",
+						"example": "SuccessFactors"
+					}
+				},
+				"type": "object"
+			},
+			"ODM": {
+				"title": "SAPOneDataModelAttributes",
+				"properties": {
+					"workforcePersonId": {
+						"description": "The UUID of the WorkforcePerson.",
+						"type": "string",
+						"example": "5049de0e-954d-4d67-82b2-f205127c1900"
+					}
+				},
+				"type": "object"
+			},
+			"UserQueryResponse": {
+				"title": "SearchResult",
+				"properties": {
+					"schemas": {
+						"type": "array",
+						"items": {
+							"type": "string",
+							"description": "A list of one or more URIs which are used to indicate the SCIM schemas that define the allowed attributes for a resource.",
+							"example": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"]
+						}
+					},
+					"totalResults": {
+						"type": "integer",
+						"description": "Specifies the total number of results matching the query.",
+						"example": 100
+					},
+					"itemsPerPage": {
+						"type": "integer",
+						"description": "Specifies the number of query results returned in a query response every page.",
+						"example": 100
+					},
+					"startIndex": {
+						"type": "integer",
+						"description": "The 1-based index of the first result in the current set of query results (only if parameter startIndex is used).",
+						"example": 1
+					},
+					"startId": {
+						"type": "string",
+						"description": "Specifies the first entry of the query result (only if parameter startId is used).",
+						"example": "initial"
+					},
+					"nextId": {
+						"type": "string",
+						"description": "The ID of the first user on the next page. For example `<user id>` or `<end>`. The `<end>` value indicates that the last user of the total number of users matching the query is returned  (only if parameter startId is used).",
+						"example": "ffffd4b9-7cc1-43d0-9272-ec70ce20ddad"
+					},
+					"Resources": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/User"
+						}
+					}
+				},
+				"type": "object"
+			},
+			"ScimErrorResponse": {
+				"title": "ErrorResponse",
+				"properties": {
+					"schemas": {
+						"title": "urn:ietf:params:scim:api:messages:2.0:Error",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"scimType": {
+						"type": "string"
+					},
+					"detail": {
+						"type": "string"
+					},
+					"status": {
+						"type": "integer",
+						"format": "int32"
+					}
+				},
+				"type": "object"
+			},
+			"ScimPostQueryRequest": {
+				"title": "SearchBody",
+				"properties": {
+					"schemas": {
+						"type": "array",
+						"items": {
+							"type": "string",
+							"enum": ["urn:ietf:params:scim:api:messages:2.0:SearchRequest"]
+						}
+					},
+					"attributes": {
+						"description": "A multi-valued list that indicates attributes names in standard notation to return in the response.",
+						"type": "string"
+					},
+					"filter": {
+						"description": "Defines the search criteria.",
+						"type": "string"
+					},
+					"startIndex": {
+						"description": "Represents the start index from which the results are returned. Default value is 1. A value less than 1 is interpreted as 1.",
+						"type": "string"
+					},
+					"startId": {
+						"description": "Used for Id-Based pagination. Page through users by specifying startId parameter.",
+						"type": "string"
+					},
+					"count": {
+						"description": "Represents the number of items which will be returned per page. A negative value is interpreted as 0. A value of 0 indicates that no resource results are to be returned. Default value is 100.",
+						"type": "string"
+					},
+					"excludedAttributes": {
+						"description": "A multi-valued list that indicates attributes names in standard notation to exclude from the response.",
+						"type": "string"
+					}
+				},
+				"type": "object"
+			},
+			"Operation": {
+				"title": "Operation",
+				"properties": {
+					"op": {
+						"type": "string",
+						"items": {
+							"type": "string"
+						},
+						"enum": ["add", "remove", "replace"]
+					},
+					"value": {
+						"type": "string"
+					},
+					"path": {
+						"type": "string"
+					}
+				},
+				"type": "object"
+			},
+			"ScimUserModifyRequest": {
+				"title": "PatchBody",
+				"required": ["schemas", "Operations"],
+				"properties": {
+					"schemas": {
+						"type": "array",
+						"items": {
+							"type": "string",
+							"enum": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+						}
+					},
+					"Operations": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/Operation"
+						}
+					}
+				},
+				"type": "object"
+			},
+			"Group": {
+				"title": "Group",
+				"required": ["members", "schemas"],
+				"properties": {
+					"id": {
+						"description": "A unique identifier of a permission group.",
+						"type": "string",
+						"example": "2439"
+					},
+					"displayName": {
+						"description": "The name of the group, equals to the \"Group Name\" field in the “Manager Permission Groups” admin page.",
+						"type": "string"
+					},
+					"members": {
+						"description": "Members of a group, selected through direct membership.",
+						"allOf": [{
+							"$ref": "#/components/schemas/Members"
+						}]
+					},
+					"meta": {
+						"description": "A complex attribute containing resource metadata.",
+						"allOf": [{
+							"$ref": "#/components/schemas/GroupMeta"
+						}]
+					},
+					"urn:ietf:params:scim:schemas:extension:sap:2.0:Group": {
+						"allOf": [{
+							"$ref": "#/components/schemas/GroupSapExtendedAttributes"
+						}]
+					},
+					"schemas": {
+						"description": "An array of Strings containing URIs that are used to indicate the namespaces of the SCIM schemas that define the attributes present in the current JSON structure.",
+						"type": "array",
+						"items": {
+							"type": "string",
+							"enum": ["urn:ietf:params:scim:schemas:core:2.0:Group",
+								"urn:ietf:params:scim:schemas:extension:sap:2.0:Group"]
+						}
+					}
+				},
+				"type": "object"
+			},
+			"Members": {
+				"title": "Members",
+				"required": ["value"],
+				"properties": {
+					"value": {
+						"description": "The account IDs of the users in the group.",
+						"type": "string"
+					},
+					"$ref": {
+						"description": "The URI of the corresponding \"User\" resources which belongs to the group.",
+						"type": "string"
+					},
+					"type": {
+						"description": "The data type of the members. Currently the only supported value is \"User\".",
+						"type": "string"
+					}
+				},
+				"type": "object"
+			},
+			"GroupResourceResponse": {
+				"title": "Group Resources",
+				"properties": {
+					"schemas": {
+						"type": "array",
+						"items": {
+							"type": "string",
+							"description": "A list of one or more URIs which are used to indicate the SCIM schemas that define the allowed attributes for a resource.",
+							"example": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"]
+						}
+					},
+					"totalResults": {
+						"type": "integer",
+						"description": "Specifies the total number of results matching the query.",
+						"example": 100
+					},
+					"itemsPerPage": {
+						"type": "integer",
+						"description": "Specifies the number of query results returned in a query response every page.",
+						"example": 100
+					},
+					"startIndex": {
+						"type": "integer",
+						"description": "The 1-based index of the first result in the current set of query results (only if parameter startIndex is used).",
+						"example": 1
+					},
+					"startId": {
+						"type": "string",
+						"description": "Specifies the first entry of the query result (only if parameter startId is used).",
+						"example": "initial"
+					},
+					"nextId": {
+						"type": "string",
+						"description": "Specifies the next group ID (that is, the ID of the first group on the next page). For example `<group id>` or `<end>`. The `<end>` value indicates that the last group of the total number of group matching the query is returned  (only if parameter startId is used).",
+						"example": "2439"
+					},
+					"Resources": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/Group"
+						}
+					}
+				},
+				"type": "object"
+			},
+			"GroupMeta": {
+				"title": "Meta",
+				"required": ["resourceType", "created", "lastModified", "location", "version", "members.cnt"],
+				"properties": {
+					"resourceType": {
+						"type": "string",
+						"description": "The name of the resource type of the resource."
+					},
+					"created": {
+						"type": "string",
+						"format": "date-time",
+						"description": "The \"DateTime\" that the resource was added to the service provider. "
+					},
+					"lastModified": {
+						"type": "string",
+						"format": "date-time",
+						"description": "The most recent DateTime that the details of this resource were updated at the service provider."
+					},
+					"location": {
+						"type": "string",
+						"description": "The URI of the resource being returned."
+					},
+					"version": {
+						"type": "string",
+						"description": "The version of the resource being returned."
+					},
+					"members.nextId": {
+						"type": "string",
+						"description": "The id of the next member in group member list."
+					},
+					"members.cnt": {
+						"type": "integer",
+						"description": "The total member count of this group."
+					}
+				},
+				"type": "object"
+			},
+			"GroupSapExtendedAttributes": {
+				"title": "GroupSapExtendedAttributes",
+				"required": ["type", "supportedOperations"],
+				"properties": {
+					"type": {
+						"type": "string",
+						"description": "The type of this group. Current valid values: \n- \"userGroup\" - dynamic and static permission groups. \n- \"deepLinkActivationPermission\" - a specific activation permission. \n- \"embeddedAnalyticsAccessPermission\" - a specific story report access permission. \n- \"mobileAccessPermission\" - a specific mobile access permission."
+					},
+					"supportedOperations": {
+						"type": "string",
+						"description": "The update options of this group. Current valid values: \n- \"readOnly\" - The group can only be read. \n- \"readWrite\" - The group can be read and changed."
+					}
+				},
+				"type": "object"
+			}
+		},
+		"parameters": {},
+		"responses": {},
+		"securitySchemes": {
+			"BasicAuth": {
+				"type": "http",
+				"scheme": "basic"
+			},
+			"Certificate": {
+				"type": "http",
+				"scheme": "X.509"
+			}
+		}
+	}
+
+}

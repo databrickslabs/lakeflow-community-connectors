@@ -1,0 +1,479 @@
+{
+    "openapi": "3.0.2",
+    "info": {
+        "title": "Onboarding New Hire Journey",
+        "description": "You can use this API to primarily mass initiate onboarding for new hires and rehires on new employment. Additionally, you can use it to create an onboarding journey for external users by assigning relevant tasks and allow mass cancellation of onboarding processes.",
+        "version": "1.0.1"
+    },
+    "servers": [
+        {
+            "url": "https://{api-server}",
+            "description": "REST APIs for the SuccessFactors Data Centers",
+            "variables": {
+                "api-server": {
+                    "description": "SuccessFactors Data Center host",
+                    "default": "apisalesdemo2.successfactors.com"
+                }
+            }
+        },
+        {
+            "url":"https://sandbox.api.sap.com/successfactorsfoundation",
+            "description":"Sandbox URL"
+        }
+    ],
+    "tags": [
+        {
+            "name": "Journeys"
+        }
+    ],
+    "paths": {
+        "/onboarding/newhire/v1/journeys": {
+            "post": {
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/components/schemas/newHireCreateJourneyResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "403": {
+                        "description": "Forbidden"
+                    },
+                    "500": {
+                        "description": "Internal Server Error"
+                    }
+                },
+                "summary": "Mass Initiate Onboarding Journeys",
+                "description": "Resource to mass initiate onboarding journeys",
+                "tags": [
+                    "Journeys"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "x-insertable": true,
+                                "description": "Array of Onboarding Journey",
+                                "title": "Array of Onboarding Journey",
+                                "items": {
+                                    "$ref": "#/components/schemas/newHireCreateJourneyRequest"
+                                },
+                                "type": "array"
+                            }
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/components/schemas/newHireUpdateJourneyResponse"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "403": {
+                        "description": "Forbidden"
+                    },
+                    "500": {
+                        "description": "Internal Server Error"
+                    }
+                },
+                "summary": "Resource to mass cancel onboarding journeys",
+                "description": "Bulk operation to cancel onboarding journeys",
+                "tags": [
+                    "Journeys"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "x-insertable": true,
+                                "description": "Journeys to be updated",
+                                "title": "Journeys to be updated",
+                                "items": {
+                                    "$ref": "#/components/schemas/newHireUpdateJourneyRequest"
+                                },
+                                "type": "array"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/onboarding/newhire/v1/journeys/{journeyId}": {
+            "get": {
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "journeyId",
+                        "schema": {
+                            "type": "string"
+                        },
+                        "required": true,
+                        "description": "Journey Id"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/components/schemas/journeyDetails"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "403": {
+                        "description": "Forbidden"
+                    },
+                    "500": {
+                        "description": "Internal Server Error"
+                    }
+                },
+                "summary": "Get the Onboarding journey",
+                "description": "Get the Onboarding journey by journey id",
+                "tags": [
+                    "Journeys"
+                ]
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "journeyDetails": {
+                "title": "journeyDetails",
+                "description": "journey Details",
+                "properties": {
+                    "journeyId": {
+                        "x-key": true,
+                        "title": "Onboarding Journey Id for the Onboardee",
+                        "type": "string"
+                    },
+                    "status": {
+                        "example": "INITIATED",
+                        "title": "Status of the Journey",
+                        "type": "string"
+                    },
+                    "userId": {
+                        "title": "Onboarding user ID",
+                        "type": "string"
+                    },
+                    "startDate": {
+                        "title": "Start Date",
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "manager": {
+                        "title": "Manager user id",
+                        "type": "string"
+                    },
+                    "journeyType": {
+                        "title": "Type of Journey",
+                        "type": "string"
+                    },
+                    "journeySubType": {
+                        "title": "Sub type of journey",
+                        "type": "string"
+                    },
+                    "hireStatus": {
+                        "title": "Hire status of journey",
+                        "type": "string"
+                    },
+                    "userFullName": {
+                        "title": "Full name of new hire",
+                        "type": "string"
+                    },
+                    "managerFullName": {
+                        "title": "Full name of the manager",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "initiatorKeys": {
+                "title": "initiatorKeys",
+                "description": "journey Initiator Business Keys",
+                "properties": {
+                    "atsApplicationId": {
+                        "title": "Applicant Tracking System Requisition ID",
+                        "maxLength": 255,
+                        "type": "string",
+                        "format": "Plaintext",
+                        "pattern": "/^.*$/"
+                    }
+                },
+                "type": "object"
+            },
+            "newHireUpdateJourneyRequest": {
+                "title": "newHireUpdateJourneyRequest",
+                "description": "Patch a Journey",
+                "properties": {
+                    "journeyId": {
+                        "x-key": true,
+                        "title": "Id of the Onboarding Process Journey",
+                        "maxLength": 255,
+                        "type": "string"
+                    },
+                    "status": {
+                        "example": "CANCEL",
+                        "title": "Type of update operation. Only CANCEL is supported",
+                        "type": "string"
+                    },
+                    "cancelReason": {
+                        "example": "No Show",
+                        "title": "Reason for cancellation",
+                        "type": "string"
+                    },
+                    "cancelEventReason": {
+                        "example": "No Show Event Reason",
+                        "title": "Event Reason for cancellation",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "newHireUpdateJourneyResponse": {
+                "title": "newHireUpdateJourneyResponse",
+                "description": "Response",
+                "properties": {
+                    "id": {
+                        "x-key": true,
+                        "nullable": true,
+                        "title": "Journey Id",
+                        "maxLength": 255,
+                        "type": "string"
+                    },
+                    "updatedJourneyDetails": {
+                        "$ref": "#/components/schemas/newHireUpdateJourneyDetails"
+                    },
+                    "errors": {
+                        "nullable": true,
+                        "title": "Error Details",
+                        "type": "string",
+                        "format": "date"
+                    }
+                },
+                "type": "object"
+            },
+            "newHireCreateJourneyRequest": {
+                "title": "newHireCreateJourneyRequest",
+                "description": "Onboarding Journey payload",
+                "properties": {
+                    "firstName": {
+                        "title": "First Name of the new hire",
+                        "type": "string"
+                    },
+                    "lastName": {
+                        "title": "Last Name of the new hire",
+                        "type": "string"
+                    },
+                    "email": {
+                        "title": "Personal email of the new hire",
+                        "type": "string"
+                    },
+                    "userName": {
+                        "x-key": true,
+                        "title": "Preferred user name",
+                        "type": "string"
+                    },
+                    "startDate": {
+                        "example": "2025-03-01",
+                        "title": "Start date. This is a floating date with no time part",
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "manager": {
+                        "title": "Manager Id",
+                        "type": "string"
+                    },
+                    "company": {
+                        "title": "Company Id",
+                        "type": "string"
+                    },
+                    "eventReason": {
+                        "title": "Hire Event reason",
+                        "type": "string"
+                    },
+                    "status": {
+                        "title": "Journey status",
+                        "type": "string"
+                    },
+                    "userId": {
+                        "x-key": true,
+                        "title": "Preferred User Id",
+                        "type": "string"
+                    },
+                    "assignmentId": {
+                        "nullable": true,
+                        "title": "Assignment ID",
+                        "type": "string"
+                    },
+                    "personId": {
+                        "nullable": true,
+                        "title": "Person Id",
+                        "type": "string"
+                    },
+                    "journeyType": {
+                        "title": "Only ONBOARDING is supported",
+                        "type": "string"
+                    },
+                    "journeySubType": {
+                        "nullable": true,
+                        "title": "NewHire or RehireWithNewEmployment. Default is NewHire.",
+                        "type": "string"
+                    },
+                    "terminatedLegacyUserId": {
+                        "nullable": true,
+                        "title": "Terminated user id for Rehire case",
+                        "type": "string"
+                    },
+                    "initiatorKeys": {
+                        "$ref": "#/components/schemas/initiatorKeys"
+                    }
+                },
+                "type": "object"
+            },
+            "newHireUpdateJourneyDetails": {
+                "title": "newHireUpdateJourneyDetails",
+                "properties": {
+                    "journeyId": {
+                        "x-key": true,
+                        "type": "string"
+                    },
+                    "status": {
+                        "example": "CANCELLED",
+                        "title": "Status of update",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "newHireCreateJourneyResponse": {
+                "title": "newHireCreateJourneyResponse",
+                "properties": {
+                    "id": {
+                        "x-key": true,
+                        "nullable": true,
+                        "title": "Email Id",
+                        "type": "string"
+                    },
+                    "createJourneyDetails": {
+                        "$ref": "#/components/schemas/newHireCreateJourneyDetails"
+                    },
+                    "errors": {
+                        "nullable": true,
+                        "title": "Error Details",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "newHireCreateJourneyDetails": {
+                "title": "newHireCreateJourneyDetails",
+                "properties": {
+                    "journeyId": {
+                        "x-key": true,
+                        "title": "Journey Id",
+                        "type": "string"
+                    },
+                    "responseStatus": {
+                        "example": "INITIATED",
+                        "title": "Response status",
+                        "type": "string"
+                    },
+                    "userId": {
+                        "title": "User Id",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            }
+        },
+        "parameters": {},
+        "responses": {},
+        "securitySchemes": {
+            "BasicAuth": {
+                "type": "http",
+                "scheme": "basic"
+            }
+        }
+    },
+    "x-odata-version": "4.0",
+    "externalDocs": {
+        "description": "Mass Initiation of Onboarding API on SAP Help Portal",
+        "url": "https://help.sap.com/docs/successfactors-release-information/8974cf00008b4e209398478ca43bcba7/64b8f20a98f74118bf7cc8a0325e1d7f.html"
+    },
+    "x-sap-api-type": "REST",
+    "x-sap-shortText": "API for new hire journeys",
+    "x-servers": [
+        {
+            "url": "https://{api-server}/",
+            "description": "New hire journeys",
+            "templates": {
+                "api-server": {
+                    "description": "SuccessFactors Data Center host",
+                    "default": "apisalesdemo8.successfactors.com"
+                }
+            }
+        }
+    ],
+    "security": [
+        {
+            "BasicAuth": []
+        }
+    ]
+}

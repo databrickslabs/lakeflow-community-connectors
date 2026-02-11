@@ -1,0 +1,1300 @@
+{
+	"swagger": "2.0",
+	"security": [
+        {
+            "basicAuthentication": []
+        }
+    ],
+    "securityDefinitions": {
+        "basicAuthentication": {
+            "type": "basic"
+        }
+    },
+	"x-sap-shortText":"API to access Calibration data such as subject rank, feedback and rating.",
+	"x-servers": [{
+		"url": "https://{api-server}/odata/v2",
+		"description": "OData APIs for the SuccessFactors Data Centers",
+		"templates": {
+			"api-server": {
+				"description": "SuccessFactors Data Center host",
+				"default": "apisalesdemo8.successfactors.com"
+			}
+		}
+	}],
+	"info": {
+		"title": "Calibration",
+		"version": "1.0",
+		"description": "Use these APIs to view Calibration data such as subject rank, feedback, and rating.\n\n You can find your company's API server in [List of API Servers in SAP SuccessFactors.](https://help.sap.com/viewer/d599f15995d348a1b45ba5603e2aba9b/LATEST/en-US/af2b8d5437494b12be88fe374eba75b6.html)"
+	},
+	"externalDocs": {
+		"description": "Calibration APIs on SAP Help Portal",
+		"url": "https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/d599f15995d348a1b45ba5603e2aba9b/ddeacbd0ffc5442882b494cbda599eb1.html"
+	},
+	"schemes": ["https"],
+	"host": "sandbox.api.sap.com",
+	"basePath": "/successfactors/odata/v2",
+	"consumes": ["application/json"],
+	"produces": ["application/json"],
+	"tags": [{
+		"name": "Talent Ratings"
+	},
+	{
+		"name": "Calibration Session"
+	},
+	{
+		"name": "Calibration Session Subject"
+	},
+	{
+		"name": "Calibration Template"
+	},
+	{
+		"name": "Calibration Subject Rank"
+	}],
+	"definitions": {
+		"odata.error": {
+			"type": "object",
+			"required": ["error"],
+			"properties": {
+				"error": {
+					"$ref": "#/definitions/odata.error.main"
+				}
+			}
+		},
+		"odata.error.main": {
+			"type": "object",
+			"required": ["code",
+			"message"],
+			"properties": {
+				"code": {
+					"type": "string"
+				},
+				"message": {
+					"type": "string"
+				},
+				"target": {
+					"type": "string"
+				},
+				"details": {
+					"type": "array",
+					"items": {
+						"$ref": "#/definitions/odata.error.detail"
+					}
+				},
+				"innererror": {
+					"type": "object",
+					"description": "The structure of this object is service-specific"
+				}
+			}
+		},
+		"odata.error.detail": {
+			"type": "object",
+			"required": ["code",
+			"message"],
+			"properties": {
+				"code": {
+					"type": "string"
+				},
+				"message": {
+					"type": "string"
+				},
+				"target": {
+					"type": "string"
+				}
+			}
+		},
+		"SFOData.TalentRatings": {
+			"type": "object",
+			"properties": {
+				"employeeId": {
+					"type": ["string",
+					"null"]
+				},
+				"feedbackId": {
+					"type": "string",
+					"format": "int64"
+				},
+				"feedbackModule": {
+					"type": ["integer",
+					"null"],
+					"format": "int32"
+				},
+				"feedbackName": {
+					"type": ["string",
+					"null"]
+				},
+				"feedbackRating": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"feedbackRatingLabel": {
+					"type": ["string",
+					"null"]
+				},
+				"feedbackScaleId": {
+					"type": "string",
+					"format": "int64"
+				},
+				"feedbackScaleMaximum": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"feedbackScaleMinimum": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"feedbackSource": {
+					"type": ["integer",
+					"null"],
+					"format": "int32"
+				},
+				"feedbackType": {
+					"type": ["integer",
+					"null"],
+					"format": "int32"
+				},
+				"feedbackWeight": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"formContentId": {
+					"type": ["string",
+					"null"],
+					"format": "int64"
+				},
+				"formDataId": {
+					"type": ["string",
+					"null"],
+					"format": "int64"
+				},
+				"calSession": {
+					"$ref": "#/definitions/SFOData.CalibrationSession"
+				}
+			},
+			"title": "TalentRatings"
+		},
+		"SFOData.CalibrationSession": {
+			"type": "object",
+			"properties": {
+				"activationDate": {
+					"type": ["string",
+					"null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"lastModifiedBy": {
+					"type": "string"
+				},
+				"lastModifiedDateTime": {
+					"type": "string",
+					"example": "/Date(1492098664000)/"
+				},
+				"sessionDate": {
+					"type": ["string",
+					"null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"sessionId": {
+					"type": "string",
+					"format": "int64"
+				},
+				"sessionLocation": {
+					"type": ["string",
+					"null"]
+				},
+				"sessionName": {
+					"type": "string"
+				},
+				"status": {
+					"type": "integer",
+					"format": "int32"
+				},
+				"calTemplate": {
+					"$ref": "#/definitions/SFOData.CalibrationTemplate"
+				},
+				"subjectList": {
+					"title": "Related Collection(SFOData.CalibrationSessionSubject)",
+					"type": "object",
+					"properties": {
+						"results": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/SFOData.CalibrationSessionSubject"
+							}
+						}
+					}
+				}
+			},
+			"title": "CalibrationSession"
+		},
+		"SFOData.CalibrationSessionSubject": {
+			"type": "object",
+			"properties": {
+				"authorizedBy": {
+					"type": ["string",
+					"null"]
+				},
+				"calSessionId": {
+					"type": "string",
+					"format": "int64"
+				},
+				"calibratedFlag": {
+					"type": ["boolean",
+					"null"]
+				},
+				"comments": {
+					"type": ["string",
+					"null"]
+				},
+				"createdBy": {
+					"type": "string"
+				},
+				"createdDateTime": {
+					"type": "string",
+					"example": "/Date(1492098664000)/"
+				},
+				"externalComments": {
+					"type": ["string",
+					"null"]
+				},
+				"lastModifiedBy": {
+					"type": "string"
+				},
+				"lastModifiedDateTime": {
+					"type": "string",
+					"example": "/Date(1492098664000)/"
+				},
+				"pmFolderMapId": {
+					"type": ["string",
+					"null"],
+					"format": "int64"
+				},
+				"pmFormDataId": {
+					"type": ["string",
+					"null"],
+					"format": "int64"
+				},
+				"pmFormOwnerId": {
+					"type": ["string",
+					"null"]
+				},
+				"reason": {
+					"type": "string"
+				},
+				"reasonId": {
+					"type": ["string",
+					"null"],
+					"format": "int64"
+				},
+				"sessionSubjectId": {
+					"type": "string",
+					"format": "int64"
+				},
+				"status": {
+					"type": "integer",
+					"format": "int32"
+				},
+				"userId": {
+					"type": "string"
+				},
+				"calSession": {
+					"$ref": "#/definitions/SFOData.CalibrationSession"
+				},
+				"pmRatingList": {
+					"title": "Related Collection(SFOData.TalentRatings)",
+					"type": "object",
+					"properties": {
+						"results": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/SFOData.TalentRatings"
+							}
+						}
+					}
+				},
+				"rankList": {
+					"title": "Related Collection(SFOData.CalibrationSubjectRank)",
+					"type": "object",
+					"properties": {
+						"results": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/SFOData.CalibrationSubjectRank"
+							}
+						}
+					}
+				}
+			},
+			"title": "CalibrationSessionSubject"
+		},
+		"SFOData.CalibrationTemplate": {
+			"type": "object",
+			"properties": {
+				"createdBy": {
+					"type": "string"
+				},
+				"createdDateTime": {
+					"type": "string",
+					"example": "/Date(1492098664000)/"
+				},
+				"endDate": {
+					"type": "string",
+					"example": "/Date(1492098664000)/"
+				},
+				"lastModifiedBy": {
+					"type": "string"
+				},
+				"lastModifiedDateTime": {
+					"type": "string",
+					"example": "/Date(1492098664000)/"
+				},
+				"startDate": {
+					"type": "string",
+					"example": "/Date(1492098664000)/"
+				},
+				"status": {
+					"type": "integer",
+					"format": "int32"
+				},
+				"templateId": {
+					"type": "string",
+					"format": "int64"
+				},
+				"templateName": {
+					"type": "string"
+				}
+			},
+			"title": "CalibrationTemplate"
+		},
+		"SFOData.CalibrationSubjectRank": {
+			"type": "object",
+			"properties": {
+				"dataType": {
+					"type": "integer",
+					"format": "int32"
+				},
+				"rank": {
+					"type": "integer",
+					"format": "int32"
+				},
+				"ratingValue": {
+					"type": ["number",
+					"string"],
+					"format": "double",
+					"example": 3.14
+				},
+				"subjectRankId": {
+					"type": "string",
+					"format": "int64"
+				},
+				"calSessionSubject": {
+					"$ref": "#/definitions/SFOData.CalibrationSessionSubject"
+				}
+			},
+			"title": "CalibrationSubjectRank"
+		}
+	},
+	"paths": {
+		"/TalentRatings": {
+			"get": {
+				"summary": "Get entities from TalentRatings",
+				"tags": ["Talent Ratings"],
+				"parameters": [{
+					"$ref": "#/parameters/top"
+				},
+				{
+					"$ref": "#/parameters/skip"
+				},
+				{
+					"$ref": "#/parameters/search"
+				},
+				{
+					"$ref": "#/parameters/filter"
+				},
+				{
+					"$ref": "#/parameters/count"
+				},
+				{
+					"name": "$orderby",
+					"in": "query",
+					"description": "Order items by property values, see [OData Sorting](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374629)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["employeeId",
+						"employeeId desc",
+						"feedbackId",
+						"feedbackId desc",
+						"feedbackModule",
+						"feedbackModule desc",
+						"feedbackName",
+						"feedbackName desc",
+						"feedbackRating",
+						"feedbackRating desc",
+						"feedbackRatingLabel",
+						"feedbackRatingLabel desc",
+						"feedbackScaleId",
+						"feedbackScaleId desc",
+						"feedbackScaleMaximum",
+						"feedbackScaleMaximum desc",
+						"feedbackScaleMinimum",
+						"feedbackScaleMinimum desc",
+						"feedbackSource",
+						"feedbackSource desc",
+						"feedbackType",
+						"feedbackType desc",
+						"feedbackWeight",
+						"feedbackWeight desc",
+						"formContentId",
+						"formContentId desc",
+						"formDataId",
+						"formDataId desc"]
+					}
+				},
+				{
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374620)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["employeeId",
+						"feedbackId",
+						"feedbackModule",
+						"feedbackName",
+						"feedbackRating",
+						"feedbackRatingLabel",
+						"feedbackScaleId",
+						"feedbackScaleMaximum",
+						"feedbackScaleMinimum",
+						"feedbackSource",
+						"feedbackType",
+						"feedbackWeight",
+						"formContentId",
+						"formDataId"]
+					}
+				},
+				{
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374621)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*",
+						"calSession"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entities",
+						"schema": {
+							"type": "object",
+							"title": "Wrapper",
+							"properties": {
+								"d": {
+									"type": "object",
+									"title": "Collection of TalentRatings",
+									"properties": {
+										"results": {
+											"type": "array",
+											"items": {
+												"$ref": "#/definitions/SFOData.TalentRatings"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/TalentRatings({feedbackId})": {
+			"get": {
+				"summary": "Get entity from TalentRatings by key",
+				"tags": ["Talent Ratings"],
+				"parameters": [{
+					"name": "feedbackId",
+					"in": "path",
+					"required": true,
+					"description": "key: feedbackId",
+					"type": "integer",
+					"format": "int64"
+				},
+				{
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374620)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["employeeId",
+						"feedbackId",
+						"feedbackModule",
+						"feedbackName",
+						"feedbackRating",
+						"feedbackRatingLabel",
+						"feedbackScaleId",
+						"feedbackScaleMaximum",
+						"feedbackScaleMinimum",
+						"feedbackSource",
+						"feedbackType",
+						"feedbackWeight",
+						"formContentId",
+						"formDataId"]
+					}
+				},
+				{
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374621)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*",
+						"calSession"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entity",
+						"schema": {
+							"title": "TalentRatings",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.TalentRatings"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/CalibrationSession": {
+			"get": {
+				"summary": "Get entities from CalibrationSession",
+				"tags": ["Calibration Session"],
+				"parameters": [{
+					"$ref": "#/parameters/top"
+				},
+				{
+					"$ref": "#/parameters/skip"
+				},
+				{
+					"$ref": "#/parameters/search"
+				},
+				{
+					"$ref": "#/parameters/filter"
+				},
+				{
+					"$ref": "#/parameters/count"
+				},
+				{
+					"name": "$orderby",
+					"in": "query",
+					"description": "Order items by property values, see [OData Sorting](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374629)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["activationDate",
+						"activationDate desc",
+						"lastModifiedBy",
+						"lastModifiedBy desc",
+						"lastModifiedDateTime",
+						"lastModifiedDateTime desc",
+						"sessionDate",
+						"sessionDate desc",
+						"sessionId",
+						"sessionId desc",
+						"sessionLocation",
+						"sessionLocation desc",
+						"sessionName",
+						"sessionName desc",
+						"status",
+						"status desc"]
+					}
+				},
+				{
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374620)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["activationDate",
+						"lastModifiedBy",
+						"lastModifiedDateTime",
+						"sessionDate",
+						"sessionId",
+						"sessionLocation",
+						"sessionName",
+						"status"]
+					}
+				},
+				{
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374621)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*",
+						"calTemplate",
+						"subjectList"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entities",
+						"schema": {
+							"type": "object",
+							"title": "Wrapper",
+							"properties": {
+								"d": {
+									"type": "object",
+									"title": "Collection of CalibrationSession",
+									"properties": {
+										"results": {
+											"type": "array",
+											"items": {
+												"$ref": "#/definitions/SFOData.CalibrationSession"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/CalibrationSession({sessionId})": {
+			"get": {
+				"summary": "Get entity from CalibrationSession by key",
+				"tags": ["Calibration Session"],
+				"parameters": [{
+					"name": "sessionId",
+					"in": "path",
+					"required": true,
+					"description": "key: sessionId",
+					"type": "integer",
+					"format": "int64"
+				},
+				{
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374620)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["activationDate",
+						"lastModifiedBy",
+						"lastModifiedDateTime",
+						"sessionDate",
+						"sessionId",
+						"sessionLocation",
+						"sessionName",
+						"status"]
+					}
+				},
+				{
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374621)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*",
+						"calTemplate",
+						"subjectList"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entity",
+						"schema": {
+							"title": "CalibrationSession",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.CalibrationSession"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/CalibrationSessionSubject": {
+			"get": {
+				"summary": "Get entities from CalibrationSessionSubject",
+				"tags": ["Calibration Session Subject"],
+				"parameters": [{
+					"$ref": "#/parameters/top"
+				},
+				{
+					"$ref": "#/parameters/skip"
+				},
+				{
+					"$ref": "#/parameters/search"
+				},
+				{
+					"$ref": "#/parameters/filter"
+				},
+				{
+					"$ref": "#/parameters/count"
+				},
+				{
+					"name": "$orderby",
+					"in": "query",
+					"description": "Order items by property values, see [OData Sorting](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374629)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["authorizedBy",
+						"authorizedBy desc",
+						"calSessionId",
+						"calSessionId desc",
+						"calibratedFlag",
+						"calibratedFlag desc",
+						"comments",
+						"comments desc",
+						"createdBy",
+						"createdBy desc",
+						"createdDateTime",
+						"createdDateTime desc",
+						"externalComments",
+						"externalComments desc",
+						"lastModifiedBy",
+						"lastModifiedBy desc",
+						"lastModifiedDateTime",
+						"lastModifiedDateTime desc",
+						"pmFolderMapId",
+						"pmFolderMapId desc",
+						"pmFormDataId",
+						"pmFormDataId desc",
+						"pmFormOwnerId",
+						"pmFormOwnerId desc",
+						"reason",
+						"reason desc",
+						"reasonId",
+						"reasonId desc",
+						"sessionSubjectId",
+						"sessionSubjectId desc",
+						"status",
+						"status desc",
+						"userId",
+						"userId desc"]
+					}
+				},
+				{
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374620)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["authorizedBy",
+						"calSessionId",
+						"calibratedFlag",
+						"comments",
+						"createdBy",
+						"createdDateTime",
+						"externalComments",
+						"lastModifiedBy",
+						"lastModifiedDateTime",
+						"pmFolderMapId",
+						"pmFormDataId",
+						"pmFormOwnerId",
+						"reason",
+						"reasonId",
+						"sessionSubjectId",
+						"status",
+						"userId"]
+					}
+				},
+				{
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374621)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*",
+						"calSession",
+						"pmRatingList",
+						"rankList"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entities",
+						"schema": {
+							"type": "object",
+							"title": "Wrapper",
+							"properties": {
+								"d": {
+									"type": "object",
+									"title": "Collection of CalibrationSessionSubject",
+									"properties": {
+										"results": {
+											"type": "array",
+											"items": {
+												"$ref": "#/definitions/SFOData.CalibrationSessionSubject"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/CalibrationSessionSubject({sessionSubjectId})": {
+			"get": {
+				"summary": "Get entity from CalibrationSessionSubject by key",
+				"tags": ["Calibration Session Subject"],
+				"parameters": [{
+					"name": "sessionSubjectId",
+					"in": "path",
+					"required": true,
+					"description": "key: sessionSubjectId",
+					"type": "integer",
+					"format": "int64"
+				},
+				{
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374620)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["authorizedBy",
+						"calSessionId",
+						"calibratedFlag",
+						"comments",
+						"createdBy",
+						"createdDateTime",
+						"externalComments",
+						"lastModifiedBy",
+						"lastModifiedDateTime",
+						"pmFolderMapId",
+						"pmFormDataId",
+						"pmFormOwnerId",
+						"reason",
+						"reasonId",
+						"sessionSubjectId",
+						"status",
+						"userId"]
+					}
+				},
+				{
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374621)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*",
+						"calSession",
+						"pmRatingList",
+						"rankList"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entity",
+						"schema": {
+							"title": "CalibrationSessionSubject",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.CalibrationSessionSubject"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/CalibrationTemplate": {
+			"get": {
+				"summary": "Get entities from CalibrationTemplate",
+				"tags": ["Calibration Template"],
+				"parameters": [{
+					"$ref": "#/parameters/top"
+				},
+				{
+					"$ref": "#/parameters/skip"
+				},
+				{
+					"$ref": "#/parameters/search"
+				},
+				{
+					"$ref": "#/parameters/filter"
+				},
+				{
+					"$ref": "#/parameters/count"
+				},
+				{
+					"name": "$orderby",
+					"in": "query",
+					"description": "Order items by property values, see [OData Sorting](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374629)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["createdBy",
+						"createdBy desc",
+						"createdDateTime",
+						"createdDateTime desc",
+						"endDate",
+						"endDate desc",
+						"lastModifiedBy",
+						"lastModifiedBy desc",
+						"lastModifiedDateTime",
+						"lastModifiedDateTime desc",
+						"startDate",
+						"startDate desc",
+						"status",
+						"status desc",
+						"templateId",
+						"templateId desc",
+						"templateName",
+						"templateName desc"]
+					}
+				},
+				{
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374620)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["createdBy",
+						"createdDateTime",
+						"endDate",
+						"lastModifiedBy",
+						"lastModifiedDateTime",
+						"startDate",
+						"status",
+						"templateId",
+						"templateName"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entities",
+						"schema": {
+							"type": "object",
+							"title": "Wrapper",
+							"properties": {
+								"d": {
+									"type": "object",
+									"title": "Collection of CalibrationTemplate",
+									"properties": {
+										"results": {
+											"type": "array",
+											"items": {
+												"$ref": "#/definitions/SFOData.CalibrationTemplate"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/CalibrationTemplate({templateId})": {
+			"get": {
+				"summary": "Get entity from CalibrationTemplate by key",
+				"tags": ["Calibration Template"],
+				"parameters": [{
+					"name": "templateId",
+					"in": "path",
+					"required": true,
+					"description": "key: templateId",
+					"type": "integer",
+					"format": "int64"
+				},
+				{
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374620)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["createdBy",
+						"createdDateTime",
+						"endDate",
+						"lastModifiedBy",
+						"lastModifiedDateTime",
+						"startDate",
+						"status",
+						"templateId",
+						"templateName"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entity",
+						"schema": {
+							"title": "CalibrationTemplate",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.CalibrationTemplate"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/CalibrationSubjectRank": {
+			"get": {
+				"summary": "Get entities from CalibrationSubjectRank",
+				"tags": ["Calibration Subject Rank"],
+				"parameters": [{
+					"$ref": "#/parameters/top"
+				},
+				{
+					"$ref": "#/parameters/skip"
+				},
+				{
+					"$ref": "#/parameters/search"
+				},
+				{
+					"$ref": "#/parameters/filter"
+				},
+				{
+					"$ref": "#/parameters/count"
+				},
+				{
+					"name": "$orderby",
+					"in": "query",
+					"description": "Order items by property values, see [OData Sorting](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374629)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["dataType",
+						"dataType desc",
+						"rank",
+						"rank desc",
+						"ratingValue",
+						"ratingValue desc",
+						"subjectRankId",
+						"subjectRankId desc"]
+					}
+				},
+				{
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374620)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["dataType",
+						"rank",
+						"ratingValue",
+						"subjectRankId"]
+					}
+				},
+				{
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374621)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*",
+						"calSessionSubject"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entities",
+						"schema": {
+							"type": "object",
+							"title": "Wrapper",
+							"properties": {
+								"d": {
+									"type": "object",
+									"title": "Collection of CalibrationSubjectRank",
+									"properties": {
+										"results": {
+											"type": "array",
+											"items": {
+												"$ref": "#/definitions/SFOData.CalibrationSubjectRank"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/CalibrationSubjectRank({subjectRankId})": {
+			"get": {
+				"summary": "Get entity from CalibrationSubjectRank by key",
+				"tags": ["Calibration Subject Rank"],
+				"parameters": [{
+					"name": "subjectRankId",
+					"in": "path",
+					"required": true,
+					"description": "key: subjectRankId",
+					"type": "integer",
+					"format": "int64"
+				},
+				{
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374620)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["dataType",
+						"rank",
+						"ratingValue",
+						"subjectRankId"]
+					}
+				},
+				{
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374621)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*",
+						"calSessionSubject"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entity",
+						"schema": {
+							"title": "CalibrationSubjectRank",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.CalibrationSubjectRank"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		}
+	},
+	"parameters": {
+		"top": {
+			"name": "$top",
+			"in": "query",
+			"description": "Show only the first n items, see [OData Paging - Top](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374630)",
+			"type": "integer",
+			"default":20
+		},
+		"skip": {
+			"name": "$skip",
+			"in": "query",
+			"description": "Skip the first n items, see [OData Paging - Skip](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374631)",
+			"type": "integer"
+		},
+		"count": {
+			"name": "$count",
+			"in": "query",
+			"description": "Include count of items, see [OData Count](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374632)",
+			"type": "boolean"
+		},
+		"filter": {
+			"name": "$filter",
+			"in": "query",
+			"description": "Filter items by property values, see [OData Filtering](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374625)",
+			"type": "string"
+		},
+		"search": {
+			"name": "$search",
+			"in": "query",
+			"description": "Search items by search phrases, see [OData Searching](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374633)",
+			"type": "string"
+		}
+	},
+	"responses": {
+		"error": {
+			"description": "Error",
+			"schema": {
+				"$ref": "#/definitions/odata.error"
+			}
+		}
+	}
+}

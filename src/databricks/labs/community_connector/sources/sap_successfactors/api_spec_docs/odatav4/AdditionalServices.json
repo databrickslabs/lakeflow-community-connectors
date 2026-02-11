@@ -1,0 +1,339 @@
+{
+	"openapi": "3.0.0",
+	"info": {
+		"title": "Additional Services",
+		"version": "",
+		"description": "AdditionalServices allows you to fetch or update the internal username of the new hires after the hiring process is completed."
+	},
+	"x-odata-version": "4.0",
+	"externalDocs": {
+		"description": "Additional Services on SAP Help Portal",
+		"url": "https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/9f5f060351034d98990213d077dab38a/8146c98118814cd486feec7b5b60d367.html"
+	},
+	"servers": [
+		{
+			"url": "https://{api-server}/odatav4/onboarding/AdditionalServices.svc/v1/",
+			"description": "Production Url",
+			"variables": {
+				"api-server": {
+					"default": "apisalesdemo8.successfactors.com"
+				}
+			}
+		},
+		{
+			"url":"https://sandbox.api.sap.com/successfactorsfoundation/odatav4/onboarding/AdditionalServices.svc/v1/",
+			"description":"Sandbox URL"
+		}
+	],
+	"x-sap-api-type": "ODATAV4",
+	"x-sap-shortText": "Service to fetch or update the internal username of the new hires after completing the hiring process.",
+	"x-servers": [{
+		"url": "https://{api-server}/odatav4",
+		"description": "OData APIs for the SuccessFactors Data Centers",
+		"templates": {
+			"api-server": {
+				"description": "SuccessFactors Data Center host",
+				"default": "apisalesdemo8.successfactors.com"
+			}
+		}
+	}],
+	"security": [{
+		"BasicAuth": []
+	}],
+	"paths": {
+		"/updateUserNamePostHiring": {
+			"post": {
+				"summary": "API for updating the username of the onboarding new hire.",
+				"description": "This API allows you to update the internal username of new hires with the username that is generated.",
+				"tags": ["Service Operations (Unbound Actions/Functions)"],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {
+									"userId": {
+										"type": "string",
+										"nullable": true
+									},
+									"userName": {
+										"type": "string",
+										"nullable": true
+									}
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "string",
+									"nullable": true
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/error"
+									}]
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "No Permission to invoke this API",
+						"content": {
+							"application/json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/forbiddenError"
+									}]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/getUserNameOfNewlyHiredEmployee(userId='{userId}')": {
+			"get": {
+				"parameters": [{
+					"name": "userId",
+					"in": "path",
+					"required": true,
+					"schema": {
+						"type": "string",
+						"nullable": true
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"nullable": true,
+									"type": "string"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/error"
+									}]
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "No Permission to invoke this API",
+						"content": {
+							"application/json": {
+								"schema": {
+									"allOf": [{
+										"$ref": "#/components/schemas/forbiddenError"
+									}]
+								}
+							}
+						}
+					}
+				},
+				"summary": "API for fetching the username of the  onboarding new hire (from Manage Pending Hire page).",
+				"description": "This API allows you to get the username of the onboarding new hire, after the new hire has gone through the Manage Pending Hires process. This is applicable to the newly hired employees whose joining date is in the future.",
+				"x-action": false,
+				"x-function": false,
+				"tags": ["Service Operations (Unbound Actions/Functions)"]
+			}
+		},
+		"/$batch": {
+			"post": {
+				"summary": "Send a group of requests",
+				"description": "Group multiple requests into a single request payload, see [Batch Requests](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_BatchRequests).\n\n*Please note that \"Try it out\" is not supported for this request.*",
+				"tags": ["Batch Requests"],
+				"requestBody": {
+					"required": true,
+					"description": "Batch request",
+					"content": {
+						"multipart/mixed;boundary=request-separator": {
+							"schema": {
+								"type": "string"
+							},
+							"example": "--request-separator\nContent-Type: application/http\nContent-Transfer-Encoding: binary\n\nGET  HTTP/1.1\nAccept: application/json\n\n\n--request-separator--"
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Batch response",
+						"content": {
+							"multipart/mixed": {
+								"schema": {
+									"type": "string"
+								},
+								"example": "--response-separator\nContent-Type: application/http\n\nHTTP/1.1 200 OK\nContent-Type: application/json\n\n{...}\n--response-separator--"
+							}
+						}
+					},
+					"4XX": {
+						"$ref": "#/components/responses/error"
+					}
+				}
+			}
+		}
+	},
+	"components": {
+		"schemas": {
+			"count": {
+				"anyOf": [{
+					"type": "number"
+				}, {
+					"type": "string"
+				}],
+				"description": "The number of entities in the collection. Available when using the [$count](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptioncount) query option."
+			},
+			"error": {
+				"type": "object",
+				"required": ["error"],
+				"properties": {
+					"error": {
+						"type": "object",
+						"required": ["code", "message"],
+						"properties": {
+							"code": {
+								"type": "string",
+								"example": "NotFound"
+							},
+							"message": {
+								"type": "string",
+								"example": "The request couldn't be completed because the user doesn't have a valid Onboarding process."
+							},
+							"details": {
+								"type": "array",
+								"items": {
+									"type": "object",
+									"required": ["code", "message"],
+									"properties": {
+										"code": {
+											"type": "string",
+											"example": "COE0007"
+										},
+										"message": {
+											"type": "string",
+											"example": "The request couldn't be completed because the user doesn't have a valid Onboarding process."
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"forbiddenError": {
+				"type": "object",
+				"required": ["forbiddenError"],
+				"properties": {
+					"error": {
+						"type": "object",
+						"required": ["code", "message"],
+						"properties": {
+							"code": {
+								"type": "string",
+								"example": "NotFound"
+							},
+							"message": {
+								"type": "string",
+								"example": "You do not have permission for invoking this API. Contact your system administrator to get the necessary permission."
+							},
+							"details": {
+								"type": "array",
+								"items": {
+									"type": "object",
+									"required": ["code", "message"],
+									"properties": {
+										"code": {
+											"type": "string",
+											"example": "COE0001"
+										},
+										"message": {
+											"type": "string",
+											"example": "You do not have permission for invoking this API. Contact your system administrator to get the necessary permission."
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"parameters": {
+			"top": {
+				"name": "$top",
+				"in": "query",
+				"description": "Show only the first n items, see [Paging - Top](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptiontop)",
+				"schema": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"example": 50
+			},
+			"skip": {
+				"name": "$skip",
+				"in": "query",
+				"description": "Skip the first n items, see [Paging - Skip](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionskip)",
+				"schema": {
+					"type": "integer",
+					"minimum": 0
+				}
+			},
+			"count": {
+				"name": "$count",
+				"in": "query",
+				"description": "Include count of items, see [Count](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptioncount)",
+				"schema": {
+					"type": "boolean"
+				}
+			},
+			"search": {
+				"name": "$search",
+				"in": "query",
+				"description": "Search items by search phrases, see [Searching](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionsearch)",
+				"schema": {
+					"type": "string"
+				}
+			}
+		},
+		"responses": {
+			"error": {
+				"description": "Error",
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/error"
+						}
+					}
+				}
+			}
+		},
+		"securitySchemes": {
+			"BasicAuth": {
+				"type": "http",
+				"scheme": "basic"
+			}
+		}
+	}
+}

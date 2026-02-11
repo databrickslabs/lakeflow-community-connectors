@@ -1,0 +1,1413 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "Calibration Session",
+        "version": "",
+        "description": "The service Calibration Session allows you to get and update information of sessions and of a single subject or multiple subjects. You can find your company's API server in [List of API Servers in SAP SuccessFactors](https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/bdf1755a26754ab5a1c59e237d0e54f3/af2b8d5437494b12be88fe374eba75b6.html?locale=en-US)."
+    },
+    "x-odata-version": "4.0",
+    "servers": [
+    {
+      "url": "https://{api-server}/odatav4/talent/calibration/CalSession.svc/v1",
+      "description": "Production Url",
+      "variables": {
+        "api-server": {
+          "default": "apisalesdemo8.successfactors.com"
+        }
+      }
+    }],
+    "tags": [{
+        "name": "Calibration Session"
+    }],
+    "paths": {
+        "/CalibrationSession": {
+            "get": {
+                "parameters": [{
+                    "$ref": "#/components/parameters/top"
+                }, {
+                    "$ref": "#/components/parameters/skip"
+                }, {
+                    "$ref": "#/components/parameters/search"
+                }, {
+                    "name": "$filter",
+                    "in": "query",
+                    "description": "Filter items by property values, see [Filtering](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionfilter)",
+                    "schema": {
+                        "type": "string"
+                    }
+                }, {
+                    "$ref": "#/components/parameters/count"
+                }, {
+                    "name": "$orderby",
+                    "in": "query",
+                    "description": "Order items by property values, see [Sorting](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionorderby)",
+                    "explode": false,
+                    "schema": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": ["activationDate", "activationDate desc", "approvalDateTime", "approvalDateTime desc", "createdByWorkAssignmentLegacyId", "createdByWorkAssignmentLegacyId desc", "id", "id desc", "lastModifiedDateTime", "lastModifiedDateTime desc", "sessionDate", "sessionDate desc", "sessionLocation", "sessionLocation desc", "sessionName", "sessionName desc", "status", "status desc"]
+                        }
+                    }
+                }, {
+                    "name": "$select",
+                    "in": "query",
+                    "description": "Select properties to be returned, see [Select](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionselect)",
+                    "explode": false,
+                    "schema": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": ["activationDate", "approvalDateTime", "createdByWorkAssignmentLegacyId", "id", "lastModifiedDateTime", "sessionDate", "sessionLocation", "sessionName", "status"]
+                        }
+                    }
+                }, {
+                    "name": "$expand",
+                    "in": "query",
+                    "description": "Expand related entities, see [Expand](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionexpand)",
+                    "explode": false,
+                    "schema": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": ["*", "executiveReviewerList", "reviewerList", "subjectList"]
+                        }
+                    }
+                }],
+                "responses": {
+                    "200": {
+                        "description": "Retrieved entities",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/components/schemas/CalSession.svc.CalibrationSession"
+                                            }
+                                        },
+                                        "@odata.count": {
+                                            "$ref": "#/components/schemas/count"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "summary": "Get entities from calibration session",
+                "description": "Query all the calibration sessions that a user can access.",
+                "x-action": false,
+                "x-function": false,
+                "tags": ["Calibration Session"]
+            }
+        },
+        "/CalibrationSession({id})": {
+            "parameters": [{
+                "name": "id",
+                "in": "path",
+                "required": true,
+                "description": "key: id",
+                "schema": {
+                    "anyOf": [{
+                        "type": "integer"
+                    }, {
+                        "type": "string"
+                    }],
+                    "format": "int64",
+                    "example": "42"
+                }
+            }],
+            "get": {
+                "parameters": [{
+                    "name": "$select",
+                    "in": "query",
+                    "description": "Select properties to be returned, see [Select](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionselect)",
+                    "explode": false,
+                    "schema": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": ["activationDate", "approvalDateTime", "createdByWorkAssignmentLegacyId", "id", "lastModifiedDateTime", "sessionDate", "sessionLocation", "sessionName", "status"]
+                        }
+                    }
+                }, {
+                    "name": "$expand",
+                    "in": "query",
+                    "description": "Expand related entities, see [Expand](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionexpand)",
+                    "explode": false,
+                    "schema": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": ["*", "executiveReviewerList", "reviewerList", "subjectList"]
+                        }
+                    }
+                }],
+                "responses": {
+                    "200": {
+                        "description": "CalibrationSession",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "title": "CalibrationSession",
+                                    "allOf": [{
+                                        "$ref": "#/components/schemas/CalSession.svc.CalibrationSession"
+                                    }]
+                                }
+                            }
+                        }
+                    }
+                },
+                "summary": "Get entity from calibration session by key",
+                "description": "Query one calibration session.",
+                "x-action": false,
+                "x-function": false,
+                "tags": ["Calibration Session"]
+            }
+        },
+        "/CalibrationSession({id})/CalSession.svc.approveSession": {
+            "post": {
+                "parameters": [{
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "description": "key: id",
+                    "schema": {
+                        "anyOf": [{
+                            "type": "integer"
+                        }, {
+                            "type": "string"
+                        }],
+                        "format": "int64",
+                        "example": "42"
+                    }
+                }],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "nullable": true,
+                                    "allOf": [{
+                                        "$ref": "#/components/schemas/CalSession.svc.ApproveSessionResponse"
+                                    }]
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden"
+                    },
+                    "404": {
+                        "description": "Not Found"
+                    }
+                },
+                "summary": "Invoke action approveSession",
+                "description": "Finalize calibration session.",
+                "x-action": true,
+                "x-function": false,
+                "tags": ["Calibration Session"]
+            }
+        },
+        "/CalibrationSession({id})/executiveReviewerList": {
+            "parameters": [{
+                "name": "id",
+                "in": "path",
+                "required": true,
+                "description": "key: id",
+                "schema": {
+                    "anyOf": [{
+                        "type": "integer"
+                    }, {
+                        "type": "string"
+                    }],
+                    "format": "int64",
+                    "example": "42"
+                }
+            }],
+            "get": {
+                "parameters": [{
+                    "$ref": "#/components/parameters/top"
+                }, {
+                    "$ref": "#/components/parameters/skip"
+                }, {
+                    "$ref": "#/components/parameters/search"
+                }, {
+                    "name": "$filter",
+                    "in": "query",
+                    "description": "Filter items by property values, see [Filtering](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionfilter)",
+                    "schema": {
+                        "type": "string"
+                    }
+                }, {
+                    "$ref": "#/components/parameters/count"
+                }, {
+                    "name": "$orderby",
+                    "in": "query",
+                    "description": "Order items by property values, see [Sorting](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionorderby)",
+                    "explode": false,
+                    "schema": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": ["id", "id desc", "workAssignmentLegacyId", "workAssignmentLegacyId desc"]
+                        }
+                    }
+                }, {
+                    "name": "$select",
+                    "in": "query",
+                    "description": "Select properties to be returned, see [Select](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionselect)",
+                    "explode": false,
+                    "schema": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": ["id", "workAssignmentLegacyId"]
+                        }
+                    }
+                }],
+                "responses": {
+                    "200": {
+                        "description": "Retrieved entities",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/components/schemas/CalSession.svc.CalibrationExecutiveReviewer"
+                                            }
+                                        },
+                                        "@odata.count": {
+                                            "$ref": "#/components/schemas/count"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "summary": "Get entities from related executive reviewer list",
+                "description": "Query all executive reviewers of the calibration session.",
+                "x-action": false,
+                "x-function": false,
+                "tags": ["Calibration Session"]
+            }
+        },
+        "/CalibrationSession({id})/executiveReviewerList({id-1})": {
+            "parameters": [{
+                "name": "id",
+                "in": "path",
+                "required": true,
+                "description": "key: id",
+                "schema": {
+                    "anyOf": [{
+                        "type": "integer"
+                    }, {
+                        "type": "string"
+                    }],
+                    "format": "int64",
+                    "example": "42"
+                }
+            }, {
+                "name": "id-1",
+                "in": "path",
+                "required": true,
+                "description": "key: id",
+                "schema": {
+                    "anyOf": [{
+                        "type": "integer"
+                    }, {
+                        "type": "string"
+                    }],
+                    "format": "int64",
+                    "example": "42"
+                }
+            }],
+            "get": {
+                "parameters": [{
+                    "name": "$select",
+                    "in": "query",
+                    "description": "Select properties to be returned, see [Select](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionselect)",
+                    "explode": false,
+                    "schema": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": ["id", "workAssignmentLegacyId"]
+                        }
+                    }
+                }],
+                "responses": {
+                    "200": {
+                        "description": "CalibrationExecutiveReviewer",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "title": "CalibrationExecutiveReviewer",
+                                    "allOf": [{
+                                        "$ref": "#/components/schemas/CalSession.svc.CalibrationExecutiveReviewer"
+                                    }]
+                                }
+                            }
+                        }
+                    }
+                },
+                "summary": "Get entity from related executive reviewer list by key",
+                "description": "Query one executive reviewer of the calibration session.",
+                "x-action": false,
+                "x-function": false,
+                "tags": ["Calibration Session"]
+            }
+        },
+        "/CalibrationSession({id})/reviewerList": {
+            "parameters": [{
+                "name": "id",
+                "in": "path",
+                "required": true,
+                "description": "key: id",
+                "schema": {
+                    "anyOf": [{
+                        "type": "integer"
+                    }, {
+                        "type": "string"
+                    }],
+                    "format": "int64",
+                    "example": "42"
+                }
+            }],
+            "get": {
+                "parameters": [{
+                    "$ref": "#/components/parameters/top"
+                }, {
+                    "$ref": "#/components/parameters/skip"
+                }, {
+                    "$ref": "#/components/parameters/search"
+                }, {
+                    "name": "$filter",
+                    "in": "query",
+                    "description": "Filter items by property values, see [Filtering](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionfilter)",
+                    "schema": {
+                        "type": "string"
+                    }
+                }, {
+                    "$ref": "#/components/parameters/count"
+                }, {
+                    "name": "$orderby",
+                    "in": "query",
+                    "description": "Order items by property values, see [Sorting](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionorderby)",
+                    "explode": false,
+                    "schema": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": ["id", "id desc", "reviewerType", "reviewerType desc", "workAssignmentLegacyId", "workAssignmentLegacyId desc"]
+                        }
+                    }
+                }, {
+                    "name": "$select",
+                    "in": "query",
+                    "description": "Select properties to be returned, see [Select](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionselect)",
+                    "explode": false,
+                    "schema": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": ["id", "reviewerType", "workAssignmentLegacyId"]
+                        }
+                    }
+                }],
+                "responses": {
+                    "200": {
+                        "description": "Retrieved entities",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/components/schemas/CalSession.svc.CalibrationSessionReviewer"
+                                            }
+                                        },
+                                        "@odata.count": {
+                                            "$ref": "#/components/schemas/count"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "summary": "Get entities from related reviewer list",
+                "description": "Query all reviewers of the calibration session, including facilitators, participants, owners.",
+                "x-action": false,
+                "x-function": false,
+                "tags": ["Calibration Session"]
+            }
+        },
+        "/CalibrationSession({id})/reviewerList({id-1})": {
+            "parameters": [{
+                "name": "id",
+                "in": "path",
+                "required": true,
+                "description": "key: id",
+                "schema": {
+                    "anyOf": [{
+                        "type": "integer"
+                    }, {
+                        "type": "string"
+                    }],
+                    "format": "int64",
+                    "example": "42"
+                }
+            }, {
+                "name": "id-1",
+                "in": "path",
+                "required": true,
+                "description": "key: id",
+                "schema": {
+                    "anyOf": [{
+                        "type": "integer"
+                    }, {
+                        "type": "string"
+                    }],
+                    "format": "int64",
+                    "example": "42"
+                }
+            }],
+            "get": {
+                "parameters": [{
+                    "name": "$select",
+                    "in": "query",
+                    "description": "Select properties to be returned, see [Select](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionselect)",
+                    "explode": false,
+                    "schema": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": ["id", "reviewerType", "workAssignmentLegacyId"]
+                        }
+                    }
+                }],
+                "responses": {
+                    "200": {
+                        "description": "CalibrationSessionReviewer",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "title": "CalibrationSessionReviewer",
+                                    "allOf": [{
+                                        "$ref": "#/components/schemas/CalSession.svc.CalibrationSessionReviewer"
+                                    }]
+                                }
+                            }
+                        }
+                    }
+                },
+                "summary": "Get entity from related reviewer list by key",
+                "description": "Query one reviewer of the calibration session.",
+                "x-action": false,
+                "x-function": false,
+                "tags": ["Calibration Session"]
+            }
+        },
+        "/CalibrationSession({id})/subjectList": {
+            "parameters": [{
+                "name": "id",
+                "in": "path",
+                "required": true,
+                "description": "key: id",
+                "schema": {
+                    "anyOf": [{
+                        "type": "integer"
+                    }, {
+                        "type": "string"
+                    }],
+                    "format": "int64",
+                    "example": "42"
+                }
+            }],
+            "get": {
+                "parameters": [{
+                    "$ref": "#/components/parameters/top"
+                }, {
+                    "$ref": "#/components/parameters/skip"
+                }, {
+                    "$ref": "#/components/parameters/search"
+                }, {
+                    "name": "$filter",
+                    "in": "query",
+                    "description": "Filter items by property values, see [Filtering](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionfilter)",
+                    "schema": {
+                        "type": "string"
+                    }
+                }, {
+                    "$ref": "#/components/parameters/count"
+                }, {
+                    "name": "$orderby",
+                    "in": "query",
+                    "description": "Order items by property values, see [Sorting](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionorderby)",
+                    "explode": false,
+                    "schema": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": ["calibrated", "calibrated desc", "id", "id desc", "pmFormDataId", "pmFormDataId desc", "pmuDeeplink", "pmuDeeplink desc", "workAssignmentLegacyId", "workAssignmentLegacyId desc"]
+                        }
+                    }
+                }, {
+                    "name": "$select",
+                    "in": "query",
+                    "description": "Select properties to be returned, see [Select](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionselect)",
+                    "explode": false,
+                    "schema": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": ["calibrated", "id", "pmFormDataId", "pmuDeeplink", "workAssignmentLegacyId"]
+                        }
+                    }
+                }, {
+                    "name": "$expand",
+                    "in": "query",
+                    "description": "Expand related entities, see [Expand](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionexpand)",
+                    "explode": false,
+                    "schema": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": ["*", "commentList", "competencyRatingList", "ratingList"]
+                        }
+                    }
+                }],
+                "responses": {
+                    "200": {
+                        "description": "Retrieved entities",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/components/schemas/CalSession.svc.CalibrationSubject"
+                                            }
+                                        },
+                                        "@odata.count": {
+                                            "$ref": "#/components/schemas/count"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "summary": "Get entities from related subject list",
+                "description": "Query all subjects of the calibration session.",
+                "x-action": false,
+                "x-function": false,
+                "tags": ["Calibration Session"]
+            }
+        },
+        "/CalibrationSession({id})/subjectList({id-1})": {
+            "parameters": [{
+                "name": "id",
+                "in": "path",
+                "required": true,
+                "description": "key: id",
+                "schema": {
+                    "anyOf": [{
+                        "type": "integer"
+                    }, {
+                        "type": "string"
+                    }],
+                    "format": "int64",
+                    "example": "42"
+                }
+            }, {
+                "name": "id-1",
+                "in": "path",
+                "required": true,
+                "description": "key: id",
+                "schema": {
+                    "anyOf": [{
+                        "type": "integer"
+                    }, {
+                        "type": "string"
+                    }],
+                    "format": "int64",
+                    "example": "42"
+                }
+            }],
+            "get": {
+                "parameters": [{
+                    "name": "$select",
+                    "in": "query",
+                    "description": "Select properties to be returned, see [Select](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionselect)",
+                    "explode": false,
+                    "schema": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": ["calibrated", "id", "pmFormDataId", "pmuDeeplink", "workAssignmentLegacyId"]
+                        }
+                    }
+                }, {
+                    "name": "$expand",
+                    "in": "query",
+                    "description": "Expand related entities, see [Expand](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionexpand)",
+                    "explode": false,
+                    "schema": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": ["*", "commentList", "competencyRatingList", "ratingList"]
+                        }
+                    }
+                }],
+                "responses": {
+                    "200": {
+                        "description": "CalibrationSubject",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "title": "CalibrationSubject",
+                                    "allOf": [{
+                                        "$ref": "#/components/schemas/CalSession.svc.CalibrationSubject"
+                                    }]
+                                }
+                            }
+                        }
+                    }
+                },
+                "summary": "Get entity from related subject list by key",
+                "description": "Query one subject of the calibration session.",
+                "x-action": false,
+                "x-function": false,
+                "tags": ["Calibration Session"]
+            },
+            "patch": {
+                "parameters": [],
+                "responses": {
+                    "204": {
+                        "description": "Success"
+                    }
+                },
+                "summary": "Update entity in related ratingList, competencyRatingList, calibrated",
+                "description": "Update one calibration subject's competency ratings, ratings, calibrated flag.",
+                "x-action": false,
+                "x-function": false,
+                "tags": ["Calibration Session"]
+            }
+        },
+        "/CalibrationSession({id})/subjectList({id-1})/ratingList({ratingType-2})": {
+            "parameters": [{
+                "name": "id",
+                "in": "path",
+                "required": true,
+                "description": "key: id",
+                "schema": {
+                    "anyOf": [{
+                        "type": "integer"
+                    }, {
+                        "type": "string"
+                    }],
+                    "format": "int64",
+                    "example": "42"
+                }
+            }, {
+                "name": "id-1",
+                "in": "path",
+                "required": true,
+                "description": "key: id",
+                "schema": {
+                    "anyOf": [{
+                        "type": "integer"
+                    }, {
+                        "type": "string"
+                    }],
+                    "format": "int64",
+                    "example": "42"
+                }
+            }, {
+                "name": "ratingType-2",
+                "in": "path",
+                "required": true,
+                "description": "key: ratingType",
+                "schema": {
+                    "type": "integer",
+                    "format": "int32"
+                }
+            }]
+        },
+        "/refreshMetadata": {
+            "post": {
+                "summary": "Invoke action refreshMetadata",
+                "description": "Refresh metadata for the Calibration Session Service.",
+                "tags": ["Service Operations (Unbound Actions/Functions)"],
+                "responses": {
+                    "204": {
+                        "description": "Success"
+                    },
+                    "4XX": {
+                        "$ref": "#/components/responses/error"
+                    }
+                }
+            }
+        },
+        "/$batch": {
+            "post": {
+                "summary": "Send a group of requests",
+                "description": "Group multiple requests into a single request payload, see [Batch Requests](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_BatchRequests).\n\n*Please note that \"Try it out\" is not supported for this request.*",
+                "tags": ["Batch Requests"],
+                "requestBody": {
+                    "required": true,
+                    "description": "Batch request",
+                    "content": {
+                        "multipart/mixed;boundary=request-separator": {
+                            "schema": {
+                                "type": "string"
+                            },
+                            "example": "--request-separator\nContent-Type: application/http\nContent-Transfer-Encoding: binary\n\nGET CalibrationSession HTTP/1.1\nAccept: application/json\n\n\n--request-separator--"
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Batch response",
+                        "content": {
+                            "multipart/mixed": {
+                                "schema": {
+                                    "type": "string"
+                                },
+                                "example": "--response-separator\nContent-Type: application/http\n\nHTTP/1.1 200 OK\nContent-Type: application/json\n\n{...}\n--response-separator--"
+                            }
+                        }
+                    },
+                    "4XX": {
+                        "$ref": "#/components/responses/error"
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "CalSession.svc.CalibrationSession": {
+                "type": "object",
+                "properties": {
+                    "activationDate": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "date",
+                        "example": "2017-04-13",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "approvalDateTime": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "date-time",
+                        "example": "2017-04-13T15:51:04Z",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "createdByWorkAssignmentLegacyId": {
+                        "type": "string",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "id": {
+                        "anyOf": [{
+                            "type": "integer"
+                        }, {
+                            "type": "string"
+                        }],
+                        "format": "int64",
+                        "example": "42",
+                        "x-key": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "lastModifiedDateTime": {
+                        "type": "string",
+                        "format": "date-time",
+                        "example": "2017-04-13T15:51:04Z",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "sessionDate": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "date",
+                        "example": "2017-04-13",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "sessionLocation": {
+                        "type": "string",
+                        "nullable": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "sessionName": {
+                        "type": "string",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "status": {
+                        "type": "integer",
+                        "format": "int32",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "executiveReviewerList": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/CalSession.svc.CalibrationExecutiveReviewer"
+                        },
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "reviewerList": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/CalSession.svc.CalibrationSessionReviewer"
+                        },
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "subjectList": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/CalSession.svc.CalibrationSubject"
+                        },
+                        "x-insertable": false,
+                        "x-filterable": true
+                    }
+                },
+                "x-insertable": false,
+                "x-updatable": false,
+                "x-deletable": false,
+                "x-isEntity": true,
+                "title": "CalibrationSession"
+            },
+            "CalSession.svc.CalibrationSubject": {
+                "type": "object",
+                "properties": {
+                    "calibrated": {
+                        "type": "boolean",
+                        "nullable": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "id": {
+                        "anyOf": [{
+                            "type": "integer"
+                        }, {
+                            "type": "string"
+                        }],
+                        "format": "int64",
+                        "example": "42",
+                        "x-key": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "pmFormDataId": {
+                        "anyOf": [{
+                            "type": "integer"
+                        }, {
+                            "type": "string"
+                        }],
+                        "nullable": true,
+                        "format": "int64",
+                        "example": "42",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "pmuDeeplink": {
+                        "type": "string",
+                        "nullable": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "workAssignmentLegacyId": {
+                        "type": "string",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "commentList": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/CalSession.svc.CalibrationSubjectComment"
+                        },
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "competencyRatingList": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/CalSession.svc.CalibrationCompetencyRating"
+                        },
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "ratingList": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/CalSession.svc.CalibrationRating"
+                        },
+                        "x-insertable": false,
+                        "x-filterable": true
+                    }
+                },
+                "x-insertable": false,
+                "x-updatable": false,
+                "x-deletable": false,
+                "x-isEntity": true,
+                "title": "CalibrationSubject"
+            },
+            "CalSession.svc.CalibrationCompetencyRating": {
+                "type": "object",
+                "properties": {
+                    "competencyId": {
+                        "anyOf": [{
+                            "type": "integer"
+                        }, {
+                            "type": "string"
+                        }],
+                        "format": "int64",
+                        "example": "42",
+                        "x-key": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "competencyName": {
+                        "type": "string",
+                        "nullable": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "competencySectionId": {
+                        "anyOf": [{
+                            "type": "integer"
+                        }, {
+                            "type": "string"
+                        }],
+                        "nullable": true,
+                        "format": "int64",
+                        "example": "42",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "competencySectionName": {
+                        "type": "string",
+                        "nullable": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "rating": {
+                        "anyOf": [{
+                            "type": "number"
+                        }, {
+                            "type": "string"
+                        }],
+                        "nullable": true,
+                        "format": "decimal",
+                        "multipleOf": 0.001,
+                        "example": 0,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "ratingLabel": {
+                        "type": "string",
+                        "nullable": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "ratingOptions": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/CalSession.svc.CalibrationRatingOption"
+                        },
+                        "x-insertable": false,
+                        "x-filterable": true
+                    }
+                },
+                "x-insertable": false,
+                "x-updatable": false,
+                "x-deletable": false,
+                "x-isEntity": true,
+                "title": "CalibrationCompetencyRating"
+            },
+            "CalSession.svc.CalibrationRatingOption": {
+                "type": "object",
+                "properties": {
+                    "label": {
+                        "type": "string",
+                        "nullable": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "value": {
+                        "anyOf": [{
+                            "type": "number"
+                        }, {
+                            "type": "string"
+                        }],
+                        "format": "double",
+                        "example": 3.14,
+                        "x-key": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    }
+                },
+                "x-insertable": false,
+                "x-updatable": false,
+                "x-deletable": false,
+                "x-isEntity": true,
+                "title": "CalibrationRatingOption"
+            },
+            "CalSession.svc.CalibrationRating": {
+                "type": "object",
+                "properties": {
+                    "rating": {
+                        "anyOf": [{
+                            "type": "number"
+                        }, {
+                            "type": "string"
+                        }],
+                        "nullable": true,
+                        "format": "decimal",
+                        "multipleOf": 0.001,
+                        "example": 0,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "ratingLabel": {
+                        "type": "string",
+                        "nullable": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "ratingType": {
+                        "type": "integer",
+                        "format": "int32",
+                        "x-key": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "ratingTypeLabel": {
+                        "type": "string",
+                        "nullable": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    }
+                },
+                "x-insertable": false,
+                "x-updatable": false,
+                "x-deletable": false,
+                "x-isEntity": true,
+                "title": "CalibrationRating"
+            },
+            "CalSession.svc.CalibrationExecutiveReviewer": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "anyOf": [{
+                            "type": "integer"
+                        }, {
+                            "type": "string"
+                        }],
+                        "format": "int64",
+                        "example": "42",
+                        "x-key": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "workAssignmentLegacyId": {
+                        "type": "string",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    }
+                },
+                "x-insertable": false,
+                "x-updatable": false,
+                "x-deletable": false,
+                "x-isEntity": true,
+                "title": "CalibrationExecutiveReviewer"
+            },
+            "CalSession.svc.CalibrationSubjectComment": {
+                "type": "object",
+                "properties": {
+                    "authorizedByWorkAssignmentLegacyId": {
+                        "type": "string",
+                        "nullable": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "comment": {
+                        "type": "string",
+                        "nullable": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "createdByWorkAssignmentLegacyId": {
+                        "type": "string",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "createdDateTime": {
+                        "type": "string",
+                        "format": "date-time",
+                        "example": "2017-04-13T15:51:04Z",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "id": {
+                        "anyOf": [{
+                            "type": "integer"
+                        }, {
+                            "type": "string"
+                        }],
+                        "format": "int64",
+                        "example": "42",
+                        "x-key": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "lastModifiedDateTime": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "date-time",
+                        "example": "2017-04-13T15:51:04Z",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "modified": {
+                        "type": "boolean",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "reasonId": {
+                        "anyOf": [{
+                            "type": "integer"
+                        }, {
+                            "type": "string"
+                        }],
+                        "nullable": true,
+                        "format": "int64",
+                        "example": "42",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "reasonLabel": {
+                        "type": "string",
+                        "nullable": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    }
+                },
+                "x-insertable": false,
+                "x-updatable": false,
+                "x-deletable": false,
+                "x-isEntity": true,
+                "title": "CalibrationSubjectComment"
+            },
+            "CalSession.svc.CalibrationSessionReviewer": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "anyOf": [{
+                            "type": "integer"
+                        }, {
+                            "type": "string"
+                        }],
+                        "format": "int64",
+                        "example": "42",
+                        "x-key": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "reviewerType": {
+                        "type": "string",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "workAssignmentLegacyId": {
+                        "type": "string",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    }
+                },
+                "x-insertable": false,
+                "x-updatable": false,
+                "x-deletable": false,
+                "x-isEntity": true,
+                "title": "CalibrationSessionReviewer"
+            },
+            "CalSession.svc.ApproveSessionResponse": {
+                "type": "object",
+                "properties": {
+                    "errorCode": {
+                        "type": "string",
+                        "nullable": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "errorMessage": {
+                        "type": "string",
+                        "nullable": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "isSuccess": {
+                        "type": "boolean",
+                        "nullable": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    }
+                },
+                "x-insertable": false,
+                "x-updatable": false,
+                "x-deletable": false,
+                "x-isEntity": false,
+                "title": "ApproveSessionResponse"
+            },
+            "count": {
+                "anyOf": [{
+                    "type": "number"
+                }, {
+                    "type": "string"
+                }],
+                "description": "The number of entities in the collection. Available when using the [$count](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptioncount) query option."
+            },
+            "error": {
+                "type": "object",
+                "required": ["error"],
+                "properties": {
+                    "error": {
+                        "type": "object",
+                        "required": ["code", "message"],
+                        "properties": {
+                            "code": {
+                                "type": "string"
+                            },
+                            "message": {
+                                "type": "string"
+                            },
+                            "target": {
+                                "type": "string"
+                            },
+                            "details": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "required": ["code", "message"],
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        },
+                                        "target": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "parameters": {
+            "top": {
+                "name": "$top",
+                "in": "query",
+                "description": "Show only the first n items, see [Paging - Top](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptiontop)",
+                "schema": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "example": 50
+            },
+            "skip": {
+                "name": "$skip",
+                "in": "query",
+                "description": "Skip the first n items, see [Paging - Skip](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionskip)",
+                "schema": {
+                    "type": "integer",
+                    "minimum": 0
+                }
+            },
+            "count": {
+                "name": "$count",
+                "in": "query",
+                "description": "Include count of items, see [Count](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptioncount)",
+                "schema": {
+                    "type": "boolean"
+                }
+            },
+            "search": {
+                "name": "$search",
+                "in": "query",
+                "description": "Search items by search phrases, see [Searching](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionsearch)",
+                "schema": {
+                    "type": "string"
+                }
+            }
+        },
+        "responses": {
+            "error": {
+                "description": "Error",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "$ref": "#/components/schemas/error"
+                        }
+                    }
+                }
+            }
+        },
+        "securitySchemes": {
+        "BasicAuth": {
+        "type": "http",
+        "scheme": "basic"
+       }
+     }
+    },
+    "x-sap-api-type": "ODATAV4",
+    "x-sap-shortText": "Calibration Service to get and update information of sessions and subjects.",
+    "security": [
+    {
+      "BasicAuth": []
+    }
+  ]
+}

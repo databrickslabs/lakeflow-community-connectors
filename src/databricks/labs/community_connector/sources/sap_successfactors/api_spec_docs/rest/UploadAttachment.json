@@ -1,0 +1,256 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Time Off Upload Attachment",
+    "description": "You can use this API to upload files which can be used as content for custom field on absence requests afterwards.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://{api-server}",
+      "description": "REST APIs for the SuccessFactors Data Centers",
+      "variables": {
+        "api-server": {
+          "description": "SuccessFactors Data Center host",
+          "default": "apisalesdemo2.successfactors.eu"
+        }
+      }
+    }
+  ],
+  "paths": {
+    "/rest/timemanagement/absence/v1/attachment/upload": {
+      "post": {
+        "summary": "Uploads a file.",
+        "description": "Uploads a file and returns the attachment id.",
+        "tags": [
+          "Attachment"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachmentUploadRequest"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/MultipartUploadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "It indicates that the request is successful and returns the attachment id of the uploaded attachment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessfulUploadResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "It indicates that the server cannot process the request due to something that is perceived to be a client error. For example, any validation error in the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequest"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "It indicates that the server cannot process the request as the user does not have the required permission to access the resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Forbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "It indicates that the server has not found anything matching the request URI or the requested resource doesn't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "It indicates that the server encountered an unexpected condition that prevented it from fulfilling the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "sfOauth": {
+        "type": "oauth2",
+        "description": "Successfactors OAuth 2.0 flow. More information is available [here](https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/9f5f060351034d98990213d077dab38a/d9a9545305004187986c866de2b66987.html?locale=en-US)",
+        "flows": {
+          "clientCredentials": {
+            "tokenUrl": "https://{api-server}/oauth/token",
+            "scopes": {}
+          }
+        }
+      }
+    },
+    "schemas": {
+      "AttachmentUploadRequest": {
+        "type": "object",
+        "properties": {
+          "fileName": {
+            "type": "string",
+            "format": "text",
+            "description": "The name of file which will be uploaded.",
+            "example": "test.txt"
+          },
+          "attachmentContent": {
+            "type": "string",
+            "format": "byte",
+            "description": "Attachment content in a base 64 string",
+            "example": "SGVsbG8hCg=="
+          }
+        },
+        "description": "Attachment upload request body with a file name and the content in base 64 string."
+      },
+      "MultipartUploadRequest": {
+        "type": "object",
+        "properties": {
+          "attachment": {
+            "type": "string",
+            "format": "binary",
+            "description": "The file which will be uploaded."
+          }
+        },
+        "description": "Attachment upload request body for a multi part request."
+      },
+      "SuccessfulUploadResponse": {
+        "title": "SuccessfulUploadResponse",
+        "description": "Response body",
+        "properties": {
+          "attachmentId": {
+            "title": "Attachment Id",
+            "type": "integer",
+            "example": 140
+          }
+        }
+      },
+      "BadRequest": {
+        "title": "Bad Request",
+        "description": "Response body",
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "object",
+            "properties": {
+              "code": {
+                "title": "Code",
+                "type": "string",
+                "example": "BadRequest"
+              },
+              "message": {
+                "title": "Message",
+                "type": "string",
+                "example": "To upload an attachment, please enter the file name and content."
+              }
+            }
+          }
+        },
+        "type": "object"
+      },
+      "Forbidden": {
+        "type": "object",
+        "title": "Forbidden Exception",
+        "description": "Response body",
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "object",
+            "properties": {
+              "code": {
+                "title": "Code",
+                "type": "string",
+                "example": "Forbidden"
+              },
+              "message": {
+                "title": "Message",
+                "type": "string",
+                "example": "You can't access the requested resource."
+              }
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "type": "object",
+        "title": "Not Found Exception",
+        "description": "Response body",
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "object",
+            "properties": {
+              "code": {
+                "title": "Code",
+                "type": "string",
+                "example": "NotFound"
+              },
+              "message": {
+                "title": "Message",
+                "type": "string",
+                "example": "The requested resource can't be found."
+              }
+            }
+          }
+        }
+      },
+      "InternalServerError": {
+        "title": "InternalServerError",
+        "description": "Response body",
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "object",
+            "properties": {
+              "code": {
+                "title": "Code",
+                "type": "string",
+                "example": "InternalError"
+              },
+              "message": {
+                "title": "Message",
+                "type": "string",
+                "example": "An unexpected error has occurred. Please contact the system administrator."
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "sfOauth": []
+    }
+  ],
+  "externalDocs": {
+    "description": "More information about this API is available in help.sap.com",
+    "url": "https://help.sap.com/docs/SAP_SUCCESSFACTORS_EMPLOYEE_CENTRAL/68de09dff990417b9f0acf6ccc13a14d/42ea8806a2e441438c7b2bce87c268e8.html?state=LATEST"
+  },
+  "x-sap-api-type": "REST",
+  "x-sap-shortText": "APIs for SAP SuccessFactors Time Management."
+}

@@ -1,0 +1,839 @@
+{
+    "swagger": "2.0",
+    "security": [
+        {
+            "basicAuthentication": []
+        }
+    ],
+    "securityDefinitions": {
+        "basicAuthentication": {
+            "type": "basic"
+        }
+    },
+    "x-sap-shortText": "API to access the data for dismissal protection",
+    "x-servers": [{
+        "url": "https://{api-server}/odata/v2",
+        "description": "OData APIs for the SuccessFactors Data Centers",
+        "templates": {
+            "api-server": {
+                "description": "SuccessFactors Data Center host",
+                "default": "apisalesdemo8.successfactors.com"
+            }
+        }
+    },
+        {
+            "url":"https://sandbox.api.sap.com/successfactorsfoundation/odata/v2",
+            "description":"Sandbox URL"
+        }
+    ],
+    "info": {
+        "title": "Dismissal Protection",
+        "version": "1.0",
+        "description": "API to access data for dismissal protection.\n\n You can find your company's API server in [List of API Servers in SAP SuccessFactors.](https://help.sap.com/viewer/d599f15995d348a1b45ba5603e2aba9b/LATEST/en-US/af2b8d5437494b12be88fe374eba75b6.html)"
+    },
+    "externalDocs": {
+        "description": "Dismissal Protection on SAP Help Portal",
+        "url": "https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/d599f15995d348a1b45ba5603e2aba9b/c6340025421a4704aba4f9f899e63f2f.html"
+    },
+    "schemes": [
+        "https"
+    ],
+    "host": "sandbox.api.sap.com",
+    "basePath": "/successfactors/odata/v2",
+    "consumes": [
+        "application/json"
+    ],
+    "produces": [
+        "application/json"
+    ],
+    "tags": [
+        {
+            "name": "Employee Dismissal Protection Detail"
+        },
+        {
+            "name": "Employee Dismissal Protection"
+        }
+    ],
+    "definitions": {
+        "odata.error": {
+            "type": "object",
+            "required": [
+                "error"
+            ],
+            "properties": {
+                "error": {
+                    "$ref": "#/definitions/odata.error.main"
+                }
+            }
+        },
+        "odata.error.main": {
+            "type": "object",
+            "required": [
+                "code",
+                "message"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                },
+                "details": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/odata.error.detail"
+                    }
+                },
+                "innererror": {
+                    "type": "object",
+                    "description": "The structure of this object is service-specific"
+                }
+            }
+        },
+        "odata.error.detail": {
+            "type": "object",
+            "required": [
+                "code",
+                "message"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                }
+            }
+        },
+        "SFOData.EmployeeDismissalProtectionDetail": {
+            "type": "object",
+            "properties": {
+                "EmployeeDismissalProtection_workerId": {
+                    "type": "string",
+                    "maxLength": 100
+                },
+                "createdBy": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 100
+                },
+                "createdDateTime": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "example": "/Date(1492098664000)/"
+                },
+                "dismissalProtectionType": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 128
+                },
+                "externalCode": {
+                    "type": "string",
+                    "maxLength": 128
+                },
+                "lastModifiedBy": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 100
+                },
+                "lastModifiedDateTime": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "example": "/Date(1492098664000)/"
+                },
+                "mdfSystemRecordStatus": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 255
+                },
+                "protectionEndDate": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "example": "/Date(1492098664000)/"
+                },
+                "protectionStartDate": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "example": "/Date(1492098664000)/"
+                }
+            },
+            "title": "EmployeeDismissalProtectionDetail"
+        },
+        "SFOData.EmployeeDismissalProtection": {
+            "type": "object",
+            "properties": {
+                "createdBy": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 100
+                },
+                "createdDateTime": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "example": "/Date(1492098664000)/"
+                },
+                "lastModifiedBy": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 100
+                },
+                "lastModifiedDateTime": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "example": "/Date(1492098664000)/"
+                },
+                "mdfSystemRecordStatus": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 255
+                },
+                "workerId": {
+                    "type": "string",
+                    "maxLength": 100
+                },
+                "empDismissalProtectionDetails": {
+                    "title": "Related Collection(SFOData.EmployeeDismissalProtectionDetail)",
+                    "type": "object",
+                    "properties": {
+                        "results": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/SFOData.EmployeeDismissalProtectionDetail"
+                            }
+                        }
+                    }
+                }
+            },
+            "title": "EmployeeDismissalProtection"
+        }
+    },
+    "paths": {
+        "/EmployeeDismissalProtectionDetail": {
+            "get": {
+                "summary": "Get entities from EmployeeDismissalProtectionDetail",
+                "tags": [
+                    "Employee Dismissal Protection Detail"
+                ],
+                "parameters": [
+                    {
+                        "$ref": "#/parameters/top"
+                    },
+                    {
+                        "$ref": "#/parameters/skip"
+                    },
+                    {
+                        "$ref": "#/parameters/search"
+                    },
+                    {
+                        "$ref": "#/parameters/filter"
+                    },
+                    {
+                        "$ref": "#/parameters/count"
+                    },
+                    {
+                        "name": "$orderby",
+                        "in": "query",
+                        "description": "Order items by property values, see [OData Sorting](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "EmployeeDismissalProtection_workerId",
+                                "EmployeeDismissalProtection_workerId desc",
+                                "createdBy",
+                                "createdBy desc",
+                                "createdDateTime",
+                                "createdDateTime desc",
+                                "dismissalProtectionType",
+                                "dismissalProtectionType desc",
+                                "externalCode",
+                                "externalCode desc",
+                                "lastModifiedBy",
+                                "lastModifiedBy desc",
+                                "lastModifiedDateTime",
+                                "lastModifiedDateTime desc",
+                                "mdfSystemRecordStatus",
+                                "mdfSystemRecordStatus desc",
+                                "protectionEndDate",
+                                "protectionEndDate desc",
+                                "protectionStartDate",
+                                "protectionStartDate desc"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "$select",
+                        "in": "query",
+                        "description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "EmployeeDismissalProtection_workerId",
+                                "createdBy",
+                                "createdDateTime",
+                                "dismissalProtectionType",
+                                "externalCode",
+                                "lastModifiedBy",
+                                "lastModifiedDateTime",
+                                "mdfSystemRecordStatus",
+                                "protectionEndDate",
+                                "protectionStartDate"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Retrieved entities",
+                        "schema": {
+                            "type": "object",
+                            "title": "Wrapper",
+                            "properties": {
+                                "d": {
+                                    "type": "object",
+                                    "title": "Collection of EmployeeDismissalProtectionDetail",
+                                    "properties": {
+                                        "results": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/SFOData.EmployeeDismissalProtectionDetail"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "$ref": "#/responses/error"
+                    }
+                }
+            },
+            "post": {
+                "summary": "Add new entity to EmployeeDismissalProtectionDetail",
+                "tags": [
+                    "Employee Dismissal Protection Detail"
+                ],
+                "parameters": [
+                    {
+                        "name": "EmployeeDismissalProtectionDetail",
+                        "in": "body",
+                        "description": "New entity",
+                        "schema": {
+                            "$ref": "#/definitions/SFOData.EmployeeDismissalProtectionDetail"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created entity",
+                        "schema": {
+                            "title": "Created EmployeeDismissalProtectionDetail",
+                            "type": "object",
+                            "properties": {
+                                "d": {
+                                    "$ref": "#/definitions/SFOData.EmployeeDismissalProtectionDetail"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "$ref": "#/responses/error"
+                    }
+                }
+            }
+        },
+        "/EmployeeDismissalProtectionDetail(EmployeeDismissalProtection_workerId='{EmployeeDismissalProtection_workerId}',externalCode='{externalCode}')": {
+            "get": {
+                "summary": "Get entity from EmployeeDismissalProtectionDetail by key",
+                "tags": [
+                    "Employee Dismissal Protection Detail"
+                ],
+                "parameters": [
+                    {
+                        "name": "EmployeeDismissalProtection_workerId",
+                        "in": "path",
+                        "required": true,
+                        "description": "key: EmployeeDismissalProtection_workerId",
+                        "type": "string"
+                    },
+                    {
+                        "name": "externalCode",
+                        "in": "path",
+                        "required": true,
+                        "description": "key: externalCode",
+                        "type": "string"
+                    },
+                    {
+                        "name": "$select",
+                        "in": "query",
+                        "description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "EmployeeDismissalProtection_workerId",
+                                "createdBy",
+                                "createdDateTime",
+                                "dismissalProtectionType",
+                                "externalCode",
+                                "lastModifiedBy",
+                                "lastModifiedDateTime",
+                                "mdfSystemRecordStatus",
+                                "protectionEndDate",
+                                "protectionStartDate"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Retrieved entity",
+                        "schema": {
+                            "title": "EmployeeDismissalProtectionDetail",
+                            "type": "object",
+                            "properties": {
+                                "d": {
+                                    "$ref": "#/definitions/SFOData.EmployeeDismissalProtectionDetail"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "$ref": "#/responses/error"
+                    }
+                }
+            },
+            "put": {
+                "summary": "Update entity in EmployeeDismissalProtectionDetail",
+                "tags": [
+                    "Employee Dismissal Protection Detail"
+                ],
+                "parameters": [
+                    {
+                        "name": "EmployeeDismissalProtection_workerId",
+                        "in": "path",
+                        "required": true,
+                        "description": "key: EmployeeDismissalProtection_workerId",
+                        "type": "string"
+                    },
+                    {
+                        "name": "externalCode",
+                        "in": "path",
+                        "required": true,
+                        "description": "key: externalCode",
+                        "type": "string"
+                    },
+                    {
+                        "name": "EmployeeDismissalProtectionDetail",
+                        "in": "body",
+                        "description": "New property values",
+                        "schema": {
+                            "title": "Modified EmployeeDismissalProtectionDetail",
+                            "type": "object",
+                            "properties": {
+                                "d": {
+                                    "$ref": "#/definitions/SFOData.EmployeeDismissalProtectionDetail"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Success"
+                    },
+                    "400": {
+                        "$ref": "#/responses/error"
+                    }
+                }
+            },
+            "delete": {
+                "summary": "Delete entity from EmployeeDismissalProtectionDetail",
+                "tags": [
+                    "Employee Dismissal Protection Detail"
+                ],
+                "parameters": [
+                    {
+                        "name": "EmployeeDismissalProtection_workerId",
+                        "in": "path",
+                        "required": true,
+                        "description": "key: EmployeeDismissalProtection_workerId",
+                        "type": "string"
+                    },
+                    {
+                        "name": "externalCode",
+                        "in": "path",
+                        "required": true,
+                        "description": "key: externalCode",
+                        "type": "string"
+                    },
+                    {
+                        "name": "If-Match",
+                        "in": "header",
+                        "description": "ETag",
+                        "type": "string"
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Success"
+                    },
+                    "400": {
+                        "$ref": "#/responses/error"
+                    }
+                }
+            }
+        },
+        "/EmployeeDismissalProtection": {
+            "get": {
+                "summary": "Get entities from EmployeeDismissalProtection",
+                "tags": [
+                    "Employee Dismissal Protection"
+                ],
+                "parameters": [
+                    {
+                        "$ref": "#/parameters/top"
+                    },
+                    {
+                        "$ref": "#/parameters/skip"
+                    },
+                    {
+                        "$ref": "#/parameters/search"
+                    },
+                    {
+                        "$ref": "#/parameters/filter"
+                    },
+                    {
+                        "$ref": "#/parameters/count"
+                    },
+                    {
+                        "name": "$orderby",
+                        "in": "query",
+                        "description": "Order items by property values, see [OData Sorting](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "createdBy",
+                                "createdBy desc",
+                                "createdDateTime",
+                                "createdDateTime desc",
+                                "lastModifiedBy",
+                                "lastModifiedBy desc",
+                                "lastModifiedDateTime",
+                                "lastModifiedDateTime desc",
+                                "mdfSystemRecordStatus",
+                                "mdfSystemRecordStatus desc",
+                                "workerId",
+                                "workerId desc"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "$select",
+                        "in": "query",
+                        "description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "createdBy",
+                                "createdDateTime",
+                                "lastModifiedBy",
+                                "lastModifiedDateTime",
+                                "mdfSystemRecordStatus",
+                                "workerId"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "$expand",
+                        "in": "query",
+                        "description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "*",
+                                "empDismissalProtectionDetails"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Retrieved entities",
+                        "schema": {
+                            "type": "object",
+                            "title": "Wrapper",
+                            "properties": {
+                                "d": {
+                                    "type": "object",
+                                    "title": "Collection of EmployeeDismissalProtection",
+                                    "properties": {
+                                        "results": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/SFOData.EmployeeDismissalProtection"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "$ref": "#/responses/error"
+                    }
+                }
+            },
+            "post": {
+                "summary": "Add new entity to EmployeeDismissalProtection",
+                "tags": [
+                    "Employee Dismissal Protection"
+                ],
+                "parameters": [
+                    {
+                        "name": "EmployeeDismissalProtection",
+                        "in": "body",
+                        "description": "New entity",
+                        "schema": {
+                            "$ref": "#/definitions/SFOData.EmployeeDismissalProtection"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created entity",
+                        "schema": {
+                            "title": "Created EmployeeDismissalProtection",
+                            "type": "object",
+                            "properties": {
+                                "d": {
+                                    "$ref": "#/definitions/SFOData.EmployeeDismissalProtection"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "$ref": "#/responses/error"
+                    }
+                }
+            }
+        },
+        "/EmployeeDismissalProtection('{workerId}')": {
+            "get": {
+                "summary": "Get entity from EmployeeDismissalProtection by key",
+                "tags": [
+                    "Employee Dismissal Protection"
+                ],
+                "parameters": [
+                    {
+                        "name": "workerId",
+                        "in": "path",
+                        "required": true,
+                        "description": "key: workerId",
+                        "type": "string"
+                    },
+                    {
+                        "name": "$select",
+                        "in": "query",
+                        "description": "Select properties to be returned, see [OData Select](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "createdBy",
+                                "createdDateTime",
+                                "lastModifiedBy",
+                                "lastModifiedDateTime",
+                                "mdfSystemRecordStatus",
+                                "workerId"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "$expand",
+                        "in": "query",
+                        "description": "Expand related entities, see [OData Expand](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "*",
+                                "empDismissalProtectionDetails"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Retrieved entity",
+                        "schema": {
+                            "title": "EmployeeDismissalProtection",
+                            "type": "object",
+                            "properties": {
+                                "d": {
+                                    "$ref": "#/definitions/SFOData.EmployeeDismissalProtection"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "$ref": "#/responses/error"
+                    }
+                }
+            },
+            "put": {
+                "summary": "Update entity in EmployeeDismissalProtection",
+                "tags": [
+                    "Employee Dismissal Protection"
+                ],
+                "parameters": [
+                    {
+                        "name": "workerId",
+                        "in": "path",
+                        "required": true,
+                        "description": "key: workerId",
+                        "type": "string"
+                    },
+                    {
+                        "name": "EmployeeDismissalProtection",
+                        "in": "body",
+                        "description": "New property values",
+                        "schema": {
+                            "title": "Modified EmployeeDismissalProtection",
+                            "type": "object",
+                            "properties": {
+                                "d": {
+                                    "$ref": "#/definitions/SFOData.EmployeeDismissalProtection"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Success"
+                    },
+                    "400": {
+                        "$ref": "#/responses/error"
+                    }
+                }
+            },
+            "delete": {
+                "summary": "Delete entity from EmployeeDismissalProtection",
+                "tags": [
+                    "Employee Dismissal Protection"
+                ],
+                "parameters": [
+                    {
+                        "name": "workerId",
+                        "in": "path",
+                        "required": true,
+                        "description": "key: workerId",
+                        "type": "string"
+                    },
+                    {
+                        "name": "If-Match",
+                        "in": "header",
+                        "description": "ETag",
+                        "type": "string"
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Success"
+                    },
+                    "400": {
+                        "$ref": "#/responses/error"
+                    }
+                }
+            }
+        }
+    },
+    "parameters": {
+        "top": {
+            "name": "$top",
+            "in": "query",
+            "description": "Show only the first n items, see [OData Paging - Top](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "integer",
+            "default": 5
+        },
+        "skip": {
+            "name": "$skip",
+            "in": "query",
+            "description": "Skip the first n items, see [OData Paging - Skip](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "integer"
+        },
+        "count": {
+            "name": "$count",
+            "in": "query",
+            "description": "Include count of items, see [OData Count](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "boolean"
+        },
+        "filter": {
+            "name": "$filter",
+            "in": "query",
+            "description": "Filter items by property values, see [OData Filtering](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "string"
+        },
+        "search": {
+            "name": "$search",
+            "in": "query",
+            "description": "Search items by search phrases, see [OData Searching](https://www.odata.org/documentation/odata-version-2-0/uri-conventions/)",
+            "type": "string"
+        }
+    },
+    "responses": {
+        "error": {
+            "description": "Error",
+            "schema": {
+                "$ref": "#/definitions/odata.error"
+            }
+        }
+    }
+}

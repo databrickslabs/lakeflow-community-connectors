@@ -1,0 +1,429 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "Clock In Clock Out Time Events",
+        "version": "1.0",
+        "description": "APIs provided for Clock In Clock Out allows you to perform integrations and derive insights. \n\nYou can find your company's API server in [List of API Servers in SAP SuccessFactors.](https://help.sap.com/viewer/d599f15995d348a1b45ba5603e2aba9b/LATEST/en-US/af2b8d5437494b12be88fe374eba75b6.html)"
+    },
+    "x-sap-api-type": "ODATAV4",
+    "x-odata-version": "4.0",
+    "x-sap-shortText": "API to get SAP SuccessFactors Time Events information.",
+    "servers": [{
+                "url": "https://{api-server}/odatav4/timemanagement/timeeventprocessing/clockinclockout/v1",
+                "variables": {
+                    "api-server": {
+                        "description": "SuccessFactors Data Center host",
+                        "default": "apisalesdemo2.successfactors.eu"
+                    }
+                }
+        },
+        {
+          "url": "https://sandbox.api.sap.com/sapsuccessfactorstimetracking/cico",
+          "description": "Sandbox Server"
+        }],
+    "externalDocs": {
+        "description": "Clock In Clock Out API on SAP Help Portal",
+        "url": "https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/9f5f060351034d98990213d077dab38a/a07ddee2403441118261082dcd14df39.html"
+    },
+    "tags": [{
+        "name": "timeevents"
+    }],
+    "paths": {
+        "/timeevents": {
+            "get": {
+                "parameters": [{
+                    "$ref": "#/components/parameters/top"
+                }, {
+                    "$ref": "#/components/parameters/skip"
+                }, {
+                    "name": "$filter",
+                    "in": "query",
+                    "description": "Filter items by property values, see [Filtering](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionfilter)",
+                    "schema": {
+                        "type": "string"
+                    }
+                }, {
+                    "$ref": "#/components/parameters/count"
+                }, {
+                    "name": "$orderby",
+                    "in": "query",
+                    "description": "Order items by property values, see [Sorting](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionorderby)",
+                    "explode": false,
+                    "schema": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": ["approvalStatusCode", "approvalStatusCode desc", "comments", "comments desc", "createdAt", "createdAt desc", "createdBy", "createdBy desc", "creationSourceCode", "creationSourceCode desc", "externalId", "externalId desc", "lastChangedAt", "lastChangedAt desc", "lastChangedBy", "lastChangedBy desc", "pairingStatusCode", "pairingStatusCode desc", "reasonForManualTimeEventCode", "reasonForManualTimeEventCode desc", "terminalId", "terminalId desc", "timeEventTypeCode", "timeEventTypeCode desc", "timeTypeCode", "timeTypeCode desc", "timeZoneOffset", "timeZoneOffset desc", "timestampUTC", "timestampUTC desc", "validationMessages", "validationMessages desc", "validationStatusCode", "validationStatusCode desc", "workAssignmentId", "workAssignmentId desc"]
+                        }
+                    }
+                }, {
+                    "name": "$select",
+                    "in": "query",
+                    "description": "Select properties to be returned, see [Select](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionselect)",
+                    "explode": false,
+                    "schema": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                            "type": "string",
+                            "enum": ["approvalStatusCode", "comments", "createdAt", "createdBy", "creationSourceCode", "externalId", "lastChangedAt", "lastChangedBy", "pairingStatusCode", "reasonForManualTimeEventCode", "terminalId", "timeEventTypeCode", "timeTypeCode", "timeZoneOffset", "timestampUTC", "validationMessages", "validationStatusCode", "workAssignmentId"]
+                        }
+                    }
+                }, {
+                    "in": "header",
+                    "name": "Authorization",
+                    "description": "Export Time Event API respects RBP and user needs valid token to access this API.",
+                    "schema": {
+                        "example": "Bearer <token>",
+                        "type": "string"
+                    },
+                    "required": false
+                }],
+                "responses": {
+                    "200": {
+                        "description": "API response code will be 200 in 2 scenarios.\n1. When API will export the time events successfully.\n2. When RBP permission will not be enabled, it will return empty response with 200 response code.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/components/schemas/clockinclockout.timeevents"
+                                            }
+                                        },
+                                        "@odata.count": {
+                                            "$ref": "#/components/schemas/count"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "API response code will be 401 for invalid bearer token.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "allOf": [{
+                                        "$ref": "#/components/schemas/error"
+                                    }]
+                                }
+                            }
+                        }
+                    }
+                },
+                "summary": "Export Time Events information for external customers.",
+                "description": "This API allows you to fetch and export the time events details along with filters. You can get a maximum of 1000 records with each request.",
+                "x-action": false,
+                "x-function": false,
+                "tags": ["timeevents"]
+            }
+        }
+    },
+    "security": [{
+        "ApiKeyAuth": []
+    }],
+    "components": {
+        "schemas": {
+            "clockinclockout.timeevents": {
+                "type": "object",
+                "properties": {
+                    "approvalStatusCode": {
+                        "type": "string",
+                        "nullable": true,
+                        "title": "Approval Status of the Time Event",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "comments": {
+                        "type": "string",
+                        "nullable": true,
+                        "title": "Additional information for creation of Manual Time Event",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "createdAt": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "date-time",
+                        "example": "2017-04-13T15:51:04Z",
+                        "title": "Created Date",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "createdBy": {
+                        "type": "string",
+                        "nullable": true,
+                        "title": "Created User",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "creationSourceCode": {
+                        "type": "string",
+                        "nullable": true,
+                        "title": "Source of created Time Event",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "externalId": {
+                        "type": "string",
+                        "nullable": true,
+                        "title": "Unique alphanumeric id for the Time Event",
+                        "x-key": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "lastChangedAt": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "date-time",
+                        "example": "2017-04-13T15:51:04Z",
+                        "title": "Last Modified Date",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "lastChangedBy": {
+                        "type": "string",
+                        "nullable": true,
+                        "title": "Last Modified User",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "pairingStatusCode": {
+                        "type": "string",
+                        "nullable": true,
+                        "title": "Pairing Status of the Time Event",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "reasonForManualTimeEventCode": {
+                        "type": "string",
+                        "nullable": true,
+                        "title": "Reason for creation of Manual Time Event",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "terminalId": {
+                        "type": "string",
+                        "nullable": true,
+                        "title": "Terminal id of the Time Event",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "timeEventTypeCode": {
+                        "type": "string",
+                        "nullable": true,
+                        "title": "Unique alphanumeric code for the Time Event Type",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "timeTypeCode": {
+                        "type": "string",
+                        "nullable": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "timeZoneOffset": {
+                        "type": "string",
+                        "nullable": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "timestampUTC": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "date-time",
+                        "example": "2017-04-13T15:51:04Z",
+                        "title": "Timestamp at which Time Event was created",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "validationMessages": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/clockinclockout.Message"
+                        },
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "validationStatusCode": {
+                        "type": "string",
+                        "nullable": true,
+                        "title": "Validation Status of the Time Event",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "workAssignmentId": {
+                        "type": "string",
+                        "nullable": true,
+                        "title": "Assignment id of the user",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    }
+                },
+                "x-insertable": true,
+                "x-updatable": true,
+                "x-deletable": true,
+                "x-isEntity": true,
+                "title": "timeevents"
+            },
+            "clockinclockout.Message": {
+                "type": "object",
+                "properties": {
+                    "additionalTargets": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "code": {
+                        "type": "string",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "longtextUrl": {
+                        "type": "string",
+                        "nullable": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "message": {
+                        "type": "string",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "numericSeverity": {
+                        "type": "integer",
+                        "format": "uint8",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "target": {
+                        "type": "string",
+                        "nullable": true,
+                        "x-insertable": false,
+                        "x-filterable": true
+                    },
+                    "transition": {
+                        "type": "boolean",
+                        "x-insertable": false,
+                        "x-filterable": true
+                    }
+                },
+                "x-insertable": false,
+                "x-updatable": false,
+                "x-deletable": false,
+                "x-isEntity": false,
+                "title": "Message"
+            },
+            "count": {
+                "anyOf": [{
+                    "type": "number"
+                }, {
+                    "type": "string"
+                }],
+                "description": "The number of entities in the collection. Available when using the [$count](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptioncount) query option."
+            },
+            "error": {
+                "type": "object",
+                "required": ["error"],
+                "properties": {
+                    "error": {
+                        "type": "object",
+                        "required": ["code", "message"],
+                        "properties": {
+                            "code": {
+                                "type": "string"
+                            },
+                            "message": {
+                                "type": "string"
+                            },
+                            "target": {
+                                "type": "string"
+                            },
+                            "details": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "required": ["code", "message"],
+                                    "properties": {
+                                        "code": {
+                                            "type": "string"
+                                        },
+                                        "message": {
+                                            "type": "string"
+                                        },
+                                        "target": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "parameters": {
+            "top": {
+                "name": "$top",
+                "in": "query",
+                "description": "Show only the first n items, see [Paging - Top](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptiontop)",
+                "schema": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "example": 50
+            },
+            "skip": {
+                "name": "$skip",
+                "in": "query",
+                "description": "Skip the first n items, see [Paging - Skip](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionskip)",
+                "schema": {
+                    "type": "integer",
+                    "minimum": 0
+                }
+            },
+            "count": {
+                "name": "$count",
+                "in": "query",
+                "description": "Include count of items, see [Count](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptioncount)",
+                "schema": {
+                    "type": "boolean"
+                }
+            },
+            "search": {
+                "name": "$search",
+                "in": "query",
+                "description": "Search items by search phrases, see [Searching](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionsearch)",
+                "schema": {
+                    "type": "string"
+                }
+            }
+        },
+        "responses": {
+            "error": {
+                "description": "Error",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "$ref": "#/components/schemas/error"
+                        }
+                    }
+                }
+            }
+        },
+        "securitySchemes": {
+            "ApiKeyAuth": {
+                "type": "apiKey",
+                "name": "Authorization",
+                "in": "header"
+            }
+        }
+    }
+}

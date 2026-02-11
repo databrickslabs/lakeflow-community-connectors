@@ -1,0 +1,249 @@
+    {
+        "openapi": "3.0.1",
+        "info": {
+            "title": "Clock In Clock Out Time Events",
+            "description": "You can use this API to perform mass deletion of Clock In Clock Out time events. Please enter the API Key in the format: Bearer<space><token>.\n\n You can find your company's API server in [List of API Servers in SAP SuccessFactors.](https://help.sap.com/viewer/d599f15995d348a1b45ba5603e2aba9b/LATEST/en-US/af2b8d5437494b12be88fe374eba75b6.html)",
+            "version": "1.0"
+        },
+        "servers": [{
+                "url": "https://sandbox.api.sap.com/sapsuccessfactorstimetrackingdel",
+                "description": "Sandbox Server"
+            },
+            {
+                "url": "https://{api-server}/rest/timemanagement/timeeventprocessing/clockinclockout/v1",
+                "description": "REST APIs for the SuccessFactors Data Centers",
+                "variables": {
+                    "api-server": {
+                        "description": "SuccessFactors Data Center host",
+                        "default": "apisalesdemo2.successfactors.eu"
+                    }
+                }
+            }
+        ],
+        "paths": {
+            "/timeevents": {
+                "patch": {
+                    "tags": [
+                        "External Time Event"
+                    ],
+                    "summary": "Delete time events of employees.",
+                    "operationId": "delete",
+                    "requestBody": {
+                        "content": {
+                            "application/merge-patch+json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TimeEventDeleteRequest"
+                                }
+                            }
+                        },
+                        "required": true
+                    },
+                    "responses": {
+                        "400": {
+                            "description": "It indicates that the server cannot process the request due to something that is perceived to be a client error. For example, any validation error in the request.",
+                            "headers": {
+                                "X-Correlation-ID": {
+                                    "$ref": "#/components/headers/X-Correlation-ID"
+                                }
+                            },
+                            "content": {
+                                "*/*": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/TimeEventDeleteResponseBadRequest"
+                                    }
+                                }
+                            }
+                        },
+                        "200": {
+                            "description": "It indicates that the request is successful and the valid time event IDs given in the request are successfully deleted.",
+                            "headers": {
+                                "X-Correlation-ID": {
+                                    "$ref": "#/components/headers/X-Correlation-ID"
+                                }
+                            },
+                            "content": {
+                                "*/*": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/TimeEventDeleteResponse"
+                                    }
+                                }
+                            }
+                        },
+                        "500": {
+                            "description": "It indicates that the server encountered an unexpected condition that prevented it from fulfilling the request.",
+                            "headers": {
+                                "X-Correlation-ID": {
+                                    "$ref": "#/components/headers/X-Correlation-ID"
+                                }
+                            },
+                            "content": {
+                                "*/*": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/InternalServerError"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "security": [{
+                        "ApiKeyAuth": []
+                    }]
+                }
+            }
+        },
+        "components": {
+            "schemas": {
+                "IdAndDeleteRequest": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "string",
+                            "description": "Time Event id to be deleted.",
+                            "example": "1234"
+                        },
+                        "deleted": {
+                            "type": "boolean",
+                            "description": "Parameter that defines if a time event should be deleted or not. Valid values are true or false. Set to true for deletion.",
+                            "example": true
+                        }
+                    },
+                    "description": "Request will contain a list of time event IDs to be deleted and the deleted parameter."
+                },
+                "TimeEventDeleteRequest": {
+                    "type": "object",
+                    "properties": {
+                        "value": {
+                            "type": "array",
+                            "description": "Request will contain a list of time event IDs to be deleted and the deleted parameter.",
+                            "items": {
+                                "$ref": "#/components/schemas/IdAndDeleteRequest"
+                            }
+                        }
+                    },
+                    "description": "Request will contain a list of time event IDs to be deleted and the deleted parameter."
+                },
+                "TimeEventDeleteFailedEvent": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "string",
+                            "description": "IDs of time events that weren't deleted.",
+                            "example": "2345"
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Reason for failure.",
+                            "example": "A time event was not found for this ID."
+                        }
+                    },
+                    "description": "Details of time event IDs that weren't deleted."
+                },
+                "TimeEventDeleteResponse": {
+                    "type": "object",
+                    "properties": {
+                        "status": {
+                            "type": "string",
+                            "example": "partial_success"
+                        },
+                        "message": {
+                            "type": "string",
+                            "example": "A few failures were identified while deleting time events."
+                        },
+                        "deletedCount": {
+                            "type": "integer",
+                            "format": "int32",
+                            "example": 2
+                        },
+                        "failedTimeEvents": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/components/schemas/TimeEventDeleteFailedEvent"
+                            }
+                        }
+                    }
+                },
+                "TimeEventDeleteResponseBadRequest": {
+                    "title": "TimeEventDeleteResponseBadRequest",
+                    "description": "Response body",
+                    "properties": {
+                        "status": {
+                            "title": "Status",
+                            "type": "string",
+                            "example": "Bad Request"
+                        },
+                        "message": {
+                            "title": "Message",
+                            "type": "string",
+                            "example": "The maximum number of time events in a request shouldn't exceed 1000."
+                        },
+                        "deletedCount": {
+                            "title": "Number of time events that were successfully deleted.",
+                            "type": "integer",
+                            "format": "int32",
+                            "example": 0
+                        },
+                        "failedTimeEvents": {
+                            "type": "array",
+                            "items": {
+
+                            },
+                            "example": []
+                        }
+                    },
+                    "type": "object"
+                },
+                "InternalServerError": {
+                    "title": "InternalServerError",
+                    "description": "Response body",
+                    "properties": {
+                        "error": {
+                            "title": "Error",
+                            "type": "object",
+                            "properties": {
+                                "code": {
+                                    "title": "Code",
+                                    "type": "string",
+                                    "example": "InternalError"
+                                },
+                                "message": {
+                                    "title": "Message",
+                                    "type": "string",
+                                    "example": "An unexpected error has occurred. Please contact the system administrator."
+                                }
+                            }
+                        }
+                    }
+                }
+
+            },
+            "responses": {},
+            "headers": {
+                "Retry-After": {
+                    "description": "It indicates how long the client should wait before making a follow-up request.",
+                    "schema": {
+                        "type": "integer"
+                    }
+                },
+                "X-Correlation-ID": {
+                    "description": "One unique id which is able to identify the whole request.",
+                    "schema": {
+                        "type": "string",
+                        "format": "uuid"
+                    }
+                }
+            },
+            "securitySchemes": {
+                "ApiKeyAuth": {
+                    "type": "apiKey",
+                    "name": "Authorization",
+                    "in": "header"
+                }
+            }
+        },
+        "externalDocs": {
+            "description": "Clock In Clock Out Time Events API on SAP Help Portal",
+            "url": "https://help.sap.com/docs/SAP_SUCCESSFACTORS_TIME_TRACKING/a2a03e747cb44e4497b392579c89d439/8f7e61ba4a42416e83f3f117180bdeb6.html"
+        },
+        "x-sap-api-type": "REST",
+        "x-sap-shortText": "APIs for SAP SuccessFactors Clock In Clock Out Time Events."
+    }

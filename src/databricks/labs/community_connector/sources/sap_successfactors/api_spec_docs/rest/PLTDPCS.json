@@ -1,0 +1,594 @@
+{
+  "openapi": "3.0.2",
+  "info": {
+    "title": "Data Privacy Consent Statement",
+    "description": "Public REST API of Data Privacy Consent Statement (DPCS)",
+    "version": "1.0.0"
+  },
+  "x-sap-api-type": "REST",
+  "x-sap-shortText": "Get data privacy consent statements and manage acknowledgements.",
+  "servers": [
+    {
+      "url": "https://{api-server}/rest/security/privacy/v1",
+      "description": "Rest APIs for Data privacy consent statements.",
+      "variables": {
+        "api-server": {
+          "description": "DPCS rest api host.",
+          "default": "apisalesdemo8.successfactors.com"
+        }
+      }
+    },
+    {
+      "url": "https://sandbox.api.sap.com/successfactorsfoundation",
+      "description": "Sandbox Server"
+    }
+  ],
+  "externalDocs": {
+    "description": "Implementing and Managing Data Protection and Privacy",
+    "url": "https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/2becac773fcf4f84a993f0556160d3de/13ebd268d4dd4686b8162794305c2984.html"
+  },
+  "tags": [
+    {
+      "name": "Statements"
+    },
+    {
+      "name": "Acknowledgements"
+    }
+  ],
+  "paths": {
+    "/statements": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "type",
+            "description": "DPCS_TYPE, currently supported : RECRUITING_EXTERNAL, PROFILE_PHOTO",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "country",
+            "description": "alpha 3 country code (eg. CHN, USA...)",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "customFieldValue",
+            "description": "custom field value (optional)",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "language",
+            "description": "locale to filter contents (optional) (eg: default, en_US, zh_CN_SF)",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The DPCS details of the user is returned successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dpcsVersion"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                },
+                "example": {
+                  "message": "Invalid type",
+                  "code": 400
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                },
+                "example": {
+                  "message": "Statement recruiting_external-USA not found",
+                  "code": 404
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                },
+                "example": {
+                  "message": "Internal Server Error",
+                  "code": 500
+                }
+              }
+            }
+          }
+        },
+        "summary": "View details of data privacy consent statements.",
+        "description": "To retrieve the details of data privacy consent statements by their DPCS type or country codes.",
+        "tags": [
+          "Statements"
+        ]
+      }
+    },
+    "/acknowledgements": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "type",
+            "description": "The type of a data privacy consent statement. Supported values are RECRUITING_EXTERNAL and PROFILE_PHOTO.",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "country",
+            "description": "Supported format is alpha 3 country code. For example, CHN, USA, etc. \n\n For RECRUITING_EXTERNAL type, country is required.",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "subjectId",
+            "description": "An identifier of the subject. It can be userId, assignmentId, or candidateId. \n- For PROFILE_PHOTO type, it should be assignmentId. \n- For RECRUITING_EXTERNAL type, it should be candidateId.",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "customFieldValue",
+            "description": "Values of the fields customized in your company instance.",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "language",
+            "description": "The locale you want to filter returned contents. For example, en_US, zh_CN_SF, etc. The default language is en_US.",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The DPCS status of the user is returned successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dpcsStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                },
+                "example": {
+                  "message": "Invalid type",
+                  "code": 400
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "You don’t have permission to view the DPCS status of the user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                },
+                "example": {
+                  "message": "Access denied.",
+                  "code": 403
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                },
+                "example": {
+                  "message": "Statement recruiting_external-USA not found",
+                  "code": 404
+                }
+              }
+            }
+          }
+        },
+        "summary": "Gets the status of a data privacy consent statement.",
+        "description": "An user can accept, revoke, or take no action towards a data privacy consent statement.",
+        "tags": [
+          "Acknowledgements"
+        ]
+      },
+      "post": {
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "The DPCS status of the user is updated successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/acknowledgementResult"
+                },
+                "example": {
+                  "status": 2,
+                  "statementId": 1
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                },
+                "example": {
+                  "message": "Invalid subjectId. Please provide a valid candidate ID.",
+                  "code": 400
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "You don’t have permission to update the DPCS status of the user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                },
+                "example": {
+                  "message": "Access denied.",
+                  "code": 403
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error"
+                },
+                "example": {
+                  "message": "Statement not found",
+                  "code": 404
+                }
+              }
+            }
+          }
+        },
+        "summary": "Updates the status of a data privacy consent statement.",
+        "description": "To accept or revoke a data privacy consent statement.",
+        "tags": [
+          "Acknowledgements"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/acknowledgeRequestBody"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "dpcsVersion": {
+        "title": "statement",
+        "properties": {
+          "id": {
+            "x-key": true,
+            "example": "1",
+            "title": "An identifier of a DPCS.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "version": {
+            "example": "1",
+            "title": "The version number of a DPCS.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "customFieldType": {
+            "nullable": true,
+            "example": "Department",
+            "title": "The type of the fields customized in your company instance.",
+            "maxLength": 200,
+            "type": "string",
+            "format": "Plaintext",
+            "pattern": "/^.*$/"
+          },
+          "template": {
+            "$ref": "#/components/schemas/dpcs"
+          },
+          "contents": {
+            "nullable": true,
+            "title": "A list of DPCS content.",
+            "items": {
+              "$ref": "#/components/schemas/dpcsContent"
+            },
+            "type": "array"
+          },
+          "attributes": {
+            "nullable": true,
+            "title": "A list of DPCS attributes.",
+            "items": {
+              "$ref": "#/components/schemas/dpcsAttribute"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "dpcs": {
+        "title": "template",
+        "description": "DPCS object.",
+        "properties": {
+          "id": {
+            "x-key": true,
+            "example": "1",
+            "title": "The identifier of a DPCS template.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "example": "dpcs1",
+            "title": "The name of a DPCS template.",
+            "maxLength": 100,
+            "type": "string",
+            "format": "Plaintext",
+            "pattern": "/^.*$/"
+          },
+          "type": {
+            "example": "1",
+            "title": "The type of a DPCS. Supported values are 0~8. Currently only supported 2:Recruiting external, 8:Profile photo.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "status": {
+            "example": "1",
+            "title": "The status of a DPCS template. Supported values are enables 1, disabled 0, and deleted 2.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "forceAccept": {
+            "nullable": true,
+            "example": "0",
+            "title": "Determines whether the DPCS needs to be displayed to users even if it has been accepted already. Supported values are 0 false and 1 true.",
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "type": "object"
+      },
+      "dpcsContent": {
+        "title": "content",
+        "properties": {
+          "id": {
+            "x-key": true,
+            "example": "1",
+            "title": "An identifier of the DPSC content.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "statementId": {
+            "nullable": true,
+            "example": "1",
+            "title": "The version ID of the DPCS.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "locale": {
+            "example": "en_US",
+            "title": "The language of the DPSC content.",
+            "maxLength": 32,
+            "type": "string",
+            "format": "Plaintext",
+            "pattern": "/^.*$/"
+          },
+          "title": {
+            "nullable": true,
+            "example": "title",
+            "title": "The title of the DPCS content.",
+            "maxLength": 100,
+            "type": "string",
+            "format": "Plaintext",
+            "pattern": "/^.*$/"
+          },
+          "content": {
+            "nullable": true,
+            "example": "content",
+            "title": "The content of the DPCS.",
+            "maxLength": 50000,
+            "type": "string",
+            "format": "Serialized Data Object"
+          }
+        },
+        "type": "object"
+      },
+      "dpcsAttribute": {
+        "title": "attribute",
+        "properties": {
+          "id": {
+            "x-key": true,
+            "example": "1",
+            "title": "An identifier of the DPCS attribute.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "statementId": {
+            "nullable": true,
+            "example": "1",
+            "title": "The version ID of the DPCS.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "attributeName": {
+            "example": "name",
+            "title": "The name of the attribute.",
+            "maxLength": 100,
+            "type": "string",
+            "format": "Plaintext",
+            "pattern": "/^.*$/"
+          },
+          "attributeValue": {
+            "example": "value",
+            "title": "The value of the attribute.",
+            "maxLength": 100,
+            "type": "string",
+            "format": "Plaintext",
+            "pattern": "/^.*$/"
+          }
+        },
+        "type": "object"
+      },
+      "dpcsStatus": {
+        "title": "acknowledgement",
+        "properties": {
+          "status": {
+            "example": "1",
+            "title": "The status of the DPCS. Supported values are 0: DECLINE, 1: ACCEPT, 2: REVOKE, and 3: NOT PRESENTED.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "statement": {
+            "$ref": "#/components/schemas/dpcsVersion"
+          }
+        },
+        "type": "object"
+      },
+      "error": {
+        "title": "error",
+        "properties": {
+          "code": {
+            "title": "The code of an error message.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "message": {
+            "title": "An error message.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "acknowledgeRequestBody": {
+        "title": "acknowledgementAction",
+        "properties": {
+          "type": {
+            "example": "RECRUITING_EXTERNAL",
+            "title": "The type of a data privacy consent statement. Supported values are RECRUITING_EXTERNAL and PROFILE_PHOTO.",
+            "maxLength": 20,
+            "type": "string",
+            "format": "Plaintext",
+            "pattern": "/^.*$/"
+          },
+          "statementId": {
+            "example": "1",
+            "title": "The version ID of the DPCS.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "subjectId": {
+            "example": "65548733",
+            "title": "An identifier of the subject. It can be userId, assignmentId, or candidateId.",
+            "maxLength": 30,
+            "type": "string",
+            "format": "Plaintext",
+            "pattern": "/^.*$/"
+          },
+          "action": {
+            "example": "1",
+            "title": "To decline, accept, or revoke a DPCS. Supported values are 0: DECLINE, 1: ACCEPT, and 2: REVOKE.",
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "type": "object"
+      },
+      "acknowledgementResult": {
+        "title": "acknowledgementResult",
+        "properties": {
+          "status": {
+            "example": "1",
+            "title": "The status of the acknowledgement, 0: DECLINE, 1: ACCEPT, and 2: REVOKE.",
+            "type": "integer",
+            "format": "int32"
+          },
+          "statementId": {
+            "example": "1",
+            "title": "The version ID of the DPCS.",
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "parameters": {},
+    "responses": {},
+    "securitySchemes": {
+      "BasicAuth": {
+        "type": "http",
+        "scheme": "basic"
+      }
+    }
+  },
+  "security": [
+    {
+      "BasicAuth": []
+    }
+  ]
+}

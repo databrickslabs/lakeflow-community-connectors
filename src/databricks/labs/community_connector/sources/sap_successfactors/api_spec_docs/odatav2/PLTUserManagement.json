@@ -1,0 +1,3341 @@
+{
+	"swagger": "2.0",
+	"security": [
+        {
+            "basicAuthentication": []
+        }
+    ],
+    "securityDefinitions": {
+        "basicAuthentication": {
+            "type": "basic"
+        }
+    },
+	"x-sap-shortText":"API to access information about a system user.",
+	"x-servers": [{
+		"url": "https://{api-server}/odata/v2",
+		"description": "OData APIs for the SuccessFactors Data Centers",
+		"templates": {
+			"api-server": {
+				"description": "SuccessFactors Data Center host",
+				"default": "apisalesdemo8.successfactors.com"
+			}
+		}
+	}],
+	"info": {
+		"title": "User Management",
+		"version": "1.0",
+		"description": "API to access information about a system user including log in user name, password, and summaries of user personal and organizational information.\n\n You can find your company's API server in [List of API Servers in SAP SuccessFactors.](https://help.sap.com/viewer/d599f15995d348a1b45ba5603e2aba9b/LATEST/en-US/af2b8d5437494b12be88fe374eba75b6.html)"
+	},
+	"externalDocs": {
+		"description": "User Management APIs on SAP Help Portal",
+		"url": "https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/d599f15995d348a1b45ba5603e2aba9b/b39fde677c254b68ba7704f7c0129071.html"
+	},
+	"schemes": ["https"],
+	"host": "sandbox.api.sap.com",
+	"basePath": "/successfactors/odata/v2",
+	"consumes": ["application/json"],
+	"produces": ["application/json"],
+	"tags": [{
+		"name": "User"
+	},
+	{
+		"name": "User Permissions"
+	}],
+	"definitions": {
+		"odata.error": {
+			"type": "object",
+			"required": ["error"],
+			"properties": {
+				"error": {
+					"$ref": "#/definitions/odata.error.main"
+				}
+			}
+		},
+		"odata.error.main": {
+			"type": "object",
+			"required": ["code",
+			"message"],
+			"properties": {
+				"code": {
+					"type": "string"
+				},
+				"message": {
+					"type": "string"
+				},
+				"target": {
+					"type": "string"
+				},
+				"details": {
+					"type": "array",
+					"items": {
+						"$ref": "#/definitions/odata.error.detail"
+					}
+				},
+				"innererror": {
+					"type": "object",
+					"description": "The structure of this object is service-specific"
+				}
+			}
+		},
+		"odata.error.detail": {
+			"type": "object",
+			"required": ["code",
+			"message"],
+			"properties": {
+				"code": {
+					"type": "string"
+				},
+				"message": {
+					"type": "string"
+				},
+				"target": {
+					"type": "string"
+				}
+			}
+		},
+		"SFOData.User": {
+			"type": "object",
+			"properties": {
+				"addressLine1": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"addressLine2": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"addressLine3": {
+					"type": ["string",
+					"null"]
+				},
+				"benchStrength": {
+					"type": ["string",
+					"null"]
+				},
+				"bonusBudgetAmount": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"bonusTarget": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"businessPhone": {
+					"type": ["string",
+					"null"],
+					"maxLength": 20
+				},
+				"businessSegment": {
+					"type": ["string",
+					"null"]
+				},
+				"cellPhone": {
+					"type": ["string",
+					"null"]
+				},
+				"citizenship": {
+					"type": ["string",
+					"null"]
+				},
+				"city": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"compensationBonusEligible": {
+					"type": ["boolean",
+					"null"]
+				},
+				"compensationEligible": {
+					"type": ["boolean",
+					"null"]
+				},
+				"compensationReadOnly": {
+					"type": ["boolean",
+					"null"]
+				},
+				"compensationSalaryEligible": {
+					"type": ["boolean",
+					"null"]
+				},
+				"compensationSalaryRateType": {
+					"type": ["string",
+					"null"]
+				},
+				"compensationSalaryRateUnits": {
+					"type": ["string",
+					"null"],
+					"format": "int64"
+				},
+				"compensationStockEligible": {
+					"type": ["boolean",
+					"null"]
+				},
+				"competency": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "float",
+					"example": 3.14
+				},
+				"country": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"criticalTalentComments": {
+					"type": ["string",
+					"null"]
+				},
+				"custom01": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"custom02": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"custom03": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"custom04": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"custom05": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"custom06": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"custom07": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"custom08": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"custom09": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"custom10": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"custom11": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"custom12": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"custom13": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"custom14": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"custom15": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"dateOfBirth": {
+					"type": ["string",
+					"null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"dateOfCurrentPosition": {
+					"type": ["string",
+					"null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"dateOfPosition": {
+					"type": ["string",
+					"null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"defaultFullName": {
+					"type": ["string",
+					"null"]
+				},
+				"defaultLocale": {
+					"type": ["string",
+					"null"],
+					"maxLength": 100
+				},
+				"department": {
+					"type": ["string",
+					"null"],
+					"maxLength": 128
+				},
+				"division": {
+					"type": ["string",
+					"null"],
+					"maxLength": 128
+				},
+				"email": {
+					"type": ["string",
+					"null"]
+				},
+				"empId": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"employeeClass": {
+					"type": ["string",
+					"null"]
+				},
+				"ethnicity": {
+					"type": ["string",
+					"null"]
+				},
+				"fax": {
+					"type": ["string",
+					"null"],
+					"maxLength": 20
+				},
+				"finalJobCode": {
+					"type": ["string",
+					"null"]
+				},
+				"finalJobFamily": {
+					"type": ["string",
+					"null"]
+				},
+				"finalJobRole": {
+					"type": ["string",
+					"null"]
+				},
+				"firstName": {
+					"type": ["string",
+					"null"],
+					"maxLength": 128
+				},
+				"futureLeader": {
+					"type": ["boolean",
+					"null"]
+				},
+				"gender": {
+					"type": "string",
+					"maxLength": 2
+				},
+				"hireDate": {
+					"type": ["string",
+					"null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"homePhone": {
+					"type": ["string",
+					"null"]
+				},
+				"impactOfLoss": {
+					"type": ["string",
+					"null"]
+				},
+				"impactOfLossComments": {
+					"type": ["string",
+					"null"]
+				},
+				"issueComments": {
+					"type": ["string",
+					"null"]
+				},
+				"jobCode": {
+					"type": ["string",
+					"null"],
+					"maxLength": 128
+				},
+				"jobFamily": {
+					"type": ["string",
+					"null"]
+				},
+				"jobLevel": {
+					"type": ["string",
+					"null"]
+				},
+				"jobRole": {
+					"type": ["string",
+					"null"]
+				},
+				"jobTitle": {
+					"type": ["string",
+					"null"]
+				},
+				"keyPosition": {
+					"type": ["boolean",
+					"null"]
+				},
+				"lastModified": {
+					"type": ["string",
+					"null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"lastModifiedDateTime": {
+					"type": ["string",
+					"null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"lastModifiedWithTZ": {
+					"type": ["string",
+					"null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"lastName": {
+					"type": ["string",
+					"null"],
+					"maxLength": 128
+				},
+				"lastReviewDate": {
+					"type": ["string",
+					"null"]
+				},
+				"level": {
+					"type": ["string",
+					"null"]
+				},
+				"localCurrencyCode": {
+					"type": ["string",
+					"null"]
+				},
+				"location": {
+					"type": ["string",
+					"null"],
+					"maxLength": 128
+				},
+				"lumpsum2Target": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"lumpsumTarget": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"married": {
+					"type": ["boolean",
+					"null"]
+				},
+				"matrix1Label": {
+					"type": ["string",
+					"null"]
+				},
+				"matrix2Label": {
+					"type": ["string",
+					"null"]
+				},
+				"matrixManaged": {
+					"type": ["boolean",
+					"null"]
+				},
+				"meritEffectiveDate": {
+					"type": ["string",
+					"null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"meritTarget": {
+					"type": ["string",
+					"null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"mi": {
+					"type": ["string",
+					"null"],
+					"maxLength": 128
+				},
+				"minority": {
+					"type": ["boolean",
+					"null"]
+				},
+				"nationality": {
+					"type": ["string",
+					"null"]
+				},
+				"newToPosition": {
+					"type": ["boolean",
+					"null"]
+				},
+				"nickname": {
+					"type": ["string",
+					"null"],
+					"maxLength": 128
+				},
+				"objective": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "float",
+					"example": 3.14
+				},
+				"onboardingId": {
+					"type": ["string",
+					"null"]
+				},
+				"origHireDate": {
+					"type": ["string",
+					"null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"password": {
+					"type": ["string",
+					"null"],
+					"maxLength": 128
+				},
+				"payGrade": {
+					"type": ["string",
+					"null"]
+				},
+				"performance": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "float",
+					"example": 3.14
+				},
+				"potential": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "float",
+					"example": 3.14
+				},
+				"promotionAmount": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"raiseProrating": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"reasonForLeaving": {
+					"type": ["string",
+					"null"]
+				},
+				"reloComments": {
+					"type": ["string",
+					"null"]
+				},
+				"reloLocation": {
+					"type": ["string",
+					"null"]
+				},
+				"reloWilling": {
+					"type": ["string",
+					"null"]
+				},
+				"reviewFreq": {
+					"type": ["string",
+					"null"],
+					"maxLength": 200000000
+				},
+				"riskOfLoss": {
+					"type": ["string",
+					"null"]
+				},
+				"salary": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"salaryBudgetExtra2Percentage": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"salaryBudgetExtraPercentage": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"salaryBudgetFinalSalaryPercentage": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"salaryBudgetLumpsumPercentage": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"salaryBudgetMeritPercentage": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"salaryBudgetPromotionPercentage": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"salaryBudgetTotalRaisePercentage": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"salaryLocal": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"salaryProrating": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"salutation": {
+					"type": ["string",
+					"null"],
+					"maxLength": 128
+				},
+				"sciLastModified": {
+					"type": ["string",
+					"null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"seatingChart": {
+					"type": ["string",
+					"null"]
+				},
+				"serviceDate": {
+					"type": ["string",
+					"null"],
+					"example": "/Date(1492098664000)/"
+				},
+				"ssn": {
+					"type": ["string",
+					"null"],
+					"maxLength": 128
+				},
+				"state": {
+					"type": ["string",
+					"null"],
+					"maxLength": 20
+				},
+				"status": {
+					"type": "string",
+					"maxLength": 17
+				},
+				"stockBudgetOptionAmount": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"stockBudgetOther1Amount": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"stockBudgetOther2Amount": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"stockBudgetOther3Amount": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"stockBudgetStockAmount": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"stockBudgetUnitAmount": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"suffix": {
+					"type": ["string",
+					"null"],
+					"maxLength": 128
+				},
+				"sysCostOfSource": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "float",
+					"example": 3.14
+				},
+				"sysSource": {
+					"type": ["integer",
+					"null"],
+					"format": "int32"
+				},
+				"sysStartingSalary": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "float",
+					"example": 3.14
+				},
+				"timeZone": {
+					"type": ["string",
+					"null"],
+					"maxLength": 16
+				},
+				"title": {
+					"type": ["string",
+					"null"],
+					"maxLength": 255
+				},
+				"totalTeamSize": {
+					"type": ["string",
+					"null"],
+					"format": "int64"
+				},
+				"userId": {
+					"type": "string",
+					"maxLength": 100
+				},
+				"username": {
+					"type": ["string",
+					"null"],
+					"maxLength": 100
+				},
+				"veteranDisabled": {
+					"type": ["boolean",
+					"null"]
+				},
+				"veteranMedal": {
+					"type": ["boolean",
+					"null"]
+				},
+				"veteranProtected": {
+					"type": ["boolean",
+					"null"]
+				},
+				"veteranSeparated": {
+					"type": ["boolean",
+					"null"]
+				},
+				"zipCode": {
+					"type": ["string",
+					"null"],
+					"maxLength": 10
+				},
+				"customManager": {
+					"title": "Related Collection(SFOData.User)",
+					"type": "object",
+					"properties": {
+						"results": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/SFOData.User"
+							}
+						}
+					}
+				},
+				"customReports": {
+					"title": "Related Collection(SFOData.User)",
+					"type": "object",
+					"properties": {
+						"results": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/SFOData.User"
+							}
+						}
+					}
+				},
+				"directReports": {
+					"title": "Related Collection(SFOData.User)",
+					"type": "object",
+					"properties": {
+						"results": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/SFOData.User"
+							}
+						}
+					}
+				},
+				"hr": {
+					"$ref": "#/definitions/SFOData.User"
+				},
+				"hrReports": {
+					"title": "Related Collection(SFOData.User)",
+					"type": "object",
+					"properties": {
+						"results": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/SFOData.User"
+							}
+						}
+					}
+				},
+				"manager": {
+					"$ref": "#/definitions/SFOData.User"
+				},
+				"matrixManager": {
+					"title": "Related Collection(SFOData.User)",
+					"type": "object",
+					"properties": {
+						"results": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/SFOData.User"
+							}
+						}
+					}
+				},
+				"matrixReports": {
+					"title": "Related Collection(SFOData.User)",
+					"type": "object",
+					"properties": {
+						"results": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/SFOData.User"
+							}
+						}
+					}
+				},
+				"proxy": {
+					"title": "Related Collection(SFOData.User)",
+					"type": "object",
+					"properties": {
+						"results": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/SFOData.User"
+							}
+						}
+					}
+				},
+				"secondManager": {
+					"$ref": "#/definitions/SFOData.User"
+				},
+				"secondReports": {
+					"title": "Related Collection(SFOData.User)",
+					"type": "object",
+					"properties": {
+						"results": {
+							"type": "array",
+							"items": {
+								"$ref": "#/definitions/SFOData.User"
+							}
+						}
+					}
+				},
+				"userPermissionsNav": {
+					"$ref": "#/definitions/SFOData.UserPermissions"
+				}
+			},
+			"title": "User"
+		},
+		"SFOData.UserPermissions": {
+			"type": "object",
+			"properties": {
+				"addressLine1": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"addressLine2": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"addressLine3": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"benchStrength": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"benchStrengthNav": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"bonusBudgetAmount": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"bonusTarget": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"businessPhone": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"businessSegment": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"cellPhone": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"citizenship": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"city": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"compensationBonusEligible": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"compensationEligible": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"compensationReadOnly": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"compensationSalaryEligible": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"compensationSalaryRateType": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"compensationSalaryRateUnits": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"compensationStockEligible": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"competency": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"competencyRatingNav": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"country": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"criticalTalentComments": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"custom01": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"custom02": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"custom03": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"custom04": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"custom05": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"custom06": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"custom07": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"custom08": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"custom09": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"custom10": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"custom11": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"custom12": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"custom13": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"custom14": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"custom15": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"customManager": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"customReports": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"dateOfBirth": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"dateOfCurrentPosition": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"dateOfPosition": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"defaultFullName": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"defaultLocale": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"department": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"directReports": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"division": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"dummyNominationNav": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"email": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"empId": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"empInfo": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"employeeClass": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"ethnicity": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"ethnicityNav": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"fax": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"finalJobCode": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"finalJobFamily": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"finalJobRole": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"firstName": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"futureLeader": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"gender": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"hireDate": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"homePhone": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"hr": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"hrReports": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"impactOfLoss": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"impactOfLossComments": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"impactOfLossNav": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"issueComments": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"jobCode": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"jobFamily": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"jobLevel": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"jobRole": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"jobTitle": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"keyPosition": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"lastModified": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"lastModifiedDateTime": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"lastModifiedWithTZ": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"lastName": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"lastReviewDate": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"level": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"localCurrencyCode": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"location": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"lumpsum2Target": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"lumpsumTarget": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"manager": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"married": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"matrix1Label": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"matrix2Label": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"matrixManaged": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"matrixManager": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"matrixReports": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"meritEffectiveDate": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"meritTarget": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"mi": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"minority": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"nationality": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"newToPosition": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"nickname": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"nominationNav": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"objective": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"onboardingId": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"origHireDate": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"password": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"payGrade": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"performance": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"potential": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"promotionAmount": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"proxy": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"raiseProrating": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"reasonForLeaving": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"reasonForLeavingNav": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"reloComments": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"reloLocation": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"reloWilling": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"reloWillingNav": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"reviewFreq": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"riskOfLoss": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"riskOfLossNav": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"salary": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"salaryBudgetExtra2Percentage": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"salaryBudgetExtraPercentage": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"salaryBudgetFinalSalaryPercentage": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"salaryBudgetLumpsumPercentage": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"salaryBudgetMeritPercentage": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"salaryBudgetPromotionPercentage": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"salaryBudgetTotalRaisePercentage": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"salaryLocal": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"salaryProrating": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"salutation": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"salutationNav": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"sciLastModified": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"seatingChart": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"secondManager": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"secondReports": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"serviceDate": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"ssn": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"state": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"status": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"stockBudgetOptionAmount": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"stockBudgetOther1Amount": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"stockBudgetOther2Amount": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"stockBudgetOther3Amount": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"stockBudgetStockAmount": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"stockBudgetUnitAmount": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"suffix": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"sysCostOfSource": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"sysSource": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"sysSourceNav": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"sysStartingSalary": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"timeZone": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"title": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"totalTeamSize": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"userId": {
+					"type": "integer",
+					"format": "uint8"
+				},
+				"userPermissionsNav": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"username": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"veteranDisabled": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"veteranMedal": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"veteranProtected": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"veteranSeparated": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				},
+				"zipCode": {
+					"type": ["integer",
+					"null"],
+					"format": "uint8"
+				}
+			},
+			"title": "UserPermissions"
+		}
+	},
+	"paths": {
+		"/User": {
+			"get": {
+				"summary": "Get entities from User",
+				"tags": ["User"],
+				"parameters": [{
+					"$ref": "#/parameters/top"
+				},
+				{
+					"$ref": "#/parameters/skip"
+				},
+				{
+					"$ref": "#/parameters/search"
+				},
+				{
+					"$ref": "#/parameters/filter"
+				},
+				{
+					"$ref": "#/parameters/count"
+				},
+				{
+					"name": "$orderby",
+					"in": "query",
+					"description": "Order items by property values, see [OData Sorting](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374629)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["addressLine1",
+						"addressLine1 desc",
+						"addressLine2",
+						"addressLine2 desc",
+						"addressLine3",
+						"addressLine3 desc",
+						"benchStrength",
+						"benchStrength desc",
+						"bonusBudgetAmount",
+						"bonusBudgetAmount desc",
+						"bonusTarget",
+						"bonusTarget desc",
+						"businessPhone",
+						"businessPhone desc",
+						"businessSegment",
+						"businessSegment desc",
+						"cellPhone",
+						"cellPhone desc",
+						"citizenship",
+						"citizenship desc",
+						"city",
+						"city desc",
+						"compensationBonusEligible",
+						"compensationBonusEligible desc",
+						"compensationEligible",
+						"compensationEligible desc",
+						"compensationReadOnly",
+						"compensationReadOnly desc",
+						"compensationSalaryEligible",
+						"compensationSalaryEligible desc",
+						"compensationSalaryRateType",
+						"compensationSalaryRateType desc",
+						"compensationSalaryRateUnits",
+						"compensationSalaryRateUnits desc",
+						"compensationStockEligible",
+						"compensationStockEligible desc",
+						"competency",
+						"competency desc",
+						"country",
+						"country desc",
+						"criticalTalentComments",
+						"criticalTalentComments desc",
+						"custom01",
+						"custom01 desc",
+						"custom02",
+						"custom02 desc",
+						"custom03",
+						"custom03 desc",
+						"custom04",
+						"custom04 desc",
+						"custom05",
+						"custom05 desc",
+						"custom06",
+						"custom06 desc",
+						"custom07",
+						"custom07 desc",
+						"custom08",
+						"custom08 desc",
+						"custom09",
+						"custom09 desc",
+						"custom10",
+						"custom10 desc",
+						"custom11",
+						"custom11 desc",
+						"custom12",
+						"custom12 desc",
+						"custom13",
+						"custom13 desc",
+						"custom14",
+						"custom14 desc",
+						"custom15",
+						"custom15 desc",
+						"dateOfBirth",
+						"dateOfBirth desc",
+						"dateOfCurrentPosition",
+						"dateOfCurrentPosition desc",
+						"dateOfPosition",
+						"dateOfPosition desc",
+						"defaultFullName",
+						"defaultFullName desc",
+						"defaultLocale",
+						"defaultLocale desc",
+						"department",
+						"department desc",
+						"division",
+						"division desc",
+						"email",
+						"email desc",
+						"empId",
+						"empId desc",
+						"employeeClass",
+						"employeeClass desc",
+						"ethnicity",
+						"ethnicity desc",
+						"fax",
+						"fax desc",
+						"finalJobCode",
+						"finalJobCode desc",
+						"finalJobFamily",
+						"finalJobFamily desc",
+						"finalJobRole",
+						"finalJobRole desc",
+						"firstName",
+						"firstName desc",
+						"futureLeader",
+						"futureLeader desc",
+						"gender",
+						"gender desc",
+						"hireDate",
+						"hireDate desc",
+						"homePhone",
+						"homePhone desc",
+						"impactOfLoss",
+						"impactOfLoss desc",
+						"impactOfLossComments",
+						"impactOfLossComments desc",
+						"issueComments",
+						"issueComments desc",
+						"jobCode",
+						"jobCode desc",
+						"jobFamily",
+						"jobFamily desc",
+						"jobLevel",
+						"jobLevel desc",
+						"jobRole",
+						"jobRole desc",
+						"jobTitle",
+						"jobTitle desc",
+						"keyPosition",
+						"keyPosition desc",
+						"lastModified",
+						"lastModified desc",
+						"lastModifiedDateTime",
+						"lastModifiedDateTime desc",
+						"lastModifiedWithTZ",
+						"lastModifiedWithTZ desc",
+						"lastName",
+						"lastName desc",
+						"lastReviewDate",
+						"lastReviewDate desc",
+						"level",
+						"level desc",
+						"localCurrencyCode",
+						"localCurrencyCode desc",
+						"location",
+						"location desc",
+						"lumpsum2Target",
+						"lumpsum2Target desc",
+						"lumpsumTarget",
+						"lumpsumTarget desc",
+						"married",
+						"married desc",
+						"matrix1Label",
+						"matrix1Label desc",
+						"matrix2Label",
+						"matrix2Label desc",
+						"matrixManaged",
+						"matrixManaged desc",
+						"meritEffectiveDate",
+						"meritEffectiveDate desc",
+						"meritTarget",
+						"meritTarget desc",
+						"mi",
+						"mi desc",
+						"minority",
+						"minority desc",
+						"nationality",
+						"nationality desc",
+						"newToPosition",
+						"newToPosition desc",
+						"nickname",
+						"nickname desc",
+						"objective",
+						"objective desc",
+						"onboardingId",
+						"onboardingId desc",
+						"origHireDate",
+						"origHireDate desc",
+						"password",
+						"password desc",
+						"payGrade",
+						"payGrade desc",
+						"performance",
+						"performance desc",
+						"potential",
+						"potential desc",
+						"promotionAmount",
+						"promotionAmount desc",
+						"raiseProrating",
+						"raiseProrating desc",
+						"reasonForLeaving",
+						"reasonForLeaving desc",
+						"reloComments",
+						"reloComments desc",
+						"reloLocation",
+						"reloLocation desc",
+						"reloWilling",
+						"reloWilling desc",
+						"reviewFreq",
+						"reviewFreq desc",
+						"riskOfLoss",
+						"riskOfLoss desc",
+						"salary",
+						"salary desc",
+						"salaryBudgetExtra2Percentage",
+						"salaryBudgetExtra2Percentage desc",
+						"salaryBudgetExtraPercentage",
+						"salaryBudgetExtraPercentage desc",
+						"salaryBudgetFinalSalaryPercentage",
+						"salaryBudgetFinalSalaryPercentage desc",
+						"salaryBudgetLumpsumPercentage",
+						"salaryBudgetLumpsumPercentage desc",
+						"salaryBudgetMeritPercentage",
+						"salaryBudgetMeritPercentage desc",
+						"salaryBudgetPromotionPercentage",
+						"salaryBudgetPromotionPercentage desc",
+						"salaryBudgetTotalRaisePercentage",
+						"salaryBudgetTotalRaisePercentage desc",
+						"salaryLocal",
+						"salaryLocal desc",
+						"salaryProrating",
+						"salaryProrating desc",
+						"salutation",
+						"salutation desc",
+						"sciLastModified",
+						"sciLastModified desc",
+						"seatingChart",
+						"seatingChart desc",
+						"serviceDate",
+						"serviceDate desc",
+						"ssn",
+						"ssn desc",
+						"state",
+						"state desc",
+						"status",
+						"status desc",
+						"stockBudgetOptionAmount",
+						"stockBudgetOptionAmount desc",
+						"stockBudgetOther1Amount",
+						"stockBudgetOther1Amount desc",
+						"stockBudgetOther2Amount",
+						"stockBudgetOther2Amount desc",
+						"stockBudgetOther3Amount",
+						"stockBudgetOther3Amount desc",
+						"stockBudgetStockAmount",
+						"stockBudgetStockAmount desc",
+						"stockBudgetUnitAmount",
+						"stockBudgetUnitAmount desc",
+						"suffix",
+						"suffix desc",
+						"sysCostOfSource",
+						"sysCostOfSource desc",
+						"sysSource",
+						"sysSource desc",
+						"sysStartingSalary",
+						"sysStartingSalary desc",
+						"timeZone",
+						"timeZone desc",
+						"title",
+						"title desc",
+						"totalTeamSize",
+						"totalTeamSize desc",
+						"userId",
+						"userId desc",
+						"username",
+						"username desc",
+						"veteranDisabled",
+						"veteranDisabled desc",
+						"veteranMedal",
+						"veteranMedal desc",
+						"veteranProtected",
+						"veteranProtected desc",
+						"veteranSeparated",
+						"veteranSeparated desc",
+						"zipCode",
+						"zipCode desc"]
+					}
+				},
+				{
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374620)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["addressLine1",
+						"addressLine2",
+						"addressLine3",
+						"benchStrength",
+						"bonusBudgetAmount",
+						"bonusTarget",
+						"businessPhone",
+						"businessSegment",
+						"cellPhone",
+						"citizenship",
+						"city",
+						"compensationBonusEligible",
+						"compensationEligible",
+						"compensationReadOnly",
+						"compensationSalaryEligible",
+						"compensationSalaryRateType",
+						"compensationSalaryRateUnits",
+						"compensationStockEligible",
+						"competency",
+						"country",
+						"criticalTalentComments",
+						"custom01",
+						"custom02",
+						"custom03",
+						"custom04",
+						"custom05",
+						"custom06",
+						"custom07",
+						"custom08",
+						"custom09",
+						"custom10",
+						"custom11",
+						"custom12",
+						"custom13",
+						"custom14",
+						"custom15",
+						"dateOfBirth",
+						"dateOfCurrentPosition",
+						"dateOfPosition",
+						"defaultFullName",
+						"defaultLocale",
+						"department",
+						"division",
+						"email",
+						"empId",
+						"employeeClass",
+						"ethnicity",
+						"fax",
+						"finalJobCode",
+						"finalJobFamily",
+						"finalJobRole",
+						"firstName",
+						"futureLeader",
+						"gender",
+						"hireDate",
+						"homePhone",
+						"impactOfLoss",
+						"impactOfLossComments",
+						"issueComments",
+						"jobCode",
+						"jobFamily",
+						"jobLevel",
+						"jobRole",
+						"jobTitle",
+						"keyPosition",
+						"lastModified",
+						"lastModifiedDateTime",
+						"lastModifiedWithTZ",
+						"lastName",
+						"lastReviewDate",
+						"level",
+						"localCurrencyCode",
+						"location",
+						"lumpsum2Target",
+						"lumpsumTarget",
+						"married",
+						"matrix1Label",
+						"matrix2Label",
+						"matrixManaged",
+						"meritEffectiveDate",
+						"meritTarget",
+						"mi",
+						"minority",
+						"nationality",
+						"newToPosition",
+						"nickname",
+						"objective",
+						"onboardingId",
+						"origHireDate",
+						"password",
+						"payGrade",
+						"performance",
+						"potential",
+						"promotionAmount",
+						"raiseProrating",
+						"reasonForLeaving",
+						"reloComments",
+						"reloLocation",
+						"reloWilling",
+						"reviewFreq",
+						"riskOfLoss",
+						"salary",
+						"salaryBudgetExtra2Percentage",
+						"salaryBudgetExtraPercentage",
+						"salaryBudgetFinalSalaryPercentage",
+						"salaryBudgetLumpsumPercentage",
+						"salaryBudgetMeritPercentage",
+						"salaryBudgetPromotionPercentage",
+						"salaryBudgetTotalRaisePercentage",
+						"salaryLocal",
+						"salaryProrating",
+						"salutation",
+						"sciLastModified",
+						"seatingChart",
+						"serviceDate",
+						"ssn",
+						"state",
+						"status",
+						"stockBudgetOptionAmount",
+						"stockBudgetOther1Amount",
+						"stockBudgetOther2Amount",
+						"stockBudgetOther3Amount",
+						"stockBudgetStockAmount",
+						"stockBudgetUnitAmount",
+						"suffix",
+						"sysCostOfSource",
+						"sysSource",
+						"sysStartingSalary",
+						"timeZone",
+						"title",
+						"totalTeamSize",
+						"userId",
+						"username",
+						"veteranDisabled",
+						"veteranMedal",
+						"veteranProtected",
+						"veteranSeparated",
+						"zipCode"]
+					}
+				},
+				{
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374621)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*",
+						"customManager",
+						"customReports",
+						"directReports",
+						"hr",
+						"hrReports",
+						"manager",
+						"matrixManager",
+						"matrixReports",
+						"proxy",
+						"secondManager",
+						"secondReports",
+						"userPermissionsNav"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entities",
+						"schema": {
+							"type": "object",
+							"title": "Wrapper",
+							"properties": {
+								"d": {
+									"type": "object",
+									"title": "Collection of User",
+									"properties": {
+										"results": {
+											"type": "array",
+											"items": {
+												"$ref": "#/definitions/SFOData.User"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			},
+			"post": {
+				"summary": "Add new entity to User",
+				"tags": ["User"],
+				"parameters": [{
+					"name": "User",
+					"in": "body",
+					"description": "New entity",
+					"schema": {
+						"$ref": "#/definitions/SFOData.User"
+					}
+				}],
+				"responses": {
+					"201": {
+						"description": "Created entity",
+						"schema": {
+							"title": "Created User",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.User"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/User('{userId}')": {
+			"get": {
+				"summary": "Get entity from User by key",
+				"tags": ["User"],
+				"parameters": [{
+					"name": "userId",
+					"in": "path",
+					"required": true,
+					"description": "key: userId",
+					"type": "string"
+				},
+				{
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374620)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["addressLine1",
+						"addressLine2",
+						"addressLine3",
+						"benchStrength",
+						"bonusBudgetAmount",
+						"bonusTarget",
+						"businessPhone",
+						"businessSegment",
+						"cellPhone",
+						"citizenship",
+						"city",
+						"compensationBonusEligible",
+						"compensationEligible",
+						"compensationReadOnly",
+						"compensationSalaryEligible",
+						"compensationSalaryRateType",
+						"compensationSalaryRateUnits",
+						"compensationStockEligible",
+						"competency",
+						"country",
+						"criticalTalentComments",
+						"custom01",
+						"custom02",
+						"custom03",
+						"custom04",
+						"custom05",
+						"custom06",
+						"custom07",
+						"custom08",
+						"custom09",
+						"custom10",
+						"custom11",
+						"custom12",
+						"custom13",
+						"custom14",
+						"custom15",
+						"dateOfBirth",
+						"dateOfCurrentPosition",
+						"dateOfPosition",
+						"defaultFullName",
+						"defaultLocale",
+						"department",
+						"division",
+						"email",
+						"empId",
+						"employeeClass",
+						"ethnicity",
+						"fax",
+						"finalJobCode",
+						"finalJobFamily",
+						"finalJobRole",
+						"firstName",
+						"futureLeader",
+						"gender",
+						"hireDate",
+						"homePhone",
+						"impactOfLoss",
+						"impactOfLossComments",
+						"issueComments",
+						"jobCode",
+						"jobFamily",
+						"jobLevel",
+						"jobRole",
+						"jobTitle",
+						"keyPosition",
+						"lastModified",
+						"lastModifiedDateTime",
+						"lastModifiedWithTZ",
+						"lastName",
+						"lastReviewDate",
+						"level",
+						"localCurrencyCode",
+						"location",
+						"lumpsum2Target",
+						"lumpsumTarget",
+						"married",
+						"matrix1Label",
+						"matrix2Label",
+						"matrixManaged",
+						"meritEffectiveDate",
+						"meritTarget",
+						"mi",
+						"minority",
+						"nationality",
+						"newToPosition",
+						"nickname",
+						"objective",
+						"onboardingId",
+						"origHireDate",
+						"password",
+						"payGrade",
+						"performance",
+						"potential",
+						"promotionAmount",
+						"raiseProrating",
+						"reasonForLeaving",
+						"reloComments",
+						"reloLocation",
+						"reloWilling",
+						"reviewFreq",
+						"riskOfLoss",
+						"salary",
+						"salaryBudgetExtra2Percentage",
+						"salaryBudgetExtraPercentage",
+						"salaryBudgetFinalSalaryPercentage",
+						"salaryBudgetLumpsumPercentage",
+						"salaryBudgetMeritPercentage",
+						"salaryBudgetPromotionPercentage",
+						"salaryBudgetTotalRaisePercentage",
+						"salaryLocal",
+						"salaryProrating",
+						"salutation",
+						"sciLastModified",
+						"seatingChart",
+						"serviceDate",
+						"ssn",
+						"state",
+						"status",
+						"stockBudgetOptionAmount",
+						"stockBudgetOther1Amount",
+						"stockBudgetOther2Amount",
+						"stockBudgetOther3Amount",
+						"stockBudgetStockAmount",
+						"stockBudgetUnitAmount",
+						"suffix",
+						"sysCostOfSource",
+						"sysSource",
+						"sysStartingSalary",
+						"timeZone",
+						"title",
+						"totalTeamSize",
+						"userId",
+						"username",
+						"veteranDisabled",
+						"veteranMedal",
+						"veteranProtected",
+						"veteranSeparated",
+						"zipCode"]
+					}
+				},
+				{
+					"name": "$expand",
+					"in": "query",
+					"description": "Expand related entities, see [OData Expand](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374621)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["*",
+						"customManager",
+						"customReports",
+						"directReports",
+						"hr",
+						"hrReports",
+						"manager",
+						"matrixManager",
+						"matrixReports",
+						"proxy",
+						"secondManager",
+						"secondReports",
+						"userPermissionsNav"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entity",
+						"schema": {
+							"title": "User",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.User"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			},
+			"put": {
+				"summary": "Update entity in User",
+				"tags": ["User"],
+				"parameters": [{
+					"name": "userId",
+					"in": "path",
+					"required": true,
+					"description": "key: userId",
+					"type": "string"
+				},
+				{
+					"name": "User",
+					"in": "body",
+					"description": "New property values",
+					"schema": {
+						"title": "Modified User",
+						"type": "object",
+						"properties": {
+							"d": {
+								"$ref": "#/definitions/SFOData.User"
+							}
+						}
+					}
+				}],
+				"responses": {
+					"204": {
+						"description": "Success"
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/UserPermissions": {
+			"get": {
+				"summary": "Get entities from UserPermissions",
+				"tags": ["User Permissions"],
+				"parameters": [{
+					"$ref": "#/parameters/top"
+				},
+				{
+					"$ref": "#/parameters/skip"
+				},
+				{
+					"$ref": "#/parameters/search"
+				},
+				{
+					"$ref": "#/parameters/filter"
+				},
+				{
+					"$ref": "#/parameters/count"
+				},
+				{
+					"name": "$orderby",
+					"in": "query",
+					"description": "Order items by property values, see [OData Sorting](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374629)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["addressLine1",
+						"addressLine1 desc",
+						"addressLine2",
+						"addressLine2 desc",
+						"addressLine3",
+						"addressLine3 desc",
+						"benchStrength",
+						"benchStrength desc",
+						"benchStrengthNav",
+						"benchStrengthNav desc",
+						"bonusBudgetAmount",
+						"bonusBudgetAmount desc",
+						"bonusTarget",
+						"bonusTarget desc",
+						"businessPhone",
+						"businessPhone desc",
+						"businessSegment",
+						"businessSegment desc",
+						"cellPhone",
+						"cellPhone desc",
+						"citizenship",
+						"citizenship desc",
+						"city",
+						"city desc",
+						"compensationBonusEligible",
+						"compensationBonusEligible desc",
+						"compensationEligible",
+						"compensationEligible desc",
+						"compensationReadOnly",
+						"compensationReadOnly desc",
+						"compensationSalaryEligible",
+						"compensationSalaryEligible desc",
+						"compensationSalaryRateType",
+						"compensationSalaryRateType desc",
+						"compensationSalaryRateUnits",
+						"compensationSalaryRateUnits desc",
+						"compensationStockEligible",
+						"compensationStockEligible desc",
+						"competency",
+						"competency desc",
+						"competencyRatingNav",
+						"competencyRatingNav desc",
+						"country",
+						"country desc",
+						"criticalTalentComments",
+						"criticalTalentComments desc",
+						"custom01",
+						"custom01 desc",
+						"custom02",
+						"custom02 desc",
+						"custom03",
+						"custom03 desc",
+						"custom04",
+						"custom04 desc",
+						"custom05",
+						"custom05 desc",
+						"custom06",
+						"custom06 desc",
+						"custom07",
+						"custom07 desc",
+						"custom08",
+						"custom08 desc",
+						"custom09",
+						"custom09 desc",
+						"custom10",
+						"custom10 desc",
+						"custom11",
+						"custom11 desc",
+						"custom12",
+						"custom12 desc",
+						"custom13",
+						"custom13 desc",
+						"custom14",
+						"custom14 desc",
+						"custom15",
+						"custom15 desc",
+						"customManager",
+						"customManager desc",
+						"customReports",
+						"customReports desc",
+						"dateOfBirth",
+						"dateOfBirth desc",
+						"dateOfCurrentPosition",
+						"dateOfCurrentPosition desc",
+						"dateOfPosition",
+						"dateOfPosition desc",
+						"defaultFullName",
+						"defaultFullName desc",
+						"defaultLocale",
+						"defaultLocale desc",
+						"department",
+						"department desc",
+						"directReports",
+						"directReports desc",
+						"division",
+						"division desc",
+						"dummyNominationNav",
+						"dummyNominationNav desc",
+						"email",
+						"email desc",
+						"empId",
+						"empId desc",
+						"empInfo",
+						"empInfo desc",
+						"employeeClass",
+						"employeeClass desc",
+						"ethnicity",
+						"ethnicity desc",
+						"ethnicityNav",
+						"ethnicityNav desc",
+						"fax",
+						"fax desc",
+						"finalJobCode",
+						"finalJobCode desc",
+						"finalJobFamily",
+						"finalJobFamily desc",
+						"finalJobRole",
+						"finalJobRole desc",
+						"firstName",
+						"firstName desc",
+						"futureLeader",
+						"futureLeader desc",
+						"gender",
+						"gender desc",
+						"hireDate",
+						"hireDate desc",
+						"homePhone",
+						"homePhone desc",
+						"hr",
+						"hr desc",
+						"hrReports",
+						"hrReports desc",
+						"impactOfLoss",
+						"impactOfLoss desc",
+						"impactOfLossComments",
+						"impactOfLossComments desc",
+						"impactOfLossNav",
+						"impactOfLossNav desc",
+						"issueComments",
+						"issueComments desc",
+						"jobCode",
+						"jobCode desc",
+						"jobFamily",
+						"jobFamily desc",
+						"jobLevel",
+						"jobLevel desc",
+						"jobRole",
+						"jobRole desc",
+						"jobTitle",
+						"jobTitle desc",
+						"keyPosition",
+						"keyPosition desc",
+						"lastModified",
+						"lastModified desc",
+						"lastModifiedDateTime",
+						"lastModifiedDateTime desc",
+						"lastModifiedWithTZ",
+						"lastModifiedWithTZ desc",
+						"lastName",
+						"lastName desc",
+						"lastReviewDate",
+						"lastReviewDate desc",
+						"level",
+						"level desc",
+						"localCurrencyCode",
+						"localCurrencyCode desc",
+						"location",
+						"location desc",
+						"lumpsum2Target",
+						"lumpsum2Target desc",
+						"lumpsumTarget",
+						"lumpsumTarget desc",
+						"manager",
+						"manager desc",
+						"married",
+						"married desc",
+						"matrix1Label",
+						"matrix1Label desc",
+						"matrix2Label",
+						"matrix2Label desc",
+						"matrixManaged",
+						"matrixManaged desc",
+						"matrixManager",
+						"matrixManager desc",
+						"matrixReports",
+						"matrixReports desc",
+						"meritEffectiveDate",
+						"meritEffectiveDate desc",
+						"meritTarget",
+						"meritTarget desc",
+						"mi",
+						"mi desc",
+						"minority",
+						"minority desc",
+						"nationality",
+						"nationality desc",
+						"newToPosition",
+						"newToPosition desc",
+						"nickname",
+						"nickname desc",
+						"nominationNav",
+						"nominationNav desc",
+						"objective",
+						"objective desc",
+						"onboardingId",
+						"onboardingId desc",
+						"origHireDate",
+						"origHireDate desc",
+						"password",
+						"password desc",
+						"payGrade",
+						"payGrade desc",
+						"performance",
+						"performance desc",
+						"potential",
+						"potential desc",
+						"promotionAmount",
+						"promotionAmount desc",
+						"proxy",
+						"proxy desc",
+						"raiseProrating",
+						"raiseProrating desc",
+						"reasonForLeaving",
+						"reasonForLeaving desc",
+						"reasonForLeavingNav",
+						"reasonForLeavingNav desc",
+						"reloComments",
+						"reloComments desc",
+						"reloLocation",
+						"reloLocation desc",
+						"reloWilling",
+						"reloWilling desc",
+						"reloWillingNav",
+						"reloWillingNav desc",
+						"reviewFreq",
+						"reviewFreq desc",
+						"riskOfLoss",
+						"riskOfLoss desc",
+						"riskOfLossNav",
+						"riskOfLossNav desc",
+						"salary",
+						"salary desc",
+						"salaryBudgetExtra2Percentage",
+						"salaryBudgetExtra2Percentage desc",
+						"salaryBudgetExtraPercentage",
+						"salaryBudgetExtraPercentage desc",
+						"salaryBudgetFinalSalaryPercentage",
+						"salaryBudgetFinalSalaryPercentage desc",
+						"salaryBudgetLumpsumPercentage",
+						"salaryBudgetLumpsumPercentage desc",
+						"salaryBudgetMeritPercentage",
+						"salaryBudgetMeritPercentage desc",
+						"salaryBudgetPromotionPercentage",
+						"salaryBudgetPromotionPercentage desc",
+						"salaryBudgetTotalRaisePercentage",
+						"salaryBudgetTotalRaisePercentage desc",
+						"salaryLocal",
+						"salaryLocal desc",
+						"salaryProrating",
+						"salaryProrating desc",
+						"salutation",
+						"salutation desc",
+						"salutationNav",
+						"salutationNav desc",
+						"sciLastModified",
+						"sciLastModified desc",
+						"seatingChart",
+						"seatingChart desc",
+						"secondManager",
+						"secondManager desc",
+						"secondReports",
+						"secondReports desc",
+						"serviceDate",
+						"serviceDate desc",
+						"ssn",
+						"ssn desc",
+						"state",
+						"state desc",
+						"status",
+						"status desc",
+						"stockBudgetOptionAmount",
+						"stockBudgetOptionAmount desc",
+						"stockBudgetOther1Amount",
+						"stockBudgetOther1Amount desc",
+						"stockBudgetOther2Amount",
+						"stockBudgetOther2Amount desc",
+						"stockBudgetOther3Amount",
+						"stockBudgetOther3Amount desc",
+						"stockBudgetStockAmount",
+						"stockBudgetStockAmount desc",
+						"stockBudgetUnitAmount",
+						"stockBudgetUnitAmount desc",
+						"suffix",
+						"suffix desc",
+						"sysCostOfSource",
+						"sysCostOfSource desc",
+						"sysSource",
+						"sysSource desc",
+						"sysSourceNav",
+						"sysSourceNav desc",
+						"sysStartingSalary",
+						"sysStartingSalary desc",
+						"timeZone",
+						"timeZone desc",
+						"title",
+						"title desc",
+						"totalTeamSize",
+						"totalTeamSize desc",
+						"userId",
+						"userId desc",
+						"userPermissionsNav",
+						"userPermissionsNav desc",
+						"username",
+						"username desc",
+						"veteranDisabled",
+						"veteranDisabled desc",
+						"veteranMedal",
+						"veteranMedal desc",
+						"veteranProtected",
+						"veteranProtected desc",
+						"veteranSeparated",
+						"veteranSeparated desc",
+						"zipCode",
+						"zipCode desc"]
+					}
+				},
+				{
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374620)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["addressLine1",
+						"addressLine2",
+						"addressLine3",
+						"benchStrength",
+						"benchStrengthNav",
+						"bonusBudgetAmount",
+						"bonusTarget",
+						"businessPhone",
+						"businessSegment",
+						"cellPhone",
+						"citizenship",
+						"city",
+						"compensationBonusEligible",
+						"compensationEligible",
+						"compensationReadOnly",
+						"compensationSalaryEligible",
+						"compensationSalaryRateType",
+						"compensationSalaryRateUnits",
+						"compensationStockEligible",
+						"competency",
+						"competencyRatingNav",
+						"country",
+						"criticalTalentComments",
+						"custom01",
+						"custom02",
+						"custom03",
+						"custom04",
+						"custom05",
+						"custom06",
+						"custom07",
+						"custom08",
+						"custom09",
+						"custom10",
+						"custom11",
+						"custom12",
+						"custom13",
+						"custom14",
+						"custom15",
+						"customManager",
+						"customReports",
+						"dateOfBirth",
+						"dateOfCurrentPosition",
+						"dateOfPosition",
+						"defaultFullName",
+						"defaultLocale",
+						"department",
+						"directReports",
+						"division",
+						"dummyNominationNav",
+						"email",
+						"empId",
+						"empInfo",
+						"employeeClass",
+						"ethnicity",
+						"ethnicityNav",
+						"fax",
+						"finalJobCode",
+						"finalJobFamily",
+						"finalJobRole",
+						"firstName",
+						"futureLeader",
+						"gender",
+						"hireDate",
+						"homePhone",
+						"hr",
+						"hrReports",
+						"impactOfLoss",
+						"impactOfLossComments",
+						"impactOfLossNav",
+						"issueComments",
+						"jobCode",
+						"jobFamily",
+						"jobLevel",
+						"jobRole",
+						"jobTitle",
+						"keyPosition",
+						"lastModified",
+						"lastModifiedDateTime",
+						"lastModifiedWithTZ",
+						"lastName",
+						"lastReviewDate",
+						"level",
+						"localCurrencyCode",
+						"location",
+						"lumpsum2Target",
+						"lumpsumTarget",
+						"manager",
+						"married",
+						"matrix1Label",
+						"matrix2Label",
+						"matrixManaged",
+						"matrixManager",
+						"matrixReports",
+						"meritEffectiveDate",
+						"meritTarget",
+						"mi",
+						"minority",
+						"nationality",
+						"newToPosition",
+						"nickname",
+						"nominationNav",
+						"objective",
+						"onboardingId",
+						"origHireDate",
+						"password",
+						"payGrade",
+						"performance",
+						"potential",
+						"promotionAmount",
+						"proxy",
+						"raiseProrating",
+						"reasonForLeaving",
+						"reasonForLeavingNav",
+						"reloComments",
+						"reloLocation",
+						"reloWilling",
+						"reloWillingNav",
+						"reviewFreq",
+						"riskOfLoss",
+						"riskOfLossNav",
+						"salary",
+						"salaryBudgetExtra2Percentage",
+						"salaryBudgetExtraPercentage",
+						"salaryBudgetFinalSalaryPercentage",
+						"salaryBudgetLumpsumPercentage",
+						"salaryBudgetMeritPercentage",
+						"salaryBudgetPromotionPercentage",
+						"salaryBudgetTotalRaisePercentage",
+						"salaryLocal",
+						"salaryProrating",
+						"salutation",
+						"salutationNav",
+						"sciLastModified",
+						"seatingChart",
+						"secondManager",
+						"secondReports",
+						"serviceDate",
+						"ssn",
+						"state",
+						"status",
+						"stockBudgetOptionAmount",
+						"stockBudgetOther1Amount",
+						"stockBudgetOther2Amount",
+						"stockBudgetOther3Amount",
+						"stockBudgetStockAmount",
+						"stockBudgetUnitAmount",
+						"suffix",
+						"sysCostOfSource",
+						"sysSource",
+						"sysSourceNav",
+						"sysStartingSalary",
+						"timeZone",
+						"title",
+						"totalTeamSize",
+						"userId",
+						"userPermissionsNav",
+						"username",
+						"veteranDisabled",
+						"veteranMedal",
+						"veteranProtected",
+						"veteranSeparated",
+						"zipCode"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entities",
+						"schema": {
+							"type": "object",
+							"title": "Wrapper",
+							"properties": {
+								"d": {
+									"type": "object",
+									"title": "Collection of UserPermissions",
+									"properties": {
+										"results": {
+											"type": "array",
+											"items": {
+												"$ref": "#/definitions/SFOData.UserPermissions"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/UserPermissions({userId})": {
+			"get": {
+				"summary": "Get entity from UserPermissions by key",
+				"tags": ["User Permissions"],
+				"parameters": [{
+					"name": "userId",
+					"in": "path",
+					"required": true,
+					"description": "key: userId",
+					"type": "string"
+				},
+				{
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374620)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["addressLine1",
+						"addressLine2",
+						"addressLine3",
+						"benchStrength",
+						"benchStrengthNav",
+						"bonusBudgetAmount",
+						"bonusTarget",
+						"businessPhone",
+						"businessSegment",
+						"cellPhone",
+						"citizenship",
+						"city",
+						"compensationBonusEligible",
+						"compensationEligible",
+						"compensationReadOnly",
+						"compensationSalaryEligible",
+						"compensationSalaryRateType",
+						"compensationSalaryRateUnits",
+						"compensationStockEligible",
+						"competency",
+						"competencyRatingNav",
+						"country",
+						"criticalTalentComments",
+						"custom01",
+						"custom02",
+						"custom03",
+						"custom04",
+						"custom05",
+						"custom06",
+						"custom07",
+						"custom08",
+						"custom09",
+						"custom10",
+						"custom11",
+						"custom12",
+						"custom13",
+						"custom14",
+						"custom15",
+						"customManager",
+						"customReports",
+						"dateOfBirth",
+						"dateOfCurrentPosition",
+						"dateOfPosition",
+						"defaultFullName",
+						"defaultLocale",
+						"department",
+						"directReports",
+						"division",
+						"dummyNominationNav",
+						"email",
+						"empId",
+						"empInfo",
+						"employeeClass",
+						"ethnicity",
+						"ethnicityNav",
+						"fax",
+						"finalJobCode",
+						"finalJobFamily",
+						"finalJobRole",
+						"firstName",
+						"futureLeader",
+						"gender",
+						"hireDate",
+						"homePhone",
+						"hr",
+						"hrReports",
+						"impactOfLoss",
+						"impactOfLossComments",
+						"impactOfLossNav",
+						"issueComments",
+						"jobCode",
+						"jobFamily",
+						"jobLevel",
+						"jobRole",
+						"jobTitle",
+						"keyPosition",
+						"lastModified",
+						"lastModifiedDateTime",
+						"lastModifiedWithTZ",
+						"lastName",
+						"lastReviewDate",
+						"level",
+						"localCurrencyCode",
+						"location",
+						"lumpsum2Target",
+						"lumpsumTarget",
+						"manager",
+						"married",
+						"matrix1Label",
+						"matrix2Label",
+						"matrixManaged",
+						"matrixManager",
+						"matrixReports",
+						"meritEffectiveDate",
+						"meritTarget",
+						"mi",
+						"minority",
+						"nationality",
+						"newToPosition",
+						"nickname",
+						"nominationNav",
+						"objective",
+						"onboardingId",
+						"origHireDate",
+						"password",
+						"payGrade",
+						"performance",
+						"potential",
+						"promotionAmount",
+						"proxy",
+						"raiseProrating",
+						"reasonForLeaving",
+						"reasonForLeavingNav",
+						"reloComments",
+						"reloLocation",
+						"reloWilling",
+						"reloWillingNav",
+						"reviewFreq",
+						"riskOfLoss",
+						"riskOfLossNav",
+						"salary",
+						"salaryBudgetExtra2Percentage",
+						"salaryBudgetExtraPercentage",
+						"salaryBudgetFinalSalaryPercentage",
+						"salaryBudgetLumpsumPercentage",
+						"salaryBudgetMeritPercentage",
+						"salaryBudgetPromotionPercentage",
+						"salaryBudgetTotalRaisePercentage",
+						"salaryLocal",
+						"salaryProrating",
+						"salutation",
+						"salutationNav",
+						"sciLastModified",
+						"seatingChart",
+						"secondManager",
+						"secondReports",
+						"serviceDate",
+						"ssn",
+						"state",
+						"status",
+						"stockBudgetOptionAmount",
+						"stockBudgetOther1Amount",
+						"stockBudgetOther2Amount",
+						"stockBudgetOther3Amount",
+						"stockBudgetStockAmount",
+						"stockBudgetUnitAmount",
+						"suffix",
+						"sysCostOfSource",
+						"sysSource",
+						"sysSourceNav",
+						"sysStartingSalary",
+						"timeZone",
+						"title",
+						"totalTeamSize",
+						"userId",
+						"userPermissionsNav",
+						"username",
+						"veteranDisabled",
+						"veteranMedal",
+						"veteranProtected",
+						"veteranSeparated",
+						"zipCode"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entity",
+						"schema": {
+							"title": "UserPermissions",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.UserPermissions"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/getUserNameFormat": {
+			"get": {
+				"summary": "Invoke function getUserNameFormat",
+				"tags": ["Service Operations"],
+				"parameters": [{
+					"name": "locale",
+					"in": "query",
+					"required": true,
+					"type": "string"
+				}],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"schema": {
+							"title": "Result",
+							"type": "object",
+							"properties": {
+								"d": {
+									"type": "string"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/getPasswordPolicy": {
+			"get": {
+				"summary": "Invoke function getPasswordPolicy",
+				"tags": ["Service Operations"],
+				"parameters": [{
+					"name": "locale",
+					"in": "query",
+					"required": true,
+					"type": "string"
+				}],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"schema": {
+							"title": "Result",
+							"type": "object",
+							"properties": {
+								"d": {
+									"type": "string"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		}
+	},
+	"parameters": {
+		"top": {
+			"name": "$top",
+			"in": "query",
+			"description": "Show only the first n items, see [OData Paging - Top](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374630)",
+			"type": "integer",
+			"default": 20
+		},
+		"skip": {
+			"name": "$skip",
+			"in": "query",
+			"description": "Skip the first n items, see [OData Paging - Skip](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374631)",
+			"type": "integer"
+		},
+		"count": {
+			"name": "$count",
+			"in": "query",
+			"description": "Include count of items, see [OData Count](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374632)",
+			"type": "boolean"
+		},
+		"filter": {
+			"name": "$filter",
+			"in": "query",
+			"description": "Filter items by property values, see [OData Filtering](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374625)",
+			"type": "string"
+		},
+		"search": {
+			"name": "$search",
+			"in": "query",
+			"description": "Search items by search phrases, see [OData Searching](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374633)",
+			"type": "string"
+		}
+	},
+	"responses": {
+		"error": {
+			"description": "Error",
+			"schema": {
+				"$ref": "#/definitions/odata.error"
+			}
+		}
+	}
+}

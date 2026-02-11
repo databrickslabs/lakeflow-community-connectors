@@ -1,0 +1,306 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Family and Medical Leave Act Request",
+    "description": "The Family and Medical Leave Act (FMLA) is a United States labour law requiring covered employers to provide employees with job-protected, unpaid leave for qualified medical and family reasons.\nThe FMLA entitles eligible employees of covered employers to take unpaid, job-protected leave for specified family and medical reasons with continuation of group health insurance coverage under the same terms and conditions as if the employee had not taken leave.\nThis brings in the requirement of creation of continuous/intermittent absence in EC Time Off along with classification of Absences for FMLA leave deduction. And also inbound integration with 3rd party providers for FMLA requests in EC and ability to view the absences created for a FMLA request.\n",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://{api-server}",
+      "description": "REST APIs for the SuccessFactors Data Centers",
+      "variables": {
+        "api-server": {
+          "description": "SuccessFactors Data Center host",
+          "default": "apisalesdemo2.successfactors.eu"
+        }
+      }
+    },
+    {
+      "url":"https://sandbox.api.sap.com/successfactorsfoundation",
+      "description":"Sandbox URL"
+    }
+  ],
+  "tags": [
+    {
+      "name": "FMLA Request",
+      "description": "APIs for handling FMLA Requests"
+    }
+  ],
+  "paths": {
+    "/rest/workforce/localization/v1/fmlaRequests": {
+      "patch": {
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "FMLA Request update successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FMLARequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "It indicates that the server cannot process the request due to something that is perceived to be a client error. For example, any validation error in the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequest"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "It indicates that the server encountered an unexpected condition that prevented it from fulfilling the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "API should be used to update the fmla request(s)",
+        "description": "FMLA Request API will be used by Third Party to trigger the update of a FMLA Request in SF",
+        "tags": [
+          "FMLA Request"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FMLARequest"
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "FMLA Request is created successfully in the system.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FMLARequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "It indicates that the server cannot process the request due to something that is perceived to be a client error. For example, any validation error in the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequest"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "It indicates that the server encountered an unexpected condition that prevented it from fulfilling the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerError"
+                }
+              }
+            }
+          }
+        },
+        "summary": "APIs should be used to create the fmla request(s)",
+        "description": "FMLA Request API will be used by Third Party to trigger the FMLA request processing in SF",
+        "tags": [
+          "FMLA Request"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FMLARequest"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "sfOauth": {
+        "type": "oauth2",
+        "description": "Successfactors OAuth 2.0 flow. More information is available [here](https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/9f5f060351034d98990213d077dab38a/d9a9545305004187986c866de2b66987.html?locale=en-US)",
+        "flows": {
+          "clientCredentials": {
+            "tokenUrl": "https://{api-server}/oauth/token",
+            "scopes": {}
+          }
+        }
+      }
+    },
+    "schemas": {
+      "FMLARequest": {
+        "title": "FMLARequest",
+        "properties": {
+          "Assignment Id": {
+            "x-key": true,
+            "type": "string"
+          },
+          "Id": {
+            "x-key": true,
+            "type": "string"
+          },
+          "Provider Name": {
+            "type": "string"
+          },
+          "FMLA Start date": {
+            "type": "string"
+          },
+          "FMLA End date": {
+            "type": "string"
+          },
+          "FMLA reason": {
+            "type": "string"
+          },
+          "Absence Type": {
+            "type": "string"
+          },
+          "Request Status": {
+            "type": "string"
+          },
+          "Return to work date": {
+            "type": "string"
+          },
+          "Absence Specific Information": {
+            "title": "IntermitentRequestDetail",
+            "items": {
+              "$ref": "#/components/schemas/IntermitentRequestDetail"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "IntermitentRequestDetail": {
+        "title": "Requested Absences",
+        "properties": {
+          "Absence Start date": {
+            "type": "string"
+          },
+          "Absence End Date": {
+            "type": "string"
+          },
+          "Absence start time": {
+            "type": "string"
+          },
+          "Absence end time": {
+            "type": "string"
+          },
+          "duration days": {
+            "type": "string"
+          },
+          "duration hours": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "BadRequest": {
+        "title": "Bad Request",
+        "description": "Response body",
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "object",
+            "properties": {
+              "code": {
+                "title": "Code",
+                "type": "string",
+                "example": "BadRequest"
+              },
+              "message": {
+                "title": "Message",
+                "type": "string",
+                "example": "Error creating FMLA Request. Please verify the provided fields."
+              }
+            }
+          }
+        },
+        "type": "object"
+      },
+      "InternalServerError": {
+        "title": "InternalServerError",
+        "description": "Response body",
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "object",
+            "properties": {
+              "code": {
+                "title": "Code",
+                "type": "string",
+                "example": "InternalError"
+              },
+              "message": {
+                "title": "Message",
+                "type": "string",
+                "example": "An unexpected error has occurred. Please contact the system administrator."
+              }
+            }
+          }
+        }
+      }
+    },
+    "parameters": {},
+    "responses": {
+      "400": {
+        "description": "It indicates that the server cannot process the request due to something that is perceived to be a client error. For example, any validation error in the request.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/BadRequest"
+            }
+          }
+        }
+      },
+      "500": {
+        "description": "It indicates that the server encountered an unexpected condition that prevented it from fulfilling the request.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/InternalServerError"
+            }
+          }
+        }
+      }
+    }
+  },
+  "x-odata-version": "4.0",
+  "externalDocs": {
+    "description": "More information about this API is available in help.sap.com",
+    "url": "https://help.sap.com/docs/successfactors-employee-central/implementing-time-management-in-sap-successfactors/family-and-medical-leave-act?state=DRAFT"
+  },
+  "x-sap-api-type": "REST",
+  "x-sap-shortText": "APIs used for FMLA Request in SAP SuccessFactors Time Management.",
+  "x-servers": [
+    {
+      "url": "https://{api-server}/odatav4",
+      "description": "OData APIs for the SuccessFactors Data Centers",
+      "templates": {
+        "api-server": {
+          "description": "SuccessFactors Data Center host",
+          "default": "apisalesdemo2.successfactors.eu"
+        }
+      }
+    }
+  ],
+  "security": [
+    {
+      "sfOauth": []
+    }
+  ]
+}

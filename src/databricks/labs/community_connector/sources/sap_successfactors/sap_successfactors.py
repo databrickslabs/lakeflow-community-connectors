@@ -1,0 +1,6896 @@
+# SAP SuccessFactors Connector for Lakeflow Connect.
+#
+# This connector implements the LakeflowConnect interface to ingest data from
+# SAP SuccessFactors using OData v2 APIs with Basic Authentication.
+#
+# Authentication:
+#     - Username format: username@companyId (e.g., "sfadmin@SFPART067615")
+#     - Basic Auth with base64 encoding
+#
+# OData v2 Features:
+#     - Handles __next continuation links for pagination
+#     - Handles $top/$skip offset pagination as fallback
+#     - Parses SAP DateTime format: /Date(milliseconds)/
+
+import base64
+import re
+import time
+from datetime import datetime, timezone
+from typing import Dict, Iterator, List, Tuple, Any, Optional
+import requests
+from pyspark.sql.types import (
+    StructType,
+    StructField,
+    StringType,
+    LongType,
+    BooleanType,
+    DoubleType,
+    TimestampType,
+    ArrayType,
+    BinaryType,
+)
+
+
+# === TABLE_CONFIG_START ===
+# Table configuration mapping table names to their metadata
+_TABLE_CONFIG: Dict[str, Dict[str, Any]] = {
+    "Advance": {
+        "entity_set": "Advance",
+        "primary_keys": ["NonRecurringPayment_externalCode", "externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "AdvancesAccumulation": {
+        "entity_set": "AdvancesAccumulation",
+        "primary_keys": ["externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "AdvancesEligibility": {
+        "entity_set": "AdvancesEligibility",
+        "primary_keys": ["effectiveStartDate", "externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "AdvancesInstallments": {
+        "entity_set": "AdvancesInstallments",
+        "primary_keys": [
+            "Advance_externalCode",
+            "NonRecurringPayment_externalCode",
+            "externalCode"
+        ],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "AssignedComplianceForm": {
+        "entity_set": "AssignedComplianceForm",
+        "primary_keys": ["id"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "Attachment": {
+        "entity_set": "Attachment",
+        "primary_keys": ["attachmentId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "Bank": {
+        "entity_set": "Bank",
+        "primary_keys": ["externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "Benefit": {
+        "entity_set": "Benefit",
+        "primary_keys": ["benefitId", "effectiveStartDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "BudgetGroup": {
+        "entity_set": "BudgetGroup",
+        "primary_keys": ["externalCode", "effectiveStartDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "CalibrationSession": {
+        "entity_set": "CalibrationSession",
+        "primary_keys": ["sessionId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "CalibrationSessionSubject": {
+        "entity_set": "CalibrationSessionSubject",
+        "primary_keys": ["sessionSubjectId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "CalibrationSubjectRank": {
+        "entity_set": "CalibrationSubjectRank",
+        "primary_keys": ["subjectRankId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "CalibrationTemplate": {
+        "entity_set": "CalibrationTemplate",
+        "primary_keys": ["templateId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "Candidate": {
+        "entity_set": "Candidate",
+        "primary_keys": ["candidateId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "CandidateBackground_Certificates": {
+        "entity_set": "CandidateBackground_Certificates",
+        "primary_keys": ["backgroundElementId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "CandidateBackground_Education": {
+        "entity_set": "CandidateBackground_Education",
+        "primary_keys": ["backgroundElementId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "CandidateBackground_InsideWorkExperience": {
+        "entity_set": "CandidateBackground_InsideWorkExperience",
+        "primary_keys": ["backgroundElementId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "CandidateBackground_Languages": {
+        "entity_set": "CandidateBackground_Languages",
+        "primary_keys": ["backgroundElementId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "CandidateBackground_OutsideWorkExperience": {
+        "entity_set": "CandidateBackground_OutsideWorkExperience",
+        "primary_keys": ["backgroundElementId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "CandidateBackground_TalentPool": {
+        "entity_set": "CandidateBackground_TalentPool",
+        "primary_keys": ["backgroundElementId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "CandidateBackground_TalentPoolcorp": {
+        "entity_set": "CandidateBackground_TalentPoolcorp",
+        "primary_keys": ["backgroundElementId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "CandidateComments": {
+        "entity_set": "CandidateComments",
+        "primary_keys": ["commentId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "CandidateLight": {
+        "entity_set": "CandidateLight",
+        "primary_keys": ["candidateId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "CompetencyEntity": {
+        "entity_set": "CompetencyEntity",
+        "primary_keys": ["externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "ComplianceDocumentFlow": {
+        "entity_set": "ComplianceDocumentFlow",
+        "primary_keys": ["documentFlowCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "ComplianceFormData": {
+        "entity_set": "ComplianceFormData",
+        "primary_keys": ["externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "ComplianceFormSignature": {
+        "entity_set": "ComplianceFormSignature",
+        "primary_keys": ["ComplianceFormData_externalCode", "externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "ComplianceProcess": {
+        "entity_set": "ComplianceProcess",
+        "primary_keys": ["processId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "ComplianceProcessTask": {
+        "entity_set": "ComplianceProcessTask",
+        "primary_keys": ["taskId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "Country": {
+        "entity_set": "Country",
+        "primary_keys": ["code", "effectiveStartDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "CurrencyConversion": {
+        "entity_set": "CurrencyConversion",
+        "primary_keys": ["code", "effectiveStartDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "CustomPayType": {
+        "entity_set": "CustomPayType",
+        "primary_keys": ["externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "CustomPayTypeAssignment": {
+        "entity_set": "CustomPayTypeAssignment",
+        "primary_keys": ["externalCode", "CustomPayType_externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "DGExpression": {
+        "entity_set": "DGExpression",
+        "primary_keys": ["expressionID"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "DGField": {
+        "entity_set": "DGField",
+        "primary_keys": ["name"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "DGFieldOperator": {
+        "entity_set": "DGFieldOperator",
+        "primary_keys": ["token"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "DGFieldValue": {
+        "entity_set": "DGFieldValue",
+        "primary_keys": ["fieldValue"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "DGFilter": {
+        "entity_set": "DGFilter",
+        "primary_keys": ["filterId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "DGPeoplePool": {
+        "entity_set": "DGPeoplePool",
+        "primary_keys": ["peoplePoolId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "DeductionScreenId": {
+        "entity_set": "DeductionScreenId",
+        "primary_keys": ["externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "DevLearningCertifications": {
+        "entity_set": "DevLearningCertifications",
+        "primary_keys": ["certificateId", "learningId"],
+        "cursor_field": "certificateLastModifiedDate",
+        "ingestion_type": "cdc",
+    },
+    "DevLearning_4201": {
+        "entity_set": "DevLearning_4201",
+        "primary_keys": ["learningId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "DynamicGroup": {
+        "entity_set": "DynamicGroup",
+        "primary_keys": ["groupID"],
+        "cursor_field": "lastModifiedDate",
+        "ingestion_type": "cdc",
+    },
+    "DynamicGroupDefinition": {
+        "entity_set": "DynamicGroupDefinition",
+        "primary_keys": ["groupID"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "EMEvent": {
+        "entity_set": "EMEvent",
+        "primary_keys": ["id"],
+        "cursor_field": "eventTime",
+        "ingestion_type": "cdc",
+    },
+    "EMEventAttribute": {
+        "entity_set": "EMEventAttribute",
+        "primary_keys": ["id"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "EMEventPayload": {
+        "entity_set": "EMEventPayload",
+        "primary_keys": ["id"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "EMMonitoredProcess": {
+        "entity_set": "EMMonitoredProcess",
+        "primary_keys": ["processDefinitionId", "processInstanceId", "processType"],
+        "cursor_field": "lastEventTime",
+        "ingestion_type": "cdc",
+    },
+    "EmpBeneficiary": {
+        "entity_set": "EmpBeneficiary",
+        "primary_keys": ["userId", "personIdExternal"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "EmpCompensation": {
+        "entity_set": "EmpCompensation",
+        "primary_keys": ["startDate", "userId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "EmpCompensationCalculated": {
+        "entity_set": "EmpCompensationCalculated",
+        "primary_keys": ["seqNumber", "startDate", "userId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "EmpCompensationGroupSumCalculated": {
+        "entity_set": "EmpCompensationGroupSumCalculated",
+        "primary_keys": ["seqNumber", "startDate", "userId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "EmpCostAssignment": {
+        "entity_set": "EmpCostAssignment",
+        "primary_keys": ["effectiveStartDate", "worker"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "EmpEmployment": {
+        "entity_set": "EmpEmployment",
+        "primary_keys": ["prevEmployeeId", "userId", "personIdExternal"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "EmpEmploymentHigherDuty": {
+        "entity_set": "EmpEmploymentHigherDuty",
+        "primary_keys": ["personIdExternal", "userId", "homeAssignment", "startDate"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "EmpEmploymentTermination": {
+        "entity_set": "EmpEmploymentTermination",
+        "primary_keys": ["userId", "attachmentId", "personIdExternal", "newMainEmploymentId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "EmpJob": {
+        "entity_set": "EmpJob",
+        "primary_keys": ["userId", "managerId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "EmpJobRelationships": {
+        "entity_set": "EmpJobRelationships",
+        "primary_keys": ["relUserId", "userId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "EmpPayCompNonRecurring": {
+        "entity_set": "EmpPayCompNonRecurring",
+        "primary_keys": ["payComponentCode", "payDate", "userId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "EmpPayCompRecurring": {
+        "entity_set": "EmpPayCompRecurring",
+        "primary_keys": ["seqNumber", "startDate", "userId", "payComponent"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "EmpPensionPayout": {
+        "entity_set": "EmpPensionPayout",
+        "primary_keys": ["userId", "personIdExternal"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "EmpWorkPermit": {
+        "entity_set": "EmpWorkPermit",
+        "primary_keys": ["attachmentId", "userId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "EmployeeCompensation": {
+        "entity_set": "employeeCompensations",
+        "primary_keys": ["compEntryId", "compPlanId", "formDataId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "EmployeeDismissalProtection": {
+        "entity_set": "EmployeeDismissalProtection",
+        "primary_keys": ["workerId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "EmployeeDismissalProtectionDetail": {
+        "entity_set": "EmployeeDismissalProtectionDetail",
+        "primary_keys": ["EmployeeDismissalProtection_workerId", "externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "EmployeePayrollRunResults": {
+        "entity_set": "EmployeePayrollRunResults",
+        "primary_keys": ["externalCode", "mdfSystemEffectiveStartDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "EmployeePayrollRunResultsItems": {
+        "entity_set": "EmployeePayrollRunResultsItems",
+        "primary_keys": [
+            "EmployeePayrollRunResults_externalCode",
+            "EmployeePayrollRunResults_mdfSystemEffectiveStartDate",
+            "externalCode"
+        ],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "ExternalUser": {
+        "entity_set": "ExternalUser",
+        "primary_keys": ["userId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOBusinessUnit": {
+        "entity_set": "FOBusinessUnit",
+        "primary_keys": ["externalCode", "startDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOCompany": {
+        "entity_set": "FOCompany",
+        "primary_keys": ["externalCode", "startDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOCorporateAddressDEFLT": {
+        "entity_set": "FOCorporateAddressDEFLT",
+        "primary_keys": ["addressId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOCostCenter": {
+        "entity_set": "FOCostCenter",
+        "primary_keys": ["externalCode", "startDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FODepartment": {
+        "entity_set": "FODepartment",
+        "primary_keys": ["externalCode", "startDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FODivision": {
+        "entity_set": "FODivision",
+        "primary_keys": ["externalCode", "startDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FODynamicRole": {
+        "entity_set": "FODynamicRole",
+        "primary_keys": ["dynamicRoleAssignmentId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOEventReason": {
+        "entity_set": "FOEventReason",
+        "primary_keys": ["externalCode", "startDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOFrequency": {
+        "entity_set": "FOFrequency",
+        "primary_keys": ["externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOGeozone": {
+        "entity_set": "FOGeozone",
+        "primary_keys": ["externalCode", "startDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOJobClassLocalAUS": {
+        "entity_set": "FOJobClassLocalAUS",
+        "primary_keys": ["externalCode", "startDate", "country"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOJobClassLocalBRA": {
+        "entity_set": "FOJobClassLocalBRA",
+        "primary_keys": ["externalCode", "startDate", "country"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOJobClassLocalCAN": {
+        "entity_set": "FOJobClassLocalCAN",
+        "primary_keys": ["externalCode", "startDate", "country"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOJobClassLocalDEFLT": {
+        "entity_set": "FOJobClassLocalDEFLT",
+        "primary_keys": ["externalCode", "startDate", "country"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOJobClassLocalFRA": {
+        "entity_set": "FOJobClassLocalFRA",
+        "primary_keys": ["externalCode", "startDate", "country"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOJobClassLocalGBR": {
+        "entity_set": "FOJobClassLocalGBR",
+        "primary_keys": ["externalCode", "startDate", "country"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOJobClassLocalITA": {
+        "entity_set": "FOJobClassLocalITA",
+        "primary_keys": ["externalCode", "startDate", "country"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOJobClassLocalUSA": {
+        "entity_set": "FOJobClassLocalUSA",
+        "primary_keys": ["externalCode", "startDate", "country"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOJobCode": {
+        "entity_set": "FOJobCode",
+        "primary_keys": ["externalCode", "startDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOJobFunction": {
+        "entity_set": "FOJobFunction",
+        "primary_keys": ["externalCode", "startDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOLocation": {
+        "entity_set": "FOLocation",
+        "primary_keys": ["externalCode", "startDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOLocationGroup": {
+        "entity_set": "FOLocationGroup",
+        "primary_keys": ["externalCode", "startDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOPayComponent": {
+        "entity_set": "FOPayComponent",
+        "primary_keys": ["externalCode", "startDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOPayComponentGroup": {
+        "entity_set": "FOPayComponentGroup",
+        "primary_keys": ["externalCode", "startDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOPayGrade": {
+        "entity_set": "FOPayGrade",
+        "primary_keys": ["externalCode", "startDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOPayGroup": {
+        "entity_set": "FOPayGroup",
+        "primary_keys": ["externalCode", "startDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "FOPayRange": {
+        "entity_set": "FOPayRange",
+        "primary_keys": ["externalCode", "startDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "HireDateChange": {
+        "entity_set": "HireDateChange",
+        "primary_keys": ["usersSysId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "InterviewIndividualAssessment": {
+        "entity_set": "InterviewIndividualAssessment",
+        "primary_keys": ["interviewIndividualAssessmentId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "InterviewOverallAssessment": {
+        "entity_set": "InterviewOverallAssessment",
+        "primary_keys": ["interviewOverallAssessmentId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "JobApplication": {
+        "entity_set": "JobApplication",
+        "primary_keys": ["applicationId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "JobApplicationAssessmentOrder": {
+        "entity_set": "JobApplicationAssessmentOrder",
+        "primary_keys": ["id"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "JobApplicationAssessmentReport": {
+        "entity_set": "JobApplicationAssessmentReport",
+        "primary_keys": ["id"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "JobApplicationAssessmentReportDetail": {
+        "entity_set": "JobApplicationAssessmentReportDetail",
+        "primary_keys": ["id"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "JobApplicationAudit": {
+        "entity_set": "JobApplicationAudit",
+        "primary_keys": ["fieldOrderPos", "revNumber"],
+        "cursor_field": "lastModifiedDate",
+        "ingestion_type": "cdc",
+    },
+    "JobApplicationBackgroundCheckRequest": {
+        "entity_set": "JobApplicationBackgroundCheckRequest",
+        "primary_keys": ["requestId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "JobApplicationBackgroundCheckResult": {
+        "entity_set": "JobApplicationBackgroundCheckResult",
+        "primary_keys": ["statusId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "JobApplicationComments": {
+        "entity_set": "JobApplicationComments",
+        "primary_keys": ["commentId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "JobApplicationInterview": {
+        "entity_set": "JobApplicationInterview",
+        "primary_keys": ["applicationInterviewId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "JobApplicationOnboardingData": {
+        "entity_set": "JobApplicationOnboardingData",
+        "primary_keys": ["onboardingId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "JobApplicationOnboardingStatus": {
+        "entity_set": "JobApplicationOnboardingStatus",
+        "primary_keys": ["onboardingStatusId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "JobApplicationQuestionResponse": {
+        "entity_set": "JobApplicationQuestionResponse",
+        "primary_keys": ["applicationId", "order"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "JobApplicationSnapshot_Certificates": {
+        "entity_set": "JobApplicationSnapshot_Certificates",
+        "primary_keys": ["applicationId", "backgroundElementId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "JobApplicationSnapshot_Education": {
+        "entity_set": "JobApplicationSnapshot_Education",
+        "primary_keys": ["applicationId", "backgroundElementId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "JobApplicationSnapshot_InsideWorkExperience": {
+        "entity_set": "JobApplicationSnapshot_InsideWorkExperience",
+        "primary_keys": ["applicationId", "backgroundElementId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "JobApplicationSnapshot_Languages": {
+        "entity_set": "JobApplicationSnapshot_Languages",
+        "primary_keys": ["applicationId", "backgroundElementId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "JobApplicationSnapshot_OutsideWorkExperience": {
+        "entity_set": "JobApplicationSnapshot_OutsideWorkExperience",
+        "primary_keys": ["applicationId", "backgroundElementId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "JobApplicationSnapshot_TalentPool": {
+        "entity_set": "JobApplicationSnapshot_TalentPool",
+        "primary_keys": ["applicationId", "backgroundElementId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "JobApplicationSnapshot_TalentPoolcorp": {
+        "entity_set": "JobApplicationSnapshot_TalentPoolcorp",
+        "primary_keys": ["applicationId", "backgroundElementId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "JobApplicationStatus": {
+        "entity_set": "JobApplicationStatus",
+        "primary_keys": ["appStatusSetId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "JobApplicationStatusAuditTrail": {
+        "entity_set": "JobApplicationStatusAuditTrail",
+        "primary_keys": ["revNumber"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "JobApplicationStatusLabel": {
+        "entity_set": "JobApplicationStatusLabel",
+        "primary_keys": ["appStatusId", "locale"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "JobOffer": {
+        "entity_set": "JobOffer",
+        "primary_keys": ["offerApprovalId"],
+        "cursor_field": "lastModifiedDate",
+        "ingestion_type": "cdc",
+    },
+    "JobOfferApprover": {
+        "entity_set": "JobOfferApprover",
+        "primary_keys": ["offerApproverId"],
+        "cursor_field": "lastModifiedDate",
+        "ingestion_type": "cdc",
+    },
+    "JobReqFwdCandidates": {
+        "entity_set": "JobReqFwdCandidates",
+        "primary_keys": ["candidateId", "jobReqId"],
+        "cursor_field": "lastModifiedDate",
+        "ingestion_type": "cdc",
+    },
+    "JobReqQuestion": {
+        "entity_set": "JobReqQuestion",
+        "primary_keys": ["questionId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "JobReqScreeningQuestion": {
+        "entity_set": "JobReqScreeningQuestion",
+        "primary_keys": ["jobReqId", "locale", "order"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "JobReqScreeningQuestionChoice": {
+        "entity_set": "JobReqScreeningQuestionChoice",
+        "primary_keys": ["locale", "optionId", "optionValue"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "JobRequisition": {
+        "entity_set": "JobRequisition",
+        "primary_keys": ["jobReqId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "JobRequisitionGroupOperator": {
+        "entity_set": "JobRequisitionGroupOperator",
+        "primary_keys": ["jobReqId", "operatorRole", "userGroupId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "JobRequisitionLocale": {
+        "entity_set": "JobRequisitionLocale",
+        "primary_keys": ["jobReqLocalId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "JobRequisitionOperator": {
+        "entity_set": "JobRequisitionOperator",
+        "primary_keys": ["jobReqId", "operatorRole", "userName"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "JobRequisitionPosting": {
+        "entity_set": "JobRequisitionPosting",
+        "primary_keys": ["jobPostingId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "JourneyDetails": {
+        "entity_set": "journeys",
+        "primary_keys": ["journeyId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "LegacyPositionEntity": {
+        "entity_set": "LegacyPositionEntity",
+        "primary_keys": ["positionId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "LocalizedData": {
+        "entity_set": "LocalizedData",
+        "primary_keys": ["localizedDataCode", "localizedDataLocale"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "MDFEnumValue": {
+        "entity_set": "MDFEnumValue",
+        "primary_keys": ["key"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "MDFLocalizedValue": {
+        "entity_set": "MDFLocalizedValue",
+        "primary_keys": ["locale"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "NominationTarget": {
+        "entity_set": "NominationTarget",
+        "primary_keys": ["nominationId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "NomineeHistory": {
+        "entity_set": "NomineeHistory",
+        "primary_keys": ["id"],
+        "cursor_field": "modifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "ONB2EquipmentActivity": {
+        "entity_set": "ONB2EquipmentActivity",
+        "primary_keys": ["activityId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "ONB2EquipmentType": {
+        "entity_set": "ONB2EquipmentType",
+        "primary_keys": ["code"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "ONB2EquipmentTypeValue": {
+        "entity_set": "ONB2EquipmentTypeValue",
+        "primary_keys": ["code"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "ONB2Process": {
+        "entity_set": "ONB2Process",
+        "primary_keys": ["processId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "ONB2ProcessTask": {
+        "entity_set": "ONB2ProcessTask",
+        "primary_keys": ["ONB2Process_processId", "taskId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "ONB2ProcessTrigger": {
+        "entity_set": "ONB2ProcessTrigger",
+        "primary_keys": ["triggerId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "OfferLetter": {
+        "entity_set": "OfferLetter",
+        "primary_keys": ["offerLetterId"],
+        "cursor_field": "lastModifiedDate",
+        "ingestion_type": "cdc",
+    },
+    "OnboardingCandidateInfo": {
+        "entity_set": "OnboardingCandidateInfo",
+        "primary_keys": ["applicantId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "OnboardingEquipment": {
+        "entity_set": "OnboardingEquipment",
+        "primary_keys": [
+            "OnboardingEquipmentActivity_activityId",
+            "OnboardingNewHireActivitiesStep_processStepId",
+            "OnboardingProcess_onboardingProcessId",
+            "equipmentId"
+        ],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "OnboardingEquipmentActivity": {
+        "entity_set": "OnboardingEquipmentActivity",
+        "primary_keys": [
+            "OnboardingNewHireActivitiesStep_processStepId",
+            "OnboardingProcess_onboardingProcessId",
+            "activityId"
+        ],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "OnboardingEquipmentType": {
+        "entity_set": "OnboardingEquipmentType",
+        "primary_keys": ["code"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "OnboardingEquipmentTypeValue": {
+        "entity_set": "OnboardingEquipmentTypeValue",
+        "primary_keys": ["code"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "OnboardingGoal": {
+        "entity_set": "OnboardingGoal",
+        "primary_keys": [
+            "OnboardingGoalActivity_activityId",
+            "OnboardingGoalCategory_externalCode",
+            "OnboardingNewHireActivitiesStep_processStepId",
+            "OnboardingProcess_onboardingProcessId",
+            "goalId"
+        ],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "OnboardingGoalActivity": {
+        "entity_set": "OnboardingGoalActivity",
+        "primary_keys": [
+            "OnboardingNewHireActivitiesStep_processStepId",
+            "OnboardingProcess_onboardingProcessId",
+            "activityId"
+        ],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "OnboardingGoalCategory": {
+        "entity_set": "OnboardingGoalCategory",
+        "primary_keys": [
+            "OnboardingGoalActivity_activityId",
+            "OnboardingNewHireActivitiesStep_processStepId",
+            "OnboardingProcess_onboardingProcessId",
+            "externalCode"
+        ],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "OnboardingMeetingActivity": {
+        "entity_set": "OnboardingMeetingActivity",
+        "primary_keys": [
+            "OnboardingNewHireActivitiesStep_processStepId",
+            "OnboardingProcess_onboardingProcessId",
+            "activityId"
+        ],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "OnboardingMeetingEvent": {
+        "entity_set": "OnboardingMeetingEvent",
+        "primary_keys": [
+            "OnboardingMeetingActivity_activityId",
+            "OnboardingNewHireActivitiesStep_processStepId",
+            "OnboardingProcess_onboardingProcessId",
+            "externalCode"
+        ],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "OnboardingNewHireActivitiesStep": {
+        "entity_set": "OnboardingNewHireActivitiesStep",
+        "primary_keys": ["OnboardingProcess_onboardingProcessId", "processStepId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "OnboardingProcess": {
+        "entity_set": "OnboardingProcess",
+        "primary_keys": ["onboardingProcessId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "OneTimeDeduction": {
+        "entity_set": "OneTimeDeduction",
+        "primary_keys": ["externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "PaymentInformationDetailV3": {
+        "entity_set": "PaymentInformationDetailV3",
+        "primary_keys": [
+            "externalCode",
+            "PaymentInformationV3_worker",
+            "PaymentInformationV3_effectiveStartDate"
+        ],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "PaymentInformationDetailV3USA": {
+        "entity_set": "PaymentInformationDetailV3USA",
+        "primary_keys": [
+            "externalCode",
+            "PaymentInformationV3_worker",
+            "PaymentInformationV3_effectiveStartDate",
+            "PaymentInformationDetailV3_externalCode"
+        ],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "PaymentInformationV3": {
+        "entity_set": "PaymentInformationV3",
+        "primary_keys": ["worker", "effectiveStartDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "PaymentMethodAssignmentV3": {
+        "entity_set": "PaymentMethodAssignmentV3",
+        "primary_keys": ["externalCode", "PaymentMethodV3_externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "PaymentMethodV3": {
+        "entity_set": "PaymentMethodV3",
+        "primary_keys": ["externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "PersonEmpTerminationInfo": {
+        "entity_set": "PersonEmpTerminationInfo",
+        "primary_keys": ["personIdExternal"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "Photo": {
+        "entity_set": "Photo",
+        "primary_keys": ["photoId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "PickListV2": {
+        "entity_set": "PickListV2",
+        "primary_keys": ["effectiveStartDate", "id"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "PickListValueV2": {
+        "entity_set": "PickListValueV2",
+        "primary_keys": ["PickListV2_effectiveStartDate", "PickListV2_id", "externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "PicklistOption": {
+        "entity_set": "PicklistOption",
+        "primary_keys": ["id", "externalCode", "optionValue", "sortOrder", "status"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "RBPBasicPermission": {
+        "entity_set": "RBPBasicPermission",
+        "primary_keys": ["permissionId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "RBPRole": {
+        "entity_set": "RBPRole",
+        "primary_keys": ["roleId"],
+        "cursor_field": "lastModifiedDate",
+        "ingestion_type": "cdc",
+    },
+    "RBPRule": {
+        "entity_set": "RBPRule",
+        "primary_keys": ["ruleId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "RCMAdminReassignOfferApprover": {
+        "entity_set": "RCMAdminReassignOfferApprover",
+        "primary_keys": ["applicationId", "currUserId", "offerDetailId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "RcmCompetency": {
+        "entity_set": "RcmCompetency",
+        "primary_keys": ["rcmCompetencyId", "locale"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "RecurringDeduction": {
+        "entity_set": "RecurringDeduction",
+        "primary_keys": ["effectiveStartDate", "userSysId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "RecurringDeductionItem": {
+        "entity_set": "RecurringDeductionItem",
+        "primary_keys": [
+            "RecurringDeduction_effectiveStartDate",
+            "RecurringDeduction_userSysId",
+            "payComponentType"
+        ],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "ScimGroup": {
+        "entity_set": "Groups",
+        "primary_keys": ["id"],
+        "cursor_field": "meta_lastModified",
+        "ingestion_type": "cdc",
+    },
+    "ScimUser": {
+        "entity_set": "Users",
+        "primary_keys": ["id"],
+        "cursor_field": "meta_lastModified",
+        "ingestion_type": "cdc",
+    },
+    "Successor": {
+        "entity_set": "Successor",
+        "primary_keys": ["id"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "TalentGraphicOption": {
+        "entity_set": "TalentGraphicOption",
+        "primary_keys": ["dataIndex", "optionKey"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "TalentPool": {
+        "entity_set": "TalentPool",
+        "primary_keys": ["code", "effectiveStartDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "TalentRatings": {
+        "entity_set": "TalentRatings",
+        "primary_keys": [
+            "feedbackId",
+            "feedbackModule",
+            "formDataId",
+            "formContentId",
+            "feedbackType",
+            "feedbackSource",
+            "feedbackScaleId",
+            "employeeId"
+        ],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "Territory": {
+        "entity_set": "Territory",
+        "primary_keys": ["territoryCode"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "User": {
+        "entity_set": "User",
+        "primary_keys": ["userId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "UserPermissions": {
+        "entity_set": "UserPermissions",
+        "primary_keys": ["userId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "achievement": {
+        "entity_set": "Achievement",
+        "primary_keys": ["achievementId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "activity": {
+        "entity_set": "Activity",
+        "primary_keys": ["activityId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "budget_period": {
+        "entity_set": "BudgetPeriodGO",
+        "primary_keys": ["budgetPeriodId", "effectiveStartDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "calibration_competency_rating": {
+        "entity_set": "CalibrationCompetencyRating",
+        "primary_keys": ["competencyId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "calibration_executive_reviewer": {
+        "entity_set": "CalibrationExecutiveReviewer",
+        "primary_keys": ["id"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "calibration_rating": {
+        "entity_set": "CalibrationRating",
+        "primary_keys": ["ratingType"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "calibration_rating_option": {
+        "entity_set": "CalibrationRatingOption",
+        "primary_keys": ["value"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "calibration_session": {
+        "entity_set": "CalibrationSession",
+        "primary_keys": ["id"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "calibration_session_reviewer": {
+        "entity_set": "CalibrationSessionReviewer",
+        "primary_keys": ["sessionReviewerId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "calibration_subject": {
+        "entity_set": "CalibrationSubject",
+        "primary_keys": ["id"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "calibration_subject_comment": {
+        "entity_set": "CalibrationSubjectComment",
+        "primary_keys": ["id"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "clock_in_clock_out_groups": {
+        "entity_set": "ClockInClockOutGroups",
+        "primary_keys": ["code"],
+        "cursor_field": "lastChangedAt",
+        "ingestion_type": "cdc",
+    },
+    "continuous_performance_user_permission": {
+        "entity_set": "ContinuousPerformanceUserPermission",
+        "primary_keys": ["permType", "targetUserId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "cpm_achievements": {
+        "entity_set": "achievements",
+        "primary_keys": ["achievementRecordId", "activityRecordId"],
+        "cursor_field": "lastModifiedDate",
+        "ingestion_type": "cdc",
+    },
+    "cpm_activities": {
+        "entity_set": "activities",
+        "primary_keys": ["activityRecordId"],
+        "cursor_field": "lastModifiedDate",
+        "ingestion_type": "cdc",
+    },
+    "cpm_activity_status": {
+        "entity_set": "activityStatuses",
+        "primary_keys": ["activityStatusRecordId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "cpm_activity_updates": {
+        "entity_set": "activityUpdates",
+        "primary_keys": ["activityUpdateRecordId"],
+        "cursor_field": "lastModifiedDate",
+        "ingestion_type": "cdc",
+    },
+    "cpm_user_permissions": {
+        "entity_set": "userPermissions",
+        "primary_keys": ["targetUserAssignmentUUID"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "cust_CommutingAllowance": {
+        "entity_set": "cust_CommutingAllowance",
+        "primary_keys": ["effectiveStartDate", "externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "cust_ProgressiveDisciplinaryAction": {
+        "entity_set": "cust_ProgressiveDisciplinaryAction",
+        "primary_keys": ["effectiveStartDate", "externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "cust_auth_sign": {
+        "entity_set": "cust_auth_sign",
+        "primary_keys": ["externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "cust_grievances": {
+        "entity_set": "cust_grievances",
+        "primary_keys": ["effectiveStartDate", "externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "cust_voluntarySeparationRequest": {
+        "entity_set": "cust_voluntarySeparationRequest",
+        "primary_keys": ["effectiveStartDate", "externalCode"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "custom_nav": {
+        "entity_set": "CustomNav",
+        "primary_keys": ["title"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "custom_tasks": {
+        "entity_set": "customTasks",
+        "primary_keys": ["id"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "extension_point_task": {
+        "entity_set": "ExtensionPointTaskDetail",
+        "primary_keys": ["processId", "taskId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "feedback": {
+        "entity_set": "feedback",
+        "primary_keys": ["recordId"],
+        "cursor_field": "lastModifiedAt",
+        "ingestion_type": "cdc",
+    },
+    "feedback_requests": {
+        "entity_set": "feedbackRequests",
+        "primary_keys": ["recordId"],
+        "cursor_field": "lastModifiedAt",
+        "ingestion_type": "cdc",
+    },
+    "form360_participant_detail": {
+        "entity_set": "Form360ParticipantDetail",
+        "primary_keys": ["formContentId", "formDataId", "participantId", "columnKey"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "form_competency": {
+        "entity_set": "FormCompetency",
+        "primary_keys": ["formContentId", "formDataId", "itemId", "sectionIndex"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "form_customized_weighted_rating_section": {
+        "entity_set": "FormCustomizedWeightedRatingSection",
+        "primary_keys": ["formContentId", "formDataId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "form_folder": {
+        "entity_set": "FormFolder",
+        "primary_keys": ["folderId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "form_header": {
+        "entity_set": "FormHeader",
+        "primary_keys": ["formDataId"],
+        "cursor_field": "formLastModifiedDate",
+        "ingestion_type": "cdc",
+    },
+    "form_objective": {
+        "entity_set": "FormObjective",
+        "primary_keys": ["formContentId", "formDataId", "itemId", "sectionIndex"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "form_perf_pot_summary_section": {
+        "entity_set": "FormPerfPotSummarySection",
+        "primary_keys": ["formContentId", "formDataId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "form_review_feedback": {
+        "entity_set": "FormReviewFeedback",
+        "primary_keys": ["feedbackId"],
+        "cursor_field": "responseDate",
+        "ingestion_type": "cdc",
+    },
+    "form_template": {
+        "entity_set": "FormTemplate",
+        "primary_keys": ["formTemplateId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "functional_area": {
+        "entity_set": "FunctionalAreaGO",
+        "primary_keys": ["functionalAreaID", "effectiveStartDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "fund": {
+        "entity_set": "FundGO",
+        "primary_keys": ["externalCode", "effectiveStartDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "fund_center": {
+        "entity_set": "FundCenterGO",
+        "primary_keys": ["externalCode", "effectiveStartDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "goal_1": {
+        "entity_set": "Goal_1",
+        "primary_keys": ["id"],
+        "cursor_field": "lastModified",
+        "ingestion_type": "cdc",
+    },
+    "goal_comment_1": {
+        "entity_set": "GoalComment_1",
+        "primary_keys": ["id"],
+        "cursor_field": "lastModified",
+        "ingestion_type": "cdc",
+    },
+    "goal_permission_1": {
+        "entity_set": "GoalPermission_1",
+        "primary_keys": ["id"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "goal_plan_state": {
+        "entity_set": "GoalPlanState",
+        "primary_keys": ["planId", "stateId", "userId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "goal_plan_template": {
+        "entity_set": "GoalPlanTemplate",
+        "primary_keys": ["id"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "goal_task_1": {
+        "entity_set": "GoalTask_1",
+        "primary_keys": ["id"],
+        "cursor_field": "lastModified",
+        "ingestion_type": "cdc",
+    },
+    "goal_weight": {
+        "entity_set": "GoalWeight",
+        "primary_keys": ["planId", "type"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "grant": {
+        "entity_set": "GrantGO",
+        "primary_keys": ["grantCode", "effectiveStartDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "i9_audit_trail_record": {
+        "entity_set": "i9AuditTrailRecords",
+        "primary_keys": ["externalCode"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "pbc_employee_financing": {
+        "entity_set": "employeeFinancingData",
+        "primary_keys": ["id", "objectType", "startDate", "endDate"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "pbc_employee_grouping": {
+        "entity_set": "employeeGroupings",
+        "primary_keys": ["id"],
+        "cursor_field": "lastModifiedTimestamp",
+        "ingestion_type": "cdc",
+    },
+    "pbc_symbolic_account": {
+        "entity_set": "symbolicAccounts",
+        "primary_keys": ["id"],
+        "cursor_field": "lastModifiedTimestamp",
+        "ingestion_type": "cdc",
+    },
+    "project_controlling_object": {
+        "entity_set": "ProjectControllingObject",
+        "primary_keys": ["externalCode", "effectiveStartDate"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "review_route_map": {
+        "entity_set": "reviewRouteMaps",
+        "primary_keys": ["reviewId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "scim_group": {
+        "entity_set": "Groups",
+        "primary_keys": ["id"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "scim_user": {
+        "entity_set": "Users",
+        "primary_keys": ["id"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "success_store_content": {
+        "entity_set": "SuccessStoreContent",
+        "primary_keys": ["contentId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "success_store_content_blob": {
+        "entity_set": "SuccessStoreContentBlob",
+        "primary_keys": ["contentId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "supporter_feedback": {
+        "entity_set": "SupporterFeedback",
+        "primary_keys": ["feedbackId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "theme_config": {
+        "entity_set": "ThemeConfig",
+        "primary_keys": ["id"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "theme_info": {
+        "entity_set": "ThemeInfo",
+        "primary_keys": ["id"],
+        "cursor_field": "lastModifiedDate",
+        "ingestion_type": "cdc",
+    },
+    "theme_template": {
+        "entity_set": "ThemeTemplate",
+        "primary_keys": ["id"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "time_event_types": {
+        "entity_set": "TimeEventTypes",
+        "primary_keys": ["code"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "todo": {
+        "entity_set": "Todo",
+        "primary_keys": ["categoryId"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+    "todo_entry_v2": {
+        "entity_set": "TodoEntryV2",
+        "primary_keys": ["todoEntryId"],
+        "cursor_field": "lastModifiedDateTime",
+        "ingestion_type": "cdc",
+    },
+    "user_capabilities": {
+        "entity_set": "userCapabilities",
+        "primary_keys": ["targetUserAssignmentUUID"],
+        "cursor_field": None,
+        "ingestion_type": "snapshot",
+    },
+}
+# === TABLE_CONFIG_END ===
+
+# Tables that require de-duplication due to SAP API returning identical rows
+_DEDUPE_TABLES = {"PicklistOption", "TalentRatings"}
+
+# === TABLE_SCHEMAS_START ===
+# Spark schemas for each table
+_TABLE_SCHEMAS: Dict[str, StructType] = {
+    "Advance": StructType([
+        StructField("NonRecurringPayment_externalCode", StringType(), False),
+        StructField("externalCode", StringType(), False),
+        StructField("advanceEligibilityCode", StringType(), True),
+        StructField("advanceType", StringType(), True),
+        StructField("approvalStatus", StringType(), True),
+        StructField("approver", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("currencyCode", StringType(), True),
+        StructField("currencyGO", StringType(), True),
+        StructField("eligibileAmount", StringType(), True),
+        StructField("eligibilityAmount", StringType(), True),
+        StructField("eligibleAdvanceType", StringType(), True),
+        StructField("installmentAmount", StringType(), True),
+        StructField("installmentFrequency", StringType(), True),
+        StructField("interestRate", StringType(), True),
+        StructField("interestType", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedDateWithTZ", StringType(), True),
+        StructField("mdfSystemEffectiveEndDate", StringType(), True),
+        StructField("mdfSystemEffectiveStartDate", StringType(), True),
+        StructField("mdfSystemEntityId", StringType(), True),
+        StructField("mdfSystemObjectType", StringType(), True),
+        StructField("mdfSystemRecordId", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemStatus", StringType(), True),
+        StructField("mdfSystemTransactionSequence", LongType(), True),
+        StructField("mdfSystemVersionId", LongType(), True),
+        StructField("notesForApprover", StringType(), True),
+        StructField("numberOfInstallments", LongType(), True),
+        StructField("paymentMode", StringType(), True),
+        StructField("pendingAmount", StringType(), True),
+        StructField("periodEndDate", StringType(), True),
+        StructField("periodStartDate", StringType(), True),
+        StructField("recoveryMode", StringType(), True),
+        StructField("recoveryStatus", StringType(), True),
+        StructField("remainingRequests", LongType(), True),
+        StructField("requestDate", StringType(), True),
+        StructField("requestedAmount", StringType(), True),
+        StructField("totalRepaymentAmount", StringType(), True)
+    ]),
+    "AdvancesAccumulation": StructType([
+        StructField("externalCode", StringType(), False),
+        StructField("accumulatedAmount", StringType(), True),
+        StructField("advanceType", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("currency", StringType(), True),
+        StructField("currencyGO", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedDateWithTZ", StringType(), True),
+        StructField("mdfSystemEffectiveEndDate", StringType(), True),
+        StructField("mdfSystemEffectiveStartDate", StringType(), True),
+        StructField("mdfSystemEntityId", StringType(), True),
+        StructField("mdfSystemObjectType", StringType(), True),
+        StructField("mdfSystemRecordId", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemStatus", StringType(), True),
+        StructField("mdfSystemTransactionSequence", LongType(), True),
+        StructField("mdfSystemVersionId", LongType(), True),
+        StructField("numberOfOccurances", LongType(), True),
+        StructField("periodEndDate", StringType(), True),
+        StructField("periodStartDate", StringType(), True),
+        StructField("remainingEligibleAmount", StringType(), True),
+        StructField("remainingNumberOfOccurances", LongType(), True),
+        StructField("userSysId", StringType(), True)
+    ]),
+    "AdvancesEligibility": StructType([
+        StructField("externalCode", StringType(), False),
+        StructField("effectiveStartDate", StringType(), False),
+        StructField("advanceType", StringType(), True),
+        StructField("basePayComponent", StringType(), True),
+        StructField("basePayComponentGroup", StringType(), True),
+        StructField("calculationPercentageOn", StringType(), True),
+        StructField("company", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("currency", StringType(), True),
+        StructField("currencyGO", StringType(), True),
+        StructField("dayOfDeduction", StringType(), True),
+        StructField("deductionDateFormat", StringType(), True),
+        StructField("deductionPayCompOTD", StringType(), True),
+        StructField("deductionPayCompRD", StringType(), True),
+        StructField("defaultWorkflow", StringType(), True),
+        StructField("department", StringType(), True),
+        StructField("effectiveEndDate", StringType(), True),
+        StructField("effectiveStatus", StringType(), True),
+        StructField("eligibilityAmount", StringType(), True),
+        StructField("enableAutoRecovery", StringType(), True),
+        StructField("exceptionForNumberOfInstallments", BooleanType(), True),
+        StructField("exceptionForRequestedAmount", BooleanType(), True),
+        StructField("exceptionWorkflow", StringType(), True),
+        StructField("externalName", StringType(), True),
+        StructField("firstOccurenceStartDate", StringType(), True),
+        StructField("installmentAmount", StringType(), True),
+        StructField("installmentFrequency", StringType(), True),
+        StructField("interestRate", StringType(), True),
+        StructField("interestType", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("maximumEligibilityAmount", StringType(), True),
+        StructField("numberOfInstallments", LongType(), True),
+        StructField("numberOfInstallmentsEditableByEmployee", StringType(), True),
+        StructField("numberOfOccurences", LongType(), True),
+        StructField("occuranceOfDay", StringType(), True),
+        StructField("payComponentType", StringType(), True),
+        StructField("paygrade", StringType(), True),
+        StructField("periodEndDate", StringType(), True),
+        StructField("periodStartDate", StringType(), True),
+        StructField("recoveryMode", StringType(), True),
+        StructField("recoveryModeEditableByEmployee", StringType(), True),
+        StructField("unitOfPeriod", StringType(), True),
+        StructField("validityPeriod", LongType(), True)
+    ]),
+    "AdvancesInstallments": StructType([
+        StructField("Advance_externalCode", StringType(), False),
+        StructField("NonRecurringPayment_externalCode", StringType(), False),
+        StructField("externalCode", StringType(), False),
+        StructField("amortization", StringType(), True),
+        StructField("amortizationTotal", StringType(), True),
+        StructField("balanceRemaining", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("currency", StringType(), True),
+        StructField("currencyGO", StringType(), True),
+        StructField("effectiveStatus", StringType(), True),
+        StructField("installmentAmount", StringType(), True),
+        StructField("installmentStatus", StringType(), True),
+        StructField("interestAmount", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemCreatedBy", StringType(), True),
+        StructField("mdfSystemCreatedDate", StringType(), True),
+        StructField("mdfSystemEffectiveEndDate", StringType(), True),
+        StructField("mdfSystemEffectiveStartDate", StringType(), True),
+        StructField("mdfSystemEntityId", StringType(), True),
+        StructField("mdfSystemLastModifiedBy", StringType(), True),
+        StructField("mdfSystemLastModifiedDate", StringType(), True),
+        StructField("mdfSystemLastModifiedDateWithTZ", StringType(), True),
+        StructField("mdfSystemObjectType", StringType(), True),
+        StructField("mdfSystemRecordId", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemTransactionSequence", LongType(), True),
+        StructField("mdfSystemVersionId", LongType(), True),
+        StructField("paymentDate", StringType(), True)
+    ]),
+    "AssignedComplianceForm": StructType([
+        StructField("id", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True)
+    ]),
+    "Attachment": StructType([
+        StructField("attachmentId", LongType(), False),
+        StructField("createdDate", StringType(), True),
+        StructField("deletable", BooleanType(), True),
+        StructField("deprecable", BooleanType(), True),
+        StructField("description", StringType(), True),
+        StructField("documentCategory", StringType(), True),
+        StructField("documentEntityId", StringType(), True),
+        StructField("documentEntityType", StringType(), True),
+        StructField("documentType", StringType(), True),
+        StructField("fileContent", BinaryType(), True),
+        StructField("fileExtension", StringType(), True),
+        StructField("fileName", StringType(), True),
+        StructField("fileSize", LongType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mimeType", StringType(), True),
+        StructField("module", StringType(), True),
+        StructField("userId", StringType(), True)
+    ]),
+    "Bank": StructType([
+        StructField("bankBranch", StringType(), True),
+        StructField("bankCountry", StringType(), True),
+        StructField("bankName", StringType(), True),
+        StructField("businessIdentifierCode", StringType(), True),
+        StructField("city", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("effectiveStatus", StringType(), True),
+        StructField("externalCode", StringType(), False),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("postalCode", StringType(), True),
+        StructField("routingNumber", StringType(), True),
+        StructField("street", StringType(), True)
+    ]),
+    "Benefit": StructType([
+        StructField("ageOfRetirement", StringType(), True),
+        StructField("annualMaxContributionAmount", StringType(), True),
+        StructField("annualMinContributionAmount", StringType(), True),
+        StructField("balanceCarryForward", BooleanType(), True),
+        StructField("benefitId", StringType(), True),
+        StructField("benefitName", StringType(), True),
+        StructField("benefitProgram", StringType(), True),
+        StructField("benefitSavingsPlanSubType", StringType(), True),
+        StructField("benefitSchedule", StringType(), True),
+        StructField("benefitShortDescription", StringType(), True),
+        StructField("benefitSpecific", StringType(), True),
+        StructField("benefitType", StringType(), True),
+        StructField("bothBalanceCarryForwardParametersPresent", BooleanType(), True),
+        StructField("carryForwardEnrollment", BooleanType(), True),
+        StructField("claim", StringType(), True),
+        StructField("claimDetail", StringType(), True),
+        StructField("claimDetailRequired", BooleanType(), True),
+        StructField("claimScreenID", StringType(), True),
+        StructField("claimsLimitPerFrequencyPeriod", LongType(), True),
+        StructField("conversionFactor", StringType(), True),
+        StructField("country", StringType(), True),
+        StructField("coverage", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("creditPoints", StringType(), True),
+        StructField("currency", StringType(), True),
+        StructField("decimalPrecisionSettingForContributionAmount", BooleanType(), True),
+        StructField("deductionStartDate", StringType(), True),
+        StructField("dependentSpecificRule", BooleanType(), True),
+        StructField("dummyField", StringType(), True),
+        StructField("effectiveEndDate", StringType(), True),
+        StructField("effectiveStartDate", StringType(), True),
+        StructField("effectiveStatus", StringType(), True),
+        StructField("eligibilityRuleId", StringType(), True),
+        StructField("emailNotificationForEnrollment", BooleanType(), True),
+        StructField("employeeClaimWorkflowId", StringType(), True),
+        StructField("employeeEnrollmentEditAllowed", BooleanType(), True),
+        StructField("employeeEnrollmentEditType", StringType(), True),
+        StructField("employeeEnrollmentWorkflowId", StringType(), True),
+        StructField("employeeWithEmployerMatchContributions", StringType(), True),
+        StructField("enrolleeOptions", StringType(), True),
+        StructField("enrollment", StringType(), True),
+        StructField("enrollmentRequired", BooleanType(), True),
+        StructField("enrollmentScreenID", StringType(), True),
+        StructField("enrollmentType", StringType(), True),
+        StructField("entitlementAmount", StringType(), True),
+        StructField("exceedEntitlementAmount", BooleanType(), True),
+        StructField("exceptionWorkflowId", StringType(), True),
+        StructField("frequency", StringType(), True),
+        StructField("insuranceType", StringType(), True),
+        StructField("jobEnrollmentEditAllowed", BooleanType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedDateWithTZ", StringType(), True),
+        StructField("mdfSystemEntityId", StringType(), True),
+        StructField("mdfSystemObjectType", StringType(), True),
+        StructField("mdfSystemRecordId", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemTransactionSequence", LongType(), True),
+        StructField("mdfSystemVersionId", LongType(), True),
+        StructField("multipleFundSelectionsAllowed", BooleanType(), True),
+        StructField("noOfClaimTansactions", LongType(), True),
+        StructField("noOfDependentsToConsider", LongType(), True),
+        StructField("nomineeRelevant", BooleanType(), True),
+        StructField("payrollIntegration", BooleanType(), True),
+        StructField("plan", StringType(), True),
+        StructField("savingsPlanSubType", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("supressClientDateValidation", BooleanType(), True),
+        StructField("triggerDate", StringType(), True),
+        StructField("typeOfPension", StringType(), True),
+        StructField("walletType", StringType(), True)
+    ]),
+    "BudgetGroup": StructType([
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("effectiveEndDate", StringType(), True),
+        StructField("effectiveStartDate", StringType(), True),
+        StructField("effectiveStatus", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("externalName", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemCreatedBy", StringType(), True),
+        StructField("mdfSystemCreatedDate", StringType(), True),
+        StructField("mdfSystemEntityId", StringType(), True),
+        StructField("mdfSystemLastModifiedBy", StringType(), True),
+        StructField("mdfSystemLastModifiedDate", StringType(), True),
+        StructField("mdfSystemLastModifiedDateWithTZ", StringType(), True),
+        StructField("mdfSystemObjectType", StringType(), True),
+        StructField("mdfSystemRecordId", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemTransactionSequence", LongType(), True),
+        StructField("mdfSystemVersionId", LongType(), True),
+        StructField("userId", StringType(), True)
+    ]),
+    "CalibrationSession": StructType([
+        StructField("activationDate", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("sessionDate", StringType(), True),
+        StructField("sessionId", LongType(), False),
+        StructField("sessionLocation", StringType(), True),
+        StructField("sessionName", StringType(), True),
+        StructField("status", LongType(), True)
+    ]),
+    "CalibrationSessionSubject": StructType([
+        StructField("authorizedBy", StringType(), True),
+        StructField("calSessionId", LongType(), True),
+        StructField("calibratedFlag", BooleanType(), True),
+        StructField("comments", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("externalComments", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("pmFolderMapId", LongType(), True),
+        StructField("pmFormDataId", LongType(), True),
+        StructField("pmFormOwnerId", StringType(), True),
+        StructField("reason", StringType(), True),
+        StructField("reasonId", LongType(), True),
+        StructField("sessionSubjectId", LongType(), False),
+        StructField("status", LongType(), True),
+        StructField("userId", StringType(), True)
+    ]),
+    "CalibrationSubjectRank": StructType([
+        StructField("dataType", LongType(), True),
+        StructField("rank", LongType(), True),
+        StructField("ratingValue", DoubleType(), True),
+        StructField("subjectRankId", LongType(), False)
+    ]),
+    "CalibrationTemplate": StructType([
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", LongType(), True),
+        StructField("templateId", LongType(), False),
+        StructField("templateName", StringType(), True)
+    ]),
+    "Candidate": StructType([
+        StructField("candidateId", LongType(), False),
+        StructField("firstName", StringType(), True),
+        StructField("lastName", StringType(), True),
+        StructField("middleName", StringType(), True),
+        StructField("primaryEmail", StringType(), True),
+        StructField("contactEmail", StringType(), True),
+        StructField("cellPhone", StringType(), True),
+        StructField("homePhone", StringType(), True),
+        StructField("address", StringType(), True),
+        StructField("address2", StringType(), True),
+        StructField("city", StringType(), True),
+        StructField("country", StringType(), True),
+        StructField("zip", StringType(), True),
+        StructField("currentTitle", StringType(), True),
+        StructField("candidateLocale", StringType(), True),
+        StructField("anonymized", StringType(), True),
+        StructField("anonymizedDateTime", StringType(), True),
+        StructField("externalCandidate", BooleanType(), True),
+        StructField("publicIntranet", BooleanType(), True),
+        StructField("visibilityOption", BooleanType(), True),
+        StructField("shareProfile", StringType(), True),
+        StructField("agreeToPrivacyStatement", StringType(), True),
+        StructField("dataPrivacyId", LongType(), True),
+        StructField("usersSysId", StringType(), True),
+        StructField("partnerMemberId", StringType(), True),
+        StructField("partnerSource", LongType(), True),
+        StructField("creationDateTime", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastLoginDateTime", StringType(), True),
+        StructField("dateofAvailability", StringType(), True),
+        StructField("privacyAcceptDateTime", StringType(), True),
+        StructField("password", StringType(), True)
+    ]),
+    "CandidateBackground_Certificates": StructType([
+        StructField("backgroundElementId", LongType(), False),
+        StructField("candidateId", LongType(), True),
+        StructField("bgOrderPos", LongType(), True),
+        StructField("name", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("institution", StringType(), True),
+        StructField("licenseType", StringType(), True),
+        StructField("licenseName", StringType(), True),
+        StructField("licenseNumber", StringType(), True),
+        StructField("licenseState", StringType(), True),
+        StructField("licenseCountry", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True)
+    ]),
+    "CandidateBackground_Education": StructType([
+        StructField("backgroundElementId", LongType(), False),
+        StructField("candidateId", LongType(), True),
+        StructField("bgOrderPos", LongType(), True),
+        StructField("school", StringType(), True),
+        StructField("degree", StringType(), True),
+        StructField("major", StringType(), True),
+        StructField("degreeDate", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("schoolType", StringType(), True),
+        StructField("schoolAddress", StringType(), True),
+        StructField("schoolCity", StringType(), True),
+        StructField("schoolState", StringType(), True),
+        StructField("schoolCountry", StringType(), True),
+        StructField("schoolZip", StringType(), True),
+        StructField("schoolPhone", StringType(), True),
+        StructField("presentStudent", LongType(), True),
+        StructField("lastModifiedDateTime", StringType(), True)
+    ]),
+    "CandidateBackground_InsideWorkExperience": StructType([
+        StructField("backgroundElementId", LongType(), False),
+        StructField("candidateId", LongType(), True),
+        StructField("bgOrderPos", LongType(), True),
+        StructField("title", StringType(), True),
+        StructField("department", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True)
+    ]),
+    "CandidateBackground_Languages": StructType([
+        StructField("backgroundElementId", LongType(), False),
+        StructField("candidateId", LongType(), True),
+        StructField("bgOrderPos", LongType(), True),
+        StructField("language", StringType(), True),
+        StructField("readingProf", StringType(), True),
+        StructField("speakingProf", StringType(), True),
+        StructField("writingProf", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True)
+    ]),
+    "CandidateBackground_OutsideWorkExperience": StructType([
+        StructField("backgroundElementId", LongType(), False),
+        StructField("candidateId", LongType(), True),
+        StructField("bgOrderPos", LongType(), True),
+        StructField("employer", StringType(), True),
+        StructField("startTitle", StringType(), True),
+        StructField("businessType", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("presentEmployer", StringType(), True),
+        StructField("employerAddress", StringType(), True),
+        StructField("employerCity", StringType(), True),
+        StructField("employerState", StringType(), True),
+        StructField("employerCountry", StringType(), True),
+        StructField("employerZip", StringType(), True),
+        StructField("employerPhone", StringType(), True),
+        StructField("employerEmail", StringType(), True),
+        StructField("employerContact", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True)
+    ]),
+    "CandidateBackground_TalentPool": StructType([
+        StructField("backgroundElementId", LongType(), False),
+        StructField("candidateId", LongType(), True),
+        StructField("bgOrderPos", LongType(), True),
+        StructField("lastModifiedDateTime", StringType(), True)
+    ]),
+    "CandidateBackground_TalentPoolcorp": StructType([
+        StructField("backgroundElementId", LongType(), False),
+        StructField("candidateId", LongType(), True),
+        StructField("bgOrderPos", LongType(), True),
+        StructField("lastModifiedDateTime", StringType(), True)
+    ]),
+    "CandidateComments": StructType([
+        StructField("commentId", LongType(), False),
+        StructField("candidateId", LongType(), True),
+        StructField("associatedId", LongType(), True),
+        StructField("associatedCommentId", LongType(), True),
+        StructField("commentator", StringType(), True),
+        StructField("content", StringType(), True),
+        StructField("hasAssociatedComment", StringType(), True),
+        StructField("refType", StringType(), True),
+        StructField("migratedCommentatorUserName", StringType(), True)
+    ]),
+    "CandidateLight": StructType([
+        StructField("candidateId", LongType(), False),
+        StructField("firstName", StringType(), True),
+        StructField("lastName", StringType(), True),
+        StructField("middleName", StringType(), True),
+        StructField("primaryEmail", StringType(), True),
+        StructField("contactEmail", StringType(), True),
+        StructField("cellPhone", StringType(), True),
+        StructField("homePhone", StringType(), True),
+        StructField("address", StringType(), True),
+        StructField("address2", StringType(), True),
+        StructField("city", StringType(), True),
+        StructField("country", StringType(), True),
+        StructField("zip", StringType(), True),
+        StructField("currentTitle", StringType(), True),
+        StructField("candidateLocale", StringType(), True),
+        StructField("anonymized", StringType(), True),
+        StructField("anonymizedDateTime", StringType(), True),
+        StructField("externalCandidate", BooleanType(), True),
+        StructField("publicIntranet", BooleanType(), True),
+        StructField("visibilityOption", BooleanType(), True),
+        StructField("shareProfile", StringType(), True),
+        StructField("agreeToPrivacyStatement", StringType(), True),
+        StructField("dataPrivacyId", LongType(), True),
+        StructField("usersSysId", StringType(), True),
+        StructField("partnerMemberId", StringType(), True),
+        StructField("partnerSource", LongType(), True),
+        StructField("creationDateTime", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastLoginDateTime", StringType(), True),
+        StructField("dateofAvailability", StringType(), True),
+        StructField("privacyAcceptDateTime", StringType(), True),
+        StructField("password", StringType(), True)
+    ]),
+    "CompetencyEntity": StructType([
+        StructField("category_de_DE", StringType(), True),
+        StructField("category_defaultValue", StringType(), True),
+        StructField("category_en_GB", StringType(), True),
+        StructField("category_en_US", StringType(), True),
+        StructField("category_es_ES", StringType(), True),
+        StructField("category_fr_FR", StringType(), True),
+        StructField("category_ja_JP", StringType(), True),
+        StructField("category_ko_KR", StringType(), True),
+        StructField("category_localized", StringType(), True),
+        StructField("category_nl_NL", StringType(), True),
+        StructField("category_pt_BR", StringType(), True),
+        StructField("category_pt_PT", StringType(), True),
+        StructField("category_ru_RU", StringType(), True),
+        StructField("category_zh_CN", StringType(), True),
+        StructField("category_zh_TW", StringType(), True),
+        StructField("collection", BooleanType(), True),
+        StructField("core", BooleanType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("description_de_DE", StringType(), True),
+        StructField("description_defaultValue", StringType(), True),
+        StructField("description_en_GB", StringType(), True),
+        StructField("description_en_US", StringType(), True),
+        StructField("description_es_ES", StringType(), True),
+        StructField("description_fr_FR", StringType(), True),
+        StructField("description_ja_JP", StringType(), True),
+        StructField("description_ko_KR", StringType(), True),
+        StructField("description_localized", StringType(), True),
+        StructField("description_nl_NL", StringType(), True),
+        StructField("description_pt_BR", StringType(), True),
+        StructField("description_pt_PT", StringType(), True),
+        StructField("description_ru_RU", StringType(), True),
+        StructField("description_zh_CN", StringType(), True),
+        StructField("description_zh_TW", StringType(), True),
+        StructField("effectiveEndDate", StringType(), True),
+        StructField("effectiveStartDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedDateWithTZ", StringType(), True),
+        StructField("libName_de_DE", StringType(), True),
+        StructField("libName_defaultValue", StringType(), True),
+        StructField("libName_en_GB", StringType(), True),
+        StructField("libName_en_US", StringType(), True),
+        StructField("libName_es_ES", StringType(), True),
+        StructField("libName_fr_FR", StringType(), True),
+        StructField("libName_ja_JP", StringType(), True),
+        StructField("libName_ko_KR", StringType(), True),
+        StructField("libName_localized", StringType(), True),
+        StructField("libName_nl_NL", StringType(), True),
+        StructField("libName_pt_BR", StringType(), True),
+        StructField("libName_pt_PT", StringType(), True),
+        StructField("libName_ru_RU", StringType(), True),
+        StructField("libName_zh_CN", StringType(), True),
+        StructField("libName_zh_TW", StringType(), True),
+        StructField("mdfSystemEntityId", StringType(), True),
+        StructField("mdfSystemObjectType", StringType(), True),
+        StructField("mdfSystemRecordId", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemVersionId", LongType(), True),
+        StructField("name_de_DE", StringType(), True),
+        StructField("name_defaultValue", StringType(), True),
+        StructField("name_en_GB", StringType(), True),
+        StructField("name_en_US", StringType(), True),
+        StructField("name_es_ES", StringType(), True),
+        StructField("name_fr_FR", StringType(), True),
+        StructField("name_ja_JP", StringType(), True),
+        StructField("name_ko_KR", StringType(), True),
+        StructField("name_localized", StringType(), True),
+        StructField("name_nl_NL", StringType(), True),
+        StructField("name_pt_BR", StringType(), True),
+        StructField("name_pt_PT", StringType(), True),
+        StructField("name_ru_RU", StringType(), True),
+        StructField("name_zh_CN", StringType(), True),
+        StructField("name_zh_TW", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("subModule", StringType(), True),
+        StructField("transactionSequence", LongType(), True)
+    ]),
+    "ComplianceDocumentFlow": StructType([
+        StructField("documentFlowCode", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True)
+    ]),
+    "ComplianceFormData": StructType([
+        StructField("externalCode", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("documentAttachmentId", LongType(), True),
+        StructField("documentFlow", StringType(), True),
+        StructField("envelopeId", StringType(), True),
+        StructField("form", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("pdfId", StringType(), True),
+        StructField("process", StringType(), True),
+        StructField("sensitiveDataIncluded", BooleanType(), True),
+        StructField("subjectUser", StringType(), True)
+    ]),
+    "ComplianceFormSignature": StructType([
+        StructField("ComplianceFormData_externalCode", StringType(), False),
+        StructField("externalCode", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True)
+    ]),
+    "ComplianceProcess": StructType([
+        StructField("processId", StringType(), False),
+        StructField("complianceMasterId", StringType(), True),
+        StructField("correctDataTriggered", BooleanType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("onboardingProcess", StringType(), True),
+        StructField("processInitiatorId", StringType(), True),
+        StructField("processInitiatorType", StringType(), True),
+        StructField("processStatus", StringType(), True),
+        StructField("processType", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("user", StringType(), True)
+    ]),
+    "ComplianceProcessTask": StructType([
+        StructField("taskId", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True)
+    ]),
+    "Country": StructType([
+        StructField("code", StringType(), False),
+        StructField("effectiveStartDate", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("currency", StringType(), True),
+        StructField("externalName_defaultValue", StringType(), True),
+        StructField("externalName_en_US", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("numericCountryCode", LongType(), True),
+        StructField("status", StringType(), True),
+        StructField("twoCharCountryCode", StringType(), True)
+    ]),
+    "CurrencyConversion": StructType([
+        StructField("code", StringType(), False),
+        StructField("effectiveStartDate", StringType(), False),
+        StructField("baseCurrency", StringType(), True),
+        StructField("conversionRate", DoubleType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("effectiveEndDate", StringType(), True),
+        StructField("effectiveStatus", StringType(), True),
+        StructField("exchangeRateType", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("toCurrency", StringType(), True)
+    ]),
+    "CustomPayType": StructType([
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("externalCode", StringType(), False),
+        StructField("externalName_de_DE", StringType(), True),
+        StructField("externalName_defaultValue", StringType(), True),
+        StructField("externalName_en_DEBUG", StringType(), True),
+        StructField("externalName_en_GB", StringType(), True),
+        StructField("externalName_en_US", StringType(), True),
+        StructField("externalName_es_ES", StringType(), True),
+        StructField("externalName_fr_FR", StringType(), True),
+        StructField("externalName_ja_JP", StringType(), True),
+        StructField("externalName_ko_KR", StringType(), True),
+        StructField("externalName_localized", StringType(), True),
+        StructField("externalName_nl_NL", StringType(), True),
+        StructField("externalName_pt_BR", StringType(), True),
+        StructField("externalName_pt_PT", StringType(), True),
+        StructField("externalName_ru_RU", StringType(), True),
+        StructField("externalName_zh_CN", StringType(), True),
+        StructField("externalName_zh_TW", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("standardPayType", StringType(), True)
+    ]),
+    "CustomPayTypeAssignment": StructType([
+        StructField("CustomPayType_externalCode", StringType(), False),
+        StructField("country", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("externalCode", LongType(), False),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True)
+    ]),
+    "DGExpression": StructType([
+        StructField("expressionID", StringType(), False)
+    ]),
+    "DGField": StructType([
+        StructField("name", StringType(), False),
+        StructField("dataType", StringType(), True),
+        StructField("label", StringType(), True),
+        StructField("picklistId", StringType(), True)
+    ]),
+    "DGFieldOperator": StructType([
+        StructField("token", StringType(), False),
+        StructField("label", StringType(), True)
+    ]),
+    "DGFieldValue": StructType([
+        StructField("fieldValue", StringType(), False)
+    ]),
+    "DGFilter": StructType([
+        StructField("filterId", StringType(), False)
+    ]),
+    "DGPeoplePool": StructType([
+        StructField("peoplePoolId", StringType(), False)
+    ]),
+    "DeductionScreenId": StructType([
+        StructField("externalCode", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("dummyFieldValue", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemCreatedBy", StringType(), True),
+        StructField("mdfSystemCreatedDate", StringType(), True),
+        StructField("mdfSystemEffectiveEndDate", StringType(), True),
+        StructField("mdfSystemEffectiveStartDate", StringType(), True),
+        StructField("mdfSystemEntityId", StringType(), True),
+        StructField("mdfSystemLastModifiedBy", StringType(), True),
+        StructField("mdfSystemLastModifiedDate", StringType(), True),
+        StructField("mdfSystemLastModifiedDateWithTZ", StringType(), True),
+        StructField("mdfSystemObjectType", StringType(), True),
+        StructField("mdfSystemRecordId", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemStatus", StringType(), True),
+        StructField("mdfSystemTransactionSequence", LongType(), True),
+        StructField("mdfSystemVersionId", LongType(), True),
+        StructField("onetimeDeductionId", StringType(), True),
+        StructField("onetimeDeductionUserGoAdminId", StringType(), True),
+        StructField("onetimeDeductionUserGoEmployeeEditId", StringType(), True),
+        StructField("onetimeDeductionUserGoEmployeeId", StringType(), True),
+        StructField("recurringDeductionId", StringType(), True)
+    ]),
+    "DevLearningCertifications": StructType([
+        StructField("certificateId", LongType(), False),
+        StructField("learningId", LongType(), False),
+        StructField("certificateName", StringType(), True),
+        StructField("certificateCreatedBy", StringType(), True),
+        StructField("certificateCreatedDate", StringType(), True),
+        StructField("certificateIssueDate", StringType(), True),
+        StructField("certificateExpiredDate", StringType(), True),
+        StructField("certificateLastModifiedBy", StringType(), True),
+        StructField("certificateLastModifiedDate", StringType(), True)
+    ]),
+    "DevLearning_4201": StructType([
+        StructField("learningId", LongType(), False),
+        StructField("userId", StringType(), True),
+        StructField("assignee", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("guid", StringType(), True),
+        StructField("sourceType", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("completedDate", StringType(), True)
+    ]),
+    "DynamicGroup": StructType([
+        StructField("groupID", LongType(), False),
+        StructField("groupName", StringType(), True),
+        StructField("groupType", StringType(), True),
+        StructField("activeMembershipCount", LongType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("staticGroup", BooleanType(), True),
+        StructField("userType", StringType(), True)
+    ]),
+    "DynamicGroupDefinition": StructType([
+        StructField("groupID", LongType(), False),
+        StructField("excludedPeoplePool1", StringType(), True),
+        StructField("excludedPeoplePool2", StringType(), True),
+        StructField("excludedPeoplePool3", StringType(), True),
+        StructField("includedPeoplePool1", StringType(), True),
+        StructField("includedPeoplePool2", StringType(), True),
+        StructField("includedPeoplePool3", StringType(), True)
+    ]),
+    "EMEvent": StructType([
+        StructField("id", LongType(), False),
+        StructField("eventName", StringType(), False),
+        StructField("eventDescription", StringType(), True),
+        StructField("eventDescriptionMsgKey", StringType(), True),
+        StructField("eventTime", StringType(), True),
+        StructField("eventType", StringType(), True)
+    ]),
+    "EMEventAttribute": StructType([
+        StructField("id", LongType(), False),
+        StructField("name", StringType(), False),
+        StructField("value", StringType(), True)
+    ]),
+    "EMEventPayload": StructType([
+        StructField("id", LongType(), False),
+        StructField("fileName", StringType(), True),
+        StructField("fileType", StringType(), True),
+        StructField("mimeType", StringType(), True),
+        StructField("payload", BinaryType(), False),
+        StructField("type", StringType(), False)
+    ]),
+    "EMMonitoredProcess": StructType([
+        StructField("processDefinitionId", StringType(), False),
+        StructField("processInstanceId", StringType(), False),
+        StructField("processType", StringType(), False),
+        StructField("monitoredProcessId", LongType(), False),
+        StructField("coRelatorId", StringType(), True),
+        StructField("firstEventTime", StringType(), False),
+        StructField("lastEventTime", StringType(), False),
+        StructField("hasErrors", StringType(), True),
+        StructField("hasWarnings", StringType(), True),
+        StructField("moduleName", StringType(), True),
+        StructField("processDefinitionName", StringType(), True),
+        StructField("processInstanceName", StringType(), True),
+        StructField("processState", StringType(), False)
+    ]),
+    "EmpBeneficiary": StructType([
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("payrollEndDate", StringType(), True),
+        StructField("personIdExternal", StringType(), False),
+        StructField("plannedEndDate", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("userId", StringType(), False)
+    ]),
+    "EmpCompensation": StructType([
+        StructField("startDate", StringType(), False),
+        StructField("userId", StringType(), False),
+        StructField("benefitsRate", DoubleType(), True),
+        StructField("bonusTarget", DoubleType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("customDouble5", DoubleType(), True),
+        StructField("customDouble6", DoubleType(), True),
+        StructField("customDouble7", DoubleType(), True),
+        StructField("customString20", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("event", StringType(), True),
+        StructField("eventReason", StringType(), True),
+        StructField("isEligibleForBenefits", BooleanType(), True),
+        StructField("isEligibleForCar", BooleanType(), True),
+        StructField("isHighlyCompensatedEmployee", BooleanType(), True),
+        StructField("isInsider", BooleanType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("payGrade", StringType(), True),
+        StructField("payGroup", StringType(), True),
+        StructField("payrollSystemId", StringType(), True)
+    ]),
+    "EmpCompensationCalculated": StructType([
+        StructField("seqNumber", LongType(), False),
+        StructField("startDate", StringType(), False),
+        StructField("userId", StringType(), False),
+        StructField("compaRatio", DoubleType(), True),
+        StructField("currency", StringType(), True),
+        StructField("errorCode", StringType(), True),
+        StructField("errorMessage", StringType(), True),
+        StructField("payRange", StringType(), True),
+        StructField("proratedMaxPointOfPayRange", StringType(), True),
+        StructField("proratedMidPointOfPayRange", StringType(), True),
+        StructField("proratedMinPointOfPayRange", StringType(), True),
+        StructField("rangePenetration", DoubleType(), True),
+        StructField("yearlyBaseSalary", StringType(), True)
+    ]),
+    "EmpCompensationGroupSumCalculated": StructType([
+        StructField("seqNumber", LongType(), False),
+        StructField("startDate", StringType(), False),
+        StructField("userId", StringType(), False),
+        StructField("amount", DoubleType(), True),
+        StructField("currencyCode", StringType(), True),
+        StructField("errorCode", StringType(), True),
+        StructField("errorMessage", StringType(), True),
+        StructField("payComponentGroupId", StringType(), True)
+    ]),
+    "EmpCostAssignment": StructType([
+        StructField("effectiveStartDate", StringType(), True),
+        StructField("worker", StringType(), True),
+        StructField("companyCode", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("doNotSyncFromPositionCostAssignment", BooleanType(), True),
+        StructField("effectiveEndDate", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemStatus", StringType(), True),
+        StructField("skipValidationDerivation", BooleanType(), True)
+    ]),
+    "EmpEmployment": StructType([
+        StructField("StockEndDate", StringType(), True),
+        StructField("assignmentClass", StringType(), True),
+        StructField("benefitsEligibilityStartDate", StringType(), True),
+        StructField("benefitsEndDate", StringType(), True),
+        StructField("bonusPayExpirationDate", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("eligibleForSalContinuation", BooleanType(), True),
+        StructField("eligibleForStock", BooleanType(), True),
+        StructField("employeeFirstEmployment", BooleanType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("firstDateWorked", StringType(), True),
+        StructField("includeAllRecords", BooleanType(), True),
+        StructField("initialOptionGrant", DoubleType(), True),
+        StructField("initialStockGrant", DoubleType(), True),
+        StructField("isContingentWorker", BooleanType(), True),
+        StructField("isECRecord", BooleanType(), True),
+        StructField("jobNumber", StringType(), True),
+        StructField("lastDateWorked", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("okToRehire", BooleanType(), True),
+        StructField("originalStartDate", StringType(), True),
+        StructField("payrollEndDate", StringType(), True),
+        StructField("personIdExternal", StringType(), False),
+        StructField("prevEmployeeId", StringType(), True),
+        StructField("professionalServiceDate", StringType(), True),
+        StructField("regretTermination", BooleanType(), True),
+        StructField("salaryEndDate", StringType(), True),
+        StructField("seniorityDate", StringType(), True),
+        StructField("serviceDate", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("userId", StringType(), False)
+    ]),
+    "EmpEmploymentHigherDuty": StructType([
+        StructField("personIdExternal", StringType(), True),
+        StructField("userId", StringType(), True),
+        StructField("homeAssignment", StringType(), True),
+        StructField("plannedEndDate", StringType(), True),
+        StructField("startDate", StringType(), True)
+    ]),
+    "EmpEmploymentTermination": StructType([
+        StructField("StockEndDate", StringType(), True),
+        StructField("attachmentId", StringType(), True),
+        StructField("benefitsEndDate", StringType(), True),
+        StructField("bonusPayExpirationDate", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("eligibleForSalContinuation", BooleanType(), True),
+        StructField("endDate", StringType(), False),
+        StructField("eventReason", StringType(), True),
+        StructField("lastDateWorked", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("newMainEmploymentId", StringType(), True),
+        StructField("notes", StringType(), True),
+        StructField("okToRehire", BooleanType(), True),
+        StructField("payrollEndDate", StringType(), True),
+        StructField("personIdExternal", StringType(), False),
+        StructField("regretTermination", BooleanType(), True),
+        StructField("salaryEndDate", StringType(), True),
+        StructField("userId", StringType(), False)
+    ]),
+    "EmpJob": StructType([
+        StructField("assedicCertInitialStateNum", StringType(), True),
+        StructField("assedicCertObjectNum", StringType(), True),
+        StructField("businessUnit", StringType(), True),
+        StructField("calcMethodIndicator", BooleanType(), True),
+        StructField("commitmentIndicator", StringType(), True),
+        StructField("company", StringType(), True),
+        StructField("contractReferenceForAed", StringType(), True),
+        StructField("contractType", StringType(), True),
+        StructField("costCenter", StringType(), True),
+        StructField("countryOfCompany", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("defaultOvertimeCompensationVariant", StringType(), True),
+        StructField("department", StringType(), True),
+        StructField("division", StringType(), True),
+        StructField("eeo1JobCategory", StringType(), True),
+        StructField("eeo4JobCategory", StringType(), True),
+        StructField("eeo5JobCategory", StringType(), True),
+        StructField("eeo6JobCategory", StringType(), True),
+        StructField("eeoClass", StringType(), True),
+        StructField("electoralCollegeForWorkersRepresentatives", StringType(), True),
+        StructField("electoralCollegeForWorksCouncil", StringType(), True),
+        StructField("empRelationship", StringType(), True),
+        StructField("emplStatus", StringType(), True),
+        StructField("employeeClass", StringType(), True),
+        StructField("employeeWorkgroupMembership", StringType(), True),
+        StructField("employmentType", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("event", StringType(), True),
+        StructField("eventReason", StringType(), True),
+        StructField("exclExecutiveSector", BooleanType(), True),
+        StructField("expectedReturnDate", StringType(), True),
+        StructField("familyRelationshipWithEmployer", StringType(), True),
+        StructField("fgtsDate", StringType(), True),
+        StructField("fgtsOptant", BooleanType(), True),
+        StructField("fgtsPercent", DoubleType(), True),
+        StructField("flsaStatus", StringType(), True),
+        StructField("fte", DoubleType(), True),
+        StructField("harmfulAgentExposure", StringType(), True),
+        StructField("hazard", BooleanType(), True),
+        StructField("healthRisk", BooleanType(), True),
+        StructField("holidayCalendarCode", StringType(), True),
+        StructField("isCompetitionClauseActive", BooleanType(), True),
+        StructField("isFulltimeEmployee", BooleanType(), True),
+        StructField("isSideLineJobAllowed", BooleanType(), True),
+        StructField("jobCode", StringType(), True),
+        StructField("jobTitle", StringType(), True),
+        StructField("laborProtection", BooleanType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("location", StringType(), True),
+        StructField("managerId", StringType(), True),
+        StructField("mandatoryWorkBreakRecord", StringType(), True),
+        StructField("municipalInseeCode", StringType(), True),
+        StructField("notes", StringType(), True),
+        StructField("operation", StringType(), True),
+        StructField("payGrade", StringType(), True),
+        StructField("payScaleArea", StringType(), True),
+        StructField("payScaleGroup", StringType(), True),
+        StructField("payScaleLevel", StringType(), True),
+        StructField("payScaleType", StringType(), True),
+        StructField("pcfm", BooleanType(), True),
+        StructField("pensionProtection", BooleanType(), True),
+        StructField("permitIndicator", BooleanType(), True),
+        StructField("position", StringType(), True),
+        StructField("positionEntryDate", StringType(), True),
+        StructField("probationPeriodEndDate", StringType(), True),
+        StructField("regularTemp", StringType(), True),
+        StructField("residentVote", BooleanType(), True),
+        StructField("retired", BooleanType(), True),
+        StructField("seqNumber", StringType(), False),
+        StructField("sickPaySupplement", StringType(), True),
+        StructField("standardHours", DoubleType(), True),
+        StructField("startDate", StringType(), False),
+        StructField("teachersPension", BooleanType(), True),
+        StructField("timeRecordingAdmissibilityCode", StringType(), True),
+        StructField("timeRecordingProfileCode", StringType(), True),
+        StructField("timeRecordingVariant", StringType(), True),
+        StructField("timeTypeProfileCode", StringType(), True),
+        StructField("timezone", StringType(), True),
+        StructField("travelDistance", DoubleType(), True),
+        StructField("tupeOrgNumber", StringType(), True),
+        StructField("userId", StringType(), False),
+        StructField("workLocation", StringType(), True),
+        StructField("workerCategory", StringType(), True),
+        StructField("workingDaysPerWeek", DoubleType(), True),
+        StructField("workingTimeDirective", BooleanType(), True),
+        StructField("workscheduleCode", StringType(), True),
+        StructField("wtdHoursLimit", StringType(), True)
+    ]),
+    "EmpJobRelationships": StructType([
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("operation", StringType(), True),
+        StructField("relUserId", StringType(), True),
+        StructField("relationshipType", StringType(), False),
+        StructField("startDate", StringType(), False),
+        StructField("userId", StringType(), False)
+    ]),
+    "EmpPayCompNonRecurring": StructType([
+        StructField("payComponentCode", StringType(), False),
+        StructField("payDate", StringType(), False),
+        StructField("userId", StringType(), False),
+        StructField("alternativeCostCenter", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("currencyCode", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("notes", StringType(), True),
+        StructField("operation", StringType(), True),
+        StructField("value", DoubleType(), True)
+    ]),
+    "EmpPayCompRecurring": StructType([
+        StructField("seqNumber", LongType(), False),
+        StructField("startDate", StringType(), False),
+        StructField("userId", StringType(), False),
+        StructField("payComponent", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("currencyCode", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("frequency", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("notes", StringType(), True),
+        StructField("operation", StringType(), True),
+        StructField("paycompvalue", DoubleType(), True)
+    ]),
+    "EmpPensionPayout": StructType([
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("payrollEndDate", StringType(), True),
+        StructField("personIdExternal", StringType(), False),
+        StructField("plannedEndDate", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("userId", StringType(), False)
+    ]),
+    "EmpWorkPermit": StructType([
+        StructField("attachment", StringType(), True),
+        StructField("attachmentFileName", StringType(), True),
+        StructField("attachmentFileSize", StringType(), True),
+        StructField("attachmentFileType", StringType(), True),
+        StructField("attachmentId", StringType(), True),
+        StructField("attachmentMimeType", StringType(), True),
+        StructField("attachmentStatus", StringType(), True),
+        StructField("country", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("documentNumber", StringType(), False),
+        StructField("documentTitle", StringType(), True),
+        StructField("documentType", StringType(), False),
+        StructField("expirationDate", StringType(), True),
+        StructField("isValidated", BooleanType(), True),
+        StructField("issueDate", StringType(), True),
+        StructField("issuePlace", StringType(), True),
+        StructField("issuingAuthority", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("notes", StringType(), True),
+        StructField("userId", StringType(), False)
+    ]),
+    "EmployeeCompensation": StructType([
+        StructField("compEntryId", LongType(), True),
+        StructField("compPlanId", LongType(), True),
+        StructField("formDataId", LongType(), True),
+        StructField("compTemplateId", LongType(), True),
+        StructField("entryUserId", StringType(), True),
+        StructField("entryUserGroupName", StringType(), True),
+        StructField("entryUserName", StringType(), True),
+        StructField("entryUserFirstName", StringType(), True),
+        StructField("entryUserLastName", StringType(), True),
+        StructField("entryUserMiddleName", StringType(), True),
+        StructField("revieweeMgrUserId", StringType(), True),
+        StructField("revieweeMgrUserName", StringType(), True),
+        StructField("revieweeMgrUserFirstName", StringType(), True),
+        StructField("revieweeMgrUserLastName", StringType(), True),
+        StructField("revieweeMgrUserMiddleName", StringType(), True),
+        StructField("department", StringType(), True),
+        StructField("division", StringType(), True),
+        StructField("location", StringType(), True),
+        StructField("localCurrencyCode", StringType(), True),
+        StructField("functionalCurrencyCode", StringType(), True),
+        StructField("isECUser", BooleanType(), True),
+        StructField("isTotalComp", BooleanType(), True)
+    ]),
+    "EmployeeDismissalProtection": StructType([
+        StructField("workerId", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True)
+    ]),
+    "EmployeeDismissalProtectionDetail": StructType([
+        StructField("EmployeeDismissalProtection_workerId", StringType(), False),
+        StructField("externalCode", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("dismissalProtectionType", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("protectionEndDate", StringType(), True),
+        StructField("protectionStartDate", StringType(), True)
+    ]),
+    "EmployeePayrollRunResults": StructType([
+        StructField("externalCode", StringType(), False),
+        StructField("mdfSystemEffectiveStartDate", StringType(), False),
+        StructField("clientId", StringType(), True),
+        StructField("companyId", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("currency", StringType(), True),
+        StructField("employmentId", StringType(), True),
+        StructField("endDateWhenPaid", StringType(), True),
+        StructField("externalName", StringType(), True),
+        StructField("isVoid", BooleanType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedDateWithTZ", StringType(), True),
+        StructField("mdfSystemEffectiveEndDate", StringType(), True),
+        StructField("mdfSystemEntityId", StringType(), True),
+        StructField("mdfSystemObjectType", StringType(), True),
+        StructField("mdfSystemRecordId", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemStatus", StringType(), True),
+        StructField("mdfSystemTransactionSequence", LongType(), True),
+        StructField("mdfSystemVersionId", LongType(), True),
+        StructField("payDate", StringType(), True),
+        StructField("payrollId", StringType(), True),
+        StructField("payrollProviderId", StringType(), True),
+        StructField("payrollProviderPayrollRunType", StringType(), True),
+        StructField("payrollRunType", StringType(), True),
+        StructField("personId", StringType(), True),
+        StructField("sequenceNumber", StringType(), True),
+        StructField("startDateWhenPaid", StringType(), True),
+        StructField("systemId", StringType(), True),
+        StructField("userId", StringType(), True)
+    ]),
+    "EmployeePayrollRunResultsItems": StructType([
+        StructField("EmployeePayrollRunResults_externalCode", StringType(), False),
+        StructField("EmployeePayrollRunResults_mdfSystemEffectiveStartDate", StringType(), False),
+        StructField("externalCode", StringType(), False),
+        StructField("amount", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("endDateWhenEarned", StringType(), True),
+        StructField("externalName", StringType(), True),
+        StructField("groupingReason", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedDateWithTZ", StringType(), True),
+        StructField("mdfSystemEffectiveEndDate", StringType(), True),
+        StructField("mdfSystemEffectiveStartDate", StringType(), True),
+        StructField("mdfSystemEntityId", StringType(), True),
+        StructField("mdfSystemObjectType", StringType(), True),
+        StructField("mdfSystemRecordId", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemStatus", StringType(), True),
+        StructField("mdfSystemTransactionSequence", LongType(), True),
+        StructField("mdfSystemVersionId", LongType(), True),
+        StructField("payrollProviderGroupingReason", StringType(), True),
+        StructField("payrollProviderGroupingValue", StringType(), True),
+        StructField("payrollProviderUnitOfMeasurement", StringType(), True),
+        StructField("payrollProviderWageType", StringType(), True),
+        StructField("quantity", StringType(), True),
+        StructField("startDateWhenEarned", StringType(), True),
+        StructField("unitOfMeasurement", StringType(), True),
+        StructField("wageType", StringType(), True)
+    ]),
+    "ExternalUser": StructType([
+        StructField("userId", StringType(), False),
+        StructField("defaultLocale", StringType(), True),
+        StructField("is_deleted", BooleanType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("loginMethod", StringType(), True),
+        StructField("password", StringType(), True),
+        StructField("personGUID", StringType(), True),
+        StructField("personId", DoubleType(), True),
+        StructField("personIdExternal", StringType(), True),
+        StructField("productName", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("timeZone", StringType(), True),
+        StructField("userName", StringType(), True)
+    ]),
+    "FOBusinessUnit": StructType([
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("description_de_DE", StringType(), True),
+        StructField("description_defaultValue", StringType(), True),
+        StructField("description_en_GB", StringType(), True),
+        StructField("description_en_US", StringType(), True),
+        StructField("description_es_ES", StringType(), True),
+        StructField("description_fr_FR", StringType(), True),
+        StructField("description_ja_JP", StringType(), True),
+        StructField("description_ko_KR", StringType(), True),
+        StructField("description_localized", StringType(), True),
+        StructField("description_nl_NL", StringType(), True),
+        StructField("description_pt_BR", StringType(), True),
+        StructField("description_pt_PT", StringType(), True),
+        StructField("description_ru_RU", StringType(), True),
+        StructField("description_zh_CN", StringType(), True),
+        StructField("description_zh_TW", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("headOfUnit", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("name_de_DE", StringType(), True),
+        StructField("name_defaultValue", StringType(), True),
+        StructField("name_en_GB", StringType(), True),
+        StructField("name_en_US", StringType(), True),
+        StructField("name_es_ES", StringType(), True),
+        StructField("name_fr_FR", StringType(), True),
+        StructField("name_ja_JP", StringType(), True),
+        StructField("name_ko_KR", StringType(), True),
+        StructField("name_localized", StringType(), True),
+        StructField("name_nl_NL", StringType(), True),
+        StructField("name_pt_BR", StringType(), True),
+        StructField("name_pt_PT", StringType(), True),
+        StructField("name_ru_RU", StringType(), True),
+        StructField("name_zh_CN", StringType(), True),
+        StructField("name_zh_TW", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "FOCompany": StructType([
+        StructField("country", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("currency", StringType(), True),
+        StructField("defaultLocation", StringType(), True),
+        StructField("defaultPayGroup", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("description_de_DE", StringType(), True),
+        StructField("description_defaultValue", StringType(), True),
+        StructField("description_en_GB", StringType(), True),
+        StructField("description_en_US", StringType(), True),
+        StructField("description_es_ES", StringType(), True),
+        StructField("description_fr_FR", StringType(), True),
+        StructField("description_ja_JP", StringType(), True),
+        StructField("description_ko_KR", StringType(), True),
+        StructField("description_localized", StringType(), True),
+        StructField("description_nl_NL", StringType(), True),
+        StructField("description_pt_BR", StringType(), True),
+        StructField("description_pt_PT", StringType(), True),
+        StructField("description_ru_RU", StringType(), True),
+        StructField("description_zh_CN", StringType(), True),
+        StructField("description_zh_TW", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("name_de_DE", StringType(), True),
+        StructField("name_defaultValue", StringType(), True),
+        StructField("name_en_GB", StringType(), True),
+        StructField("name_en_US", StringType(), True),
+        StructField("name_es_ES", StringType(), True),
+        StructField("name_fr_FR", StringType(), True),
+        StructField("name_ja_JP", StringType(), True),
+        StructField("name_ko_KR", StringType(), True),
+        StructField("name_localized", StringType(), True),
+        StructField("name_nl_NL", StringType(), True),
+        StructField("name_pt_BR", StringType(), True),
+        StructField("name_pt_PT", StringType(), True),
+        StructField("name_ru_RU", StringType(), True),
+        StructField("name_zh_CN", StringType(), True),
+        StructField("name_zh_TW", StringType(), True),
+        StructField("standardHours", DoubleType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "FOCorporateAddressDEFLT": StructType([
+        StructField("address1", StringType(), True),
+        StructField("address2", StringType(), True),
+        StructField("address3", StringType(), True),
+        StructField("address4", StringType(), True),
+        StructField("address5", StringType(), True),
+        StructField("addressId", StringType(), True),
+        StructField("city", StringType(), True),
+        StructField("country", StringType(), True),
+        StructField("county", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("province", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("state", StringType(), True),
+        StructField("zipCode", StringType(), True)
+    ]),
+    "FOCostCenter": StructType([
+        StructField("costcenterExternalObjectID", StringType(), True),
+        StructField("costcenterManager", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("cust_LegalEntityProp", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("description_de_DE", StringType(), True),
+        StructField("description_defaultValue", StringType(), True),
+        StructField("description_en_GB", StringType(), True),
+        StructField("description_en_US", StringType(), True),
+        StructField("description_es_ES", StringType(), True),
+        StructField("description_fr_FR", StringType(), True),
+        StructField("description_ja_JP", StringType(), True),
+        StructField("description_ko_KR", StringType(), True),
+        StructField("description_localized", StringType(), True),
+        StructField("description_nl_NL", StringType(), True),
+        StructField("description_pt_BR", StringType(), True),
+        StructField("description_pt_PT", StringType(), True),
+        StructField("description_ru_RU", StringType(), True),
+        StructField("description_zh_CN", StringType(), True),
+        StructField("description_zh_TW", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("glStatementCode", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("name_de_DE", StringType(), True),
+        StructField("name_defaultValue", StringType(), True),
+        StructField("name_en_GB", StringType(), True),
+        StructField("name_en_US", StringType(), True),
+        StructField("name_es_ES", StringType(), True),
+        StructField("name_fr_FR", StringType(), True),
+        StructField("name_ja_JP", StringType(), True),
+        StructField("name_ko_KR", StringType(), True),
+        StructField("name_localized", StringType(), True),
+        StructField("name_nl_NL", StringType(), True),
+        StructField("name_pt_BR", StringType(), True),
+        StructField("name_pt_PT", StringType(), True),
+        StructField("name_ru_RU", StringType(), True),
+        StructField("name_zh_CN", StringType(), True),
+        StructField("name_zh_TW", StringType(), True),
+        StructField("parent", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "FODepartment": StructType([
+        StructField("costCenter", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("cust_toLegalEntityProp", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("description_de_DE", StringType(), True),
+        StructField("description_defaultValue", StringType(), True),
+        StructField("description_en_GB", StringType(), True),
+        StructField("description_en_US", StringType(), True),
+        StructField("description_es_ES", StringType(), True),
+        StructField("description_fr_FR", StringType(), True),
+        StructField("description_ja_JP", StringType(), True),
+        StructField("description_ko_KR", StringType(), True),
+        StructField("description_localized", StringType(), True),
+        StructField("description_nl_NL", StringType(), True),
+        StructField("description_pt_BR", StringType(), True),
+        StructField("description_pt_PT", StringType(), True),
+        StructField("description_ru_RU", StringType(), True),
+        StructField("description_zh_CN", StringType(), True),
+        StructField("description_zh_TW", StringType(), True),
+        StructField("divisionFlx", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("headOfUnit", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("name_de_DE", StringType(), True),
+        StructField("name_defaultValue", StringType(), True),
+        StructField("name_en_GB", StringType(), True),
+        StructField("name_en_US", StringType(), True),
+        StructField("name_es_ES", StringType(), True),
+        StructField("name_fr_FR", StringType(), True),
+        StructField("name_ja_JP", StringType(), True),
+        StructField("name_ko_KR", StringType(), True),
+        StructField("name_localized", StringType(), True),
+        StructField("name_nl_NL", StringType(), True),
+        StructField("name_pt_BR", StringType(), True),
+        StructField("name_pt_PT", StringType(), True),
+        StructField("name_ru_RU", StringType(), True),
+        StructField("name_zh_CN", StringType(), True),
+        StructField("name_zh_TW", StringType(), True),
+        StructField("parent", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "FODivision": StructType([
+        StructField("businessUnitFlx", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("description_de_DE", StringType(), True),
+        StructField("description_defaultValue", StringType(), True),
+        StructField("description_en_GB", StringType(), True),
+        StructField("description_en_US", StringType(), True),
+        StructField("description_es_ES", StringType(), True),
+        StructField("description_fr_FR", StringType(), True),
+        StructField("description_ja_JP", StringType(), True),
+        StructField("description_ko_KR", StringType(), True),
+        StructField("description_localized", StringType(), True),
+        StructField("description_nl_NL", StringType(), True),
+        StructField("description_pt_BR", StringType(), True),
+        StructField("description_pt_PT", StringType(), True),
+        StructField("description_ru_RU", StringType(), True),
+        StructField("description_zh_CN", StringType(), True),
+        StructField("description_zh_TW", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("headOfUnit", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("name_de_DE", StringType(), True),
+        StructField("name_defaultValue", StringType(), True),
+        StructField("name_en_GB", StringType(), True),
+        StructField("name_en_US", StringType(), True),
+        StructField("name_es_ES", StringType(), True),
+        StructField("name_fr_FR", StringType(), True),
+        StructField("name_ja_JP", StringType(), True),
+        StructField("name_ko_KR", StringType(), True),
+        StructField("name_localized", StringType(), True),
+        StructField("name_nl_NL", StringType(), True),
+        StructField("name_pt_BR", StringType(), True),
+        StructField("name_pt_PT", StringType(), True),
+        StructField("name_ru_RU", StringType(), True),
+        StructField("name_zh_CN", StringType(), True),
+        StructField("name_zh_TW", StringType(), True),
+        StructField("parent", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "FODynamicRole": StructType([
+        StructField("businessUnit", StringType(), True),
+        StructField("company", StringType(), True),
+        StructField("costCenter", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("department", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("division", StringType(), True),
+        StructField("dynamicGroup", StringType(), True),
+        StructField("dynamicRoleAssignmentId", StringType(), True),
+        StructField("eventReason", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("jobCode", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("location", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("payGrade", StringType(), True),
+        StructField("payGroup", StringType(), True),
+        StructField("person", StringType(), True),
+        StructField("position", StringType(), True),
+        StructField("resolverType", StringType(), True)
+    ]),
+    "FOEventReason": StructType([
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("emplStatus", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("event", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("implicitPositionAction", LongType(), True),
+        StructField("includeInWorkExperience", BooleanType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("payrollEvent", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "FOFrequency": StructType([
+        StructField("annualizationFactor", DoubleType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("name", StringType(), True)
+    ]),
+    "FOGeozone": StructType([
+        StructField("adjustmentPercentage", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "FOJobClassLocalAUS": StructType([
+        StructField("country", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("genericString1", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "FOJobClassLocalBRA": StructType([
+        StructField("country", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("genericString1", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "FOJobClassLocalCAN": StructType([
+        StructField("country", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("genericString1", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "FOJobClassLocalDEFLT": StructType([
+        StructField("country", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "FOJobClassLocalFRA": StructType([
+        StructField("country", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("genericNumber2", LongType(), True),
+        StructField("genericString1", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "FOJobClassLocalGBR": StructType([
+        StructField("country", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("cust_long1", StringType(), True),
+        StructField("customLong1", LongType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("genericNumber1", LongType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "FOJobClassLocalITA": StructType([
+        StructField("country", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("genericNumber1", LongType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "FOJobClassLocalUSA": StructType([
+        StructField("country", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("eeo1JobCategory", StringType(), True),
+        StructField("eeo4JobCategory", StringType(), True),
+        StructField("eeo5JobCategory", StringType(), True),
+        StructField("eeo6JobCategory", StringType(), True),
+        StructField("eeoJobGroup", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("flsaStatusUSA", StringType(), True),
+        StructField("genericNumber1", LongType(), True),
+        StructField("genericNumber2", LongType(), True),
+        StructField("genericNumber3", LongType(), True),
+        StructField("genericNumber4", LongType(), True),
+        StructField("genericNumber5", LongType(), True),
+        StructField("genericNumber6", LongType(), True),
+        StructField("genericString1", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "FOJobCode": StructType([
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("cust_string10", StringType(), True),
+        StructField("cust_string3", StringType(), True),
+        StructField("cust_string4", StringType(), True),
+        StructField("cust_string5", StringType(), True),
+        StructField("customString1", StringType(), True),
+        StructField("customString2", StringType(), True),
+        StructField("customString3", StringType(), True),
+        StructField("customString4", StringType(), True),
+        StructField("customString5", StringType(), True),
+        StructField("customString6", StringType(), True),
+        StructField("customString7", StringType(), True),
+        StructField("customString8", StringType(), True),
+        StructField("customString9", StringType(), True),
+        StructField("defaultEmployeeClass", StringType(), True),
+        StructField("defaultJobLevel", StringType(), True),
+        StructField("defaultSupervisorLevel", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("description_de_DE", StringType(), True),
+        StructField("description_defaultValue", StringType(), True),
+        StructField("description_en_GB", StringType(), True),
+        StructField("description_en_US", StringType(), True),
+        StructField("description_es_ES", StringType(), True),
+        StructField("description_fr_FR", StringType(), True),
+        StructField("description_ja_JP", StringType(), True),
+        StructField("description_ko_KR", StringType(), True),
+        StructField("description_localized", StringType(), True),
+        StructField("description_nl_NL", StringType(), True),
+        StructField("description_pt_BR", StringType(), True),
+        StructField("description_pt_PT", StringType(), True),
+        StructField("description_ru_RU", StringType(), True),
+        StructField("description_zh_CN", StringType(), True),
+        StructField("description_zh_TW", StringType(), True),
+        StructField("employeeClass", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("grade", StringType(), True),
+        StructField("isFulltimeEmployee", BooleanType(), True),
+        StructField("isRegular", StringType(), True),
+        StructField("jobFunction", StringType(), True),
+        StructField("jobLevel", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("name_de_DE", StringType(), True),
+        StructField("name_defaultValue", StringType(), True),
+        StructField("name_en_GB", StringType(), True),
+        StructField("name_en_US", StringType(), True),
+        StructField("name_es_ES", StringType(), True),
+        StructField("name_fr_FR", StringType(), True),
+        StructField("name_ja_JP", StringType(), True),
+        StructField("name_ko_KR", StringType(), True),
+        StructField("name_localized", StringType(), True),
+        StructField("name_nl_NL", StringType(), True),
+        StructField("name_pt_BR", StringType(), True),
+        StructField("name_pt_PT", StringType(), True),
+        StructField("name_ru_RU", StringType(), True),
+        StructField("name_zh_CN", StringType(), True),
+        StructField("name_zh_TW", StringType(), True),
+        StructField("parentJobCode", StringType(), True),
+        StructField("regularTemporary", StringType(), True),
+        StructField("standardHours", DoubleType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("supervisorLevel", StringType(), True),
+        StructField("workerCompCode", StringType(), True)
+    ]),
+    "FOJobFunction": StructType([
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("description_de_DE", StringType(), True),
+        StructField("description_defaultValue", StringType(), True),
+        StructField("description_en_GB", StringType(), True),
+        StructField("description_en_US", StringType(), True),
+        StructField("description_es_ES", StringType(), True),
+        StructField("description_fr_FR", StringType(), True),
+        StructField("description_ja_JP", StringType(), True),
+        StructField("description_ko_KR", StringType(), True),
+        StructField("description_localized", StringType(), True),
+        StructField("description_nl_NL", StringType(), True),
+        StructField("description_pt_BR", StringType(), True),
+        StructField("description_pt_PT", StringType(), True),
+        StructField("description_ru_RU", StringType(), True),
+        StructField("description_zh_CN", StringType(), True),
+        StructField("description_zh_TW", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("jobFunctionType", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("name_de_DE", StringType(), True),
+        StructField("name_defaultValue", StringType(), True),
+        StructField("name_en_GB", StringType(), True),
+        StructField("name_en_US", StringType(), True),
+        StructField("name_es_ES", StringType(), True),
+        StructField("name_fr_FR", StringType(), True),
+        StructField("name_ja_JP", StringType(), True),
+        StructField("name_ko_KR", StringType(), True),
+        StructField("name_localized", StringType(), True),
+        StructField("name_nl_NL", StringType(), True),
+        StructField("name_pt_BR", StringType(), True),
+        StructField("name_pt_PT", StringType(), True),
+        StructField("name_ru_RU", StringType(), True),
+        StructField("name_zh_CN", StringType(), True),
+        StructField("name_zh_TW", StringType(), True),
+        StructField("parentFunctionCode", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("type", StringType(), True)
+    ]),
+    "FOLocation": StructType([
+        StructField("addressAddress1", StringType(), True),
+        StructField("addressAddress2", StringType(), True),
+        StructField("addressAddress3", StringType(), True),
+        StructField("addressAddress4", StringType(), True),
+        StructField("addressAddress5", StringType(), True),
+        StructField("addressCity", StringType(), True),
+        StructField("addressCountry", StringType(), True),
+        StructField("addressCounty", StringType(), True),
+        StructField("addressProvince", StringType(), True),
+        StructField("addressState", StringType(), True),
+        StructField("addressZipCode", StringType(), True),
+        StructField("companyFlx", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("geozoneFlx", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("locationGroup", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("standardHours", DoubleType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("timezone", StringType(), True)
+    ]),
+    "FOLocationGroup": StructType([
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "FOPayComponent": StructType([
+        StructField("basePayComponentGroup", StringType(), True),
+        StructField("canOverride", BooleanType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("currency", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("displayOnSelfService", BooleanType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("frequencyCode", StringType(), True),
+        StructField("isEarning", BooleanType(), True),
+        StructField("isEndDatedPayment", BooleanType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("maxFractionDigits", LongType(), True),
+        StructField("name", StringType(), True),
+        StructField("payComponentType", StringType(), True),
+        StructField("payComponentValue", DoubleType(), True),
+        StructField("recurring", BooleanType(), True),
+        StructField("selfServiceDescription", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("target", BooleanType(), True),
+        StructField("taxTreatment", StringType(), True),
+        StructField("usedForCompPlanning", StringType(), True)
+    ]),
+    "FOPayComponentGroup": StructType([
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("currency", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("payComponentFlx", StringType(), True),
+        StructField("showOnCompUI", BooleanType(), True),
+        StructField("sortOrder", DoubleType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("useForComparatioCalc", BooleanType(), True),
+        StructField("useForRangePenetration", BooleanType(), True)
+    ]),
+    "FOPayGrade": StructType([
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("customString1", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("paygradeLevel", LongType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "FOPayGroup": StructType([
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("dataDelimiter", StringType(), True),
+        StructField("decimalPoint", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("description_de_DE", StringType(), True),
+        StructField("description_defaultValue", StringType(), True),
+        StructField("description_en_GB", StringType(), True),
+        StructField("description_en_US", StringType(), True),
+        StructField("description_es_ES", StringType(), True),
+        StructField("description_fr_FR", StringType(), True),
+        StructField("description_ja_JP", StringType(), True),
+        StructField("description_ko_KR", StringType(), True),
+        StructField("description_localized", StringType(), True),
+        StructField("description_nl_NL", StringType(), True),
+        StructField("description_pt_BR", StringType(), True),
+        StructField("description_pt_PT", StringType(), True),
+        StructField("description_ru_RU", StringType(), True),
+        StructField("description_zh_CN", StringType(), True),
+        StructField("description_zh_TW", StringType(), True),
+        StructField("earliestChangeDate", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("lag", LongType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("name_de_DE", StringType(), True),
+        StructField("name_defaultValue", StringType(), True),
+        StructField("name_en_GB", StringType(), True),
+        StructField("name_en_US", StringType(), True),
+        StructField("name_es_ES", StringType(), True),
+        StructField("name_fr_FR", StringType(), True),
+        StructField("name_ja_JP", StringType(), True),
+        StructField("name_ko_KR", StringType(), True),
+        StructField("name_localized", StringType(), True),
+        StructField("name_nl_NL", StringType(), True),
+        StructField("name_pt_BR", StringType(), True),
+        StructField("name_pt_PT", StringType(), True),
+        StructField("name_ru_RU", StringType(), True),
+        StructField("name_zh_CN", StringType(), True),
+        StructField("name_zh_TW", StringType(), True),
+        StructField("payFrequency", StringType(), True),
+        StructField("paymentFrequency", StringType(), True),
+        StructField("payrollVendorId", StringType(), True),
+        StructField("primaryContactEmail", StringType(), True),
+        StructField("primaryContactID", StringType(), True),
+        StructField("primaryContactName", StringType(), True),
+        StructField("secondaryContactEmail", StringType(), True),
+        StructField("secondaryContactID", StringType(), True),
+        StructField("secondaryContactName", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("weeksInPayPeriod", LongType(), True)
+    ]),
+    "FOPayRange": StructType([
+        StructField("companyFlx", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("createdOn", StringType(), True),
+        StructField("currency", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("frequencyCode", StringType(), True),
+        StructField("geozoneFlx", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedOn", StringType(), True),
+        StructField("maximumPay", StringType(), True),
+        StructField("midPoint", StringType(), True),
+        StructField("minimumPay", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("payGradeFlx", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "HireDateChange": StructType([
+        StructField("code", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("newHireDate", StringType(), True),
+        StructField("originalHireDate", StringType(), True),
+        StructField("processingStatus", StringType(), True),
+        StructField("usersSysId", StringType(), True)
+    ]),
+    "InterviewIndividualAssessment": StructType([
+        StructField("interviewIndividualAssessmentId", LongType(), False),
+        StructField("interviewOverallAssessmentId", LongType(), True),
+        StructField("refId", LongType(), True),
+        StructField("type", StringType(), True),
+        StructField("rating", StringType(), True),
+        StructField("comments", StringType(), True),
+        StructField("isDeleted", StringType(), True)
+    ]),
+    "InterviewOverallAssessment": StructType([
+        StructField("interviewOverallAssessmentId", LongType(), False),
+        StructField("interviewRefId", LongType(), True),
+        StructField("overallRating", StringType(), True),
+        StructField("averageRating", DoubleType(), True),
+        StructField("type", StringType(), True),
+        StructField("comments", StringType(), True)
+    ]),
+    "JobApplication": StructType([
+        StructField("applicationId", LongType(), False),
+        StructField("candidateId", LongType(), True),
+        StructField("jobReqId", LongType(), True),
+        StructField("applicationTemplateId", LongType(), True),
+        StructField("firstName", StringType(), True),
+        StructField("lastName", StringType(), True),
+        StructField("middleName", StringType(), True),
+        StructField("contactEmail", StringType(), True),
+        StructField("cellPhone", StringType(), True),
+        StructField("homePhone", StringType(), True),
+        StructField("address", StringType(), True),
+        StructField("address2", StringType(), True),
+        StructField("city", StringType(), True),
+        StructField("country", StringType(), True),
+        StructField("countryCode", StringType(), True),
+        StructField("zip", StringType(), True),
+        StructField("stateOther", StringType(), True),
+        StructField("currentTitle", StringType(), True),
+        StructField("currentLocation", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("statusComments", StringType(), True),
+        StructField("appStatusSetItemId", LongType(), True),
+        StructField("appLocale", StringType(), True),
+        StructField("source", StringType(), True),
+        StructField("sourceLabel", StringType(), True),
+        StructField("referredBy", StringType(), True),
+        StructField("rating", StringType(), True),
+        StructField("averageRating", DoubleType(), True),
+        StructField("owner", StringType(), True),
+        StructField("ownershpDate", StringType(), True),
+        StructField("dateOfBirth", StringType(), True),
+        StructField("gender", StringType(), True),
+        StructField("formerEmployee", BooleanType(), True),
+        StructField("hireDate", StringType(), True),
+        StructField("hiredOn", StringType(), True),
+        StructField("jobStartDate", StringType(), True),
+        StructField("jobofferdate", StringType(), True),
+        StructField("dateAvail", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("baseSalary", DoubleType(), True),
+        StructField("jobRateOfPay", DoubleType(), True),
+        StructField("timeToHire", DoubleType(), True),
+        StructField("dataSource", StringType(), True),
+        StructField("resumeUploadDate", StringType(), True),
+        StructField("snapShotDate", StringType(), True),
+        StructField("confnumber", StringType(), True),
+        StructField("exportedOn", StringType(), True),
+        StructField("jobAppGuid", StringType(), True),
+        StructField("anonymizedFlag", StringType(), True),
+        StructField("anonymizedDate", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedByProxy", StringType(), True),
+        StructField("nonApplicantStatus", StringType(), True),
+        StructField("profileUpdated", StringType(), True),
+        StructField("duplicateProfile", StringType(), True),
+        StructField("usersSysId", StringType(), True)
+    ]),
+    "JobApplicationAssessmentOrder": StructType([
+        StructField("id", LongType(), False),
+        StructField("applicationId", LongType(), True),
+        StructField("vendorCode", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True)
+    ]),
+    "JobApplicationAssessmentReport": StructType([
+        StructField("id", LongType(), False),
+        StructField("orderId", LongType(), True),
+        StructField("status", LongType(), True),
+        StructField("statusDate", StringType(), True),
+        StructField("statusDetails", StringType(), True),
+        StructField("reportURL", StringType(), True)
+    ]),
+    "JobApplicationAssessmentReportDetail": StructType([
+        StructField("id", LongType(), False),
+        StructField("scoreComponent", StringType(), True),
+        StructField("scoreValue", StringType(), True)
+    ]),
+    "JobApplicationAudit": StructType([
+        StructField("fieldOrderPos", LongType(), False),
+        StructField("revNumber", LongType(), False),
+        StructField("revType", LongType(), True),
+        StructField("fieldId", StringType(), True),
+        StructField("fieldType", StringType(), True),
+        StructField("refType", StringType(), True),
+        StructField("source", StringType(), True),
+        StructField("oldValue", StringType(), True),
+        StructField("newValue", StringType(), True),
+        StructField("dateOldValue", StringType(), True),
+        StructField("dateNewValue", StringType(), True),
+        StructField("clobFieldRef", StringType(), True),
+        StructField("clobOldValueXML", StringType(), True),
+        StructField("clobNewValueXML", StringType(), True),
+        StructField("changedBy", StringType(), True),
+        StructField("mergedFrom", StringType(), True),
+        StructField("jobPostingId", LongType(), True),
+        StructField("jobPostStartDate", StringType(), True),
+        StructField("jobPostEndDate", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("lastModifiedExtId", LongType(), True)
+    ]),
+    "JobApplicationBackgroundCheckRequest": StructType([
+        StructField("requestId", LongType(), False),
+        StructField("applicationId", LongType(), True),
+        StructField("vendorCode", StringType(), True),
+        StructField("vendorOrderNo", StringType(), True),
+        StructField("orderStatus", StringType(), True),
+        StructField("responseCode", StringType(), True),
+        StructField("responseDetail", StringType(), True),
+        StructField("createdByUser", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True)
+    ]),
+    "JobApplicationBackgroundCheckResult": StructType([
+        StructField("statusId", LongType(), False),
+        StructField("vendorCode", StringType(), True),
+        StructField("vendorOrderNo", StringType(), True),
+        StructField("stepName", StringType(), True),
+        StructField("stepStatus", StringType(), True),
+        StructField("stepMessage", StringType(), True),
+        StructField("reportUrl", StringType(), True),
+        StructField("finalStep", BooleanType(), True),
+        StructField("createdDateTime", StringType(), True)
+    ]),
+    "JobApplicationComments": StructType([
+        StructField("commentId", LongType(), False),
+        StructField("applicationId", LongType(), True),
+        StructField("associatedId", StringType(), True),
+        StructField("associatedCommentId", LongType(), True),
+        StructField("commentator", StringType(), True),
+        StructField("content", StringType(), True),
+        StructField("hasAssociatedComment", StringType(), True),
+        StructField("refType", StringType(), True),
+        StructField("migratedCommentatorUserName", StringType(), True)
+    ]),
+    "JobApplicationInterview": StructType([
+        StructField("applicationInterviewId", LongType(), False),
+        StructField("applicationId", LongType(), True),
+        StructField("candSlotMapId", LongType(), True),
+        StructField("recruitEventStaffId", LongType(), True),
+        StructField("source", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("templateType", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("isTimeSet", LongType(), True),
+        StructField("notes", StringType(), True)
+    ]),
+    "JobApplicationOnboardingData": StructType([
+        StructField("onboardingId", LongType(), False),
+        StructField("applicationId", LongType(), True),
+        StructField("status", StringType(), True),
+        StructField("submittedBy", StringType(), True),
+        StructField("submittedOn", StringType(), True)
+    ]),
+    "JobApplicationOnboardingStatus": StructType([
+        StructField("onboardingStatusId", LongType(), False),
+        StructField("onboardingId", LongType(), True),
+        StructField("name", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("statusType", StringType(), True),
+        StructField("type", StringType(), True),
+        StructField("message", StringType(), True),
+        StructField("url", StringType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True)
+    ]),
+    "JobApplicationQuestionResponse": StructType([
+        StructField("applicationId", LongType(), False),
+        StructField("order", LongType(), False),
+        StructField("question", StringType(), True),
+        StructField("answer", StringType(), True),
+        StructField("questionResponse", StringType(), True),
+        StructField("expectedAnswer", StringType(), True),
+        StructField("expectedAnswerValue", DoubleType(), True),
+        StructField("highLow", StringType(), True),
+        StructField("type", StringType(), True),
+        StructField("maxLength", DoubleType(), True)
+    ]),
+    "JobApplicationSnapshot_Certificates": StructType([
+        StructField("applicationId", LongType(), False),
+        StructField("backgroundElementId", LongType(), False),
+        StructField("candidateId", LongType(), True),
+        StructField("bgOrderPos", LongType(), True),
+        StructField("name", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("institution", StringType(), True),
+        StructField("licenseType", StringType(), True),
+        StructField("licenseName", StringType(), True),
+        StructField("licenseNumber", StringType(), True),
+        StructField("licenseState", StringType(), True),
+        StructField("licenseCountry", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True)
+    ]),
+    "JobApplicationSnapshot_Education": StructType([
+        StructField("applicationId", LongType(), False),
+        StructField("backgroundElementId", LongType(), False),
+        StructField("candidateId", LongType(), True),
+        StructField("bgOrderPos", LongType(), True),
+        StructField("school", StringType(), True),
+        StructField("degree", StringType(), True),
+        StructField("major", StringType(), True),
+        StructField("degreeDate", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("schoolType", StringType(), True),
+        StructField("schoolAddress", StringType(), True),
+        StructField("schoolCity", StringType(), True),
+        StructField("schoolState", StringType(), True),
+        StructField("schoolCountry", StringType(), True),
+        StructField("schoolZip", StringType(), True),
+        StructField("schoolPhone", StringType(), True),
+        StructField("presentStudent", LongType(), True),
+        StructField("lastModifiedDateTime", StringType(), True)
+    ]),
+    "JobApplicationSnapshot_InsideWorkExperience": StructType([
+        StructField("applicationId", LongType(), False),
+        StructField("backgroundElementId", LongType(), False),
+        StructField("candidateId", LongType(), True),
+        StructField("bgOrderPos", LongType(), True),
+        StructField("title", StringType(), True),
+        StructField("department", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True)
+    ]),
+    "JobApplicationSnapshot_Languages": StructType([
+        StructField("applicationId", LongType(), False),
+        StructField("backgroundElementId", LongType(), False),
+        StructField("candidateId", LongType(), True),
+        StructField("bgOrderPos", LongType(), True),
+        StructField("language", StringType(), True),
+        StructField("readingProf", StringType(), True),
+        StructField("speakingProf", StringType(), True),
+        StructField("writingProf", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True)
+    ]),
+    "JobApplicationSnapshot_OutsideWorkExperience": StructType([
+        StructField("applicationId", LongType(), False),
+        StructField("backgroundElementId", LongType(), False),
+        StructField("candidateId", LongType(), True),
+        StructField("bgOrderPos", LongType(), True),
+        StructField("employer", StringType(), True),
+        StructField("startTitle", StringType(), True),
+        StructField("businessType", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("presentEmployer", StringType(), True),
+        StructField("employerAddress", StringType(), True),
+        StructField("employerCity", StringType(), True),
+        StructField("employerState", StringType(), True),
+        StructField("employerCountry", StringType(), True),
+        StructField("employerZip", StringType(), True),
+        StructField("employerPhone", StringType(), True),
+        StructField("employerEmail", StringType(), True),
+        StructField("employerContact", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True)
+    ]),
+    "JobApplicationSnapshot_TalentPool": StructType([
+        StructField("applicationId", LongType(), False),
+        StructField("backgroundElementId", LongType(), False),
+        StructField("candidateId", LongType(), True),
+        StructField("bgOrderPos", LongType(), True),
+        StructField("lastModifiedDateTime", StringType(), True)
+    ]),
+    "JobApplicationSnapshot_TalentPoolcorp": StructType([
+        StructField("applicationId", LongType(), False),
+        StructField("backgroundElementId", LongType(), False),
+        StructField("candidateId", LongType(), True),
+        StructField("bgOrderPos", LongType(), True),
+        StructField("lastModifiedDateTime", StringType(), True)
+    ]),
+    "JobApplicationStatus": StructType([
+        StructField("appStatusSetId", LongType(), False),
+        StructField("appStatusId", LongType(), True),
+        StructField("appStatusName", StringType(), True)
+    ]),
+    "JobApplicationStatusAuditTrail": StructType([
+        StructField("revNumber", LongType(), False),
+        StructField("revType", LongType(), True),
+        StructField("skippedStatus", LongType(), True),
+        StructField("statusComments", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedProxyUser", StringType(), True)
+    ]),
+    "JobApplicationStatusLabel": StructType([
+        StructField("appStatusId", LongType(), False),
+        StructField("locale", StringType(), False),
+        StructField("statusLabel", StringType(), True),
+        StructField("candidateLabel", StringType(), True)
+    ]),
+    "JobOffer": StructType([
+        StructField("offerApprovalId", LongType(), False),
+        StructField("applicationId", LongType(), True),
+        StructField("candidateName", StringType(), True),
+        StructField("currency", StringType(), True),
+        StructField("location", StringType(), True),
+        StructField("currentLocation", StringType(), True),
+        StructField("internalStatus", StringType(), True),
+        StructField("candJust", StringType(), True),
+        StructField("initialComment", StringType(), True),
+        StructField("salaryBase", DoubleType(), True),
+        StructField("jobRateOfPay", DoubleType(), True),
+        StructField("commission", DoubleType(), True),
+        StructField("targetBonusAmount", DoubleType(), True),
+        StructField("stockPackage", StringType(), True),
+        StructField("annual_FB", DoubleType(), True),
+        StructField("annual_PF", DoubleType(), True),
+        StructField("annual_SA", DoubleType(), True),
+        StructField("annual_cashPay", DoubleType(), True),
+        StructField("annual_gratuity", DoubleType(), True),
+        StructField("annual_retirals", DoubleType(), True),
+        StructField("monthly_FB", DoubleType(), True),
+        StructField("monthly_PF", DoubleType(), True),
+        StructField("monthly_SA", DoubleType(), True),
+        StructField("monthly_cashPay", DoubleType(), True),
+        StructField("monthly_gratuity", DoubleType(), True),
+        StructField("monthly_retirals", DoubleType(), True),
+        StructField("monthly_salary", DoubleType(), True),
+        StructField("total_earnings", DoubleType(), True),
+        StructField("total_fixed_pay", DoubleType(), True),
+        StructField("templateId", LongType(), True),
+        StructField("formTemplateId", LongType(), True),
+        StructField("formDataId", LongType(), True),
+        StructField("version", LongType(), True),
+        StructField("tempDate", StringType(), True),
+        StructField("redefineTemplateApprovers", StringType(), True),
+        StructField("anonymizedFlag", StringType(), True),
+        StructField("anonymizedDate", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True)
+    ]),
+    "JobOfferApprover": StructType([
+        StructField("offerApproverId", LongType(), False),
+        StructField("offerApprovalId", LongType(), True),
+        StructField("username", StringType(), True),
+        StructField("approverFirstName", StringType(), True),
+        StructField("approverLastName", StringType(), True),
+        StructField("approverOrder", LongType(), True),
+        StructField("approvalStepId", StringType(), True),
+        StructField("approverAction", StringType(), True),
+        StructField("approverActionDate", StringType(), True),
+        StructField("comment", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True)
+    ]),
+    "JobReqFwdCandidates": StructType([
+        StructField("candidateId", LongType(), False),
+        StructField("jobReqId", LongType(), False),
+        StructField("referralId", LongType(), True),
+        StructField("referralKey", StringType(), True),
+        StructField("referredBy", StringType(), True),
+        StructField("type", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("jobBoardName", StringType(), True),
+        StructField("candidateSiteid", LongType(), True),
+        StructField("extRecruiterId", LongType(), True),
+        StructField("rcmAppStatusSetItemId", LongType(), True),
+        StructField("expirationDate", StringType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True)
+    ]),
+    "JobReqQuestion": StructType([
+        StructField("questionId", LongType(), False),
+        StructField("questionName", StringType(), True),
+        StructField("questionCategory", StringType(), True),
+        StructField("questionSource", StringType(), True),
+        StructField("questionType", StringType(), True)
+    ]),
+    "JobReqScreeningQuestion": StructType([
+        StructField("questionId", LongType(), False),
+        StructField("jobReqId", LongType(), True),
+        StructField("locale", StringType(), True),
+        StructField("order", LongType(), True),
+        StructField("questionName", StringType(), True),
+        StructField("questionDescription", StringType(), True),
+        StructField("questionType", StringType(), True),
+        StructField("jobReqContent", StringType(), True),
+        StructField("expectedDir", StringType(), True),
+        StructField("expectedAnswerValue", DoubleType(), True),
+        StructField("questionWeight", DoubleType(), True),
+        StructField("ratingScale", StringType(), True),
+        StructField("maxLength", LongType(), True),
+        StructField("required", BooleanType(), True),
+        StructField("score", BooleanType(), True),
+        StructField("disqualifier", BooleanType(), True),
+        StructField("questionParentId", LongType(), True),
+        StructField("questionParentResponse", StringType(), True)
+    ]),
+    "JobReqScreeningQuestionChoice": StructType([
+        StructField("optionId", LongType(), False),
+        StructField("locale", StringType(), True),
+        StructField("optionLabel", StringType(), True),
+        StructField("optionValue", DoubleType(), True)
+    ]),
+    "JobRequisition": StructType([
+        StructField("jobReqId", LongType(), False),
+        StructField("jobReqGUId", StringType(), True),
+        StructField("templateId", LongType(), True),
+        StructField("templateType", StringType(), True),
+        StructField("appTemplateId", LongType(), True),
+        StructField("formDataId", LongType(), True),
+        StructField("statusSetId", LongType(), True),
+        StructField("internalStatus", StringType(), True),
+        StructField("deleted", StringType(), True),
+        StructField("isDraft", BooleanType(), True),
+        StructField("positionNumber", StringType(), True),
+        StructField("jobCode", StringType(), True),
+        StructField("jobRole", StringType(), True),
+        StructField("department", StringType(), True),
+        StructField("division", StringType(), True),
+        StructField("function", StringType(), True),
+        StructField("facility", StringType(), True),
+        StructField("costCenterId", StringType(), True),
+        StructField("legentity", StringType(), True),
+        StructField("location", StringType(), True),
+        StructField("city", StringType(), True),
+        StructField("stateProvince", StringType(), True),
+        StructField("postalcode", StringType(), True),
+        StructField("country", StringType(), True),
+        StructField("industry", StringType(), True),
+        StructField("currency", StringType(), True),
+        StructField("numberOpenings", DoubleType(), True),
+        StructField("openingsFilled", LongType(), True),
+        StructField("candidateProgress", LongType(), True),
+        StructField("ratedApplicantCount", LongType(), True),
+        StructField("timeToFill", LongType(), True),
+        StructField("age", LongType(), True),
+        StructField("costOfHire", DoubleType(), True),
+        StructField("defaultLanguage", StringType(), True),
+        StructField("corporatePosting", BooleanType(), True),
+        StructField("intranetPosting", BooleanType(), True),
+        StructField("salaryBase", DoubleType(), True),
+        StructField("salaryMin", DoubleType(), True),
+        StructField("salaryMax", DoubleType(), True),
+        StructField("salRateType", StringType(), True),
+        StructField("salaryComment", StringType(), True),
+        StructField("commission", DoubleType(), True),
+        StructField("targetBonusAmount", DoubleType(), True),
+        StructField("stockPackage", StringType(), True),
+        StructField("otherBonus", StringType(), True),
+        StructField("otherCompensation", StringType(), True),
+        StructField("annual_FB", DoubleType(), True),
+        StructField("annual_PF", DoubleType(), True),
+        StructField("annual_SA", DoubleType(), True),
+        StructField("annual_cashPay", DoubleType(), True),
+        StructField("annual_gratuity", DoubleType(), True),
+        StructField("annual_retirals", DoubleType(), True),
+        StructField("monthly_FB", DoubleType(), True),
+        StructField("monthly_PF", DoubleType(), True),
+        StructField("monthly_SA", DoubleType(), True),
+        StructField("monthly_cashPay", DoubleType(), True),
+        StructField("monthly_gratuity", DoubleType(), True),
+        StructField("monthly_retirals", DoubleType(), True),
+        StructField("monthly_salary", DoubleType(), True),
+        StructField("total_earnings", DoubleType(), True),
+        StructField("total_fixed_pay", DoubleType(), True),
+        StructField("total_hire_cost", StringType(), True),
+        StructField("accommodation_cost", StringType(), True),
+        StructField("agency_fee", StringType(), True),
+        StructField("travel_cost", StringType(), True),
+        StructField("misc_cost", StringType(), True),
+        StructField("jobStartDate", StringType(), True),
+        StructField("formDueDate", StringType(), True),
+        StructField("tempDate", StringType(), True),
+        StructField("closedDateTime", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedProxyUserId", StringType(), True),
+        StructField("hiringManagerNote", StringType(), True),
+        StructField("comment", StringType(), True),
+        StructField("recruitJust", StringType(), True),
+        StructField("replforwhom", StringType(), True),
+        StructField("workHours", StringType(), True),
+        StructField("classificationType", StringType(), True),
+        StructField("classificationTime", StringType(), True),
+        StructField("assessRatingScaleName", StringType(), True),
+        StructField("overallScaleName", StringType(), True),
+        StructField("reverseScale", StringType(), True)
+    ]),
+    "JobRequisitionGroupOperator": StructType([
+        StructField("jobReqId", LongType(), False),
+        StructField("operatorRole", StringType(), False),
+        StructField("userGroupId", LongType(), False),
+        StructField("userGroupName", StringType(), True),
+        StructField("isAdminSelected", BooleanType(), True),
+        StructField("isDisabled", BooleanType(), True),
+        StructField("adminSelectedGroupToBeRemoved", BooleanType(), True)
+    ]),
+    "JobRequisitionLocale": StructType([
+        StructField("jobReqLocalId", LongType(), False),
+        StructField("jobReqId", LongType(), True),
+        StructField("locale", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("jobTitle", StringType(), True),
+        StructField("externalTitle", StringType(), True),
+        StructField("jobDescription", StringType(), True),
+        StructField("externalJobDescription", StringType(), True),
+        StructField("intJobDescHeader", StringType(), True),
+        StructField("intJobDescFooter", StringType(), True),
+        StructField("extJobDescHeader", StringType(), True),
+        StructField("extJobDescFooter", StringType(), True),
+        StructField("templateHeaderFooter", StringType(), True)
+    ]),
+    "JobRequisitionOperator": StructType([
+        StructField("jobReqId", LongType(), False),
+        StructField("operatorRole", StringType(), False),
+        StructField("userName", StringType(), False),
+        StructField("usersSysId", StringType(), True),
+        StructField("firstName", StringType(), True),
+        StructField("lastName", StringType(), True),
+        StructField("email", StringType(), True),
+        StructField("phone", StringType(), True),
+        StructField("fax", StringType(), True),
+        StructField("isOwner", BooleanType(), True),
+        StructField("isAdminSelected", BooleanType(), True),
+        StructField("adminSelectedUserToBeRemoved", BooleanType(), True)
+    ]),
+    "JobRequisitionPosting": StructType([
+        StructField("jobPostingId", LongType(), False),
+        StructField("jobReqId", LongType(), True),
+        StructField("boardId", StringType(), True),
+        StructField("boardName", StringType(), True),
+        StructField("channelId", StringType(), True),
+        StructField("extPartnerAccountId", LongType(), True),
+        StructField("postingStatus", StringType(), True),
+        StructField("postedBy", StringType(), True),
+        StructField("postStartDate", StringType(), True),
+        StructField("postStartDateOffset", StringType(), True),
+        StructField("postEndDate", StringType(), True),
+        StructField("postEndDateOffset", StringType(), True),
+        StructField("agencyComments", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True)
+    ]),
+    "JourneyDetails": StructType([
+        StructField("journeyId", StringType(), False),
+        StructField("status", StringType(), True),
+        StructField("userId", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("manager", StringType(), True),
+        StructField("journeyType", StringType(), True),
+        StructField("journeySubType", StringType(), True),
+        StructField("hireStatus", StringType(), True),
+        StructField("userFullName", StringType(), True),
+        StructField("managerFullName", StringType(), True)
+    ]),
+    "LegacyPositionEntity": StructType([
+        StructField("positionId", LongType(), False),
+        StructField("positionCode", StringType(), True),
+        StructField("title", StringType(), True),
+        StructField("incumbent", StringType(), True),
+        StructField("createDate", StringType(), True)
+    ]),
+    "LocalizedData": StructType([
+        StructField("localizedDataCode", StringType(), True),
+        StructField("localizedDataLocale", StringType(), True),
+        StructField("localizedDataTranslation", StringType(), True)
+    ]),
+    "MDFEnumValue": StructType([
+        StructField("key", StringType(), False),
+        StructField("value", StringType(), False),
+        StructField("de_DE", StringType(), True),
+        StructField("en_GB", StringType(), True),
+        StructField("en_US", StringType(), True),
+        StructField("es_ES", StringType(), True),
+        StructField("fr_FR", StringType(), True),
+        StructField("ja_JP", StringType(), True),
+        StructField("ko_KR", StringType(), True),
+        StructField("nl_NL", StringType(), True),
+        StructField("pt_BR", StringType(), True),
+        StructField("pt_PT", StringType(), True),
+        StructField("ru_RU", StringType(), True),
+        StructField("zh_CN", StringType(), True),
+        StructField("zh_TW", StringType(), True)
+    ]),
+    "MDFLocalizedValue": StructType([
+        StructField("locale", StringType(), False),
+        StructField("value", StringType(), True)
+    ]),
+    "NominationTarget": StructType([
+        StructField("nominationId", LongType(), False),
+        StructField("nominationType", LongType(), True)
+    ]),
+    "NomineeHistory": StructType([
+        StructField("id", LongType(), False),
+        StructField("changeType", LongType(), True),
+        StructField("changeTypeLabel", StringType(), True),
+        StructField("modifiedBy", StringType(), True),
+        StructField("modifiedDateTime", StringType(), True),
+        StructField("nomineeId", LongType(), True),
+        StructField("note", StringType(), True),
+        StructField("rank", LongType(), True),
+        StructField("readiness", DoubleType(), True),
+        StructField("readinessLabel", StringType(), True),
+        StructField("status", LongType(), True),
+        StructField("statusLabel", StringType(), True)
+    ]),
+    "ONB2EquipmentActivity": StructType([
+        StructField("activityId", StringType(), False),
+        StructField("activityStatus", StringType(), True),
+        StructField("activityStatusDate", StringType(), True),
+        StructField("activityTitle", StringType(), True),
+        StructField("activityType", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("dueDate", StringType(), True),
+        StructField("equipmentComment", StringType(), True),
+        StructField("equipmentStatus", StringType(), True),
+        StructField("equipmentType", StringType(), True),
+        StructField("equipmentValue", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("optional", BooleanType(), True),
+        StructField("process", StringType(), True),
+        StructField("responsibleUsers", StringType(), True),
+        StructField("subjectUser", StringType(), True)
+    ]),
+    "ONB2EquipmentType": StructType([
+        StructField("code", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("description_defaultValue", StringType(), True),
+        StructField("description_en_US", StringType(), True),
+        StructField("description_localized", StringType(), True),
+        StructField("inUse", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("ui5StandardIconId", StringType(), True)
+    ]),
+    "ONB2EquipmentTypeValue": StructType([
+        StructField("code", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("description_defaultValue", StringType(), True),
+        StructField("description_en_US", StringType(), True),
+        StructField("description_localized", StringType(), True),
+        StructField("inUse", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("type", StringType(), True)
+    ]),
+    "ONB2Process": StructType([
+        StructField("processId", StringType(), False),
+        StructField("activitiesConfig", StringType(), True),
+        StructField("activitiesStatus", StringType(), True),
+        StructField("bpeProcessInstanceId", StringType(), True),
+        StructField("cancelEventReason", StringType(), True),
+        StructField("cancelOffboardingReason", StringType(), True),
+        StructField("cancelOnboardingReason", StringType(), True),
+        StructField("cancellationComment", StringType(), True),
+        StructField("cancellationDate", StringType(), True),
+        StructField("cancelledDueToRestart", BooleanType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("employeePersonId", LongType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("locale", StringType(), True),
+        StructField("manager", StringType(), True),
+        StructField("managerPersonId", LongType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("onboardingHireStatus", StringType(), True),
+        StructField("onboardingHiredDate", StringType(), True),
+        StructField("onboardingInternalHire", BooleanType(), True),
+        StructField("processRestarted", BooleanType(), True),
+        StructField("processStatus", StringType(), True),
+        StructField("processTrigger", StringType(), True),
+        StructField("processType", StringType(), True),
+        StructField("processVariant", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("targetDate", StringType(), True),
+        StructField("targetSystem", StringType(), True),
+        StructField("user", StringType(), True)
+    ]),
+    "ONB2ProcessTask": StructType([
+        StructField("ONB2Process_processId", StringType(), False),
+        StructField("taskId", StringType(), False),
+        StructField("completedBy", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("responsibilityConfig", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("type", StringType(), True)
+    ]),
+    "ONB2ProcessTrigger": StructType([
+        StructField("triggerId", StringType(), False),
+        StructField("atsApplicationId", StringType(), True),
+        StructField("atsUserId", StringType(), True),
+        StructField("bpeProcessInstanceId", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("hireType", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("rcmApplicationId", LongType(), True),
+        StructField("rcmCandidateId", LongType(), True),
+        StructField("rcmCompany", StringType(), True),
+        StructField("rcmHiringMgr", StringType(), True),
+        StructField("rcmJobReqId", LongType(), True),
+        StructField("rcmOfferId", LongType(), True),
+        StructField("rcmPrimaryEmail", StringType(), True),
+        StructField("rcmStartDate", StringType(), True),
+        StructField("rehireUser", StringType(), True),
+        StructField("triggerStatus", StringType(), True),
+        StructField("triggerType", StringType(), True)
+    ]),
+    "OfferLetter": StructType([
+        StructField("offerLetterId", LongType(), False),
+        StructField("applicationId", LongType(), True),
+        StructField("templateId", LongType(), True),
+        StructField("templateName", StringType(), True),
+        StructField("bodyTemplateId", LongType(), True),
+        StructField("body", StringType(), True),
+        StructField("bodyLocale", StringType(), True),
+        StructField("locale", StringType(), True),
+        StructField("localeCode", StringType(), True),
+        StructField("subject", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("sendMode", StringType(), True),
+        StructField("jobTitle", StringType(), True),
+        StructField("jobStartDate", StringType(), True),
+        StructField("offerExpirationDate", StringType(), True),
+        StructField("offerSentDate", StringType(), True),
+        StructField("currencyCode", StringType(), True),
+        StructField("countryCode", StringType(), True),
+        StructField("countryName", StringType(), True),
+        StructField("salaryRate", LongType(), True),
+        StructField("salaryRateType", StringType(), True),
+        StructField("overtimeRate", LongType(), True),
+        StructField("bonusPayoutFreq", StringType(), True),
+        StructField("targetBonusAmount", LongType(), True),
+        StructField("targetBonusPercent", LongType(), True),
+        StructField("stockGrant", LongType(), True),
+        StructField("stockOption", LongType(), True),
+        StructField("tokens", StringType(), True),
+        StructField("mailboxes", StringType(), True),
+        StructField("offerLetter", StringType(), True),
+        StructField("comments", StringType(), True),
+        StructField("candResponseComments", StringType(), True),
+        StructField("candResponseDate", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createDate", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True)
+    ]),
+    "OnboardingCandidateInfo": StructType([
+        StructField("applicantId", StringType(), False),
+        StructField("candidateId", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("department", StringType(), True),
+        StructField("division", StringType(), True),
+        StructField("email", StringType(), True),
+        StructField("fName", StringType(), True),
+        StructField("lName", StringType(), True),
+        StructField("hireDate", StringType(), True),
+        StructField("hired", BooleanType(), True),
+        StructField("hrManagerId", StringType(), True),
+        StructField("internalHire", BooleanType(), True),
+        StructField("jobReqId", StringType(), True),
+        StructField("jobTitle", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("location", StringType(), True),
+        StructField("managerId", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("userId", StringType(), True),
+        StructField("workCountry", StringType(), True)
+    ]),
+    "OnboardingEquipment": StructType([
+        StructField("OnboardingEquipmentActivity_activityId", LongType(), False),
+        StructField("OnboardingNewHireActivitiesStep_processStepId", LongType(), False),
+        StructField("OnboardingProcess_onboardingProcessId", LongType(), False),
+        StructField("equipmentId", LongType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True)
+    ]),
+    "OnboardingEquipmentActivity": StructType([
+        StructField("OnboardingNewHireActivitiesStep_processStepId", LongType(), False),
+        StructField("OnboardingProcess_onboardingProcessId", LongType(), False),
+        StructField("activityId", LongType(), False),
+        StructField("activityStatus", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("eventTriggered", BooleanType(), True),
+        StructField("externalName", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("optional", BooleanType(), True)
+    ]),
+    "OnboardingEquipmentType": StructType([
+        StructField("code", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True)
+    ]),
+    "OnboardingEquipmentTypeValue": StructType([
+        StructField("code", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True)
+    ]),
+    "OnboardingGoal": StructType([
+        StructField("OnboardingGoalActivity_activityId", LongType(), False),
+        StructField("OnboardingGoalCategory_externalCode", LongType(), False),
+        StructField("OnboardingNewHireActivitiesStep_processStepId", LongType(), False),
+        StructField("OnboardingProcess_onboardingProcessId", LongType(), False),
+        StructField("goalId", LongType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("text", StringType(), True)
+    ]),
+    "OnboardingGoalActivity": StructType([
+        StructField("OnboardingNewHireActivitiesStep_processStepId", LongType(), False),
+        StructField("OnboardingProcess_onboardingProcessId", LongType(), False),
+        StructField("activityId", LongType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True)
+    ]),
+    "OnboardingGoalCategory": StructType([
+        StructField("OnboardingGoalActivity_activityId", LongType(), False),
+        StructField("OnboardingNewHireActivitiesStep_processStepId", LongType(), False),
+        StructField("OnboardingProcess_onboardingProcessId", LongType(), False),
+        StructField("externalCode", LongType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("dueDaysAfterStart", LongType(), True),
+        StructField("goalCategoryId", StringType(), True),
+        StructField("goalCategoryName", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True)
+    ]),
+    "OnboardingMeetingActivity": StructType([
+        StructField("OnboardingNewHireActivitiesStep_processStepId", LongType(), False),
+        StructField("OnboardingProcess_onboardingProcessId", LongType(), False),
+        StructField("activityId", LongType(), False),
+        StructField("activityStatus", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("eventTriggered", BooleanType(), True),
+        StructField("externalName", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("optional", BooleanType(), True)
+    ]),
+    "OnboardingMeetingEvent": StructType([
+        StructField("OnboardingMeetingActivity_activityId", LongType(), False),
+        StructField("OnboardingNewHireActivitiesStep_processStepId", LongType(), False),
+        StructField("OnboardingProcess_onboardingProcessId", LongType(), False),
+        StructField("externalCode", StringType(), False),
+        StructField("agenda", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("endDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("location", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("participantUserId1", StringType(), True),
+        StructField("participantUserId2", StringType(), True),
+        StructField("participantUserId3", StringType(), True),
+        StructField("participantUserId4", StringType(), True),
+        StructField("participantUserId5", StringType(), True),
+        StructField("send", BooleanType(), True),
+        StructField("startDateTime", StringType(), True),
+        StructField("subject", StringType(), True)
+    ]),
+    "OnboardingNewHireActivitiesStep": StructType([
+        StructField("OnboardingProcess_onboardingProcessId", LongType(), False),
+        StructField("processStepId", LongType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True)
+    ]),
+    "OnboardingProcess": StructType([
+        StructField("onboardingProcessId", LongType(), False),
+        StructField("candidateInfo", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("externalName", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("processConfig", StringType(), True),
+        StructField("processStatus", StringType(), True)
+    ]),
+    "OneTimeDeduction": StructType([
+        StructField("externalCode", LongType(), False),
+        StructField("additionalInfo", StringType(), True),
+        StructField("advanceId", StringType(), True),
+        StructField("amount", StringType(), True),
+        StructField("auditUserSysId", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("currency", StringType(), True),
+        StructField("deductionDate", StringType(), True),
+        StructField("equivalentAmount", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedDateWithTZ", StringType(), True),
+        StructField("mdfSystemCreatedBy", StringType(), True),
+        StructField("mdfSystemCreatedDate", StringType(), True),
+        StructField("mdfSystemEffectiveEndDate", StringType(), True),
+        StructField("mdfSystemEffectiveStartDate", StringType(), True),
+        StructField("mdfSystemEntityId", StringType(), True),
+        StructField("mdfSystemLastModifiedBy", StringType(), True),
+        StructField("mdfSystemObjectType", StringType(), True),
+        StructField("mdfSystemRecordId", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemStatus", StringType(), True),
+        StructField("mdfSystemTransactionSequence", LongType(), True),
+        StructField("mdfSystemVersionId", LongType(), True),
+        StructField("payComponentType", StringType(), True),
+        StructField("referenceId", StringType(), True),
+        StructField("unitOfMeasure", StringType(), True),
+        StructField("userSysId", StringType(), True)
+    ]),
+    "PaymentInformationDetailV3": StructType([
+        StructField("PaymentInformationV3_effectiveStartDate", StringType(), False),
+        StructField("PaymentInformationV3_worker", StringType(), False),
+        StructField("accountNumber", StringType(), True),
+        StructField("accountOwner", StringType(), True),
+        StructField("amount", StringType(), True),
+        StructField("bank", StringType(), True),
+        StructField("bankCountry", StringType(), True),
+        StructField("businessIdentifierCode", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("currency", StringType(), True),
+        StructField("customPayType", StringType(), True),
+        StructField("externalCode", LongType(), False),
+        StructField("iban", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedDateWithTZ", StringType(), True),
+        StructField("mdfSystemEffectiveEndDate", StringType(), True),
+        StructField("mdfSystemEffectiveStartDate", StringType(), True),
+        StructField("mdfSystemEntityId", StringType(), True),
+        StructField("mdfSystemObjectType", StringType(), True),
+        StructField("mdfSystemRecordId", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemStatus", StringType(), True),
+        StructField("mdfSystemTransactionSequence", LongType(), True),
+        StructField("mdfSystemVersionId", LongType(), True),
+        StructField("paySequence", LongType(), True),
+        StructField("payType", StringType(), True),
+        StructField("paymentMethod", StringType(), True),
+        StructField("percent", StringType(), True),
+        StructField("purpose", StringType(), True),
+        StructField("routingNumber", StringType(), True)
+    ]),
+    "PaymentInformationDetailV3USA": StructType([
+        StructField("PaymentInformationDetailV3_externalCode", LongType(), False),
+        StructField("PaymentInformationV3_effectiveStartDate", StringType(), False),
+        StructField("PaymentInformationV3_worker", StringType(), False),
+        StructField("accountType", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("externalCode", LongType(), False),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedDateWithTZ", StringType(), True),
+        StructField("mdfSystemEffectiveEndDate", StringType(), True),
+        StructField("mdfSystemEffectiveStartDate", StringType(), True),
+        StructField("mdfSystemEntityId", StringType(), True),
+        StructField("mdfSystemObjectType", StringType(), True),
+        StructField("mdfSystemRecordId", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemStatus", StringType(), True),
+        StructField("mdfSystemTransactionSequence", LongType(), True),
+        StructField("mdfSystemVersionId", LongType(), True)
+    ]),
+    "PaymentInformationV3": StructType([
+        StructField("createdBy", StringType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("effectiveEndDate", StringType(), True),
+        StructField("effectiveStartDate", StringType(), False),
+        StructField("jobCountry", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedDateWithTZ", StringType(), True),
+        StructField("mdfSystemEntityId", StringType(), True),
+        StructField("mdfSystemObjectType", StringType(), True),
+        StructField("mdfSystemRecordId", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemStatus", StringType(), True),
+        StructField("mdfSystemTransactionSequence", LongType(), True),
+        StructField("mdfSystemVersionId", LongType(), True),
+        StructField("worker", StringType(), False)
+    ]),
+    "PaymentMethodAssignmentV3": StructType([
+        StructField("PaymentMethodV3_externalCode", StringType(), False),
+        StructField("country", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("externalCode", LongType(), False),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedDateWithTZ", StringType(), True),
+        StructField("mdfSystemEffectiveEndDate", StringType(), True),
+        StructField("mdfSystemEffectiveStartDate", StringType(), True),
+        StructField("mdfSystemEntityId", StringType(), True),
+        StructField("mdfSystemObjectType", StringType(), True),
+        StructField("mdfSystemRecordId", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemStatus", StringType(), True),
+        StructField("mdfSystemTransactionSequence", LongType(), True),
+        StructField("mdfSystemVersionId", LongType(), True)
+    ]),
+    "PaymentMethodV3": StructType([
+        StructField("createdBy", StringType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("externalCode", StringType(), False),
+        StructField("externalName_de_DE", StringType(), True),
+        StructField("externalName_defaultValue", StringType(), True),
+        StructField("externalName_en_GB", StringType(), True),
+        StructField("externalName_en_US", StringType(), True),
+        StructField("externalName_es_ES", StringType(), True),
+        StructField("externalName_fr_FR", StringType(), True),
+        StructField("externalName_ja_JP", StringType(), True),
+        StructField("externalName_ko_KR", StringType(), True),
+        StructField("externalName_localized", StringType(), True),
+        StructField("externalName_nl_NL", StringType(), True),
+        StructField("externalName_pt_BR", StringType(), True),
+        StructField("externalName_pt_PT", StringType(), True),
+        StructField("externalName_ru_RU", StringType(), True),
+        StructField("externalName_zh_CN", StringType(), True),
+        StructField("externalName_zh_TW", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedDateWithTZ", StringType(), True),
+        StructField("mdfSystemEffectiveEndDate", StringType(), True),
+        StructField("mdfSystemEffectiveStartDate", StringType(), True),
+        StructField("mdfSystemEntityId", StringType(), True),
+        StructField("mdfSystemObjectType", StringType(), True),
+        StructField("mdfSystemRecordId", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemStatus", StringType(), True),
+        StructField("mdfSystemTransactionSequence", LongType(), True),
+        StructField("mdfSystemVersionId", LongType(), True)
+    ]),
+    "PersonEmpTerminationInfo": StructType([
+        StructField("activeEmploymentsCount", LongType(), True),
+        StructField("latestTerminationDate", StringType(), True),
+        StructField("personIdExternal", StringType(), False)
+    ]),
+    "Photo": StructType([
+        StructField("photoId", LongType(), False),
+        StructField("userId", StringType(), False),
+        StructField("photoType", LongType(), False),
+        StructField("height", LongType(), True),
+        StructField("lastModified", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mimeType", StringType(), True),
+        StructField("photo", BinaryType(), True),
+        StructField("photoName", StringType(), True),
+        StructField("width", LongType(), True)
+    ]),
+    "PickListV2": StructType([
+        StructField("effectiveStartDate", StringType(), False),
+        StructField("id", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("displayOrder", StringType(), True),
+        StructField("effectiveEndDate", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "PickListValueV2": StructType([
+        StructField("PickListV2_effectiveStartDate", StringType(), False),
+        StructField("PickListV2_id", StringType(), False),
+        StructField("externalCode", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("label_defaultValue", StringType(), True),
+        StructField("label_en_US", StringType(), True),
+        StructField("label_localized", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "PicklistOption": StructType([
+        StructField("id", LongType(), False),
+        StructField("externalCode", StringType(), True),
+        StructField("maxValue", DoubleType(), True),
+        StructField("minValue", DoubleType(), True),
+        StructField("optionValue", DoubleType(), True),
+        StructField("sortOrder", LongType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "RBPBasicPermission": StructType([
+        StructField("permissionId", LongType(), False),
+        StructField("permissionType", StringType(), True),
+        StructField("permissionStringValue", StringType(), True),
+        StructField("permissionLongValue", LongType(), True)
+    ]),
+    "RBPRole": StructType([
+        StructField("roleId", LongType(), False),
+        StructField("roleName", StringType(), True),
+        StructField("roleDesc", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("userType", StringType(), True)
+    ]),
+    "RBPRule": StructType([
+        StructField("ruleId", LongType(), False),
+        StructField("accessGroupLevel", LongType(), True),
+        StructField("accessUserType", StringType(), True),
+        StructField("excludeSelf", BooleanType(), True),
+        StructField("includeSelf", BooleanType(), True),
+        StructField("myFilter", StringType(), True),
+        StructField("relationRole", StringType(), True),
+        StructField("status", LongType(), True),
+        StructField("targetGroupLevel", LongType(), True),
+        StructField("targetUserType", StringType(), True)
+    ]),
+    "RCMAdminReassignOfferApprover": StructType([
+        StructField("applicationId", LongType(), False),
+        StructField("currUserId", StringType(), False),
+        StructField("offerDetailId", LongType(), False),
+        StructField("candidateName", StringType(), True),
+        StructField("jobReqId", LongType(), True),
+        StructField("jobReqTitle", StringType(), True),
+        StructField("targetUserId", StringType(), True)
+    ]),
+    "RcmCompetency": StructType([
+        StructField("rcmCompetencyId", LongType(), False),
+        StructField("commonCompetencyId", LongType(), True),
+        StructField("name", StringType(), True),
+        StructField("desc", StringType(), True),
+        StructField("category", StringType(), True),
+        StructField("type", StringType(), True),
+        StructField("source", StringType(), True),
+        StructField("locale", StringType(), True)
+    ]),
+    "RecurringDeduction": StructType([
+        StructField("effectiveStartDate", StringType(), False),
+        StructField("userSysId", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("effectiveEndDate", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedDateWithTZ", StringType(), True),
+        StructField("mdfSystemCreatedBy", StringType(), True),
+        StructField("mdfSystemCreatedDate", StringType(), True),
+        StructField("mdfSystemEntityId", StringType(), True),
+        StructField("mdfSystemLastModifiedBy", StringType(), True),
+        StructField("mdfSystemObjectType", StringType(), True),
+        StructField("mdfSystemRecordId", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemStatus", StringType(), True),
+        StructField("mdfSystemTransactionSequence", LongType(), True),
+        StructField("mdfSystemVersionId", LongType(), True)
+    ]),
+    "RecurringDeductionItem": StructType([
+        StructField("RecurringDeduction_effectiveStartDate", StringType(), False),
+        StructField("RecurringDeduction_userSysId", StringType(), False),
+        StructField("payComponentType", StringType(), False),
+        StructField("additionalInfo", StringType(), True),
+        StructField("advanceId", StringType(), True),
+        StructField("amount", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("currency", StringType(), True),
+        StructField("editPermission", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("equivalentAmount", StringType(), True),
+        StructField("frequency", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemCreatedBy", StringType(), True),
+        StructField("mdfSystemCreatedDate", StringType(), True),
+        StructField("mdfSystemEffectiveEndDate", StringType(), True),
+        StructField("mdfSystemEffectiveStartDate", StringType(), True),
+        StructField("mdfSystemEntityId", StringType(), True),
+        StructField("mdfSystemLastModifiedBy", StringType(), True),
+        StructField("mdfSystemLastModifiedDate", StringType(), True),
+        StructField("mdfSystemLastModifiedDateWithTZ", StringType(), True),
+        StructField("mdfSystemObjectType", StringType(), True),
+        StructField("mdfSystemRecordId", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemStatus", StringType(), True),
+        StructField("mdfSystemTransactionSequence", LongType(), True),
+        StructField("mdfSystemVersionId", LongType(), True),
+        StructField("referenceId", StringType(), True),
+        StructField("unitOfMeasure", StringType(), True)
+    ]),
+    "ScimGroup": StructType([
+        StructField("id", StringType(), False),
+        StructField("displayName", StringType(), True),
+        # Meta fields (flattened from nested object)
+        StructField("meta_resourceType", StringType(), True),
+        StructField("meta_created", StringType(), True),
+        StructField("meta_lastModified", StringType(), True),
+        StructField("meta_location", StringType(), True),
+        StructField("meta_version", StringType(), True),
+        StructField("meta_members_nextId", StringType(), True),
+        StructField("meta_members_cnt", LongType(), True),
+        # Extension fields - SAP Group
+        StructField("sap_type", StringType(), True),
+        StructField("sap_supportedOperations", StringType(), True),
+        # Complex fields stored as JSON strings
+        StructField("members", StringType(), True),
+        StructField("schemas", StringType(), True)
+    ]),
+    "ScimUser": StructType([
+        StructField("id", StringType(), False),
+        StructField("externalId", StringType(), True),
+        StructField("userName", StringType(), False),
+        StructField("displayName", StringType(), True),
+        StructField("nickName", StringType(), True),
+        StructField("title", StringType(), True),
+        StructField("userType", StringType(), True),
+        StructField("preferredLanguage", StringType(), True),
+        StructField("locale", StringType(), True),
+        StructField("active", BooleanType(), True),
+        # Name fields (flattened from nested object)
+        StructField("name_formatted", StringType(), True),
+        StructField("name_familyName", StringType(), True),
+        StructField("name_givenName", StringType(), True),
+        StructField("name_middleName", StringType(), True),
+        StructField("name_honorificPrefix", StringType(), True),
+        StructField("name_honorificSuffix", StringType(), True),
+        # Meta fields (flattened from nested object)
+        StructField("meta_resourceType", StringType(), True),
+        StructField("meta_created", StringType(), True),
+        StructField("meta_lastModified", StringType(), True),
+        StructField("meta_location", StringType(), True),
+        StructField("meta_version", StringType(), True),
+        # Extension fields - SuccessFactors
+        StructField("sf_perPersonUuid", StringType(), True),
+        StructField("sf_loginMethod", StringType(), True),
+        StructField("sf_personIdExternal", StringType(), True),
+        # Extension fields - Enterprise
+        StructField("enterprise_department", StringType(), True),
+        StructField("enterprise_division", StringType(), True),
+        StructField("enterprise_employeeNumber", StringType(), True),
+        # Extension fields - SAP
+        StructField("sap_userUuid", StringType(), True),
+        StructField("sap_sourceSystem", StringType(), True),
+        # Extension fields - SAP Workforce
+        StructField("workforce_lastDeactivated", StringType(), True),
+        # Extension fields - SAP ODM
+        StructField("odm_workforcePersonId", StringType(), True),
+        # Complex fields stored as JSON strings
+        StructField("emails", StringType(), True),
+        StructField("phoneNumbers", StringType(), True),
+        StructField("groups", StringType(), True),
+        StructField("schemas", StringType(), True),
+        StructField("customFields", StringType(), True)
+    ]),
+    "Successor": StructType([
+        StructField("id", LongType(), False),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("nomineeUserId", StringType(), True),
+        StructField("note", StringType(), True),
+        StructField("rank", LongType(), True),
+        StructField("readiness", DoubleType(), True),
+        StructField("readinessLabel", StringType(), True),
+        StructField("status", LongType(), True),
+        StructField("statusLabel", StringType(), True)
+    ]),
+    "TalentGraphicOption": StructType([
+        StructField("dataIndex", StringType(), False),
+        StructField("optionKey", StringType(), False),
+        StructField("dataImage", StringType(), True),
+        StructField("dataLabel", StringType(), True),
+        StructField("dataShortLabel", StringType(), True),
+        StructField("dataValue", StringType(), True),
+        StructField("gradientBackgroundColor", StringType(), True),
+        StructField("optionIndex", LongType(), True),
+        StructField("optionLabel", StringType(), True),
+        StructField("optionName", StringType(), True),
+        StructField("optionScaleId", StringType(), True),
+        StructField("optionTarget", StringType(), True),
+        StructField("optionType", StringType(), True)
+    ]),
+    "TalentPool": StructType([
+        StructField("code", StringType(), False),
+        StructField("effectiveStartDate", StringType(), False),
+        StructField("effectiveEndDate", StringType(), True),
+        StructField("effectiveStatus", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("description_defaultValue", StringType(), True),
+        StructField("description_localized", StringType(), True),
+        StructField("description_de_DE", StringType(), True),
+        StructField("description_en_GB", StringType(), True),
+        StructField("description_en_US", StringType(), True),
+        StructField("description_es_ES", StringType(), True),
+        StructField("description_fr_FR", StringType(), True),
+        StructField("description_ja_JP", StringType(), True),
+        StructField("description_ko_KR", StringType(), True),
+        StructField("description_nl_NL", StringType(), True),
+        StructField("description_pt_BR", StringType(), True),
+        StructField("description_pt_PT", StringType(), True),
+        StructField("description_ru_RU", StringType(), True),
+        StructField("description_zh_CN", StringType(), True),
+        StructField("description_zh_TW", StringType(), True),
+        StructField("name_defaultValue", StringType(), True),
+        StructField("name_localized", StringType(), True),
+        StructField("name_de_DE", StringType(), True),
+        StructField("name_en_GB", StringType(), True),
+        StructField("name_en_US", StringType(), True),
+        StructField("name_es_ES", StringType(), True),
+        StructField("name_fr_FR", StringType(), True),
+        StructField("name_ja_JP", StringType(), True),
+        StructField("name_ko_KR", StringType(), True),
+        StructField("name_nl_NL", StringType(), True),
+        StructField("name_pt_BR", StringType(), True),
+        StructField("name_pt_PT", StringType(), True),
+        StructField("name_ru_RU", StringType(), True),
+        StructField("name_zh_CN", StringType(), True),
+        StructField("name_zh_TW", StringType(), True),
+        StructField("enableReadiness", BooleanType(), True),
+        StructField("owner", StringType(), True),
+        StructField("type", StringType(), True),
+        StructField("transactionSequence", LongType(), True),
+        StructField("mdfSystemCreatedBy", StringType(), True),
+        StructField("mdfSystemCreatedDate", StringType(), True),
+        StructField("mdfSystemEntityId", StringType(), True),
+        StructField("mdfSystemLastModifiedBy", StringType(), True),
+        StructField("mdfSystemLastModifiedDate", StringType(), True),
+        StructField("mdfSystemLastModifiedDateWithTZ", StringType(), True),
+        StructField("mdfSystemObjectType", StringType(), True),
+        StructField("mdfSystemRecordId", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemVersionId", LongType(), True)
+    ]),
+    "TalentRatings": StructType([
+        StructField("employeeId", StringType(), True),
+        StructField("feedbackId", LongType(), False),
+        StructField("feedbackModule", LongType(), True),
+        StructField("feedbackName", StringType(), True),
+        StructField("feedbackRating", DoubleType(), True),
+        StructField("feedbackRatingLabel", StringType(), True),
+        StructField("feedbackScaleId", LongType(), True),
+        StructField("feedbackScaleMaximum", DoubleType(), True),
+        StructField("feedbackScaleMinimum", DoubleType(), True),
+        StructField("feedbackSource", LongType(), True),
+        StructField("feedbackType", LongType(), True),
+        StructField("feedbackWeight", DoubleType(), True),
+        StructField("formContentId", LongType(), True),
+        StructField("formDataId", LongType(), True)
+    ]),
+    "Territory": StructType([
+        StructField("territoryCode", StringType(), True),
+        StructField("territoryName", StringType(), True)
+    ]),
+    "User": StructType([
+        StructField("userId", StringType(), False),
+        StructField("username", StringType(), True),
+        StructField("password", StringType(), True),
+        StructField("firstName", StringType(), True),
+        StructField("lastName", StringType(), True),
+        StructField("mi", StringType(), True),
+        StructField("email", StringType(), True),
+        StructField("gender", StringType(), True),
+        StructField("dateOfBirth", StringType(), True),
+        StructField("hireDate", StringType(), True),
+        StructField("origHireDate", StringType(), True),
+        StructField("addressLine1", StringType(), True),
+        StructField("addressLine2", StringType(), True),
+        StructField("addressLine3", StringType(), True),
+        StructField("city", StringType(), True),
+        StructField("state", StringType(), True),
+        StructField("country", StringType(), True),
+        StructField("zipCode", StringType(), True),
+        StructField("businessPhone", StringType(), True),
+        StructField("cellPhone", StringType(), True),
+        StructField("homePhone", StringType(), True),
+        StructField("fax", StringType(), True),
+        StructField("department", StringType(), True),
+        StructField("division", StringType(), True),
+        StructField("location", StringType(), True),
+        StructField("jobCode", StringType(), True),
+        StructField("jobTitle", StringType(), True),
+        StructField("jobFamily", StringType(), True),
+        StructField("jobLevel", StringType(), True),
+        StructField("jobRole", StringType(), True),
+        StructField("empId", StringType(), True),
+        StructField("employeeClass", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("salary", DoubleType(), True),
+        StructField("salaryLocal", DoubleType(), True),
+        StructField("localCurrencyCode", StringType(), True),
+        StructField("timeZone", StringType(), True),
+        StructField("defaultLocale", StringType(), True),
+        StructField("lastModified", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedWithTZ", StringType(), True),
+        StructField("custom01", StringType(), True),
+        StructField("custom02", StringType(), True),
+        StructField("custom03", StringType(), True),
+        StructField("custom04", StringType(), True),
+        StructField("custom05", StringType(), True),
+        StructField("custom06", StringType(), True),
+        StructField("custom07", StringType(), True),
+        StructField("custom08", StringType(), True),
+        StructField("custom09", StringType(), True),
+        StructField("custom10", StringType(), True),
+        StructField("custom11", StringType(), True),
+        StructField("custom12", StringType(), True),
+        StructField("custom13", StringType(), True),
+        StructField("custom14", StringType(), True),
+        StructField("custom15", StringType(), True),
+        StructField("title", StringType(), True),
+        StructField("salutation", StringType(), True),
+        StructField("nickname", StringType(), True),
+        StructField("suffix", StringType(), True),
+        StructField("defaultFullName", StringType(), True),
+        StructField("benchStrength", StringType(), True),
+        StructField("competency", DoubleType(), True),
+        StructField("performance", DoubleType(), True),
+        StructField("potential", DoubleType(), True),
+        StructField("objective", DoubleType(), True),
+        StructField("riskOfLoss", StringType(), True),
+        StructField("impactOfLoss", StringType(), True),
+        StructField("futureLeader", BooleanType(), True),
+        StructField("keyPosition", BooleanType(), True),
+        StructField("married", BooleanType(), True),
+        StructField("minority", BooleanType(), True),
+        StructField("ethnicity", StringType(), True),
+        StructField("citizenship", StringType(), True),
+        StructField("nationality", StringType(), True),
+        StructField("veteranDisabled", BooleanType(), True),
+        StructField("veteranMedal", BooleanType(), True),
+        StructField("veteranProtected", BooleanType(), True),
+        StructField("veteranSeparated", BooleanType(), True),
+        StructField("payGrade", StringType(), True),
+        StructField("bonusTarget", DoubleType(), True),
+        StructField("bonusBudgetAmount", DoubleType(), True),
+        StructField("meritTarget", StringType(), True),
+        StructField("meritEffectiveDate", StringType(), True),
+        StructField("dateOfCurrentPosition", StringType(), True),
+        StructField("dateOfPosition", StringType(), True),
+        StructField("serviceDate", StringType(), True),
+        StructField("totalTeamSize", LongType(), True)
+    ]),
+    "UserPermissions": StructType([
+        StructField("userId", LongType(), False),
+        # Note: UserPermissions contains permission flags for each User field
+        # These are dynamically generated based on User entity fields
+        StructField("username", LongType(), True),
+        StructField("firstName", LongType(), True),
+        StructField("lastName", LongType(), True),
+        StructField("email", LongType(), True),
+        StructField("department", LongType(), True),
+        StructField("division", LongType(), True),
+        StructField("location", LongType(), True),
+        StructField("jobCode", LongType(), True),
+        StructField("status", LongType(), True)
+    ]),
+    "achievement": StructType([
+        StructField("achievementId", LongType(), False),
+        StructField("achievementDate", StringType(), True),
+        StructField("achievementName", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedDateWithTZ", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("parentExternalId", StringType(), True),
+        StructField("parentTypeEnum", StringType(), True),
+        StructField("reviewed", BooleanType(), True),
+        StructField("snapshot", BooleanType(), True),
+        StructField("subjectUserId", StringType(), True)
+    ]),
+    "activity": StructType([
+        StructField("activityId", LongType(), False),
+        StructField("activityName", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("subjectUserId", StringType(), True)
+    ]),
+    "available_time_types": StructType([
+        StructField("externalCode", StringType(), False),
+        StructField("externalName", StringType(), True),
+        StructField("unit", StringType(), True),
+        StructField("undeterminedEndDateAllowed", BooleanType(), True),
+        StructField("leaveOfAbsence", BooleanType(), True),
+        StructField("mainAbsenceTimeType", BooleanType(), True),
+        StructField("flexibleRequestingAllowed", BooleanType(), True),
+        # Enum: FULL_DAY, HALF_DAY, QUARTER_DAY, FULL_HOURS, HOURS_MINUTES
+        StructField("allowedFractions", StringType(), True),
+    ]),
+    "budget_period": StructType([
+        StructField("budgetPeriodId", StringType(), True),
+        StructField("effectiveStartDate", StringType(), True),
+        StructField("effectiveStatus", StringType(), True),
+        StructField("budgetPeriodDescription_defaultValue", StringType(), True),
+        StructField("budgetPeriodDescription_en_US", StringType(), True),
+        StructField("budgetPeriodDescription_localized", StringType(), True),
+        StructField("budgetPeriodExpirationDate", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("effectiveEndDate", StringType(), True),
+        StructField("entityOID", StringType(), True),
+        StructField("entityUUID", StringType(), True),
+        StructField("fbudgetPeriodPeriodicity", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("reversalDate", StringType(), True)
+    ]),
+    "calibration_competency_rating": StructType([
+        StructField("competencyId", LongType(), False),
+        StructField("competencyName", StringType(), True),
+        StructField("competencySectionId", LongType(), True),
+        StructField("competencySectionName", StringType(), True),
+        StructField("rating", DoubleType(), True),
+        StructField("ratingLabel", StringType(), True),
+        StructField("ratingOptions", ArrayType(StructType([
+        StructField("value", DoubleType(), False),
+        StructField("label", StringType(), True),
+        ])), True)
+    ]),
+    "calibration_executive_reviewer": StructType([
+        StructField("id", LongType(), False),
+        StructField("workAssignmentLegacyId", StringType(), True)
+    ]),
+    "calibration_rating": StructType([
+        StructField("ratingType", LongType(), False),
+        StructField("rating", DoubleType(), True),
+        StructField("ratingLabel", StringType(), True),
+        StructField("ratingTypeLabel", StringType(), True)
+    ]),
+    "calibration_rating_option": StructType([
+        StructField("value", DoubleType(), False),
+        StructField("label", StringType(), True)
+    ]),
+    "calibration_session": StructType([
+        StructField("id", LongType(), False),
+        StructField("sessionName", StringType(), True),
+        StructField("sessionDate", StringType(), True),
+        StructField("sessionLocation", StringType(), True),
+        StructField("status", LongType(), True),
+        StructField("activationDate", StringType(), True),
+        StructField("approvalDateTime", StringType(), True),
+        StructField("createdByWorkAssignmentLegacyId", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("executiveReviewerList", ArrayType(StructType([
+        StructField("id", LongType(), False),
+        StructField("workAssignmentLegacyId", StringType(), True),
+        ])), True),
+        StructField("reviewerList", ArrayType(StructType([
+        StructField("id", LongType(), False),
+        StructField("workAssignmentLegacyId", StringType(), True),
+        StructField("reviewerType", StringType(), True),
+        ])), True),
+        StructField("subjectList", ArrayType(StructType([
+        StructField("id", LongType(), False),
+        StructField("workAssignmentLegacyId", StringType(), True),
+        StructField("calibrated", BooleanType(), True),
+        StructField("pmFormDataId", LongType(), True),
+        StructField("pmuDeeplink", StringType(), True),
+        StructField("commentList", StringType(), True),
+        StructField("competencyRatingList", StringType(), True),
+        StructField("ratingList", StringType(), True),
+        ])), True)
+    ]),
+    "calibration_session_reviewer": StructType([
+        StructField("sessionReviewerId", StringType(), True),
+        StructField("calSessionId", StringType(), True),
+        StructField("reviewerType", StringType(), True),
+        StructField("userId", StringType(), True),
+    ]),
+    "calibration_subject": StructType([
+        StructField("id", LongType(), False),
+        StructField("workAssignmentLegacyId", StringType(), True),
+        StructField("calibrated", BooleanType(), True),
+        StructField("pmFormDataId", LongType(), True),
+        StructField("pmuDeeplink", StringType(), True),
+        StructField("commentList", ArrayType(StructType([
+        StructField("id", LongType(), False),
+        StructField("comment", StringType(), True),
+        StructField("createdByWorkAssignmentLegacyId", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("modified", BooleanType(), True),
+        StructField("authorizedByWorkAssignmentLegacyId", StringType(), True),
+        StructField("reasonId", LongType(), True),
+        StructField("reasonLabel", StringType(), True),
+        ])), True),
+        StructField("competencyRatingList", ArrayType(StructType([
+        StructField("competencyId", LongType(), False),
+        StructField("competencyName", StringType(), True),
+        StructField("competencySectionId", LongType(), True),
+        StructField("competencySectionName", StringType(), True),
+        StructField("rating", DoubleType(), True),
+        StructField("ratingLabel", StringType(), True),
+        StructField("ratingOptions", StringType(), True),
+        ])), True),
+        StructField("ratingList", ArrayType(StructType([
+        StructField("ratingType", LongType(), False),
+        StructField("rating", DoubleType(), True),
+        StructField("ratingLabel", StringType(), True),
+        StructField("ratingTypeLabel", StringType(), True),
+        ])), True)
+    ]),
+    "calibration_subject_comment": StructType([
+        StructField("id", LongType(), False),
+        StructField("comment", StringType(), True),
+        StructField("createdByWorkAssignmentLegacyId", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("modified", BooleanType(), True),
+        StructField("authorizedByWorkAssignmentLegacyId", StringType(), True),
+        StructField("reasonId", LongType(), True),
+        StructField("reasonLabel", StringType(), True)
+    ]),
+    "clock_in_clock_out_groups": StructType([
+        StructField("code", StringType(), False),
+        StructField("createdAt", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("lastChangedAt", StringType(), True),
+        StructField("lastChangedBy", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("timeEventTypeNav", ArrayType(StructType([
+        StructField("code", StringType(), False),
+        StructField("active", BooleanType(), True),
+        StructField("event", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("description", StringType(), True),
+        ])), True)
+    ]),
+    "clock_in_clock_out_time_events": StructType([
+        StructField("id", StringType(), False),  # Request ID (1-36 chars)
+        StructField("assignmentId", StringType(), False),  # Employee assignment ID
+        StructField("typeCode", StringType(), False),  # Time event type code (e.g., P10)
+        StructField("timestamp", StringType(), False),  # ISO 8601 format
+        StructField("terminalId", StringType(), True),
+        StructField("timeTypeCode", StringType(), True),  # Only for START type events
+    ]),
+    "continuous_performance_user_permission": StructType([
+        StructField("permType", StringType(), False),
+        StructField("targetUserId", StringType(), False),
+        StructField("permStringValue", StringType(), True),
+        StructField("hasPermission", BooleanType(), True)
+    ]),
+    "cpm_achievements": StructType([
+        StructField("achievementRecordId", StringType(), False),
+        StructField("activityRecordId", StringType(), False),
+        StructField("name", StringType(), True),
+        StructField("subjectUserAssignmentUuid", StringType(), True),
+        StructField("achievementDate", StringType(), True),
+        StructField("goalId", LongType(), True),
+        StructField("devGoalId", LongType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True)
+    ]),
+    "cpm_activities": StructType([
+        StructField("activityRecordId", StringType(), False),
+        StructField("name", StringType(), True),
+        StructField("goalId", LongType(), True),
+        StructField("devGoalId", LongType(), True),
+        StructField("statusRecordId", StringType(), True),
+        StructField("subjectUserAssignmentUuid", StringType(), True),
+        StructField("meetingOwnerAssignmentUuid", StringType(), True),
+        StructField("isAchievement", BooleanType(), True),
+        StructField("achievementDate", StringType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True)
+    ]),
+    "cpm_activity_status": StructType([
+        StructField("activityStatusRecordId", StringType(), False),
+        StructField("statusName", StringType(), True),
+        StructField("colorRGBCode", StringType(), True),
+        StructField("createAchievement", BooleanType(), True),
+        StructField("defaultStatus", BooleanType(), True),
+        StructField("deleted", BooleanType(), True),
+        StructField("priority", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True)
+    ]),
+    "cpm_activity_updates": StructType([
+        StructField("activityUpdateRecordId", StringType(), False),
+        StructField("commentContent", StringType(), True),
+        StructField("commenterAssignmentUUID", StringType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True)
+    ]),
+    "cpm_user_permissions": StructType([
+        StructField("targetUserAssignmentUUID", StringType(), False),
+        StructField("hasPermission", BooleanType(), True),
+        StructField("permissionType", StringType(), True),
+        StructField("permisssionValue", StringType(), True)
+    ]),
+    "cust_CommutingAllowance": StructType([
+        StructField("effectiveStartDate", StringType(), False),
+        StructField("externalCode", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("cust_Amount", LongType(), True),
+        StructField("cust_ConnectionPoint", StringType(), True),
+        StructField("cust_DestinationStation", StringType(), True),
+        StructField("cust_OriginStation", StringType(), True),
+        StructField("cust_PaymentInterval", LongType(), True),
+        StructField("cust_TrainLinename1", StringType(), True),
+        StructField("cust_TrainLinename2", StringType(), True),
+        StructField("externalName", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemEffectiveEndDate", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True)
+    ]),
+    "cust_ProgressiveDisciplinaryAction": StructType([
+        StructField("effectiveStartDate", StringType(), False),
+        StructField("externalCode", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("cust_EEAcknowledgement", BooleanType(), True),
+        StructField("cust_FacetoFaceMtg", BooleanType(), True),
+        StructField("cust_IncidentDetails", StringType(), True),
+        StructField("cust_IncidentStatus", StringType(), True),
+        StructField("cust_InitiateVerbal", BooleanType(), True),
+        StructField("cust_Reason", StringType(), True),
+        StructField("cust_Severity", StringType(), True),
+        StructField("cust_VerbalComments", StringType(), True),
+        StructField("cust_dateofincident", StringType(), True),
+        StructField("cust_step", StringType(), True),
+        StructField("cust_unionRep", StringType(), True),
+        StructField("externalName", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemStatus", StringType(), True)
+    ]),
+    "cust_auth_sign": StructType([
+        StructField("externalCode", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("cust_asofdate", StringType(), True),
+        StructField("cust_signature", StringType(), True),
+        StructField("externalName", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True)
+    ]),
+    "cust_grievances": StructType([
+        StructField("effectiveStartDate", StringType(), False),
+        StructField("externalCode", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("cust_attendGrievanceComm", StringType(), True),
+        StructField("cust_coResponse", StringType(), True),
+        StructField("cust_coResponseDue", StringType(), True),
+        StructField("cust_comments", StringType(), True),
+        StructField("cust_dateSubmitted", StringType(), True),
+        StructField("cust_description", StringType(), True),
+        StructField("cust_grievanceNumber", LongType(), True),
+        StructField("cust_grievanceStatus", StringType(), True),
+        StructField("cust_outcome", StringType(), True),
+        StructField("cust_union", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("mdfSystemStatus", StringType(), True)
+    ]),
+    "cust_voluntarySeparationRequest": StructType([
+        StructField("effectiveStartDate", StringType(), False),
+        StructField("externalCode", StringType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("cust_eecomments", StringType(), True),
+        StructField("cust_hrcomments", StringType(), True),
+        StructField("cust_lastday", StringType(), True),
+        StructField("cust_lastdayppolicy", StringType(), True),
+        StructField("cust_mgrcomments", StringType(), True),
+        StructField("cust_noticePeriodMonths", StringType(), True),
+        StructField("cust_noticerecovery", BooleanType(), True),
+        StructField("cust_reason", StringType(), True),
+        StructField("cust_requestAsOfDate", StringType(), True),
+        StructField("cust_shortfallinnperiod", LongType(), True),
+        StructField("externalName", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemEffectiveEndDate", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True)
+    ]),
+    "custom_nav": StructType([
+        StructField("title", StringType(), False),
+        StructField("altText", StringType(), True),
+        StructField("alwaysShow", BooleanType(), True),
+        StructField("isModule", BooleanType(), True),
+        StructField("isSelected", BooleanType(), True),
+        StructField("label", StringType(), True),
+        StructField("newWindow", BooleanType(), True),
+        StructField("url", StringType(), True)
+    ]),
+    "custom_tasks": StructType([
+        StructField("id", StringType(), True),
+        StructField("title", StringType(), True),
+        StructField("config", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("user", StructType([
+            StructField("id", StringType(), True),
+            StructField("displayName", StringType(), True),
+        ]), True),
+        StructField("processId", StringType(), True),
+        StructField("dueDate", StringType(), True),
+        StructField("optional", BooleanType(), True),
+        StructField("responsibleUsers", ArrayType(StructType([
+            StructField("id", StringType(), True),
+            StructField("displayName", StringType(), True),
+        ])), True),
+        StructField("completedDate", StringType(), True),
+        StructField("completedBy", StructType([
+            StructField("id", StringType(), True),
+            StructField("displayName", StringType(), True),
+        ]), True),
+        StructField("customResource", StructType([
+            StructField("id", StringType(), True),
+            StructField("type", StringType(), True),
+        ]), True)
+    ]),
+    "dpcs_acknowledgement": StructType([
+        StructField("status", LongType(), True),
+        StructField("statementId", LongType(), True),
+        StructField("subjectId", StringType(), True)
+    ]),
+    "dpcs_statement": StructType([
+        StructField("id", LongType(), False),
+        StructField("version", LongType(), True),
+        StructField("customFieldType", StringType(), True),
+        StructField("template_id", LongType(), True),
+        StructField("template_name", StringType(), True),
+        StructField("template_type", LongType(), True),
+        StructField("template_status", LongType(), True),
+        StructField("template_forceAccept", LongType(), True),
+        StructField("contents", StringType(), True),  # JSON array serialized
+        StructField("attributes", StringType(), True),  # JSON array serialized
+    ]),
+    "extension_point_task": StructType([
+        # enum: HIRING_MANAGER_REVIEW_EXTENSION, PERSONAL_DATA_COLLECTION_EXTENSION
+        StructField("taskType", StringType(), True),
+        StructField("taskId", StringType(), True),
+        # enum: SCHEDULED, IN_PROGRESS, COMPLETED, CANCELLED_POST_COMPLETION,
+        # CANCELLED, SKIPPED, DECLINED, CLOSED
+        StructField("processStatus", StringType(), True),
+        # Onboarding process ID (from path parameter)
+        StructField("processId", StringType(), True),
+    ]),
+    "feedback": StructType([
+        StructField("recordId", StringType(), False),
+        StructField("feedbackId", LongType(), True),
+        StructField("topic", StringType(), True),
+        StructField("question1", StringType(), True),
+        StructField("question2", StringType(), True),
+        StructField("question3", StringType(), True),
+        StructField("answer1", StringType(), True),
+        StructField("answer2", StringType(), True),
+        StructField("answer3", StringType(), True),
+        StructField("feedbackMessage", StringType(), True),
+        StructField("feedbackRequestRecordId", LongType(), True),
+        StructField("dateReceived", StringType(), True),
+        StructField("dateModified", StringType(), True),
+        StructField("createdAt", StringType(), True),
+        StructField("lastModifiedAt", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("visibleToManager", BooleanType(), True),
+        StructField("senderUserAssignmentUUID", StringType(), True),
+        StructField("subjectUserAssignmentUUID", StringType(), True),
+        StructField("senderDisplayName", StringType(), True),
+        StructField("senderDisplayTitle", StringType(), True),
+        StructField("subjectDisplayName", StringType(), True),
+        StructField("subjectDisplayTitle", StringType(), True),
+        StructField("update_mc", BooleanType(), True),
+        StructField("delete_mc", BooleanType(), True),
+        StructField("question1_FC", LongType(), True),
+        StructField("question2_FC", LongType(), True),
+        StructField("question3_FC", LongType(), True),
+        StructField("answer1_FC", LongType(), True),
+        StructField("answer2_FC", LongType(), True),
+        StructField("answer3_FC", LongType(), True),
+        StructField("topic_FC", LongType(), True),
+        StructField("visibleToManager_FC", LongType(), True)
+    ]),
+    "feedback_requests": StructType([
+        StructField("recordId", StringType(), False),
+        StructField("requestId", LongType(), True),
+        StructField("topic", StringType(), True),
+        StructField("question1", StringType(), True),
+        StructField("question2", StringType(), True),
+        StructField("question3", StringType(), True),
+        StructField("requestText", StringType(), True),
+        StructField("requestDate", StringType(), True),
+        StructField("createdAt", StringType(), True),
+        StructField("lastModifiedAt", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("statusId", StringType(), True),
+        StructField("statusName", StringType(), True),
+        StructField("declined", BooleanType(), True),
+        StructField("requesterAssignmentUUID", StringType(), True),
+        StructField("recipientAssignmentUUID", StringType(), True),
+        StructField("subjectUserAssignmentUUID", StringType(), True),
+        StructField("requesterDisplayName", StringType(), True),
+        StructField("requesterDisplayTitle", StringType(), True),
+        StructField("recipientDisplayName", StringType(), True),
+        StructField("recipientDisplayTitle", StringType(), True),
+        StructField("subjectDisplayName", StringType(), True),
+        StructField("subjectDisplayTitle", StringType(), True),
+        StructField("update_mc", BooleanType(), True),
+        StructField("delete_mc", BooleanType(), True),
+        StructField("question1_FC", LongType(), True),
+        StructField("question2_FC", LongType(), True),
+        StructField("question3_FC", LongType(), True),
+        StructField("topic_FC", LongType(), True),
+        StructField("declined_FC", LongType(), True),
+        StructField("feedbackResponse_FC", LongType(), True)
+    ]),
+    "fmla_request": StructType([
+        StructField("assignmentId", StringType(), False),
+        StructField("id", StringType(), False),
+        StructField("providerName", StringType(), True),
+        StructField("fmlaStartDate", StringType(), True),
+        StructField("fmlaEndDate", StringType(), True),
+        StructField("fmlaReason", StringType(), True),
+        StructField("absenceType", StringType(), True),
+        StructField("requestStatus", StringType(), True),
+        StructField("returnToWorkDate", StringType(), True),
+        StructField("absenceSpecificInformation", ArrayType(StructType([
+        StructField("absenceStartDate", StringType(), True),
+        StructField("absenceEndDate", StringType(), True),
+        StructField("absenceStartTime", StringType(), True),
+        StructField("absenceEndTime", StringType(), True),
+        StructField("durationDays", StringType(), True),
+        StructField("durationHours", StringType(), True),
+        ])), True)
+    ]),
+    "form360_participant_detail": StructType([
+        StructField("formContentId", LongType(), False),
+        StructField("formDataId", LongType(), False),
+        StructField("participantId", StringType(), False),
+        StructField("columnKey", StringType(), False),
+        StructField("columnValue", StringType(), True)
+    ]),
+    "form_competency": StructType([
+        StructField("formContentId", LongType(), False),
+        StructField("formDataId", LongType(), False),
+        StructField("itemId", LongType(), False),
+        StructField("sectionIndex", LongType(), False),
+        StructField("category", StringType(), True),
+        StructField("description", StringType(), True),
+        StructField("expectedRating", StringType(), True),
+        StructField("itemIndex", LongType(), True),
+        StructField("name", StringType(), True),
+        StructField("source", StringType(), True),
+        StructField("weight", StringType(), True),
+        StructField("weightKey", StringType(), True)
+    ]),
+    "form_customized_weighted_rating_section": StructType([
+        StructField("formContentId", LongType(), False),
+        StructField("formDataId", LongType(), False),
+        StructField("sectionDescription", StringType(), True),
+        StructField("sectionIndex", LongType(), True),
+        StructField("sectionName", StringType(), True)
+    ]),
+    "form_folder": StructType([
+        StructField("folderId", LongType(), False),
+        StructField("folderName", StringType(), True),
+        StructField("userId", StringType(), True)
+    ]),
+    "form_header": StructType([
+        StructField("formDataId", LongType(), False),
+        StructField("creationDate", StringType(), True),
+        StructField("currentStep", StringType(), True),
+        StructField("dateAssigned", StringType(), True),
+        StructField("formDataStatus", LongType(), True),
+        StructField("formLastModifiedDate", StringType(), True),
+        StructField("formOriginator", StringType(), True),
+        StructField("formReviewDueDate", StringType(), True),
+        StructField("formReviewEndDate", StringType(), True),
+        StructField("formReviewStartDate", StringType(), True),
+        StructField("formSubjectId", StringType(), True),
+        StructField("formTemplateId", LongType(), True),
+        StructField("formTemplateType", StringType(), True),
+        StructField("formTitle", StringType(), True),
+        StructField("isRated", BooleanType(), True),
+        StructField("rating", DoubleType(), True),
+        StructField("sender", StringType(), True),
+        StructField("stepDueDate", StringType(), True)
+    ]),
+    "form_objective": StructType([
+        StructField("formContentId", LongType(), False),
+        StructField("formDataId", LongType(), False),
+        StructField("itemId", LongType(), False),
+        StructField("sectionIndex", LongType(), False),
+        StructField("category", StringType(), True),
+        StructField("done", StringType(), True),
+        StructField("itemOrder", LongType(), True),
+        StructField("metric", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("state", StringType(), True),
+        StructField("stateColor", StringType(), True),
+        StructField("useMLTRating", BooleanType(), True),
+        StructField("weight", StringType(), True),
+        StructField("weightKey", StringType(), True)
+    ]),
+    "form_perf_pot_summary_section": StructType([
+        StructField("formContentId", LongType(), False),
+        StructField("formDataId", LongType(), False),
+        StructField("sectionDescription", StringType(), True),
+        StructField("sectionIndex", LongType(), True),
+        StructField("sectionName", StringType(), True)
+    ]),
+    "form_review_feedback": StructType([
+        StructField("feedbackId", LongType(), False),
+        StructField("appraiserUserEmail", StringType(), True),
+        StructField("appraiserUserId", StringType(), True),
+        StructField("companyId", StringType(), True),
+        StructField("digiCode", StringType(), True),
+        StructField("formDataId", LongType(), True),
+        StructField("pmFeedback", StringType(), True),
+        StructField("requestDate", StringType(), True),
+        StructField("requestUserEmail", StringType(), True),
+        StructField("requestUserId", StringType(), True),
+        StructField("requestUserRole", StringType(), True),
+        StructField("responseDate", StringType(), True),
+        StructField("responseId", StringType(), True),
+        StructField("subjectUserEmail", StringType(), True),
+        StructField("subjectUserId", StringType(), True)
+    ]),
+    "form_template": StructType([
+        StructField("formTemplateId", LongType(), False),
+        StructField("formTemplateName", StringType(), True),
+        StructField("formTemplateType", StringType(), True)
+    ]),
+    "functional_area": StructType([
+        StructField("effectiveStartDate", StringType(), True),
+        StructField("effectiveStatus", StringType(), True),
+        StructField("functionalAreaID", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("effectiveEndDate", StringType(), True),
+        StructField("entityOID", StringType(), True),
+        StructField("entityUUID", StringType(), True),
+        StructField("expirationDate", StringType(), True),
+        StructField("functionalAreaDescription_defaultValue", StringType(), True),
+        StructField("functionalAreaDescription_en_US", StringType(), True),
+        StructField("functionalAreaDescription_localized", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True)
+    ]),
+    "fund": StructType([
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("effectiveEndDate", StringType(), True),
+        StructField("effectiveStartDate", StringType(), True),
+        StructField("effectiveStatus", StringType(), True),
+        StructField("entityOID", StringType(), True),
+        StructField("entityUUID", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("fmArea", StringType(), True),
+        StructField("fundCode", StringType(), True),
+        StructField("fundDescription_defaultValue", StringType(), True),
+        StructField("fundDescription_en_US", StringType(), True),
+        StructField("fundDescription_localized", StringType(), True),
+        StructField("fundExpirationDate", StringType(), True),
+        StructField("fundPeriodicity", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True)
+    ]),
+    "fund_center": StructType([
+        StructField("effectiveStartDate", StringType(), True),
+        StructField("effectiveStatus", StringType(), True),
+        StructField("financialManagementArea", StringType(), True),
+        StructField("fundCenterCode", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("effectiveEndDate", StringType(), True),
+        StructField("entityOID", StringType(), True),
+        StructField("entityUUID", StringType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("fundCenterDescription_defaultValue", StringType(), True),
+        StructField("fundCenterDescription_en_US", StringType(), True),
+        StructField("fundCenterDescription_localized", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True)
+    ]),
+    "goal_1": StructType([
+        StructField("id", LongType(), False),
+        StructField("name", StringType(), True),
+        StructField("category", StringType(), True),
+        StructField("state", StringType(), True),
+        StructField("due", StringType(), True),
+        StructField("start", StringType(), True),
+        StructField("weight", StringType(), True),
+        StructField("metric", StringType(), True),
+        StructField("userId", StringType(), True),
+        StructField("lastModified", StringType(), True)
+    ]),
+    "goal_comment_1": StructType([
+        StructField("id", LongType(), False),
+        StructField("commentator", StringType(), True),
+        StructField("content", StringType(), True),
+        StructField("lastModified", StringType(), True),
+        StructField("objId", LongType(), True)
+    ]),
+    "goal_permission_1": StructType([
+        StructField("id", LongType(), False),
+        StructField("category", LongType(), True),
+        StructField("create", BooleanType(), True),
+        StructField("delete", BooleanType(), True),
+        StructField("edit", BooleanType(), True),
+        StructField("view", BooleanType(), True),
+        StructField("due", LongType(), True),
+        StructField("flag", LongType(), True),
+        StructField("metric", LongType(), True),
+        StructField("name", LongType(), True),
+        StructField("privateAccess", BooleanType(), True),
+        StructField("start", LongType(), True),
+        StructField("state", LongType(), True),
+        StructField("tasks", LongType(), True),
+        StructField("type", StringType(), True),
+        StructField("userId", StringType(), True),
+        StructField("weight", LongType(), True)
+    ]),
+    "goal_plan_state": StructType([
+        StructField("planId", LongType(), False),
+        StructField("stateId", StringType(), False),
+        StructField("userId", StringType(), False)
+    ]),
+    "goal_plan_template": StructType([
+        StructField("id", LongType(), False),
+        StructField("name", StringType(), True),
+        StructField("description", StringType(), True)
+    ]),
+    "goal_task_1": StructType([
+        StructField("id", LongType(), False),
+        StructField("date", StringType(), True),
+        StructField("flag", LongType(), True),
+        StructField("index", LongType(), True),
+        StructField("lastModified", StringType(), True),
+        StructField("modifier", StringType(), True),
+        StructField("objId", LongType(), True),
+        StructField("target", StringType(), True)
+    ]),
+    "goal_weight": StructType([
+        StructField("planId", LongType(), False),
+        StructField("type", StringType(), False),
+        StructField("maxValue", DoubleType(), True),
+        StructField("minValue", DoubleType(), True)
+    ]),
+    "grant": StructType([
+        StructField("companyCode", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("effectiveEndDate", StringType(), True),
+        StructField("effectiveStartDate", StringType(), True),
+        StructField("effectiveStatus", StringType(), True),
+        StructField("entityOID", StringType(), True),
+        StructField("entityUUID", StringType(), True),
+        StructField("grantCode", StringType(), True),
+        StructField("grantDesc_defaultValue", StringType(), True),
+        StructField("grantDesc_en_US", StringType(), True),
+        StructField("grantDesc_localized", StringType(), True),
+        StructField("grantNotRelevent", BooleanType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True)
+    ]),
+    "i9_audit_trail_record": StructType([
+        # Core Fields
+        StructField("seqNo", LongType(), True),
+        StructField("externalCode", StringType(), True),
+        StructField("userId", StringType(), True),
+        StructField("sourceOfRecord", StringType(), True),  # enum: COMPLIANCE, IMPORT, API
+        StructField("complianceProcessId", StringType(), True),
+        StructField("status", StringType(), True),  # enum: SECTION1_INITIATED, SECTION1_SAVED, etc.
+        # Section 1 Fields (Employee Information)
+        StructField("firstName", StringType(), True),
+        StructField("lastName", StringType(), True),
+        StructField("middleName", StringType(), True),
+        StructField("otherName", StringType(), True),
+        StructField("address", StringType(), True),
+        StructField("apartmentNumber", StringType(), True),
+        StructField("city", StringType(), True),
+        StructField("state", StringType(), True),  # enum: US state codes
+        StructField("zipCode", StringType(), True),
+        StructField("dateOfBirth", StringType(), True),  # date format
+        StructField("ssn", StringType(), True),
+        StructField("emailAddress", StringType(), True),
+        StructField("phoneNumber", StringType(), True),
+        # enum: US_CITIZEN, US_NATIONAL, LAWFUL_PERMANENT_RESIDENT,
+        # ALIEN_AUTHORIZED_TO_WORK
+        StructField("citizenshipType", StringType(), True),
+        StructField("alienRegistrationNumber", StringType(), True),
+        StructField("uscisNumber", StringType(), True),
+        StructField("i94AdministrationNum", StringType(), True),
+        StructField("passportNumber", StringType(), True),
+        StructField("countryOfIssueCode", StringType(), True),
+        StructField("visaType", StringType(), True),  # enum: F1, J1, H1B, etc.
+        StructField("visaNum", StringType(), True),
+        StructField("visaExpirationDate", StringType(), True),  # date format
+        # enum: REFUGEE, ASYLEE, OTHERPROTECTED, NONE
+        StructField("protectedStatus", StringType(), True),
+        StructField("translator1", StringType(), True),
+        StructField("translator2", StringType(), True),
+        StructField("translator3", StringType(), True),
+        StructField("translator4", StringType(), True),
+        StructField("translator5", StringType(), True),
+        # Section 2 Fields (Employer Verification)
+        StructField("employerTitle", StringType(), True),
+        StructField("employerBusiness", StringType(), True),
+        StructField("employerFirstName", StringType(), True),
+        StructField("employerLastName", StringType(), True),
+        StructField("employerAddress", StringType(), True),
+        StructField("employerCity", StringType(), True),
+        StructField("employerState", StringType(), True),
+        StructField("employerZipCode", StringType(), True),
+        StructField("listADocument1Number", StringType(), True),
+        StructField("listADocument1Name", StringType(), True),
+        StructField("listADocument1Issuer", StringType(), True),
+        StructField("listADocument1Expiry", StringType(), True),
+        StructField("listADocument2Number", StringType(), True),
+        StructField("listADocument2Name", StringType(), True),
+        StructField("listADocument2Issuer", StringType(), True),
+        StructField("listADocument2Expiry", StringType(), True),
+        StructField("listADocument3Number", StringType(), True),
+        StructField("listADocument3Name", StringType(), True),
+        StructField("listADocument3Issuer", StringType(), True),
+        StructField("listADocument3Expiry", StringType(), True),
+        StructField("listBDocumentNumber", StringType(), True),
+        StructField("listCDocumentNumber", StringType(), True),
+        StructField("additionalInfo1", StringType(), True),
+        StructField("additionalInfo2", StringType(), True),
+        StructField("additionalInfo3", StringType(), True),
+        StructField("additionalInfo4", StringType(), True),
+        StructField("additionalInfo5", StringType(), True),
+        StructField("additionalInfo6", StringType(), True),
+        StructField("additionalInfo7", StringType(), True),
+        StructField("additionalInfo8", StringType(), True),
+        StructField("additionalInfo9", StringType(), True),
+        StructField("additionalInfo10", StringType(), True),
+        # Section 3 Fields (Reverification)
+        StructField("verificationDate", StringType(), True),
+        StructField("verificationDocument", StringType(), True),
+        StructField("verifierFirstName", StringType(), True),
+        StructField("verifierLastName", StringType(), True),
+        StructField("dateOfRehire", StringType(), True),
+        StructField("reverificationListADoc1", StringType(), True),
+        StructField("reverificationListADoc2", StringType(), True),
+        StructField("reverificationListADoc3", StringType(), True),
+        StructField("reverificationListCDoc", StringType(), True),
+        StructField("newFirstName", StringType(), True),
+        StructField("newLastName", StringType(), True)
+    ]),
+    "instructional_text": StructType([
+        StructField("instructionalText", StringType(), True)
+    ]),
+    "pbc_employee_financing": StructType([
+        StructField("id", StringType(), True),
+        StructField("objectType", StringType(), True),
+        StructField("startDate", StringType(), True),
+        StructField("endDate", StringType(), True),
+        StructField("companyCode", StringType(), True),
+        StructField("creationDate", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("payLocked", StringType(), True),
+        StructField("recalActive", StringType(), True),
+        StructField("financingStatusEffectiveDate", StringType(), True),
+        StructField("allDocsReleased", BooleanType(), True)
+    ]),
+    "pbc_employee_grouping": StructType([
+        StructField("id", StringType(), True),
+        StructField("countryCode", StringType(), True),
+        StructField("employeeClass", StringType(), True),
+        StructField("employmentType", StringType(), True),
+        StructField("validFrom", StringType(), True),
+        StructField("validTo", StringType(), True),
+        StructField("employeeGroup", StringType(), True),
+        StructField("lastModifiedTimestamp", StringType(), True)
+    ]),
+    "pbc_symbolic_account": StructType([
+        StructField("id", StringType(), True),
+        StructField("countryCode", StringType(), True),
+        StructField("payComponentId", StringType(), True),
+        StructField("accountAssignmentType", StringType(), True),
+        StructField("validFrom", StringType(), True),
+        StructField("validTo", StringType(), True),
+        StructField("symbolicAccount", StringType(), True),
+        StructField("lastModifiedTimestamp", StringType(), True)
+    ]),
+    "project_controlling_object": StructType([
+        StructField("externalCode", StringType(), True),
+        StructField("effectiveStartDate", StringType(), True),
+        StructField("effectiveStatus", StringType(), True),
+        StructField("company", StringType(), True),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("description_defaultValue", StringType(), True),
+        StructField("description_en_US", StringType(), True),
+        StructField("description_localized", StringType(), True),
+        StructField("effectiveEndDate", StringType(), True),
+        StructField("entityOID", StringType(), True),
+        StructField("isStatistical", BooleanType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("name_defaultValue", StringType(), True),
+        StructField("name_en_US", StringType(), True),
+        StructField("name_localized", StringType(), True),
+        StructField("projectControllingObjectType", StringType(), True)
+    ]),
+    "rbp_groups": StructType([
+        StructField("groupId", LongType(), False),
+        StructField("groupName", StringType(), True),
+        StructField("groupType", StringType(), True),  # 'static' or 'dynamic'
+        StructField("permissionId", LongType(), True),  # Query context
+    ]),
+    "rbp_permissions": StructType([
+        StructField("permissionId", LongType(), False),
+        StructField("permissionLabel", StringType(), True),
+        StructField("granted", BooleanType(), True),
+        StructField("userName", StringType(), True),  # Query context
+        StructField("keyWords", StringType(), True),  # Query context
+    ]),
+    "rbp_roles": StructType([
+        StructField("groupId", LongType(), False),
+        StructField("roleName", StringType(), False)
+    ]),
+    "review_route_map": StructType([
+        StructField("reviewId", LongType(), False),
+        StructField("modifySteps", StringType(), True),  # JSON array of reviewRouteStep
+        StructField("signoffSteps", StringType(), True),  # JSON array of reviewRouteStep
+    ]),
+    "scim_group": StructType([
+        StructField("id", StringType(), True),
+        StructField("displayName", StringType(), True),
+        # Schemas array
+        StructField("schemas", ArrayType(StringType()), True),
+        # Members array
+        StructField("members", ArrayType(StructType([
+        StructField("value", StringType(), True),
+        StructField("type", StringType(), True),
+        StructField("display", StringType(), True),
+        StructField("ref", StringType(), True),
+        ])), True),
+        # Meta object
+        StructField("meta", StructType([
+        StructField("resourceType", StringType(), True),
+        StructField("created", StringType(), True),
+        StructField("lastModified", StringType(), True),
+        StructField("location", StringType(), True),
+        StructField("version", StringType(), True),
+        ]), True),
+        # GroupExtensionVersion2 - generic object for extension data
+        # JSON string for flexible extension data
+        StructField("GroupExtensionVersion2", StringType(), True),
+    ]),
+    "scim_user": StructType([
+        StructField("id", StringType(), True),
+        StructField("userUuid", StringType(), True),
+        StructField("userName", StringType(), True),
+        StructField("displayName", StringType(), True),
+        StructField("nickName", StringType(), True),
+        StructField("title", StringType(), True),
+        StructField("userType", StringType(), True),
+        StructField("active", BooleanType(), True),
+        StructField("externalId", StringType(), True),
+        StructField("type", StringType(), True),
+        # Name object (flattened)
+        StructField("name", StructType([
+        StructField("formatted", StringType(), True),
+        StructField("familyName", StringType(), True),
+        StructField("givenName", StringType(), True),
+        StructField("middleName", StringType(), True),
+        StructField("honorificPrefix", StringType(), True),
+        StructField("honorificSuffix", StringType(), True),
+        ]), True),
+        # Meta object
+        StructField("meta", StructType([
+        StructField("resourceType", StringType(), True),
+        StructField("created", StringType(), True),
+        StructField("lastModified", StringType(), True),
+        StructField("location", StringType(), True),
+        StructField("version", StringType(), True),
+        ]), True),
+        # Schemas array
+        StructField("Schemas", ArrayType(StringType()), True),
+        # Emails array
+        StructField("emails", ArrayType(StructType([
+        StructField("value", StringType(), True),
+        StructField("type", StringType(), True),
+        StructField("primary", BooleanType(), True),
+        ])), True),
+        # PhoneNumbers array
+        StructField("phoneNumbers", ArrayType(StructType([
+        StructField("value", StringType(), True),
+        StructField("type", StringType(), True),
+        StructField("display", StringType(), True),
+        StructField("primary", StringType(), True),
+        ])), True),
+        # Groups object
+        StructField("groups", StructType([
+        StructField("value", StringType(), True),
+        StructField("type", StringType(), True),
+        StructField("display", StringType(), True),
+        StructField("ref", StringType(), True),
+        ]), True)
+    ]),
+    "sp_metadata": StructType([
+        StructField("companyId", StringType(), False),
+        StructField("dcDomain", StringType(), False),
+        StructField("errorMessage", StringType(), True),
+        StructField("result", StringType(), True),
+        StructField("status", StringType(), True)
+    ]),
+    "success_store_content": StructType([
+        StructField("contentId", StringType(), False),
+        StructField("bestPractice", BooleanType(), True),
+        StructField("comments", StringType(), True),
+        StructField("contentType", StringType(), True),
+        StructField("customField", StringType(), True),
+        StructField("defaultContent", BooleanType(), True),
+        StructField("defaultContentName", StringType(), True),
+        StructField("domain", StringType(), True),
+        StructField("expiryOnDate", StringType(), True),  # DateTime stored as string
+        StructField("publishOnDate", StringType(), True),  # DateTime stored as string
+        StructField("revisionNo", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("wizardable", BooleanType(), True)
+    ]),
+    "success_store_content_blob": StructType([
+        StructField("contentId", StringType(), False)
+    ]),
+    "supporter_feedback": StructType([
+        StructField("feedbackId", LongType(), False),
+        StructField("createdBy", StringType(), True),
+        StructField("createdDate", StringType(), True),
+        StructField("createdDateTime", StringType(), True),
+        StructField("lastModifiedBy", StringType(), True),
+        StructField("lastModifiedDate", StringType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),
+        StructField("lastModifiedDateWithTZ", StringType(), True),
+        StructField("mdfSystemRecordStatus", StringType(), True),
+        StructField("recipientId", StringType(), True),
+        StructField("requesterId", StringType(), True),
+        StructField("requestDateTime", StringType(), True),
+        StructField("requestText_defaultValue", StringType(), True),
+        StructField("requestText_localized", StringType(), True),
+        StructField("responseDateTime", StringType(), True),
+        StructField("responseText", StringType(), True),
+        StructField("subjectUserId", StringType(), True)
+    ]),
+    "termination_time_account_balances": StructType([
+        StructField("timeAccount", StructType([
+            StructField("externalCode", StringType(), True),
+            StructField("externalName", StringType(), True),
+            StructField("unit", StringType(), True),
+        ]), True),
+        StructField("balance", StructType([
+            StructField("value", DoubleType(), True),
+            StructField("formattedWithUnit", StringType(), True),
+            StructField("formattedWithUnitRoundedDown", StringType(), True),
+        ]), True),
+        StructField("accrualSeparatedBalance", StructType([
+            StructField("value", DoubleType(), True),
+            StructField("formattedWithUnit", StringType(), True),
+            StructField("formattedWithUnitRoundedDown", StringType(), True),
+        ]), True)
+    ]),
+    "theme_config": StructType([
+        StructField("id", StringType(), False),
+        StructField("themeConfiguration", StringType(), True),  # Complex type serialized as JSON
+    ]),
+    "theme_info": StructType([
+        StructField("id", StringType(), False),
+        StructField("lastModifiedDate", StringType(), True),  # int64 timestamp as string
+        StructField("locale", StringType(), True),
+        StructField("modules", StringType(), True),
+        StructField("ui5Theme", StringType(), True),
+        StructField("fingerprints", StringType(), True),  # Complex type serialized as JSON
+        StructField("urls", StringType(), True),  # Complex type serialized as JSON
+    ]),
+    "theme_template": StructType([
+        StructField("id", StringType(), False),
+        StructField("bodyStyleClass", StringType(), True),
+        StructField("footer", StringType(), True),
+        StructField("header", StringType(), True),
+        StructField("langDir", StringType(), True),
+        StructField("locale", StringType(), True),
+        StructField("scripts", StringType(), True),
+        StructField("styles", StringType(), True),
+        StructField("template", StringType(), True),
+        StructField("ui5BaseThemeRootUrl", StringType(), True)
+    ]),
+    "time_account_balances": StructType([
+        StructField("timeAccount", StructType([
+            StructField("externalCode", StringType(), True),
+            StructField("externalName", StringType(), True),
+            StructField("unit", StringType(), True),
+        ]), True),
+        StructField("balances", StructType([
+            StructField("value", DoubleType(), True),
+            StructField("formattedWithUnit", StringType(), True),
+            StructField("formattedWithUnitRoundedDown", StringType(), True),
+            StructField("asOfDate", StringType(), True),
+        ]), True)
+    ]),
+    "time_event_delete_response": StructType([
+        StructField("status", StringType(), True),
+        StructField("message", StringType(), True),
+        StructField("deletedCount", LongType(), True),
+        StructField("failedTimeEvents", ArrayType(StructType([
+        StructField("id", StringType(), True),
+        StructField("reason", StringType(), True),
+        ])), True)
+    ]),
+    "time_event_types": StructType([
+        StructField("code", StringType(), False),
+        StructField("active", BooleanType(), True),
+        StructField("event", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("description", StringType(), True)
+    ]),
+    "time_events": StructType([
+        StructField("externalId", StringType(), True),
+        StructField("workAssignmentId", StringType(), True),
+        StructField("timestampUTC", StringType(), True),  # datetime as string
+        StructField("timeEventTypeCode", StringType(), True),
+        StructField("timeTypeCode", StringType(), True),
+        StructField("timeZoneOffset", StringType(), True),
+        StructField("approvalStatusCode", StringType(), True),
+        StructField("validationStatusCode", StringType(), True),
+        StructField("pairingStatusCode", StringType(), True),
+        StructField("creationSourceCode", StringType(), True),
+        StructField("createdAt", StringType(), True),  # datetime as string
+        StructField("createdBy", StringType(), True),
+        StructField("lastChangedAt", StringType(), True),  # datetime as string (cursor field)
+        StructField("lastChangedBy", StringType(), True),
+        StructField("comments", StringType(), True),
+        StructField("reasonForManualTimeEventCode", StringType(), True),
+        StructField("terminalId", StringType(), True),
+        StructField("validationMessages", ArrayType(StructType([
+            StructField("code", StringType(), True),
+            StructField("message", StringType(), True),
+            StructField("target", StringType(), True),
+        ])), True)
+    ]),
+    "time_off_events": StructType([
+        StructField("externalCode", StringType(), False),
+        StructField("title", StringType(), False),
+        StructField("startDate", StringType(), False),  # Date as string (YYYY-MM-DD)
+        StructField("endDate", StringType(), False),  # Date as string (YYYY-MM-DD)
+        StructField("startTime", StringType(), True),
+        StructField("endTime", StringType(), True),
+        StructField("duration", DoubleType(), False),
+        StructField("timeUnit", StringType(), False),
+        StructField("durationFormatted", StringType(), False),
+        StructField("crossMidnight", BooleanType(), False),
+        StructField("type", StringType(), False),  # ABSENCE, PUBLIC_HOLIDAY, NON_WORKING_DAY
+        StructField("typeFormatted", StringType(), False),
+        # PENDING, CANCELLED, APPROVED, REJECTED, PENDING_CANCELLATION
+        StructField("status", StringType(), True),
+        StructField("statusFormatted", StringType(), True),
+        # MULTI_DAY, SINGLE_FULL_DAY, etc.
+        StructField("absenceDurationCategory", StringType(), True),
+    ]),
+    "time_type_balances": StructType([
+        StructField("mainAbsenceTimeType", BooleanType(), True),
+        StructField("favoriteTimeTypeBalance", BooleanType(), True),
+        StructField("timeType", StructType([
+            StructField("code", StringType(), True),
+            StructField("name", StringType(), True),
+            StructField("description", StringType(), True),
+        ]), True),
+        StructField("balance", StructType([
+            StructField("value", DoubleType(), True),
+            StructField("formattedWithUnit", StringType(), True),
+        ]), True)
+    ]),
+    "todo": StructType([
+        StructField("categoryId", StringType(), False),
+        StructField("categoryLabel", StringType(), True),
+        StructField("displayOrder", LongType(), True),
+        StructField("status", LongType(), True)
+    ]),
+    "todo_entry_v2": StructType([
+        StructField("todoEntryId", StringType(), False),  # Decimal as String
+        StructField("categoryId", StringType(), True),
+        StructField("categoryLabel", StringType(), True),
+        StructField("completedDateTime", StringType(), True),  # DateTime as String
+        StructField("createdDate", StringType(), True),  # DateTime as String
+        StructField("dueDate", StringType(), True),  # DateTime as String
+        StructField("formDataId", LongType(), True),
+        StructField("lastModifiedDateTime", StringType(), True),  # DateTime as String
+        StructField("linkUrl", StringType(), True),
+        StructField("status", LongType(), True),
+        StructField("subjectId", StringType(), True),
+        StructField("todoEntryName", StringType(), True)
+    ]),
+    "user_capabilities": StructType([
+        StructField("targetUserAssignmentUUID", StringType(), False),
+        StructField("canGiveFeedback", BooleanType(), True),
+        StructField("canGiveFeedbackToTargetUser", BooleanType(), True),
+        StructField("canRequestFeedbackFromTargetUser", BooleanType(), True),
+        StructField("canRequestFeedbackAboutTargetUser", BooleanType(), True)
+    ]),
+}
+# === TABLE_SCHEMAS_END ===
+
+
+
+class LakeflowConnect:
+    """
+    SAP SuccessFactors connector implementing the LakeflowConnect interface.
+
+    This connector supports:
+    - Basic Authentication with username@companyId format
+    - OData v2 API with full pagination support
+    - Both CDC (incremental) and snapshot ingestion types
+    - SAP DateTime format parsing
+    """
+
+    # Default page size for OData queries
+    DEFAULT_PAGE_SIZE = 100
+
+    # Maximum retries for API requests
+    MAX_RETRIES = 3
+
+    # Delay between retries (seconds)
+    RETRY_DELAY = 1.0
+
+    def __init__(self, options: Dict[str, str]) -> None:
+        """
+        Initialize the SAP SuccessFactors connector.
+
+        Args:
+            options: Dictionary containing connection parameters:
+                - endpoint_url: Base URL for SuccessFactors API
+                    (e.g., "https://apisalesdemo8.successfactors.com/")
+                - username: Username in format username@companyId
+                    (e.g., "sfadmin@SFPART067615")
+                - password: User password
+        """
+        self.endpoint_url = options["endpoint_url"].rstrip("/")
+        self.username = options["username"]
+        self.password = options["password"]
+
+        # Build the OData API base URL
+        self.base_url = f"{self.endpoint_url}/odata/v2"
+
+        # Create Basic Auth header
+        auth_string = f"{self.username}:{self.password}"
+        auth_bytes = base64.b64encode(auth_string.encode("utf-8")).decode("utf-8")
+
+        self.headers = {
+            "Authorization": f"Basic {auth_bytes}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+
+        # Session for connection pooling
+        self.session = requests.Session()
+        self.session.headers.update(self.headers)
+
+    def list_tables(self) -> List[str]:
+        """
+        List all available tables supported by this connector.
+
+        Returns:
+            List of table names from _TABLE_CONFIG
+        """
+        return list(_TABLE_CONFIG.keys())
+
+    def get_table_schema(
+        self, table_name: str, table_options: Dict[str, str]
+    ) -> StructType:
+        """
+        Get the Spark schema for a table.
+
+        Args:
+            table_name: Name of the table
+            table_options: Additional options (not used currently)
+
+        Returns:
+            StructType representing the table schema
+
+        Raises:
+            ValueError: If table is not supported
+        """
+        if table_name not in _TABLE_SCHEMAS:
+            supported = list(_TABLE_SCHEMAS.keys())
+            raise ValueError(
+                f"Unsupported table: {table_name}. Supported tables: {supported}"
+            )
+        return _TABLE_SCHEMAS[table_name]
+
+    def read_table_metadata(
+        self, table_name: str, table_options: Dict[str, str]
+    ) -> Dict[str, Any]:
+        """
+        Get metadata for a table including primary keys, cursor field, and ingestion type.
+
+        Args:
+            table_name: Name of the table
+            table_options: Additional options (not used currently)
+
+        Returns:
+            Dictionary with:
+                - primary_keys: List of primary key column names
+                - cursor_field: Column to use for incremental reads
+                - ingestion_type: "cdc" or "snapshot"
+
+        Raises:
+            ValueError: If table is not supported
+        """
+        if table_name not in _TABLE_CONFIG:
+            supported = list(_TABLE_CONFIG.keys())
+            raise ValueError(
+                f"Unsupported table: {table_name}. Supported tables: {supported}"
+            )
+
+        config = _TABLE_CONFIG[table_name]
+        return {
+            "primary_keys": config["primary_keys"],
+            "cursor_field": config.get("cursor_field"),
+            "ingestion_type": config.get("ingestion_type", "snapshot"),
+        }
+
+    def read_table(
+        self, table_name: str, start_offset: Dict, table_options: Dict[str, str]
+    ) -> Tuple[Iterator[Dict], Dict]:
+        """
+        Read data from a SAP SuccessFactors table.
+
+        Supports both CDC (incremental) and snapshot reads:
+        - CDC: Uses cursor_field with $filter for incremental reads
+        - Snapshot: Full table read each time
+
+        Args:
+            table_name: Name of the table to read
+            start_offset: Offset from previous read for incremental sync
+                - For CDC: {"cursor_value": "<datetime_string>"}
+                - For snapshot: {} or None
+            table_options: Additional options (not used currently)
+
+        Returns:
+            Tuple of (records_iterator, new_offset)
+            - records_iterator: Iterator yielding record dicts
+            - new_offset: Offset for next incremental read
+
+        Raises:
+            ValueError: If table is not supported
+        """
+        if table_name not in _TABLE_CONFIG:
+            supported = list(_TABLE_CONFIG.keys())
+            raise ValueError(
+                f"Unsupported table: {table_name}. Supported tables: {supported}"
+            )
+
+        config = _TABLE_CONFIG[table_name]
+        ingestion_type = config.get("ingestion_type", "snapshot")
+
+        if ingestion_type == "cdc":
+            return self._read_table_cdc(table_name, config, start_offset)
+        else:
+            return self._read_table_snapshot(table_name, config)
+
+    def _read_table_cdc(
+        self, table_name: str, config: Dict[str, Any], start_offset: Dict
+    ) -> Tuple[Iterator[Dict], Dict]:
+        """
+        Read table data incrementally using CDC (Change Data Capture).
+
+        Args:
+            table_name: Name of the table
+            config: Table configuration from _TABLE_CONFIG
+            start_offset: Previous offset with cursor_value
+
+        Returns:
+            Tuple of (records_iterator, new_offset)
+        """
+        entity_set = config["entity_set"]
+        cursor_field = config["cursor_field"]
+        select_fields = config.get("select_fields")
+
+        # Build the base URL
+        url = f"{self.base_url}/{entity_set}"
+
+        # Build query parameters
+        params = {
+            "$format": "json",
+            "$top": str(self.DEFAULT_PAGE_SIZE),
+        }
+
+        # Add $select if specified
+        if select_fields:
+            params["$select"] = ",".join(select_fields)
+
+        # Add $orderby for consistent ordering
+        params["$orderby"] = f"{cursor_field} asc"
+
+        # Add $filter for incremental read if we have a previous cursor
+        if start_offset and start_offset.get("cursor_value"):
+            cursor_value = start_offset["cursor_value"]
+            # Convert to SAP datetime format for filter
+            params["$filter"] = f"{cursor_field} gt datetime'{cursor_value}'"
+
+        # Fetch all pages of data
+        all_records, max_cursor = self._fetch_all_pages(url, params, cursor_field)
+
+        # Build new offset
+        if max_cursor:
+            new_offset = {"cursor_value": max_cursor}
+        elif start_offset:
+            new_offset = start_offset
+        else:
+            new_offset = {}
+
+        return iter(all_records), new_offset
+
+    def _read_table_snapshot(
+        self, table_name: str, config: Dict[str, Any]
+    ) -> Tuple[Iterator[Dict], Dict]:
+        """
+        Read full table data (snapshot mode).
+
+        Args:
+            table_name: Name of the table
+            config: Table configuration from _TABLE_CONFIG
+
+        Returns:
+            Tuple of (records_iterator, empty_offset)
+        """
+        entity_set = config["entity_set"]
+        select_fields = config.get("select_fields")
+        cursor_field = config.get("cursor_field")
+
+        # Build the base URL
+        url = f"{self.base_url}/{entity_set}"
+
+        # Build query parameters
+        params = {
+            "$format": "json",
+            "$top": str(self.DEFAULT_PAGE_SIZE),
+        }
+
+        # Add $select if specified
+        if select_fields:
+            params["$select"] = ",".join(select_fields)
+
+        # Add $orderby if cursor field exists for consistent ordering
+        if cursor_field:
+            params["$orderby"] = f"{cursor_field} asc"
+
+        # Fetch all pages of data
+        all_records, max_cursor = self._fetch_all_pages(url, params, cursor_field)
+
+        # De-duplicate records for tables known to have identical duplicates from SAP API
+        if table_name in _DEDUPE_TABLES:
+            all_records = self._deduplicate_records(all_records)
+
+        # For snapshot, we can optionally track the max cursor for future CDC
+        if max_cursor:
+            new_offset = {"cursor_value": max_cursor}
+        else:
+            new_offset = {}
+
+        return iter(all_records), new_offset
+
+    def _deduplicate_records(self, records: List[Dict]) -> List[Dict]:
+        """
+        Remove duplicate records based on full row content.
+
+        SAP SuccessFactors API sometimes returns identical duplicate rows
+        for certain entities. This method filters them out.
+
+        Args:
+            records: List of record dictionaries
+
+        Returns:
+            List of unique records (preserving order)
+        """
+        seen = set()
+        unique_records = []
+
+        for record in records:
+            # Create a hashable key from all field values
+            # Sort keys for consistent ordering, convert values to strings for hashability
+            record_key = tuple(
+                (k, str(v) if v is not None else None)
+                for k, v in sorted(record.items())
+            )
+
+            if record_key not in seen:
+                seen.add(record_key)
+                unique_records.append(record)
+
+        return unique_records
+
+    # pylint: disable=too-many-locals
+    def _fetch_all_pages(
+        self, base_url: str, params: Dict[str, str], cursor_field: Optional[str] = None
+    ) -> Tuple[List[Dict], Optional[str]]:
+        """
+        Fetch all pages of data from an OData endpoint.
+
+        CRITICAL: This method handles complete pagination to ensure ALL data is fetched.
+        It supports both:
+        1. __next continuation links (preferred)
+        2. $top/$skip offset pagination (fallback)
+
+        Args:
+            base_url: Base OData endpoint URL
+            params: Query parameters
+            cursor_field: Optional field to track for max cursor value
+
+        Returns:
+            Tuple of (all_records, max_cursor_value)
+        """
+        all_records = []
+        max_cursor = None
+        skip = 0
+        next_url = None
+
+        # Build initial URL with params
+        current_url = base_url
+        current_params = params.copy()
+
+        while True:
+            # Make the request
+            response = self._make_request(current_url, current_params if not next_url else None)
+
+            if response is None:
+                break
+
+            # Parse response
+            data = response.json()
+
+            # Extract records from response
+            # OData v2 format: {"d": {"results": [...]}}
+            # or {"d": {"results": [...], "__next": "..."}}
+            d = data.get("d", {})
+
+            if isinstance(d, dict):
+                results = d.get("results", [])
+                next_link = d.get("__next")
+            else:
+                # Sometimes "d" is directly the results array
+                results = d if isinstance(d, list) else []
+                next_link = None
+
+            if not results:
+                break
+
+            # Process each record
+            for record in results:
+                # Parse SAP DateTime fields
+                processed_record = self._process_record(record)
+                all_records.append(processed_record)
+
+                # Track max cursor value if cursor_field is specified
+                if cursor_field and cursor_field in processed_record:
+                    cursor_value = processed_record[cursor_field]
+                    if cursor_value:
+                        if max_cursor is None or cursor_value > max_cursor:
+                            max_cursor = cursor_value
+
+            # Check for __next continuation link (OData standard pagination)
+            if next_link:
+                next_url = next_link
+                current_url = next_url
+                current_params = None  # __next URL contains all params
+            else:
+                # Fallback to $skip pagination if we got a full page
+                if len(results) >= self.DEFAULT_PAGE_SIZE:
+                    skip += self.DEFAULT_PAGE_SIZE
+                    current_params = params.copy()
+                    current_params["$skip"] = str(skip)
+                    current_url = base_url
+                    next_url = None
+                else:
+                    # Less than a full page means we've reached the end
+                    break
+
+            # Small delay to be nice to the API
+            time.sleep(0.05)
+
+        return all_records, max_cursor
+
+    def _make_request(
+        self, url: str, params: Optional[Dict[str, str]] = None
+    ) -> Optional[requests.Response]:
+        """
+        Make an HTTP request with retry logic.
+
+        Args:
+            url: Request URL
+            params: Optional query parameters
+
+        Returns:
+            Response object or None if all retries failed
+        """
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                response = self.session.get(url, params=params, timeout=60)
+
+                if response.status_code == 200:
+                    return response
+                elif response.status_code == 429:
+                    # Rate limited - wait and retry
+                    retry_after = int(response.headers.get("Retry-After", 5))
+                    time.sleep(retry_after)
+                    continue
+                elif response.status_code >= 500:
+                    # Server error - retry
+                    time.sleep(self.RETRY_DELAY * (attempt + 1))
+                    continue
+                else:
+                    # Client error - don't retry
+                    raise Exception(
+                        f"SAP SuccessFactors API error: {response.status_code} - {response.text}"
+                    )
+            except requests.exceptions.RequestException as e:
+                if attempt < self.MAX_RETRIES - 1:
+                    time.sleep(self.RETRY_DELAY * (attempt + 1))
+                    continue
+                raise Exception(f"Request failed after {self.MAX_RETRIES} retries: {e}")
+
+        return None
+
+    def _process_record(self, record: Dict) -> Dict:
+        """
+        Process a record from the API response.
+
+        - Parses SAP DateTime format: /Date(milliseconds)/
+        - Removes OData metadata fields (__metadata, __deferred, etc.)
+
+        Args:
+            record: Raw record from API
+
+        Returns:
+            Processed record with parsed dates and cleaned fields
+        """
+        processed = {}
+
+        for key, value in record.items():
+            # Skip OData metadata fields
+            if key.startswith("__"):
+                continue
+
+            # Parse SAP DateTime format
+            if isinstance(value, str) and value.startswith("/Date("):
+                processed[key] = self._parse_sap_datetime(value)
+            elif isinstance(value, dict):
+                # Handle nested objects - check for __deferred (navigation property)
+                if "__deferred" in value:
+                    # Skip deferred navigation properties
+                    continue
+                if "__metadata" in value:
+                    # Process nested entity, removing metadata
+                    processed[key] = self._process_record(value)
+                else:
+                    processed[key] = value
+            else:
+                processed[key] = value
+
+        return processed
+
+    def _parse_sap_datetime(self, sap_datetime: str) -> str:
+        """
+        Parse SAP DateTime format to ISO 8601 string.
+
+        SAP format: /Date(milliseconds)/ or /Date(milliseconds+offset)/
+        Examples:
+            /Date(1234567890000)/
+            /Date(1234567890000+0000)/
+            /Date(-1234567890000)/
+
+        Args:
+            sap_datetime: SAP DateTime string
+
+        Returns:
+            ISO 8601 formatted datetime string
+        """
+        # Extract milliseconds from /Date(milliseconds)/ or /Date(milliseconds+offset)/
+        match = re.match(r"/Date\((-?\d+)([+-]\d{4})?\)/", sap_datetime)
+
+        if not match:
+            return sap_datetime  # Return original if format doesn't match
+
+        milliseconds = int(match.group(1))
+
+        # Convert milliseconds to seconds
+        seconds = milliseconds / 1000.0
+
+        try:
+            dt = datetime.fromtimestamp(seconds, tz=timezone.utc)
+            return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        except (ValueError, OSError):
+            # Handle dates outside valid range
+            return sap_datetime
+
+    def test_connection(self) -> Dict[str, str]:
+        """
+        Test the connection to SAP SuccessFactors API.
+
+        Returns:
+            Dictionary with status and message
+        """
+        try:
+            # Try to access the service root
+            url = f"{self.base_url}/"
+            response = self.session.get(url, timeout=30)
+
+            if response.status_code == 200:
+                return {"status": "success", "message": "Connection successful"}
+            else:
+                return {
+                    "status": "error",
+                    "message": f"API returned status {response.status_code}: {response.text}",
+                }
+        except Exception as e:
+            return {"status": "error", "message": f"Connection failed: {str(e)}"}

@@ -1,0 +1,798 @@
+{
+  "x-odata-version": "4.0",
+  "swagger": "2.0",
+  "info": {
+    "version": "1.0.0",
+    "title": "Fund Center",
+    "description": "You can use this API to create, update, read and delete fund center information. Fund center is one of the standard accounting objects supported for employees in an organization. This API is implemented based on OData version 2 specification.\n\n You can find your company's API server in [List of API Servers in SAP SuccessFactors.](https://help.sap.com/viewer/d599f15995d348a1b45ba5603e2aba9b/LATEST/en-US/af2b8d5437494b12be88fe374eba75b6.html)"
+  },
+  "x-sap-shortText": "Query and manage public sector cost object Fund Center.",
+  "security": [
+    {
+      "basicAuthentication": []
+    }
+  ],
+  "securityDefinitions": {
+    "basicAuthentication": {
+      "type": "basic"
+    }
+  },
+  "externalDocs": {
+    "description": "More information available in help.sap.com",
+    "url": "https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/b2b06831c2cb4d5facd1dfde49a7aab5/a058ad5e80b14e6280b3733337cfc014.html"
+  },
+  "x-sap-api-type": "ODATA",
+  "schemes": ["https"],
+  "x-servers": [
+    {
+      "url": "https://{api-server}/odata/v2",
+      "description": "OData APIs for the SuccessFactors Data Centers"
+    },
+    {
+      "url":"https://sandbox.api.sap.com:443/SFPublicSectorManagement_Odata",
+      "description":"Sandbox URL"
+    }
+  ],
+  "host": "hostname",
+  "consumes": ["application/json"],
+  "produces": ["application/json"],
+  "tags": [
+    {
+      "name": "Fund Center"
+    }
+  ],
+  "definitions": {
+    "odata.error": {
+      "type": "object",
+      "required": ["error"],
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/odata.error.main"
+        }
+      }
+    },
+    "odata.error.main": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/odata.error.detail"
+          }
+        },
+        "innererror": {
+          "type": "object",
+          "description": "The structure of this object is service-specific"
+        }
+      }
+    },
+    "odata.error.detail": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      }
+    },
+    "SFOData.FundCenterGO": {
+      "type": "object",
+      "title": "FundCenterGO",
+      "required": [
+        "effectiveStartDate",
+        "effectiveStatus",
+        "financialManagementArea",
+        "fundCenterCode"
+      ],
+      "properties": {
+        "createdBy": {
+          "type": ["string", "null"],
+          "example": "string",
+          "readOnly": true,
+          "maxLength": 100
+        },
+        "createdDateTime": {
+          "type": ["string", "null"],
+          "readOnly": true,
+          "example": "/Date(1492098664000)/"
+        },
+        "effectiveEndDate": {
+          "type": ["string", "null"],
+          "readOnly": true,
+          "example": "/Date(1492098664000)/"
+        },
+        "effectiveStartDate": {
+          "type": "string",
+          "example": "/Date(1492098664000)/"
+        },
+        "effectiveStatus": {
+          "type": "string",
+          "enum": ["A", "I"],
+          "description": "Status codes: \n A - Active \n I - InActive",
+          "example": "I",
+          "maxLength": 128
+        },
+        "entityOID": {
+          "type": ["string", "null"],
+          "example": "string",
+          "readOnly": true,
+          "maxLength": 70
+        },
+        "entityUUID": {
+          "type": ["string", "null"],
+          "example": "string",
+          "readOnly": true,
+          "maxLength": 70
+        },
+        "externalCode": {
+          "type": "string",
+          "example": "string/strg",
+          "maxLength": 128
+        },
+        "financialManagementArea": {
+          "type": ["string", "null"],
+          "example": "strg",
+          "maxLength": 4
+        },
+        "fundCenterCode": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 16
+        },
+        "fundCenterDescription_defaultValue": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 255
+        },
+        "fundCenterDescription_en_US": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 255
+        },
+        "fundCenterDescription_localized": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 255
+        },
+        "lastModifiedBy": {
+          "type": ["string", "null"],
+          "example": "string",
+          "readOnly": true,
+          "maxLength": 100
+        },
+        "lastModifiedDateTime": {
+          "type": ["string", "null"],
+          "readOnly": true,
+          "example": "/Date(1492098664000)/"
+        },
+        "mdfSystemRecordStatus": {
+          "type": "string",
+          "enum": ["C", "D","F","N","P","PH"],
+          "description": "Status codes:\n C - Correction\n D - Soft deleted record \n F - Full Purge Import in Progress \n N - Normal record \n P - Pending record \n PH - Pending history record",
+          "example": "N",
+          "readOnly": true,
+          "maxLength": 255
+        }
+      }
+    },
+    "SFOData.FundCenterGO-create": {
+      "type": "object",
+      "title": "FundCenterGO (for create)",
+      "required": [
+        "effectiveStartDate",
+        "effectiveStatus",
+        "financialManagementArea",
+        "fundCenterCode"
+      ],
+      "properties": {
+        "effectiveStartDate": {
+          "type": "string",
+          "example": "/Date(1492098664000)/"
+        },
+        "effectiveStatus": {
+          "type": "string",
+          "enum": ["A", "I"],
+          "description": "Status codes: \n A - Active \n I - InActive",
+          "example": "I",
+          "maxLength": 128
+        },
+        "financialManagementArea": {
+          "type": ["string", "null"],
+          "example": "strg",
+          "maxLength": 4
+        },
+        "fundCenterCode": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 16
+        },
+        "fundCenterDescription_defaultValue": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 255
+        },
+        "fundCenterDescription_en_US": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 255
+        }
+      }
+    },
+    "SFOData.FundCenterGO-update": {
+      "type": "object",
+      "title": "FundCenterGO (for update)",
+      "required": [
+        "effectiveStartDate",
+        "effectiveStatus",
+        "financialManagementArea",
+        "fundCenterCode"
+      ],
+      "properties": {
+        "effectiveStartDate": {
+          "type": "string",
+          "example": "/Date(1492098664000)/"
+        },
+        "effectiveStatus": {
+          "type": "string",
+          "enum": ["A", "I"],
+          "description": "Status codes: \n A - Active \n I - InActive",
+          "example": "I",
+          "maxLength": 128
+        },
+        "financialManagementArea": {
+          "type": ["string", "null"],
+          "example": "strg",
+          "maxLength": 4
+        },
+        "fundCenterCode": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 16
+        },
+        "fundCenterDescription_defaultValue": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 255
+        },
+        "fundCenterDescription_en_US": {
+          "type": ["string", "null"],
+          "example": "string",
+          "maxLength": 255
+        }
+      }
+    }
+  },
+  "paths": {
+    "/FundCenterGO": {
+      "get": {
+        "summary": "Get all fund centers",
+        "description": "You can use the following request to get all the fund centers. <br>For further details, refer to the SAP Help Portal documentation [OData API: Fund Center](https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/b2b06831c2cb4d5facd1dfde49a7aab5/a058ad5e80b14e6280b3733337cfc014.html)",
+        "tags": ["Fund Center"],
+        "parameters": [
+          {
+            "$ref": "#/parameters/top"
+          },
+          {
+            "$ref": "#/parameters/skip"
+          },
+          {
+            "$ref": "#/parameters/filter"
+          },
+          {
+            "$ref": "#/parameters/count"
+          },
+          {
+            "name": "$orderby",
+            "in": "query",
+            "description": "Order items by property values, see [Sorting](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionorderby)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "createdBy",
+                "createdBy desc",
+                "createdDateTime",
+                "createdDateTime desc",
+                "effectiveEndDate",
+                "effectiveEndDate desc",
+                "effectiveStartDate",
+                "effectiveStartDate desc",
+                "effectiveStatus",
+                "effectiveStatus desc",
+                "entityOID",
+                "entityOID desc",
+                "entityUUID",
+                "entityUUID desc",
+                "externalCode",
+                "externalCode desc",
+                "financialManagementArea",
+                "financialManagementArea desc",
+                "fundCenterCode",
+                "fundCenterCode desc",
+                "fundCenterDescription_defaultValue",
+                "fundCenterDescription_defaultValue desc",
+                "fundCenterDescription_en_US",
+                "fundCenterDescription_en_US desc",
+                "lastModifiedBy",
+                "lastModifiedBy desc",
+                "lastModifiedDateTime",
+                "lastModifiedDateTime desc",
+                "mdfSystemRecordStatus",
+                "mdfSystemRecordStatus desc"
+              ]
+            }
+          },
+          {
+            "name": "$select",
+            "in": "query",
+            "description": "Select properties to be returned, see [Select](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionselect)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "createdBy",
+                "createdDateTime",
+                "effectiveEndDate",
+                "effectiveStartDate",
+                "effectiveStatus",
+                "entityOID",
+                "entityUUID",
+                "externalCode",
+                "financialManagementArea",
+                "fundCenterCode",
+                "fundCenterDescription_defaultValue",
+                "fundCenterDescription_en_US",
+                "fundCenterDescription_localized",
+                "lastModifiedBy",
+                "lastModifiedDateTime",
+                "mdfSystemRecordStatus"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retrieved fund centers",
+            "schema": {
+              "type": "object",
+              "title": "Wrapper",
+              "properties": {
+                "d": {
+                  "type": "object",
+                  "title": "Collection of fund center",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/SFOData.FundCenterGO"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/responses/401"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create new fund center",
+        "description": "You can use the following request to create a new fund center. <br>For further details, refer to the SAP Help Portal documentation [OData API: Fund Center](https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/b2b06831c2cb4d5facd1dfde49a7aab5/a058ad5e80b14e6280b3733337cfc014.html)",
+        "tags": ["Fund Center"],
+        "parameters": [
+          {
+            "name": "FundCenterGO",
+            "in": "body",
+            "description": "Attributes of new fund center",
+            "schema": {
+              "$ref": "#/definitions/SFOData.FundCenterGO-create"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Fund center successfully created.",
+            "schema": {
+              "title": "Created fund center",
+              "type": "object",
+              "properties": {
+                "d": {
+                  "$ref": "#/definitions/SFOData.FundCenterGO"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - wrong name or body is not provided in the expected JSON format.",
+            "schema": {
+              "$ref": "#/definitions/odata.error"
+            },
+            "examples": {
+              "application/json": {
+                "error": {
+                  "code": "BadRequestException",
+                  "message": {
+                    "lang": "en-US",
+                    "value": "unknown property newProperty for FundCenterGO"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/responses/401"
+          },
+          "403": {
+            "description": "Access forbidden - you did not have the required permissions to access the resource.",
+            "schema": {
+              "$ref": "#/definitions/odata.error"
+            },
+            "examples": {
+              "application/json": {
+                "error": {
+                  "code": "COE_GENERAL_FORBIDDEN",
+                  "message": {
+                    "lang": "en-US",
+                    "value": "No permission to create object!"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/responses/500"
+          }
+        }
+      }
+    },
+    "/FundCenterGO(effectiveStartDate=datetime'{effectiveStartDate}',externalCode='{externalCode}')": {
+      "get": {
+        "summary": "Get fund center by key",
+        "description": "You can use the following request to get a fund center by effective start date and external code. <br>For further details, refer to the SAP Help Portal documentation [OData API: Fund Center](https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/b2b06831c2cb4d5facd1dfde49a7aab5/a058ad5e80b14e6280b3733337cfc014.html)",
+        "tags": ["Fund Center"],
+        "parameters": [
+          {
+            "name": "effectiveStartDate",
+            "in": "path",
+            "required": true,
+            "description": "key: effectiveStartDate, format: <YYYY-MM-DD>T<HH:MM:SS>  <br>\nExample: ```2021-01-01T00:00:00```",
+            "type": "string",
+            "format": "date-time"
+          },
+          {
+            "name": "externalCode",
+            "in": "path",
+            "required": true,
+            "description": "key: externalCode, format: fundCenterCode/financialManagementArea <br>\nExample: ```string/strg```",
+            "type": "string"
+          },
+          {
+            "name": "$select",
+            "in": "query",
+            "description": "Select properties to be returned, see [Select](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_SystemQueryOptionselect)",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "createdBy",
+                "createdDateTime",
+                "effectiveEndDate",
+                "effectiveStartDate",
+                "effectiveStatus",
+                "entityOID",
+                "entityUUID",
+                "externalCode",
+                "financialManagementArea",
+                "fundCenterCode",
+                "fundCenterDescription_defaultValue",
+                "fundCenterDescription_en_US",
+                "fundCenterDescription_localized",
+                "lastModifiedBy",
+                "lastModifiedDateTime",
+                "mdfSystemRecordStatus"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retrieved fund center.",
+            "schema": {
+              "title": "Fund Center",
+              "type": "object",
+              "properties": {
+                "d": {
+                  "$ref": "#/definitions/SFOData.FundCenterGO"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/responses/401"
+          },
+          "404": {
+            "description": "Not found - FundCenterGO is not found with the given key.",
+            "schema": {
+              "$ref": "#/definitions/odata.error"
+            },
+            "examples": {
+              "application/json": {
+                "error": {
+                  "code": "NotFoundException",
+                  "message": {
+                    "lang": "en-US",
+                    "value": "Entity FundCenterGO with the given key effectiveStartDate=datetime'2021-01-01T00:00:00',externalCode='string/strg' is not found."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Update fund center by key",
+        "description": "You can use the following request to update a fund center by effective start date and external code. <br>For further details, refer to the SAP Help Portal documentation [OData API: Fund Center](https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/b2b06831c2cb4d5facd1dfde49a7aab5/a058ad5e80b14e6280b3733337cfc014.html)",
+        "tags": ["Fund Center"],
+        "parameters": [
+          {
+            "name": "effectiveStartDate",
+            "in": "path",
+            "required": true,
+            "description": "key: effectiveStartDate, format: <YYYY-MM-DD>T<HH:MM:SS>  <br>\nExample: ```2021-01-01T00:00:00```",
+            "type": "string",
+            "format": "date-time"
+          },
+          {
+            "name": "externalCode",
+            "in": "path",
+            "required": true,
+            "description": "key: externalCode, format: fundCenterCode/financialManagementArea <br>\nExample: ```string/strg```",
+            "type": "string"
+          },
+          {
+            "name": "FundCenterGO",
+            "in": "body",
+            "description": "New property values",
+            "schema": {
+              "$ref": "#/definitions/SFOData.FundCenterGO-update"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fund center updated successfully."
+          },
+          "400": {
+            "description": "Bad request - wrong name or body is not provided in the expected JSON format.",
+            "schema": {
+              "$ref": "#/definitions/odata.error"
+            },
+            "examples": {
+              "application/json": {
+                "error": {
+                  "code": "BadRequestException",
+                  "message": {
+                    "lang": "en-US",
+                    "value": "unknown property newProperty for ProjectControllingObject"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/responses/401"
+          },
+          "403": {
+            "description": "Access forbidden - you did not have the required permissions to access the resource.",
+            "schema": {
+              "$ref": "#/definitions/odata.error"
+            },
+            "examples": {
+              "application/json": {
+                "error": {
+                  "code": "COE_GENERAL_FORBIDDEN",
+                  "message": {
+                    "lang": "en-US",
+                    "value": "No permission to change object!"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found - FundCenterGO is not found with the given key.",
+            "schema": {
+              "$ref": "#/definitions/odata.error"
+            },
+            "examples": {
+              "application/json": {
+                "error": {
+                  "code": "NotFoundException",
+                  "message": {
+                    "lang": "en-US",
+                    "value": "Entity FundCenterGO with the given key effectiveStartDate=datetime'2021-01-01T00:00:00',externalCode='string/strg' is not found."
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/responses/500"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete fund center by key",
+        "description": "You can use the following request to delete a fund center by effective start date and external code. <br>For further details, refer to the SAP Help Portal documentation [OData API: Fund Center](https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/b2b06831c2cb4d5facd1dfde49a7aab5/a058ad5e80b14e6280b3733337cfc014.html)",
+        "tags": ["Fund Center"],
+        "parameters": [
+          {
+            "name": "effectiveStartDate",
+            "in": "path",
+            "required": true,
+            "description": "key: effectiveStartDate, format: <YYYY-MM-DD>T<HH:MM:SS>  <br>\nExample: ```2021-01-01T00:00:00```",
+            "type": "string",
+            "format": "date-time"
+          },
+          {
+            "name": "externalCode",
+            "in": "path",
+            "required": true,
+            "description": "key: externalCode, format: fundCenterCode/financialManagementArea <br>\nExample: ```string/strg```",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fund center deleted successfully."
+          },
+          "401": {
+            "$ref": "#/responses/401"
+          },
+          "404": {
+            "description": "Not found - FundCenterGO is not found with the given key.",
+            "schema": {
+              "$ref": "#/definitions/odata.error"
+            },
+            "examples": {
+              "application/json": {
+                "error": {
+                  "code": "NotFoundException",
+                  "message": {
+                    "lang": "en-US",
+                    "value": "Entity FundCenterGO with the given key effectiveStartDate=datetime'2021-01-01T00:00:00',externalCode='string/strg' is not found."
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/responses/500"
+          }
+        }
+      }
+    }
+  },
+  "parameters": {
+    "top": {
+      "name": "$top",
+      "in": "query",
+      "description": "Show only the first n items, see [OData Paging - Top](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374630)",
+      "type": "integer",
+      "default": 20
+    },
+    "skip": {
+      "name": "$skip",
+      "in": "query",
+      "description": "Skip the first n items, see [OData Paging - Skip](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374631)",
+      "type": "integer"
+    },
+    "count": {
+      "name": "$count",
+      "in": "query",
+      "description": "Include count of items, see [OData Count](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374632)",
+      "type": "boolean"
+    },
+    "filter": {
+      "name": "$filter",
+      "in": "query",
+      "description": "Filter items by property values, see [OData Filtering](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374625)",
+      "type": "string"
+    },
+    "search": {
+      "name": "$search",
+      "in": "query",
+      "description": "Search items by search phrases, see [OData Searching](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374633)",
+      "type": "string"
+    }
+  },
+  "responses": {
+    "400": {
+      "description": "Bad request - wrong name or body is not provided in the expected JSON format.",
+      "schema": {
+        "$ref": "#/definitions/odata.error"
+      },
+      "examples": {
+        "application/json": {
+          "error": {
+            "code": "BadRequestException",
+            "message": {
+              "lang": "en-US",
+              "value": "unknown property newProperty for FundCenterGO"
+            }
+          }
+        }
+      }
+    },
+    "401": {
+      "description": "Unauthorized - authorization information is missing or invalid."
+    },
+    "403": {
+      "description": "Access forbidden - you did not have the required permissions to access the resource.",
+      "schema": {
+        "$ref": "#/definitions/odata.error"
+      }
+    },
+    "404": {
+      "description": "Not found",
+      "schema": {
+        "$ref": "#/definitions/odata.error"
+      }
+    },
+    "500": {
+      "description": "Internal server error - the requested operation led to an error during execution.",
+      "schema": {
+        "$ref": "#/definitions/odata.error"
+      },
+      "examples": {
+        "application/json": {
+          "error": {
+            "code": "ServerErrorException",
+            "message": {
+              "lang": "en-US",
+              "value": "HTTP 405 Method Not Allowed"
+            }
+          }
+        }
+      }
+    },
+    "error": {
+      "description": "Error",
+      "schema": {
+        "$ref": "#/definitions/odata.error"
+      },
+      "examples": {
+        "application/json": {
+          "error": {
+            "code": "<error code>",
+            "message": {
+              "lang": "en-US",
+              "value": "<error text>"
+            }
+          }
+        }
+      }
+    }
+  }
+}

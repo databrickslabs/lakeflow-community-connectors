@@ -1,0 +1,472 @@
+{
+    "openapi": "3.0.1",
+    "info": {
+        "title": "Retrieve and Process Extension Task",
+        "description": "The Process Extension Task API lets you finish the extension task and move on to the next one. It also gives you the option to cancel the extension task, stops the new hire's onboarding process. To use this API, you need the Task ID from the Retrieve Extension Task API.\nFor example, if the background verification fails and the hiring coordinator doesn’t want to proceed for onboarding, then the onboarding will have to be cancelled for the new hire. Process Extension Task API gives option to cancel the new hire's onboarding process.",
+        "version": "1.0"
+    },
+    "servers": [
+        {
+            "url": "https://{apiServer}/rest/onboarding/processes/v1",
+            "description": "Onboarding Process Extension Point API",
+            "variables": {
+                "apiServer": {
+                    "description": "SuccessFactors Data Center host",
+                    "default": "apisalesdemo8.successfactors.com"
+                }
+            }
+        },
+        {
+            "url":"https://sandbox.api.sap.com/successfactorsfoundation/rest/onboarding/processes/v1",
+            "description":"Sandbox URL"
+        }
+    ],
+    "externalDocs": {
+        "description": "Information about Onboarding Extension Point APIs are available on help.sap.com",
+        "url": "https://help.sap.com/docs/SAP_SUCCESSFACTORS_ONBOARDING/c94ed5fcb5fe4e0281f396556743812c/2d38cab5171a4d588c2612086ca8fed0.html?version=2411"
+    },
+    "tags": [
+        {
+            "name": "Onboarding Extension Point",
+            "description": "Onboarding Extension Point API"
+        }
+    ],
+    "paths": {
+        "/processes/{processId}/tasks/{taskId}": {
+            "patch": {
+                "tags": [
+                    "Onboarding Extension Point"
+                ],
+                "summary": "API to Update Extension Task",
+                "description": "This operation allows you to manually complete an extension task or cancel it in order to proceed with the onboarding journey of a new hire.",
+                "operationId": "updateExtensionPointTaskStatus",
+                "parameters": [
+                    {
+                        "name": "processId",
+                        "in": "path",
+                        "description": "Process Id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "taskId",
+                        "in": "path",
+                        "description": "Extension task Id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ExtensionPointTaskDetail"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "400": {
+                        "$ref": "#/components/responses/400"
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/401"
+                    },
+                    "412": {
+                        "$ref": "#/components/responses/412"
+                    },
+                    "500": {
+                        "$ref": "#/components/responses/500"
+                    },
+                    "413": {
+                        "$ref": "#/components/responses/413"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/403"
+                    },
+                    "404": {
+                        "$ref": "#/components/responses/404"
+                    },
+                    "503": {
+                        "$ref": "#/components/responses/503"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/429"
+                    },
+                    "409": {
+                        "$ref": "#/components/responses/409"
+                    }
+                }
+            }
+        },
+        "/processes/{processId}/tasks": {
+            "get": {
+                "tags": [
+                    "Onboarding Extension Point"
+                ],
+                "summary": "API to Retrieve Extension Task",
+                "description": "Query open extension tasks for a given process and retrieve it for a specific Process ID.",
+                "operationId": "getProcessTaskStatus",
+                "parameters": [
+                    {
+                        "name": "processId",
+                        "in": "path",
+                        "description": "Process Id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "$filter",
+                        "in": "query",
+                        "description": "Task type filter",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "*/*": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/ExtensionPointTaskDetail"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "$ref": "#/components/responses/400"
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/401"
+                    },
+                    "412": {
+                        "$ref": "#/components/responses/412"
+                    },
+                    "500": {
+                        "$ref": "#/components/responses/500"
+                    },
+                    "413": {
+                        "$ref": "#/components/responses/413"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/403"
+                    },
+                    "404": {
+                        "$ref": "#/components/responses/404"
+                    },
+                    "503": {
+                        "$ref": "#/components/responses/503"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/429"
+                    },
+                    "409": {
+                        "$ref": "#/components/responses/409"
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "ExtensionPointTaskDetail": {
+                "type": "object",
+                "properties": {
+                    "taskType": {
+                        "type": "string",
+                        "enum": [
+                            "HIRING_MANAGER_REVIEW_EXTENSION",
+                            "PERSONAL_DATA_COLLECTION_EXTENSION"
+                        ]
+                    },
+                    "comments": {
+                        "type": "string",
+                        "writeOnly": true
+                    },
+                    "processStatus": {
+                        "type": "string",
+                        "enum": [
+                            "SCHEDULED",
+                            "IN_PROGRESS",
+                            "COMPLETED",
+                            "CANCELLED_POST_COMPLETION",
+                            "CANCELLED",
+                            "SKIPPED",
+                            "DECLINED",
+                            "CLOSED"
+                        ]
+                    },
+                    "eventReason": {
+                        "type": "string",
+                        "writeOnly": true
+                    },
+                    "taskId": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string",
+                        "writeOnly": true,
+                        "enum": [
+                            "RESUME",
+                            "CANCEL"
+                        ]
+                    }
+                }
+            },
+            "Detail": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "target": {
+                        "type": "string"
+                    }
+                }
+            },
+            "Error": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "details": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Detail"
+                        }
+                    }
+                }
+            },
+            "ErrorResponse": {
+                "type": "object",
+                "properties": {
+                    "error": {
+                        "$ref": "#/components/schemas/Error"
+                    }
+                }
+            }
+        },
+        "parameters": {},
+        "securitySchemes": {
+      		"BearerAuth": {
+        		"type": "http",
+        		"scheme": "bearer"
+      		}
+    	},
+        "headers": {
+            "Retry-After": {
+                "description": "It indicates how long the client should wait before making a follow-up request.",
+                "schema": {
+                    "type": "string",
+                    "format": "uuid"
+                }
+            },
+            "X-Correlation-ID": {
+                "description": "One unique id which able to identify the whole request.",
+                "schema": {
+                    "type": "integer"
+                }
+            }
+        },
+        "responses": {
+            "400": {
+                "description": "Bad Request",
+                "headers": {
+                    "X-Correlation-ID": {
+                        "$ref": "#/components/headers/X-Correlation-ID"
+                    }
+                },
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "$ref": "#/components/schemas/ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "401": {
+                "description": "Unauthorized",
+                "headers": {
+                    "X-Correlation-ID": {
+                        "$ref": "#/components/headers/X-Correlation-ID"
+                    }
+                },
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "$ref": "#/components/schemas/ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "412": {
+                "description": "Precondition Failed",
+                "headers": {
+                    "X-Correlation-ID": {
+                        "$ref": "#/components/headers/X-Correlation-ID"
+                    }
+                },
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "$ref": "#/components/schemas/ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "500": {
+                "description": "Internal Server Error",
+                "headers": {
+                    "X-Correlation-ID": {
+                        "$ref": "#/components/headers/X-Correlation-ID"
+                    }
+                },
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "$ref": "#/components/schemas/ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "413": {
+                "description": "Payload Too Large",
+                "headers": {
+                    "X-Correlation-ID": {
+                        "$ref": "#/components/headers/X-Correlation-ID"
+                    }
+                },
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "$ref": "#/components/schemas/ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "403": {
+                "description": "Forbidden",
+                "headers": {
+                    "X-Correlation-ID": {
+                        "$ref": "#/components/headers/X-Correlation-ID"
+                    }
+                },
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "$ref": "#/components/schemas/ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "404": {
+                "description": "Not Found",
+                "headers": {
+                    "X-Correlation-ID": {
+                        "$ref": "#/components/headers/X-Correlation-ID"
+                    }
+                },
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "$ref": "#/components/schemas/ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "503": {
+                "description": "Service Unavailable",
+                "headers": {
+                    "Retry-After": {
+                        "$ref": "#/components/headers/Retry-After"
+                    },
+                    "X-Correlation-ID": {
+                        "$ref": "#/components/headers/X-Correlation-ID"
+                    }
+                },
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "$ref": "#/components/schemas/ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "429": {
+                "description": "Too Many Requests",
+                "headers": {
+                    "Retry-After": {
+                        "$ref": "#/components/headers/Retry-After"
+                    },
+                    "X-Correlation-ID": {
+                        "$ref": "#/components/headers/X-Correlation-ID"
+                    }
+                },
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "$ref": "#/components/schemas/ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "409": {
+                "description": "Conflict",
+                "headers": {
+                    "X-Correlation-ID": {
+                        "$ref": "#/components/headers/X-Correlation-ID"
+                    }
+                },
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "$ref": "#/components/schemas/ErrorResponse"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "x-sap-api-type": "REST",
+    "x-sap-shortText": "APIs for SAP SuccessFactors Onboarding Processes.",
+    "x-servers": [
+        {
+            "url": "https://{api-server}/",
+            "description": "Onboarding Processes Extension Point API",
+            "templates": {
+                "api-server": {
+                    "description": "SuccessFactors Data Center host",
+                    "default": "apisalesdemo8.successfactors.com"
+                }
+            }
+        }
+    ],
+    "security": [
+    	{
+      		"BearerAuth": []
+    	}
+  	]
+}

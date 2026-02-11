@@ -1,0 +1,1458 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Compensation Management",
+    "version": "1.0.0",
+    "description" : "Use this API to access data from standard and custom fields on the three tabs of salary, bonus, and stock on the compensation worksheets as well as bonus related data on the variable pay worksheets. This includes user data, any salary related data, as well as data related to performance rating, and force comments."
+  },
+  "servers": [
+    {
+      "url": "https://{api-server}/rest/rewards/compensation/v1",
+      "description": "REST APIs for the SuccessFactors Data Centers",
+      "variables": {
+        "api-server": {
+          "description": "SuccessFactors Data Center host",
+          "default": "apisalesdemo8.successfactors.com"
+        }
+      }
+    }
+  ],
+  "x-sap-shortText": "Access data from compensation planning",
+  "paths": {
+    "/employeeCompensations": {
+      "get": {
+        "description": "Retrieves a list of compensation records from salary, stock, bonus, and variable pay. It checks for permission to read compensation data.",
+        "tags": [
+          "Employee Compensation"
+        ],
+        "operationId": "queryEmployeeCompensationEntries",
+        "parameters": [
+          {
+            "name": "templateId",
+            "in": "query",
+            "required": true,
+            "description": "Template ID",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "example": 100
+            }
+          },
+          {
+            "name": "$skip",
+            "in": "query",
+            "required": false,
+            "description": "The number of events to skip before beginning to return events in the response",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "example": 200
+            }
+          },
+          {
+            "name": "$top",
+            "in": "query",
+            "required": false,
+            "description": "The maximum number of events to return in the response",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "example": 25
+            }
+          },
+          {
+            "name": "$filter",
+            "in": "query",
+            "required": false,
+            "description": "The filter operation (eq and in) for compPlanId, formDataId, location, department, and division",
+            "schema": {
+              "type": "string",
+              "example": "compPlanId eq 100 and department in ('Enterprises')"
+            }
+          },
+          {
+            "name": "$expand",
+            "in": "query",
+            "required": false,
+            "description": "The expand operation for salary, bonus, stock, varpay, commentList, and ratingInfos",
+            "schema": {
+              "type": "string",
+              "example": "$expand=salary($select=curSalary)"
+            }
+          },
+          {
+            "name": "$select",
+            "in": "query",
+            "required": false,
+            "description": "The selection operation for standard and custom fields",
+            "schema": {
+              "type": "string",
+              "example": "$select=curSalary,customFields/customField1"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "It indicates that the request is successful.",
+            "headers": {
+              "X-Correlation-ID": {
+                "$ref": "#/components/headers/X-Correlation-ID"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageEmployeeCompEntryDTO"
+                }
+              },
+              "application/schema-instance+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageEmployeeCompEntryDTO"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "It indicates that the server cannot process the request due to something that is perceived to be a client error. For example, templateId is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Bad Request",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "It indicates that the server cannot process the request as the user does not have the required permission to access the resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Forbidden",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "It indicates that the server has not found anything matching the request URI or the requested resource doesn't exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Not Found",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "It indicates that the server is not responding.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Server Unavailable",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Retrieves the compensation records on worksheets for a template ID based on your criteria."
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "EmployeeCompBonusEntryDTO": {
+        "title": "Bonus",
+        "required": [
+          "compEntryId"
+        ],
+        "type": "object",
+        "properties": {
+          "compEntryId": {
+            "type": "integer",
+            "title": "compEntryId",
+            "description": "Compensation entry ID",
+            "format": "int64",
+            "example": 1000
+          },
+          "target": {
+            "type": "number",
+            "title": "target",
+            "description": "Target",
+            "format": "double",
+            "example": 100.0
+          },
+          "extraPercent": {
+            "type": "number",
+            "title": "extraPercent",
+            "description": "User modifier percent",
+            "format": "double",
+            "example": 50.0
+          },
+          "extra": {
+            "type": "number",
+            "title": "extra",
+            "description": "Adjustment",
+            "format": "double",
+            "example": 30.0
+          },
+          "total": {
+            "type": "number",
+            "title": "total",
+            "description": "Total",
+            "format": "double",
+            "example": 50.0
+          },
+          "isIneligible": {
+            "type": "boolean",
+            "title": "isIneligible",
+            "description": "Indicates if the entry is ineligible",
+            "example": false
+          },
+          "bonusNotes": {
+            "type": "string",
+            "title": "bonusNotes",
+            "description": "Bonus notes",
+            "example": "This is a bonus note."
+          },
+          "customFields": {
+            "type": "object",
+            "title": "customFields",
+            "description": "Reportable custom fields in bonus tab",
+            "additionalProperties": {
+              "type": "object",
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "format": "date"
+                }
+              ]
+            },
+            "example": "customBonusAmount"
+          }
+        }
+      },
+      "EmployeeCompEntryDTO": {
+        "title": "EmployeeCompensation",
+        "required": [
+          "compEntryId",
+          "compPlanId",
+          "formDataId"
+        ],
+        "type": "object",
+        "properties": {
+          "compEntryId": {
+            "type": "integer",
+            "title": "compEntryId",
+            "description": "Compensation entry ID",
+            "format": "int64",
+            "example": 2000
+          },
+          "compPlanId": {
+            "type": "integer",
+            "title": "compPlanId",
+            "description": "Compensation plan ID",
+            "format": "int64",
+            "example": 100
+          },
+          "formDataId": {
+            "type": "integer",
+            "title": "formDataId",
+            "description": "Compensation form data ID",
+            "format": "int64",
+            "example": 200
+          },
+          "compTemplateId": {
+            "type": "integer",
+            "title": "compTemplateId",
+            "description": "Compensation template ID",
+            "format": "int64",
+            "example": 500
+          },
+          "entryUserId": {
+            "type": "string",
+            "title": "entryUserId",
+            "description": "Entry user ID",
+            "example": "user1"
+          },
+          "entryUserGroupName": {
+            "type": "string",
+            "title": "entryUserGroupName",
+            "description": "Entry user group name",
+            "example": "group1"
+          },
+          "entryUserName": {
+            "type": "string",
+            "title": "entryUserName",
+            "description": "Entry username",
+            "example": "adminUser"
+          },
+          "entryUserFirstName": {
+            "type": "string",
+            "title": "entryUserFirstName",
+            "description": "Entry user firstname",
+            "example": "John"
+          },
+          "entryUserLastName": {
+            "type": "string",
+            "title": "entryUserLastName",
+            "description": "Entry user lastname",
+            "example": "Doe"
+          },
+          "entryUserMiddleName": {
+            "type": "string",
+            "title": "entryUserMiddleName",
+            "description": "Entry user middle name",
+            "example": "Mike"
+          },
+          "revieweeMgrUserId": {
+            "type": "string",
+            "title": "revieweeMgrUserId",
+            "description": "Manager user ID",
+            "example": "jDoe1"
+          },
+          "revieweeMgrUserName": {
+            "type": "string",
+            "title": "revieweeMgrUserName",
+            "description": "Manager username",
+            "example": "jDoe100"
+          },
+          "revieweeMgrUserFirstName": {
+            "type": "string",
+            "title": "revieweeMgrUserFirstName",
+            "description": "Manager user firstname",
+            "example": "John"
+          },
+          "revieweeMgrUserLastName": {
+            "type": "string",
+            "title": "revieweeMgrUserLastName",
+            "description": "Manager user lastname",
+            "example": "Doe"
+          },
+          "revieweeMgrUserMiddleName": {
+            "type": "string",
+            "title": "revieweeMgrUserMiddleName",
+            "description": "Manager user middle name",
+            "example": "Mike"
+          },
+          "department": {
+            "type": "string",
+            "title": "department",
+            "description": "Department",
+            "example": "Engineering"
+          },
+          "division": {
+            "type": "string",
+            "title": "division",
+            "description": "Division",
+            "example": "Human Resource"
+          },
+          "location": {
+            "type": "string",
+            "title": "location",
+            "description": "Location",
+            "example": "USA"
+          },
+          "localCurrencyCode": {
+            "type": "string",
+            "title": "localCurrencyCode",
+            "description": "Entry local currency code",
+            "example": "USD"
+          },
+          "functionalCurrencyCode": {
+            "type": "string",
+            "title": "functionalCurrencyCode",
+            "description": "Template functional currency code",
+            "example": "EUR"
+          },
+          "isECUser": {
+            "type": "boolean",
+            "title": "isECUser",
+            "description": "Indicates if the entry is an Employee Central user",
+            "example": true
+          },
+          "isTotalComp": {
+            "type": "boolean",
+            "title": "isTotalComp",
+            "description": "Indicates if the template is a total compensation plan",
+            "example": true
+          },
+          "salary": {
+            "title": "salary",
+            "description": "Salary details",
+            "$ref": "#/components/schemas/EmployeeCompSalaryEntryDTO"
+          },
+          "stock": {
+            "title": "stock",
+            "description": "Stock details",
+            "$ref": "#/components/schemas/EmployeeCompStockEntryDTO"
+          },
+          "bonus": {
+            "title": "bonus",
+            "description": "Bonus details",
+            "$ref": "#/components/schemas/EmployeeCompBonusEntryDTO"
+          },
+          "varpay": {
+            "title": "varpay",
+            "description": "Variable pay details",
+            "$ref": "#/components/schemas/EmployeeCompVarpayEntryDTO"
+          },
+          "ratingInfos": {
+            "title": "ratingInfos",
+            "type": "array",
+            "description": "Rating information",
+            "items": {
+              "$ref": "#/components/schemas/EmployeeCompRatingInfoDTO"
+            }
+          },
+          "commentList": {
+            "title": "commentList",
+            "type": "array",
+            "description": "Force comments",
+            "items": {
+              "$ref": "#/components/schemas/EmployeeCompForceCommentDTO"
+            }
+          }
+        }
+      },
+      "EmployeeCompForceCommentDTO": {
+        "title": "ForceComment",
+        "type": "object",
+        "properties": {
+          "compCommentId": {
+            "type": "integer",
+            "title": "compCommentId",
+            "description": "Force comment ID",
+            "format": "int64",
+            "example": 100
+          },
+          "compEntryId": {
+            "type": "integer",
+            "title": "compEntryId",
+            "description": "Compensation entry ID",
+            "format": "int64",
+            "example": 2000
+          },
+          "compCommentType": {
+            "type": "integer",
+            "title": "compCommentType",
+            "description": "Force comment type",
+            "format": "int32",
+            "example": 1
+          },
+          "compCommentField": {
+            "type": "string",
+            "title": "compCommentField",
+            "description": "Force comment field",
+            "example": "meritComment"
+          },
+          "compCommentComment": {
+            "type": "string",
+            "title": "compCommentComment",
+            "description": "Force comment content",
+            "example": "This is a comment."
+          },
+          "createdDate": {
+            "type": "string",
+            "title": "createdDate",
+            "description": "Created date of force comment",
+            "format": "date-time",
+            "example": "2024-01-01"
+          },
+          "createdBy": {
+            "type": "string",
+            "title": "createdBy",
+            "description": "Author of force comment",
+            "example": "admin"
+          },
+          "lastModified": {
+            "type": "string",
+            "title": "lastModified",
+            "description": "Last modified date of force comment",
+            "format": "date-time",
+            "example": "2024-01-01"
+          },
+          "lastModifiedBy": {
+            "type": "string",
+            "title": "lastModifiedBy",
+            "description": "Author of the last modification on force comment",
+            "example": "admin"
+          }
+        }
+      },
+      "EmployeeCompGuidelineDTO": {
+        "title": "Guideline",
+        "type": "object",
+        "properties": {
+          "useAmt": {
+            "type": "boolean",
+            "title": "useAmt",
+            "description": "Indicates if the guideline uses amount",
+            "example": true
+          },
+          "min": {
+            "type": "number",
+            "title": "min",
+            "description": "Minimum",
+            "format": "double",
+            "example": 100.0
+          },
+          "mid": {
+            "type": "number",
+            "title": "mid",
+            "description": "Midpoint",
+            "format": "double",
+            "example": 200.0
+          },
+          "max": {
+            "type": "number",
+            "title": "max",
+            "description": "Maximum",
+            "format": "double",
+            "example": 300.0
+          },
+          "low": {
+            "type": "number",
+            "title": "low",
+            "description": "Low",
+            "format": "double",
+            "example": 100.0
+          },
+          "high": {
+            "type": "number",
+            "title": "high",
+            "description": "High",
+            "format": "double",
+            "example": 300.0
+          },
+          "formattedString": {
+            "type": "string",
+            "title": "formattedString",
+            "description": "Formatted guideline information",
+            "example": "$0-$54,321"
+          }
+        }
+      },
+      "EmployeeCompRatingInfoDTO": {
+        "title": "RatingInformation",
+        "type": "object",
+        "properties": {
+          "compEntryId": {
+            "type": "integer",
+            "title": "compEntryId",
+            "description": "Compensation entry ID",
+            "format": "int64",
+            "example": 2000
+          },
+          "ratingSource": {
+            "type": "string",
+            "title": "ratingSource",
+            "description": "Rating source",
+            "example": "PM",
+            "enum": [
+              "PM",
+              "EmployeeProfile"
+            ]
+          },
+          "ratingType": {
+            "type": "string",
+            "title": "ratingType",
+            "description": "Rating type",
+            "example": "bonus"
+          },
+          "rating": {
+            "type": "number",
+            "title": "rating",
+            "description": "Rating",
+            "format": "double",
+            "example": 1.0
+          },
+          "ratingDesc": {
+            "type": "string",
+            "title": "ratingDesc",
+            "description": "Rating description",
+            "example": "Meet Expectation"
+          },
+          "compRating": {
+            "type": "number",
+            "title": "compRating",
+            "description": "Comp rating",
+            "format": "double",
+            "example": 2.0
+          },
+          "pmFormTemplateId": {
+            "type": "integer",
+            "title": "pmFormTemplateId",
+            "description": "Performance form template ID",
+            "format": "int64",
+            "example": 100
+          },
+          "pmFormDataId": {
+            "type": "integer",
+            "title": "pmFormDataId",
+            "description": "Performance form data ID",
+            "format": "int64",
+            "example": 200
+          },
+          "feedbackId": {
+            "type": "integer",
+            "title": "feedbackId",
+            "description": "Feedback ID",
+            "format": "int64",
+            "example": 300
+          }
+        }
+      },
+      "EmployeeCompSalaryEntryDTO": {
+        "title": "Salary",
+        "required": [
+          "compEntryId"
+        ],
+        "type": "object",
+        "properties": {
+          "compEntryId": {
+            "type": "integer",
+            "title": "compEntryId",
+            "description": "Compensation entry ID",
+            "format": "int64",
+            "example": 1000
+          },
+          "startDate": {
+            "type": "string",
+            "title": "startDate",
+            "description": "Date of current position",
+            "format": "date-time",
+            "example": "2024-01-01"
+          },
+          "prorating": {
+            "type": "number",
+            "title": "prorating",
+            "description": "Prorating",
+            "format": "double",
+            "example": 50.0
+          },
+          "curSalary": {
+            "type": "number",
+            "title": "curSalary",
+            "description": "Current salary",
+            "format": "double",
+            "example": 10000.0
+          },
+          "curSalaryLocal": {
+            "type": "number",
+            "title": "curSalaryLocal",
+            "description": "Current salary in local currency",
+            "format": "double",
+            "example": 10000.0
+          },
+          "promo": {
+            "type": "number",
+            "title": "promo",
+            "description": "Promotion",
+            "format": "double",
+            "example": 500.0
+          },
+          "merit": {
+            "type": "number",
+            "title": "merit",
+            "description": "Merit",
+            "format": "double",
+            "example": 300.0
+          },
+          "meritTarget": {
+            "type": "number",
+            "title": "meritTarget",
+            "description": "Merit target",
+            "format": "double",
+            "example": 200.0
+          },
+          "extra": {
+            "type": "number",
+            "title": "extra",
+            "description": "Adjustment",
+            "format": "double",
+            "example": 100.0
+          },
+          "extra2": {
+            "type": "number",
+            "title": "extra2",
+            "description": "Adjustment2",
+            "format": "double",
+            "example": 500.0
+          },
+          "raiseProrating": {
+            "type": "number",
+            "title": "raiseProrating",
+            "description": "Total raise prorating",
+            "format": "double",
+            "example": 1000.0
+          },
+          "raise": {
+            "type": "number",
+            "title": "raise",
+            "description": "Total raise",
+            "format": "double",
+            "example": 500.0
+          },
+          "finalSalary": {
+            "type": "number",
+            "title": "finalSalary",
+            "description": "Final salary",
+            "format": "double",
+            "example": 20000.0
+          },
+          "finalSalaryLocal": {
+            "type": "number",
+            "title": "finalSalaryLocal",
+            "description": "Final salary in local currency",
+            "format": "double",
+            "example": 20000.0
+          },
+          "salaryRateLocalCurrency": {
+            "type": "number",
+            "title": "salaryRateLocalCurrency",
+            "description": "Salary rate in local currency",
+            "format": "double",
+            "example": 10000.0
+          },
+          "salaryRatePlanCurrency": {
+            "type": "number",
+            "title": "salaryRatePlanCurrency",
+            "description": "Salary rate in plan currency",
+            "format": "double",
+            "example": 10000.0
+          },
+          "salaryRateUnits": {
+            "type": "number",
+            "title": "salaryRateUnits",
+            "description": "Units per year",
+            "format": "double",
+            "example": 50.0
+          },
+          "salaryRateType": {
+            "type": "string",
+            "title": "salaryRateType",
+            "description": "Salary type",
+            "example": "ANNUAL"
+          },
+          "salaryRateFinal": {
+            "type": "number",
+            "title": "salaryRateFinal",
+            "description": "Final salary rate",
+            "format": "double",
+            "example": 5000.0
+          },
+          "jobLevel": {
+            "type": "string",
+            "title": "jobLevel",
+            "description": "Job level",
+            "example": "LEVEL_1"
+          },
+          "jobTitle": {
+            "type": "string",
+            "title": "jobTitle",
+            "description": "Title",
+            "example": "Manager"
+          },
+          "payGrade": {
+            "type": "string",
+            "title": "payGrade",
+            "description": "Current pay grade",
+            "example": "PG-10"
+          },
+          "finalPayGrade": {
+            "type": "string",
+            "title": "finalPayGrade",
+            "description": "Final pay grade",
+            "example": "PG-20"
+          },
+          "jobFamily": {
+            "type": "string",
+            "title": "jobFamily",
+            "description": "Current job family",
+            "example": "Accounting"
+          },
+          "jobRole": {
+            "type": "string",
+            "title": "jobRole",
+            "description": "Current job role",
+            "example": "Engineer"
+          },
+          "jobCode": {
+            "type": "string",
+            "title": "jobCode",
+            "description": "Current job code",
+            "example": "ENG"
+          },
+          "finalJobFamily": {
+            "type": "string",
+            "title": "finalJobFamily",
+            "description": "Final job family",
+            "example": "Accounting"
+          },
+          "finalJobRole": {
+            "type": "string",
+            "title": "finalJobRole",
+            "description": "Final job role",
+            "example": "Engineer"
+          },
+          "finalJobCode": {
+            "type": "string",
+            "title": "finalJobCode",
+            "description": "Final job code",
+            "example": "ENG"
+          },
+          "comparisonRatio": {
+            "type": "number",
+            "title": "comparisonRatio",
+            "description": "Final compa ratio",
+            "format": "double",
+            "example": 50.0
+          },
+          "rangePenetration": {
+            "type": "number",
+            "title": "rangePenetration",
+            "description": "Final position in range",
+            "format": "double",
+            "example": 125.0
+          },
+          "curComparisonRatio": {
+            "type": "number",
+            "title": "curComparisonRatio",
+            "description": "Current compa ratio",
+            "format": "double",
+            "example": 40.0
+          },
+          "curRangePenetration": {
+            "type": "number",
+            "title": "curRangePenetration",
+            "description": "Current position in range",
+            "format": "double",
+            "example": 130.0
+          },
+          "lumpSum": {
+            "type": "number",
+            "title": "lumpSum",
+            "description": "Lump sum",
+            "format": "double",
+            "example": 200.0
+          },
+          "lumpSumTarget": {
+            "type": "number",
+            "title": "lumpSumTarget",
+            "description": "Lump sum target",
+            "format": "double",
+            "example": 500.0
+          },
+          "lumpSum2": {
+            "type": "number",
+            "title": "lumpSum2",
+            "description": "Lump sum 2",
+            "format": "double",
+            "example": 1000.0
+          },
+          "lumpSum2Target": {
+            "type": "number",
+            "title": "lumpSum2Target",
+            "description": "Lump sum target 2",
+            "format": "double",
+            "example": 1000.0
+          },
+          "totalLumpSum": {
+            "type": "number",
+            "title": "totalLumpSum",
+            "description": "Total lump sum",
+            "format": "double",
+            "example": 1000.0
+          },
+          "totalIncrease": {
+            "type": "number",
+            "title": "totalIncrease",
+            "description": "Total increase",
+            "format": "double",
+            "example": 1000.0
+          },
+          "totalComp": {
+            "type": "number",
+            "title": "totalComp",
+            "description": "Total compensation",
+            "format": "double",
+            "example": 15000.0
+          },
+          "totalCompLocal": {
+            "type": "number",
+            "title": "totalCompLocal",
+            "description": "Total compensation in local currency",
+            "format": "double",
+            "example": 15000.0
+          },
+          "promoDate": {
+            "type": "string",
+            "title": "promoDate",
+            "description": "Promotion effective date",
+            "format": "date-time",
+            "example": "2024-01-01"
+          },
+          "meritDate": {
+            "type": "string",
+            "title": "meritDate",
+            "description": "Merit raise effective date",
+            "format": "date-time",
+            "example": "2024-01-01"
+          },
+          "extraDate": {
+            "type": "string",
+            "title": "extraDate",
+            "description": "Adjustment effective date",
+            "format": "date-time",
+            "example": "2024-01-01"
+          },
+          "extra2Date": {
+            "type": "string",
+            "title": "extra2Date",
+            "description": "Adjustment2 effective date",
+            "format": "date-time",
+            "example": "2024-01-01"
+          },
+          "lumpsumDate": {
+            "type": "string",
+            "title": "lumpsumDate",
+            "description": "Lumpsum effective date",
+            "format": "date-time",
+            "example": "2024-01-01"
+          },
+          "lumpsum2Date": {
+            "type": "string",
+            "title": "lumpsum2Date",
+            "description": "Lumpsum2 effective Date",
+            "format": "date-time",
+            "example": "2024-01-01"
+          },
+          "promoNet": {
+            "type": "number",
+            "title": "promoNet",
+            "description": "Promotion cash flow impact",
+            "format": "double",
+            "example": 100.0
+          },
+          "meritNet": {
+            "type": "number",
+            "title": "meritNet",
+            "description": "Merit raise cash flow impact",
+            "format": "double",
+            "example": 200.0
+          },
+          "extraNet": {
+            "type": "number",
+            "title": "extraNet",
+            "description": "Adjustment cash flow impact",
+            "format": "double",
+            "example": 200.0
+          },
+          "extra2Net": {
+            "type": "number",
+            "title": "extra2Net",
+            "description": "Adjustment2 cash flow impact",
+            "format": "double",
+            "example": 200.0
+          },
+          "proratingStartDate": {
+            "type": "string",
+            "title": "proratingStartDate",
+            "description": "Salary prorating start date",
+            "format": "date-time",
+            "example": "2024-01-01"
+          },
+          "proratingEndDate": {
+            "type": "string",
+            "title": "proratingEndDate",
+            "description": "Salary prorating end date",
+            "format": "date-time",
+            "example": "2024-01-01"
+          },
+          "raiseProratingStartDate": {
+            "type": "string",
+            "title": "raiseProratingStartDate",
+            "description": "Total raise prorating start date",
+            "format": "date-time",
+            "example": "2024-01-01"
+          },
+          "raiseProratingEndDate": {
+            "type": "string",
+            "title": "raiseProratingEndDate",
+            "description": "Total raise prorating end date",
+            "format": "date-time",
+            "example": "2024-01-01"
+          },
+          "isIneligible": {
+            "type": "boolean",
+            "title": "isIneligible",
+            "description": "Indicates if the entry is ineligible",
+            "example": false
+          },
+          "isPromoIneligible": {
+            "type": "boolean",
+            "title": "isPromoIneligible",
+            "description": "Indicates if the entry is ineligible for promotion",
+            "example": false
+          },
+          "isMeritIneligible": {
+            "type": "boolean",
+            "title": "isMeritIneligible",
+            "description": "Indicates if the entry is ineligible for merit raise",
+            "example": false
+          },
+          "isExtraIneligible": {
+            "type": "boolean",
+            "title": "isExtraIneligible",
+            "description": "Indicates if the entry is ineligible for adjustment",
+            "example": false
+          },
+          "isExtra2Ineligible": {
+            "type": "boolean",
+            "title": "isExtra2Ineligible",
+            "description": "Indicates if the entry is ineligible for adjustment2",
+            "example": true
+          },
+          "isLumpsumIneligible": {
+            "type": "boolean",
+            "title": "isLumpsumIneligible",
+            "description": "Indicates if the entry is ineligible for lump sum",
+            "example": true
+          },
+          "isLumpsum2Ineligible": {
+            "type": "boolean",
+            "title": "isLumpsum2Ineligible",
+            "description": "Indicates if the entry is ineligible for lump sum2",
+            "example": true
+          },
+          "payGuideMin": {
+            "type": "number",
+            "title": "payGuideMin",
+            "description": "Current salary range minimum",
+            "format": "double",
+            "example": 10000.0
+          },
+          "payGuideMid": {
+            "type": "number",
+            "title": "payGuideMid",
+            "description": "Current salary range midpoint",
+            "format": "double",
+            "example": 15000.0
+          },
+          "payGuideMax": {
+            "type": "number",
+            "title": "payGuideMax",
+            "description": "Current salary range maximum",
+            "format": "double",
+            "example": 20000.0
+          },
+          "finalPayGuideMin": {
+            "type": "number",
+            "title": "finalPayGuideMin",
+            "description": "Final salary range minimum",
+            "format": "double",
+            "example": 10000.0
+          },
+          "finalPayGuideMid": {
+            "type": "number",
+            "title": "finalPayGuideMid",
+            "description": "Final salary range midpoint",
+            "format": "double",
+            "example": 15000.0
+          },
+          "finalPayGuideMax": {
+            "type": "number",
+            "title": "finalPayGuideMax",
+            "description": "Final salary range maximum",
+            "format": "double",
+            "example": 20000.0
+          },
+          "promoGuideline": {
+            "title": "promoGuideline",
+            "description": "Promotion guideline",
+            "$ref": "#/components/schemas/EmployeeCompGuidelineDTO"
+          },
+          "meritGuideline": {
+            "title": "meritGuideline",
+            "description": "Merit guideline",
+            "$ref": "#/components/schemas/EmployeeCompGuidelineDTO"
+          },
+          "extraGuideline": {
+            "title": "extraGuideline",
+            "description": "Adjustment guideline",
+            "$ref": "#/components/schemas/EmployeeCompGuidelineDTO"
+          },
+          "extra2Guideline": {
+            "title": "extra2Guideline",
+            "description": "Adjustment2 guideline",
+            "$ref": "#/components/schemas/EmployeeCompGuidelineDTO"
+          },
+          "lumpSumGuideline": {
+            "title": "lumpSumGuideline",
+            "description": "Lump sum guideline",
+            "$ref": "#/components/schemas/EmployeeCompGuidelineDTO"
+          },
+          "lumpSum2Guideline": {
+            "title": "lumpSum2Guideline",
+            "description": "Lump sum2 guideline",
+            "$ref": "#/components/schemas/EmployeeCompGuidelineDTO"
+          },
+          "salaryNotes": {
+            "type": "string",
+            "title": "salaryNotes",
+            "description": "Salary notes",
+            "example": "This is a salary note."
+          },
+          "customFields": {
+            "type": "object",
+            "title": "customFields",
+            "description": "Reportable custom fields in salary tab",
+            "additionalProperties": {
+              "type": "object",
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "format": "date"
+                }
+              ]
+            },
+            "example": "customSalary"
+          }
+        }
+      },
+      "EmployeeCompStockEntryDTO": {
+        "title": "Stock",
+        "required": [
+          "compEntryId"
+        ],
+        "type": "object",
+        "properties": {
+          "compEntryId": {
+            "type": "integer",
+            "title": "compEntryId",
+            "description": "Compensation entry ID",
+            "format": "int64",
+            "example": 1000
+          },
+          "stock": {
+            "type": "number",
+            "title": "stock",
+            "description": "Stock",
+            "format": "double",
+            "example": 100.0
+          },
+          "grantDate": {
+            "type": "string",
+            "title": "grantDate",
+            "description": "Date of grant",
+            "format": "date-time",
+            "example": "2024-01-01"
+          },
+          "option": {
+            "type": "number",
+            "title": "option",
+            "description": "Options",
+            "format": "double",
+            "example": 100.0
+          },
+          "units": {
+            "type": "number",
+            "title": "units",
+            "description": "Units",
+            "format": "double",
+            "example": 20.0
+          },
+          "other1": {
+            "type": "number",
+            "title": "other1",
+            "description": "Other1",
+            "format": "double",
+            "example": 15.0
+          },
+          "other2": {
+            "type": "number",
+            "title": "other2",
+            "description": "Other2",
+            "format": "double",
+            "example": 20.0
+          },
+          "other3": {
+            "type": "number",
+            "title": "other3",
+            "description": "Other3",
+            "format": "double",
+            "example": 25.0
+          },
+          "isIneligible": {
+            "type": "boolean",
+            "title": "isIneligible",
+            "description": "Indicates if the entry is ineligible",
+            "example": false
+          },
+          "optionGuideline": {
+            "title": "optionGuideline",
+            "description": "Options guideline",
+            "$ref": "#/components/schemas/EmployeeCompGuidelineDTO"
+          },
+          "stockGuideline": {
+            "title": "stockGuideline",
+            "description": "Stock guideline",
+            "$ref": "#/components/schemas/EmployeeCompGuidelineDTO"
+          },
+          "unitsGuideline": {
+            "title": "unitsGuideline",
+            "description": "Units guideline",
+            "$ref": "#/components/schemas/EmployeeCompGuidelineDTO"
+          },
+          "other1Guideline": {
+            "title": "other1Guideline",
+            "description": "Other1 guideline",
+            "$ref": "#/components/schemas/EmployeeCompGuidelineDTO"
+          },
+          "other2Guideline": {
+            "title": "other2Guideline",
+            "description": "Other2 guideline",
+            "$ref": "#/components/schemas/EmployeeCompGuidelineDTO"
+          },
+          "other3Guideline": {
+            "title": "other3Guideline",
+            "description": "Other3 guideline",
+            "$ref": "#/components/schemas/EmployeeCompGuidelineDTO"
+          },
+          "stockNotes": {
+            "type": "string",
+            "title": "stockNotes",
+            "description": "Stock notes",
+            "example": "This is a stock note."
+          },
+          "customFields": {
+            "type": "object",
+            "title": "customFields",
+            "description": "Reportable custom fields in stock tab",
+            "additionalProperties": {
+              "type": "object",
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "format": "date"
+                }
+              ]
+            },
+            "example": "customStock"
+          }
+        }
+      },
+      "EmployeeCompVarpayEntryDTO": {
+        "title": "VariablePay",
+        "required": [
+          "compEntryId"
+        ],
+        "type": "object",
+        "properties": {
+          "compEntryId": {
+            "type": "integer",
+            "title": "compEntryId",
+            "description": "Compensation entry ID",
+            "format": "int64",
+            "example": 1000
+          },
+          "performancePer": {
+            "type": "number",
+            "title": "performancePer",
+            "description": "Ind percent",
+            "format": "double",
+            "example": 50.0
+          },
+          "teamPerformancePer": {
+            "type": "number",
+            "title": "teamPerformancePer",
+            "description": "Team percent",
+            "format": "double",
+            "example": 50.0
+          },
+          "varpayTeamRating": {
+            "type": "number",
+            "title": "varpayTeamRating",
+            "description": "Team rating",
+            "format": "double",
+            "example": 3.0
+          },
+          "varpayIndividualRating": {
+            "type": "number",
+            "title": "varpayIndividualRating",
+            "description": "Ind rating",
+            "format": "double",
+            "example": 4.0
+          },
+          "overwriteAmt": {
+            "type": "number",
+            "title": "overwriteAmt",
+            "description": "Override",
+            "format": "double",
+            "example": 4000.0
+          },
+          "overwriteDesc": {
+            "type": "string",
+            "title": "overwriteDesc",
+            "description": "Override description",
+            "example": "This is an override description."
+          },
+          "overwriteLastModified": {
+            "type": "string",
+            "title": "overwriteLastModified",
+            "description": "Last modified date of override",
+            "format": "date-time",
+            "example": "2024-01-01"
+          },
+          "notes": {
+            "type": "string",
+            "title": "notes",
+            "description": "Variable pay notes",
+            "example": "This is a note."
+          },
+          "teamPayoutAmt": {
+            "type": "number",
+            "title": "teamPayoutAmt",
+            "description": "Team amt",
+            "format": "double",
+            "example": 5000.0
+          },
+          "finalForecastPayoutAmt": {
+            "type": "number",
+            "title": "finalForecastPayoutAmt",
+            "description": "Forecast amt",
+            "format": "double",
+            "example": 5000.0
+          },
+          "finalForecast2PayoutAmt": {
+            "type": "number",
+            "title": "finalForecast2PayoutAmt",
+            "description": "Total",
+            "format": "double",
+            "example": 5000.0
+          },
+          "finalPayoutAmt": {
+            "type": "number",
+            "title": "finalPayoutAmt",
+            "description": "Final payout",
+            "format": "double",
+            "example": 5000.0
+          },
+          "customFields": {
+            "type": "object",
+            "title": "customFields",
+            "description": "Reportable custom fields in variable pay tab",
+            "additionalProperties": {
+              "type": "object",
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "format": "date"
+                }
+              ]
+            },
+            "example": "customPayout"
+          }
+        }
+      },
+      "PageEmployeeCompEntryDTO": {
+        "title": "EmployeeCompensationPage",
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "count",
+            "description": "Count of entries",
+            "format": "int64",
+            "example": 10
+          },
+          "value": {
+            "type": "array",
+            "title": "value",
+            "description": "Value of entries",
+            "items": {
+              "$ref": "#/components/schemas/EmployeeCompEntryDTO"
+            }
+          }
+        }
+      }
+    },
+    "responses": {},
+    "headers": {
+      "Retry-After": {
+        "description": "It indicates how long the client should wait before making a follow-up request",
+        "schema": {
+          "type": "string",
+          "format": "uuid",
+          "example": null
+        }
+      },
+      "X-Correlation-ID": {
+        "description": "One unique id which able to identify the whole request",
+        "schema": {
+          "type": "integer",
+          "example": null
+        }
+      }
+    },
+    "securitySchemes": {
+      "sfOauth": {
+        "type": "oauth2",
+        "description": "Successfactors OAuth 2.0 flow. More information is available [here](https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/9f5f060351034d98990213d077dab38a/d9a9545305004187986c866de2b66987.html?locale=en-US)",
+        "flows": {
+          "clientCredentials": {
+            "tokenUrl": "https://{api-server}/oauth/token",
+            "scopes": {}
+          }
+        }
+      }
+    }
+  },
+  "externalDocs": {
+    "description": "More information about this API is available on help.sap.com",
+    "url": "https://help.sap.com/docs/SAP_SUCCESSFACTORS_RELEASE_INFORMATION/8974cf00008b4e209398478ca43bcba7/4c437eb16661469ab37e7e6377949567.html"
+  }
+}

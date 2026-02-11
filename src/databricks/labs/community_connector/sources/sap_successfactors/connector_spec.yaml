@@ -1,0 +1,51 @@
+# SAP SuccessFactors Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+connection:
+  parameters:
+    - name: endpoint_url
+      type: string
+      required: true
+      description: >
+        Base URL for SAP SuccessFactors OData API. This is typically the API
+        endpoint for your datacenter region. Examples:
+        - US (DC2): https://api2.successfactors.com/
+        - US (DC4): https://api4.successfactors.com/
+        - EU (DC5): https://api5.successfactors.eu/
+        - EU (DC15/Frankfurt): https://api15.sapsf.eu/
+        - APAC (DC8): https://api8.successfactors.com/
+        - APAC (DC10/Sydney): https://api10.successfactors.com/
+
+    - name: username
+      type: string
+      required: true
+      description: >
+        Username in the format username@companyId. The Company ID identifies
+        your SAP SuccessFactors tenant and can be found in Admin Center under
+        Company Settings. Example: sfadmin@SFPART067615
+
+    - name: password
+      type: string
+      required: true
+      description: >
+        Password for the user account. The user must have OData API access
+        permissions enabled in SAP SuccessFactors Role-Based Permissions.
+
+# ============================================================================
+# External Options Allowlist
+# These options must be included in the externalOptionsAllowList parameter of
+# the UC connection to allow them to be passed through from the pipeline.
+#
+# Required framework options:
+#   - tableConfigs: Table-specific configurations from pipeline spec
+#   - tableNameList: List of tables for metadata retrieval
+#
+# These are framework-level options required for the pipeline to function.
+# Add any connector-specific table options here as well.
+# ============================================================================
+external_options_allowlist: "tableConfigs,tableNameList"

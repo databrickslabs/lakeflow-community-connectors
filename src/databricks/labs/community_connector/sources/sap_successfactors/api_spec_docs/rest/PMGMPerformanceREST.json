@@ -1,0 +1,328 @@
+{
+  "openapi": "3.0.2",
+  "info": {
+    "title": "Performance Management",
+    "description": "Use the API to query and update a Performance Management form's step information that is predefined in the linked route map.",
+    "version": "1.0"
+  },
+  "servers": [
+    {
+      "url": "https://{api-server}/rest/talent/performance/admin/v1",
+      "variables": {
+        "api-server": {
+          "description": "SuccessFactors Data Center host",
+          "default": ""
+        }
+      }
+    }
+  ],
+  "tags": [
+    {
+      "name": "Review Route Maps"
+    }
+  ],
+  "paths": {
+    "/reviewRouteMaps/{reviewId}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "locale",
+            "description": "the user locale ",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "path",
+            "name": "reviewId",
+            "description": "Form ID",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/reviewRouteMap"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "format": "int32",
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get route map steps of a form",
+        "description": "Query all the route map steps of a form. With this query, you can get the ID of the step you want to update.",
+        "tags": [
+          "Review Route Maps"
+        ]
+      }
+    },
+    "/reviewRouteMaps/{reviewId}/modifySteps": {
+      "patch": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reviewId",
+            "description": "Form ID",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/reviewRouteStep"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Update the role for a modify-stage step",
+        "description": "Update the role for a route map step that is in the modify stage. Only steps that haven't started yet can be updated. To update one of the roles in a multiple-role step, you must provide a full list of user roles in the payload.",
+        "tags": [
+          "Review Route Maps"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "value": {
+                    "x-insertable": true,
+                    "items": {
+                      "$ref": "#/components/schemas/reviewRouteStep"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reviewRouteMaps/{reviewId}/signoffSteps": {
+      "patch": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reviewId",
+            "description": "Form ID",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/reviewRouteStep"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Update the role for a signature-stage step",
+        "description": "Update the role for a route map step that is in the signature stage. Only steps that haven't started yet can be updated. To update one of the roles in a multiple-role step, you must provide a full list of user roles in the payload.",
+        "tags": [
+          "Review Route Maps"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "value": {
+                    "x-insertable": true,
+                    "items": {
+                      "$ref": "#/components/schemas/reviewRouteStep"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "reviewRouteMap": {
+        "properties": {
+          "reviewId": {
+            "description": "Form ID",
+            "type": "integer",
+            "format": "int64"
+          },
+          "modifySteps": {
+            "description": "Steps in the modify stage",
+            "items": {
+              "$ref": "#/components/schemas/reviewRouteStep"
+            },
+            "type": "array"
+          },
+          "signoffSteps": {
+            "description": "Steps in the signature stage",
+            "items": {
+              "$ref": "#/components/schemas/reviewRouteStep"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "reviewRouteStep": {
+        "properties": {
+          "stepId": {
+            "x-key": true,
+            "description": "Route map step ID",
+            "type": "string"
+          },
+          "stepType": {
+            "example": "EM",
+            "description": "Indicates the step type and the roles defined in the step. In a single-role step, this property is used to update the role. Examples: (single-role step) EM; (iterative step) I E EM EX; (collaboration step) C E EM EX. Note: When you specify both stepType and userRole in the payload, make sure the roles are consistent.",
+            "type": "string"
+          },
+          "stepName": {
+            "description": "Step name",
+            "type": "string"
+          },
+          "stepOrder": {
+            "example": "0",
+            "description": "Step order",
+            "type": "integer",
+            "format": "int32"
+          },
+          "current": {
+            "example": "false",
+            "description": "Whether the step is the current step",
+            "type": "boolean"
+          },
+          "completed": {
+            "example": "true",
+            "description": "Whether the step is completed",
+            "type": "boolean"
+          },
+          "status": {
+            "example": "skipped",
+            "description": "Step status",
+            "type": "string"
+          },
+          "userId": {
+            "example": "cgrant1",
+            "description": "The ID of a user in a step. To change a role to U role, you must specify user ID in the payload. This is not necessary for other target roles such as EM and EH because user ID is already determined by role.",
+            "type": "string"
+          },
+          "subSteps": {
+            "items": {
+              "$ref": "#/components/schemas/reviewRouteSubStep"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "reviewRouteSubStep": {
+        "properties": {
+          "subStepOrder": {
+            "example": "0",
+            "description": "Substep order",
+            "type": "integer",
+            "format": "int32"
+          },
+          "entryUser": {
+            "example": "true",
+            "description": "(For iterative and collaboration steps only) Whether a user is the entry user of a step",
+            "type": "boolean"
+          },
+          "exitUser": {
+            "example": "false",
+            "description": "(For iterative and collaboration steps only) Whether a user is the exit user of a step",
+            "type": "boolean"
+          },
+          "userId": {
+            "example": "cgrant1",
+            "description": "The ID of a user in a step",
+            "type": "string"
+          },
+          "userRole": {
+            "example": "EM",
+            "description": "A role in a multiple-role step. When you specify both userRole and stepType in the payload, make sure the roles are consistent.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "parameters": {},
+    "responses": {},
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "externalDocs": {
+    "description": "More Information available on help.sap.com",
+    "url": "https://help.sap.com/docs/SAP_SUCCESSFACTORS_PERFORMANCE_AND_GOALS/8aaa9ac9177d482e8e6597e509237656/50786a0ba63d4d0cacbd4db7cca2f9d2.html?latest"
+  },
+  "x-sap-shortText": "API for SAP SuccessFactors Performance Management",
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ]
+}

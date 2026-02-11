@@ -1,0 +1,1449 @@
+{
+	"swagger": "2.0",
+	"security": [
+        {
+            "basicAuthentication": []
+        }
+    ],
+    "securityDefinitions": {
+        "basicAuthentication": {
+            "type": "basic"
+        }
+    },
+	"x-sap-shortText":"API to access details of user interface style settings.",
+	"x-servers": [{
+		"url": "https://{api-server}/odata/v2",
+		"description": "OData APIs for the SuccessFactors Data Centers",
+		"templates": {
+			"api-server": {
+				"description": "SuccessFactors Data Center host",
+				"default": "apisalesdemo8.successfactors.com"
+			}
+		}
+	}],
+	"info": {
+		"title": "User Interface Themes",
+		"version": "1.0",
+		"description": "API to access details of user interface style settings that available for theming, such as CSS values for color, style definition, and configurations.\n\n You can find your company's API server in [List of API Servers in SAP SuccessFactors.](https://help.sap.com/viewer/d599f15995d348a1b45ba5603e2aba9b/LATEST/en-US/af2b8d5437494b12be88fe374eba75b6.html)"
+	},
+	"externalDocs": {
+		"description": "User Interface Themes on SAP Help Portal",
+		"url": "https://help.sap.com/docs/SAP_SUCCESSFACTORS_PLATFORM/d599f15995d348a1b45ba5603e2aba9b/d8c5d8e76fb840a3a7d159fcf21ac467.html"
+	},
+	"schemes": ["https"],
+	"host": "sandbox.api.sap.com",
+	"basePath": "/successfactors/odata/v2",
+	"consumes": ["application/json"],
+	"produces": ["application/json"],
+	"tags": [{
+		"name": "Theme Template"
+	},
+	{
+		"name": "Theme Info"
+	},
+	{
+		"name": "Theme Config"
+	}],
+	"definitions": {
+		"odata.error": {
+			"type": "object",
+			"required": ["error"],
+			"properties": {
+				"error": {
+					"$ref": "#/definitions/odata.error.main"
+				}
+			}
+		},
+		"odata.error.main": {
+			"type": "object",
+			"required": ["code",
+			"message"],
+			"properties": {
+				"code": {
+					"type": "string"
+				},
+				"message": {
+					"type": "string"
+				},
+				"target": {
+					"type": "string"
+				},
+				"details": {
+					"type": "array",
+					"items": {
+						"$ref": "#/definitions/odata.error.detail"
+					}
+				},
+				"innererror": {
+					"type": "object",
+					"description": "The structure of this object is service-specific"
+				}
+			}
+		},
+		"odata.error.detail": {
+			"type": "object",
+			"required": ["code",
+			"message"],
+			"properties": {
+				"code": {
+					"type": "string"
+				},
+				"message": {
+					"type": "string"
+				},
+				"target": {
+					"type": "string"
+				}
+			}
+		},
+		"SFOData.ThemeTemplate": {
+			"type": "object",
+			"properties": {
+				"bodyStyleClass": {
+					"type": ["string",
+					"null"]
+				},
+				"footer": {
+					"type": ["string",
+					"null"]
+				},
+				"header": {
+					"type": ["string",
+					"null"]
+				},
+				"id": {
+					"type": "string"
+				},
+				"langDir": {
+					"type": ["string",
+					"null"]
+				},
+				"locale": {
+					"type": ["string",
+					"null"]
+				},
+				"scripts": {
+					"type": ["string",
+					"null"]
+				},
+				"styles": {
+					"type": ["string",
+					"null"]
+				},
+				"template": {
+					"type": ["string",
+					"null"]
+				},
+				"ui5BaseThemeRootUrl": {
+					"type": ["string",
+					"null"]
+				}
+			},
+			"title": "ThemeTemplate"
+		},
+		"SFOData.ThemeInfo": {
+			"type": "object",
+			"properties": {
+				"fingerprints": {
+					"$ref": "#/definitions/SFOData.ThemeFingerprintsBean"
+				},
+				"id": {
+					"type": "string"
+				},
+				"lastModifiedDate": {
+					"type": ["string",
+					"null"],
+					"format": "int64"
+				},
+				"locale": {
+					"type": ["string",
+					"null"]
+				},
+				"modules": {
+					"type": ["string",
+					"null"]
+				},
+				"ui5Theme": {
+					"type": ["string",
+					"null"]
+				},
+				"urls": {
+					"$ref": "#/definitions/SFOData.ThemeUrlsBean"
+				}
+			},
+			"title": "ThemeInfo"
+		},
+		"SFOData.ThemeConfig": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string"
+				},
+				"themeConfiguration": {
+					"$ref": "#/definitions/SFOData.GlobalThemeConfiguration"
+				}
+			},
+			"title": "ThemeConfig"
+		},
+		"SFOData.ThemeUrlsBean": {
+			"type": "object",
+			"properties": {
+				"baseUrl": {
+					"type": ["string",
+					"null"]
+				},
+				"configUrl": {
+					"type": ["string",
+					"null"]
+				},
+				"cssUrl": {
+					"type": ["string",
+					"null"]
+				},
+				"ui5BaseThemeRootUrl": {
+					"type": ["string",
+					"null"]
+				}
+			},
+			"title": "ThemeUrlsBean",
+			"description": "Complex type that contains password validation result, password salt and password hash."
+		},
+		"SFOData.ThemeFingerprintsBean": {
+			"type": "object",
+			"properties": {
+				"config": {
+					"type": ["string",
+					"null"]
+				},
+				"css": {
+					"type": ["string",
+					"null"]
+				},
+				"ui5BaseThemeRoot": {
+					"type": ["string",
+					"null"]
+				}
+			},
+			"title": "ThemeFingerprintsBean",
+			"description": "Complex type that contains password validation result, password salt and password hash."
+		},
+		"SFOData.ThemeColor": {
+			"type": "object",
+			"properties": {
+				"value": {
+					"type": ["string",
+					"null"]
+				}
+			},
+			"title": "ThemeColor",
+			"description": "Complex type that contains password validation result, password salt and password hash."
+		},
+		"SFOData.ThemeURL": {
+			"type": "object",
+			"properties": {
+				"value": {
+					"type": ["string",
+					"null"]
+				}
+			},
+			"title": "ThemeURL",
+			"description": "Complex type that contains password validation result, password salt and password hash."
+		},
+		"SFOData.ThemeBackgroundConfig": {
+			"type": "object",
+			"properties": {
+				"baseColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"imageHorizontalPosition": {
+					"type": ["string",
+					"null"]
+				},
+				"imageOption": {
+					"type": ["string",
+					"null"]
+				},
+				"imageRepeat": {
+					"type": ["string",
+					"null"]
+				},
+				"imageVerticalPosition": {
+					"type": ["string",
+					"null"]
+				},
+				"lighting": {
+					"type": ["string",
+					"null"]
+				},
+				"texture": {
+					"type": ["string",
+					"null"]
+				},
+				"url": {
+					"$ref": "#/definitions/SFOData.ThemeURL"
+				}
+			},
+			"title": "ThemeBackgroundConfig",
+			"description": "Complex type that contains password validation result, password salt and password hash."
+		},
+		"SFOData.ThemeButtonConfig": {
+			"type": "object",
+			"properties": {
+				"bgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"borderColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"borderWidth": {
+					"type": ["string",
+					"null"]
+				},
+				"disabledBgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"disabledBorderColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"disabledTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"hoverBgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"hoverBorderColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"hoverTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"textColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				}
+			},
+			"title": "ThemeButtonConfig",
+			"description": "Complex type that contains password validation result, password salt and password hash."
+		},
+		"SFOData.ThemeContentConfig": {
+			"type": "object",
+			"properties": {
+				"bgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"bgColorVariant": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"iconScheme": {
+					"type": ["string",
+					"null"]
+				},
+				"linkTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"textColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"textColorVariant": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				}
+			},
+			"title": "ThemeContentConfig",
+			"description": "Complex type that contains password validation result, password salt and password hash."
+		},
+		"SFOData.ThemeDiagramConfig": {
+			"type": "object",
+			"properties": {
+				"backgroundColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"lineColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"negativeThresholdColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"neutralThresholdColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"paletteColor10": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"paletteColor2": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"paletteColor3": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"paletteColor4": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"paletteColor5": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"paletteColor6": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"paletteColor7": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"paletteColor8": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"paletteColor9": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"positiveThresholdColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"primaryColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"textColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"titleColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				}
+			},
+			"title": "ThemeDiagramConfig",
+			"description": "Complex type that contains password validation result, password salt and password hash."
+		},
+		"SFOData.ThemeExternalConfig": {
+			"type": "object",
+			"properties": {
+				"faviconOption": {
+					"type": ["string",
+					"null"]
+				},
+				"faviconUrl": {
+					"$ref": "#/definitions/SFOData.ThemeURL"
+				},
+				"footerLogoOption": {
+					"type": ["string",
+					"null"]
+				},
+				"footerLogoUrl": {
+					"$ref": "#/definitions/SFOData.ThemeURL"
+				}
+			},
+			"title": "ThemeExternalConfig",
+			"description": "Complex type that contains the portion of the theme configuration for external use-cases."
+		},
+		"SFOData.ThemeFooterConfig": {
+			"type": "object",
+			"properties": {
+				"logoScheme": {
+					"type": ["string",
+					"null"]
+				},
+				"textColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				}
+			},
+			"title": "ThemeFooterConfig",
+			"description": "Complex type that contains password validation result, password salt and password hash."
+		},
+		"SFOData.ThemeHeaderBackgroundConfig": {
+			"type": "object",
+			"properties": {
+				"baseColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"bgOption": {
+					"type": ["string",
+					"null"]
+				},
+				"imageHorizontalPosition": {
+					"type": ["string",
+					"null"]
+				},
+				"imageRepeat": {
+					"type": ["string",
+					"null"]
+				},
+				"imageVerticalPosition": {
+					"type": ["string",
+					"null"]
+				},
+				"styleOption": {
+					"type": ["string",
+					"null"]
+				},
+				"url": {
+					"$ref": "#/definitions/SFOData.ThemeURL"
+				}
+			},
+			"title": "ThemeHeaderBackgroundConfig",
+			"description": "Complex type that contains password validation result, password salt and password hash."
+		},
+		"SFOData.ThemeHighlightConfig": {
+			"type": "object",
+			"properties": {
+				"bgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"iconScheme": {
+					"type": ["string",
+					"null"]
+				},
+				"linkTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"textColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				}
+			},
+			"title": "ThemeHighlightConfig",
+			"description": "Complex type that contains password validation result, password salt and password hash."
+		},
+		"SFOData.ThemeLoginBackgroundConfig": {
+			"type": "object",
+			"properties": {
+				"backgroundType": {
+					"type": ["string",
+					"null"]
+				},
+				"baseColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"imageHorizontalPosition": {
+					"type": ["string",
+					"null"]
+				},
+				"imageRepeat": {
+					"type": ["string",
+					"null"]
+				},
+				"imageVerticalPosition": {
+					"type": ["string",
+					"null"]
+				},
+				"option": {
+					"type": ["string",
+					"null"]
+				},
+				"overlayOpacity": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"overlayOption": {
+					"type": ["string",
+					"null"]
+				},
+				"url": {
+					"$ref": "#/definitions/SFOData.ThemeURL"
+				}
+			},
+			"title": "ThemeLoginBackgroundConfig"
+		},
+		"SFOData.ThemeLoginLogoConfig": {
+			"type": "object",
+			"properties": {
+				"option": {
+					"type": ["string",
+					"null"]
+				},
+				"systemType": {
+					"type": ["string",
+					"null"]
+				},
+				"url": {
+					"$ref": "#/definitions/SFOData.ThemeURL"
+				}
+			},
+			"title": "ThemeLoginLogoConfig"
+		},
+		"SFOData.ThemeLoginConfig": {
+			"type": "object",
+			"properties": {
+				"autofillBgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"background": {
+					"$ref": "#/definitions/SFOData.ThemeLoginBackgroundConfig"
+				},
+				"footerScheme": {
+					"type": ["string",
+					"null"]
+				},
+				"logo": {
+					"$ref": "#/definitions/SFOData.ThemeLoginLogoConfig"
+				},
+				"primaryButton": {
+					"$ref": "#/definitions/SFOData.ThemeButtonConfig"
+				},
+				"primaryButtonOption": {
+					"type": ["string",
+					"null"]
+				}
+			},
+			"title": "ThemeLoginConfig"
+		},
+		"SFOData.ThemeLogoConfig": {
+			"type": "object",
+			"properties": {
+				"backdropColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"position": {
+					"type": ["string",
+					"null"]
+				},
+				"url": {
+					"$ref": "#/definitions/SFOData.ThemeURL"
+				},
+				"useBackdrop": {
+					"type": ["boolean",
+					"null"]
+				},
+				"useUploadedLogo": {
+					"type": ["boolean",
+					"null"]
+				}
+			},
+			"title": "ThemeLogoConfig",
+			"description": "Complex type that contains password validation result, password salt and password hash."
+		},
+		"SFOData.ThemeMenuConfig": {
+			"type": "object",
+			"properties": {
+				"activeBgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"activeTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"bgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"hoverBgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"hoverBgColorDisabled": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"hoverTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"textColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"textColorDisabled": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				}
+			},
+			"title": "ThemeMenuConfig",
+			"description": "Complex type that contains password validation result, password salt and password hash."
+		},
+		"SFOData.ThemeModulePickerConfig": {
+			"type": "object",
+			"properties": {
+				"activeHeaderBgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"activeHeaderTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"headerTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"hoverHeaderBgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"hoverHeaderTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				}
+			},
+			"title": "ThemeModulePickerConfig",
+			"description": "Complex type that contains password validation result, password salt and password hash."
+		},
+		"SFOData.ThemeNavigationConfig": {
+			"type": "object",
+			"properties": {
+				"activeTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"allowCondensedView": {
+					"type": ["boolean",
+					"null"]
+				},
+				"hoverTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"textColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				}
+			},
+			"title": "ThemeNavigationConfig",
+			"description": "Complex type that contains password validation result, password salt and password hash."
+		},
+		"SFOData.ThemePlacematConfig": {
+			"type": "object",
+			"properties": {
+				"backgroundType": {
+					"type": ["string",
+					"null"]
+				},
+				"bgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"borderColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"opacity": {
+					"type": ["number",
+					"string",
+					"null"],
+					"format": "double",
+					"example": 3.14
+				},
+				"selectedTabColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"useShadow": {
+					"type": ["boolean",
+					"null"]
+				}
+			},
+			"title": "ThemePlacematConfig",
+			"description": "Complex type that contains password validation result, password salt and password hash."
+		},
+		"SFOData.ThemePortletConfig": {
+			"type": "object",
+			"properties": {
+				"alertTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"bodyBackgroundColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"bodyLinkTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"bodyTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"calloutTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"custom1TextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"custom2TextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"dimmedTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"headerBgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"headerLinkTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"headerTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"sidebarColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"sidebarLinkTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"sidebarTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				}
+			},
+			"title": "ThemePortletConfig",
+			"description": "Complex type that contains password validation result, password salt and password hash."
+		},
+		"SFOData.ThemeTableConfig": {
+			"type": "object",
+			"properties": {
+				"altRowBgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"disabledRowCellBgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"headerBgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"headerTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"hoverRowBgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"linkColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"rowBgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"selectedRowBgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"selectedSortedRowBgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"sortCellBgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"textColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				}
+			},
+			"title": "ThemeTableConfig",
+			"description": "Complex type that contains password validation result, password salt and password hash."
+		},
+		"SFOData.ThemeTileConfig": {
+			"type": "object",
+			"properties": {
+				"accentBodyBGColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"accentBodyIconScheme": {
+					"type": ["string",
+					"null"]
+				},
+				"accentBodyTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"accentHeaderBGColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"accentHeaderIconScheme": {
+					"type": ["string",
+					"null"]
+				},
+				"accentHeaderLinkColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"accentHeaderTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"accentLinkColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"alertBadgeBGColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"alertBadgeTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"alertTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"bodyBGColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"bodyIconScheme": {
+					"type": ["string",
+					"null"]
+				},
+				"bodyTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"headerBGColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"headerIconScheme": {
+					"type": ["string",
+					"null"]
+				},
+				"headerLinkColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"headerTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"linkColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				}
+			},
+			"title": "ThemeTileConfig",
+			"description": "Complex type that contains password validation result, password salt and password hash."
+		},
+		"SFOData.ThemeLandingPage": {
+			"type": "object",
+			"properties": {
+				"themeId": {
+					"type": ["string",
+					"null"]
+				}
+			},
+			"title": "ThemeLandingPage",
+			"description": "Complex type that contains password validation result, password salt and password hash."
+		},
+		"SFOData.ThemeLandingPageTileConfig": {
+			"type": "object",
+			"properties": {
+				"alertTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"bgColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"bodyTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"borderColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"headerTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"iconColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"neutralTextColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				}
+			},
+			"title": "ThemeLandingPageTileConfig"
+		},
+		"SFOData.GlobalThemeConfiguration": {
+			"type": "object",
+			"properties": {
+				"accentColorBase": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"background": {
+					"$ref": "#/definitions/SFOData.ThemeBackgroundConfig"
+				},
+				"containerShadowColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"content": {
+					"$ref": "#/definitions/SFOData.ThemeContentConfig"
+				},
+				"diagram": {
+					"$ref": "#/definitions/SFOData.ThemeDiagramConfig"
+				},
+				"external": {
+					"$ref": "#/definitions/SFOData.ThemeExternalConfig"
+				},
+				"footer": {
+					"$ref": "#/definitions/SFOData.ThemeFooterConfig"
+				},
+				"headerBackground": {
+					"$ref": "#/definitions/SFOData.ThemeHeaderBackgroundConfig"
+				},
+				"highlight": {
+					"$ref": "#/definitions/SFOData.ThemeHighlightConfig"
+				},
+				"landingPage": {
+					"$ref": "#/definitions/SFOData.ThemeLandingPage"
+				},
+				"landingPageTile": {
+					"$ref": "#/definitions/SFOData.ThemeLandingPageTileConfig"
+				},
+				"login": {
+					"$ref": "#/definitions/SFOData.ThemeLoginConfig"
+				},
+				"logo": {
+					"$ref": "#/definitions/SFOData.ThemeLogoConfig"
+				},
+				"menu": {
+					"$ref": "#/definitions/SFOData.ThemeMenuConfig"
+				},
+				"modulePicker": {
+					"$ref": "#/definitions/SFOData.ThemeModulePickerConfig"
+				},
+				"navigation": {
+					"$ref": "#/definitions/SFOData.ThemeNavigationConfig"
+				},
+				"pageTitleColor": {
+					"$ref": "#/definitions/SFOData.ThemeColor"
+				},
+				"placemat": {
+					"$ref": "#/definitions/SFOData.ThemePlacematConfig"
+				},
+				"portlet": {
+					"$ref": "#/definitions/SFOData.ThemePortletConfig"
+				},
+				"portletCloseIconScheme": {
+					"type": ["string",
+					"null"]
+				},
+				"primaryButton": {
+					"$ref": "#/definitions/SFOData.ThemeButtonConfig"
+				},
+				"searchBackgroundScheme": {
+					"type": ["string",
+					"null"]
+				},
+				"secondaryButton": {
+					"$ref": "#/definitions/SFOData.ThemeButtonConfig"
+				},
+				"table": {
+					"$ref": "#/definitions/SFOData.ThemeTableConfig"
+				},
+				"tile": {
+					"$ref": "#/definitions/SFOData.ThemeTileConfig"
+				},
+				"useContainerShadowColor": {
+					"type": ["boolean",
+					"null"]
+				},
+				"useDownloadableFonts": {
+					"type": ["boolean",
+					"null"]
+				},
+				"useModernStylesInLegacy": {
+					"type": ["boolean",
+					"null"]
+				},
+				"useTextShadow": {
+					"type": ["boolean",
+					"null"]
+				}
+			},
+			"title": "GlobalThemeConfiguration"
+		}
+	},
+	"paths": {
+		"/ThemeTemplate": {
+			"get": {
+				"summary": "Get entities from ThemeTemplate",
+				"tags": ["Theme Template"],
+				"parameters": [{
+					"$ref": "#/parameters/top"
+				},
+				{
+					"$ref": "#/parameters/skip"
+				},
+				{
+					"$ref": "#/parameters/search"
+				},
+				{
+					"$ref": "#/parameters/filter"
+				},
+				{
+					"$ref": "#/parameters/count"
+				},
+				{
+					"name": "$orderby",
+					"in": "query",
+					"description": "Order items by property values, see [OData Sorting](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374629)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["bodyStyleClass",
+						"bodyStyleClass desc",
+						"footer",
+						"footer desc",
+						"header",
+						"header desc",
+						"id",
+						"id desc",
+						"langDir",
+						"langDir desc",
+						"locale",
+						"locale desc",
+						"scripts",
+						"scripts desc",
+						"styles",
+						"styles desc",
+						"template",
+						"template desc",
+						"ui5BaseThemeRootUrl",
+						"ui5BaseThemeRootUrl desc"]
+					}
+				},
+				{
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374620)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["bodyStyleClass",
+						"footer",
+						"header",
+						"id",
+						"langDir",
+						"locale",
+						"scripts",
+						"styles",
+						"template",
+						"ui5BaseThemeRootUrl"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entities",
+						"schema": {
+							"type": "object",
+							"title": "Wrapper",
+							"properties": {
+								"d": {
+									"type": "object",
+									"title": "Collection of ThemeTemplate",
+									"properties": {
+										"results": {
+											"type": "array",
+											"items": {
+												"$ref": "#/definitions/SFOData.ThemeTemplate"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ThemeTemplate('{id}')": {
+			"get": {
+				"summary": "Get entity from ThemeTemplate by key",
+				"tags": ["Theme Template"],
+				"parameters": [{
+					"name": "id",
+					"in": "path",
+					"required": true,
+					"description": "key: id",
+					"type": "string"
+				},
+				{
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374620)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["bodyStyleClass",
+						"footer",
+						"header",
+						"id",
+						"langDir",
+						"locale",
+						"scripts",
+						"styles",
+						"template",
+						"ui5BaseThemeRootUrl"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entity",
+						"schema": {
+							"title": "ThemeTemplate",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.ThemeTemplate"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ThemeInfo": {
+			"get": {
+				"summary": "Get entities from ThemeInfo",
+				"tags": ["Theme Info"],
+				"parameters": [{
+					"$ref": "#/parameters/top"
+				},
+				{
+					"$ref": "#/parameters/skip"
+				},
+				{
+					"$ref": "#/parameters/search"
+				},
+				{
+					"$ref": "#/parameters/filter"
+				},
+				{
+					"$ref": "#/parameters/count"
+				},
+				{
+					"name": "$orderby",
+					"in": "query",
+					"description": "Order items by property values, see [OData Sorting](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374629)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["fingerprints",
+						"fingerprints desc",
+						"id",
+						"id desc",
+						"lastModifiedDate",
+						"lastModifiedDate desc",
+						"locale",
+						"locale desc",
+						"modules",
+						"modules desc",
+						"ui5Theme",
+						"ui5Theme desc",
+						"urls",
+						"urls desc"]
+					}
+				},
+				{
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374620)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["fingerprints",
+						"id",
+						"lastModifiedDate",
+						"locale",
+						"modules",
+						"ui5Theme",
+						"urls"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entities",
+						"schema": {
+							"type": "object",
+							"title": "Wrapper",
+							"properties": {
+								"d": {
+									"type": "object",
+									"title": "Collection of ThemeInfo",
+									"properties": {
+										"results": {
+											"type": "array",
+											"items": {
+												"$ref": "#/definitions/SFOData.ThemeInfo"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ThemeInfo('{id}')": {
+			"get": {
+				"summary": "Get entity from ThemeInfo by key",
+				"tags": ["Theme Info"],
+				"parameters": [{
+					"name": "id",
+					"in": "path",
+					"required": true,
+					"description": "key: id",
+					"type": "string"
+				},
+				{
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374620)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["fingerprints",
+						"id",
+						"lastModifiedDate",
+						"locale",
+						"modules",
+						"ui5Theme",
+						"urls"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entity",
+						"schema": {
+							"title": "ThemeInfo",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.ThemeInfo"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ThemeConfig": {
+			"get": {
+				"summary": "Get entities from ThemeConfig",
+				"tags": ["Theme Config"],
+				"parameters": [{
+					"$ref": "#/parameters/top"
+				},
+				{
+					"$ref": "#/parameters/skip"
+				},
+				{
+					"$ref": "#/parameters/search"
+				},
+				{
+					"$ref": "#/parameters/filter"
+				},
+				{
+					"$ref": "#/parameters/count"
+				},
+				{
+					"name": "$orderby",
+					"in": "query",
+					"description": "Order items by property values, see [OData Sorting](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374629)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["id",
+						"id desc",
+						"themeConfiguration",
+						"themeConfiguration desc"]
+					}
+				},
+				{
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374620)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["id",
+						"themeConfiguration"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entities",
+						"schema": {
+							"type": "object",
+							"title": "Wrapper",
+							"properties": {
+								"d": {
+									"type": "object",
+									"title": "Collection of ThemeConfig",
+									"properties": {
+										"results": {
+											"type": "array",
+											"items": {
+												"$ref": "#/definitions/SFOData.ThemeConfig"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		},
+		"/ThemeConfig('{id}')": {
+			"get": {
+				"summary": "Get entity from ThemeConfig by key",
+				"tags": ["Theme Config"],
+				"parameters": [{
+					"name": "id",
+					"in": "path",
+					"required": true,
+					"description": "key: id",
+					"type": "string"
+				},
+				{
+					"name": "$select",
+					"in": "query",
+					"description": "Select properties to be returned, see [OData Select](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374620)",
+					"type": "array",
+					"uniqueItems": true,
+					"items": {
+						"type": "string",
+						"enum": ["id",
+						"themeConfiguration"]
+					}
+				}],
+				"responses": {
+					"200": {
+						"description": "Retrieved entity",
+						"schema": {
+							"title": "ThemeConfig",
+							"type": "object",
+							"properties": {
+								"d": {
+									"$ref": "#/definitions/SFOData.ThemeConfig"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/responses/error"
+					}
+				}
+			}
+		}
+	},
+	"parameters": {
+		"top": {
+			"name": "$top",
+			"in": "query",
+			"description": "Show only the first n items, see [OData Paging - Top](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374630)",
+			"type": "integer",
+			"default":20
+		},
+		"skip": {
+			"name": "$skip",
+			"in": "query",
+			"description": "Skip the first n items, see [OData Paging - Skip](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374631)",
+			"type": "integer"
+		},
+		"count": {
+			"name": "$count",
+			"in": "query",
+			"description": "Include count of items, see [OData Count](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374632)",
+			"type": "boolean"
+		},
+		"filter": {
+			"name": "$filter",
+			"in": "query",
+			"description": "Filter items by property values, see [OData Filtering](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374625)",
+			"type": "string"
+		},
+		"search": {
+			"name": "$search",
+			"in": "query",
+			"description": "Search items by search phrases, see [OData Searching](http://docs.oasis-open.org/odata/odata/v4.0/odata-v4.0-part1-protocol.html#_Toc445374633)",
+			"type": "string"
+		}
+	},
+	"responses": {
+		"error": {
+			"description": "Error",
+			"schema": {
+				"$ref": "#/definitions/odata.error"
+			}
+		}
+	}
+}
