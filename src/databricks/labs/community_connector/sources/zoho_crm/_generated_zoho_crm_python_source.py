@@ -400,7 +400,7 @@ def register_lakeflow_source(spark):
             return cls(response.status_code, message)
 
 
-    class ZohoAPIClient:
+    class ZohoAPIClient:  # pylint: disable=too-many-instance-attributes
         """
         HTTP client for Zoho CRM API with OAuth2 authentication.
 
@@ -479,7 +479,7 @@ def register_lakeflow_source(spark):
 
             return self._access_token
 
-        def request(
+        def request(  # pylint: disable=too-many-arguments,too-many-positional-arguments
             self,
             method: str,
             endpoint: str,
@@ -540,7 +540,7 @@ def register_lakeflow_source(spark):
 
             raise ZohoAPIError(0, f"Failed after {max_retries} retries")
 
-        def _make_http_request(
+        def _make_http_request(  # pylint: disable=too-many-arguments,too-many-positional-arguments
             self,
             method: str,
             url: str,
