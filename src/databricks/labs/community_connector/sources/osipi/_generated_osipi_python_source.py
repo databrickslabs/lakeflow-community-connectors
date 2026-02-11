@@ -15,10 +15,12 @@ from typing import (
     Optional,
     Tuple,
 )
+import json
 
 from pyspark.sql import Row
 from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
 from pyspark.sql.types import *
+import base64
 import requests
 
 
@@ -26,156 +28,1138 @@ def register_lakeflow_source(spark):
     """Register the Lakeflow Python source with Spark."""
 
     ########################################################
-    # libs/utils.py
+    # src/databricks/labs/community_connector/libs/utils.py
     ########################################################
 
+    def _parse_struct(value: Any, field_type: StructType) -> Row:
+        """Parse a dictionary into a PySpark Row based on StructType schema."""
+        if not isinstance(value, dict):
+            raise ValueError(f"Expected a dictionary for StructType, got {type(value)}")
+        # Spark Python -> Arrow conversion require missing StructType fields to be assigned None.
+        if value == {}:
+            raise ValueError(
+                "field in StructType cannot be an empty dict. "
+                "Please assign None as the default value instead."
+            )
+        field_dict = {}
+        for field in field_type.fields:
+            if field.name in value:
+                field_dict[field.name] = parse_value(value.get(field.name), field.dataType)
+            elif field.nullable:
+                field_dict[field.name] = None
+            else:
+                raise ValueError(f"Field {field.name} is not nullable but not found in the input")
+        return Row(**field_dict)
+
+
+    def _parse_array(value: Any, field_type: ArrayType) -> list:
+        """Parse a list into a PySpark array based on ArrayType schema."""
+        if not isinstance(value, list):
+            if field_type.containsNull:
+                return [parse_value(value, field_type.elementType)]
+            raise ValueError(f"Expected a list for ArrayType, got {type(value)}")
+        return [parse_value(v, field_type.elementType) for v in value]
+
+
+    def _parse_map(value: Any, field_type: MapType) -> dict:
+        """Parse a dictionary into a PySpark map based on MapType schema."""
+        if not isinstance(value, dict):
+            raise ValueError(f"Expected a dictionary for MapType, got {type(value)}")
+        return {
+            parse_value(k, field_type.keyType): parse_value(v, field_type.valueType)
+            for k, v in value.items()
+        }
+
+
+    def _parse_string(value: Any) -> str:
+        """Convert value to string."""
+        return str(value)
+
+
+    def _parse_integer(value: Any) -> int:
+        """Convert value to integer."""
+        if isinstance(value, str) and value.strip():
+            return int(float(value)) if "." in value else int(value)
+        if isinstance(value, (int, float)):
+            return int(value)
+        raise ValueError(f"Cannot convert {value} to integer")
+
+
+    def _parse_float(value: Any) -> float:
+        """Convert value to float."""
+        return float(value)
+
+
+    def _parse_decimal(value: Any) -> Decimal:
+        """Convert value to Decimal."""
+        return Decimal(value) if isinstance(value, str) and value.strip() else Decimal(str(value))
+
+
+    def _parse_boolean(value: Any) -> bool:
+        """Convert value to boolean."""
+        if isinstance(value, str):
+            lowered = value.lower()
+            if lowered in ("true", "t", "yes", "y", "1"):
+                return True
+            if lowered in ("false", "f", "no", "n", "0"):
+                return False
+        return bool(value)
+
+
+    def _parse_date(value: Any) -> datetime.date:
+        """Convert value to date."""
+        if isinstance(value, str):
+            for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+                try:
+                    return datetime.strptime(value, fmt).date()
+                except ValueError:
+                    continue
+            return datetime.fromisoformat(value).date()
+        if isinstance(value, datetime):
+            return value.date()
+        raise ValueError(f"Cannot convert {value} to date")
+
+
+    def _parse_timestamp(value: Any) -> datetime:
+        """Convert value to timestamp."""
+        if isinstance(value, str):
+            ts_value = value.replace("Z", "+00:00") if value.endswith("Z") else value
+            try:
+                return datetime.fromisoformat(ts_value)
+            except ValueError:
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
+                    try:
+                        return datetime.strptime(ts_value, fmt)
+                    except ValueError:
+                        continue
+        elif isinstance(value, (int, float)):
+            return datetime.fromtimestamp(value)
+        elif isinstance(value, datetime):
+            return value
+        raise ValueError(f"Cannot convert {value} to timestamp")
+
+
+    def _decode_string_to_bytes(value: str) -> bytes:
+        """Try to decode a string as base64, then hex, then UTF-8."""
+        try:
+            return base64.b64decode(value)
+        except Exception:
+            pass
+        try:
+            return bytes.fromhex(value)
+        except Exception:
+            pass
+        return value.encode("utf-8")
+
+
+    def _parse_binary(value: Any) -> bytes:
+        """Convert value to bytes. Tries base64, then hex, then UTF-8 for strings."""
+        if isinstance(value, bytes):
+            return value
+        if isinstance(value, bytearray):
+            return bytes(value)
+        if isinstance(value, str):
+            return _decode_string_to_bytes(value)
+        if isinstance(value, list):
+            return bytes(value)
+        return str(value).encode("utf-8")
+
+
+    # Mapping of primitive types to their parser functions
+    _PRIMITIVE_PARSERS = {
+        StringType: _parse_string,
+        IntegerType: _parse_integer,
+        LongType: _parse_integer,
+        FloatType: _parse_float,
+        DoubleType: _parse_float,
+        DecimalType: _parse_decimal,
+        BooleanType: _parse_boolean,
+        DateType: _parse_date,
+        TimestampType: _parse_timestamp,
+        BinaryType: _parse_binary,
+    }
+
+
     def parse_value(value: Any, field_type: DataType) -> Any:
-        """Convert a JSON-ish value into a PySpark-compatible value.
-
-        NOTE: In Spark Connect / Python Data Source workers, DataType classes may come from
-        different modules than the driver (so isinstance(field_type, StructType) can fail).
-        We therefore dispatch using field_type.typeName() / class-name and duck-typing.
         """
-
+        Converts a JSON value into a PySpark-compatible data type based on the provided field type.
+        """
         if value is None:
             return None
 
+        # Handle complex types
+        if isinstance(field_type, StructType):
+            return _parse_struct(value, field_type)
+        if isinstance(field_type, ArrayType):
+            return _parse_array(value, field_type)
+        if isinstance(field_type, MapType):
+            return _parse_map(value, field_type)
+
+        # Handle primitive types via type-based lookup
         try:
-            type_name = field_type.typeName() if hasattr(field_type, "typeName") else None
-        except Exception:
-            type_name = None
-        type_name = (type_name or field_type.__class__.__name__).lower()
+            field_type_class = type(field_type)
+            if field_type_class in _PRIMITIVE_PARSERS:
+                return _PRIMITIVE_PARSERS[field_type_class](value)
 
-        # -------------------- complex types --------------------
-        if type_name in ("struct", "structtype") or hasattr(field_type, "fields"):
-            if not isinstance(value, dict):
-                raise ValueError(f"Expected a dictionary for StructType, got {type(value)}")
-            if value == {}:
-                raise ValueError(
-                    "field in StructType cannot be an empty dict. Please assign None as the default value instead."
-                )
-
-            fields = getattr(field_type, "fields", None) or []
-            field_dict = {}
-            for field in fields:
-                if field.name in value:
-                    field_dict[field.name] = parse_value(value.get(field.name), field.dataType)
-                elif getattr(field, "nullable", True):
-                    field_dict[field.name] = None
-                else:
-                    raise ValueError(f"Field {field.name} is not nullable but not found in the input")
-
-            return Row(**field_dict)
-
-        if type_name in ("array", "arraytype") or hasattr(field_type, "elementType"):
-            element_type = getattr(field_type, "elementType", None)
-            contains_null = getattr(field_type, "containsNull", True)
-            if not isinstance(value, list):
-                if contains_null:
-                    return [parse_value(value, element_type)]
-                raise ValueError(f"Expected a list for ArrayType, got {type(value)}")
-            return [parse_value(v, element_type) for v in value]
-
-        if type_name in ("map", "maptype") or (hasattr(field_type, "keyType") and hasattr(field_type, "valueType")):
-            if not isinstance(value, dict):
-                raise ValueError(f"Expected a dictionary for MapType, got {type(value)}")
-            return {
-                parse_value(k, field_type.keyType): parse_value(v, field_type.valueType)
-                for k, v in value.items()
-            }
-
-        # -------------------- primitive types --------------------
-        try:
-            if type_name in ("string", "stringtype"):
-                return str(value) if value is not None else None
-
-            if type_name in ("int", "integer", "integertype", "long", "longtype", "bigint"):
-                if isinstance(value, str) and value.strip():
-                    if "." in value:
-                        return int(float(value))
-                    return int(value)
-                if isinstance(value, (int, float)):
-                    return int(value)
-                raise ValueError(f"Cannot convert {value} to integer")
-
-            if type_name in ("float", "floattype", "double", "doubletype"):
-                if isinstance(value, str) and value.strip():
-                    return float(value)
-                return float(value)
-
-            if type_name in ("decimal", "decimaltype"):
-                if isinstance(value, str) and value.strip():
-                    return Decimal(value)
-                return Decimal(str(value))
-
-            if type_name in ("boolean", "booleantype"):
-                if isinstance(value, str):
-                    lowered = value.lower()
-                    if lowered in ("true", "t", "yes", "y", "1"):
-                        return True
-                    if lowered in ("false", "f", "no", "n", "0"):
-                        return False
-                return bool(value)
-
-            if type_name in ("date", "datetype"):
-                if isinstance(value, str):
-                    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"):
-                        try:
-                            return datetime.strptime(value, fmt).date()
-                        except ValueError:
-                            continue
-                    return datetime.fromisoformat(value).date()
-                if isinstance(value, datetime):
-                    return value.date()
-                raise ValueError(f"Cannot convert {value} to date")
-
-            if type_name in ("timestamp", "timestamptype"):
-                if isinstance(value, str):
-                    if value.endswith("Z"):
-                        value = value.replace("Z", "+00:00")
-                    try:
-                        return datetime.fromisoformat(value)
-                    except ValueError:
-                        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
-                            try:
-                                return datetime.strptime(value, fmt)
-                            except ValueError:
-                                continue
-                if isinstance(value, (int, float)):
-                    return datetime.fromtimestamp(value)
-                if isinstance(value, datetime):
-                    return value
-                raise ValueError(f"Cannot convert {value} to timestamp")
-
-            if type_name in ("null", "nulltype"):
-                return None
+            # Check for custom UDT handling
+            if hasattr(field_type, "fromJson"):
+                return field_type.fromJson(value)
 
             raise TypeError(f"Unsupported field type: {field_type}")
-
         except (ValueError, TypeError) as e:
-            raise ValueError(
-                f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}"
-            )
+            raise ValueError(f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}")
 
 
     ########################################################
-    # src/databricks/labs/community_connector/sources/osipi/osipi.py
+    # src/databricks/labs/community_connector/interface/lakeflow_connect.py
     ########################################################
 
-    def _utcnow() -> datetime:
+    class LakeflowConnect:
+        def __init__(self, options: dict[str, str]) -> None:
+            """
+            Initialize the source connector with parameters needed to connect to the source.
+            Args:
+                options: A dictionary of parameters like authentication tokens, table names,
+                    and other configurations.
+            """
+
+        def list_tables(self) -> list[str]:
+            """
+            List names of all the tables supported by the source connector.
+            The list could either be a static list or retrieved from the source via API.
+            Returns:
+                A list of table names.
+            """
+
+        def get_table_schema(
+            self, table_name: str, table_options: dict[str, str]
+        ) -> StructType:
+            """
+            Fetch the schema of a table.
+            Args:
+                table_name: The name of the table to fetch the schema for.
+                table_options: A dictionary of options for accessing the table. For example,
+                    the source API may require extra parameters needed to fetch the schema.
+                    If there are no additional options required, you can ignore this
+                    parameter, and no options will be provided during execution.
+                    Only add parameters to table_options if they are essential for accessing
+                    or retrieving the data (such as specifying table namespaces).
+            Returns:
+                A StructType object representing the schema of the table.
+            """
+
+        def read_table_metadata(
+            self, table_name: str, table_options: dict[str, str]
+        ) -> dict:
+            """
+            Fetch the metadata of a table.
+            Args:
+                table_name: The name of the table to fetch the metadata for.
+                table_options: A dictionary of options for accessing the table. For example,
+                    the source API may require extra parameters needed to fetch the metadata.
+                    If there are no additional options required, you can ignore this
+                    parameter, and no options will be provided during execution.
+                    Only add parameters to table_options if they are essential for accessing
+                    or retrieving the data (such as specifying table namespaces).
+            Returns:
+                A dictionary containing the metadata of the table. It should include the
+                following keys:
+                    - primary_keys: List of string names of the primary key columns of
+                        the table.
+                    - cursor_field: The name of the field to use as a cursor for
+                        incremental loading.
+                    - ingestion_type: The type of ingestion to use for the table. It
+                        should be one of the following values:
+                        - "snapshot": For snapshot loading.
+                        - "cdc": Capture incremental changes (no delete support).
+                        - "cdc_with_deletes": Capture incremental changes with delete
+                            support. Requires implementing read_table_deletes().
+                        - "append": Incremental append.
+            """
+
+        def read_table(
+            self, table_name: str, start_offset: dict, table_options: dict[str, str]
+        ) -> (Iterator[dict], dict):
+            """
+            Read the records of a table and return an iterator of records and an offset.
+            The read starts from the provided start_offset.
+            Records returned in the iterator will be one batch of records marked by the
+            offset as its end_offset.
+            The read_table function could be called multiple times to read the entire table
+            in multiple batches and it stops when the same offset is returned again.
+            If the table cannot be incrementally read, the offset can be None if we want to
+            read the entire table in one batch.
+            We could still return some fake offsets (cannot checkpointing) to split the
+            table into multiple batches.
+            Args:
+                table_name: The name of the table to read.
+                start_offset: The offset to start reading from.
+                table_options: A dictionary of options for accessing the table. For example,
+                    the source API may require extra parameters needed to read the table.
+                    If there are no additional options required, you can ignore this
+                    parameter, and no options will be provided during execution.
+                    Only add parameters to table_options if they are essential for accessing
+                    or retrieving the data (such as specifying table namespaces).
+            Returns:
+                An iterator of records in JSON format and an offset.
+                DO NOT convert the JSON based on the schema in `get_table_schema` in
+                `read_table`.
+                records: An iterator of records in JSON format.
+                offset: An offset in dict.
+            """
+
+        def read_table_deletes(
+            self, table_name: str, start_offset: dict, table_options: dict[str, str]
+        ) -> (Iterator[dict], dict):
+            """
+            Read deleted records from a table for CDC delete synchronization.
+            This method is called when ingestion_type is "cdc_with_deletes" to fetch
+            records that have been deleted from the source system.
+
+            The returned records should have at minimum the primary key fields and
+            cursor field populated. Other fields can be null.
+
+            Args:
+                table_name: The name of the table to read deleted records from.
+                start_offset: The offset to start reading from (same format as read_table).
+                table_options: A dictionary of options for accessing the table.
+            Returns:
+                An iterator of deleted records in JSON format and an offset.
+                records: An iterator of deleted records (must include primary keys and cursor).
+                offset: An offset in dict (same format as read_table).
+            """
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/sources/osipi/osipi_constants.py
+    ########################################################
+
+    TABLE_DATASERVERS = "pi_dataservers"
+    TABLE_POINTS = "pi_points"
+    TABLE_POINT_ATTRIBUTES = "pi_point_attributes"
+    TABLE_POINT_TYPE_CATALOG = "pi_point_type_catalog"
+
+    # =============================================================================
+    # Time Series Tables
+    # =============================================================================
+    TABLE_TIMESERIES = "pi_timeseries"
+    TABLE_INTERPOLATED = "pi_interpolated"
+    TABLE_PLOT = "pi_plot"
+    TABLE_CURRENT_VALUE = "pi_current_value"
+    TABLE_SUMMARY = "pi_summary"
+    TABLE_END = "pi_end"
+    TABLE_VALUE_AT_TIME = "pi_value_at_time"
+    TABLE_RECORDED_AT_TIME = "pi_recorded_at_time"
+    TABLE_CALCULATED = "pi_calculated"
+
+    # StreamSet variants (multi-tag batch endpoints)
+    TABLE_STREAMSET_RECORDED = "pi_streamset_recorded"
+    TABLE_STREAMSET_INTERPOLATED = "pi_streamset_interpolated"
+    TABLE_STREAMSET_PLOT = "pi_streamset_plot"
+    TABLE_STREAMSET_SUMMARY = "pi_streamset_summary"
+    TABLE_STREAMSET_END = "pi_streamset_end"
+
+    # =============================================================================
+    # Asset Framework (AF) Tables
+    # =============================================================================
+    TABLE_ASSET_SERVERS = "pi_assetservers"
+    TABLE_ASSET_DATABASES = "pi_assetdatabases"
+    TABLE_AF_HIERARCHY = "pi_af_hierarchy"
+    TABLE_ELEMENT_ATTRIBUTES = "pi_element_attributes"
+    TABLE_ELEMENT_TEMPLATES = "pi_element_templates"
+    TABLE_ELEMENT_TEMPLATE_ATTRIBUTES = "pi_element_template_attributes"
+    TABLE_ATTRIBUTE_TEMPLATES = "pi_attribute_templates"
+    TABLE_CATEGORIES = "pi_categories"
+    TABLE_ANALYSES = "pi_analyses"
+    TABLE_ANALYSIS_TEMPLATES = "pi_analysis_templates"
+    TABLE_AF_TABLES = "pi_af_tables"
+    TABLE_AF_TABLE_ROWS = "pi_af_table_rows"
+    TABLE_UNITS_OF_MEASURE = "pi_units_of_measure"
+
+    # =============================================================================
+    # Event Frame Tables
+    # =============================================================================
+    TABLE_EVENT_FRAMES = "pi_event_frames"
+    TABLE_EVENTFRAME_ATTRIBUTES = "pi_eventframe_attributes"
+    TABLE_EVENTFRAME_TEMPLATES = "pi_eventframe_templates"
+    TABLE_EVENTFRAME_TEMPLATE_ATTRIBUTES = "pi_eventframe_template_attributes"
+    TABLE_EVENTFRAME_REFERENCED_ELEMENTS = "pi_eventframe_referenced_elements"
+    TABLE_EVENTFRAME_ACKS = "pi_eventframe_acknowledgements"
+    TABLE_EVENTFRAME_ANNOTATIONS = "pi_eventframe_annotations"
+
+    # =============================================================================
+    # Governance & Diagnostics Tables
+    # =============================================================================
+    TABLE_LINKS = "pi_links"
+
+    # =============================================================================
+    # Table Groups (for logical organization)
+    # =============================================================================
+    TABLES_DISCOVERY_INVENTORY = [
+        TABLE_DATASERVERS,
+        TABLE_POINTS,
+        TABLE_POINT_ATTRIBUTES,
+        TABLE_POINT_TYPE_CATALOG,
+    ]
+
+    TABLES_TIME_SERIES = [
+        TABLE_TIMESERIES,
+        TABLE_STREAMSET_RECORDED,
+        TABLE_INTERPOLATED,
+        TABLE_STREAMSET_INTERPOLATED,
+        TABLE_PLOT,
+        TABLE_STREAMSET_PLOT,
+        TABLE_SUMMARY,
+        TABLE_STREAMSET_SUMMARY,
+        TABLE_CURRENT_VALUE,
+        TABLE_VALUE_AT_TIME,
+        TABLE_RECORDED_AT_TIME,
+        TABLE_END,
+        TABLE_STREAMSET_END,
+        TABLE_CALCULATED,
+    ]
+
+    TABLES_ASSET_FRAMEWORK = [
+        TABLE_ASSET_SERVERS,
+        TABLE_ASSET_DATABASES,
+        TABLE_AF_HIERARCHY,
+        TABLE_ELEMENT_ATTRIBUTES,
+        TABLE_ELEMENT_TEMPLATES,
+        TABLE_ELEMENT_TEMPLATE_ATTRIBUTES,
+        TABLE_ATTRIBUTE_TEMPLATES,
+        TABLE_CATEGORIES,
+        TABLE_ANALYSES,
+        TABLE_ANALYSIS_TEMPLATES,
+        TABLE_AF_TABLES,
+        TABLE_AF_TABLE_ROWS,
+        TABLE_UNITS_OF_MEASURE,
+    ]
+
+    TABLES_EVENT_FRAMES = [
+        TABLE_EVENT_FRAMES,
+        TABLE_EVENTFRAME_ATTRIBUTES,
+        TABLE_EVENTFRAME_TEMPLATES,
+        TABLE_EVENTFRAME_TEMPLATE_ATTRIBUTES,
+        TABLE_EVENTFRAME_REFERENCED_ELEMENTS,
+        TABLE_EVENTFRAME_ACKS,
+        TABLE_EVENTFRAME_ANNOTATIONS,
+    ]
+
+    TABLES_GOVERNANCE_DIAGNOSTICS = [
+        TABLE_LINKS,
+    ]
+
+    # All supported tables
+    SUPPORTED_TABLES = (
+        TABLES_DISCOVERY_INVENTORY
+        + TABLES_TIME_SERIES
+        + TABLES_ASSET_FRAMEWORK
+        + TABLES_EVENT_FRAMES
+        + TABLES_GOVERNANCE_DIAGNOSTICS
+    )
+    """List of all table names supported by the OSI PI connector."""
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/sources/osipi/osipi_schemas.py
+    ########################################################
+
+    TS_VALUE_SCHEMA = StructType(
+        [
+            StructField("tag_webid", StringType(), False),
+            StructField("timestamp", TimestampType(), False),
+            StructField("value", DoubleType(), True),
+            StructField("good", BooleanType(), True),
+            StructField("questionable", BooleanType(), True),
+            StructField("substituted", BooleanType(), True),
+            StructField("annotated", BooleanType(), True),
+            StructField("units", StringType(), True),
+            StructField("ingestion_timestamp", TimestampType(), False),
+        ]
+    )
+    """Common schema for time-series value tables."""
+
+
+    # =============================================================================
+    # Discovery & Inventory Schemas
+    # =============================================================================
+
+    DATASERVERS_SCHEMA = StructType(
+        [
+            StructField("webid", StringType(), False),
+            StructField("name", StringType(), True),
+        ]
+    )
+
+    POINTS_SCHEMA = StructType(
+        [
+            StructField("webid", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("descriptor", StringType(), True),
+            StructField("engineering_units", StringType(), True),
+            StructField("path", StringType(), True),
+            StructField("dataserver_webid", StringType(), True),
+        ]
+    )
+
+    POINT_ATTRIBUTES_SCHEMA = StructType(
+        [
+            StructField("point_webid", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("value", StringType(), True),
+            StructField("type", StringType(), True),
+            StructField("ingestion_timestamp", TimestampType(), False),
+        ]
+    )
+
+    POINT_TYPE_CATALOG_SCHEMA = StructType(
+        [
+            StructField("point_type", StringType(), False),
+            StructField("engineering_units", StringType(), True),
+            StructField("count_points", LongType(), True),
+        ]
+    )
+
+
+    # =============================================================================
+    # Time Series Schemas
+    # =============================================================================
+
+    END_SCHEMA = StructType(
+        [
+            StructField("tag_webid", StringType(), False),
+            StructField("timestamp", TimestampType(), True),
+            StructField("value", DoubleType(), True),
+            StructField("good", BooleanType(), True),
+            StructField("questionable", BooleanType(), True),
+            StructField("substituted", BooleanType(), True),
+            StructField("annotated", BooleanType(), True),
+            StructField("units", StringType(), True),
+            StructField("ingestion_timestamp", TimestampType(), False),
+        ]
+    )
+
+    CURRENT_VALUE_SCHEMA = StructType(
+        [
+            StructField("tag_webid", StringType(), False),
+            StructField("timestamp", TimestampType(), True),
+            StructField("value", DoubleType(), True),
+            StructField("good", BooleanType(), True),
+            StructField("questionable", BooleanType(), True),
+            StructField("substituted", BooleanType(), True),
+            StructField("annotated", BooleanType(), True),
+            StructField("units", StringType(), True),
+            StructField("ingestion_timestamp", TimestampType(), False),
+        ]
+    )
+
+    VALUE_AT_TIME_SCHEMA = StructType(
+        [
+            StructField("tag_webid", StringType(), False),
+            StructField("timestamp", TimestampType(), True),
+            StructField("value", DoubleType(), True),
+            StructField("good", BooleanType(), True),
+            StructField("questionable", BooleanType(), True),
+            StructField("substituted", BooleanType(), True),
+            StructField("annotated", BooleanType(), True),
+            StructField("units", StringType(), True),
+            StructField("ingestion_timestamp", TimestampType(), False),
+        ]
+    )
+
+    RECORDED_AT_TIME_SCHEMA = StructType(
+        [
+            StructField("tag_webid", StringType(), False),
+            StructField("query_time", TimestampType(), True),
+            StructField("timestamp", TimestampType(), True),
+            StructField("value", DoubleType(), True),
+            StructField("good", BooleanType(), True),
+            StructField("questionable", BooleanType(), True),
+            StructField("substituted", BooleanType(), True),
+            StructField("annotated", BooleanType(), True),
+            StructField("units", StringType(), True),
+            StructField("ingestion_timestamp", TimestampType(), False),
+        ]
+    )
+
+    SUMMARY_SCHEMA = StructType(
+        [
+            StructField("tag_webid", StringType(), False),
+            StructField("summary_type", StringType(), False),
+            StructField("timestamp", TimestampType(), True),
+            StructField("value", DoubleType(), True),
+            StructField("good", BooleanType(), True),
+            StructField("questionable", BooleanType(), True),
+            StructField("substituted", BooleanType(), True),
+            StructField("annotated", BooleanType(), True),
+            StructField("units", StringType(), True),
+            StructField("ingestion_timestamp", TimestampType(), False),
+        ]
+    )
+
+    STREAMSET_SUMMARY_SCHEMA = StructType(
+        [
+            StructField("tag_webid", StringType(), False),
+            StructField("summary_type", StringType(), False),
+            StructField("timestamp", TimestampType(), False),
+            StructField("value", DoubleType(), True),
+            StructField("good", BooleanType(), True),
+            StructField("questionable", BooleanType(), True),
+            StructField("substituted", BooleanType(), True),
+            StructField("annotated", BooleanType(), True),
+            StructField("units", StringType(), True),
+            StructField("ingestion_timestamp", TimestampType(), False),
+        ]
+    )
+
+    CALCULATED_SCHEMA = StructType(
+        [
+            StructField("tag_webid", StringType(), False),
+            StructField("timestamp", TimestampType(), False),
+            StructField("value", DoubleType(), True),
+            StructField("units", StringType(), True),
+            StructField("calculation_type", StringType(), True),
+            StructField("ingestion_timestamp", TimestampType(), False),
+        ]
+    )
+
+
+    # =============================================================================
+    # Asset Framework Schemas
+    # =============================================================================
+
+    ASSET_SERVERS_SCHEMA = StructType(
+        [
+            StructField("webid", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("path", StringType(), True),
+        ]
+    )
+
+    ASSET_DATABASES_SCHEMA = StructType(
+        [
+            StructField("webid", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("path", StringType(), True),
+            StructField("assetserver_webid", StringType(), True),
+        ]
+    )
+
+    AF_HIERARCHY_SCHEMA = StructType(
+        [
+            StructField("element_webid", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("template_name", StringType(), True),
+            StructField("description", StringType(), True),
+            StructField("path", StringType(), True),
+            StructField("parent_webid", StringType(), True),
+            StructField("depth", LongType(), True),
+            StructField("category_names", ArrayType(StringType()), True),
+            StructField("ingestion_timestamp", TimestampType(), False),
+        ]
+    )
+
+    ELEMENT_ATTRIBUTES_SCHEMA = StructType(
+        [
+            StructField("element_webid", StringType(), False),
+            StructField("attribute_webid", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("description", StringType(), True),
+            StructField("path", StringType(), True),
+            StructField("type", StringType(), True),
+            StructField("default_units_name", StringType(), True),
+            StructField("data_reference_plugin", StringType(), True),
+            StructField("is_configuration_item", BooleanType(), True),
+            StructField("ingestion_timestamp", TimestampType(), False),
+        ]
+    )
+
+    ELEMENT_TEMPLATES_SCHEMA = StructType(
+        [
+            StructField("webid", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("description", StringType(), True),
+            StructField("path", StringType(), True),
+            StructField("assetdatabase_webid", StringType(), True),
+        ]
+    )
+
+    ELEMENT_TEMPLATE_ATTRIBUTES_SCHEMA = StructType(
+        [
+            StructField("webid", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("description", StringType(), True),
+            StructField("path", StringType(), True),
+            StructField("type", StringType(), True),
+            StructField("default_units_name", StringType(), True),
+            StructField("data_reference_plugin", StringType(), True),
+            StructField("is_configuration_item", BooleanType(), True),
+            StructField("elementtemplate_webid", StringType(), True),
+            StructField("assetdatabase_webid", StringType(), True),
+        ]
+    )
+
+    CATEGORIES_SCHEMA = StructType(
+        [
+            StructField("webid", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("description", StringType(), True),
+            StructField("category_type", StringType(), True),
+            StructField("assetdatabase_webid", StringType(), True),
+        ]
+    )
+
+    ATTRIBUTE_TEMPLATES_SCHEMA = StructType(
+        [
+            StructField("webid", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("description", StringType(), True),
+            StructField("path", StringType(), True),
+            StructField("type", StringType(), True),
+            StructField("elementtemplate_webid", StringType(), True),
+            StructField("assetdatabase_webid", StringType(), True),
+        ]
+    )
+
+    ANALYSES_SCHEMA = StructType(
+        [
+            StructField("webid", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("description", StringType(), True),
+            StructField("path", StringType(), True),
+            StructField("analysis_template_name", StringType(), True),
+            StructField("target_element_webid", StringType(), True),
+            StructField("assetdatabase_webid", StringType(), True),
+        ]
+    )
+
+    ANALYSIS_TEMPLATES_SCHEMA = StructType(
+        [
+            StructField("webid", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("description", StringType(), True),
+            StructField("path", StringType(), True),
+            StructField("assetdatabase_webid", StringType(), True),
+        ]
+    )
+
+    AF_TABLES_SCHEMA = StructType(
+        [
+            StructField("webid", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("description", StringType(), True),
+            StructField("path", StringType(), True),
+            StructField("assetdatabase_webid", StringType(), True),
+        ]
+    )
+
+    AF_TABLE_ROWS_SCHEMA = StructType(
+        [
+            StructField("table_webid", StringType(), False),
+            StructField("row_index", LongType(), True),
+            StructField("columns", MapType(StringType(), StringType()), True),
+            StructField("ingestion_timestamp", TimestampType(), False),
+        ]
+    )
+
+    UNITS_OF_MEASURE_SCHEMA = StructType(
+        [
+            StructField("webid", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("abbreviation", StringType(), True),
+            StructField("quantity_type", StringType(), True),
+        ]
+    )
+
+
+    # =============================================================================
+    # Event Frame Schemas
+    # =============================================================================
+
+    EVENT_FRAMES_SCHEMA = StructType(
+        [
+            StructField("event_frame_webid", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("template_name", StringType(), True),
+            StructField("start_time", TimestampType(), True),
+            StructField("end_time", TimestampType(), True),
+            StructField("primary_referenced_element_webid", StringType(), True),
+            StructField("description", StringType(), True),
+            StructField("category_names", ArrayType(StringType()), True),
+            StructField("attributes", MapType(StringType(), StringType()), True),
+            StructField("ingestion_timestamp", TimestampType(), False),
+        ]
+    )
+
+    EVENTFRAME_ATTRIBUTES_SCHEMA = StructType(
+        [
+            StructField("event_frame_webid", StringType(), False),
+            StructField("attribute_webid", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("description", StringType(), True),
+            StructField("path", StringType(), True),
+            StructField("type", StringType(), True),
+            StructField("default_units_name", StringType(), True),
+            StructField("data_reference_plugin", StringType(), True),
+            StructField("is_configuration_item", BooleanType(), True),
+            StructField("ingestion_timestamp", TimestampType(), False),
+        ]
+    )
+
+    EVENTFRAME_TEMPLATES_SCHEMA = StructType(
+        [
+            StructField("webid", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("description", StringType(), True),
+            StructField("path", StringType(), True),
+            StructField("assetdatabase_webid", StringType(), True),
+        ]
+    )
+
+    EVENTFRAME_TEMPLATE_ATTRIBUTES_SCHEMA = StructType(
+        [
+            StructField("webid", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("description", StringType(), True),
+            StructField("path", StringType(), True),
+            StructField("type", StringType(), True),
+            StructField("eventframe_template_webid", StringType(), True),
+            StructField("assetdatabase_webid", StringType(), True),
+        ]
+    )
+
+    EVENTFRAME_REFERENCED_ELEMENTS_SCHEMA = StructType(
+        [
+            StructField("event_frame_webid", StringType(), False),
+            StructField("element_webid", StringType(), False),
+            StructField("relationship_type", StringType(), True),
+            StructField("start_time", TimestampType(), True),
+            StructField("end_time", TimestampType(), True),
+            StructField("ingestion_timestamp", TimestampType(), False),
+        ]
+    )
+
+    EVENTFRAME_ACKS_SCHEMA = StructType(
+        [
+            StructField("event_frame_webid", StringType(), False),
+            StructField("ack_id", StringType(), False),
+            StructField("ack_timestamp", TimestampType(), True),
+            StructField("ack_user", StringType(), True),
+            StructField("comment", StringType(), True),
+            StructField("ingestion_timestamp", TimestampType(), False),
+        ]
+    )
+
+    EVENTFRAME_ANNOTATIONS_SCHEMA = StructType(
+        [
+            StructField("event_frame_webid", StringType(), False),
+            StructField("annotation_id", StringType(), False),
+            StructField("annotation_timestamp", TimestampType(), True),
+            StructField("annotation_user", StringType(), True),
+            StructField("text", StringType(), True),
+            StructField("ingestion_timestamp", TimestampType(), False),
+        ]
+    )
+
+
+    # =============================================================================
+    # Governance & Diagnostics Schemas
+    # =============================================================================
+
+    LINKS_SCHEMA = StructType(
+        [
+            StructField("entity_type", StringType(), False),
+            StructField("webid", StringType(), False),
+            StructField("rel", StringType(), False),
+            StructField("href", StringType(), True),
+        ]
+    )
+
+
+    # =============================================================================
+    # Schema Mapping
+    # =============================================================================
+
+    TABLE_SCHEMAS: dict[str, StructType] = {
+        # Discovery & Inventory
+        TABLE_DATASERVERS: DATASERVERS_SCHEMA,
+        TABLE_POINTS: POINTS_SCHEMA,
+        TABLE_POINT_ATTRIBUTES: POINT_ATTRIBUTES_SCHEMA,
+        TABLE_POINT_TYPE_CATALOG: POINT_TYPE_CATALOG_SCHEMA,
+        # Time Series
+        TABLE_TIMESERIES: TS_VALUE_SCHEMA,
+        TABLE_STREAMSET_RECORDED: TS_VALUE_SCHEMA,
+        TABLE_INTERPOLATED: TS_VALUE_SCHEMA,
+        TABLE_STREAMSET_INTERPOLATED: TS_VALUE_SCHEMA,
+        TABLE_PLOT: TS_VALUE_SCHEMA,
+        TABLE_STREAMSET_PLOT: TS_VALUE_SCHEMA,
+        TABLE_END: END_SCHEMA,
+        TABLE_STREAMSET_END: END_SCHEMA,
+        TABLE_CURRENT_VALUE: CURRENT_VALUE_SCHEMA,
+        TABLE_VALUE_AT_TIME: VALUE_AT_TIME_SCHEMA,
+        TABLE_RECORDED_AT_TIME: RECORDED_AT_TIME_SCHEMA,
+        TABLE_SUMMARY: SUMMARY_SCHEMA,
+        TABLE_STREAMSET_SUMMARY: STREAMSET_SUMMARY_SCHEMA,
+        TABLE_CALCULATED: CALCULATED_SCHEMA,
+        # Asset Framework
+        TABLE_ASSET_SERVERS: ASSET_SERVERS_SCHEMA,
+        TABLE_ASSET_DATABASES: ASSET_DATABASES_SCHEMA,
+        TABLE_AF_HIERARCHY: AF_HIERARCHY_SCHEMA,
+        TABLE_ELEMENT_ATTRIBUTES: ELEMENT_ATTRIBUTES_SCHEMA,
+        TABLE_ELEMENT_TEMPLATES: ELEMENT_TEMPLATES_SCHEMA,
+        TABLE_ELEMENT_TEMPLATE_ATTRIBUTES: ELEMENT_TEMPLATE_ATTRIBUTES_SCHEMA,
+        TABLE_CATEGORIES: CATEGORIES_SCHEMA,
+        TABLE_ATTRIBUTE_TEMPLATES: ATTRIBUTE_TEMPLATES_SCHEMA,
+        TABLE_ANALYSES: ANALYSES_SCHEMA,
+        TABLE_ANALYSIS_TEMPLATES: ANALYSIS_TEMPLATES_SCHEMA,
+        TABLE_AF_TABLES: AF_TABLES_SCHEMA,
+        TABLE_AF_TABLE_ROWS: AF_TABLE_ROWS_SCHEMA,
+        TABLE_UNITS_OF_MEASURE: UNITS_OF_MEASURE_SCHEMA,
+        # Event Frames
+        TABLE_EVENT_FRAMES: EVENT_FRAMES_SCHEMA,
+        TABLE_EVENTFRAME_ATTRIBUTES: EVENTFRAME_ATTRIBUTES_SCHEMA,
+        TABLE_EVENTFRAME_TEMPLATES: EVENTFRAME_TEMPLATES_SCHEMA,
+        TABLE_EVENTFRAME_TEMPLATE_ATTRIBUTES: EVENTFRAME_TEMPLATE_ATTRIBUTES_SCHEMA,
+        TABLE_EVENTFRAME_REFERENCED_ELEMENTS: EVENTFRAME_REFERENCED_ELEMENTS_SCHEMA,
+        TABLE_EVENTFRAME_ACKS: EVENTFRAME_ACKS_SCHEMA,
+        TABLE_EVENTFRAME_ANNOTATIONS: EVENTFRAME_ANNOTATIONS_SCHEMA,
+        # Governance & Diagnostics
+        TABLE_LINKS: LINKS_SCHEMA,
+    }
+    """Mapping of table names to their StructType schemas."""
+
+
+    # =============================================================================
+    # Table Metadata Definitions
+    # =============================================================================
+
+    TABLE_METADATA: dict[str, dict] = {
+        # Discovery & Inventory (snapshot)
+        TABLE_DATASERVERS: {
+            "primary_keys": ["webid"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_POINTS: {
+            "primary_keys": ["webid"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_POINT_ATTRIBUTES: {
+            "primary_keys": ["point_webid", "name"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_POINT_TYPE_CATALOG: {
+            "primary_keys": ["point_type", "engineering_units"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        # Time Series
+        TABLE_TIMESERIES: {
+            "primary_keys": ["tag_webid", "timestamp"],
+            "cursor_field": "timestamp",
+            "ingestion_type": "append",
+        },
+        TABLE_STREAMSET_RECORDED: {
+            "primary_keys": ["tag_webid", "timestamp"],
+            "cursor_field": "timestamp",
+            "ingestion_type": "append",
+        },
+        TABLE_INTERPOLATED: {
+            "primary_keys": ["tag_webid", "timestamp"],
+            "cursor_field": "timestamp",
+            "ingestion_type": "append",
+        },
+        TABLE_STREAMSET_INTERPOLATED: {
+            "primary_keys": ["tag_webid", "timestamp"],
+            "cursor_field": "timestamp",
+            "ingestion_type": "append",
+        },
+        TABLE_PLOT: {
+            "primary_keys": ["tag_webid", "timestamp"],
+            "cursor_field": "timestamp",
+            "ingestion_type": "append",
+        },
+        TABLE_STREAMSET_PLOT: {
+            "primary_keys": ["tag_webid", "timestamp"],
+            "cursor_field": "timestamp",
+            "ingestion_type": "append",
+        },
+        TABLE_STREAMSET_SUMMARY: {
+            "primary_keys": ["tag_webid", "summary_type", "timestamp"],
+            "cursor_field": "timestamp",
+            "ingestion_type": "append",
+        },
+        TABLE_CURRENT_VALUE: {
+            "primary_keys": ["tag_webid"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_SUMMARY: {
+            "primary_keys": ["tag_webid", "summary_type"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_END: {
+            "primary_keys": ["tag_webid"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_STREAMSET_END: {
+            "primary_keys": ["tag_webid"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_VALUE_AT_TIME: {
+            "primary_keys": ["tag_webid", "timestamp"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_RECORDED_AT_TIME: {
+            "primary_keys": ["tag_webid", "query_time"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_CALCULATED: {
+            "primary_keys": ["tag_webid", "timestamp", "calculation_type"],
+            "cursor_field": "timestamp",
+            "ingestion_type": "append",
+        },
+        # Asset Framework (snapshot)
+        TABLE_ASSET_SERVERS: {
+            "primary_keys": ["webid"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_ASSET_DATABASES: {
+            "primary_keys": ["webid"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_AF_HIERARCHY: {
+            "primary_keys": ["element_webid"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_ELEMENT_ATTRIBUTES: {
+            "primary_keys": ["element_webid", "attribute_webid"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_UNITS_OF_MEASURE: {
+            "primary_keys": ["webid"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_ELEMENT_TEMPLATES: {
+            "primary_keys": ["webid"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_CATEGORIES: {
+            "primary_keys": ["webid"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_ATTRIBUTE_TEMPLATES: {
+            "primary_keys": ["webid"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_ANALYSES: {
+            "primary_keys": ["webid"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_ANALYSIS_TEMPLATES: {
+            "primary_keys": ["webid"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_AF_TABLES: {
+            "primary_keys": ["webid"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_AF_TABLE_ROWS: {
+            "primary_keys": ["table_webid", "row_index"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_ELEMENT_TEMPLATE_ATTRIBUTES: {
+            "primary_keys": ["webid"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        # Event Frames
+        TABLE_EVENT_FRAMES: {
+            "primary_keys": ["event_frame_webid", "start_time"],
+            "cursor_field": "start_time",
+            "ingestion_type": "append",
+        },
+        TABLE_EVENTFRAME_ATTRIBUTES: {
+            "primary_keys": ["event_frame_webid", "attribute_webid"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_EVENTFRAME_TEMPLATES: {
+            "primary_keys": ["webid"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_EVENTFRAME_TEMPLATE_ATTRIBUTES: {
+            "primary_keys": ["webid"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_EVENTFRAME_REFERENCED_ELEMENTS: {
+            "primary_keys": ["event_frame_webid", "element_webid"],
+            "cursor_field": "start_time",
+            "ingestion_type": "append",
+        },
+        TABLE_EVENTFRAME_ACKS: {
+            "primary_keys": ["event_frame_webid", "ack_id"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        TABLE_EVENTFRAME_ANNOTATIONS: {
+            "primary_keys": ["event_frame_webid", "annotation_id"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+        # Governance & Diagnostics
+        TABLE_LINKS: {
+            "primary_keys": ["entity_type", "webid", "rel"],
+            "cursor_field": None,
+            "ingestion_type": "snapshot",
+        },
+    }
+    """Metadata for each table including primary keys, cursor field, and ingestion type."""
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/sources/osipi/osipi_utils.py
+    ########################################################
+
+    def utcnow() -> datetime:
+        """Return the current UTC time as a timezone-aware datetime."""
         return datetime.now(timezone.utc)
 
 
-    def _isoformat_z(dt: datetime) -> str:
+    def isoformat_z(dt: datetime) -> str:
+        """Format a datetime as an ISO 8601 string with 'Z' suffix for UTC."""
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-    def _parse_ts(value: str) -> datetime:
+    def parse_ts(value: str) -> datetime:
+        """Parse an ISO 8601 timestamp string to a timezone-aware datetime."""
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
-    def _parse_pi_time(value: Optional[str], now: Optional[datetime] = None) -> datetime:
+
+    def parse_pi_time(value: Optional[str], now: Optional[datetime] = None) -> datetime:
         """
         Parse PI Web API time expressions commonly used in query params.
 
@@ -183,8 +1167,15 @@ def register_lakeflow_source(spark):
         - "*" (now)
         - "*-10m", "*-2h", "*-7d" (relative to now)
         - ISO timestamps with or without Z suffix
+
+        Args:
+            value: The time expression to parse.
+            now: Reference time for relative expressions (defaults to current UTC time).
+
+        Returns:
+            A timezone-aware datetime.
         """
-        now_dt = now or _utcnow()
+        now_dt = now or utcnow()
         if value is None or value == "" or value == "*":
             return now_dt
 
@@ -212,14 +1203,36 @@ def register_lakeflow_source(spark):
             return now_dt
 
 
-    def _chunks(items: List[str], n: int) -> List[List[str]]:
+    def chunks(items: List[str], n: int) -> List[List[str]]:
+        """Split a list into chunks of size n.
+
+        Args:
+            items: List to split.
+            n: Chunk size. If <= 0, returns the original list as a single chunk.
+
+        Returns:
+            List of chunks.
+        """
         if n <= 0:
             return [items]
         return [items[i : i + n] for i in range(0, len(items), n)]
 
 
+    def as_bool(v: Any, default: bool = False) -> bool:
+        """Convert a value to boolean with flexible parsing.
 
-    def _as_bool(v: Any, default: bool = False) -> bool:
+        Accepts:
+        - bool: returns as-is
+        - int/float: returns bool(v)
+        - str: parses "true", "yes", "1" as True; "false", "no", "0" as False
+
+        Args:
+            v: Value to convert.
+            default: Default value if conversion fails.
+
+        Returns:
+            Boolean value.
+        """
         if v is None:
             return default
         if isinstance(v, bool):
@@ -234,7 +1247,15 @@ def register_lakeflow_source(spark):
         return default
 
 
-    def _try_float(v: Any) -> Optional[float]:
+    def try_float(v: Any) -> Optional[float]:
+        """Try to convert a value to float.
+
+        Args:
+            v: Value to convert.
+
+        Returns:
+            Float value or None if conversion fails.
+        """
         if v is None:
             return None
         try:
@@ -243,151 +1264,85 @@ def register_lakeflow_source(spark):
             return None
 
 
-    def _batch_request_dict(requests_list: List[dict]) -> dict:
-        """PI Web API docs define the batch request body as a dictionary keyed by ids."""
+    def batch_request_dict(requests_list: List[dict]) -> dict:
+        """Convert a list of batch requests to the PI Web API batch request format.
+
+        PI Web API docs define the batch request body as a dictionary keyed by ids.
+
+        Args:
+            requests_list: List of request dictionaries.
+
+        Returns:
+            Dictionary keyed by string ids (1, 2, 3, ...).
+        """
         return {str(i + 1): req for i, req in enumerate(requests_list)}
 
 
-    def _batch_response_items(resp_json: dict) -> List[Tuple[str, dict]]:
-        """Normalize PI Web API batch response into a list of (request_id, response_obj)."""
+    def batch_response_items(resp_json: dict) -> List[Tuple[str, dict]]:
+        """Normalize PI Web API batch response into a list of (request_id, response_obj).
+
+        Handles both:
+        - Official PI Web API format: dictionary keyed by request ids
+        - Some mocks: {"Responses": [...]}
+
+        Args:
+            resp_json: The JSON response from a batch request.
+
+        Returns:
+            List of (request_id, response_dict) tuples, sorted by numeric id.
+        """
         if not isinstance(resp_json, dict):
             return []
 
-        # Official PI Web API batch response is a dictionary keyed by request ids.
-        # Some mocks use {"Responses": [...]}.
+        # Some mocks use {"Responses": [...]}
         if "Responses" in resp_json and isinstance(resp_json.get("Responses"), list):
             return [(str(i + 1), r) for i, r in enumerate(resp_json.get("Responses") or [])]
 
-        # Otherwise treat top-level keys as request ids.
+        # Otherwise treat top-level keys as request ids
         out = []
         for k, v in resp_json.items():
             if isinstance(v, dict) and ("Status" in v or "Content" in v or "Headers" in v):
                 out.append((str(k), v))
-        # preserve numeric ordering when possible
+
+        # Preserve numeric ordering when possible
         def keyfn(x):
             try:
                 return int(x[0])
             except Exception:
                 return 10**18
+
         return sorted(out, key=keyfn)
 
 
-    class LakeflowConnect:
-        TABLE_DATASERVERS = "pi_dataservers"
-        TABLE_POINTS = "pi_points"
-        TABLE_POINT_ATTRIBUTES = "pi_point_attributes"
-        TABLE_TIMESERIES = "pi_timeseries"
-        TABLE_INTERPOLATED = "pi_interpolated"
-        TABLE_PLOT = "pi_plot"
-        TABLE_AF_HIERARCHY = "pi_af_hierarchy"
-        TABLE_EVENT_FRAMES = "pi_event_frames"
+    ########################################################
+    # src/databricks/labs/community_connector/sources/osipi/osipi_http.py
+    ########################################################
 
-        TABLE_CURRENT_VALUE = "pi_current_value"
-        TABLE_SUMMARY = "pi_summary"
-        TABLE_STREAMSET_RECORDED = "pi_streamset_recorded"
-        TABLE_STREAMSET_INTERPOLATED = "pi_streamset_interpolated"
-        TABLE_STREAMSET_SUMMARY = "pi_streamset_summary"
-        TABLE_ELEMENT_ATTRIBUTES = "pi_element_attributes"
-        TABLE_EVENTFRAME_ATTRIBUTES = "pi_eventframe_attributes"
-        TABLE_ASSET_SERVERS = "pi_assetservers"
-        TABLE_ASSET_DATABASES = "pi_assetdatabases"
-        TABLE_ELEMENT_TEMPLATES = "pi_element_templates"
-        TABLE_CATEGORIES = "pi_categories"
-        TABLE_ATTRIBUTE_TEMPLATES = "pi_attribute_templates"
-        TABLE_ANALYSES = "pi_analyses"
-        TABLE_EVENTFRAME_TEMPLATES = "pi_eventframe_templates"
-        TABLE_END = "pi_end"
-        TABLE_VALUE_AT_TIME = "pi_value_at_time"
-        TABLE_STREAMSET_PLOT = "pi_streamset_plot"
-        TABLE_UNITS_OF_MEASURE = "pi_units_of_measure"
-        TABLE_ANALYSIS_TEMPLATES = "pi_analysis_templates"
-        TABLE_EVENTFRAME_TEMPLATE_ATTRIBUTES = "pi_eventframe_template_attributes"
-        TABLE_STREAMSET_END = "pi_streamset_end"
-        TABLE_ELEMENT_TEMPLATE_ATTRIBUTES = "pi_element_template_attributes"
-        TABLE_EVENTFRAME_REFERENCED_ELEMENTS = "pi_eventframe_referenced_elements"
-        TABLE_AF_TABLES = "pi_af_tables"
-        TABLE_AF_TABLE_ROWS = "pi_af_table_rows"
-        TABLE_EVENTFRAME_ACKS = "pi_eventframe_acknowledgements"
-        TABLE_EVENTFRAME_ANNOTATIONS = "pi_eventframe_annotations"
-        TABLE_RECORDED_AT_TIME = "pi_recorded_at_time"
-        TABLE_CALCULATED = "pi_calculated"
-        TABLE_POINT_TYPE_CATALOG = "pi_point_type_catalog"
-        TABLE_LINKS = "pi_links"
+    class PiWebApiClient:
+        """HTTP client for PI Web API with authentication support.
 
-        # ---------------------------------------------------------------------
-        # Table groups (readability)
-        # ---------------------------------------------------------------------
-        TABLES_DISCOVERY_INVENTORY = [
-            TABLE_DATASERVERS,
-            TABLE_POINTS,
-            TABLE_POINT_ATTRIBUTES,
-            TABLE_POINT_TYPE_CATALOG,
-        ]
-
-        TABLES_TIME_SERIES = [
-            TABLE_TIMESERIES,
-            TABLE_STREAMSET_RECORDED,
-            TABLE_INTERPOLATED,
-            TABLE_STREAMSET_INTERPOLATED,
-            TABLE_PLOT,
-            TABLE_STREAMSET_PLOT,
-            TABLE_SUMMARY,
-            TABLE_STREAMSET_SUMMARY,
-            TABLE_CURRENT_VALUE,
-            TABLE_VALUE_AT_TIME,
-            TABLE_RECORDED_AT_TIME,
-            TABLE_END,
-            TABLE_STREAMSET_END,
-            TABLE_CALCULATED,
-        ]
-
-        TABLES_ASSET_FRAMEWORK = [
-            TABLE_ASSET_SERVERS,
-            TABLE_ASSET_DATABASES,
-            TABLE_AF_HIERARCHY,
-            TABLE_ELEMENT_ATTRIBUTES,
-            TABLE_ELEMENT_TEMPLATES,
-            TABLE_ELEMENT_TEMPLATE_ATTRIBUTES,
-            TABLE_ATTRIBUTE_TEMPLATES,
-            TABLE_CATEGORIES,
-            TABLE_ANALYSES,
-            TABLE_ANALYSIS_TEMPLATES,
-            TABLE_AF_TABLES,
-            TABLE_AF_TABLE_ROWS,
-            TABLE_UNITS_OF_MEASURE,
-        ]
-
-        TABLES_EVENT_FRAMES = [
-            TABLE_EVENT_FRAMES,
-            TABLE_EVENTFRAME_ATTRIBUTES,
-            TABLE_EVENTFRAME_TEMPLATES,
-            TABLE_EVENTFRAME_TEMPLATE_ATTRIBUTES,
-            TABLE_EVENTFRAME_REFERENCED_ELEMENTS,
-            TABLE_EVENTFRAME_ACKS,
-            TABLE_EVENTFRAME_ANNOTATIONS,
-        ]
-
-        TABLES_GOVERNANCE_DIAGNOSTICS = [
-            TABLE_LINKS,
-        ]
+        Handles:
+        - Bearer token authentication
+        - OIDC client credentials flow
+        - Basic authentication
+        - HTTP GET/POST with retry on 401
+        - Batch request execution
+        """
 
         def __init__(self, options: Dict[str, str]) -> None:
-            """
-            IMPORTANT: This connector runs inside Spark Python Data Source workers.
+            """Initialize the PI Web API client.
 
-            Do NOT reference SparkSession/SparkContext here (or anywhere in the connector).
-            All configuration must come from `options`, including UC Connection-injected
-            options when `.option("databricks.connection", <name>)` is used.
+            Args:
+                options: Configuration dictionary with connection parameters.
             """
             self.options = options
 
-            # NOTE: Do not hard-fail in __init__ if pi_base_url is missing.
-            # In some pipeline contexts, UC Connection options may not be injected during
-            # the initial DataSource instantiation. We validate in _ensure_auth instead.
-            self.base_url = (options.get("pi_base_url") or options.get("pi_web_api_url") or "").rstrip("/")
+            # Resolve base URL from various option keys
+            self.base_url = (
+                options.get("pi_base_url") or options.get("pi_web_api_url") or ""
+            ).rstrip("/")
 
-            # UC ConnectionType.HTTP (bearer) exposes standard option keys like host/base_path/port.
-            # Support those so users can store PI host + bearer token in UC without custom option keys.
+            # UC ConnectionType.HTTP (bearer) exposes standard option keys
             if not self.base_url:
                 host = (options.get("host") or "").strip()
                 base_path = (options.get("base_path") or "").strip()
@@ -404,7 +1359,7 @@ def register_lakeflow_source(spark):
                     if port and ":" not in scheme_host.split("//", 1)[-1]:
                         scheme_host = scheme_host.rstrip("/") + f":{port}"
 
-                    # Optional base_path (avoid trailing slash)
+                    # Optional base_path
                     if base_path:
                         if not base_path.startswith("/"):
                             base_path = "/" + base_path
@@ -414,580 +1369,19 @@ def register_lakeflow_source(spark):
 
             self.session = requests.Session()
             self.session.headers.update({"Accept": "application/json"})
-            self.verify_ssl = _as_bool(options.get("verify_ssl"), default=True)
+            self.verify_ssl = as_bool(options.get("verify_ssl"), default=True)
             self._auth_resolved = False
 
-            # OIDC token cache (best-effort; refreshed when close to expiry)
+            # OIDC token cache
             self._oidc_access_token: Optional[str] = None
             self._oidc_token_expires_at: Optional[datetime] = None
 
-        def list_tables(self) -> List[str]:
-            return (
-                list(self.TABLES_DISCOVERY_INVENTORY)
-                + list(self.TABLES_TIME_SERIES)
-                + list(self.TABLES_ASSET_FRAMEWORK)
-                + list(self.TABLES_EVENT_FRAMES)
-                + list(self.TABLES_GOVERNANCE_DIAGNOSTICS)
-            )
-
-        def get_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
-            # -----------------------------------------------------------------
-            # Schemas (grouped for readability)
-            # -----------------------------------------------------------------
-
-            # Common schema blocks
-            ts_value_schema = StructType(
-                [
-                    StructField("tag_webid", StringType(), False),
-                    StructField("timestamp", TimestampType(), False),
-                    StructField("value", DoubleType(), True),
-                    StructField("good", BooleanType(), True),
-                    StructField("questionable", BooleanType(), True),
-                    StructField("substituted", BooleanType(), True),
-                    StructField("annotated", BooleanType(), True),
-                    StructField("units", StringType(), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                ]
-            )
-
-            # Discovery & inventory
-            schemas: Dict[str, StructType] = {
-                self.TABLE_DATASERVERS: StructType(
-                    [
-                    StructField("webid", StringType(), False),
-                    StructField("name", StringType(), True),
-                    ]
-                ),
-                self.TABLE_POINTS: StructType(
-                    [
-                    StructField("webid", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("descriptor", StringType(), True),
-                    StructField("engineering_units", StringType(), True),
-                    StructField("path", StringType(), True),
-                    StructField("dataserver_webid", StringType(), True),
-                    ]
-                ),
-                self.TABLE_POINT_ATTRIBUTES: StructType(
-                    [
-                    StructField("point_webid", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("value", StringType(), True),
-                    StructField("type", StringType(), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                    ]
-                ),
-                self.TABLE_POINT_TYPE_CATALOG: StructType(
-                    [
-                        StructField("point_type", StringType(), False),
-                        StructField("engineering_units", StringType(), True),
-                        StructField("count_points", LongType(), True),
-                    ]
-                ),
-            }
-
-            # Time-series
-            schemas.update(
-                {
-                    self.TABLE_TIMESERIES: ts_value_schema,
-                    self.TABLE_STREAMSET_RECORDED: ts_value_schema,
-                    self.TABLE_INTERPOLATED: ts_value_schema,
-                    self.TABLE_STREAMSET_INTERPOLATED: ts_value_schema,
-                    self.TABLE_PLOT: ts_value_schema,
-                    self.TABLE_STREAMSET_PLOT: ts_value_schema,
-                    self.TABLE_END: StructType(
-                        [
-                    StructField("tag_webid", StringType(), False),
-                            StructField("timestamp", TimestampType(), True),
-                    StructField("value", DoubleType(), True),
-                    StructField("good", BooleanType(), True),
-                    StructField("questionable", BooleanType(), True),
-                    StructField("substituted", BooleanType(), True),
-                    StructField("annotated", BooleanType(), True),
-                    StructField("units", StringType(), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                        ]
-                    ),
-                    self.TABLE_STREAMSET_END: StructType(
-                        [
-                    StructField("tag_webid", StringType(), False),
-                    StructField("timestamp", TimestampType(), True),
-                    StructField("value", DoubleType(), True),
-                    StructField("good", BooleanType(), True),
-                    StructField("questionable", BooleanType(), True),
-                    StructField("substituted", BooleanType(), True),
-                    StructField("annotated", BooleanType(), True),
-                    StructField("units", StringType(), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                        ]
-                    ),
-                    self.TABLE_CURRENT_VALUE: StructType(
-                        [
-                    StructField("tag_webid", StringType(), False),
-                    StructField("timestamp", TimestampType(), True),
-                    StructField("value", DoubleType(), True),
-                    StructField("good", BooleanType(), True),
-                    StructField("questionable", BooleanType(), True),
-                    StructField("substituted", BooleanType(), True),
-                    StructField("annotated", BooleanType(), True),
-                    StructField("units", StringType(), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                        ]
-                    ),
-                    self.TABLE_VALUE_AT_TIME: StructType(
-                        [
-                            StructField("tag_webid", StringType(), False),
-                            StructField("timestamp", TimestampType(), True),
-                            StructField("value", DoubleType(), True),
-                            StructField("good", BooleanType(), True),
-                            StructField("questionable", BooleanType(), True),
-                            StructField("substituted", BooleanType(), True),
-                            StructField("annotated", BooleanType(), True),
-                            StructField("units", StringType(), True),
-                            StructField("ingestion_timestamp", TimestampType(), False),
-                        ]
-                    ),
-                    self.TABLE_RECORDED_AT_TIME: StructType(
-                        [
-                            StructField("tag_webid", StringType(), False),
-                            StructField("query_time", TimestampType(), True),
-                            StructField("timestamp", TimestampType(), True),
-                            StructField("value", DoubleType(), True),
-                            StructField("good", BooleanType(), True),
-                            StructField("questionable", BooleanType(), True),
-                            StructField("substituted", BooleanType(), True),
-                            StructField("annotated", BooleanType(), True),
-                            StructField("units", StringType(), True),
-                            StructField("ingestion_timestamp", TimestampType(), False),
-                        ]
-                    ),
-                    self.TABLE_SUMMARY: StructType(
-                        [
-                    StructField("tag_webid", StringType(), False),
-                    StructField("summary_type", StringType(), False),
-                    StructField("timestamp", TimestampType(), True),
-                    StructField("value", DoubleType(), True),
-                    StructField("good", BooleanType(), True),
-                    StructField("questionable", BooleanType(), True),
-                    StructField("substituted", BooleanType(), True),
-                    StructField("annotated", BooleanType(), True),
-                    StructField("units", StringType(), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                        ]
-                    ),
-                    self.TABLE_STREAMSET_SUMMARY: StructType(
-                        [
-                    StructField("tag_webid", StringType(), False),
-                    StructField("summary_type", StringType(), False),
-                    StructField("timestamp", TimestampType(), False),
-                    StructField("value", DoubleType(), True),
-                    StructField("good", BooleanType(), True),
-                    StructField("questionable", BooleanType(), True),
-                    StructField("substituted", BooleanType(), True),
-                    StructField("annotated", BooleanType(), True),
-                    StructField("units", StringType(), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                        ]
-                    ),
-                    self.TABLE_CALCULATED: StructType(
-                        [
-                            StructField("tag_webid", StringType(), False),
-                            StructField("timestamp", TimestampType(), False),
-                            StructField("value", DoubleType(), True),
-                            StructField("units", StringType(), True),
-                            StructField("calculation_type", StringType(), True),
-                            StructField("ingestion_timestamp", TimestampType(), False),
-                        ]
-                    ),
-                }
-            )
-
-            # Asset Framework (AF)
-            schemas.update(
-                {
-                    self.TABLE_ASSET_SERVERS: StructType(
-                        [
-                            StructField("webid", StringType(), False),
-                            StructField("name", StringType(), True),
-                            StructField("path", StringType(), True),
-                        ]
-                    ),
-                    self.TABLE_ASSET_DATABASES: StructType(
-                        [
-                            StructField("webid", StringType(), False),
-                            StructField("name", StringType(), True),
-                            StructField("path", StringType(), True),
-                            StructField("assetserver_webid", StringType(), True),
-                        ]
-                    ),
-                    self.TABLE_AF_HIERARCHY: StructType(
-                        [
-                    StructField("element_webid", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("template_name", StringType(), True),
-                    StructField("description", StringType(), True),
-                    StructField("path", StringType(), True),
-                    StructField("parent_webid", StringType(), True),
-                    StructField("depth", LongType(), True),
-                    StructField("category_names", ArrayType(StringType()), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                        ]
-                    ),
-                    self.TABLE_ELEMENT_ATTRIBUTES: StructType(
-                        [
-                            StructField("element_webid", StringType(), False),
-                            StructField("attribute_webid", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("description", StringType(), True),
-                            StructField("path", StringType(), True),
-                            StructField("type", StringType(), True),
-                            StructField("default_units_name", StringType(), True),
-                            StructField("data_reference_plugin", StringType(), True),
-                            StructField("is_configuration_item", BooleanType(), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                        ]
-                    ),
-                    self.TABLE_ELEMENT_TEMPLATES: StructType(
-                        [
-                            StructField("webid", StringType(), False),
-                            StructField("name", StringType(), True),
-                            StructField("description", StringType(), True),
-                            StructField("path", StringType(), True),
-                            StructField("assetdatabase_webid", StringType(), True),
-                        ]
-                    ),
-                    self.TABLE_ELEMENT_TEMPLATE_ATTRIBUTES: StructType(
-                        [
-                            StructField("webid", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("description", StringType(), True),
-                    StructField("path", StringType(), True),
-                    StructField("type", StringType(), True),
-                    StructField("default_units_name", StringType(), True),
-                    StructField("data_reference_plugin", StringType(), True),
-                    StructField("is_configuration_item", BooleanType(), True),
-                            StructField("elementtemplate_webid", StringType(), True),
-                            StructField("assetdatabase_webid", StringType(), True),
-                        ]
-                    ),
-                    self.TABLE_CATEGORIES: StructType(
-                        [
-                            StructField("webid", StringType(), False),
-                            StructField("name", StringType(), True),
-                            StructField("description", StringType(), True),
-                            StructField("category_type", StringType(), True),
-                            StructField("assetdatabase_webid", StringType(), True),
-                        ]
-                    ),
-                    self.TABLE_ATTRIBUTE_TEMPLATES: StructType(
-                        [
-                            StructField("webid", StringType(), False),
-                            StructField("name", StringType(), True),
-                            StructField("description", StringType(), True),
-                            StructField("path", StringType(), True),
-                            StructField("type", StringType(), True),
-                            StructField("elementtemplate_webid", StringType(), True),
-                            StructField("assetdatabase_webid", StringType(), True),
-                        ]
-                    ),
-                    self.TABLE_ANALYSES: StructType(
-                        [
-                            StructField("webid", StringType(), False),
-                            StructField("name", StringType(), True),
-                            StructField("description", StringType(), True),
-                            StructField("path", StringType(), True),
-                            StructField("analysis_template_name", StringType(), True),
-                            StructField("target_element_webid", StringType(), True),
-                            StructField("assetdatabase_webid", StringType(), True),
-                        ]
-                    ),
-                    self.TABLE_ANALYSIS_TEMPLATES: StructType(
-                        [
-                            StructField("webid", StringType(), False),
-                            StructField("name", StringType(), True),
-                            StructField("description", StringType(), True),
-                            StructField("path", StringType(), True),
-                            StructField("assetdatabase_webid", StringType(), True),
-                        ]
-                    ),
-                    self.TABLE_AF_TABLES: StructType(
-                        [
-                            StructField("webid", StringType(), False),
-                            StructField("name", StringType(), True),
-                            StructField("description", StringType(), True),
-                            StructField("path", StringType(), True),
-                            StructField("assetdatabase_webid", StringType(), True),
-                        ]
-                    ),
-                    self.TABLE_AF_TABLE_ROWS: StructType(
-                        [
-                            StructField("table_webid", StringType(), False),
-                            StructField("row_index", LongType(), True),
-                            StructField("columns", MapType(StringType(), StringType()), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                        ]
-                    ),
-                    self.TABLE_UNITS_OF_MEASURE: StructType(
-                        [
-                            StructField("webid", StringType(), False),
-                            StructField("name", StringType(), True),
-                            StructField("abbreviation", StringType(), True),
-                            StructField("quantity_type", StringType(), True),
-                        ]
-                    ),
-                }
-            )
-
-            # Event Frames
-            schemas.update(
-                {
-                    self.TABLE_EVENT_FRAMES: StructType(
-                        [
-                            StructField("event_frame_webid", StringType(), False),
-                            StructField("name", StringType(), True),
-                            StructField("template_name", StringType(), True),
-                            StructField("start_time", TimestampType(), True),
-                            StructField("end_time", TimestampType(), True),
-                            StructField("primary_referenced_element_webid", StringType(), True),
-                            StructField("description", StringType(), True),
-                            StructField("category_names", ArrayType(StringType()), True),
-                            StructField("attributes", MapType(StringType(), StringType()), True),
-                            StructField("ingestion_timestamp", TimestampType(), False),
-                        ]
-                    ),
-                    self.TABLE_EVENTFRAME_ATTRIBUTES: StructType(
-                        [
-                    StructField("event_frame_webid", StringType(), False),
-                    StructField("attribute_webid", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("description", StringType(), True),
-                    StructField("path", StringType(), True),
-                    StructField("type", StringType(), True),
-                    StructField("default_units_name", StringType(), True),
-                    StructField("data_reference_plugin", StringType(), True),
-                    StructField("is_configuration_item", BooleanType(), True),
-                    StructField("ingestion_timestamp", TimestampType(), False),
-                        ]
-                    ),
-                    self.TABLE_EVENTFRAME_TEMPLATES: StructType(
-                        [
-                    StructField("webid", StringType(), False),
-                    StructField("name", StringType(), True),
-                            StructField("description", StringType(), True),
-                    StructField("path", StringType(), True),
-                            StructField("assetdatabase_webid", StringType(), True),
-                        ]
-                    ),
-                    self.TABLE_EVENTFRAME_TEMPLATE_ATTRIBUTES: StructType(
-                        [
-                    StructField("webid", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("description", StringType(), True),
-                    StructField("path", StringType(), True),
-                            StructField("type", StringType(), True),
-                            StructField("eventframe_template_webid", StringType(), True),
-                    StructField("assetdatabase_webid", StringType(), True),
-                        ]
-                    ),
-                    self.TABLE_EVENTFRAME_REFERENCED_ELEMENTS: StructType(
-                        [
-                            StructField("event_frame_webid", StringType(), False),
-                            StructField("element_webid", StringType(), False),
-                            StructField("relationship_type", StringType(), True),
-                            StructField("start_time", TimestampType(), True),
-                            StructField("end_time", TimestampType(), True),
-                            StructField("ingestion_timestamp", TimestampType(), False),
-                        ]
-                    ),
-                    self.TABLE_EVENTFRAME_ACKS: StructType(
-                        [
-                            StructField("event_frame_webid", StringType(), False),
-                            StructField("ack_id", StringType(), False),
-                            StructField("ack_timestamp", TimestampType(), True),
-                            StructField("ack_user", StringType(), True),
-                            StructField("comment", StringType(), True),
-                            StructField("ingestion_timestamp", TimestampType(), False),
-                        ]
-                    ),
-                    self.TABLE_EVENTFRAME_ANNOTATIONS: StructType(
-                        [
-                            StructField("event_frame_webid", StringType(), False),
-                            StructField("annotation_id", StringType(), False),
-                            StructField("annotation_timestamp", TimestampType(), True),
-                            StructField("annotation_user", StringType(), True),
-                            StructField("text", StringType(), True),
-                            StructField("ingestion_timestamp", TimestampType(), False),
-                        ]
-                    ),
-                }
-            )
-
-            # Governance & diagnostics
-            schemas.update(
-                {
-                    self.TABLE_LINKS: StructType(
-                        [
-                            StructField("entity_type", StringType(), False),
-                            StructField("webid", StringType(), False),
-                            StructField("rel", StringType(), False),
-                            StructField("href", StringType(), True),
-                        ]
-                    ),
-                }
-            )
-
-            schema = schemas.get(table_name)
-            if schema is None:
-                raise ValueError(f"Unknown table: {table_name}")
-            return schema
-
-        def read_table_metadata(self, table_name: str, table_options: Dict[str, str]) -> Dict:
-            # -----------------------------------------------------------------
-            # Metadata (grouped for readability)
-            # -----------------------------------------------------------------
-            meta: Dict[str, Dict[str, Any]] = {}
-
-            # Discovery & inventory (snapshot)
-            meta[self.TABLE_DATASERVERS] = {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            meta[self.TABLE_POINTS] = {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            meta[self.TABLE_POINT_ATTRIBUTES] = {"primary_keys": ["point_webid", "name"], "cursor_field": None, "ingestion_type": "snapshot"}
-            meta[self.TABLE_POINT_TYPE_CATALOG] = {"primary_keys": ["point_type", "engineering_units"], "cursor_field": None, "ingestion_type": "snapshot"}
-
-            # Time-series
-            for t in (
-                self.TABLE_TIMESERIES,
-                self.TABLE_STREAMSET_RECORDED,
-                self.TABLE_INTERPOLATED,
-                self.TABLE_STREAMSET_INTERPOLATED,
-                self.TABLE_PLOT,
-                self.TABLE_STREAMSET_PLOT,
-            ):
-                meta[t] = {"primary_keys": ["tag_webid", "timestamp"], "cursor_field": "timestamp", "ingestion_type": "append"}
-            meta[self.TABLE_STREAMSET_SUMMARY] = {"primary_keys": ["tag_webid", "summary_type", "timestamp"], "cursor_field": "timestamp", "ingestion_type": "append"}
-            meta[self.TABLE_CURRENT_VALUE] = {"primary_keys": ["tag_webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            meta[self.TABLE_SUMMARY] = {"primary_keys": ["tag_webid", "summary_type"], "cursor_field": None, "ingestion_type": "snapshot"}
-            meta[self.TABLE_END] = {"primary_keys": ["tag_webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            meta[self.TABLE_STREAMSET_END] = {"primary_keys": ["tag_webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            meta[self.TABLE_VALUE_AT_TIME] = {"primary_keys": ["tag_webid", "timestamp"], "cursor_field": None, "ingestion_type": "snapshot"}
-            meta[self.TABLE_RECORDED_AT_TIME] = {"primary_keys": ["tag_webid", "query_time"], "cursor_field": None, "ingestion_type": "snapshot"}
-            meta[self.TABLE_CALCULATED] = {"primary_keys": ["tag_webid", "timestamp", "calculation_type"], "cursor_field": "timestamp", "ingestion_type": "append"}
-
-            # Asset Framework (AF) (snapshot)
-            for t, pk in (
-                (self.TABLE_ASSET_SERVERS, ["webid"]),
-                (self.TABLE_ASSET_DATABASES, ["webid"]),
-                (self.TABLE_AF_HIERARCHY, ["element_webid"]),
-                (self.TABLE_ELEMENT_ATTRIBUTES, ["element_webid", "attribute_webid"]),
-                (self.TABLE_UNITS_OF_MEASURE, ["webid"]),
-                (self.TABLE_ELEMENT_TEMPLATES, ["webid"]),
-                (self.TABLE_CATEGORIES, ["webid"]),
-                (self.TABLE_ATTRIBUTE_TEMPLATES, ["webid"]),
-                (self.TABLE_ANALYSES, ["webid"]),
-                (self.TABLE_ANALYSIS_TEMPLATES, ["webid"]),
-                (self.TABLE_AF_TABLES, ["webid"]),
-                (self.TABLE_AF_TABLE_ROWS, ["table_webid", "row_index"]),
-                (self.TABLE_ELEMENT_TEMPLATE_ATTRIBUTES, ["webid"]),
-            ):
-                meta[t] = {"primary_keys": pk, "cursor_field": None, "ingestion_type": "snapshot"}
-
-            # Event Frames
-            meta[self.TABLE_EVENT_FRAMES] = {"primary_keys": ["event_frame_webid", "start_time"], "cursor_field": "start_time", "ingestion_type": "append"}
-            meta[self.TABLE_EVENTFRAME_ATTRIBUTES] = {"primary_keys": ["event_frame_webid", "attribute_webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            meta[self.TABLE_EVENTFRAME_TEMPLATES] = {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            meta[self.TABLE_EVENTFRAME_TEMPLATE_ATTRIBUTES] = {"primary_keys": ["webid"], "cursor_field": None, "ingestion_type": "snapshot"}
-            meta[self.TABLE_EVENTFRAME_REFERENCED_ELEMENTS] = {"primary_keys": ["event_frame_webid", "element_webid"], "cursor_field": "start_time", "ingestion_type": "append"}
-            meta[self.TABLE_EVENTFRAME_ACKS] = {"primary_keys": ["event_frame_webid", "ack_id"], "cursor_field": None, "ingestion_type": "snapshot"}
-            meta[self.TABLE_EVENTFRAME_ANNOTATIONS] = {"primary_keys": ["event_frame_webid", "annotation_id"], "cursor_field": None, "ingestion_type": "snapshot"}
-
-            # Governance & diagnostics (snapshot)
-            meta[self.TABLE_LINKS] = {"primary_keys": ["entity_type", "webid", "rel"], "cursor_field": None, "ingestion_type": "snapshot"}
-
-            out = meta.get(table_name)
-            if out is None:
-                raise ValueError(f"Unknown table: {table_name}")
-            return out
-
-        def read_table(self, table_name: str, start_offset: dict, table_options: Dict[str, str]) -> Tuple[Iterator[dict], dict]:
-            self._ensure_auth()
-
-            # Snapshot offset semantics:
-            # For snapshot tables, once we return an "end" offset, subsequent reads with the same offset
-            # must return no rows to avoid duplicates in streaming mode.
-            try:
-                meta = self.read_table_metadata(table_name, table_options)
-                if (
-                    meta.get("ingestion_type") == "snapshot"
-                    and isinstance(start_offset, dict)
-                    and start_offset.get("offset") == "done"
-                ):
-                    return iter(()), dict(start_offset)
-            except Exception:
-                # Never fail the read due to metadata lookup; fall back to existing behavior.
-                pass
-
-            dispatch = {
-                # Discovery & inventory
-                self.TABLE_DATASERVERS: lambda: (iter(self._read_dataservers()), {"offset": "done"}),
-                self.TABLE_POINTS: lambda: (iter(self._read_points(table_options)), {"offset": "done"}),
-                self.TABLE_POINT_ATTRIBUTES: lambda: (iter(self._read_point_attributes(table_options)), {"offset": "done"}),
-                self.TABLE_POINT_TYPE_CATALOG: lambda: (iter(self._read_point_type_catalog(table_options)), {"offset": "done"}),
-
-                # Time-series
-                self.TABLE_TIMESERIES: lambda: self._read_timeseries(start_offset, table_options),
-                self.TABLE_STREAMSET_RECORDED: lambda: self._read_streamset_recorded(start_offset, table_options),
-                self.TABLE_INTERPOLATED: lambda: self._read_interpolated(start_offset, table_options),
-                self.TABLE_STREAMSET_INTERPOLATED: lambda: self._read_streamset_interpolated(start_offset, table_options),
-                self.TABLE_PLOT: lambda: self._read_plot(start_offset, table_options),
-                self.TABLE_STREAMSET_PLOT: lambda: self._read_streamset_plot(start_offset, table_options),
-                self.TABLE_SUMMARY: lambda: (iter(self._read_summary(table_options)), {"offset": "done"}),
-                self.TABLE_STREAMSET_SUMMARY: lambda: self._read_streamset_summary(start_offset, table_options),
-                self.TABLE_CURRENT_VALUE: lambda: (iter(self._read_current_value(table_options)), {"offset": "done"}),
-                self.TABLE_VALUE_AT_TIME: lambda: (iter(self._read_value_at_time(table_options)), {"offset": "done"}),
-                self.TABLE_RECORDED_AT_TIME: lambda: (iter(self._read_recorded_at_time(table_options)), {"offset": "done"}),
-                self.TABLE_END: lambda: (iter(self._read_end(table_options)), {"offset": "done"}),
-                self.TABLE_STREAMSET_END: lambda: (iter(self._read_streamset_end(table_options)), {"offset": "done"}),
-                self.TABLE_CALCULATED: lambda: self._read_calculated(start_offset, table_options),
-
-                # Asset Framework (AF)
-                self.TABLE_ASSET_SERVERS: lambda: (iter(self._read_assetservers_table()), {"offset": "done"}),
-                self.TABLE_ASSET_DATABASES: lambda: (iter(self._read_assetdatabases_table()), {"offset": "done"}),
-                self.TABLE_AF_HIERARCHY: lambda: (iter(self._read_af_hierarchy()), {"offset": "done"}),
-                self.TABLE_ELEMENT_ATTRIBUTES: lambda: (iter(self._read_element_attributes(table_options)), {"offset": "done"}),
-                self.TABLE_ELEMENT_TEMPLATES: lambda: (iter(self._read_element_templates_table(table_options)), {"offset": "done"}),
-                self.TABLE_ELEMENT_TEMPLATE_ATTRIBUTES: lambda: (iter(self._read_element_template_attributes_table(table_options)), {"offset": "done"}),
-                self.TABLE_ATTRIBUTE_TEMPLATES: lambda: (iter(self._read_attribute_templates_table(table_options)), {"offset": "done"}),
-                self.TABLE_CATEGORIES: lambda: (iter(self._read_categories_table(table_options)), {"offset": "done"}),
-                self.TABLE_ANALYSES: lambda: (iter(self._read_analyses_table(table_options)), {"offset": "done"}),
-                self.TABLE_ANALYSIS_TEMPLATES: lambda: (iter(self._read_analysis_templates_table(table_options)), {"offset": "done"}),
-                self.TABLE_AF_TABLES: lambda: (iter(self._read_af_tables_table(table_options)), {"offset": "done"}),
-                self.TABLE_AF_TABLE_ROWS: lambda: (iter(self._read_af_table_rows_table(table_options)), {"offset": "done"}),
-                self.TABLE_UNITS_OF_MEASURE: lambda: (iter(self._read_units_of_measure_table()), {"offset": "done"}),
-
-                # Event Frames
-                self.TABLE_EVENT_FRAMES: lambda: self._read_event_frames(start_offset, table_options),
-                self.TABLE_EVENTFRAME_ATTRIBUTES: lambda: (iter(self._read_eventframe_attributes(table_options)), {"offset": "done"}),
-                self.TABLE_EVENTFRAME_TEMPLATES: lambda: (iter(self._read_eventframe_templates_table(table_options)), {"offset": "done"}),
-                self.TABLE_EVENTFRAME_TEMPLATE_ATTRIBUTES: lambda: (iter(self._read_eventframe_template_attributes_table(table_options)), {"offset": "done"}),
-                self.TABLE_EVENTFRAME_REFERENCED_ELEMENTS: lambda: self._read_eventframe_referenced_elements(start_offset, table_options),
-                self.TABLE_EVENTFRAME_ACKS: lambda: (iter(self._read_eventframe_acknowledgements_table(table_options)), {"offset": "done"}),
-                self.TABLE_EVENTFRAME_ANNOTATIONS: lambda: (iter(self._read_eventframe_annotations_table(table_options)), {"offset": "done"}),
-
-                # Governance & diagnostics
-                self.TABLE_LINKS: lambda: (iter(self._read_links(table_options)), {"offset": "done"}),
-            }
-
-            handler = dispatch.get(table_name)
-            if handler is None:
-                raise ValueError(f"Unknown table: {table_name}")
-            return handler()
-
-
-        def _ensure_auth(self) -> None:
-            """Authenticate using UC Connection-injected options (no Spark usage)."""
-            # If we already resolved auth, refresh OIDC token when close to expiry.
+        def ensure_auth(self) -> None:
+            """Authenticate using UC Connection-injected options."""
+            # If already resolved, check OIDC token expiry
             if self._auth_resolved:
                 if self._oidc_access_token and self._oidc_token_expires_at:
-                    if _utcnow() < self._oidc_token_expires_at - timedelta(minutes=5):
+                    if utcnow() < self._oidc_token_expires_at - timedelta(minutes=5):
                         return
                     self._auth_resolved = False
                 else:
@@ -997,20 +1391,21 @@ def register_lakeflow_source(spark):
             if connection_name:
                 print(f"🔍 Using UC Connection: {connection_name}")
 
-            # Extract auth parameters from options
-            # Support bearer_value as alternative to access_token (in case UC strips "token" options)
-            access_token = self.options.get("access_token") or self.options.get("bearer_value")
+            # Extract auth parameters
+            access_token = (
+                self.options.get("access_token")
+                or self.options.get("bearer_token")
+                or self.options.get("bearer_value")
+            )
             workspace_host = self.options.get("workspace_host")
             client_id = self.options.get("client_id")
             client_secret = self.options.get("client_secret")
             username = self.options.get("username")
             password = self.options.get("password")
 
-            # Opt-in: allow unauthenticated access (useful for debugging or public PI Web API endpoints).
-            # NOTE: Default remains secure-by-default (no anonymous access unless explicitly enabled).
-            if _as_bool(self.options.get("allow_anonymous"), default=False):
+            # Opt-in: allow unauthenticated access
+            if as_bool(self.options.get("allow_anonymous"), default=False):
                 print("⚠️  AUTH: allow_anonymous=true (no Authorization header will be sent)")
-                # Ensure no previous auth state leaks into requests.
                 self.session.headers.pop("Authorization", None)
                 self.session.auth = None
                 self._oidc_access_token = None
@@ -1026,12 +1421,16 @@ def register_lakeflow_source(spark):
 
             # Method 2: OIDC with client credentials
             if workspace_host and client_id and client_secret:
-                if not workspace_host.startswith("http://") and not workspace_host.startswith("https://"):
+                if not workspace_host.startswith("http://") and not workspace_host.startswith(
+                    "https://"
+                ):
                     workspace_host = "https://" + workspace_host
 
                 if self._oidc_access_token and self._oidc_token_expires_at:
-                    if _utcnow() < self._oidc_token_expires_at - timedelta(minutes=5):
-                        self.session.headers.update({"Authorization": f"Bearer {self._oidc_access_token}"})
+                    if utcnow() < self._oidc_token_expires_at - timedelta(minutes=5):
+                        self.session.headers.update(
+                            {"Authorization": f"Bearer {self._oidc_access_token}"}
+                        )
                         self._auth_resolved = True
                         return
 
@@ -1050,7 +1449,7 @@ def register_lakeflow_source(spark):
                     raise RuntimeError("OIDC endpoint did not return access_token")
                 expires_in = int(payload.get("expires_in") or 3600)
                 self._oidc_access_token = token
-                self._oidc_token_expires_at = _utcnow() + timedelta(seconds=expires_in)
+                self._oidc_token_expires_at = utcnow() + timedelta(seconds=expires_in)
                 self.session.headers.update({"Authorization": f"Bearer {token}"})
                 self._auth_resolved = True
                 return
@@ -1063,188 +1462,99 @@ def register_lakeflow_source(spark):
 
             raise RuntimeError(
                 "No valid authentication credentials found in options. "
-                "Expected one of: access_token, OR (workspace_host + client_id + client_secret), OR (username + password)."
+                "Expected one of: access_token, OR (workspace_host + client_id + client_secret), "
+                "OR (username + password)."
             )
 
-        def _start_dt_from_offset(self, start_offset: dict) -> Optional[datetime]:
-            if start_offset and isinstance(start_offset, dict):
-                off = start_offset.get("offset")
-                if isinstance(off, str) and off:
-                    try:
-                        return _parse_ts(off)
-                    except Exception:
-                        return None
-            return None
+        def _reset_auth(self) -> None:
+            """Reset authentication state for retry."""
+            self._auth_resolved = False
+            self._oidc_access_token = None
+            self._oidc_token_expires_at = None
+            self.session.headers.pop("Authorization", None)
+            self.session.auth = None
 
-        def _compute_time_range(
-            self,
-            start_offset: dict,
-            table_options: Dict[str, str],
-            *,
-            apply_window_seconds: bool = False,
-        ) -> Tuple[str, str]:
+        def get_json(self, path: str, params: Optional[Any] = None) -> dict:
+            """Make a GET request and return JSON response.
+
+            Args:
+                path: API path (e.g., "/piwebapi/dataservers").
+                params: Query parameters.
+
+            Returns:
+                JSON response as dictionary.
             """
-            Standardize the repeated 'start/end time window' logic used by time-series reads.
-            Returns (start_str, end_str) formatted as PI Web API ISO-Z strings.
-            """
-            now = _utcnow()
-
-            end_opt = table_options.get("endTime") or table_options.get("end_time") or "*"
-            end_dt = _parse_pi_time(end_opt, now=now)
-
-            start_dt = self._start_dt_from_offset(start_offset)
-            if start_dt is None:
-                start_opt = table_options.get("startTime") or table_options.get("start_time")
-                if start_opt:
-                    start_dt = _parse_pi_time(str(start_opt), now=end_dt)
-                else:
-                    lookback_minutes = int(table_options.get("lookback_minutes", 60))
-                    start_dt = end_dt - timedelta(minutes=lookback_minutes)
-
-            if apply_window_seconds:
-                window_seconds = int(table_options.get("window_seconds", 0) or 0)
-                if window_seconds > 0:
-                    end_dt = min(end_dt, start_dt + timedelta(seconds=window_seconds))
-
-            return _isoformat_z(start_dt), _isoformat_z(end_dt)
-
-        def _build_streamset_params(
-            self,
-            webids: List[str],
-            *,
-            start_str: str,
-            end_str: str,
-            max_count: Optional[int] = None,
-            interval: Optional[str] = None,
-            intervals: Optional[int] = None,
-            selected_fields: Optional[str] = None,
-        ) -> List[Tuple[str, str]]:
-            params: List[Tuple[str, str]] = [("webId", w) for w in webids]
-            params += [("startTime", start_str), ("endTime", end_str)]
-            if interval:
-                params.append(("interval", str(interval)))
-            if intervals is not None:
-                params.append(("intervals", str(intervals)))
-            if max_count is not None:
-                params.append(("maxCount", str(max_count)))
-            if selected_fields:
-                params.append(("selectedFields", str(selected_fields)))
-            return params
-
-        def _get_json(self, path: str, params: Optional[Any] = None) -> dict:
-
             url = f"{self.base_url}{path}"
-
-
-            debug = _as_bool(self.options.get("debug_http"), default=False)
+            debug = as_bool(self.options.get("debug_http"), default=False)
 
             if debug:
-
-                # DEBUG: Log the actual request details
-
-                print("🔍 DEBUG _get_json:")
-
+                print("🔍 DEBUG get_json:")
                 print(f"   URL: {url}")
-
                 print(f"   Headers: {dict(self.session.headers)}")
-
                 print(f"   Auth: {self.session.auth}")
-
                 print(f"   Params: {params}")
-
                 print(f"   verify_ssl: {self.verify_ssl}")
 
-
             for attempt in range(2):
-
-                self._ensure_auth()
-
+                self.ensure_auth()
                 r = self.session.get(url, params=params, timeout=60, verify=self.verify_ssl)
 
-
-                # Some proxies/apps behave differently with a trailing slash.
-
-                # Try `.../` on 404, but only use it if it succeeds (avoid breaking servers that 404 on trailing "/").
-
+                # Some proxies/apps behave differently with a trailing slash
                 if r.status_code == 404 and not url.endswith("/"):
-
-                    r_slash = self.session.get(url + "/", params=params, timeout=60, verify=self.verify_ssl)
-
+                    r_slash = self.session.get(
+                        url + "/", params=params, timeout=60, verify=self.verify_ssl
+                    )
                     if r_slash.status_code < 400:
-
                         r = r_slash
 
-
                 if debug:
-
                     print(f"   Response status: {r.status_code}")
-
                     print(f"   Response headers: {dict(r.headers)}")
 
-
                 if r.status_code == 401 and attempt == 0:
-
                     if debug:
-
                         print("   Got 401, retrying auth...")
-
-                    self._auth_resolved = False
-
-                    self._oidc_access_token = None
-
-                    self._oidc_token_expires_at = None
-
-                    self.session.headers.pop("Authorization", None)
-
-                    self.session.auth = None
-
+                    self._reset_auth()
                     continue
 
-
                 try:
-
                     r.raise_for_status()
-
                 except requests.HTTPError as e:
-
                     body = (getattr(r, "text", None) or "")[:2000]
-
                     hdrs = {
-
                         k: (v[:200] if isinstance(v, str) else str(v)[:200])
-
                         for k, v in (getattr(r, "headers", {}) or {}).items()
-
                     }
-
                     raise requests.HTTPError(
-
                         f"{e}. Response headers: {hdrs}. Response body (truncated): {body}",
-
                         response=r,
-
                     ) from e
-
 
                 return r.json()
 
-
             raise RuntimeError("Authentication failed after retry")
 
+        def post_json(self, path: str, payload: Any) -> dict:
+            """Make a POST request with JSON payload and return JSON response.
 
-        def _post_json(self, path: str, payload: Any) -> dict:
+            Args:
+                path: API path.
+                payload: JSON payload to send.
+
+            Returns:
+                JSON response as dictionary.
+            """
             url = f"{self.base_url}{path}"
             self.session.headers.setdefault("Content-Type", "application/json")
+
             for attempt in range(2):
-                self._ensure_auth()
+                self.ensure_auth()
                 r = self.session.post(url, json=payload, timeout=120, verify=self.verify_ssl)
+
                 if r.status_code == 401 and attempt == 0:
-                    self._auth_resolved = False
-                    self._oidc_access_token = None
-                    self._oidc_token_expires_at = None
-                    self.session.headers.pop("Authorization", None)
-                    self.session.auth = None
+                    self._reset_auth()
                     continue
+
                 try:
                     r.raise_for_status()
                 except requests.HTTPError as e:
@@ -1257,20 +1567,471 @@ def register_lakeflow_source(spark):
                         f"{e}. Response headers: {hdrs}. Response body (truncated): {body}",
                         response=r,
                     ) from e
+
                 return r.json()
+
             raise RuntimeError("Authentication failed after retry")
 
-        def _batch_execute(self, requests_list: List[dict]) -> List[Tuple[str, dict]]:
-            payload = _batch_request_dict(requests_list)
-            resp_json = self._post_json("/piwebapi/batch", payload)
-            return _batch_response_items(resp_json)
+        def batch_execute(self, requests_list: List[dict]) -> List[Tuple[str, dict]]:
+            """Execute a batch request to PI Web API.
+
+            Args:
+                requests_list: List of request dictionaries.
+
+            Returns:
+                List of (request_id, response_dict) tuples.
+            """
+            payload = batch_request_dict(requests_list)
+            resp_json = self.post_json("/piwebapi/batch", payload)
+            return batch_response_items(resp_json)
+
+
+    # =============================================================================
+    # Time range and pagination helpers
+    # =============================================================================
+
+
+    def compute_time_range(
+        start_offset: dict,
+        table_options: Dict[str, str],
+        *,
+        apply_window_seconds: bool = False,
+    ) -> Tuple[str, str]:
+        """Compute start/end time range for time-series reads.
+
+        Args:
+            start_offset: Offset dictionary with optional "offset" key.
+            table_options: Table options with time configuration.
+            apply_window_seconds: Whether to apply window_seconds cap.
+
+        Returns:
+            Tuple of (start_time_str, end_time_str) in ISO format.
+        """
+        now = utcnow()
+
+        end_opt = table_options.get("endTime") or table_options.get("end_time") or "*"
+        end_dt = parse_pi_time(end_opt, now=now)
+
+        start_dt = _start_dt_from_offset(start_offset)
+        if start_dt is None:
+            start_opt = table_options.get("startTime") or table_options.get("start_time")
+            if start_opt:
+                start_dt = parse_pi_time(str(start_opt), now=end_dt)
+            else:
+                lookback_minutes = int(table_options.get("lookback_minutes", 60))
+                start_dt = end_dt - timedelta(minutes=lookback_minutes)
+
+        if apply_window_seconds:
+            window_seconds = int(table_options.get("window_seconds", 0) or 0)
+            if window_seconds > 0:
+                end_dt = min(end_dt, start_dt + timedelta(seconds=window_seconds))
+
+        return isoformat_z(start_dt), isoformat_z(end_dt)
+
+
+    def _start_dt_from_offset(start_offset: dict) -> Optional[datetime]:
+        """Extract start datetime from offset dictionary."""
+        if start_offset and isinstance(start_offset, dict):
+            off = start_offset.get("offset")
+            if isinstance(off, str) and off:
+                try:
+                    return parse_ts(off)
+                except Exception:
+                    return None
+        return None
+
+
+    def build_streamset_params(
+        webids: List[str],
+        *,
+        start_str: str,
+        end_str: str,
+        max_count: Optional[int] = None,
+        interval: Optional[str] = None,
+        intervals: Optional[int] = None,
+        selected_fields: Optional[str] = None,
+    ) -> List[Tuple[str, str]]:
+        """Build query parameters for StreamSet endpoints.
+
+        Args:
+            webids: List of tag WebIDs.
+            start_str: Start time string.
+            end_str: End time string.
+            max_count: Maximum count per request.
+            interval: Interval string (e.g., "1m").
+            intervals: Number of intervals.
+            selected_fields: Fields to select.
+
+        Returns:
+            List of (key, value) tuples for query parameters.
+        """
+        params: List[Tuple[str, str]] = [("webId", w) for w in webids]
+        params += [("startTime", start_str), ("endTime", end_str)]
+        if interval:
+            params.append(("interval", str(interval)))
+        if intervals is not None:
+            params.append(("intervals", str(intervals)))
+        if max_count is not None:
+            params.append(("maxCount", str(max_count)))
+        if selected_fields:
+            params.append(("selectedFields", str(selected_fields)))
+        return params
+
+
+    def paginate_time_series(
+        get_data_func,
+        start_str: str,
+        end_str: str,
+        max_count: int,
+    ) -> Iterator[dict]:
+        """Generic pagination for time-series endpoints using time-based cursors.
+
+        Args:
+            get_data_func: Function that takes (start, end) and returns API response.
+            start_str: Start time string.
+            end_str: End time string.
+            max_count: Maximum records per page.
+
+        Yields:
+            Stream or item dictionaries from paginated responses.
+        """
+        current_start = start_str
+
+        while True:
+            data = get_data_func(current_start, end_str)
+
+            items_container = data.get("Items", []) or []
+            if not items_container:
+                break
+
+            # Check if this is a streamset response
+            is_streamset = (
+                isinstance(items_container, list)
+                and len(items_container) > 0
+                and isinstance(items_container[0], dict)
+                and "WebId" in items_container[0]
+            )
+
+            page_record_count = 0
+            if is_streamset:
+                for stream in items_container:
+                    stream_items = stream.get("Items", []) or []
+                    page_record_count += len(stream_items)
+                    yield stream
+            else:
+                page_record_count = len(items_container)
+                for item in items_container:
+                    yield item
+
+            if page_record_count < max_count:
+                break
+
+            # Track timestamps for pagination
+            last_timestamps: List[datetime] = []
+            if is_streamset:
+                for stream in items_container:
+                    stream_items = stream.get("Items", []) or []
+                    stream_last_ts = None
+                    for item in stream_items:
+                        ts = item.get("Timestamp")
+                        if ts:
+                            try:
+                                ts_dt = parse_ts(ts)
+                                if stream_last_ts is None or ts_dt > stream_last_ts:
+                                    stream_last_ts = ts_dt
+                            except Exception:
+                                pass
+                    if stream_last_ts:
+                        last_timestamps.append(stream_last_ts)
+            else:
+                for item in items_container:
+                    ts = item.get("Timestamp")
+                    if ts:
+                        try:
+                            ts_dt = parse_ts(ts)
+                            last_timestamps.append(ts_dt)
+                        except Exception:
+                            pass
+
+            if not last_timestamps:
+                break
+
+            if is_streamset:
+                last_timestamp = min(last_timestamps)
+            else:
+                last_timestamp = max(last_timestamps)
+
+            current_start = isoformat_z(last_timestamp + timedelta(microseconds=1))
+
+            try:
+                if parse_ts(current_start) >= parse_ts(end_str):
+                    break
+            except Exception:
+                break
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/sources/osipi/osipi.py
+    ########################################################
+
+    class OsipiLakeflowConnect(LakeflowConnect):
+        """OSI PI Lakeflow Community Connector.
+
+        This connector reads from an OSI PI Web API-compatible endpoint
+        and exposes multiple logical tables for discovery, time-series,
+        asset framework, and event frame data.
+        """
+
+        # Re-export table constants for backwards compatibility
+        TABLE_DATASERVERS = TABLE_DATASERVERS
+        TABLE_POINTS = TABLE_POINTS
+        TABLE_POINT_ATTRIBUTES = TABLE_POINT_ATTRIBUTES
+        TABLE_TIMESERIES = TABLE_TIMESERIES
+        TABLE_INTERPOLATED = TABLE_INTERPOLATED
+        TABLE_PLOT = TABLE_PLOT
+        TABLE_AF_HIERARCHY = TABLE_AF_HIERARCHY
+        TABLE_EVENT_FRAMES = TABLE_EVENT_FRAMES
+        TABLE_CURRENT_VALUE = TABLE_CURRENT_VALUE
+        TABLE_SUMMARY = TABLE_SUMMARY
+        TABLE_STREAMSET_RECORDED = TABLE_STREAMSET_RECORDED
+        TABLE_STREAMSET_INTERPOLATED = TABLE_STREAMSET_INTERPOLATED
+        TABLE_STREAMSET_SUMMARY = TABLE_STREAMSET_SUMMARY
+        TABLE_ELEMENT_ATTRIBUTES = TABLE_ELEMENT_ATTRIBUTES
+        TABLE_EVENTFRAME_ATTRIBUTES = TABLE_EVENTFRAME_ATTRIBUTES
+        TABLE_ASSET_SERVERS = TABLE_ASSET_SERVERS
+        TABLE_ASSET_DATABASES = TABLE_ASSET_DATABASES
+        TABLE_ELEMENT_TEMPLATES = TABLE_ELEMENT_TEMPLATES
+        TABLE_CATEGORIES = TABLE_CATEGORIES
+        TABLE_ATTRIBUTE_TEMPLATES = TABLE_ATTRIBUTE_TEMPLATES
+        TABLE_ANALYSES = TABLE_ANALYSES
+        TABLE_EVENTFRAME_TEMPLATES = TABLE_EVENTFRAME_TEMPLATES
+        TABLE_END = TABLE_END
+        TABLE_VALUE_AT_TIME = TABLE_VALUE_AT_TIME
+        TABLE_STREAMSET_PLOT = TABLE_STREAMSET_PLOT
+        TABLE_UNITS_OF_MEASURE = TABLE_UNITS_OF_MEASURE
+        TABLE_ANALYSIS_TEMPLATES = TABLE_ANALYSIS_TEMPLATES
+        TABLE_EVENTFRAME_TEMPLATE_ATTRIBUTES = TABLE_EVENTFRAME_TEMPLATE_ATTRIBUTES
+        TABLE_STREAMSET_END = TABLE_STREAMSET_END
+        TABLE_ELEMENT_TEMPLATE_ATTRIBUTES = TABLE_ELEMENT_TEMPLATE_ATTRIBUTES
+        TABLE_EVENTFRAME_REFERENCED_ELEMENTS = TABLE_EVENTFRAME_REFERENCED_ELEMENTS
+        TABLE_AF_TABLES = TABLE_AF_TABLES
+        TABLE_AF_TABLE_ROWS = TABLE_AF_TABLE_ROWS
+        TABLE_EVENTFRAME_ACKS = TABLE_EVENTFRAME_ACKS
+        TABLE_EVENTFRAME_ANNOTATIONS = TABLE_EVENTFRAME_ANNOTATIONS
+        TABLE_RECORDED_AT_TIME = TABLE_RECORDED_AT_TIME
+        TABLE_CALCULATED = TABLE_CALCULATED
+        TABLE_POINT_TYPE_CATALOG = TABLE_POINT_TYPE_CATALOG
+        TABLE_LINKS = TABLE_LINKS
+
+        # Re-export table groups for backwards compatibility
+        TABLES_DISCOVERY_INVENTORY = TABLES_DISCOVERY_INVENTORY
+        TABLES_TIME_SERIES = TABLES_TIME_SERIES
+        TABLES_ASSET_FRAMEWORK = TABLES_ASSET_FRAMEWORK
+        TABLES_EVENT_FRAMES = TABLES_EVENT_FRAMES
+        TABLES_GOVERNANCE_DIAGNOSTICS = TABLES_GOVERNANCE_DIAGNOSTICS
+
+        def __init__(self, options: Dict[str, str]) -> None:
+            """
+            IMPORTANT: This connector runs inside Spark Python Data Source workers.
+
+            Do NOT reference SparkSession/SparkContext here (or anywhere in the connector).
+            All configuration must come from `options`, including UC Connection-injected
+            options when `.option("databricks.connection", <name>)` is used.
+            """
+            # DEBUG: Log all received options to verify UC Connection injection
+            print(f"[OSIPI DEBUG] __init__ received options keys: {list(options.keys())}")
+            print(f"[OSIPI DEBUG] sourceName: {options.get('sourceName')}")
+            print(f"[OSIPI DEBUG] pi_base_url: {options.get('pi_base_url')}")
+            print(f"[OSIPI DEBUG] host: {options.get('host')}")
+            print(f"[OSIPI DEBUG] bearer_token present: {'bearer_token' in options}")
+            print(f"[OSIPI DEBUG] access_token present: {'access_token' in options}")
+            print(f"[OSIPI DEBUG] bearer_value present: {'bearer_value' in options}")
+
+            self.options = options
+
+            # Initialize HTTP client (handles auth, base_url resolution, SSL config)
+            self._client = PiWebApiClient(options)
+
+        def list_tables(self) -> List[str]:
+            """Return a list of all supported table names."""
+            return list(SUPPORTED_TABLES)
+
+        def get_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
+            """Return the schema for a given table."""
+            schema = TABLE_SCHEMAS.get(table_name)
+            if schema is None:
+                raise ValueError(f"Unknown table: {table_name}")
+            return schema
+
+        def read_table_metadata(self, table_name: str, table_options: Dict[str, str]) -> Dict:
+            """Return metadata for a given table."""
+            meta = TABLE_METADATA.get(table_name)
+            if meta is None:
+                raise ValueError(f"Unknown table: {table_name}")
+            return dict(meta)
+
+        def read_table(
+            self, table_name: str, start_offset: dict, table_options: Dict[str, str]
+        ) -> Tuple[Iterator[dict], dict]:
+            """Read data from a table."""
+            self._client.ensure_auth()
+
+            # Snapshot offset semantics:
+            # For snapshot tables, once we return an "end" offset, subsequent reads with the same offset
+            # must return no rows to avoid duplicates in streaming mode.
+            try:
+                meta = self.read_table_metadata(table_name, table_options)
+                if (
+                    meta.get("ingestion_type") == "snapshot"
+                    and isinstance(start_offset, dict)
+                    and start_offset.get("offset") == "done"
+                ):
+                    return iter(()), dict(start_offset)
+            except Exception:
+                # Never fail the read due to metadata lookup; fall back to existing behavior.
+                pass
+
+            dispatch = {
+                # Discovery & inventory
+                TABLE_DATASERVERS: lambda: (iter(self._read_dataservers()), {"offset": "done"}),
+                TABLE_POINTS: lambda: (iter(self._read_points(table_options)), {"offset": "done"}),
+                TABLE_POINT_ATTRIBUTES: lambda: (
+                    iter(self._read_point_attributes(table_options)),
+                    {"offset": "done"},
+                ),
+                TABLE_POINT_TYPE_CATALOG: lambda: (
+                    iter(self._read_point_type_catalog(table_options)),
+                    {"offset": "done"},
+                ),
+                # Time-series
+                TABLE_TIMESERIES: lambda: self._read_timeseries(start_offset, table_options),
+                TABLE_STREAMSET_RECORDED: lambda: self._read_streamset_recorded(
+                    start_offset, table_options
+                ),
+                TABLE_INTERPOLATED: lambda: self._read_interpolated(start_offset, table_options),
+                TABLE_STREAMSET_INTERPOLATED: lambda: self._read_streamset_interpolated(
+                    start_offset, table_options
+                ),
+                TABLE_PLOT: lambda: self._read_plot(start_offset, table_options),
+                TABLE_STREAMSET_PLOT: lambda: self._read_streamset_plot(start_offset, table_options),
+                TABLE_SUMMARY: lambda: (iter(self._read_summary(table_options)), {"offset": "done"}),
+                TABLE_STREAMSET_SUMMARY: lambda: self._read_streamset_summary(
+                    start_offset, table_options
+                ),
+                TABLE_CURRENT_VALUE: lambda: (
+                    iter(self._read_current_value(table_options)),
+                    {"offset": "done"},
+                ),
+                TABLE_VALUE_AT_TIME: lambda: (
+                    iter(self._read_value_at_time(table_options)),
+                    {"offset": "done"},
+                ),
+                TABLE_RECORDED_AT_TIME: lambda: (
+                    iter(self._read_recorded_at_time(table_options)),
+                    {"offset": "done"},
+                ),
+                TABLE_END: lambda: (iter(self._read_end(table_options)), {"offset": "done"}),
+                TABLE_STREAMSET_END: lambda: (
+                    iter(self._read_streamset_end(table_options)),
+                    {"offset": "done"},
+                ),
+                TABLE_CALCULATED: lambda: self._read_calculated(start_offset, table_options),
+                # Asset Framework (AF)
+                TABLE_ASSET_SERVERS: lambda: (
+                    iter(self._read_assetservers_table()),
+                    {"offset": "done"},
+                ),
+                TABLE_ASSET_DATABASES: lambda: (
+                    iter(self._read_assetdatabases_table()),
+                    {"offset": "done"},
+                ),
+                TABLE_AF_HIERARCHY: lambda: (iter(self._read_af_hierarchy()), {"offset": "done"}),
+                TABLE_ELEMENT_ATTRIBUTES: lambda: (
+                    iter(self._read_element_attributes(table_options)),
+                    {"offset": "done"},
+                ),
+                TABLE_ELEMENT_TEMPLATES: lambda: (
+                    iter(self._read_element_templates_table(table_options)),
+                    {"offset": "done"},
+                ),
+                TABLE_ELEMENT_TEMPLATE_ATTRIBUTES: lambda: (
+                    iter(self._read_element_template_attributes_table(table_options)),
+                    {"offset": "done"},
+                ),
+                TABLE_ATTRIBUTE_TEMPLATES: lambda: (
+                    iter(self._read_attribute_templates_table(table_options)),
+                    {"offset": "done"},
+                ),
+                TABLE_CATEGORIES: lambda: (
+                    iter(self._read_categories_table(table_options)),
+                    {"offset": "done"},
+                ),
+                TABLE_ANALYSES: lambda: (
+                    iter(self._read_analyses_table(table_options)),
+                    {"offset": "done"},
+                ),
+                TABLE_ANALYSIS_TEMPLATES: lambda: (
+                    iter(self._read_analysis_templates_table(table_options)),
+                    {"offset": "done"},
+                ),
+                TABLE_AF_TABLES: lambda: (
+                    iter(self._read_af_tables_table(table_options)),
+                    {"offset": "done"},
+                ),
+                TABLE_AF_TABLE_ROWS: lambda: (
+                    iter(self._read_af_table_rows_table(table_options)),
+                    {"offset": "done"},
+                ),
+                TABLE_UNITS_OF_MEASURE: lambda: (
+                    iter(self._read_units_of_measure_table()),
+                    {"offset": "done"},
+                ),
+                # Event Frames
+                TABLE_EVENT_FRAMES: lambda: self._read_event_frames(start_offset, table_options),
+                TABLE_EVENTFRAME_ATTRIBUTES: lambda: (
+                    iter(self._read_eventframe_attributes(table_options)),
+                    {"offset": "done"},
+                ),
+                TABLE_EVENTFRAME_TEMPLATES: lambda: (
+                    iter(self._read_eventframe_templates_table(table_options)),
+                    {"offset": "done"},
+                ),
+                TABLE_EVENTFRAME_TEMPLATE_ATTRIBUTES: lambda: (
+                    iter(self._read_eventframe_template_attributes_table(table_options)),
+                    {"offset": "done"},
+                ),
+                TABLE_EVENTFRAME_REFERENCED_ELEMENTS: lambda: self._read_eventframe_referenced_elements(
+                    start_offset, table_options
+                ),
+                TABLE_EVENTFRAME_ACKS: lambda: (
+                    iter(self._read_eventframe_acknowledgements_table(table_options)),
+                    {"offset": "done"},
+                ),
+                TABLE_EVENTFRAME_ANNOTATIONS: lambda: (
+                    iter(self._read_eventframe_annotations_table(table_options)),
+                    {"offset": "done"},
+                ),
+                # Governance & diagnostics
+                TABLE_LINKS: lambda: (iter(self._read_links(table_options)), {"offset": "done"}),
+            }
+
+            handler = dispatch.get(table_name)
+            if handler is None:
+                raise ValueError(f"Unknown table: {table_name}")
+            return handler()
+
+        # =========================================================================
+        # Discovery & Inventory readers
+        # =========================================================================
 
         def _read_dataservers(self) -> List[dict]:
-            data = self._get_json("/piwebapi/dataservers")
+            """Read PI data servers."""
+            data = self._client.get_json("/piwebapi/dataservers")
             items = data.get("Items", []) or []
             return [{"webid": i.get("WebId"), "name": i.get("Name")} for i in items if i.get("WebId")]
 
         def _read_points(self, table_options: Dict[str, str]) -> List[dict]:
+            """Read PI points (tags)."""
             dataservers = self._read_dataservers()
             if not dataservers:
                 return []
@@ -1287,18 +2048,22 @@ def register_lakeflow_source(spark):
                 if name_filter:
                     params["nameFilter"] = str(name_filter)
 
-                data = self._get_json(f"/piwebapi/dataservers/{server_webid}/points", params=params)
+                data = self._client.get_json(
+                    f"/piwebapi/dataservers/{server_webid}/points", params=params
+                )
                 items = data.get("Items", []) or []
 
                 for p in items:
-                    out.append({
-                        "webid": p.get("WebId"),
-                        "name": p.get("Name"),
-                        "descriptor": p.get("Descriptor", ""),
-                        "engineering_units": p.get("EngineeringUnits", ""),
-                        "path": p.get("Path", ""),
-                        "dataserver_webid": server_webid,
-                    })
+                    out.append(
+                        {
+                            "webid": p.get("WebId"),
+                            "name": p.get("Name"),
+                            "descriptor": p.get("Descriptor", ""),
+                            "engineering_units": p.get("EngineeringUnits", ""),
+                            "path": p.get("Path", ""),
+                            "dataserver_webid": server_webid,
+                        }
+                    )
 
                 if len(items) < page_size:
                     break
@@ -1307,6 +2072,7 @@ def register_lakeflow_source(spark):
             return [r for r in out if r.get("webid")]
 
         def _resolve_tag_webids(self, table_options: Dict[str, str]) -> List[str]:
+            """Resolve tag WebIDs from options or by sampling points."""
             tag_webids_csv = table_options.get("tag_webids") or self.options.get("tag_webids") or ""
             tag_webids = [t.strip() for t in str(tag_webids_csv).split(",") if t.strip()]
             if tag_webids:
@@ -1315,10 +2081,10 @@ def register_lakeflow_source(spark):
             return [p["webid"] for p in pts[: int(table_options.get("default_tags", 50))]]
 
         def _read_point_attributes(self, table_options: Dict[str, str]) -> List[dict]:
-            # Options:
-            # - point_webids: csv of point WebIds
-            # - default_points: sample size if point_webids not provided
-            point_webids_csv = (table_options.get("point_webids") or self.options.get("point_webids") or "").strip()
+            """Read PI point attributes."""
+            point_webids_csv = (
+                table_options.get("point_webids") or self.options.get("point_webids") or ""
+            ).strip()
             point_webids = [t.strip() for t in point_webids_csv.split(",") if t.strip()]
             if not point_webids:
                 default_points = int(table_options.get("default_points", 10))
@@ -1331,54 +2097,83 @@ def register_lakeflow_source(spark):
                 params["selectedFields"] = selected_fields
 
             out: List[dict] = []
-            ingest_ts = _utcnow()
+            ingest_ts = utcnow()
 
             for wid in point_webids:
                 try:
-                    data = self._get_json(f"/piwebapi/points/{wid}/attributes", params=params or None)
-                    for item in (data.get("Items") or []):
-                        out.append({
-                            "point_webid": wid,
-                            "name": item.get("Name"),
-                            "value": None if item.get("Value") is None else str(item.get("Value")),
-                            "type": item.get("Type") or item.get("ValueType") or "",
-                            "ingestion_timestamp": ingest_ts,
-                        })
+                    data = self._client.get_json(
+                        f"/piwebapi/points/{wid}/attributes", params=params or None
+                    )
+                    for item in data.get("Items") or []:
+                        out.append(
+                            {
+                                "point_webid": wid,
+                                "name": item.get("Name"),
+                                "value": None if item.get("Value") is None else str(item.get("Value")),
+                                "type": item.get("Type") or item.get("ValueType") or "",
+                                "ingestion_timestamp": ingest_ts,
+                            }
+                        )
                 except Exception:
                     continue
 
             return out
 
+        def _read_point_type_catalog(self, table_options: Dict[str, str]) -> List[dict]:
+            """Derive a point type catalog by scanning points."""
+            points = self._read_points(table_options)
+            counts: Dict[Tuple[str, str], int] = {}
+            for p in points:
+                desc = (p.get("descriptor") or "").strip()
+                eu = (p.get("engineering_units") or "").strip()
+                pt = (desc.split(" ", 1)[0] if desc else "Unknown") or "Unknown"
+                key = (pt, eu)
+                counts[key] = counts.get(key, 0) + 1
+            out: List[dict] = []
+            for (pt, eu), n in sorted(counts.items(), key=lambda x: (-x[1], x[0][0], x[0][1])):
+                out.append({"point_type": pt, "engineering_units": eu, "count_points": n})
+            return out
 
-        def _read_timeseries(self, start_offset: dict, table_options: Dict[str, str]) -> Tuple[Iterator[dict], dict]:
+        # =========================================================================
+        # Time-series readers
+        # =========================================================================
+
+        def _read_timeseries(
+            self, start_offset: dict, table_options: Dict[str, str]
+        ) -> Tuple[Iterator[dict], dict]:
+            """Read recorded time-series values."""
             tag_webids = self._resolve_tag_webids(table_options)
-            start_str, end_str = self._compute_time_range(start_offset, table_options, apply_window_seconds=True)
+            start_str, end_str = compute_time_range(
+                start_offset, table_options, apply_window_seconds=True
+            )
             max_count = int(table_options.get("maxCount", 1000))
-            ingest_ts = _utcnow()
+            ingest_ts = utcnow()
 
             tags_per_request = int(table_options.get("tags_per_request", 0) or 0)
-            groups = _chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
+            groups = chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
 
-            prefer_streamset = _as_bool(table_options.get("prefer_streamset", True), default=True)
+            prefer_streamset = as_bool(table_options.get("prefer_streamset", True), default=True)
             selected_fields = table_options.get("selectedFields")
 
             next_offset = {"offset": end_str}
 
-            # Preferred: StreamSet GetRecordedAdHoc for multi-tag reads.
             if prefer_streamset and len(tag_webids) > 1:
                 def iterator() -> Iterator[dict]:
                     for group in groups:
                         if not group:
                             continue
-                        params = self._build_streamset_params(
-                            group,
-                            start_str=start_str,
-                            end_str=end_str,
-                            max_count=max_count,
-                            selected_fields=selected_fields,
-                        )
-                        data = self._get_json("/piwebapi/streamsets/recorded", params=params)
-                        for stream in data.get("Items", []) or []:
+
+                        def get_data(start: str, end: str) -> dict:
+                            params = build_streamset_params(
+                                group,
+                                start_str=start,
+                                end_str=end,
+                                max_count=max_count,
+                                selected_fields=selected_fields,
+                            )
+                            return self._client.get_json("/piwebapi/streamsets/recorded", params=params)
+
+                        for stream in paginate_time_series(get_data, start_str, end_str, max_count):
                             webid = stream.get("WebId")
                             if not webid:
                                 continue
@@ -1388,19 +2183,19 @@ def register_lakeflow_source(spark):
                                     continue
                                 yield {
                                     "tag_webid": webid,
-                                    "timestamp": _parse_ts(ts),
-                                    "value": _try_float(item.get("Value")),
-                                    "good": _as_bool(item.get("Good"), default=True),
-                                    "questionable": _as_bool(item.get("Questionable"), default=False),
-                                    "substituted": _as_bool(item.get("Substituted"), default=False),
-                                    "annotated": _as_bool(item.get("Annotated"), default=False),
+                                    "timestamp": parse_ts(ts),
+                                    "value": try_float(item.get("Value")),
+                                    "good": as_bool(item.get("Good"), default=True),
+                                    "questionable": as_bool(item.get("Questionable"), default=False),
+                                    "substituted": as_bool(item.get("Substituted"), default=False),
+                                    "annotated": as_bool(item.get("Annotated"), default=False),
                                     "units": item.get("UnitsAbbreviation", ""),
                                     "ingestion_timestamp": ingest_ts,
                                 }
 
                 return iterator(), next_offset
 
-            # Fallback: Batch execute many Stream GetRecorded calls (chunked).
+            # Fallback: Batch execute
             def iterator() -> Iterator[dict]:
                 for group in groups:
                     if not group:
@@ -1409,11 +2204,15 @@ def register_lakeflow_source(spark):
                         {
                             "Method": "GET",
                             "Resource": f"/piwebapi/streams/{webid}/recorded",
-                            "Parameters": {"startTime": start_str, "endTime": end_str, "maxCount": str(max_count)},
+                            "Parameters": {
+                                "startTime": start_str,
+                                "endTime": end_str,
+                                "maxCount": str(max_count),
+                            },
                         }
                         for webid in group
                     ]
-                    responses = self._batch_execute(reqs)
+                    responses = self._client.batch_execute(reqs)
                     for idx, (_rid, resp) in enumerate(responses):
                         if resp.get("Status") != 200:
                             continue
@@ -1427,42 +2226,49 @@ def register_lakeflow_source(spark):
                                 continue
                             yield {
                                 "tag_webid": webid,
-                                "timestamp": _parse_ts(ts),
-                                "value": _try_float(item.get("Value")),
-                                "good": _as_bool(item.get("Good"), default=True),
-                                "questionable": _as_bool(item.get("Questionable"), default=False),
-                                "substituted": _as_bool(item.get("Substituted"), default=False),
-                                "annotated": _as_bool(item.get("Annotated"), default=False),
+                                "timestamp": parse_ts(ts),
+                                "value": try_float(item.get("Value")),
+                                "good": as_bool(item.get("Good"), default=True),
+                                "questionable": as_bool(item.get("Questionable"), default=False),
+                                "substituted": as_bool(item.get("Substituted"), default=False),
+                                "annotated": as_bool(item.get("Annotated"), default=False),
                                 "units": item.get("UnitsAbbreviation", ""),
                                 "ingestion_timestamp": ingest_ts,
                             }
 
             return iterator(), next_offset
 
-        def _read_streamset_recorded(self, start_offset: dict, table_options: Dict[str, str]) -> Tuple[Iterator[dict], dict]:
-            # Explicit StreamSet recorded table (same output schema as pi_timeseries)
+        def _read_streamset_recorded(
+            self, start_offset: dict, table_options: Dict[str, str]
+        ) -> Tuple[Iterator[dict], dict]:
+            """Read recorded values via StreamSet endpoint."""
             tag_webids = self._resolve_tag_webids(table_options)
-            start_str, end_str = self._compute_time_range(start_offset, table_options, apply_window_seconds=True)
+            start_str, end_str = compute_time_range(
+                start_offset, table_options, apply_window_seconds=True
+            )
             max_count = int(table_options.get("maxCount", 1000))
-            ingest_ts = _utcnow()
+            ingest_ts = utcnow()
 
             tags_per_request = int(table_options.get("tags_per_request", 0) or 0)
-            groups = _chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
+            groups = chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
             selected_fields = table_options.get("selectedFields")
 
             def iterator() -> Iterator[dict]:
                 for group in groups:
                     if not group:
                         continue
-                    params = self._build_streamset_params(
-                        group,
-                        start_str=start_str,
-                        end_str=end_str,
-                        max_count=max_count,
-                        selected_fields=selected_fields,
-                    )
-                    data = self._get_json("/piwebapi/streamsets/recorded", params=params)
-                    for stream in data.get("Items", []) or []:
+
+                    def get_data(start: str, end: str) -> dict:
+                        params = build_streamset_params(
+                            group,
+                            start_str=start,
+                            end_str=end,
+                            max_count=max_count,
+                            selected_fields=selected_fields,
+                        )
+                        return self._client.get_json("/piwebapi/streamsets/recorded", params=params)
+
+                    for stream in paginate_time_series(get_data, start_str, end_str, max_count):
                         webid = stream.get("WebId")
                         if not webid:
                             continue
@@ -1472,34 +2278,35 @@ def register_lakeflow_source(spark):
                                 continue
                             yield {
                                 "tag_webid": webid,
-                                "timestamp": _parse_ts(ts),
-                                "value": _try_float(item.get("Value")),
-                                "good": _as_bool(item.get("Good"), default=True),
-                                "questionable": _as_bool(item.get("Questionable"), default=False),
-                                "substituted": _as_bool(item.get("Substituted"), default=False),
-                                "annotated": _as_bool(item.get("Annotated"), default=False),
+                                "timestamp": parse_ts(ts),
+                                "value": try_float(item.get("Value")),
+                                "good": as_bool(item.get("Good"), default=True),
+                                "questionable": as_bool(item.get("Questionable"), default=False),
+                                "substituted": as_bool(item.get("Substituted"), default=False),
+                                "annotated": as_bool(item.get("Annotated"), default=False),
                                 "units": item.get("UnitsAbbreviation", ""),
                                 "ingestion_timestamp": ingest_ts,
                             }
 
             return iterator(), {"offset": end_str}
 
-
-
-        def _read_interpolated(self, start_offset: dict, table_options: Dict[str, str]) -> Tuple[Iterator[dict], dict]:
-            """Interpolated values for tags over a window (best-effort).
-
-            If interpolated endpoints are not available on the PI Web API host, this returns an empty iterator.
-            """
+        def _read_interpolated(
+            self, start_offset: dict, table_options: Dict[str, str]
+        ) -> Tuple[Iterator[dict], dict]:
+            """Read interpolated values."""
             tag_webids = self._resolve_tag_webids(table_options)
-            start_str, end_str = self._compute_time_range(start_offset, table_options, apply_window_seconds=False)
+            start_str, end_str = compute_time_range(
+                start_offset, table_options, apply_window_seconds=False
+            )
 
-            interval = (table_options.get("interval") or table_options.get("sampleInterval") or "1m").strip()
+            interval = (
+                table_options.get("interval") or table_options.get("sampleInterval") or "1m"
+            ).strip()
             max_count = int(table_options.get("maxCount", 1000))
-            ingest_ts = _utcnow()
+            ingest_ts = utcnow()
 
             tags_per_request = int(table_options.get("tags_per_request", 0) or 0)
-            groups = _chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
+            groups = chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
             selected_fields = table_options.get("selectedFields")
 
             next_offset = {"offset": end_str}
@@ -1511,59 +2318,67 @@ def register_lakeflow_source(spark):
                         continue
                     yield {
                         "tag_webid": wid,
-                        "timestamp": _parse_ts(ts),
-                        "value": _try_float(item.get("Value")),
-                        "good": _as_bool(item.get("Good"), default=True),
-                        "questionable": _as_bool(item.get("Questionable"), default=False),
-                        "substituted": _as_bool(item.get("Substituted"), default=False),
-                        "annotated": _as_bool(item.get("Annotated"), default=False),
+                        "timestamp": parse_ts(ts),
+                        "value": try_float(item.get("Value")),
+                        "good": as_bool(item.get("Good"), default=True),
+                        "questionable": as_bool(item.get("Questionable"), default=False),
+                        "substituted": as_bool(item.get("Substituted"), default=False),
+                        "annotated": as_bool(item.get("Annotated"), default=False),
                         "units": item.get("UnitsAbbreviation", ""),
                         "ingestion_timestamp": ingest_ts,
                     }
 
-            # Try StreamSet interpolated first for multi-tag reads.
             def iterator() -> Iterator[dict]:
                 for group in groups:
                     if not group:
                         continue
                     # Prefer streamsets/interpolated when multiple tags
                     if len(group) > 1:
-                        params = self._build_streamset_params(
-                            group,
-                            start_str=start_str,
-                            end_str=end_str,
-                            interval=interval,
-                            max_count=max_count,
-                            selected_fields=selected_fields,
-                        )
+                        # Define a function that makes the API call for pagination
+                        def get_data(start: str, end: str) -> dict:
+                            params = build_streamset_params(
+                                group,
+                                start_str=start,
+                                end_str=end,
+                                interval=interval,
+                                max_count=max_count,
+                                selected_fields=selected_fields,
+                            )
+                            return self._client.get_json(
+                                "/piwebapi/streamsets/interpolated", params=params
+                            )
+
                         try:
-                            data = self._get_json("/piwebapi/streamsets/interpolated", params=params)
-                        except requests.exceptions.HTTPError as e:
-                            if getattr(e.response, 'status_code', None) == 404:
-                                data = None
-                            else:
-                                raise
-                        if data:
-                            for stream in data.get("Items", []) or []:
+                            for stream in paginate_time_series(get_data, start_str, end_str, max_count):
                                 wid = stream.get("WebId")
                                 if not wid:
                                     continue
                                 yield from emit_items(wid, stream.get("Items", []) or [])
                             continue
+                        except requests.exceptions.HTTPError as e:
+                            if getattr(e.response, "status_code", None) == 404:
+                                pass
+                            else:
+                                raise
 
                     # Fallback: per-tag interpolated via batch
                     reqs = [
                         {
                             "Method": "GET",
                             "Resource": f"/piwebapi/streams/{wid}/interpolated",
-                            "Parameters": {"startTime": start_str, "endTime": end_str, "interval": interval, "maxCount": str(max_count)},
+                            "Parameters": {
+                                "startTime": start_str,
+                                "endTime": end_str,
+                                "interval": interval,
+                                "maxCount": str(max_count),
+                            },
                         }
                         for wid in group
                     ]
                     try:
-                        responses = self._batch_execute(reqs)
+                        responses = self._client.batch_execute(reqs)
                     except requests.exceptions.HTTPError as e:
-                        if getattr(e.response, 'status_code', None) == 404:
+                        if getattr(e.response, "status_code", None) == 404:
                             return
                         raise
                     for idx, (_rid, resp) in enumerate(responses):
@@ -1577,445 +2392,107 @@ def register_lakeflow_source(spark):
 
             return iterator(), next_offset
 
-
-        def _read_streamset_interpolated(self, start_offset: dict, table_options: Dict[str, str]) -> Tuple[Iterator[dict], dict]:
-            """Explicit StreamSet interpolated table (same output schema as pi_interpolated)."""
-            # Force streamset path by grouping all tags together.
+        def _read_streamset_interpolated(
+            self, start_offset: dict, table_options: Dict[str, str]
+        ) -> Tuple[Iterator[dict], dict]:
+            """Read interpolated values via StreamSet endpoint."""
             opts = dict(table_options)
             opts["tags_per_request"] = str(max(1, int(opts.get("tags_per_request", 0) or 0)))
             return self._read_interpolated(start_offset, opts)
 
-
-        def _read_plot(self, start_offset: dict, table_options: Dict[str, str]) -> Tuple[Iterator[dict], dict]:
-            """Plot values for tags over a window (best-effort).
-
-            If plot endpoints are not available on the PI Web API host, this returns an empty iterator.
-            """
+        def _read_plot(
+            self, start_offset: dict, table_options: Dict[str, str]
+        ) -> Tuple[Iterator[dict], dict]:
+            """Read plot values."""
             tag_webids = self._resolve_tag_webids(table_options)
-            start_str, end_str = self._compute_time_range(start_offset, table_options, apply_window_seconds=False)
+            start_str, end_str = compute_time_range(
+                start_offset, table_options, apply_window_seconds=False
+            )
             intervals = int(table_options.get("intervals", 300) or 300)
-            ingest_ts = _utcnow()
+            ingest_ts = utcnow()
 
             def iterator() -> Iterator[dict]:
                 for wid in tag_webids:
                     try:
-                        data = self._get_json(
+                        data = self._client.get_json(
                             f"/piwebapi/streams/{wid}/plot",
-                            params={"startTime": start_str, "endTime": end_str, "intervals": str(intervals)},
+                            params={
+                                "startTime": start_str,
+                                "endTime": end_str,
+                                "intervals": str(intervals),
+                            },
                         )
                     except requests.exceptions.HTTPError as e:
-                        if getattr(e.response, 'status_code', None) == 404:
+                        if getattr(e.response, "status_code", None) == 404:
                             return
                         raise
 
-                    for item in (data.get("Items") or []):
+                    for item in data.get("Items") or []:
                         ts = item.get("Timestamp")
                         if not ts:
                             continue
                         yield {
                             "tag_webid": wid,
-                            "timestamp": _parse_ts(ts),
-                            "value": _try_float(item.get("Value")),
-                            "good": _as_bool(item.get("Good"), default=True),
-                            "questionable": _as_bool(item.get("Questionable"), default=False),
-                            "substituted": _as_bool(item.get("Substituted"), default=False),
-                            "annotated": _as_bool(item.get("Annotated"), default=False),
+                            "timestamp": parse_ts(ts),
+                            "value": try_float(item.get("Value")),
+                            "good": as_bool(item.get("Good"), default=True),
+                            "questionable": as_bool(item.get("Questionable"), default=False),
+                            "substituted": as_bool(item.get("Substituted"), default=False),
+                            "annotated": as_bool(item.get("Annotated"), default=False),
                             "units": item.get("UnitsAbbreviation", ""),
                             "ingestion_timestamp": ingest_ts,
                         }
 
             return iterator(), {"offset": end_str}
 
-
-        def _read_streamset_summary(self, start_offset: dict, table_options: Dict[str, str]) -> Tuple[Iterator[dict], dict]:
-            """Multi-tag summary (best-effort).
-
-            If streamset summary endpoints are not available on the PI Web API host, this returns an empty iterator.
-            """
+        def _read_streamset_plot(
+            self, start_offset: dict, table_options: Dict[str, str]
+        ) -> Tuple[Iterator[dict], dict]:
+            """Read plot values via StreamSet endpoint."""
             tag_webids = self._resolve_tag_webids(table_options)
-            start_str, end_str = self._compute_time_range(start_offset, table_options, apply_window_seconds=False)
-
-            summary_type = (table_options.get("summaryType") or "Total").strip()
-            calculation_basis = (table_options.get("calculationBasis") or "TimeWeighted").strip()
-            summary_duration = (table_options.get("summaryDuration") or "1h").strip()
-            selected_fields = table_options.get("selectedFields")
-
-            tags_per_request = int(table_options.get("tags_per_request", 0) or 0)
-            groups = _chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
-
-            ingest_ts = _utcnow()
-
-            def iterator() -> Iterator[dict]:
-                for group in groups:
-                    if not group:
-                        continue
-                    params = self._build_streamset_params(
-                        group,
-                        start_str=start_str,
-                        end_str=end_str,
-                        selected_fields=selected_fields,
-                    )
-                    params += [
-                        ("summaryType", summary_type),
-                        ("calculationBasis", calculation_basis),
-                        ("summaryDuration", summary_duration),
-                    ]
-
-                    try:
-                        data = self._get_json("/piwebapi/streamsets/summary", params=params)
-                    except requests.exceptions.HTTPError as e:
-                        if getattr(e.response, 'status_code', None) == 404:
-                            return
-                        raise
-
-                    for stream in data.get("Items", []) or []:
-                        wid = stream.get("WebId")
-                        if not wid:
-                            continue
-                        for item in stream.get("Items", []) or []:
-                            stype = item.get("Type")
-                            v = item.get("Value", {}) or {}
-                            ts = v.get("Timestamp")
-                            if not ts:
-                                continue
-                            yield {
-                                "tag_webid": wid,
-                                "summary_type": str(stype),
-                                "timestamp": _parse_ts(ts),
-                                "value": _try_float(v.get("Value")),
-                                "good": _as_bool(v.get("Good"), default=True),
-                                "questionable": _as_bool(v.get("Questionable"), default=False),
-                                "substituted": _as_bool(v.get("Substituted"), default=False),
-                                "annotated": _as_bool(v.get("Annotated"), default=False),
-                                "units": v.get("UnitsAbbreviation", ""),
-                                "ingestion_timestamp": ingest_ts,
-                            }
-
-            return iterator(), {"offset": end_str}
-
-
-        def _read_assetservers_table(self) -> List[dict]:
-            try:
-                items = self._read_assetservers()
-            except requests.exceptions.HTTPError as e:
-                if getattr(e.response, 'status_code', None) == 404:
-                    return []
-                raise
-            out: List[dict] = []
-            for s in items or []:
-                wid = s.get("WebId")
-                if not wid:
-                    continue
-                out.append({"webid": wid, "name": s.get("Name", ""), "path": s.get("Path", "")})
-            return out
-
-
-        def _read_assetdatabases_table(self) -> List[dict]:
-            try:
-                assetservers = self._read_assetservers()
-            except requests.exceptions.HTTPError as e:
-                if getattr(e.response, 'status_code', None) == 404:
-                    return []
-                raise
-
-            out: List[dict] = []
-            for srv in assetservers or []:
-                srv_wid = srv.get("WebId")
-                if not srv_wid:
-                    continue
-                try:
-                    dbs = self._read_assetdatabases(srv_wid)
-                except requests.exceptions.HTTPError as e:
-                    if getattr(e.response, 'status_code', None) == 404:
-                        continue
-                    raise
-                for db in dbs or []:
-                    db_wid = db.get("WebId")
-                    if not db_wid:
-                        continue
-                    out.append({
-                        "webid": db_wid,
-                        "name": db.get("Name", ""),
-                        "path": db.get("Path", ""),
-                        "assetserver_webid": srv_wid,
-                    })
-            return out
-
-
-        def _read_element_templates_table(self, table_options: Dict[str, str]) -> List[dict]:
-            out: List[dict] = []
-            db_wid_opt = (table_options.get("assetdatabase_webid") or "").strip()
-            if db_wid_opt:
-                db_wids = [db_wid_opt]
-            else:
-                db_wids = [d.get("webid") for d in self._read_assetdatabases_table() if d.get("webid")]
-
-            for db_wid in db_wids:
-                try:
-                    data = self._get_json(f"/piwebapi/assetdatabases/{db_wid}/elementtemplates")
-                except requests.exceptions.HTTPError as e:
-                    if getattr(e.response, 'status_code', None) == 404:
-                        continue
-                    raise
-                for it in (data.get("Items") or []):
-                    wid = it.get("WebId")
-                    if not wid:
-                        continue
-                    out.append({
-                        "webid": wid,
-                        "name": it.get("Name", ""),
-                        "description": it.get("Description", ""),
-                        "path": it.get("Path", ""),
-                        "assetdatabase_webid": db_wid,
-                    })
-            return out
-
-
-        def _read_categories_table(self, table_options: Dict[str, str]) -> List[dict]:
-            """List AF categories (best-effort)."""
-            out: List[dict] = []
-            db_wid_opt = (table_options.get("assetdatabase_webid") or "").strip()
-            if db_wid_opt:
-                db_wids = [db_wid_opt]
-            else:
-                db_wids = [d.get("webid") for d in self._read_assetdatabases_table() if d.get("webid")]
-
-            for db_wid in db_wids:
-                try:
-                    data = self._get_json(f"/piwebapi/assetdatabases/{db_wid}/categories")
-                except requests.exceptions.HTTPError as e:
-                    if getattr(e.response, "status_code", None) == 404:
-                        continue
-                    raise
-                for it in (data.get("Items") or []):
-                    wid = it.get("WebId")
-                    if not wid:
-                        continue
-                    out.append(
-                        {
-                            "webid": wid,
-                            "name": it.get("Name", ""),
-                            "description": it.get("Description", ""),
-                            "category_type": it.get("CategoryType", "") or it.get("Type", ""),
-                            "assetdatabase_webid": db_wid,
-                        }
-                    )
-            return out
-
-
-        def _read_attribute_templates_table(self, table_options: Dict[str, str]) -> List[dict]:
-            """List AF attribute templates for element templates (best-effort)."""
-            out: List[dict] = []
-            db_wid_opt = (table_options.get("assetdatabase_webid") or "").strip()
-
-            templates = self._read_element_templates_table({"assetdatabase_webid": db_wid_opt} if db_wid_opt else {})
-            for tpl in templates:
-                tpl_wid = tpl.get("webid")
-                if not tpl_wid:
-                    continue
-                db_wid = tpl.get("assetdatabase_webid") or db_wid_opt or ""
-                try:
-                    data = self._get_json(f"/piwebapi/elementtemplates/{tpl_wid}/attributetemplates")
-                except requests.exceptions.HTTPError as e:
-                    if getattr(e.response, "status_code", None) == 404:
-                        continue
-                    raise
-                for it in (data.get("Items") or []):
-                    wid = it.get("WebId")
-                    if not wid:
-                        continue
-                    out.append(
-                        {
-                            "webid": wid,
-                            "name": it.get("Name", ""),
-                            "description": it.get("Description", ""),
-                            "path": it.get("Path", ""),
-                            "type": it.get("Type", "") or it.get("AttributeType", ""),
-                            "elementtemplate_webid": tpl_wid,
-                            "assetdatabase_webid": db_wid,
-                        }
-                    )
-            return out
-
-
-        def _read_analyses_table(self, table_options: Dict[str, str]) -> List[dict]:
-            """List AF analyses (best-effort)."""
-            out: List[dict] = []
-            db_wid_opt = (table_options.get("assetdatabase_webid") or "").strip()
-            if db_wid_opt:
-                db_wids = [db_wid_opt]
-            else:
-                db_wids = [d.get("webid") for d in self._read_assetdatabases_table() if d.get("webid")]
-
-            for db_wid in db_wids:
-                try:
-                    data = self._get_json(f"/piwebapi/assetdatabases/{db_wid}/analyses")
-                except requests.exceptions.HTTPError as e:
-                    if getattr(e.response, "status_code", None) == 404:
-                        continue
-                    raise
-                for it in (data.get("Items") or []):
-                    wid = it.get("WebId")
-                    if not wid:
-                        continue
-                    out.append(
-                        {
-                            "webid": wid,
-                            "name": it.get("Name", ""),
-                            "description": it.get("Description", ""),
-                            "path": it.get("Path", ""),
-                            "analysis_template_name": it.get("AnalysisTemplateName", "") or it.get("TemplateName", ""),
-                            "target_element_webid": it.get("TargetElementWebId", "") or it.get("TargetElement", ""),
-                            "assetdatabase_webid": db_wid,
-                        }
-                    )
-            return out
-
-
-        def _read_eventframe_templates_table(self, table_options: Dict[str, str]) -> List[dict]:
-            """List Event Frame templates (best-effort)."""
-            out: List[dict] = []
-            db_wid_opt = (table_options.get("assetdatabase_webid") or "").strip()
-            if db_wid_opt:
-                db_wids = [db_wid_opt]
-            else:
-                db_wids = [d.get("webid") for d in self._read_assetdatabases_table() if d.get("webid")]
-
-            for db_wid in db_wids:
-                try:
-                    data = self._get_json(f"/piwebapi/assetdatabases/{db_wid}/eventframetemplates")
-                except requests.exceptions.HTTPError as e:
-                    if getattr(e.response, "status_code", None) == 404:
-                        continue
-                    raise
-                for it in (data.get("Items") or []):
-                    wid = it.get("WebId")
-                    if not wid:
-                        continue
-                    out.append(
-                        {
-                            "webid": wid,
-                            "name": it.get("Name", ""),
-                            "description": it.get("Description", ""),
-                            "path": it.get("Path", ""),
-                            "assetdatabase_webid": db_wid,
-                        }
-                    )
-            return out
-
-
-        def _read_end(self, table_options: Dict[str, str]) -> List[dict]:
-            """Stream GetEnd (best-effort)."""
-            tag_webids = self._resolve_tag_webids(table_options)
-            ingest_ts = _utcnow()
-            out: List[dict] = []
-            for wid in tag_webids:
-                try:
-                    v = self._get_json(f"/piwebapi/streams/{wid}/end")
-                except requests.exceptions.HTTPError as e:
-                    if getattr(e.response, "status_code", None) == 404:
-                        continue
-                    raise
-                ts = v.get("Timestamp")
-                out.append(
-                    {
-                        "tag_webid": wid,
-                        "timestamp": _parse_ts(ts) if ts else None,
-                        "value": _try_float(v.get("Value")),
-                        "good": _as_bool(v.get("Good"), default=True),
-                        "questionable": _as_bool(v.get("Questionable"), default=False),
-                        "substituted": _as_bool(v.get("Substituted"), default=False),
-                        "annotated": _as_bool(v.get("Annotated"), default=False),
-                        "units": v.get("UnitsAbbreviation", ""),
-                        "ingestion_timestamp": ingest_ts,
-                    }
-                )
-            return out
-
-
-        def _read_value_at_time(self, table_options: Dict[str, str]) -> List[dict]:
-            """Stream GetValue at requested time (option `time`, defaults to '*')."""
-            tag_webids = self._resolve_tag_webids(table_options)
-            time_param = table_options.get("time") or "*"
-            ingest_ts = _utcnow()
-            tags_per_request = int(table_options.get("tags_per_request", 0) or 0)
-            groups = _chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
-
-            out: List[dict] = []
-            for group in groups:
-                if not group:
-                    continue
-                reqs: List[dict] = [
-                    {"Method": "GET", "Resource": f"/piwebapi/streams/{w}/value", "Parameters": {"time": str(time_param)}}
-                    for w in group
-                ]
-                responses = self._batch_execute(reqs)
-                for idx, (_rid, resp) in enumerate(responses):
-                    if resp.get("Status") != 200:
-                        continue
-                    wid = group[idx] if idx < len(group) else None
-                    if not wid:
-                        continue
-                    v = resp.get("Content", {}) or {}
-                    ts = v.get("Timestamp")
-                    out.append(
-                        {
-                            "tag_webid": wid,
-                            "timestamp": _parse_ts(ts) if ts else None,
-                            "value": _try_float(v.get("Value")),
-                            "good": _as_bool(v.get("Good"), default=True),
-                            "questionable": _as_bool(v.get("Questionable"), default=False),
-                            "substituted": _as_bool(v.get("Substituted"), default=False),
-                            "annotated": _as_bool(v.get("Annotated"), default=False),
-                            "units": v.get("UnitsAbbreviation", ""),
-                            "ingestion_timestamp": ingest_ts,
-                        }
-                    )
-            return out
-
-
-        def _read_streamset_plot(self, start_offset: dict, table_options: Dict[str, str]) -> Tuple[Iterator[dict], dict]:
-            """StreamSet plot (best-effort): downsampled multi-tag points for visualization."""
-            tag_webids = self._resolve_tag_webids(table_options)
-            now = _utcnow()
+            now = utcnow()
 
             end_opt = table_options.get("endTime") or table_options.get("end_time") or "*"
-            end_dt = _parse_pi_time(end_opt, now=now)
+            end_dt = parse_pi_time(end_opt, now=now)
 
             start_dt: Optional[datetime] = None
             if start_offset and isinstance(start_offset, dict):
                 off = start_offset.get("offset")
                 if isinstance(off, str) and off:
                     try:
-                        start_dt = _parse_ts(off)
+                        start_dt = parse_ts(off)
                     except Exception:
                         start_dt = None
 
             if start_dt is None:
                 start_opt = table_options.get("startTime") or table_options.get("start_time")
                 if start_opt:
-                    start_dt = _parse_pi_time(str(start_opt), now=end_dt)
+                    start_dt = parse_pi_time(str(start_opt), now=end_dt)
                 else:
                     lookback_minutes = int(table_options.get("lookback_minutes", 60))
                     start_dt = end_dt - timedelta(minutes=lookback_minutes)
 
-            start_str = _isoformat_z(start_dt)
-            end_str = _isoformat_z(end_dt)
+            start_str = isoformat_z(start_dt)
+            end_str = isoformat_z(end_dt)
             intervals = int(table_options.get("intervals", 300) or 300)
-            ingest_ts = _utcnow()
+            ingest_ts = utcnow()
             next_offset = {"offset": end_str}
 
             tags_per_request = int(table_options.get("tags_per_request", 0) or 0)
-            groups = _chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
+            groups = chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
 
             def iterator() -> Iterator[dict]:
                 for group in groups:
                     if not group:
                         continue
                     params: List[Tuple[str, str]] = [("webId", w) for w in group]
-                    params += [("startTime", start_str), ("endTime", end_str), ("intervals", str(intervals))]
+                    params += [
+                        ("startTime", start_str),
+                        ("endTime", end_str),
+                        ("intervals", str(intervals)),
+                    ]
                     try:
-                        data = self._get_json("/piwebapi/streamsets/plot", params=params)
+                        data = self._client.get_json("/piwebapi/streamsets/plot", params=params)
                     except requests.exceptions.HTTPError as e:
                         if getattr(e.response, "status_code", None) == 404:
                             data = None
@@ -2033,12 +2510,12 @@ def register_lakeflow_source(spark):
                                     continue
                                 yield {
                                     "tag_webid": wid,
-                                    "timestamp": _parse_ts(ts),
-                                    "value": _try_float(item.get("Value")),
-                                    "good": _as_bool(item.get("Good"), default=True),
-                                    "questionable": _as_bool(item.get("Questionable"), default=False),
-                                    "substituted": _as_bool(item.get("Substituted"), default=False),
-                                    "annotated": _as_bool(item.get("Annotated"), default=False),
+                                    "timestamp": parse_ts(ts),
+                                    "value": try_float(item.get("Value")),
+                                    "good": as_bool(item.get("Good"), default=True),
+                                    "questionable": as_bool(item.get("Questionable"), default=False),
+                                    "substituted": as_bool(item.get("Substituted"), default=False),
+                                    "annotated": as_bool(item.get("Annotated"), default=False),
                                     "units": item.get("UnitsAbbreviation", ""),
                                     "ingestion_timestamp": ingest_ts,
                                 }
@@ -2046,9 +2523,13 @@ def register_lakeflow_source(spark):
 
                     for wid in group:
                         try:
-                            pdata = self._get_json(
+                            pdata = self._client.get_json(
                                 f"/piwebapi/streams/{wid}/plot",
-                                params={"startTime": start_str, "endTime": end_str, "intervals": str(intervals)},
+                                params={
+                                    "startTime": start_str,
+                                    "endTime": end_str,
+                                    "intervals": str(intervals),
+                                },
                             )
                         except requests.exceptions.HTTPError as e:
                             if getattr(e.response, "status_code", None) == 404:
@@ -2060,133 +2541,330 @@ def register_lakeflow_source(spark):
                                 continue
                             yield {
                                 "tag_webid": wid,
-                                "timestamp": _parse_ts(ts),
-                                "value": _try_float(item.get("Value")),
-                                "good": _as_bool(item.get("Good"), default=True),
-                                "questionable": _as_bool(item.get("Questionable"), default=False),
-                                "substituted": _as_bool(item.get("Substituted"), default=False),
-                                "annotated": _as_bool(item.get("Annotated"), default=False),
+                                "timestamp": parse_ts(ts),
+                                "value": try_float(item.get("Value")),
+                                "good": as_bool(item.get("Good"), default=True),
+                                "questionable": as_bool(item.get("Questionable"), default=False),
+                                "substituted": as_bool(item.get("Substituted"), default=False),
+                                "annotated": as_bool(item.get("Annotated"), default=False),
                                 "units": item.get("UnitsAbbreviation", ""),
                                 "ingestion_timestamp": ingest_ts,
                             }
 
             return iterator(), next_offset
 
+        def _read_summary(self, table_options: Dict[str, str]) -> List[dict]:
+            """Read summary values."""
+            tag_webids = self._resolve_tag_webids(table_options)
+            start_time = table_options.get("startTime")
+            end_time = table_options.get("endTime")
+            summary_types_csv = table_options.get("summaryType", "Total")
+            summary_types = [s.strip() for s in str(summary_types_csv).split(",") if s.strip()]
+            if not summary_types:
+                summary_types = ["Total"]
 
-        def _read_units_of_measure_table(self) -> List[dict]:
-            """List Units Of Measure (best-effort)."""
-            try:
-                data = self._get_json("/piwebapi/uoms")
-            except requests.exceptions.HTTPError as e:
-                if getattr(e.response, "status_code", None) == 404:
-                    return []
-                raise
+            passthrough_keys = (
+                "calculationBasis",
+                "timeType",
+                "summaryDuration",
+                "sampleType",
+                "sampleInterval",
+                "timeZone",
+                "filterExpression",
+            )
+            passthrough = {
+                k: str(table_options.get(k))
+                for k in passthrough_keys
+                if table_options.get(k) is not None
+            }
+
+            ingest_ts = utcnow()
             out: List[dict] = []
-            for it in (data.get("Items") or []):
-                wid = it.get("WebId")
-                if not wid:
+
+            for w in tag_webids:
+                params: List[Tuple[str, str]] = []
+                if start_time:
+                    params.append(("startTime", str(start_time)))
+                if end_time:
+                    params.append(("endTime", str(end_time)))
+                for st in summary_types:
+                    params.append(("summaryType", st))
+                for k, v in passthrough.items():
+                    params.append((k, v))
+
+                data = self._client.get_json(f"/piwebapi/streams/{w}/summary", params=params)
+                for item in data.get("Items", []) or []:
+                    stype = item.get("Type") or ""
+                    v = item.get("Value", {}) or {}
+                    ts = v.get("Timestamp")
+                    out.append(
+                        {
+                            "tag_webid": w,
+                            "summary_type": str(stype),
+                            "timestamp": parse_ts(ts) if ts else None,
+                            "value": try_float(v.get("Value")),
+                            "good": as_bool(v.get("Good"), default=True),
+                            "questionable": as_bool(v.get("Questionable"), default=False),
+                            "substituted": as_bool(v.get("Substituted"), default=False),
+                            "annotated": as_bool(v.get("Annotated"), default=False),
+                            "units": v.get("UnitsAbbreviation", ""),
+                            "ingestion_timestamp": ingest_ts,
+                        }
+                    )
+
+            return out
+
+        def _read_streamset_summary(
+            self, start_offset: dict, table_options: Dict[str, str]
+        ) -> Tuple[Iterator[dict], dict]:
+            """Read multi-tag summary via StreamSet endpoint."""
+            tag_webids = self._resolve_tag_webids(table_options)
+            start_str, end_str = compute_time_range(
+                start_offset, table_options, apply_window_seconds=False
+            )
+
+            summary_type = (table_options.get("summaryType") or "Total").strip()
+            calculation_basis = (table_options.get("calculationBasis") or "TimeWeighted").strip()
+            summary_duration = (table_options.get("summaryDuration") or "1h").strip()
+            selected_fields = table_options.get("selectedFields")
+
+            tags_per_request = int(table_options.get("tags_per_request", 0) or 0)
+            groups = chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
+
+            ingest_ts = utcnow()
+
+            def iterator() -> Iterator[dict]:
+                for group in groups:
+                    if not group:
+                        continue
+                    params = build_streamset_params(
+                        group,
+                        start_str=start_str,
+                        end_str=end_str,
+                        selected_fields=selected_fields,
+                    )
+                    params += [
+                        ("summaryType", summary_type),
+                        ("calculationBasis", calculation_basis),
+                        ("summaryDuration", summary_duration),
+                    ]
+
+                    try:
+                        data = self._client.get_json("/piwebapi/streamsets/summary", params=params)
+                    except requests.exceptions.HTTPError as e:
+                        if getattr(e.response, "status_code", None) == 404:
+                            return
+                        raise
+
+                    for stream in data.get("Items", []) or []:
+                        wid = stream.get("WebId")
+                        if not wid:
+                            continue
+                        for item in stream.get("Items", []) or []:
+                            stype = item.get("Type")
+                            v = item.get("Value", {}) or {}
+                            ts = v.get("Timestamp")
+                            if not ts:
+                                continue
+                            yield {
+                                "tag_webid": wid,
+                                "summary_type": str(stype),
+                                "timestamp": parse_ts(ts),
+                                "value": try_float(v.get("Value")),
+                                "good": as_bool(v.get("Good"), default=True),
+                                "questionable": as_bool(v.get("Questionable"), default=False),
+                                "substituted": as_bool(v.get("Substituted"), default=False),
+                                "annotated": as_bool(v.get("Annotated"), default=False),
+                                "units": v.get("UnitsAbbreviation", ""),
+                                "ingestion_timestamp": ingest_ts,
+                            }
+
+            return iterator(), {"offset": end_str}
+
+        def _read_current_value(self, table_options: Dict[str, str]) -> List[dict]:
+            """Read current values."""
+            tag_webids = self._resolve_tag_webids(table_options)
+            tags_per_request = int(table_options.get("tags_per_request", 0) or 0)
+            tag_webid_groups = (
+                chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
+            )
+            time_param = table_options.get("time")
+
+            ingest_ts = utcnow()
+            out: List[dict] = []
+
+            for group in tag_webid_groups:
+                if not group:
                     continue
+                group_reqs: List[dict] = []
+                for w in group:
+                    params: Dict[str, str] = {}
+                    if time_param:
+                        params["time"] = str(time_param)
+                    group_reqs.append(
+                        {
+                            "Method": "GET",
+                            "Resource": f"/piwebapi/streams/{w}/value",
+                            "Parameters": params,
+                        }
+                    )
+                responses = self._client.batch_execute(group_reqs)
+                for idx, (_rid, resp) in enumerate(responses):
+                    if resp.get("Status") != 200:
+                        continue
+                    webid = group[idx] if idx < len(group) else None
+                    if not webid:
+                        continue
+                    v = resp.get("Content", {}) or {}
+                    ts = v.get("Timestamp")
+                    out.append(
+                        {
+                            "tag_webid": webid,
+                            "timestamp": parse_ts(ts) if ts else None,
+                            "value": try_float(v.get("Value")),
+                            "good": as_bool(v.get("Good"), default=True),
+                            "questionable": as_bool(v.get("Questionable"), default=False),
+                            "substituted": as_bool(v.get("Substituted"), default=False),
+                            "annotated": as_bool(v.get("Annotated"), default=False),
+                            "units": v.get("UnitsAbbreviation", ""),
+                            "ingestion_timestamp": ingest_ts,
+                        }
+                    )
+
+            return out
+
+        def _read_value_at_time(self, table_options: Dict[str, str]) -> List[dict]:
+            """Read value at specified time."""
+            tag_webids = self._resolve_tag_webids(table_options)
+            time_param = table_options.get("time") or "*"
+            ingest_ts = utcnow()
+            tags_per_request = int(table_options.get("tags_per_request", 0) or 0)
+            groups = chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
+
+            out: List[dict] = []
+            for group in groups:
+                if not group:
+                    continue
+                reqs: List[dict] = [
+                    {
+                        "Method": "GET",
+                        "Resource": f"/piwebapi/streams/{w}/value",
+                        "Parameters": {"time": str(time_param)},
+                    }
+                    for w in group
+                ]
+                responses = self._client.batch_execute(reqs)
+                for idx, (_rid, resp) in enumerate(responses):
+                    if resp.get("Status") != 200:
+                        continue
+                    wid = group[idx] if idx < len(group) else None
+                    if not wid:
+                        continue
+                    v = resp.get("Content", {}) or {}
+                    ts = v.get("Timestamp")
+                    out.append(
+                        {
+                            "tag_webid": wid,
+                            "timestamp": parse_ts(ts) if ts else None,
+                            "value": try_float(v.get("Value")),
+                            "good": as_bool(v.get("Good"), default=True),
+                            "questionable": as_bool(v.get("Questionable"), default=False),
+                            "substituted": as_bool(v.get("Substituted"), default=False),
+                            "annotated": as_bool(v.get("Annotated"), default=False),
+                            "units": v.get("UnitsAbbreviation", ""),
+                            "ingestion_timestamp": ingest_ts,
+                        }
+                    )
+            return out
+
+        def _read_recorded_at_time(self, table_options: Dict[str, str]) -> List[dict]:
+            """Read recorded value at specified time."""
+            tag_webids = self._resolve_tag_webids(table_options)
+            time_param = table_options.get("time") or "*"
+            ingest_ts = utcnow()
+
+            out: List[dict] = []
+            for wid in tag_webids:
+                try:
+                    data = self._client.get_json(
+                        f"/piwebapi/streams/{wid}/recordedattime", params={"time": str(time_param)}
+                    )
+                except requests.exceptions.HTTPError as e:
+                    if getattr(e.response, "status_code", None) == 404:
+                        try:
+                            data = self._client.get_json(
+                                f"/piwebapi/streams/{wid}/value", params={"time": str(time_param)}
+                            )
+                        except requests.exceptions.HTTPError as e2:
+                            if getattr(e2.response, "status_code", None) == 404:
+                                continue
+                            continue
+                    else:
+                        continue
+
+                ts = data.get("Timestamp")
+                try:
+                    qt = parse_pi_time(str(time_param), now=utcnow())
+                except Exception:
+                    qt = None
                 out.append(
                     {
-                        "webid": wid,
-                        "name": it.get("Name", ""),
-                        "abbreviation": it.get("Abbreviation", "") or it.get("Symbol", ""),
-                        "quantity_type": it.get("QuantityType", "") or it.get("Quantity", ""),
+                        "tag_webid": wid,
+                        "query_time": qt,
+                        "timestamp": parse_ts(ts) if ts else None,
+                        "value": try_float(data.get("Value")),
+                        "good": as_bool(data.get("Good"), default=True),
+                        "questionable": as_bool(data.get("Questionable"), default=False),
+                        "substituted": as_bool(data.get("Substituted"), default=False),
+                        "annotated": as_bool(data.get("Annotated"), default=False),
+                        "units": data.get("UnitsAbbreviation", ""),
+                        "ingestion_timestamp": ingest_ts,
                     }
                 )
             return out
 
-
-        def _read_analysis_templates_table(self, table_options: Dict[str, str]) -> List[dict]:
-            """List analysis templates (best-effort)."""
+        def _read_end(self, table_options: Dict[str, str]) -> List[dict]:
+            """Read end values (latest recorded value)."""
+            tag_webids = self._resolve_tag_webids(table_options)
+            ingest_ts = utcnow()
             out: List[dict] = []
-            db_wid_opt = (table_options.get("assetdatabase_webid") or "").strip()
-            if db_wid_opt:
-                db_wids = [db_wid_opt]
-            else:
-                db_wids = [d.get("webid") for d in self._read_assetdatabases_table() if d.get("webid")]
-
-            for db_wid in db_wids:
+            for wid in tag_webids:
                 try:
-                    data = self._get_json(f"/piwebapi/assetdatabases/{db_wid}/analysistemplates")
+                    v = self._client.get_json(f"/piwebapi/streams/{wid}/end")
                 except requests.exceptions.HTTPError as e:
                     if getattr(e.response, "status_code", None) == 404:
                         continue
                     raise
-                for it in (data.get("Items") or []):
-                    wid = it.get("WebId")
-                    if not wid:
-                        continue
-                    out.append(
-                        {
-                            "webid": wid,
-                            "name": it.get("Name", ""),
-                            "description": it.get("Description", ""),
-                            "path": it.get("Path", ""),
-                            "assetdatabase_webid": db_wid,
-                        }
-                    )
+                ts = v.get("Timestamp")
+                out.append(
+                    {
+                        "tag_webid": wid,
+                        "timestamp": parse_ts(ts) if ts else None,
+                        "value": try_float(v.get("Value")),
+                        "good": as_bool(v.get("Good"), default=True),
+                        "questionable": as_bool(v.get("Questionable"), default=False),
+                        "substituted": as_bool(v.get("Substituted"), default=False),
+                        "annotated": as_bool(v.get("Annotated"), default=False),
+                        "units": v.get("UnitsAbbreviation", ""),
+                        "ingestion_timestamp": ingest_ts,
+                    }
+                )
             return out
-
-
-        def _read_eventframe_template_attributes_table(self, table_options: Dict[str, str]) -> List[dict]:
-            """List event frame template attribute templates (best-effort)."""
-            out: List[dict] = []
-            db_wid_opt = (table_options.get("assetdatabase_webid") or "").strip()
-            tpl_wid_opt = (table_options.get("eventframe_template_webid") or "").strip()
-
-            template_pairs: List[Tuple[str, str]] = []
-            if tpl_wid_opt:
-                template_pairs = [(tpl_wid_opt, db_wid_opt)]
-            else:
-                # enumerate templates across DBs
-                templates = self._read_eventframe_templates_table({"assetdatabase_webid": db_wid_opt} if db_wid_opt else {})
-                for t in templates:
-                    tw = t.get("webid")
-                    if not tw:
-                        continue
-                    template_pairs.append((tw, t.get("assetdatabase_webid") or db_wid_opt))
-
-            for tpl_wid, db_wid in template_pairs:
-                try:
-                    data = self._get_json(f"/piwebapi/eventframetemplates/{tpl_wid}/attributetemplates")
-                except requests.exceptions.HTTPError as e:
-                    if getattr(e.response, "status_code", None) == 404:
-                        continue
-                    raise
-                for it in (data.get("Items") or []):
-                    wid = it.get("WebId")
-                    if not wid:
-                        continue
-                    out.append(
-                        {
-                            "webid": wid,
-                            "name": it.get("Name", ""),
-                            "description": it.get("Description", ""),
-                            "path": it.get("Path", ""),
-                            "type": it.get("Type", "") or it.get("AttributeType", ""),
-                            "eventframe_template_webid": tpl_wid,
-                            "assetdatabase_webid": db_wid or "",
-                        }
-                    )
-            return out
-
 
         def _read_streamset_end(self, table_options: Dict[str, str]) -> List[dict]:
-            """Multi-tag end values (best-effort)."""
+            """Read end values via StreamSet endpoint."""
             tag_webids = self._resolve_tag_webids(table_options)
-            ingest_ts = _utcnow()
+            ingest_ts = utcnow()
             tags_per_request = int(table_options.get("tags_per_request", 0) or 0)
-            groups = _chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
+            groups = chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
 
             out: List[dict] = []
-            # Prefer StreamSet endpoint if available
             for group in groups:
                 if not group:
                     continue
                 params: List[Tuple[str, str]] = [("webId", w) for w in group]
                 try:
-                    data = self._get_json("/piwebapi/streamsets/end", params=params)
+                    data = self._client.get_json("/piwebapi/streamsets/end", params=params)
                 except requests.exceptions.HTTPError as e:
                     if getattr(e.response, "status_code", None) == 404:
                         data = None
@@ -2202,22 +2880,21 @@ def register_lakeflow_source(spark):
                         out.append(
                             {
                                 "tag_webid": wid,
-                                "timestamp": _parse_ts(ts) if ts else None,
-                                "value": _try_float(v.get("Value")),
-                                "good": _as_bool(v.get("Good"), default=True),
-                                "questionable": _as_bool(v.get("Questionable"), default=False),
-                                "substituted": _as_bool(v.get("Substituted"), default=False),
-                                "annotated": _as_bool(v.get("Annotated"), default=False),
+                                "timestamp": parse_ts(ts) if ts else None,
+                                "value": try_float(v.get("Value")),
+                                "good": as_bool(v.get("Good"), default=True),
+                                "questionable": as_bool(v.get("Questionable"), default=False),
+                                "substituted": as_bool(v.get("Substituted"), default=False),
+                                "annotated": as_bool(v.get("Annotated"), default=False),
                                 "units": v.get("UnitsAbbreviation", ""),
                                 "ingestion_timestamp": ingest_ts,
                             }
                         )
                     continue
 
-                # Fallback: per-tag /end
                 for wid in group:
                     try:
-                        v = self._get_json(f"/piwebapi/streams/{wid}/end")
+                        v = self._client.get_json(f"/piwebapi/streams/{wid}/end")
                     except requests.exceptions.HTTPError as e:
                         if getattr(e.response, "status_code", None) == 404:
                             continue
@@ -2226,113 +2903,264 @@ def register_lakeflow_source(spark):
                     out.append(
                         {
                             "tag_webid": wid,
-                            "timestamp": _parse_ts(ts) if ts else None,
-                            "value": _try_float(v.get("Value")),
-                            "good": _as_bool(v.get("Good"), default=True),
-                            "questionable": _as_bool(v.get("Questionable"), default=False),
-                            "substituted": _as_bool(v.get("Substituted"), default=False),
-                            "annotated": _as_bool(v.get("Annotated"), default=False),
+                            "timestamp": parse_ts(ts) if ts else None,
+                            "value": try_float(v.get("Value")),
+                            "good": as_bool(v.get("Good"), default=True),
+                            "questionable": as_bool(v.get("Questionable"), default=False),
+                            "substituted": as_bool(v.get("Substituted"), default=False),
+                            "annotated": as_bool(v.get("Annotated"), default=False),
                             "units": v.get("UnitsAbbreviation", ""),
                             "ingestion_timestamp": ingest_ts,
                         }
                     )
             return out
 
+        def _read_calculated(
+            self, start_offset: dict, table_options: Dict[str, str]
+        ) -> Tuple[Iterator[dict], dict]:
+            """Read calculated values."""
+            tag_webids = self._resolve_tag_webids(table_options)
+            calc_type = (
+                table_options.get("calculationType")
+                or table_options.get("calculation_type")
+                or "Average"
+            ).strip()
+            now = utcnow()
 
-        def _read_element_template_attributes_table(self, table_options: Dict[str, str]) -> List[dict]:
-            """Richer attribute template inventory (best-effort)."""
-            out: List[dict] = []
-            db_wid_opt = (table_options.get("assetdatabase_webid") or "").strip()
-            tpl_wid_opt = (table_options.get("elementtemplate_webid") or "").strip()
+            end_opt = table_options.get("endTime") or table_options.get("end_time") or "*"
+            end_dt = parse_pi_time(end_opt, now=now)
 
-            template_pairs: List[Tuple[str, str]] = []
-            if tpl_wid_opt:
-                template_pairs = [(tpl_wid_opt, db_wid_opt)]
-            else:
-                templates = self._read_element_templates_table({"assetdatabase_webid": db_wid_opt} if db_wid_opt else {})
-                for t in templates:
-                    tw = t.get("webid")
-                    if not tw:
-                        continue
-                    template_pairs.append((tw, t.get("assetdatabase_webid") or db_wid_opt))
+            start_dt: Optional[datetime] = None
+            if start_offset and isinstance(start_offset, dict):
+                off = start_offset.get("offset")
+                if isinstance(off, str) and off:
+                    try:
+                        start_dt = parse_ts(off)
+                    except Exception:
+                        start_dt = None
 
-            for tpl_wid, db_wid in template_pairs:
-                try:
-                    data = self._get_json(f"/piwebapi/elementtemplates/{tpl_wid}/attributetemplates")
-                except requests.exceptions.HTTPError as e:
-                    if getattr(e.response, "status_code", None) == 404:
-                        continue
-                    raise
-                for it in (data.get("Items") or []):
-                    wid = it.get("WebId")
-                    if not wid:
-                        continue
-                    out.append(
-                        {
-                            "webid": wid,
-                            "name": it.get("Name", ""),
-                            "description": it.get("Description", ""),
-                            "path": it.get("Path", ""),
-                            "type": it.get("Type", "") or it.get("AttributeType", ""),
-                            "default_units_name": it.get("DefaultUnitsName", "") or it.get("DefaultUnits", ""),
-                            "data_reference_plugin": it.get("DataReferencePlugin", "") or it.get("DataReference", ""),
-                            "is_configuration_item": _as_bool(it.get("IsConfigurationItem"), default=False),
-                            "elementtemplate_webid": tpl_wid,
-                            "assetdatabase_webid": db_wid or "",
-                        }
-                    )
-            return out
+            if start_dt is None:
+                start_opt = table_options.get("startTime") or table_options.get("start_time")
+                if start_opt:
+                    start_dt = parse_pi_time(str(start_opt), now=end_dt)
+                else:
+                    lookback_minutes = int(table_options.get("lookback_minutes", 60))
+                    start_dt = end_dt - timedelta(minutes=lookback_minutes)
 
-
-        def _read_eventframe_referenced_elements(self, start_offset: dict, table_options: Dict[str, str]) -> Tuple[Iterator[dict], dict]:
-            """EventFrame ↔ referenced elements (best-effort)."""
-            # Reuse the event frame windowing logic, and emit element relationships.
-            it, next_offset = self._read_event_frames(start_offset, table_options)
-            ingest_ts = _utcnow()
+            start_str = isoformat_z(start_dt)
+            end_str = isoformat_z(end_dt)
+            interval = (
+                table_options.get("interval") or table_options.get("sampleInterval") or "1m"
+            ).strip()
+            ingest_ts = utcnow()
+            next_offset = {"offset": end_str}
 
             def iterator() -> Iterator[dict]:
-                for ef in it:
-                    ef_wid = ef.get("event_frame_webid")
-                    if not ef_wid:
-                        continue
-                    st = ef.get("start_time")
-                    et = ef.get("end_time")
-                    primary = ef.get("primary_referenced_element_webid")
-                    if primary:
-                        yield {
-                            "event_frame_webid": ef_wid,
-                            "element_webid": primary,
-                            "relationship_type": "primary",
-                            "start_time": st,
-                            "end_time": et,
-                            "ingestion_timestamp": ingest_ts,
-                        }
-
-                    # Optional: try API to enumerate more referenced elements (if supported)
+                for wid in tag_webids:
                     try:
-                        data = self._get_json(f"/piwebapi/eventframes/{ef_wid}/referencedelements")
+                        data = self._client.get_json(
+                            f"/piwebapi/streams/{wid}/calculated",
+                            params={
+                                "startTime": start_str,
+                                "endTime": end_str,
+                                "interval": interval,
+                                "calculationType": calc_type,
+                            },
+                        )
                     except requests.exceptions.HTTPError as e:
                         if getattr(e.response, "status_code", None) == 404:
+                            try:
+                                data = self._client.get_json(
+                                    f"/piwebapi/streams/{wid}/plot",
+                                    params={
+                                        "startTime": start_str,
+                                        "endTime": end_str,
+                                        "intervals": "120",
+                                    },
+                                )
+                            except requests.exceptions.HTTPError as e2:
+                                if getattr(e2.response, "status_code", None) == 404:
+                                    continue
+                                continue
+                        else:
                             continue
-                        raise
-                    for el in (data.get("Items") or []):
-                        ew = el.get("WebId")
-                        if not ew or ew == primary:
+
+                    for item in data.get("Items") or []:
+                        ts = item.get("Timestamp")
+                        if not ts:
                             continue
                         yield {
-                            "event_frame_webid": ef_wid,
-                            "element_webid": ew,
-                            "relationship_type": "referenced",
-                            "start_time": st,
-                            "end_time": et,
+                            "tag_webid": wid,
+                            "timestamp": parse_ts(ts),
+                            "value": try_float(item.get("Value")),
+                            "units": item.get("UnitsAbbreviation", "") or item.get("Units", ""),
+                            "calculation_type": calc_type,
                             "ingestion_timestamp": ingest_ts,
                         }
 
             return iterator(), next_offset
 
+        # =========================================================================
+        # Asset Framework readers
+        # =========================================================================
 
-        def _read_af_tables_table(self, table_options: Dict[str, str]) -> List[dict]:
-            """List AF Tables (best-effort)."""
+        def _read_assetservers(self) -> List[dict]:
+            """Read asset servers."""
+            data = self._client.get_json("/piwebapi/assetservers")
+            return data.get("Items", []) or []
+
+        def _read_assetdatabases(self, assetserver_webid: str) -> List[dict]:
+            """Read asset databases for a given asset server."""
+            data = self._client.get_json(f"/piwebapi/assetservers/{assetserver_webid}/assetdatabases")
+            return data.get("Items", []) or []
+
+        def _read_assetservers_table(self) -> List[dict]:
+            """Read asset servers as table rows."""
+            try:
+                items = self._read_assetservers()
+            except requests.exceptions.HTTPError as e:
+                if getattr(e.response, "status_code", None) == 404:
+                    return []
+                raise
+            out: List[dict] = []
+            for s in items or []:
+                wid = s.get("WebId")
+                if not wid:
+                    continue
+                out.append({"webid": wid, "name": s.get("Name", ""), "path": s.get("Path", "")})
+            return out
+
+        def _read_assetdatabases_table(self) -> List[dict]:
+            """Read asset databases as table rows."""
+            try:
+                assetservers = self._read_assetservers()
+            except requests.exceptions.HTTPError as e:
+                if getattr(e.response, "status_code", None) == 404:
+                    return []
+                raise
+
+            out: List[dict] = []
+            for srv in assetservers or []:
+                srv_wid = srv.get("WebId")
+                if not srv_wid:
+                    continue
+                try:
+                    dbs = self._read_assetdatabases(srv_wid)
+                except requests.exceptions.HTTPError as e:
+                    if getattr(e.response, "status_code", None) == 404:
+                        continue
+                    raise
+                for db in dbs or []:
+                    db_wid = db.get("WebId")
+                    if not db_wid:
+                        continue
+                    out.append(
+                        {
+                            "webid": db_wid,
+                            "name": db.get("Name", ""),
+                            "path": db.get("Path", ""),
+                            "assetserver_webid": srv_wid,
+                        }
+                    )
+            return out
+
+        def _read_af_hierarchy(self) -> List[dict]:
+            """Read AF element hierarchy."""
+            assetservers = self._read_assetservers()
+            if not assetservers:
+                return []
+
+            out: List[dict] = []
+            ingest_ts = utcnow()
+
+            def walk(elements: List[dict], parent_webid: str, depth: int):
+                for e in elements:
+                    webid = e.get("WebId")
+                    if not webid:
+                        continue
+                    out.append(
+                        {
+                            "element_webid": webid,
+                            "name": e.get("Name", ""),
+                            "template_name": e.get("TemplateName", ""),
+                            "description": e.get("Description", ""),
+                            "path": e.get("Path", ""),
+                            "parent_webid": parent_webid or "",
+                            "depth": depth,
+                            "category_names": e.get("CategoryNames") or [],
+                            "ingestion_timestamp": ingest_ts,
+                        }
+                    )
+                    children = e.get("Elements") or []
+                    if children:
+                        walk(children, webid, depth + 1)
+
+            for srv in assetservers:
+                srv_webid = srv.get("WebId")
+                if not srv_webid:
+                    continue
+                for db in self._read_assetdatabases(srv_webid):
+                    db_webid = db.get("WebId")
+                    if not db_webid:
+                        continue
+                    roots = (
+                        self._client.get_json(
+                            f"/piwebapi/assetdatabases/{db_webid}/elements",
+                            params={"searchFullHierarchy": "true"},
+                        ).get("Items", [])
+                        or []
+                    )
+                    walk(roots, parent_webid="", depth=0)
+
+            return out
+
+        def _read_element_attributes(self, table_options: Dict[str, str]) -> List[dict]:
+            """Read element attributes."""
+            element_csv = table_options.get("element_webids", "")
+            element_webids = [e.strip() for e in str(element_csv).split(",") if e.strip()]
+            if not element_webids:
+                af = self._read_af_hierarchy()
+                element_webids = [
+                    r.get("element_webid")
+                    for r in af[: int(table_options.get("default_elements", 10))]
+                    if r.get("element_webid")
+                ]
+
+            name_filter = table_options.get("nameFilter")
+            page_size = int(table_options.get("maxCount", 1000))
+            start_index = int(table_options.get("startIndex", 0))
+
+            ingest_ts = utcnow()
+            out: List[dict] = []
+            for ew in element_webids:
+                params: Dict[str, str] = {"maxCount": str(page_size), "startIndex": str(start_index)}
+                if name_filter:
+                    params["nameFilter"] = str(name_filter)
+                data = self._client.get_json(f"/piwebapi/elements/{ew}/attributes", params=params)
+                for a in data.get("Items", []) or []:
+                    aw = a.get("WebId")
+                    if not aw:
+                        continue
+                    out.append(
+                        {
+                            "element_webid": ew,
+                            "attribute_webid": aw,
+                            "name": a.get("Name", ""),
+                            "description": a.get("Description", ""),
+                            "path": a.get("Path", ""),
+                            "type": a.get("Type", ""),
+                            "default_units_name": a.get("DefaultUnitsName", ""),
+                            "data_reference_plugin": a.get("DataReferencePlugIn", ""),
+                            "is_configuration_item": as_bool(
+                                a.get("IsConfigurationItem"), default=False
+                            ),
+                            "ingestion_timestamp": ingest_ts,
+                        }
+                    )
+            return out
+
+        def _read_element_templates_table(self, table_options: Dict[str, str]) -> List[dict]:
+            """Read element templates."""
             out: List[dict] = []
             db_wid_opt = (table_options.get("assetdatabase_webid") or "").strip()
             if db_wid_opt:
@@ -2342,12 +3170,12 @@ def register_lakeflow_source(spark):
 
             for db_wid in db_wids:
                 try:
-                    data = self._get_json(f"/piwebapi/assetdatabases/{db_wid}/tables")
+                    data = self._client.get_json(f"/piwebapi/assetdatabases/{db_wid}/elementtemplates")
                 except requests.exceptions.HTTPError as e:
                     if getattr(e.response, "status_code", None) == 404:
                         continue
                     raise
-                for it in (data.get("Items") or []):
+                for it in data.get("Items") or []:
                     wid = it.get("WebId")
                     if not wid:
                         continue
@@ -2362,20 +3190,230 @@ def register_lakeflow_source(spark):
                     )
             return out
 
+        def _read_element_template_attributes_table(self, table_options: Dict[str, str]) -> List[dict]:
+            """Read element template attributes."""
+            out: List[dict] = []
+            db_wid_opt = (table_options.get("assetdatabase_webid") or "").strip()
+            tpl_wid_opt = (table_options.get("elementtemplate_webid") or "").strip()
+
+            template_pairs: List[Tuple[str, str]] = []
+            if tpl_wid_opt:
+                template_pairs = [(tpl_wid_opt, db_wid_opt)]
+            else:
+                templates = self._read_element_templates_table(
+                    {"assetdatabase_webid": db_wid_opt} if db_wid_opt else {}
+                )
+                for t in templates:
+                    tw = t.get("webid")
+                    if not tw:
+                        continue
+                    template_pairs.append((tw, t.get("assetdatabase_webid") or db_wid_opt))
+
+            for tpl_wid, db_wid in template_pairs:
+                try:
+                    data = self._client.get_json(
+                        f"/piwebapi/elementtemplates/{tpl_wid}/attributetemplates"
+                    )
+                except requests.exceptions.HTTPError as e:
+                    if getattr(e.response, "status_code", None) == 404:
+                        continue
+                    raise
+                for it in data.get("Items") or []:
+                    wid = it.get("WebId")
+                    if not wid:
+                        continue
+                    out.append(
+                        {
+                            "webid": wid,
+                            "name": it.get("Name", ""),
+                            "description": it.get("Description", ""),
+                            "path": it.get("Path", ""),
+                            "type": it.get("Type", "") or it.get("AttributeType", ""),
+                            "default_units_name": it.get("DefaultUnitsName", "")
+                            or it.get("DefaultUnits", ""),
+                            "data_reference_plugin": it.get("DataReferencePlugin", "")
+                            or it.get("DataReference", ""),
+                            "is_configuration_item": as_bool(
+                                it.get("IsConfigurationItem"), default=False
+                            ),
+                            "elementtemplate_webid": tpl_wid,
+                            "assetdatabase_webid": db_wid or "",
+                        }
+                    )
+            return out
+
+        def _read_categories_table(self, table_options: Dict[str, str]) -> List[dict]:
+            """Read AF categories."""
+            out: List[dict] = []
+            db_wid_opt = (table_options.get("assetdatabase_webid") or "").strip()
+            if db_wid_opt:
+                db_wids = [db_wid_opt]
+            else:
+                db_wids = [d.get("webid") for d in self._read_assetdatabases_table() if d.get("webid")]
+
+            for db_wid in db_wids:
+                try:
+                    data = self._client.get_json(f"/piwebapi/assetdatabases/{db_wid}/categories")
+                except requests.exceptions.HTTPError as e:
+                    if getattr(e.response, "status_code", None) == 404:
+                        continue
+                    raise
+                for it in data.get("Items") or []:
+                    wid = it.get("WebId")
+                    if not wid:
+                        continue
+                    out.append(
+                        {
+                            "webid": wid,
+                            "name": it.get("Name", ""),
+                            "description": it.get("Description", ""),
+                            "category_type": it.get("CategoryType", "") or it.get("Type", ""),
+                            "assetdatabase_webid": db_wid,
+                        }
+                    )
+            return out
+
+        def _read_attribute_templates_table(self, table_options: Dict[str, str]) -> List[dict]:
+            """Read AF attribute templates for element templates."""
+            out: List[dict] = []
+            db_wid_opt = (table_options.get("assetdatabase_webid") or "").strip()
+
+            templates = self._read_element_templates_table(
+                {"assetdatabase_webid": db_wid_opt} if db_wid_opt else {}
+            )
+            for tpl in templates:
+                tpl_wid = tpl.get("webid")
+                if not tpl_wid:
+                    continue
+                db_wid = tpl.get("assetdatabase_webid") or db_wid_opt or ""
+                try:
+                    data = self._client.get_json(
+                        f"/piwebapi/elementtemplates/{tpl_wid}/attributetemplates"
+                    )
+                except requests.exceptions.HTTPError as e:
+                    if getattr(e.response, "status_code", None) == 404:
+                        continue
+                    raise
+                for it in data.get("Items") or []:
+                    wid = it.get("WebId")
+                    if not wid:
+                        continue
+                    out.append(
+                        {
+                            "webid": wid,
+                            "name": it.get("Name", ""),
+                            "description": it.get("Description", ""),
+                            "path": it.get("Path", ""),
+                            "type": it.get("Type", "") or it.get("AttributeType", ""),
+                            "elementtemplate_webid": tpl_wid,
+                            "assetdatabase_webid": db_wid,
+                        }
+                    )
+            return out
+
+        def _read_analyses_table(self, table_options: Dict[str, str]) -> List[dict]:
+            """Read AF analyses."""
+            out: List[dict] = []
+            db_wid_opt = (table_options.get("assetdatabase_webid") or "").strip()
+            if db_wid_opt:
+                db_wids = [db_wid_opt]
+            else:
+                db_wids = [d.get("webid") for d in self._read_assetdatabases_table() if d.get("webid")]
+
+            for db_wid in db_wids:
+                try:
+                    data = self._client.get_json(f"/piwebapi/assetdatabases/{db_wid}/analyses")
+                except requests.exceptions.HTTPError as e:
+                    if getattr(e.response, "status_code", None) == 404:
+                        continue
+                    raise
+                for it in data.get("Items") or []:
+                    wid = it.get("WebId")
+                    if not wid:
+                        continue
+                    out.append(
+                        {
+                            "webid": wid,
+                            "name": it.get("Name", ""),
+                            "description": it.get("Description", ""),
+                            "path": it.get("Path", ""),
+                            "analysis_template_name": it.get("AnalysisTemplateName", "")
+                            or it.get("TemplateName", ""),
+                            "target_element_webid": it.get("TargetElementWebId", "")
+                            or it.get("TargetElement", ""),
+                            "assetdatabase_webid": db_wid,
+                        }
+                    )
+            return out
+
+        def _read_analysis_templates_table(self, table_options: Dict[str, str]) -> List[dict]:
+            """Read analysis templates."""
+            out: List[dict] = []
+            db_wid_opt = (table_options.get("assetdatabase_webid") or "").strip()
+            if db_wid_opt:
+                db_wids = [db_wid_opt]
+            else:
+                db_wids = [d.get("webid") for d in self._read_assetdatabases_table() if d.get("webid")]
+
+            for db_wid in db_wids:
+                try:
+                    data = self._client.get_json(f"/piwebapi/assetdatabases/{db_wid}/analysistemplates")
+                except requests.exceptions.HTTPError as e:
+                    if getattr(e.response, "status_code", None) == 404:
+                        continue
+                    raise
+                for it in data.get("Items") or []:
+                    wid = it.get("WebId")
+                    if not wid:
+                        continue
+                    out.append(
+                        {
+                            "webid": wid,
+                            "name": it.get("Name", ""),
+                            "description": it.get("Description", ""),
+                            "path": it.get("Path", ""),
+                            "assetdatabase_webid": db_wid,
+                        }
+                    )
+            return out
+
+        def _read_af_tables_table(self, table_options: Dict[str, str]) -> List[dict]:
+            """Read AF tables."""
+            out: List[dict] = []
+            db_wid_opt = (table_options.get("assetdatabase_webid") or "").strip()
+            if db_wid_opt:
+                db_wids = [db_wid_opt]
+            else:
+                db_wids = [d.get("webid") for d in self._read_assetdatabases_table() if d.get("webid")]
+
+            for db_wid in db_wids:
+                try:
+                    data = self._client.get_json(f"/piwebapi/assetdatabases/{db_wid}/tables")
+                except requests.exceptions.HTTPError as e:
+                    if getattr(e.response, "status_code", None) == 404:
+                        continue
+                    raise
+                for it in data.get("Items") or []:
+                    wid = it.get("WebId")
+                    if not wid:
+                        continue
+                    out.append(
+                        {
+                            "webid": wid,
+                            "name": it.get("Name", ""),
+                            "description": it.get("Description", ""),
+                            "path": it.get("Path", ""),
+                            "assetdatabase_webid": db_wid,
+                        }
+                    )
+            return out
 
         def _read_af_table_rows_table(self, table_options: Dict[str, str]) -> List[dict]:
-            """Read rows from AF Tables (best-effort).
-
-            Options:
-            - assetdatabase_webid (optional) to scope table discovery
-            - table_webid (single) or table_webids (csv) to choose specific tables
-            - default_tables: number of tables to sample if none specified (default 1)
-            - startIndex/maxCount for row pagination (defaults 0/50)
-            """
+            """Read rows from AF tables."""
             start_index = int(table_options.get("startIndex", 0) or 0)
             max_count = int(table_options.get("maxCount", 50) or 50)
             default_tables = int(table_options.get("default_tables", 1) or 1)
-            ingest_ts = _utcnow()
+            ingest_ts = utcnow()
 
             table_webid = (table_options.get("table_webid") or "").strip()
             table_webids_csv = (table_options.get("table_webids") or "").strip()
@@ -2386,12 +3424,14 @@ def register_lakeflow_source(spark):
                 table_webids = [s.strip() for s in table_webids_csv.split(",") if s.strip()]
             else:
                 tables = self._read_af_tables_table(table_options)
-                table_webids = [t.get("webid") for t in tables if t.get("webid")][: max(0, default_tables)]
+                table_webids = [t.get("webid") for t in tables if t.get("webid")][
+                    : max(0, default_tables)
+                ]
 
             out: List[dict] = []
             for tw in table_webids:
                 try:
-                    data = self._get_json(
+                    data = self._client.get_json(
                         f"/piwebapi/tables/{tw}/rows",
                         params={"startIndex": str(start_index), "maxCount": str(max_count)},
                     )
@@ -2402,7 +3442,6 @@ def register_lakeflow_source(spark):
                 items = data.get("Items", []) or []
                 for i, row in enumerate(items):
                     cols = row.get("Columns") or row.get("columns") or {}
-                    # Normalize to string->string map for schema stability.
                     cols_norm = {str(k): ("" if v is None else str(v)) for k, v in (cols or {}).items()}
                     ridx = row.get("Index")
                     if ridx is None:
@@ -2417,441 +3456,53 @@ def register_lakeflow_source(spark):
                     )
             return out
 
-
-        def _read_eventframe_acknowledgements_table(self, table_options: Dict[str, str]) -> List[dict]:
-            """Event frame acknowledgements (best-effort)."""
-            ingest_ts = _utcnow()
-            out: List[dict] = []
-
-            # Use recent event frames as the driving set.
+        def _read_units_of_measure_table(self) -> List[dict]:
+            """Read units of measure."""
             try:
-                it, _ = self._read_event_frames({}, table_options)
-            except Exception as e:
-                pass  # Error ignored
-                return []
-
-            max_elems = int(table_options.get("default_event_frames", 25) or 25)
-            for i, ef in enumerate(it):
-                if i >= max_elems:
-                    break
-                ef_wid = ef.get("event_frame_webid")
-                if not ef_wid:
-                    continue
-                try:
-                    data = self._get_json(f"/piwebapi/eventframes/{ef_wid}/acknowledgements")
-                except requests.exceptions.HTTPError as e:
-                    if getattr(e.response, "status_code", None) == 404:
-                        continue
-                    pass  # Error ignored
-                    continue
-                for item in (data.get("Items") or []):
-                    ack_id = item.get("Id") or item.get("WebId") or item.get("AckId")
-                    if not ack_id:
-                        continue
-                    ts = item.get("Timestamp")
-                    out.append(
-                        {
-                            "event_frame_webid": ef_wid,
-                            "ack_id": str(ack_id),
-                            "ack_timestamp": _parse_ts(ts) if ts else None,
-                            "ack_user": item.get("User") or item.get("AcknowledgedBy") or "",
-                            "comment": item.get("Comment") or "",
-                            "ingestion_timestamp": ingest_ts,
-                        }
-                    )
-            return out
-
-
-        def _read_eventframe_annotations_table(self, table_options: Dict[str, str]) -> List[dict]:
-            """Event frame annotations (best-effort)."""
-            ingest_ts = _utcnow()
+                data = self._client.get_json("/piwebapi/uoms")
+            except requests.exceptions.HTTPError as e:
+                if getattr(e.response, "status_code", None) == 404:
+                    return []
+                raise
             out: List[dict] = []
-
-            try:
-                it, _ = self._read_event_frames({}, table_options)
-            except Exception as e:
-                pass  # Error ignored
-                return []
-
-            max_elems = int(table_options.get("default_event_frames", 25) or 25)
-            for i, ef in enumerate(it):
-                if i >= max_elems:
-                    break
-                ef_wid = ef.get("event_frame_webid")
-                if not ef_wid:
+            for it in data.get("Items") or []:
+                wid = it.get("WebId")
+                if not wid:
                     continue
-                try:
-                    data = self._get_json(f"/piwebapi/eventframes/{ef_wid}/annotations")
-                except requests.exceptions.HTTPError as e:
-                    if getattr(e.response, "status_code", None) == 404:
-                        continue
-                    pass  # Error ignored
-                    continue
-                for item in (data.get("Items") or []):
-                    ann_id = item.get("Id") or item.get("WebId") or item.get("AnnotationId")
-                    if not ann_id:
-                        continue
-                    ts = item.get("Timestamp")
-                    out.append(
-                        {
-                            "event_frame_webid": ef_wid,
-                            "annotation_id": str(ann_id),
-                            "annotation_timestamp": _parse_ts(ts) if ts else None,
-                            "annotation_user": item.get("User") or item.get("CreatedBy") or "",
-                            "text": item.get("Text") or item.get("Message") or "",
-                            "ingestion_timestamp": ingest_ts,
-                        }
-                    )
-            return out
-
-
-        def _read_recorded_at_time(self, table_options: Dict[str, str]) -> List[dict]:
-            """RecordedAtTime per tag (best-effort)."""
-            tag_webids = self._resolve_tag_webids(table_options)
-            time_param = table_options.get("time") or "*"
-            ingest_ts = _utcnow()
-
-            out: List[dict] = []
-            for wid in tag_webids:
-                try:
-                    data = self._get_json(f"/piwebapi/streams/{wid}/recordedattime", params={"time": str(time_param)})
-                except requests.exceptions.HTTPError as e:
-                    # Fallback: use Stream GetValue if RecordedAtTime is unavailable on the source host.
-                    if getattr(e.response, "status_code", None) == 404:
-                        try:
-                            data = self._get_json(f"/piwebapi/streams/{wid}/value", params={"time": str(time_param)})
-                        except requests.exceptions.HTTPError as e2:
-                            if getattr(e2.response, "status_code", None) == 404:
-                                continue
-                            pass  # Error ignored
-                            continue
-                    else:
-                        pass  # Error ignored
-                        continue
-
-                ts = data.get("Timestamp")
-                # query_time is the requested time; parse best-effort
-                try:
-                    qt = _parse_pi_time(str(time_param), now=_utcnow())
-                except Exception:
-                    qt = None
                 out.append(
                     {
-                        "tag_webid": wid,
-                        "query_time": qt,
-                        "timestamp": _parse_ts(ts) if ts else None,
-                        "value": _try_float(data.get("Value")),
-                        "good": _as_bool(data.get("Good"), default=True),
-                        "questionable": _as_bool(data.get("Questionable"), default=False),
-                        "substituted": _as_bool(data.get("Substituted"), default=False),
-                        "annotated": _as_bool(data.get("Annotated"), default=False),
-                        "units": data.get("UnitsAbbreviation", ""),
-                        "ingestion_timestamp": ingest_ts,
+                        "webid": wid,
+                        "name": it.get("Name", ""),
+                        "abbreviation": it.get("Abbreviation", "") or it.get("Symbol", ""),
+                        "quantity_type": it.get("QuantityType", "") or it.get("Quantity", ""),
                     }
                 )
             return out
 
+        # =========================================================================
+        # Event Frame readers
+        # =========================================================================
 
-        def _read_calculated(self, start_offset: dict, table_options: Dict[str, str]) -> Tuple[Iterator[dict], dict]:
-            """Calculated values over time (best-effort)."""
-            tag_webids = self._resolve_tag_webids(table_options)
-            calc_type = (table_options.get("calculationType") or table_options.get("calculation_type") or "Average").strip()
-            now = _utcnow()
-
-            end_opt = table_options.get("endTime") or table_options.get("end_time") or "*"
-            end_dt = _parse_pi_time(end_opt, now=now)
-
-            start_dt: Optional[datetime] = None
-            if start_offset and isinstance(start_offset, dict):
-                off = start_offset.get("offset")
-                if isinstance(off, str) and off:
-                    try:
-                        start_dt = _parse_ts(off)
-                    except Exception:
-                        start_dt = None
-
-            if start_dt is None:
-                start_opt = table_options.get("startTime") or table_options.get("start_time")
-                if start_opt:
-                    start_dt = _parse_pi_time(str(start_opt), now=end_dt)
-                else:
-                    lookback_minutes = int(table_options.get("lookback_minutes", 60))
-                    start_dt = end_dt - timedelta(minutes=lookback_minutes)
-
-            start_str = _isoformat_z(start_dt)
-            end_str = _isoformat_z(end_dt)
-            interval = (table_options.get("interval") or table_options.get("sampleInterval") or "1m").strip()
-            ingest_ts = _utcnow()
-            next_offset = {"offset": end_str}
-
-            def iterator() -> Iterator[dict]:
-                for wid in tag_webids:
-                    try:
-                        data = self._get_json(
-                            f"/piwebapi/streams/{wid}/calculated",
-                            params={"startTime": start_str, "endTime": end_str, "interval": interval, "calculationType": calc_type},
-                        )
-                    except requests.exceptions.HTTPError as e:
-                        if getattr(e.response, "status_code", None) == 404:
-                            # fallback: use plot points and label them as calculated
-                            try:
-                                data = self._get_json(
-                                    f"/piwebapi/streams/{wid}/plot",
-                                    params={"startTime": start_str, "endTime": end_str, "intervals": "120"},
-                                )
-                            except requests.exceptions.HTTPError as e2:
-                                if getattr(e2.response, "status_code", None) == 404:
-                                    continue
-                                pass  # Error ignored
-                                continue
-                        else:
-                            pass  # Error ignored
-                            continue
-
-                    for item in (data.get("Items") or []):
-                        ts = item.get("Timestamp")
-                        if not ts:
-                            continue
-                        yield {
-                            "tag_webid": wid,
-                            "timestamp": _parse_ts(ts),
-                            "value": _try_float(item.get("Value")),
-                            "units": item.get("UnitsAbbreviation", "") or item.get("Units", ""),
-                            "calculation_type": calc_type,
-                            "ingestion_timestamp": ingest_ts,
-                        }
-
-            return iterator(), next_offset
-
-
-        def _read_point_type_catalog(self, table_options: Dict[str, str]) -> List[dict]:
-            """Derive a point type catalog by scanning points and grouping by a coarse 'type'."""
-            # We keep this lightweight: use pi_points results in-memory.
-            points = self._read_points(table_options)
-            counts: Dict[Tuple[str, str], int] = {}
-            for p in points:
-                desc = (p.get("descriptor") or "").strip()
-                eu = (p.get("engineering_units") or "").strip()
-                # heuristic: first word of descriptor (Temperature/Pressure/etc), else "Unknown"
-                pt = (desc.split(" ", 1)[0] if desc else "Unknown") or "Unknown"
-                key = (pt, eu)
-                counts[key] = counts.get(key, 0) + 1
-            out: List[dict] = []
-            for (pt, eu), n in sorted(counts.items(), key=lambda x: (-x[1], x[0][0], x[0][1])):
-                out.append({"point_type": pt, "engineering_units": eu, "count_points": n})
-            return out
-
-
-        def _read_links(self, table_options: Dict[str, str]) -> List[dict]:
-            """Materialize Links fields (best-effort) by sampling key resources."""
-            out: List[dict] = []
-
-            def add(entity_type: str, webid: str, links: Any):
-                if not webid or not isinstance(links, dict):
-                    return
-                for rel, href in links.items():
-                    if href is None:
-                        continue
-                    out.append({"entity_type": entity_type, "webid": webid, "rel": str(rel), "href": str(href)})
-
-            # Dataservers
-            try:
-                data = self._get_json("/piwebapi/dataservers")
-                for it in (data.get("Items") or []):
-                    wid = it.get("WebId")
-                    add("dataserver", wid, it.get("Links"))
-            except Exception:
-                pass
-
-            # AssetServers
-            try:
-                data = self._get_json("/piwebapi/assetservers")
-                for it in (data.get("Items") or []):
-                    wid = it.get("WebId")
-                    add("assetserver", wid, it.get("Links"))
-            except Exception:
-                pass
-
-            # AF Tables (inventory)
-            try:
-                for t in self._read_af_tables_table(table_options):
-                    # we only have parsed fields; Links aren't preserved, so just emit a derived link.
-                    wid = t.get("webid")
-                    if wid:
-                        out.append({"entity_type": "aftable", "webid": wid, "rel": "rows", "href": f"/piwebapi/tables/{wid}/rows"})
-            except Exception:
-                pass
-
-            return out
-
-
-        def _read_current_value(self, table_options: Dict[str, str]) -> List[dict]:
-            tag_webids = self._resolve_tag_webids(table_options)
-            tags_per_request = int(table_options.get("tags_per_request", 0) or 0)
-            tag_webid_groups = _chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
-            time_param = table_options.get("time")
-
-            reqs: List[dict] = []
-            for w in tag_webids:
-                params: Dict[str, str] = {}
-                if time_param:
-                    params["time"] = str(time_param)
-                reqs.append({"Method": "GET", "Resource": f"/piwebapi/streams/{w}/value", "Parameters": params})
-
-            ingest_ts = _utcnow()
-            out: List[dict] = []
-
-            for group in tag_webid_groups:
-                if not group:
-                    continue
-                group_reqs: List[dict] = []
-                for w in group:
-                    params: Dict[str, str] = {}
-                    if time_param:
-                        params["time"] = str(time_param)
-                    group_reqs.append({"Method": "GET", "Resource": f"/piwebapi/streams/{w}/value", "Parameters": params})
-                responses = self._batch_execute(group_reqs)
-                for idx, (_rid, resp) in enumerate(responses):
-                    if resp.get("Status") != 200:
-                        continue
-                    webid = group[idx] if idx < len(group) else None
-                    if not webid:
-                        continue
-                    v = resp.get("Content", {}) or {}
-                    ts = v.get("Timestamp")
-                    out.append({
-                        "tag_webid": webid,
-                        "timestamp": _parse_ts(ts) if ts else None,
-                        "value": _try_float(v.get("Value")),
-                        "good": _as_bool(v.get("Good"), default=True),
-                        "questionable": _as_bool(v.get("Questionable"), default=False),
-                        "substituted": _as_bool(v.get("Substituted"), default=False),
-                        "annotated": _as_bool(v.get("Annotated"), default=False),
-                        "units": v.get("UnitsAbbreviation", ""),
-                        "ingestion_timestamp": ingest_ts,
-                    })
-
-            return out
-
-        def _read_summary(self, table_options: Dict[str, str]) -> List[dict]:
-            # NOTE: The PI Web API supports multiple instances of summaryType.
-            # We implement the API-correct approach (repeat summaryType in query params) and keep this table snapshot-like.
-            tag_webids = self._resolve_tag_webids(table_options)
-            tags_per_request = int(table_options.get("tags_per_request", 0) or 0)
-            tag_webid_groups = _chunks(tag_webids, tags_per_request) if tags_per_request else [tag_webids]
-            start_time = table_options.get("startTime")
-            end_time = table_options.get("endTime")
-            summary_types_csv = table_options.get("summaryType", "Total")
-            summary_types = [s.strip() for s in str(summary_types_csv).split(",") if s.strip()]
-            if not summary_types:
-                summary_types = ["Total"]
-
-            passthrough_keys = ("calculationBasis", "timeType", "summaryDuration", "sampleType", "sampleInterval", "timeZone", "filterExpression")
-            passthrough = {k: str(table_options.get(k)) for k in passthrough_keys if table_options.get(k) is not None}
-
-            ingest_ts = _utcnow()
-            out: List[dict] = []
-
-            for w in tag_webids:
-                params: List[Tuple[str, str]] = []
-                if start_time:
-                    params.append(("startTime", str(start_time)))
-                if end_time:
-                    params.append(("endTime", str(end_time)))
-                for st in summary_types:
-                    params.append(("summaryType", st))
-                for k, v in passthrough.items():
-                    params.append((k, v))
-
-                data = self._get_json(f"/piwebapi/streams/{w}/summary", params=params)
-                for item in data.get("Items", []) or []:
-                    stype = item.get("Type") or ""
-                    v = item.get("Value", {}) or {}
-                    ts = v.get("Timestamp")
-                    out.append({
-                        "tag_webid": w,
-                        "summary_type": str(stype),
-                        "timestamp": _parse_ts(ts) if ts else None,
-                        "value": _try_float(v.get("Value")),
-                        "good": _as_bool(v.get("Good"), default=True),
-                        "questionable": _as_bool(v.get("Questionable"), default=False),
-                        "substituted": _as_bool(v.get("Substituted"), default=False),
-                        "annotated": _as_bool(v.get("Annotated"), default=False),
-                        "units": v.get("UnitsAbbreviation", ""),
-                        "ingestion_timestamp": ingest_ts,
-                    })
-
-            return out
-
-        def _read_assetservers(self) -> List[dict]:
-            data = self._get_json("/piwebapi/assetservers")
-            return data.get("Items", []) or []
-
-        def _read_assetdatabases(self, assetserver_webid: str) -> List[dict]:
-            data = self._get_json(f"/piwebapi/assetservers/{assetserver_webid}/assetdatabases")
-            return data.get("Items", []) or []
-
-        def _read_af_hierarchy(self) -> List[dict]:
-            assetservers = self._read_assetservers()
-            if not assetservers:
-                return []
-
-            out: List[dict] = []
-            ingest_ts = _utcnow()
-
-            def walk(elements: List[dict], parent_webid: str, depth: int):
-                for e in elements:
-                    webid = e.get("WebId")
-                    if not webid:
-                        continue
-                    out.append({
-                        "element_webid": webid,
-                        "name": e.get("Name", ""),
-                        "template_name": e.get("TemplateName", ""),
-                        "description": e.get("Description", ""),
-                        "path": e.get("Path", ""),
-                        "parent_webid": parent_webid or "",
-                        "depth": depth,
-                        "category_names": e.get("CategoryNames") or [],
-                        "ingestion_timestamp": ingest_ts,
-                    })
-                    children = e.get("Elements") or []
-                    if children:
-                        walk(children, webid, depth + 1)
-
-            for srv in assetservers:
-                srv_webid = srv.get("WebId")
-                if not srv_webid:
-                    continue
-                for db in self._read_assetdatabases(srv_webid):
-                    db_webid = db.get("WebId")
-                    if not db_webid:
-                        continue
-                    roots = self._get_json(
-                        f"/piwebapi/assetdatabases/{db_webid}/elements",
-                        params={"searchFullHierarchy": "true"},
-                    ).get("Items", []) or []
-                    walk(roots, parent_webid="", depth=0)
-
-            return out
-
-        def _read_event_frames(self, start_offset: dict, table_options: Dict[str, str]) -> Tuple[Iterator[dict], dict]:
-            now = _utcnow()
+        def _read_event_frames(
+            self, start_offset: dict, table_options: Dict[str, str]
+        ) -> Tuple[Iterator[dict], dict]:
+            """Read event frames."""
+            now = utcnow()
 
             start = None
             if start_offset and isinstance(start_offset, dict):
                 off = start_offset.get("offset")
                 if isinstance(off, str) and off:
                     try:
-                        start = _parse_ts(off)
+                        start = parse_ts(off)
                     except Exception:
                         start = None
             if start is None:
                 lookback_days = int(table_options.get("lookback_days", 30))
                 start = now - timedelta(days=lookback_days)
 
-            start_str = _isoformat_z(start)
-            end_str = _isoformat_z(now)
+            start_str = isoformat_z(start)
+            end_str = isoformat_z(now)
 
             page_size = int(table_options.get("maxCount", 1000))
             base_start_index = int(table_options.get("startIndex", 0))
@@ -2881,14 +3532,16 @@ def register_lakeflow_source(spark):
                             "startIndex": str(start_index),
                             "maxCount": str(page_size),
                         }
-                        resp = self._get_json(f"/piwebapi/assetdatabases/{db_webid}/eventframes", params=params)
+                        resp = self._client.get_json(
+                            f"/piwebapi/assetdatabases/{db_webid}/eventframes", params=params
+                        )
                         items = resp.get("Items", []) or []
                         all_events.extend(items)
                         if len(items) < page_size:
                             break
                         start_index += page_size
 
-            ingest_ts = _utcnow()
+            ingest_ts = utcnow()
 
             def iterator() -> Iterator[dict]:
                 for ef in all_events:
@@ -2901,8 +3554,8 @@ def register_lakeflow_source(spark):
                         "event_frame_webid": webid,
                         "name": ef.get("Name", ""),
                         "template_name": ef.get("TemplateName", ""),
-                        "start_time": _parse_ts(ef.get("StartTime")) if ef.get("StartTime") else None,
-                        "end_time": _parse_ts(ef.get("EndTime")) if ef.get("EndTime") else None,
+                        "start_time": parse_ts(ef.get("StartTime")) if ef.get("StartTime") else None,
+                        "end_time": parse_ts(ef.get("EndTime")) if ef.get("EndTime") else None,
                         "primary_referenced_element_webid": ef.get("PrimaryReferencedElementWebId"),
                         "description": ef.get("Description", ""),
                         "category_names": ef.get("CategoryNames") or [],
@@ -2912,48 +3565,14 @@ def register_lakeflow_source(spark):
 
             return iterator(), {"offset": end_str}
 
-        def _read_element_attributes(self, table_options: Dict[str, str]) -> List[dict]:
-            element_csv = table_options.get("element_webids", "")
-            element_webids = [e.strip() for e in str(element_csv).split(",") if e.strip()]
-            if not element_webids:
-                af = self._read_af_hierarchy()
-                element_webids = [r.get("element_webid") for r in af[: int(table_options.get("default_elements", 10))] if r.get("element_webid")]
-
-            name_filter = table_options.get("nameFilter")
-            page_size = int(table_options.get("maxCount", 1000))
-            start_index = int(table_options.get("startIndex", 0))
-
-            ingest_ts = _utcnow()
-            out: List[dict] = []
-            for ew in element_webids:
-                params: Dict[str, str] = {"maxCount": str(page_size), "startIndex": str(start_index)}
-                if name_filter:
-                    params["nameFilter"] = str(name_filter)
-                data = self._get_json(f"/piwebapi/elements/{ew}/attributes", params=params)
-                for a in data.get("Items", []) or []:
-                    aw = a.get("WebId")
-                    if not aw:
-                        continue
-                    out.append({
-                        "element_webid": ew,
-                        "attribute_webid": aw,
-                        "name": a.get("Name", ""),
-                        "description": a.get("Description", ""),
-                        "path": a.get("Path", ""),
-                        "type": a.get("Type", ""),
-                        "default_units_name": a.get("DefaultUnitsName", ""),
-                        "data_reference_plugin": a.get("DataReferencePlugIn", ""),
-                        "is_configuration_item": _as_bool(a.get("IsConfigurationItem"), default=False),
-                        "ingestion_timestamp": ingest_ts,
-                    })
-            return out
-
         def _read_eventframe_attributes(self, table_options: Dict[str, str]) -> List[dict]:
+            """Read event frame attributes."""
             ef_csv = table_options.get("event_frame_webids", "")
             ef_webids = [e.strip() for e in str(ef_csv).split(",") if e.strip()]
             if not ef_webids:
-                # sample event frames
-                records, _ = self._read_event_frames({}, {"lookback_days": table_options.get("lookback_days", 30)})
+                records, _ = self._read_event_frames(
+                    {}, {"lookback_days": table_options.get("lookback_days", 30)}
+                )
                 tmp = []
                 for i, r in enumerate(records):
                     tmp.append(r)
@@ -2965,39 +3584,309 @@ def register_lakeflow_source(spark):
             page_size = int(table_options.get("maxCount", 1000))
             start_index = int(table_options.get("startIndex", 0))
 
-            ingest_ts = _utcnow()
+            ingest_ts = utcnow()
             out: List[dict] = []
             for efw in ef_webids:
                 params: Dict[str, str] = {"maxCount": str(page_size), "startIndex": str(start_index)}
                 if name_filter:
                     params["nameFilter"] = str(name_filter)
-                data = self._get_json(f"/piwebapi/eventframes/{efw}/attributes", params=params)
+                data = self._client.get_json(f"/piwebapi/eventframes/{efw}/attributes", params=params)
                 for a in data.get("Items", []) or []:
                     aw = a.get("WebId")
                     if not aw:
                         continue
-                    out.append({
-                        "event_frame_webid": efw,
-                        "attribute_webid": aw,
-                        "name": a.get("Name", ""),
-                        "description": a.get("Description", ""),
-                        "path": a.get("Path", ""),
-                        "type": a.get("Type", ""),
-                        "default_units_name": a.get("DefaultUnitsName", ""),
-                        "data_reference_plugin": a.get("DataReferencePlugIn", ""),
-                        "is_configuration_item": _as_bool(a.get("IsConfigurationItem"), default=False),
-                        "ingestion_timestamp": ingest_ts,
-                    })
+                    out.append(
+                        {
+                            "event_frame_webid": efw,
+                            "attribute_webid": aw,
+                            "name": a.get("Name", ""),
+                            "description": a.get("Description", ""),
+                            "path": a.get("Path", ""),
+                            "type": a.get("Type", ""),
+                            "default_units_name": a.get("DefaultUnitsName", ""),
+                            "data_reference_plugin": a.get("DataReferencePlugIn", ""),
+                            "is_configuration_item": as_bool(
+                                a.get("IsConfigurationItem"), default=False
+                            ),
+                            "ingestion_timestamp": ingest_ts,
+                        }
+                    )
+            return out
+
+        def _read_eventframe_templates_table(self, table_options: Dict[str, str]) -> List[dict]:
+            """Read event frame templates."""
+            out: List[dict] = []
+            db_wid_opt = (table_options.get("assetdatabase_webid") or "").strip()
+            if db_wid_opt:
+                db_wids = [db_wid_opt]
+            else:
+                db_wids = [d.get("webid") for d in self._read_assetdatabases_table() if d.get("webid")]
+
+            for db_wid in db_wids:
+                try:
+                    data = self._client.get_json(
+                        f"/piwebapi/assetdatabases/{db_wid}/eventframetemplates"
+                    )
+                except requests.exceptions.HTTPError as e:
+                    if getattr(e.response, "status_code", None) == 404:
+                        continue
+                    raise
+                for it in data.get("Items") or []:
+                    wid = it.get("WebId")
+                    if not wid:
+                        continue
+                    out.append(
+                        {
+                            "webid": wid,
+                            "name": it.get("Name", ""),
+                            "description": it.get("Description", ""),
+                            "path": it.get("Path", ""),
+                            "assetdatabase_webid": db_wid,
+                        }
+                    )
+            return out
+
+        def _read_eventframe_template_attributes_table(
+            self, table_options: Dict[str, str]
+        ) -> List[dict]:
+            """Read event frame template attributes."""
+            out: List[dict] = []
+            db_wid_opt = (table_options.get("assetdatabase_webid") or "").strip()
+            tpl_wid_opt = (table_options.get("eventframe_template_webid") or "").strip()
+
+            template_pairs: List[Tuple[str, str]] = []
+            if tpl_wid_opt:
+                template_pairs = [(tpl_wid_opt, db_wid_opt)]
+            else:
+                templates = self._read_eventframe_templates_table(
+                    {"assetdatabase_webid": db_wid_opt} if db_wid_opt else {}
+                )
+                for t in templates:
+                    tw = t.get("webid")
+                    if not tw:
+                        continue
+                    template_pairs.append((tw, t.get("assetdatabase_webid") or db_wid_opt))
+
+            for tpl_wid, db_wid in template_pairs:
+                try:
+                    data = self._client.get_json(
+                        f"/piwebapi/eventframetemplates/{tpl_wid}/attributetemplates"
+                    )
+                except requests.exceptions.HTTPError as e:
+                    if getattr(e.response, "status_code", None) == 404:
+                        continue
+                    raise
+                for it in data.get("Items") or []:
+                    wid = it.get("WebId")
+                    if not wid:
+                        continue
+                    out.append(
+                        {
+                            "webid": wid,
+                            "name": it.get("Name", ""),
+                            "description": it.get("Description", ""),
+                            "path": it.get("Path", ""),
+                            "type": it.get("Type", "") or it.get("AttributeType", ""),
+                            "eventframe_template_webid": tpl_wid,
+                            "assetdatabase_webid": db_wid or "",
+                        }
+                    )
+            return out
+
+        def _read_eventframe_referenced_elements(
+            self, start_offset: dict, table_options: Dict[str, str]
+        ) -> Tuple[Iterator[dict], dict]:
+            """Read event frame referenced elements."""
+            it, next_offset = self._read_event_frames(start_offset, table_options)
+            ingest_ts = utcnow()
+
+            def iterator() -> Iterator[dict]:
+                for ef in it:
+                    ef_wid = ef.get("event_frame_webid")
+                    if not ef_wid:
+                        continue
+                    st = ef.get("start_time")
+                    et = ef.get("end_time")
+                    primary = ef.get("primary_referenced_element_webid")
+                    if primary:
+                        yield {
+                            "event_frame_webid": ef_wid,
+                            "element_webid": primary,
+                            "relationship_type": "primary",
+                            "start_time": st,
+                            "end_time": et,
+                            "ingestion_timestamp": ingest_ts,
+                        }
+
+                    try:
+                        data = self._client.get_json(
+                            f"/piwebapi/eventframes/{ef_wid}/referencedelements"
+                        )
+                    except requests.exceptions.HTTPError as e:
+                        if getattr(e.response, "status_code", None) == 404:
+                            continue
+                        raise
+                    for el in data.get("Items") or []:
+                        ew = el.get("WebId")
+                        if not ew or ew == primary:
+                            continue
+                        yield {
+                            "event_frame_webid": ef_wid,
+                            "element_webid": ew,
+                            "relationship_type": "referenced",
+                            "start_time": st,
+                            "end_time": et,
+                            "ingestion_timestamp": ingest_ts,
+                        }
+
+            return iterator(), next_offset
+
+        def _read_eventframe_acknowledgements_table(self, table_options: Dict[str, str]) -> List[dict]:
+            """Read event frame acknowledgements."""
+            ingest_ts = utcnow()
+            out: List[dict] = []
+
+            try:
+                it, _ = self._read_event_frames({}, table_options)
+            except Exception:
+                return []
+
+            max_elems = int(table_options.get("default_event_frames", 25) or 25)
+            for i, ef in enumerate(it):
+                if i >= max_elems:
+                    break
+                ef_wid = ef.get("event_frame_webid")
+                if not ef_wid:
+                    continue
+                try:
+                    data = self._client.get_json(f"/piwebapi/eventframes/{ef_wid}/acknowledgements")
+                except requests.exceptions.HTTPError as e:
+                    if getattr(e.response, "status_code", None) == 404:
+                        continue
+                    continue
+                for item in data.get("Items") or []:
+                    ack_id = item.get("Id") or item.get("WebId") or item.get("AckId")
+                    if not ack_id:
+                        continue
+                    ts = item.get("Timestamp")
+                    out.append(
+                        {
+                            "event_frame_webid": ef_wid,
+                            "ack_id": str(ack_id),
+                            "ack_timestamp": parse_ts(ts) if ts else None,
+                            "ack_user": item.get("User") or item.get("AcknowledgedBy") or "",
+                            "comment": item.get("Comment") or "",
+                            "ingestion_timestamp": ingest_ts,
+                        }
+                    )
+            return out
+
+        def _read_eventframe_annotations_table(self, table_options: Dict[str, str]) -> List[dict]:
+            """Read event frame annotations."""
+            ingest_ts = utcnow()
+            out: List[dict] = []
+
+            try:
+                it, _ = self._read_event_frames({}, table_options)
+            except Exception:
+                return []
+
+            max_elems = int(table_options.get("default_event_frames", 25) or 25)
+            for i, ef in enumerate(it):
+                if i >= max_elems:
+                    break
+                ef_wid = ef.get("event_frame_webid")
+                if not ef_wid:
+                    continue
+                try:
+                    data = self._client.get_json(f"/piwebapi/eventframes/{ef_wid}/annotations")
+                except requests.exceptions.HTTPError as e:
+                    if getattr(e.response, "status_code", None) == 404:
+                        continue
+                    continue
+                for item in data.get("Items") or []:
+                    ann_id = item.get("Id") or item.get("WebId") or item.get("AnnotationId")
+                    if not ann_id:
+                        continue
+                    ts = item.get("Timestamp")
+                    out.append(
+                        {
+                            "event_frame_webid": ef_wid,
+                            "annotation_id": str(ann_id),
+                            "annotation_timestamp": parse_ts(ts) if ts else None,
+                            "annotation_user": item.get("User") or item.get("CreatedBy") or "",
+                            "text": item.get("Text") or item.get("Message") or "",
+                            "ingestion_timestamp": ingest_ts,
+                        }
+                    )
+            return out
+
+        # =========================================================================
+        # Governance & Diagnostics readers
+        # =========================================================================
+
+        def _read_links(self, table_options: Dict[str, str]) -> List[dict]:
+            """Materialize Links fields by sampling key resources."""
+            out: List[dict] = []
+
+            def add(entity_type: str, webid: str, links: Any):
+                if not webid or not isinstance(links, dict):
+                    return
+                for rel, href in links.items():
+                    if href is None:
+                        continue
+                    out.append(
+                        {"entity_type": entity_type, "webid": webid, "rel": str(rel), "href": str(href)}
+                    )
+
+            # Dataservers
+            try:
+                data = self._client.get_json("/piwebapi/dataservers")
+                for it in data.get("Items") or []:
+                    wid = it.get("WebId")
+                    add("dataserver", wid, it.get("Links"))
+            except Exception:
+                pass
+
+            # AssetServers
+            try:
+                data = self._client.get_json("/piwebapi/assetservers")
+                for it in data.get("Items") or []:
+                    wid = it.get("WebId")
+                    add("assetserver", wid, it.get("Links"))
+            except Exception:
+                pass
+
+            # AF Tables
+            try:
+                for t in self._read_af_tables_table(table_options):
+                    wid = t.get("webid")
+                    if wid:
+                        out.append(
+                            {
+                                "entity_type": "aftable",
+                                "webid": wid,
+                                "rel": "rows",
+                                "href": f"/piwebapi/tables/{wid}/rows",
+                            }
+                        )
+            except Exception:
+                pass
+
             return out
 
 
     ########################################################
-    # pipeline/lakeflow_python_source.py
+    # src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py
     ########################################################
 
+    LakeflowConnectImpl = OsipiLakeflowConnect
+    # Constant option or column names
     METADATA_TABLE = "_lakeflow_metadata"
     TABLE_NAME = "tableName"
     TABLE_NAME_LIST = "tableNameList"
+    TABLE_CONFIGS = "tableConfigs"
+    IS_DELETE_FLOW = "isDeleteFlow"
 
 
     class LakeflowStreamReader(SimpleDataSourceStreamReader):
@@ -3022,9 +3911,20 @@ def register_lakeflow_source(spark):
             return {}
 
         def read(self, start: dict) -> (Iterator[tuple], dict):
-            records, offset = self.lakeflow_connect.read_table(
-                self.options["tableName"], start, self.options
-            )
+            is_delete_flow = self.options.get(IS_DELETE_FLOW) == "true"
+            # Strip delete flow options before passing to connector
+            table_options = {
+                k: v for k, v in self.options.items() if k != IS_DELETE_FLOW
+            }
+
+            if is_delete_flow:
+                records, offset = self.lakeflow_connect.read_table_deletes(
+                    self.options[TABLE_NAME], start, table_options
+                )
+            else:
+                records, offset = self.lakeflow_connect.read_table(
+                    self.options[TABLE_NAME], start, table_options
+                )
             rows = map(lambda x: parse_value(x, self.schema), records)
             return rows, offset
 
@@ -3065,34 +3965,42 @@ def register_lakeflow_source(spark):
             table_name_list = self.options.get(TABLE_NAME_LIST, "")
             table_names = [o.strip() for o in table_name_list.split(",") if o.strip()]
             all_records = []
+            table_configs = json.loads(self.options.get(TABLE_CONFIGS, "{}"))
             for table in table_names:
-                metadata = self.lakeflow_connect.read_table_metadata(table, self.options)
-                all_records.append({"tableName": table, **metadata})
+                metadata = self.lakeflow_connect.read_table_metadata(
+                    table, table_configs.get(table, {})
+                )
+                all_records.append({TABLE_NAME: table, **metadata})
             return all_records
 
 
     class LakeflowSource(DataSource):
+        """
+        PySpark DataSource implementation for Lakeflow Connect.
+        """
+
         def __init__(self, options):
             self.options = options
-            self.lakeflow_connect = LakeflowConnect(options)
+            # TEMPORARY: LakeflowConnectImpl is replaced with the actual implementation
+            # class during merge. See the placeholder comment at the top of this file.
+            self.lakeflow_connect = LakeflowConnectImpl(options)
 
         @classmethod
         def name(cls):
             return "lakeflow_connect"
 
         def schema(self):
-            table = self.options["tableName"]
+            table = self.options[TABLE_NAME]
             if table == METADATA_TABLE:
                 return StructType(
                     [
-                        StructField("tableName", StringType(), False),
+                        StructField(TABLE_NAME, StringType(), False),
                         StructField("primary_keys", ArrayType(StringType()), True),
                         StructField("cursor_field", StringType(), True),
                         StructField("ingestion_type", StringType(), True),
                     ]
                 )
             else:
-                # Assuming the LakeflowConnect interface uses get_table_schema, not get_table_details
                 return self.lakeflow_connect.get_table_schema(table, self.options)
 
         def reader(self, schema: StructType):
