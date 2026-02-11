@@ -1,10 +1,12 @@
 # Databricks notebook source
+# pylint: skip-file
 """
 OSI PI Single-Pipeline Ingestion Sample
 
 This sample demonstrates ingesting key OSI PI tables into a single pipeline.
 For production deployments with many tables, use the load-balanced deployment
-notebook instead (tools/load_balanced_deployment/notebooks/00_load_balanced_deployment_all_in_one.py).
+notebook instead
+tools/load_balanced_deployment/notebooks/00_load_balanced_deployment_all_in_one.py.
 
 Features:
 - Discovery & inventory tables (data servers, points, attributes)
