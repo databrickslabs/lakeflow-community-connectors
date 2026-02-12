@@ -242,6 +242,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+          # Install source-specific dependencies if the source has its own pyproject.toml
+          SOURCE_DIR="src/databricks/labs/community_connector/sources/${{ matrix.source }}"
+          if [ -f "$SOURCE_DIR/pyproject.toml" ]; then
+            pip install -e "$SOURCE_DIR"
+          fi
       - name: Run ${{ matrix.source }} tests
         run: |
           IGNORE_FLAGS=""
