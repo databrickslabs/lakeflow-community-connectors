@@ -73,6 +73,9 @@ Example with table_configuration:
 from databricks.labs.community_connector.pipeline import ingest
 from databricks.labs.community_connector import register
 
+# Enable the injection of connection options from Unity Catalog connections into connectors
+spark.conf.set("spark.databricks.unityCatalog.connectionDfOptionInjection.enabled", "true")
+
 # ==============================================================================
 # CONFIGURATION
 # ==============================================================================
