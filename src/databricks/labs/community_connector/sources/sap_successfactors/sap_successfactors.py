@@ -76,9 +76,9 @@ class SapSuccessFactorsLakeflowConnect(LakeflowConnect):
                     - static: Uses hardcoded table definitions
                     - dynamic: Fetches from OData $metadata API
         """
-        self.endpoint_url = options["endpoint_url"].rstrip("/")
-        self.username = options["username"]
-        self.password = options["password"]
+        endpoint_url = options["endpoint_url"].rstrip("/")
+        username = options["username"]
+        password = options["password"]
         self.metadata_mode = options.get("metadata_mode", "static").lower()
 
         if self.metadata_mode not in ("static", "dynamic"):
@@ -87,10 +87,10 @@ class SapSuccessFactorsLakeflowConnect(LakeflowConnect):
             )
 
         # Build the OData API base URL
-        self.base_url = f"{self.endpoint_url}/odata/v2"
+        self.base_url = f"{endpoint_url}/odata/v2"
 
         # Create Basic Auth header
-        auth_string = f"{self.username}:{self.password}"
+        auth_string = f"{username}:{password}"
         auth_bytes = base64.b64encode(auth_string.encode("utf-8")).decode("utf-8")
 
         self.headers = {

@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 from typing import Dict
 
 from pyspark.sql.types import (

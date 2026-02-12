@@ -69,6 +69,49 @@ EDMX_NS = {
 # ----------------------------------------------------------------
 
 
+def _parse_entity_type(et_elem) -> Dict[str, Any]:
+    """
+    Parse a single ``<EntityType>`` element into a structured dictionary.
+
+    Args:
+        et_elem: An :class:`xml.etree.ElementTree.Element` for the EntityType.
+
+    Returns:
+        Dictionary with ``name``, ``primary_keys``, and ``properties``.
+    """
+    et_name = et_elem.attrib.get("Name", "")
+
+    # Extract primary keys
+    primary_keys: List[str] = []
+    key_elem = et_elem.find("edm:Key", EDMX_NS)
+    if key_elem is not None:
+        for prop_ref in key_elem.findall("edm:PropertyRef", EDMX_NS):
+            pk_name = prop_ref.attrib.get("Name")
+            if pk_name:
+                primary_keys.append(pk_name)
+
+    # Extract properties (skip NavigationProperty)
+    properties: List[Dict[str, Any]] = []
+    for prop_elem in et_elem.findall("edm:Property", EDMX_NS):
+        prop_name = prop_elem.attrib.get("Name", "")
+        prop_type = prop_elem.attrib.get("Type", "Edm.String")
+        nullable_str = prop_elem.attrib.get("Nullable", "true")
+        nullable = nullable_str.lower() != "false"
+        properties.append(
+            {
+                "name": prop_name,
+                "type": prop_type,
+                "nullable": nullable,
+            }
+        )
+
+    return {
+        "name": et_name,
+        "primary_keys": primary_keys,
+        "properties": properties,
+    }
+
+
 def parse_edmx(xml_text: str) -> Dict[str, Any]:
     """
     Parse an EDMX XML document into a structured metadata dictionary.
@@ -120,36 +163,7 @@ def parse_edmx(xml_text: str) -> Dict[str, Any]:
         for et_elem in schema_elem.findall("edm:EntityType", EDMX_NS):
             et_name = et_elem.attrib.get("Name", "")
             fq_name = f"{namespace}.{et_name}" if namespace else et_name
-
-            # Extract primary keys
-            primary_keys: List[str] = []
-            key_elem = et_elem.find("edm:Key", EDMX_NS)
-            if key_elem is not None:
-                for prop_ref in key_elem.findall("edm:PropertyRef", EDMX_NS):
-                    pk_name = prop_ref.attrib.get("Name")
-                    if pk_name:
-                        primary_keys.append(pk_name)
-
-            # Extract properties (skip NavigationProperty)
-            properties: List[Dict[str, Any]] = []
-            for prop_elem in et_elem.findall("edm:Property", EDMX_NS):
-                prop_name = prop_elem.attrib.get("Name", "")
-                prop_type = prop_elem.attrib.get("Type", "Edm.String")
-                nullable_str = prop_elem.attrib.get("Nullable", "true")
-                nullable = nullable_str.lower() != "false"
-                properties.append(
-                    {
-                        "name": prop_name,
-                        "type": prop_type,
-                        "nullable": nullable,
-                    }
-                )
-
-            entity_types[fq_name] = {
-                "name": et_name,
-                "primary_keys": primary_keys,
-                "properties": properties,
-            }
+            entity_types[fq_name] = _parse_entity_type(et_elem)
 
     # Collect EntitySet → EntityType mappings
     entity_sets: Dict[str, Dict[str, Any]] = {}

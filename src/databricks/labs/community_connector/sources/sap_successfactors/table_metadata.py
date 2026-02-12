@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 from typing import Any, Dict
 
 TABLE_CONFIG: Dict[str, Dict[str, Any]] = {
