@@ -1,0 +1,18 @@
+# Test files excluded from auto-triggered CI tests.
+# These tests use LakeflowConnectTester which requires real API credentials
+# and cannot run in CI without proper secrets configured.
+#
+# Remove a test file from this list to enable auto-triggered testing for it.
+# Lines starting with '#' and blank lines are ignored.
+
+tests/unit/sources/example/test_example_lakeflow_connect.py
+tests/unit/sources/github/test_github_lakeflow_connect.py
+tests/unit/sources/hubspot/test_hubspot_lakeflow_connect.py
+tests/unit/sources/mixpanel/test_mixpanel_lakeflow_connect.py
+tests/unit/sources/osipi/test_osipi_lakeflow_connect.py
+tests/unit/sources/qualtrics/test_qualtrics_lakeflow_connect.py
+tests/unit/sources/sap_successfactors/test_sap_successfactors_lakeflow_connect.py
+tests/unit/sources/sap_successfactors/test_group_runner.py
+tests/unit/sources/stripe/test_stripe_lakeflow_connect.py
+tests/unit/sources/zendesk/test_zendesk_lakeflow_connect.py
+tests/unit/sources/zoho_crm/test_zoho_crm_lakeflow_connect.py
