@@ -3,6 +3,9 @@
 from databricks.labs.community_connector.pipeline import ingest
 from databricks.labs.community_connector import register
 
+# Enable the injection of connection options from Unity Catalog connections into connectors
+spark.conf.set("spark.databricks.unityCatalog.connectionDfOptionInjection.enabled", "true")
+
 # Connector source name.
 source_name = "{SOURCE_NAME}"  # e.g., "github", "salesforce"
 
