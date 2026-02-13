@@ -6,6 +6,7 @@
 # Connection Parameters
 # These are provided when creating the Unity Catalog connection.
 # ============================================================================
+display_name: SAP SuccessFactors
 connection:
   parameters:
     - name: endpoint_url
@@ -32,6 +33,7 @@ connection:
     - name: password
       type: string
       required: true
+      secret: true
       description: >
         Password for the user account. The user must have OData API access
         permissions enabled in SAP SuccessFactors Role-Based Permissions.

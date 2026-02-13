@@ -6,6 +6,7 @@
 # Connection Parameters
 # These are provided when creating the Unity Catalog connection.
 # ============================================================================
+display_name: Zendesk
 connection:
   parameters:
     - name: subdomain
@@ -27,6 +28,7 @@ connection:
     - name: api_token
       type: string
       required: true
+      secret: true
       description: >
         Zendesk API token for authentication. Generate this from
         Admin Center → Apps and integrations → APIs → Zendesk API.

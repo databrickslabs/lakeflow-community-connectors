@@ -10,6 +10,7 @@
 # 1. Service Account (username + secret) - Recommended for organizations
 # 2. API Secret - Simpler setup for individual projects
 # ============================================================================
+display_name: Mixpanel
 connection:
   # ---------------------------------------------------------------------------
   # Authentication Methods
@@ -32,6 +33,7 @@ connection:
         - name: secret
           type: string
           required: true
+          secret: true
           description: >
             Mixpanel service account secret. Generated when creating the
             service account.
@@ -44,6 +46,7 @@ connection:
         - name: api_secret
           type: string
           required: true
+          secret: true
           description: >
             Mixpanel project API secret. Found in Project Settings under
             the API Secret section.

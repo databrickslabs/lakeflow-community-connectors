@@ -10,6 +10,7 @@
 # authentication method is supported using client credentials and a
 # refresh token obtained through the OAuth flow.
 # ============================================================================
+display_name: Zoho CRM
 connection:
   # ---------------------------------------------------------------------------
   # Single Authentication Method: OAuth2 with Refresh Token
@@ -25,6 +26,7 @@ connection:
     - name: client_secret
       type: string
       required: true
+      secret: true
       description: >
         OAuth Client Secret from Zoho API Console. This is the secret
         associated with your Client ID.
@@ -32,6 +34,7 @@ connection:
     - name: refresh_token
       type: string
       required: true
+      secret: true
       description: >
         OAuth Refresh Token obtained from the authorization flow. This is a
         long-lived token that never expires and is used to obtain access tokens.
