@@ -6,6 +6,7 @@
 # Connection Parameters
 # These are provided when creating the Unity Catalog connection.
 # ============================================================================
+display_name: Example
 connection:
   parameters:
     # The example connector does not require any specific connection parameters.

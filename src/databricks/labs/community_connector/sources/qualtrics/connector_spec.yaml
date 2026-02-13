@@ -6,11 +6,13 @@
 # Connection Parameters
 # These are provided when creating the Unity Catalog connection.
 # ============================================================================
+display_name: Qualtrics
 connection:
   parameters:
     - name: api_token
       type: string
       required: true
+      secret: true
       description: >
         Qualtrics API token for authentication. Generate from
         Account Settings > Qualtrics IDs > API section.

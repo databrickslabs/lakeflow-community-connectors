@@ -11,6 +11,7 @@
 # 2. OIDC Client Credentials - OAuth 2.0 client credentials flow via Databricks
 # 3. Basic Auth - Username/password authentication (when enabled on PI Web API)
 # ============================================================================
+display_name: OSI PI
 connection:
   # ---------------------------------------------------------------------------
   # Authentication Methods
@@ -24,6 +25,7 @@ connection:
         - name: access_token
           type: string
           required: true
+          secret: true
           description: >
             Bearer token for PI Web API authentication. Can be obtained from
             your identity provider or PI Web API token endpoint.
@@ -49,6 +51,7 @@ connection:
         - name: client_secret
           type: string
           required: true
+          secret: true
           description: >
             OIDC client secret for the service principal or application.
 
@@ -66,6 +69,7 @@ connection:
         - name: password
           type: string
           required: true
+          secret: true
           description: >
             Password for basic authentication to PI Web API.
 

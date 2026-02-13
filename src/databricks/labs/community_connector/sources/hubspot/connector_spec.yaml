@@ -6,11 +6,13 @@
 # Connection Parameters
 # These are provided when creating the Unity Catalog connection.
 # ============================================================================
+display_name: HubSpot
 connection:
   parameters:
     - name: access_token
       type: string
       required: true
+      secret: true
       description: >
         HubSpot Private App access token used for API authentication.
         Must have appropriate read permissions for the objects you want to sync.

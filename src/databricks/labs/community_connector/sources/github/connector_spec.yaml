@@ -6,11 +6,13 @@
 # Connection Parameters
 # These are provided when creating the Unity Catalog connection.
 # ============================================================================
+display_name: GitHub
 connection:
   parameters:
     - name: token
       type: string
       required: true
+      secret: true
       description: >
         Personal access token used for GitHub REST API authentication.
         Must have appropriate scopes (public_repo or repo).
