@@ -3,20 +3,20 @@ import json
 from pathlib import Path
 
 # Import test suite and connector
-import tests.test_suite as test_suite
-from tests.test_suite import LakeflowConnectTester
-from tests.test_utils import load_config
-from sources.surveymonkey.surveymonkey import LakeflowConnect
+import tests.unit.sources.test_suite as test_suite
+from tests.unit.sources.test_suite import LakeflowConnectTester
+from tests.unit.sources.test_utils import load_config
+from databricks.labs.community_connector.sources.surveymonkey.surveymonkey import SurveymonkeyLakeflowConnect
 
 
 def test_surveymonkey_connector():
     """Test the SurveyMonkey connector using the test suite"""
     # Inject the LakeflowConnect class into test_suite module's namespace
     # This is required because test_suite.py expects LakeflowConnect to be available
-    test_suite.LakeflowConnect = LakeflowConnect
+    test_suite.LakeflowConnect = SurveymonkeyLakeflowConnect
 
     # Load configuration
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent
     config_path = parent_dir / "configs" / "dev_config.json"
     
     config = load_config(config_path)
@@ -45,12 +45,12 @@ def test_surveymonkey_connector():
 
 def test_surveymonkey_connection():
     """Test basic SurveyMonkey API connection"""
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent
     config_path = parent_dir / "configs" / "dev_config.json"
     
     config = load_config(config_path)
     
-    connector = LakeflowConnect(config)
+    connector = SurveymonkeyLakeflowConnect(config)
     result = connector.test_connection()
     
     print(f"\nConnection test result: {result}")
@@ -60,12 +60,12 @@ def test_surveymonkey_connection():
 
 def test_list_tables():
     """Test that list_tables returns expected tables"""
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent
     config_path = parent_dir / "configs" / "dev_config.json"
     
     config = load_config(config_path)
     
-    connector = LakeflowConnect(config)
+    connector = SurveymonkeyLakeflowConnect(config)
     tables = connector.list_tables()
     
     # Updated expected tables to include all new tables
@@ -97,12 +97,12 @@ def test_list_tables():
 
 def test_read_surveys():
     """Test reading surveys table"""
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent
     config_path = parent_dir / "configs" / "dev_config.json"
     
     config = load_config(config_path)
     
-    connector = LakeflowConnect(config)
+    connector = SurveymonkeyLakeflowConnect(config)
     
     # Get schema
     schema = connector.get_table_schema("surveys", {})
@@ -126,12 +126,12 @@ def test_read_surveys():
 
 def test_read_users():
     """Test reading users (current user) table"""
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent
     config_path = parent_dir / "configs" / "dev_config.json"
     
     config = load_config(config_path)
     
-    connector = LakeflowConnect(config)
+    connector = SurveymonkeyLakeflowConnect(config)
     
     # Get schema
     schema = connector.get_table_schema("users", {})
@@ -150,12 +150,12 @@ def test_read_users():
 
 def test_read_survey_responses_for_survey():
     """Test reading survey responses for a specific survey"""
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent
     config_path = parent_dir / "configs" / "dev_config.json"
     
     config = load_config(config_path)
     
-    connector = LakeflowConnect(config)
+    connector = SurveymonkeyLakeflowConnect(config)
     
     # First get a survey to use
     surveys_iter, _ = connector.read_table("surveys", {}, {})
@@ -184,12 +184,12 @@ def test_read_survey_responses_for_survey():
 
 def test_read_groups():
     """Test reading groups table"""
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent
     config_path = parent_dir / "configs" / "dev_config.json"
     
     config = load_config(config_path)
     
-    connector = LakeflowConnect(config)
+    connector = SurveymonkeyLakeflowConnect(config)
     
     # Get schema
     schema = connector.get_table_schema("groups", {})
@@ -216,12 +216,12 @@ def test_read_groups():
 
 def test_read_survey_folders():
     """Test reading survey_folders table"""
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent
     config_path = parent_dir / "configs" / "dev_config.json"
     
     config = load_config(config_path)
     
-    connector = LakeflowConnect(config)
+    connector = SurveymonkeyLakeflowConnect(config)
     
     # Get schema
     schema = connector.get_table_schema("survey_folders", {})
@@ -244,12 +244,12 @@ def test_read_survey_folders():
 
 def test_read_survey_categories():
     """Test reading survey_categories table"""
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent
     config_path = parent_dir / "configs" / "dev_config.json"
     
     config = load_config(config_path)
     
-    connector = LakeflowConnect(config)
+    connector = SurveymonkeyLakeflowConnect(config)
     
     # Get schema
     schema = connector.get_table_schema("survey_categories", {})
@@ -273,12 +273,12 @@ def test_read_survey_categories():
 
 def test_read_survey_languages():
     """Test reading survey_languages table"""
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent
     config_path = parent_dir / "configs" / "dev_config.json"
     
     config = load_config(config_path)
     
-    connector = LakeflowConnect(config)
+    connector = SurveymonkeyLakeflowConnect(config)
     
     # Get schema
     schema = connector.get_table_schema("survey_languages", {})
@@ -302,12 +302,12 @@ def test_read_survey_languages():
 
 def test_read_survey_templates():
     """Test reading survey_templates table"""
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent
     config_path = parent_dir / "configs" / "dev_config.json"
     
     config = load_config(config_path)
     
-    connector = LakeflowConnect(config)
+    connector = SurveymonkeyLakeflowConnect(config)
     
     # Get schema
     schema = connector.get_table_schema("survey_templates", {})
@@ -330,12 +330,12 @@ def test_read_survey_templates():
 
 def test_read_webhooks():
     """Test reading webhooks table"""
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent
     config_path = parent_dir / "configs" / "dev_config.json"
     
     config = load_config(config_path)
     
-    connector = LakeflowConnect(config)
+    connector = SurveymonkeyLakeflowConnect(config)
     
     # Get schema
     schema = connector.get_table_schema("webhooks", {})
@@ -358,12 +358,12 @@ def test_read_webhooks():
 
 def test_read_workgroups():
     """Test reading workgroups table"""
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent
     config_path = parent_dir / "configs" / "dev_config.json"
     
     config = load_config(config_path)
     
-    connector = LakeflowConnect(config)
+    connector = SurveymonkeyLakeflowConnect(config)
     
     # Get schema
     schema = connector.get_table_schema("workgroups", {})
@@ -386,14 +386,14 @@ def test_read_workgroups():
 
 def test_read_survey_rollups():
     """Test reading survey_rollups table for a specific survey"""
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent
     config_path = parent_dir / "configs" / "dev_config.json"
     table_config_path = parent_dir / "configs" / "dev_table_config.json"
     
     config = load_config(config_path)
     table_config = load_config(table_config_path) if table_config_path.exists() else {}
     
-    connector = LakeflowConnect(config)
+    connector = SurveymonkeyLakeflowConnect(config)
     
     # Get schema
     schema = connector.get_table_schema("survey_rollups", {})
@@ -425,12 +425,12 @@ def test_read_survey_rollups():
 
 def test_read_benchmark_bundles():
     """Test reading benchmark_bundles table"""
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent
     config_path = parent_dir / "configs" / "dev_config.json"
     
     config = load_config(config_path)
     
-    connector = LakeflowConnect(config)
+    connector = SurveymonkeyLakeflowConnect(config)
     
     # Get schema
     schema = connector.get_table_schema("benchmark_bundles", {})
@@ -453,12 +453,12 @@ def test_read_benchmark_bundles():
 
 def test_read_contact_lists():
     """Test reading contact_lists table"""
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent
     config_path = parent_dir / "configs" / "dev_config.json"
     
     config = load_config(config_path)
     
-    connector = LakeflowConnect(config)
+    connector = SurveymonkeyLakeflowConnect(config)
     
     # Get schema
     schema = connector.get_table_schema("contact_lists", {})
@@ -481,12 +481,12 @@ def test_read_contact_lists():
 
 def test_read_contacts():
     """Test reading contacts table"""
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent
     config_path = parent_dir / "configs" / "dev_config.json"
     
     config = load_config(config_path)
     
-    connector = LakeflowConnect(config)
+    connector = SurveymonkeyLakeflowConnect(config)
     
     # Get schema
     schema = connector.get_table_schema("contacts", {})
@@ -509,14 +509,14 @@ def test_read_contacts():
 
 def test_read_collectors():
     """Test reading collectors table for a specific survey"""
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent
     config_path = parent_dir / "configs" / "dev_config.json"
     table_config_path = parent_dir / "configs" / "dev_table_config.json"
     
     config = load_config(config_path)
     table_config = load_config(table_config_path) if table_config_path.exists() else {}
     
-    connector = LakeflowConnect(config)
+    connector = SurveymonkeyLakeflowConnect(config)
     
     # Get schema
     schema = connector.get_table_schema("collectors", {})
@@ -544,14 +544,14 @@ def test_read_collectors():
 
 def test_read_survey_pages():
     """Test reading survey_pages table for a specific survey"""
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent
     config_path = parent_dir / "configs" / "dev_config.json"
     table_config_path = parent_dir / "configs" / "dev_table_config.json"
     
     config = load_config(config_path)
     table_config = load_config(table_config_path) if table_config_path.exists() else {}
     
-    connector = LakeflowConnect(config)
+    connector = SurveymonkeyLakeflowConnect(config)
     
     # Get schema
     schema = connector.get_table_schema("survey_pages", {})
@@ -579,14 +579,14 @@ def test_read_survey_pages():
 
 def test_read_survey_questions():
     """Test reading survey_questions table for a specific survey"""
-    parent_dir = Path(__file__).parent.parent
+    parent_dir = Path(__file__).parent
     config_path = parent_dir / "configs" / "dev_config.json"
     table_config_path = parent_dir / "configs" / "dev_table_config.json"
     
     config = load_config(config_path)
     table_config = load_config(table_config_path) if table_config_path.exists() else {}
     
-    connector = LakeflowConnect(config)
+    connector = SurveymonkeyLakeflowConnect(config)
     
     # Get schema
     schema = connector.get_table_schema("survey_questions", {})

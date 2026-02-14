@@ -12,8 +12,10 @@ from pyspark.sql.types import (
 )
 from typing import Dict, List, Tuple, Iterator
 
+from databricks.labs.community_connector.interface.lakeflow_connect import LakeflowConnect
 
-class LakeflowConnect:
+
+class SurveymonkeyLakeflowConnect(LakeflowConnect):
     def __init__(self, options: dict) -> None:
         """
         Initialize the SurveyMonkey connector with API credentials.
