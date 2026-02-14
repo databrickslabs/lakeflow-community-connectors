@@ -116,7 +116,7 @@ class TestGmailConnectorUnit:
         
         for table_name in cdc_tables:
             metadata = connector.read_table_metadata(table_name, {})
-            assert metadata["ingestion_type"] == "cdc", f"{table_name} should be cdc"
+            assert metadata["ingestion_type"] == "cdc_with_deletes", f"{table_name} should be cdc_with_deletes"
             assert "cursor_field" in metadata, f"{table_name} missing cursor_field"
 
     def test_unit_snapshot_tables_no_cursor_field(self, connector):

@@ -298,12 +298,12 @@ TABLE_METADATA = {
     "messages": {
         "primary_keys": ["id"],
         "cursor_field": "historyId",
-        "ingestion_type": "cdc",
+        "ingestion_type": "cdc_with_deletes",
     },
     "threads": {
         "primary_keys": ["id"],
         "cursor_field": "historyId",
-        "ingestion_type": "cdc",
+        "ingestion_type": "cdc_with_deletes",
     },
     "labels": {
         "primary_keys": ["id"],
