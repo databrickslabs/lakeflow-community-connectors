@@ -1,18 +1,14 @@
 import requests
 import time
-from pyspark.sql.types import (
-    StructType,
-    StructField,
-    StringType,
-    LongType,
-    BooleanType,
-    ArrayType,
-    MapType,
-    DoubleType,
-)
+from pyspark.sql.types import StructType
 from typing import Dict, List, Tuple, Iterator
 
 from databricks.labs.community_connector.interface.lakeflow_connect import LakeflowConnect
+from databricks.labs.community_connector.sources.surveymonkey.surveymonkey_schemas import (
+    TABLE_SCHEMAS,
+    OBJECT_CONFIG,
+    SUPPORTED_TABLES,
+)
 
 
 class SurveymonkeyLakeflowConnect(LakeflowConnect):
@@ -33,658 +29,25 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
             "Content-Type": "application/json",
         }
 
-        # Centralized object metadata configuration
-        self._object_config = {
-            "surveys": {
-                "primary_keys": ["id"],
-                "cursor_field": "date_modified",
-                "ingestion_type": "cdc",
-                "endpoint": "/surveys",
-                "per_page": 1000,
-            },
-            "survey_responses": {
-                "primary_keys": ["id"],
-                "cursor_field": "date_modified",
-                "ingestion_type": "cdc",
-                "endpoint": "/surveys/{survey_id}/responses/bulk",
-                "per_page": 100,  # Max 100 for responses
-                "requires_survey_id": True,
-            },
-            "survey_pages": {
-                "primary_keys": ["id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot",
-                "endpoint": "/surveys/{survey_id}/pages",
-                "per_page": 1000,
-                "requires_survey_id": True,
-            },
-            "survey_questions": {
-                "primary_keys": ["id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot",
-                "endpoint": "/surveys/{survey_id}/pages/{page_id}/questions",
-                "per_page": 1000,
-                "requires_survey_id": True,
-                "requires_page_id": True,
-            },
-            "collectors": {
-                "primary_keys": ["id"],
-                "cursor_field": "date_modified",
-                "ingestion_type": "cdc",
-                "endpoint": "/surveys/{survey_id}/collectors",
-                "per_page": 1000,
-                "requires_survey_id": True,
-            },
-            "contact_lists": {
-                "primary_keys": ["id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot",
-                "endpoint": "/contact_lists",
-                "per_page": 1000,
-            },
-            "contacts": {
-                "primary_keys": ["id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot",
-                "endpoint": "/contacts",
-                "per_page": 1000,
-            },
-            "users": {
-                "primary_keys": ["id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot",
-                "endpoint": "/users/me",
-                "per_page": 1,  # Single user endpoint
-            },
-            "groups": {
-                "primary_keys": ["id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot",
-                "endpoint": "/groups",
-                "per_page": 1000,
-            },
-            "group_members": {
-                "primary_keys": ["id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot",
-                "endpoint": "/groups/{group_id}/members",
-                "per_page": 1000,
-                "requires_group_id": True,
-            },
-            "workgroups": {
-                "primary_keys": ["id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot",
-                "endpoint": "/workgroups",
-                "per_page": 1000,
-            },
-            "survey_folders": {
-                "primary_keys": ["id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot",
-                "endpoint": "/survey_folders",
-                "per_page": 1000,
-            },
-            "survey_categories": {
-                "primary_keys": ["id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot",
-                "endpoint": "/survey_categories",
-                "per_page": 1000,
-            },
-            "survey_templates": {
-                "primary_keys": ["id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot",
-                "endpoint": "/survey_templates",
-                "per_page": 1000,
-            },
-            "survey_languages": {
-                "primary_keys": ["id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot",
-                "endpoint": "/survey_languages",
-                "per_page": 1000,
-            },
-            "webhooks": {
-                "primary_keys": ["id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot",
-                "endpoint": "/webhooks",
-                "per_page": 1000,
-            },
-            "survey_rollups": {
-                "primary_keys": ["id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot",
-                "endpoint": "/surveys/{survey_id}/rollups",
-                "per_page": 100,
-                "requires_survey_id": True,
-            },
-            "benchmark_bundles": {
-                "primary_keys": ["id"],
-                "cursor_field": None,
-                "ingestion_type": "snapshot",
-                "endpoint": "/benchmark_bundles",
-                "per_page": 1000,
-            },
-        }
-
-        # Nested schema for buttons_text in surveys
-        self._buttons_text_schema = StructType(
-            [
-                StructField("next_button", StringType(), True),
-                StructField("prev_button", StringType(), True),
-                StructField("done_button", StringType(), True),
-                StructField("exit_button", StringType(), True),
-            ]
-        )
-
-        # Nested schema for contact in metadata
-        self._contact_schema = StructType(
-            [
-                StructField("first_name", StringType(), True),
-                StructField("last_name", StringType(), True),
-                StructField("email", StringType(), True),
-            ]
-        )
-
-        # Nested schema for response metadata
-        self._metadata_schema = StructType(
-            [
-                StructField("contact", self._contact_schema, True),
-            ]
-        )
-
-        # Nested schema for choice_metadata in answers
-        self._choice_metadata_schema = StructType(
-            [
-                StructField("weight", LongType(), True),
-            ]
-        )
-
-        # Nested schema for answer in responses
-        self._answer_schema = StructType(
-            [
-                StructField("choice_id", StringType(), True),
-                StructField("choice_metadata", self._choice_metadata_schema, True),
-                StructField("row_id", StringType(), True),
-                StructField("col_id", StringType(), True),
-                StructField("other_id", StringType(), True),
-                StructField("text", StringType(), True),
-                StructField("download_url", StringType(), True),
-                StructField("content_type", StringType(), True),
-                StructField("tag_data", ArrayType(StringType()), True),
-            ]
-        )
-
-        # Nested schema for question in response pages
-        self._response_question_schema = StructType(
-            [
-                StructField("id", StringType(), True),
-                StructField("variable_id", StringType(), True),
-                StructField("answers", ArrayType(self._answer_schema), True),
-            ]
-        )
-
-        # Nested schema for page in responses
-        self._response_page_schema = StructType(
-            [
-                StructField("id", StringType(), True),
-                StructField("questions", ArrayType(self._response_question_schema), True),
-            ]
-        )
-
-        # Nested schema for logic_path (simplified)
-        self._logic_path_schema = StructType(
-            [
-                StructField("path", ArrayType(StringType()), True),
-            ]
-        )
-
-        # Nested schema for choices in questions
-        self._choice_schema = StructType(
-            [
-                StructField("id", StringType(), True),
-                StructField("position", LongType(), True),
-                StructField("text", StringType(), True),
-                StructField("visible", BooleanType(), True),
-                StructField("is_na", BooleanType(), True),
-                StructField("weight", LongType(), True),
-            ]
-        )
-
-        # Nested schema for other option in questions
-        self._other_schema = StructType(
-            [
-                StructField("id", StringType(), True),
-                StructField("text", StringType(), True),
-                StructField("visible", BooleanType(), True),
-                StructField("is_answer_choice", BooleanType(), True),
-                StructField("position", LongType(), True),
-            ]
-        )
-
-        # Nested schema for question answers (available options)
-        self._question_answers_schema = StructType(
-            [
-                StructField("choices", ArrayType(self._choice_schema), True),
-                StructField("rows", ArrayType(self._choice_schema), True),
-                StructField("cols", ArrayType(self._choice_schema), True),
-                StructField("other", self._other_schema, True),
-            ]
-        )
-
-        # Nested schema for required field in questions
-        self._required_schema = StructType(
-            [
-                StructField("text", StringType(), True),
-                StructField("type", StringType(), True),
-                StructField("amount", StringType(), True),
-            ]
-        )
-
-        # Nested schema for sorting in questions
-        self._sorting_schema = StructType(
-            [
-                StructField("type", StringType(), True),
-                StructField("ignore_last", BooleanType(), True),
-            ]
-        )
-
-        # Nested schema for validation in questions
-        self._validation_schema = StructType(
-            [
-                StructField("type", StringType(), True),
-                StructField("text", StringType(), True),
-                StructField("min", StringType(), True),
-                StructField("max", StringType(), True),
-                StructField("sum", LongType(), True),
-                StructField("sum_text", StringType(), True),
-            ]
-        )
-
-        # Nested schema for thank_you_page in collectors
-        self._thank_you_page_schema = StructType(
-            [
-                StructField("is_enabled", BooleanType(), True),
-                StructField("message", StringType(), True),
-            ]
-        )
-
-        # Nested schema for workgroup metadata
-        self._workgroup_metadata_schema = StructType(
-            [
-                StructField("key", StringType(), True),
-                StructField("value", StringType(), True),
-            ]
-        )
-
-        # Nested schema for default_role in workgroups
-        self._default_role_schema = StructType(
-            [
-                StructField("id", StringType(), True),
-                StructField("name", StringType(), True),
-            ]
-        )
-
-        # Nested schema for workgroup member
-        self._workgroup_member_schema = StructType(
-            [
-                StructField("id", StringType(), True),
-                StructField("user_id", StringType(), True),
-                StructField("email", StringType(), True),
-            ]
-        )
-
-        # Nested schema for rollup summary item
-        self._rollup_summary_schema = StructType(
-            [
-                StructField("text", StringType(), True),
-                StructField("choice_id", StringType(), True),
-                StructField("count", LongType(), True),
-                StructField("percentage", DoubleType(), True),
-                StructField("other_text", ArrayType(StringType()), True),
-                StructField("min", DoubleType(), True),
-                StructField("max", DoubleType(), True),
-                StructField("mean", DoubleType(), True),
-                StructField("median", DoubleType(), True),
-            ]
-        )
-
-        # Nested schema for benchmark details
-        self._benchmark_details_schema = StructType(
-            [
-                StructField("industry", StringType(), True),
-                StructField("sample_size", LongType(), True),
-            ]
-        )
-
-        # Nested schema for user question types
-        self._question_types_schema = StructType(
-            [
-                StructField("available", ArrayType(StringType()), True),
-            ]
-        )
-
-        # Nested schema for user scopes
-        self._scopes_schema = StructType(
-            [
-                StructField("available", ArrayType(StringType()), True),
-                StructField("granted", ArrayType(StringType()), True),
-            ]
-        )
-
-        # Nested schema for user features
-        self._features_schema = StructType(
-            [
-                StructField("collector_create_limit", LongType(), True),
-                StructField("email_enabled", BooleanType(), True),
-            ]
-        )
-
-        # Centralized schema configuration
-        self._schema_config = {
-            "surveys": StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("title", StringType(), True),
-                    StructField("nickname", StringType(), True),
-                    StructField("href", StringType(), True),
-                    StructField("folder_id", StringType(), True),
-                    StructField("category", StringType(), True),
-                    StructField("language", StringType(), True),
-                    StructField("question_count", LongType(), True),
-                    StructField("page_count", LongType(), True),
-                    StructField("date_created", StringType(), True),
-                    StructField("date_modified", StringType(), True),
-                    StructField("response_count", LongType(), True),
-                    StructField("buttons_text", self._buttons_text_schema, True),
-                    StructField("is_owner", BooleanType(), True),
-                    StructField("footer", BooleanType(), True),
-                    StructField("custom_variables", MapType(StringType(), StringType()), True),
-                    StructField("preview", StringType(), True),
-                    StructField("edit_url", StringType(), True),
-                    StructField("collect_url", StringType(), True),
-                    StructField("analyze_url", StringType(), True),
-                    StructField("summary_url", StringType(), True),
-                ]
-            ),
-            "survey_responses": StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("survey_id", StringType(), True),
-                    StructField("recipient_id", StringType(), True),
-                    StructField("collector_id", StringType(), True),
-                    StructField("custom_value", StringType(), True),
-                    StructField("edit_url", StringType(), True),
-                    StructField("analyze_url", StringType(), True),
-                    StructField("total_time", LongType(), True),
-                    StructField("date_created", StringType(), True),
-                    StructField("date_modified", StringType(), True),
-                    StructField("response_status", StringType(), True),
-                    StructField("collection_mode", StringType(), True),
-                    StructField("ip_address", StringType(), True),
-                    StructField("logic_path", self._logic_path_schema, True),
-                    StructField("metadata", self._metadata_schema, True),
-                    StructField("page_path", ArrayType(StringType()), True),
-                    StructField("pages", ArrayType(self._response_page_schema), True),
-                ]
-            ),
-            "survey_pages": StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("survey_id", StringType(), True),
-                    StructField("title", StringType(), True),
-                    StructField("description", StringType(), True),
-                    StructField("position", LongType(), True),
-                    StructField("question_count", LongType(), True),
-                    StructField("href", StringType(), True),
-                ]
-            ),
-            "survey_questions": StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("survey_id", StringType(), True),
-                    StructField("page_id", StringType(), True),
-                    StructField("position", LongType(), True),
-                    StructField("visible", BooleanType(), True),
-                    StructField("family", StringType(), True),
-                    StructField("subtype", StringType(), True),
-                    StructField("heading", StringType(), True),
-                    StructField("href", StringType(), True),
-                    StructField("sorting", self._sorting_schema, True),
-                    StructField("required", self._required_schema, True),
-                    StructField("validation", self._validation_schema, True),
-                    StructField("forced_ranking", BooleanType(), True),
-                    StructField("answers", self._question_answers_schema, True),
-                ]
-            ),
-            "collectors": StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("survey_id", StringType(), True),
-                    StructField("name", StringType(), True),
-                    StructField("type", StringType(), True),
-                    StructField("status", StringType(), True),
-                    StructField("redirect_url", StringType(), True),
-                    StructField("thank_you_page", self._thank_you_page_schema, True),
-                    StructField("response_count", LongType(), True),
-                    StructField("date_created", StringType(), True),
-                    StructField("date_modified", StringType(), True),
-                    StructField("url", StringType(), True),
-                    StructField("href", StringType(), True),
-                ]
-            ),
-            "contact_lists": StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("href", StringType(), True),
-                ]
-            ),
-            "contacts": StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("email", StringType(), True),
-                    StructField("first_name", StringType(), True),
-                    StructField("last_name", StringType(), True),
-                    StructField("custom_fields", MapType(StringType(), StringType()), True),
-                    StructField("href", StringType(), True),
-                ]
-            ),
-            "users": StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("username", StringType(), True),
-                    StructField("first_name", StringType(), True),
-                    StructField("last_name", StringType(), True),
-                    StructField("email", StringType(), True),
-                    StructField("email_verified", BooleanType(), True),
-                    StructField("account_type", StringType(), True),
-                    StructField("language", StringType(), True),
-                    StructField("date_created", StringType(), True),
-                    StructField("date_last_login", StringType(), True),
-                    StructField("question_types", self._question_types_schema, True),
-                    StructField("scopes", self._scopes_schema, True),
-                    StructField("sso_connections", ArrayType(StringType()), True),
-                    StructField("features", self._features_schema, True),
-                    StructField("href", StringType(), True),
-                ]
-            ),
-            "groups": StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("member_count", LongType(), True),
-                    StructField("max_invites", LongType(), True),
-                    StructField("date_created", StringType(), True),
-                    StructField("href", StringType(), True),
-                ]
-            ),
-            "group_members": StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("group_id", StringType(), True),
-                    StructField("username", StringType(), True),
-                    StructField("email", StringType(), True),
-                    StructField("type", StringType(), True),
-                    StructField("status", StringType(), True),
-                    StructField("date_created", StringType(), True),
-                    StructField("href", StringType(), True),
-                ]
-            ),
-            "workgroups": StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("description", StringType(), True),
-                    StructField("is_visible", BooleanType(), True),
-                    StructField("metadata", self._workgroup_metadata_schema, True),
-                    StructField("created_at", StringType(), True),
-                    StructField("updated_at", StringType(), True),
-                    StructField("members", ArrayType(self._workgroup_member_schema), True),
-                    StructField("members_count", LongType(), True),
-                    StructField("shares_count", LongType(), True),
-                    StructField("default_role", self._default_role_schema, True),
-                    StructField("organization_id", StringType(), True),
-                    StructField("href", StringType(), True),
-                ]
-            ),
-            "survey_folders": StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("title", StringType(), True),
-                    StructField("num_surveys", LongType(), True),
-                    StructField("href", StringType(), True),
-                ]
-            ),
-            "survey_categories": StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("name", StringType(), True),
-                ]
-            ),
-            "survey_templates": StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("title", StringType(), True),
-                    StructField("description", StringType(), True),
-                    StructField("category", StringType(), True),
-                    StructField("available", BooleanType(), True),
-                    StructField("num_questions", LongType(), True),
-                    StructField("preview_link", StringType(), True),
-                    StructField("href", StringType(), True),
-                ]
-            ),
-            "survey_languages": StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("native_name", StringType(), True),
-                ]
-            ),
-            "webhooks": StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("event_type", StringType(), True),
-                    StructField("object_type", StringType(), True),
-                    StructField("object_ids", ArrayType(StringType()), True),
-                    StructField("subscription_url", StringType(), True),
-                    StructField("authorization", StringType(), True),
-                    StructField("href", StringType(), True),
-                ]
-            ),
-            "survey_rollups": StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("survey_id", StringType(), True),
-                    StructField("family", StringType(), True),
-                    StructField("subtype", StringType(), True),
-                    StructField("href", StringType(), True),
-                    StructField("summary", ArrayType(MapType(StringType(), StringType())), True),
-                ]
-            ),
-            "benchmark_bundles": StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("description", StringType(), True),
-                    StructField("title", StringType(), True),
-                    StructField("details", self._benchmark_details_schema, True),
-                    StructField("country_code", StringType(), True),
-                    StructField("href", StringType(), True),
-                ]
-            ),
-        }
+    # ─── Interface Methods ────────────────────────────────────────────────────
 
     def list_tables(self) -> List[str]:
-        """
-        List available SurveyMonkey tables/objects.
-
-        Returns:
-            List of supported table names
-        """
-        return [
-            "surveys",
-            "survey_responses",
-            "survey_pages",
-            "survey_questions",
-            "collectors",
-            "contact_lists",
-            "contacts",
-            "users",
-            "groups",
-            "group_members",
-            "workgroups",
-            "survey_folders",
-            "survey_categories",
-            "survey_templates",
-            "survey_languages",
-            "webhooks",
-            "survey_rollups",
-            "benchmark_bundles",
-        ]
+        """List available SurveyMonkey tables/objects."""
+        return SUPPORTED_TABLES.copy()
 
     def get_table_schema(
         self, table_name: str, table_options: Dict[str, str]
     ) -> StructType:
-        """
-        Get the Spark schema for a SurveyMonkey table.
-
-        Args:
-            table_name: Name of the table
-            table_options: Additional options (not used for schema retrieval)
-
-        Returns:
-            StructType representing the table schema
-        """
-        if table_name not in self._schema_config:
-            raise ValueError(
-                f"Unsupported table: {table_name}. Supported tables are: {self.list_tables()}"
-            )
-        return self._schema_config[table_name]
+        """Get the Spark schema for a SurveyMonkey table."""
+        self._validate_table(table_name)
+        return TABLE_SCHEMAS[table_name]
 
     def read_table_metadata(
         self, table_name: str, table_options: Dict[str, str]
     ) -> dict:
-        """
-        Get metadata for a SurveyMonkey table.
-
-        Args:
-            table_name: Name of the table
-            table_options: Additional options (not used for metadata)
-
-        Returns:
-            Dictionary with primary_keys, cursor_field, and ingestion_type
-        """
-        if table_name not in self._object_config:
-            raise ValueError(
-                f"Unsupported table: {table_name}. Supported tables are: {self.list_tables()}"
-            )
-        config = self._object_config[table_name]
+        """Get metadata for a SurveyMonkey table."""
+        self._validate_table(table_name)
+        config = OBJECT_CONFIG[table_name]
         result = {
             "primary_keys": config["primary_keys"],
             "ingestion_type": config["ingestion_type"],
@@ -697,39 +60,21 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
     def read_table(
         self, table_name: str, start_offset: dict, table_options: Dict[str, str]
     ) -> Tuple[Iterator[dict], dict]:
-        """
-        Read data from a SurveyMonkey table.
+        """Read data from a SurveyMonkey table."""
+        self._validate_table(table_name)
 
-        Args:
-            table_name: Name of the table to read
-            start_offset: Dictionary containing cursor information for incremental reads
-                - For cdc: {"date_modified": "<iso_datetime>"}
-                - For snapshot: None or {}
-            table_options: Additional options for table access
-                - survey_id: Required for survey_responses, survey_pages, survey_questions, collectors, survey_rollups
-                - page_id: Required for survey_questions
-                - group_id: Required for group_members
-
-        Returns:
-            Tuple of (records_iterator, new_offset)
-        """
-        if table_name not in self._object_config:
-            raise ValueError(
-                f"Unsupported table: {table_name}. Supported tables are: {self.list_tables()}"
-            )
-
-        config = self._object_config[table_name]
+        config = OBJECT_CONFIG[table_name]
 
         # Validate required parameters (some tables can iterate over all parents if not provided)
         requires_survey_id = config.get("requires_survey_id", False)
         requires_page_id = config.get("requires_page_id", False)
         requires_group_id = config.get("requires_group_id", False)
-        
+
         # Tables that can iterate over all parent objects if parent_id not provided
         can_iterate_surveys = table_name in ["survey_responses", "survey_pages", "survey_questions", "collectors", "survey_rollups"]
         can_iterate_pages = table_name in ["survey_questions"]
         can_iterate_groups = table_name in ["group_members"]
-        
+
         if requires_survey_id and not table_options.get("survey_id") and not can_iterate_surveys:
             raise ValueError(
                 f"Table '{table_name}' requires 'survey_id' in table_options"
@@ -758,21 +103,19 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
             # Snapshot ingestion
             return self._read_data_full(table_name, table_options)
 
+    # ─── Helpers ──────────────────────────────────────────────────────────────
+
+    def _validate_table(self, table_name: str) -> None:
+        """Validate that the table is supported."""
+        if table_name not in TABLE_SCHEMAS:
+            raise ValueError(
+                f"Unsupported table: {table_name}. Supported tables are: {SUPPORTED_TABLES}"
+            )
+
     def _make_request(
         self, url: str, params: dict = None, retries: int = 3, allow_empty_on_error: bool = False
     ) -> dict:
-        """
-        Make an API request with retry logic and rate limit handling.
-
-        Args:
-            url: Full URL to request
-            params: Query parameters
-            retries: Number of retries on rate limit
-            allow_empty_on_error: If True, return empty data on 400/403 errors instead of raising
-
-        Returns:
-            JSON response as dictionary
-        """
+        """Make an API request with retry logic and rate limit handling."""
         for attempt in range(retries):
             response = requests.get(url, headers=self.headers, params=params)
 
@@ -794,17 +137,8 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
         raise Exception("Max retries exceeded due to rate limiting")
 
     def _build_endpoint_url(self, table_name: str, table_options: Dict[str, str]) -> str:
-        """
-        Build the API endpoint URL with path parameters substituted.
-
-        Args:
-            table_name: Name of the table
-            table_options: Options containing path parameter values
-
-        Returns:
-            Full endpoint URL
-        """
-        config = self._object_config[table_name]
+        """Build the API endpoint URL with path parameters substituted."""
+        config = OBJECT_CONFIG[table_name]
         endpoint = config["endpoint"]
 
         # Substitute path parameters
@@ -817,20 +151,38 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
 
         return f"{self.base_url}{endpoint}"
 
+    def _clean_empty_dicts(self, obj):
+        """Recursively convert empty dicts to None for nested structures."""
+        if isinstance(obj, dict):
+            if not obj:
+                return None
+            return {k: self._clean_empty_dicts(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._clean_empty_dicts(item) for item in obj]
+        return obj
+
+    def _add_parent_identifiers(
+        self, table_name: str, record: dict, table_options: Dict[str, str]
+    ) -> dict:
+        """Add parent identifiers to child records."""
+        config = OBJECT_CONFIG[table_name]
+
+        if config.get("requires_survey_id"):
+            record["survey_id"] = table_options.get("survey_id")
+        if config.get("requires_page_id"):
+            record["page_id"] = table_options.get("page_id")
+        if config.get("requires_group_id"):
+            record["group_id"] = table_options.get("group_id")
+
+        return record
+
+    # ─── Table Readers ────────────────────────────────────────────────────────
+
     def _read_data_full(
         self, table_name: str, table_options: Dict[str, str]
     ) -> Tuple[Iterator[dict], dict]:
-        """
-        Read all data from a SurveyMonkey table (full refresh).
-
-        Args:
-            table_name: Name of the table
-            table_options: Additional options for the table
-
-        Returns:
-            Tuple of (records_iterator, offset)
-        """
-        config = self._object_config[table_name]
+        """Read all data from a SurveyMonkey table (full refresh)."""
+        config = OBJECT_CONFIG[table_name]
 
         # Handle special case for users (single record endpoint)
         if table_name == "users":
@@ -896,7 +248,6 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
             # Add parent identifiers for child objects and clean empty dicts
             for record in records:
                 record = self._add_parent_identifiers(table_name, record, table_options)
-                # Clean empty dicts to None for nested structures
                 record = self._clean_empty_dicts(record)
                 all_records.append(record)
 
@@ -924,18 +275,8 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
     def _read_data_incremental(
         self, table_name: str, start_offset: dict, table_options: Dict[str, str]
     ) -> Tuple[Iterator[dict], dict]:
-        """
-        Read incremental data from a SurveyMonkey table.
-
-        Args:
-            table_name: Name of the table
-            start_offset: Dictionary with cursor field value
-            table_options: Additional options for the table
-
-        Returns:
-            Tuple of (records_iterator, new_offset)
-        """
-        config = self._object_config[table_name]
+        """Read incremental data from a SurveyMonkey table."""
+        config = OBJECT_CONFIG[table_name]
         cursor_field = config["cursor_field"]
         cursor_start = start_offset.get(cursor_field)
 
@@ -974,7 +315,6 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
 
             for record in records:
                 record = self._add_parent_identifiers(table_name, record, table_options)
-                # Clean empty dicts to None for nested structures
                 record = self._clean_empty_dicts(record)
                 all_records.append(record)
 
@@ -995,31 +335,16 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
         return iter(all_records), offset
 
     def _read_single_user(self) -> Tuple[Iterator[dict], dict]:
-        """
-        Read the current user's information.
-
-        Returns:
-            Tuple of (records_iterator, empty_offset)
-        """
+        """Read the current user's information."""
         url = f"{self.base_url}/users/me"
         data = self._make_request(url)
-        # Clean empty dicts to None for nested structures
         data = self._clean_empty_dicts(data)
         return iter([data]), {}
 
     def _read_all_survey_responses(
         self, table_options: Dict[str, str], start_modified_at: str = None
     ) -> Tuple[Iterator[dict], dict]:
-        """
-        Read responses across all surveys.
-
-        Args:
-            table_options: Additional options
-            start_modified_at: ISO datetime for incremental reads
-
-        Returns:
-            Tuple of (records_iterator, offset)
-        """
+        """Read responses across all surveys."""
         # First, get all surveys
         surveys_url = f"{self.base_url}/surveys"
         all_surveys = []
@@ -1074,7 +399,6 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
 
                 for response in responses:
                     response["survey_id"] = survey_id
-                    # Clean empty dicts to None for nested structures
                     response = self._clean_empty_dicts(response)
                     all_responses.append(response)
 
@@ -1095,21 +419,13 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
     def _read_all_survey_questions(
         self, table_options: Dict[str, str]
     ) -> Tuple[Iterator[dict], dict]:
-        """
-        Read all questions from a survey by iterating through pages.
-
-        Args:
-            table_options: Must contain survey_id
-
-        Returns:
-            Tuple of (records_iterator, empty_offset)
-        """
+        """Read all questions from a survey by iterating through pages."""
         survey_id = table_options.get("survey_id")
-        
+
         # If no survey_id provided, iterate over all surveys
         if not survey_id:
             return self._read_all_questions_all_surveys()
-        
+
         # Use the /surveys/{id}/details endpoint to get pages and questions
         details_url = f"{self.base_url}/surveys/{survey_id}/details"
         all_questions = []
@@ -1125,7 +441,6 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
                 for question in questions:
                     question["survey_id"] = survey_id
                     question["page_id"] = page_id
-                    # Clean empty dicts to None for nested structures
                     question = self._clean_empty_dicts(question)
                     all_questions.append(question)
         except Exception:
@@ -1134,12 +449,7 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
         return iter(all_questions), {}
 
     def _read_all_questions_all_surveys(self) -> Tuple[Iterator[dict], dict]:
-        """
-        Read all questions from all surveys.
-
-        Returns:
-            Tuple of (records_iterator, empty_offset)
-        """
+        """Read all questions from all surveys."""
         # First, get all surveys
         surveys_url = f"{self.base_url}/surveys"
         all_surveys = []
@@ -1179,7 +489,6 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
                     for question in questions:
                         question["survey_id"] = survey_id
                         question["page_id"] = page_id
-                        # Clean empty dicts to None for nested structures
                         question = self._clean_empty_dicts(question)
                         all_questions.append(question)
             except Exception:
@@ -1193,36 +502,27 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
     def _read_survey_pages(
         self, table_options: Dict[str, str]
     ) -> Tuple[Iterator[dict], dict]:
-        """
-        Read pages from a specific survey or all surveys.
-
-        Args:
-            table_options: May contain survey_id
-
-        Returns:
-            Tuple of (records_iterator, empty_offset)
-        """
+        """Read pages from a specific survey or all surveys."""
         survey_id = table_options.get("survey_id")
-        
+
         if survey_id:
             # Read pages for a specific survey
             details_url = f"{self.base_url}/surveys/{survey_id}/details"
             all_pages = []
-            
+
             try:
                 data = self._make_request(details_url)
                 pages = data.get("pages", [])
 
                 for survey_page in pages:
                     survey_page["survey_id"] = survey_id
-                    # Clean empty dicts to None for nested structures
                     survey_page = self._clean_empty_dicts(survey_page)
                     all_pages.append(survey_page)
             except Exception:
                 pass
 
             return iter(all_pages), {}
-        
+
         # No survey_id - read pages from all surveys
         surveys_url = f"{self.base_url}/surveys"
         all_surveys = []
@@ -1257,7 +557,6 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
 
                 for survey_page in pages:
                     survey_page["survey_id"] = sid
-                    # Clean empty dicts to None for nested structures
                     survey_page = self._clean_empty_dicts(survey_page)
                     all_pages.append(survey_page)
             except Exception:
@@ -1271,15 +570,7 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
     def _read_all_collectors(
         self, table_options: Dict[str, str]
     ) -> Tuple[Iterator[dict], dict]:
-        """
-        Read all collectors from all surveys.
-
-        Args:
-            table_options: Additional options (not used)
-
-        Returns:
-            Tuple of (records_iterator, offset)
-        """
+        """Read all collectors from all surveys."""
         # First, get all surveys
         surveys_url = f"{self.base_url}/surveys"
         all_surveys = []
@@ -1326,7 +617,6 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
 
                 for collector in collectors:
                     collector["survey_id"] = survey_id
-                    # Clean empty dicts to None for nested structures
                     collector = self._clean_empty_dicts(collector)
                     all_collectors.append(collector)
 
@@ -1347,15 +637,7 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
     def _read_all_group_members(
         self, table_options: Dict[str, str]
     ) -> Tuple[Iterator[dict], dict]:
-        """
-        Read all members from all groups.
-
-        Args:
-            table_options: Additional options (not used)
-
-        Returns:
-            Tuple of (records_iterator, empty_offset)
-        """
+        """Read all members from all groups."""
         # First, get all groups
         groups_url = f"{self.base_url}/groups"
         all_groups = []
@@ -1406,7 +688,6 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
 
                 for member in members:
                     member["group_id"] = group_id
-                    # Clean empty dicts to None for nested structures
                     member = self._clean_empty_dicts(member)
                     all_members.append(member)
 
@@ -1421,21 +702,12 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
     def _read_survey_rollups(
         self, table_options: Dict[str, str]
     ) -> Tuple[Iterator[dict], dict]:
-        """
-        Read rollup statistics for a specific survey or all surveys.
-
-        Args:
-            table_options: May contain survey_id
-
-        Returns:
-            Tuple of (records_iterator, empty_offset)
-        """
+        """Read rollup statistics for a specific survey or all surveys."""
         survey_id = table_options.get("survey_id")
-        
+
         if survey_id:
-            # Read rollups for a specific survey
             return self._read_rollups_for_survey(survey_id)
-        
+
         # No survey_id - read rollups from all surveys
         surveys_url = f"{self.base_url}/surveys"
         all_surveys = []
@@ -1471,15 +743,7 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
     def _read_rollups_for_survey(
         self, survey_id: str
     ) -> Tuple[Iterator[dict], dict]:
-        """
-        Read rollup statistics for a specific survey.
-
-        Args:
-            survey_id: The survey ID
-
-        Returns:
-            Tuple of (records_iterator, empty_offset)
-        """
+        """Read rollup statistics for a specific survey."""
         rollups_url = f"{self.base_url}/surveys/{survey_id}/rollups"
         all_rollups = []
         page = 1
@@ -1500,7 +764,6 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
 
             for rollup in rollups:
                 rollup["survey_id"] = survey_id
-                # Clean empty dicts to None for nested structures
                 rollup = self._clean_empty_dicts(rollup)
                 all_rollups.append(rollup)
 
@@ -1512,70 +775,8 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
 
         return iter(all_rollups), {}
 
-    def _clean_empty_dicts(self, obj):
-        """
-        Recursively convert empty dicts to None for nested structures.
-        This is required because the schema expects None for absent StructType fields.
-
-        Args:
-            obj: The object to clean
-
-        Returns:
-            Cleaned object with empty dicts replaced by None
-        """
-        if isinstance(obj, dict):
-            if not obj:
-                return None
-            return {k: self._clean_empty_dicts(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [self._clean_empty_dicts(item) for item in obj]
-        return obj
-
-    def _add_parent_identifiers(
-        self, table_name: str, record: dict, table_options: Dict[str, str]
-    ) -> dict:
-        """
-        Add parent identifiers to child records.
-
-        Args:
-            table_name: Name of the table
-            record: The record to modify
-            table_options: Options containing parent identifiers
-
-        Returns:
-            Modified record with parent identifiers
-        """
-        config = self._object_config[table_name]
-
-        if config.get("requires_survey_id"):
-            record["survey_id"] = table_options.get("survey_id")
-        if config.get("requires_page_id"):
-            record["page_id"] = table_options.get("page_id")
-        if config.get("requires_group_id"):
-            record["group_id"] = table_options.get("group_id")
-
-        return record
-
-    def _get_detailed_survey(self, survey_id: str) -> dict:
-        """
-        Get detailed survey information including pages and questions.
-
-        Args:
-            survey_id: The survey ID
-
-        Returns:
-            Detailed survey data
-        """
-        url = f"{self.base_url}/surveys/{survey_id}/details"
-        return self._make_request(url)
-
     def test_connection(self) -> dict:
-        """
-        Test the connection to SurveyMonkey API.
-
-        Returns:
-            Dictionary with status and message
-        """
+        """Test the connection to SurveyMonkey API."""
         try:
             url = f"{self.base_url}/users/me"
             response = requests.get(url, headers=self.headers)
