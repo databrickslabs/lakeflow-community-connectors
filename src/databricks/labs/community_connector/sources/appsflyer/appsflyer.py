@@ -64,7 +64,10 @@ class AppsflyerLakeflowConnect(LakeflowConnect):
                 if attempt == _MAX_RETRIES:
                     raise
                 wait = _RETRY_BACKOFF_BASE ** (attempt + 1)
-                print(f"[AppsFlyer] Connection error (attempt {attempt + 1}), retrying in {wait}s: {exc}")
+                print(
+                    f"[AppsFlyer] Connection error (attempt {attempt + 1}),"
+                    f" retrying in {wait}s: {exc}"
+                )
                 time.sleep(wait)
                 continue
 
