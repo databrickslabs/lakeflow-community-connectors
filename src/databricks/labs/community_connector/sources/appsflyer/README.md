@@ -1,5 +1,9 @@
 # Lakeflow AppsFlyer Community Connector
 
+## Authors
+
+- lina.ryoo@databricks.com
+
 This documentation provides setup instructions and reference information for the AppsFlyer source connector.
 
 ## Prerequisites
