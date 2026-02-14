@@ -1,0 +1,35 @@
+# appsflyer Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: AppsFlyer
+connection:
+  parameters:
+    - name: api_token
+      type: string
+      required: true
+      secret: true
+      description: >
+        API token for AppsFlyer authentication. Obtain this token from the
+        AppsFlyer dashboard by navigating to: (User menu) → API Tokens.
+        The token is in UUID format and should be kept secure.
+
+    - name: base_url
+      type: string
+      required: false
+      description: >
+        Base URL for the AppsFlyer API. Defaults to https://hq1.appsflyer.com
+        (US region). Use https://eu-west1.appsflyer.com for EU region accounts.
+        Override this only if you need to connect to a specific regional endpoint.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# ============================================================================
+external_options_allowlist: "app_id,start_date,lookback_hours,max_days_per_batch"

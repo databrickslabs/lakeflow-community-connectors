@@ -1,0 +1,9 @@
+connection_name: my_appsflyer_conn
+objects:
+  - table:
+      source_table: organic_in_app_events_report
+      table_configuration:
+        app_id: "com.appsflyer.dbx"
+        start_date: "2026-01-08"
+        lookback_hours: "6"
+        max_days_per_batch: "7"
