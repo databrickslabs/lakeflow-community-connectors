@@ -221,7 +221,7 @@ Use the Lakeflow Community Connector UI to copy or reference the SurveyMonkey co
 In your pipeline code (e.g., `ingestion_pipeline.py`), configure a `pipeline_spec` that references:
 
 - A **Unity Catalog connection** that uses this SurveyMonkey connector.
-- One or more **tables** to ingest, each with optional `table_options`.
+- One or more **tables** to ingest, each with optional `table_configuration`.
 
 **Example: Ingest all surveys and their responses**
 
@@ -260,19 +260,50 @@ In your pipeline code (e.g., `ingestion_pipeline.py`), configure a `pipeline_spe
       {
         "table": {
           "source_table": "survey_responses",
-          "survey_id": "421006327"
+          "table_configuration": {
+            "survey_id": "421006327"
+          }
         }
       },
       {
         "table": {
           "source_table": "survey_pages",
-          "survey_id": "421006327"
+          "table_configuration": {
+            "survey_id": "421006327"
+          }
         }
       },
       {
         "table": {
           "source_table": "survey_questions",
-          "survey_id": "421006327"
+          "table_configuration": {
+            "survey_id": "421006327"
+          }
+        }
+      }
+    ]
+  }
+}
+```
+
+**Example: Ingest members for a specific group**
+
+```json
+{
+  "pipeline_spec": {
+    "connection_name": "surveymonkey_connection",
+    "object": [
+      {
+        "table": {
+          "source_table": "groups"
+        }
+      },
+      {
+        "table": {
+          "source_table": "group_members",
+          "table_configuration": {
+            "group_id": "12345"
+          }
         }
       }
     ]
@@ -283,7 +314,7 @@ In your pipeline code (e.g., `ingestion_pipeline.py`), configure a `pipeline_spe
 - `connection_name` must point to the UC connection configured with your SurveyMonkey `access_token`.
 - For each `table`:
   - `source_table` must be one of the supported table names listed above.
-  - Table options like `survey_id` and `page_id` control which data is read.
+  - Custom table options like `survey_id`, `page_id`, and `group_id` must be placed under `table_configuration`.
 
 
 ### Step 3: Run and Schedule the Pipeline
