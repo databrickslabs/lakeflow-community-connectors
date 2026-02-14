@@ -1180,6 +1180,10 @@ def register_lakeflow_source(spark):
             if table_name == "survey_responses" and not table_options.get("survey_id"):
                 return self._read_all_survey_responses(table_options, start_modified_at=cursor_start)
 
+            # Handle special case for collectors across all surveys
+            if table_name == "collectors" and not table_options.get("survey_id"):
+                return self._read_all_collectors(table_options, start_modified_at=cursor_start)
+
             url = self._build_endpoint_url(table_name, table_options)
             per_page = config["per_page"]
 
@@ -1464,7 +1468,7 @@ def register_lakeflow_source(spark):
             return iter(all_pages), {}
 
         def _read_all_collectors(
-            self, table_options: Dict[str, str]
+            self, table_options: Dict[str, str], start_modified_at: str = None
         ) -> Tuple[Iterator[dict], dict]:
             """Read all collectors from all surveys."""
             # First, get all surveys
@@ -1490,7 +1494,7 @@ def register_lakeflow_source(spark):
 
             # Then, get collectors for each survey
             all_collectors = []
-            latest_cursor_value = None
+            latest_cursor_value = start_modified_at
 
             for survey in all_surveys:
                 survey_id = survey["id"]
@@ -1498,7 +1502,15 @@ def register_lakeflow_source(spark):
                 page = 1
 
                 while True:
-                    params = {"page": page, "per_page": 1000}
+                    params = {
+                        "page": page,
+                        "per_page": 1000,
+                        "sort_by": "date_modified",
+                        "sort_order": "ASC",
+                    }
+
+                    if start_modified_at:
+                        params["start_modified_at"] = start_modified_at
 
                     try:
                         data = self._make_request(collectors_url, params)
