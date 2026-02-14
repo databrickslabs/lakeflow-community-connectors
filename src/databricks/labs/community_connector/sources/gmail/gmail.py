@@ -132,30 +132,11 @@ class GmailLakeflowConnect(LakeflowConnect):
             if response.get("historyId"):
                 latest_history_id = response["historyId"]
 
-            for history_record in response.get("history", []):
-                for deleted in history_record.get("messagesDeleted", []):
-                    msg = deleted.get("message", {})
-                    if msg.get("id"):
-                        if table_name == "messages":
-                            if msg["id"] not in seen_ids:
-                                seen_ids.add(msg["id"])
-                                deleted_records.append(
-                                    {
-                                        "id": msg["id"],
-                                        "threadId": msg.get("threadId"),
-                                        "historyId": history_record.get("id", latest_history_id),
-                                    }
-                                )
-                        elif table_name == "threads":
-                            thread_id = msg.get("threadId")
-                            if thread_id and thread_id not in seen_ids:
-                                seen_ids.add(thread_id)
-                                deleted_records.append(
-                                    {
-                                        "id": thread_id,
-                                        "historyId": history_record.get("id", latest_history_id),
-                                    }
-                                )
+            deleted_records.extend(
+                self._collect_deleted_records(
+                    table_name, response.get("history", []), seen_ids, latest_history_id
+                )
+            )
 
             page_token = response.get("nextPageToken")
             if not page_token:
@@ -163,6 +144,34 @@ class GmailLakeflowConnect(LakeflowConnect):
 
         next_offset = {"historyId": latest_history_id}
         return iter(deleted_records), next_offset
+
+    def _collect_deleted_records(
+        self, table_name: str, history_records: list, seen_ids: set, latest_history_id: str
+    ) -> list[dict]:
+        """Extract deleted record entries from history records."""
+        deleted_records = []
+        for history_record in history_records:
+            record_history_id = history_record.get("id", latest_history_id)
+            for deleted in history_record.get("messagesDeleted", []):
+                msg = deleted.get("message", {})
+                msg_id = msg.get("id")
+                if not msg_id:
+                    continue
+                if table_name == "messages" and msg_id not in seen_ids:
+                    seen_ids.add(msg_id)
+                    deleted_records.append(
+                        {
+                            "id": msg_id,
+                            "threadId": msg.get("threadId"),
+                            "historyId": record_history_id,
+                        }
+                    )
+                elif table_name == "threads":
+                    thread_id = msg.get("threadId")
+                    if thread_id and thread_id not in seen_ids:
+                        seen_ids.add(thread_id)
+                        deleted_records.append({"id": thread_id, "historyId": record_history_id})
+        return deleted_records
 
     # ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -179,29 +188,22 @@ class GmailLakeflowConnect(LakeflowConnect):
         self, start_offset: dict, table_options: Dict[str, str]
     ) -> (Iterator[dict], dict):
         """Read messages using streaming list + batch get pattern."""
+        start_history_id = start_offset.get("historyId") if start_offset else None
+
+        if start_history_id:
+            return self._read_messages_incremental(start_history_id, table_options)
+        return self._read_messages_streaming(table_options)
+
+    def _read_messages_streaming(
+        self,
+        table_options: Dict[str, str],
+    ) -> (Iterator[dict], dict):
+        """Stream messages with sequential fetching for reliability."""
         max_results = int(table_options.get("maxResults", "100"))
         query = table_options.get("q")
         label_ids = table_options.get("labelIds")
         include_spam_trash = table_options.get("includeSpamTrash", "false").lower() == "true"
 
-        start_history_id = start_offset.get("historyId") if start_offset else None
-
-        if start_history_id:
-            return self._read_messages_incremental(start_history_id, table_options)
-        else:
-            return self._read_messages_streaming(
-                max_results, query, label_ids, include_spam_trash, table_options
-            )
-
-    def _read_messages_streaming(
-        self,
-        max_results: int,
-        query: str,
-        label_ids: str,
-        include_spam_trash: bool,
-        table_options: Dict[str, str],
-    ) -> (Iterator[dict], dict):
-        """Stream messages with sequential fetching for reliability."""
         params = {"maxResults": min(max_results, 500)}
         if query:
             params["q"] = query
@@ -282,9 +284,7 @@ class GmailLakeflowConnect(LakeflowConnect):
             response = self.api.make_request("GET", f"/users/{self.user_id}/history", params=params)
 
             if response is None:
-                return self._read_messages_streaming(
-                    100, None, None, False, table_options
-                )
+                return self._read_messages_streaming(table_options)
 
             if response.get("historyId"):
                 latest_history_id = response["historyId"]
@@ -318,31 +318,22 @@ class GmailLakeflowConnect(LakeflowConnect):
         self, start_offset: dict, table_options: Dict[str, str]
     ) -> (Iterator[dict], dict):
         """Read threads using streaming list + batch get pattern."""
-        max_results = int(table_options.get("maxResults", "100"))
-        query = table_options.get("q")
-        label_ids = table_options.get("labelIds")
-        include_spam_trash = (
-            table_options.get("includeSpamTrash", "false").lower() == "true"
-        )
-
         start_history_id = start_offset.get("historyId") if start_offset else None
 
         if start_history_id:
             return self._read_threads_incremental(start_history_id, table_options)
-        else:
-            return self._read_threads_streaming(
-                max_results, query, label_ids, include_spam_trash, table_options
-            )
+        return self._read_threads_streaming(table_options)
 
     def _read_threads_streaming(
         self,
-        max_results: int,
-        query: str,
-        label_ids: str,
-        include_spam_trash: bool,
         table_options: Dict[str, str],
     ) -> (Iterator[dict], dict):
         """Stream threads with parallel fetching for performance."""
+        max_results = int(table_options.get("maxResults", "100"))
+        query = table_options.get("q")
+        label_ids = table_options.get("labelIds")
+        include_spam_trash = table_options.get("includeSpamTrash", "false").lower() == "true"
+
         params = {"maxResults": min(max_results, 500)}
         if query:
             params["q"] = query
@@ -420,7 +411,7 @@ class GmailLakeflowConnect(LakeflowConnect):
             response = self.api.make_request("GET", f"/users/{self.user_id}/history", params=params)
 
             if response is None:
-                return self._read_threads_streaming(100, None, None, False, table_options)
+                return self._read_threads_streaming(table_options)
 
             if response.get("historyId"):
                 latest_history_id = response["historyId"]

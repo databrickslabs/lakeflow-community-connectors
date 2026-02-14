@@ -150,7 +150,7 @@ class GmailApiClient:
                 try:
                     json_start = part.find("{")
                     json_end = part.rfind("}") + 1
-                    if json_start >= 0 and json_end > json_start:
+                    if 0 <= json_start < json_end:
                         json_str = part[json_start:json_end]
                         results.append(json.loads(json_str))
                 except (json.JSONDecodeError, ValueError):
