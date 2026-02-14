@@ -135,34 +135,12 @@ Contains event-specific data including:
 - **Ingestion Type**: CDC
 - **Required Options**: `app_id`
 
-#### `retargeting_installs_report`
-- **Description**: Re-engagement installation events
+#### `organic_uninstall_events_report`
+- **Description**: Uninstall events from organic users
 - **Primary Keys**: `appsflyer_id`, `event_time`
 - **Cursor Field**: `event_time`
 - **Ingestion Type**: CDC
 - **Required Options**: `app_id`
-
-#### `retargeting_in_app_events_report`
-- **Description**: In-app events from retargeting campaigns
-- **Primary Keys**: `appsflyer_id`, `event_time`, `event_name`
-- **Cursor Field**: `event_time`
-- **Ingestion Type**: CDC
-- **Required Options**: `app_id`
-
-### Aggregated Reports
-
-#### `daily_report`
-- **Description**: Daily aggregated metrics by media source and campaign
-- **Primary Keys**: `date`, `media_source`
-- **Cursor Field**: `date`
-- **Ingestion Type**: CDC
-- **Required Options**: `app_id`
-
-Contains aggregated metrics including:
-- Impressions, clicks, installs, conversions
-- Sessions and loyal users
-- Total revenue, cost, ROI, ARPU
-- Grouped by date, media source, campaign, geo
 
 ### Metadata Tables
 

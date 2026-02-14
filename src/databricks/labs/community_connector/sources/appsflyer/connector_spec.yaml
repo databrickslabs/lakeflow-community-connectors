@@ -6,11 +6,13 @@
 # Connection Parameters
 # These are provided when creating the Unity Catalog connection.
 # ============================================================================
+display_name: AppsFlyer
 connection:
   parameters:
     - name: api_token
       type: string
       required: true
+      secret: true
       description: >
         API token for AppsFlyer authentication. Obtain this token from the
         AppsFlyer dashboard by navigating to: (User menu) → API Tokens.
