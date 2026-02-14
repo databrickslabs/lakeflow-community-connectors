@@ -13,6 +13,7 @@ from typing import (
     Generator,
     Iterator,
     List,
+    Optional,
 )
 import json
 import time
@@ -332,61 +333,370 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
-    # src/databricks/labs/community_connector/sources/gmail/gmail.py
+    # src/databricks/labs/community_connector/sources/gmail/gmail_schemas.py
     ########################################################
 
-    class GmailLakeflowConnect(LakeflowConnect):
-        """Gmail connector implementing the LakeflowConnect interface with 100% API coverage."""
-
-        # Supported tables - Full Gmail API coverage
-        SUPPORTED_TABLES = [
-            "messages",
-            "threads",
-            "labels",
-            "drafts",
-            "profile",
-            "settings",
-            "filters",
-            "forwarding_addresses",
-            "send_as",
-            "delegates",
+    HEADER_STRUCT = StructType(
+        [
+            StructField("name", StringType(), True),
+            StructField("value", StringType(), True),
         ]
+    )
 
-        # Batch API settings
-        BATCH_SIZE = 50  # Gmail batch API supports up to 100, using 50 for safety
-        MAX_WORKERS = 5  # Concurrent workers for parallel fetching
+    BODY_STRUCT = StructType(
+        [
+            StructField("attachmentId", StringType(), True),
+            StructField("size", LongType(), True),
+            StructField("data", StringType(), True),
+        ]
+    )
 
-        def __init__(self, options: dict[str, str]) -> None:
-            """
-            Initialize the Gmail connector with OAuth 2.0 credentials.
+    PART_STRUCT = StructType(
+        [
+            StructField("partId", StringType(), True),
+            StructField("mimeType", StringType(), True),
+            StructField("filename", StringType(), True),
+            StructField("headers", ArrayType(HEADER_STRUCT), True),
+            StructField("body", BODY_STRUCT, True),
+        ]
+    )
 
-            Expected options:
-                - client_id: OAuth 2.0 client ID from Google Cloud Console
-                - client_secret: OAuth 2.0 client secret
-                - refresh_token: Long-lived refresh token obtained via OAuth flow
-                - user_id (optional): User email or 'me' (default: 'me')
-            """
-            self.client_id = options.get("client_id")
-            self.client_secret = options.get("client_secret")
-            self.refresh_token = options.get("refresh_token")
-            self.user_id = options.get("user_id", "me")
+    PAYLOAD_STRUCT = StructType(
+        [
+            StructField("partId", StringType(), True),
+            StructField("mimeType", StringType(), True),
+            StructField("filename", StringType(), True),
+            StructField("headers", ArrayType(HEADER_STRUCT), True),
+            StructField("body", BODY_STRUCT, True),
+            StructField("parts", ArrayType(PART_STRUCT), True),
+        ]
+    )
 
-            if not self.client_id:
-                raise ValueError("Gmail connector requires 'client_id' in options")
-            if not self.client_secret:
-                raise ValueError("Gmail connector requires 'client_secret' in options")
-            if not self.refresh_token:
-                raise ValueError("Gmail connector requires 'refresh_token' in options")
+    # ─── Table Schemas ────────────────────────────────────────────────────────────
 
-            self.base_url = "https://gmail.googleapis.com/gmail/v1"
-            self.batch_url = "https://gmail.googleapis.com/batch/gmail/v1"
+    MESSAGES_SCHEMA = StructType(
+        [
+            StructField("id", StringType(), False),
+            StructField("threadId", StringType(), True),
+            StructField("labelIds", ArrayType(StringType()), True),
+            StructField("snippet", StringType(), True),
+            StructField("historyId", StringType(), True),
+            StructField("internalDate", StringType(), True),
+            StructField("sizeEstimate", LongType(), True),
+            StructField("payload", PAYLOAD_STRUCT, True),
+        ]
+    )
+
+    THREADS_SCHEMA = StructType(
+        [
+            StructField("id", StringType(), False),
+            StructField("snippet", StringType(), True),
+            StructField("historyId", StringType(), True),
+            StructField(
+                "messages",
+                ArrayType(
+                    StructType(
+                        [
+                            StructField("id", StringType(), True),
+                            StructField("threadId", StringType(), True),
+                            StructField("labelIds", ArrayType(StringType()), True),
+                            StructField("snippet", StringType(), True),
+                            StructField("historyId", StringType(), True),
+                            StructField("internalDate", StringType(), True),
+                        ]
+                    )
+                ),
+                True,
+            ),
+        ]
+    )
+
+    LABELS_SCHEMA = StructType(
+        [
+            StructField("id", StringType(), False),
+            StructField("name", StringType(), True),
+            StructField("messageListVisibility", StringType(), True),
+            StructField("labelListVisibility", StringType(), True),
+            StructField("type", StringType(), True),
+            StructField("messagesTotal", LongType(), True),
+            StructField("messagesUnread", LongType(), True),
+            StructField("threadsTotal", LongType(), True),
+            StructField("threadsUnread", LongType(), True),
+            StructField(
+                "color",
+                StructType(
+                    [
+                        StructField("textColor", StringType(), True),
+                        StructField("backgroundColor", StringType(), True),
+                    ]
+                ),
+                True,
+            ),
+        ]
+    )
+
+    DRAFTS_SCHEMA = StructType(
+        [
+            StructField("id", StringType(), False),
+            StructField(
+                "message",
+                StructType(
+                    [
+                        StructField("id", StringType(), True),
+                        StructField("threadId", StringType(), True),
+                        StructField("labelIds", ArrayType(StringType()), True),
+                        StructField("snippet", StringType(), True),
+                        StructField("historyId", StringType(), True),
+                        StructField("internalDate", StringType(), True),
+                        StructField("sizeEstimate", LongType(), True),
+                        StructField("payload", PAYLOAD_STRUCT, True),
+                    ]
+                ),
+                True,
+            ),
+        ]
+    )
+
+    PROFILE_SCHEMA = StructType(
+        [
+            StructField("emailAddress", StringType(), False),
+            StructField("messagesTotal", LongType(), True),
+            StructField("threadsTotal", LongType(), True),
+            StructField("historyId", StringType(), True),
+        ]
+    )
+
+    SETTINGS_SCHEMA = StructType(
+        [
+            StructField("emailAddress", StringType(), False),
+            StructField(
+                "autoForwarding",
+                StructType(
+                    [
+                        StructField("enabled", BooleanType(), True),
+                        StructField("emailAddress", StringType(), True),
+                        StructField("disposition", StringType(), True),
+                    ]
+                ),
+                True,
+            ),
+            StructField(
+                "imap",
+                StructType(
+                    [
+                        StructField("enabled", BooleanType(), True),
+                        StructField("autoExpunge", BooleanType(), True),
+                        StructField("expungeBehavior", StringType(), True),
+                        StructField("maxFolderSize", LongType(), True),
+                    ]
+                ),
+                True,
+            ),
+            StructField(
+                "pop",
+                StructType(
+                    [
+                        StructField("accessWindow", StringType(), True),
+                        StructField("disposition", StringType(), True),
+                    ]
+                ),
+                True,
+            ),
+            StructField(
+                "language",
+                StructType(
+                    [
+                        StructField("displayLanguage", StringType(), True),
+                    ]
+                ),
+                True,
+            ),
+            StructField(
+                "vacation",
+                StructType(
+                    [
+                        StructField("enableAutoReply", BooleanType(), True),
+                        StructField("responseSubject", StringType(), True),
+                        StructField("responseBodyPlainText", StringType(), True),
+                        StructField("responseBodyHtml", StringType(), True),
+                        StructField("restrictToContacts", BooleanType(), True),
+                        StructField("restrictToDomain", BooleanType(), True),
+                        StructField("startTime", StringType(), True),
+                        StructField("endTime", StringType(), True),
+                    ]
+                ),
+                True,
+            ),
+        ]
+    )
+
+    FILTERS_SCHEMA = StructType(
+        [
+            StructField("id", StringType(), False),
+            StructField(
+                "criteria",
+                StructType(
+                    [
+                        StructField("from", StringType(), True),
+                        StructField("to", StringType(), True),
+                        StructField("subject", StringType(), True),
+                        StructField("query", StringType(), True),
+                        StructField("negatedQuery", StringType(), True),
+                        StructField("hasAttachment", BooleanType(), True),
+                        StructField("excludeChats", BooleanType(), True),
+                        StructField("size", LongType(), True),
+                        StructField("sizeComparison", StringType(), True),
+                    ]
+                ),
+                True,
+            ),
+            StructField(
+                "action",
+                StructType(
+                    [
+                        StructField("addLabelIds", ArrayType(StringType()), True),
+                        StructField("removeLabelIds", ArrayType(StringType()), True),
+                        StructField("forward", StringType(), True),
+                    ]
+                ),
+                True,
+            ),
+        ]
+    )
+
+    FORWARDING_ADDRESSES_SCHEMA = StructType(
+        [
+            StructField("forwardingEmail", StringType(), False),
+            StructField("verificationStatus", StringType(), True),
+        ]
+    )
+
+    SEND_AS_SCHEMA = StructType(
+        [
+            StructField("sendAsEmail", StringType(), False),
+            StructField("displayName", StringType(), True),
+            StructField("replyToAddress", StringType(), True),
+            StructField("signature", StringType(), True),
+            StructField("isPrimary", BooleanType(), True),
+            StructField("isDefault", BooleanType(), True),
+            StructField("treatAsAlias", BooleanType(), True),
+            StructField("verificationStatus", StringType(), True),
+            StructField(
+                "smtpMsa",
+                StructType(
+                    [
+                        StructField("host", StringType(), True),
+                        StructField("port", LongType(), True),
+                        StructField("username", StringType(), True),
+                        StructField("securityMode", StringType(), True),
+                    ]
+                ),
+                True,
+            ),
+        ]
+    )
+
+    DELEGATES_SCHEMA = StructType(
+        [
+            StructField("delegateEmail", StringType(), False),
+            StructField("verificationStatus", StringType(), True),
+        ]
+    )
+
+    # ─── Lookup Tables ────────────────────────────────────────────────────────────
+
+    TABLE_SCHEMAS = {
+        "messages": MESSAGES_SCHEMA,
+        "threads": THREADS_SCHEMA,
+        "labels": LABELS_SCHEMA,
+        "drafts": DRAFTS_SCHEMA,
+        "profile": PROFILE_SCHEMA,
+        "settings": SETTINGS_SCHEMA,
+        "filters": FILTERS_SCHEMA,
+        "forwarding_addresses": FORWARDING_ADDRESSES_SCHEMA,
+        "send_as": SEND_AS_SCHEMA,
+        "delegates": DELEGATES_SCHEMA,
+    }
+
+    TABLE_METADATA = {
+        "messages": {
+            "primary_keys": ["id"],
+            "cursor_field": "historyId",
+            "ingestion_type": "cdc_with_deletes",
+        },
+        "threads": {
+            "primary_keys": ["id"],
+            "cursor_field": "historyId",
+            "ingestion_type": "cdc_with_deletes",
+        },
+        "labels": {
+            "primary_keys": ["id"],
+            "ingestion_type": "snapshot",
+        },
+        "drafts": {
+            "primary_keys": ["id"],
+            "ingestion_type": "snapshot",
+        },
+        "profile": {
+            "primary_keys": ["emailAddress"],
+            "ingestion_type": "snapshot",
+        },
+        "settings": {
+            "primary_keys": ["emailAddress"],
+            "ingestion_type": "snapshot",
+        },
+        "filters": {
+            "primary_keys": ["id"],
+            "ingestion_type": "snapshot",
+        },
+        "forwarding_addresses": {
+            "primary_keys": ["forwardingEmail"],
+            "ingestion_type": "snapshot",
+        },
+        "send_as": {
+            "primary_keys": ["sendAsEmail"],
+            "ingestion_type": "snapshot",
+        },
+        "delegates": {
+            "primary_keys": ["delegateEmail"],
+            "ingestion_type": "snapshot",
+        },
+    }
+
+    SUPPORTED_TABLES = list(TABLE_SCHEMAS.keys())
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/sources/gmail/gmail_utils.py
+    ########################################################
+
+    BATCH_SIZE = 50  # Gmail batch API supports up to 100, using 50 for safety
+    MAX_WORKERS = 5  # Concurrent workers for parallel fetching
+
+
+    class GmailApiClient:
+        """Handles Gmail API communication: auth, requests, batch, and parallel fetching."""
+
+        BASE_URL = "https://gmail.googleapis.com/gmail/v1"
+        BATCH_URL = "https://gmail.googleapis.com/batch/gmail/v1"
+
+        def __init__(
+            self,
+            client_id: str,
+            client_secret: str,
+            refresh_token: str,
+            user_id: str = "me",
+        ) -> None:
+            self.client_id = client_id
+            self.client_secret = client_secret
+            self.refresh_token = refresh_token
+            self.user_id = user_id
+
             self._access_token = None
             self._token_expires_at = 0
-
-            # Session for connection reuse
             self._session = requests.Session()
 
-        def _get_access_token(self) -> str:
+        def get_access_token(self) -> str:
             """Exchange refresh token for access token with caching."""
             # Return cached token if still valid (with 60s buffer)
             if self._access_token and time.time() < self._token_expires_at - 60:
@@ -409,22 +719,22 @@ def register_lakeflow_source(spark):
 
             return self._access_token
 
-        def _get_headers(self) -> Dict[str, str]:
+        def get_headers(self) -> Dict[str, str]:
             """Get headers with valid access token."""
             return {
-                "Authorization": f"Bearer {self._get_access_token()}",
+                "Authorization": f"Bearer {self.get_access_token()}",
                 "Accept": "application/json",
             }
 
-        def _make_request(
-            self, method: str, endpoint: str, params: Dict = None, retry_count: int = 3
-        ) -> Dict:
+        def make_request(
+            self, method: str, endpoint: str, params: Optional[Dict] = None, retry_count: int = 3
+        ) -> Optional[Dict]:
             """Make API request with retry and rate limit handling."""
-            url = f"{self.base_url}{endpoint}"
+            url = f"{self.BASE_URL}{endpoint}"
 
             for attempt in range(retry_count):
                 response = self._session.request(
-                    method, url, headers=self._get_headers(), params=params
+                    method, url, headers=self.get_headers(), params=params
                 )
 
                 if response.status_code == 200:
@@ -439,15 +749,14 @@ def register_lakeflow_source(spark):
                     return None
                 elif response.status_code == 403:
                     # Forbidden - missing OAuth scope or permission
-                    # Return None to allow graceful handling
                     return None
                 else:
                     response.raise_for_status()
 
             raise Exception(f"Failed after {retry_count} retries")
 
-        def _make_batch_request(
-            self, endpoints: List[str], params_list: List[Dict] = None
+        def make_batch_request(
+            self, endpoints: List[str], params_list: Optional[List[Dict]] = None
         ) -> List[Dict]:
             """
             Make batch API request for efficient bulk data retrieval.
@@ -463,10 +772,10 @@ def register_lakeflow_source(spark):
 
             # Build multipart batch request body
             boundary = "batch_gmail_connector"
-            body_parts = []
+            body_parts: List[str] = []
 
             for i, (endpoint, params) in enumerate(zip(endpoints, params_list)):
-                url = f"{self.base_url}{endpoint}"
+                url = f"{self.BASE_URL}{endpoint}"
                 if params:
                     query_string = "&".join(f"{k}={v}" for k, v in params.items())
                     url = f"{url}?{query_string}"
@@ -479,10 +788,10 @@ def register_lakeflow_source(spark):
 
             body = "\r\n".join(body_parts) + f"\r\n--{boundary}--"
 
-            headers = self._get_headers()
+            headers = self.get_headers()
             headers["Content-Type"] = f"multipart/mixed; boundary={boundary}"
 
-            response = self._session.post(self.batch_url, headers=headers, data=body)
+            response = self._session.post(self.BATCH_URL, headers=headers, data=body)
 
             if response.status_code != 200:
                 # Fall back to sequential requests on batch failure
@@ -515,21 +824,21 @@ def register_lakeflow_source(spark):
             """Fallback sequential fetch when batch fails."""
             results = []
             for endpoint, params in zip(endpoints, params_list):
-                result = self._make_request("GET", endpoint, params)
+                result = self.make_request("GET", endpoint, params)
                 if result:
                     results.append(result)
             return results
 
-        def _fetch_details_parallel(
-            self, ids: List[str], fetch_func, table_options: Dict[str, str]
+        def fetch_details_parallel(
+            self, ids: List[str], fetch_func, max_workers: int = MAX_WORKERS
         ) -> Generator[Dict, None, None]:
             """
             Fetch details in parallel using thread pool.
             Yields results as they complete for true streaming.
             """
-            with ThreadPoolExecutor(max_workers=self.MAX_WORKERS) as executor:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {
-                    executor.submit(fetch_func, id_, table_options): id_ for id_ in ids
+                    executor.submit(fetch_func, id_): id_ for id_ in ids
                 }
                 for future in as_completed(futures):
                     try:
@@ -540,415 +849,55 @@ def register_lakeflow_source(spark):
                         # Skip failed fetches, continue with others
                         continue
 
-        def list_tables(self) -> List[str]:
+
+    ########################################################
+    # src/databricks/labs/community_connector/sources/gmail/gmail.py
+    ########################################################
+
+    class GmailLakeflowConnect(LakeflowConnect):
+        """Gmail connector implementing the LakeflowConnect interface with 100% API coverage."""
+
+        def __init__(self, options: dict[str, str]) -> None:
+            """
+            Initialize the Gmail connector with OAuth 2.0 credentials.
+
+            Expected options:
+                - client_id: OAuth 2.0 client ID from Google Cloud Console
+                - client_secret: OAuth 2.0 client secret
+                - refresh_token: Long-lived refresh token obtained via OAuth flow
+                - user_id (optional): User email or 'me' (default: 'me')
+            """
+            self.client_id = options.get("client_id")
+            self.client_secret = options.get("client_secret")
+            self.refresh_token = options.get("refresh_token")
+            self.user_id = options.get("user_id", "me")
+
+            if not self.client_id:
+                raise ValueError("Gmail connector requires 'client_id' in options")
+            if not self.client_secret:
+                raise ValueError("Gmail connector requires 'client_secret' in options")
+            if not self.refresh_token:
+                raise ValueError("Gmail connector requires 'refresh_token' in options")
+
+            self.api = GmailApiClient(
+                self.client_id, self.client_secret, self.refresh_token, self.user_id
+            )
+
+        # ─── Interface Methods ────────────────────────────────────────────────────
+
+        def list_tables(self) -> list[str]:
             """Return the list of available Gmail tables."""
-            return self.SUPPORTED_TABLES.copy()
+            return SUPPORTED_TABLES.copy()
 
-        def _validate_table(self, table_name: str) -> None:
-            """Validate that the table is supported."""
-            if table_name not in self.SUPPORTED_TABLES:
-                raise ValueError(
-                    f"Unsupported table: '{table_name}'. "
-                    f"Supported tables are: {self.SUPPORTED_TABLES}"
-                )
-
-        def get_table_schema(
-            self, table_name: str, table_options: Dict[str, str]
-        ) -> StructType:
-            """
-            Fetch the schema of a table.
-
-            Args:
-                table_name: The name of the table
-                table_options: Additional options (not used for Gmail)
-
-            Returns:
-                StructType representing the schema
-            """
+        def get_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
+            """Fetch the schema of a table."""
             self._validate_table(table_name)
+            return TABLE_SCHEMAS[table_name]
 
-            schema_map = {
-                "messages": self._get_messages_schema,
-                "threads": self._get_threads_schema,
-                "labels": self._get_labels_schema,
-                "drafts": self._get_drafts_schema,
-                "profile": self._get_profile_schema,
-                "settings": self._get_settings_schema,
-                "filters": self._get_filters_schema,
-                "forwarding_addresses": self._get_forwarding_addresses_schema,
-                "send_as": self._get_send_as_schema,
-                "delegates": self._get_delegates_schema,
-            }
-            return schema_map[table_name]()
-
-        def _get_header_struct(self) -> StructType:
-            """Return the header struct used across schemas."""
-            return StructType(
-                [
-                    StructField("name", StringType(), True),
-                    StructField("value", StringType(), True),
-                ]
-            )
-
-        def _get_body_struct(self) -> StructType:
-            """Return the body struct used across schemas."""
-            return StructType(
-                [
-                    StructField("attachmentId", StringType(), True),
-                    StructField("size", LongType(), True),
-                    StructField("data", StringType(), True),
-                ]
-            )
-
-        def _get_messages_schema(self) -> StructType:
-            """Return schema for messages table."""
-            header_struct = self._get_header_struct()
-            body_struct = self._get_body_struct()
-
-            # MessagePart struct for payload.parts (recursive structure simplified)
-            part_struct = StructType(
-                [
-                    StructField("partId", StringType(), True),
-                    StructField("mimeType", StringType(), True),
-                    StructField("filename", StringType(), True),
-                    StructField("headers", ArrayType(header_struct), True),
-                    StructField("body", body_struct, True),
-                ]
-            )
-
-            # Payload struct
-            payload_struct = StructType(
-                [
-                    StructField("partId", StringType(), True),
-                    StructField("mimeType", StringType(), True),
-                    StructField("filename", StringType(), True),
-                    StructField("headers", ArrayType(header_struct), True),
-                    StructField("body", body_struct, True),
-                    StructField("parts", ArrayType(part_struct), True),
-                ]
-            )
-
-            return StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("threadId", StringType(), True),
-                    StructField("labelIds", ArrayType(StringType()), True),
-                    StructField("snippet", StringType(), True),
-                    StructField("historyId", StringType(), True),
-                    StructField("internalDate", StringType(), True),
-                    StructField("sizeEstimate", LongType(), True),
-                    StructField("payload", payload_struct, True),
-                ]
-            )
-
-        def _get_threads_schema(self) -> StructType:
-            """Return schema for threads table."""
-            # Simplified message struct for threads (without full payload)
-            message_in_thread_struct = StructType(
-                [
-                    StructField("id", StringType(), True),
-                    StructField("threadId", StringType(), True),
-                    StructField("labelIds", ArrayType(StringType()), True),
-                    StructField("snippet", StringType(), True),
-                    StructField("historyId", StringType(), True),
-                    StructField("internalDate", StringType(), True),
-                ]
-            )
-
-            return StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("snippet", StringType(), True),
-                    StructField("historyId", StringType(), True),
-                    StructField("messages", ArrayType(message_in_thread_struct), True),
-                ]
-            )
-
-        def _get_labels_schema(self) -> StructType:
-            """Return schema for labels table."""
-            color_struct = StructType(
-                [
-                    StructField("textColor", StringType(), True),
-                    StructField("backgroundColor", StringType(), True),
-                ]
-            )
-
-            return StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("name", StringType(), True),
-                    StructField("messageListVisibility", StringType(), True),
-                    StructField("labelListVisibility", StringType(), True),
-                    StructField("type", StringType(), True),
-                    StructField("messagesTotal", LongType(), True),
-                    StructField("messagesUnread", LongType(), True),
-                    StructField("threadsTotal", LongType(), True),
-                    StructField("threadsUnread", LongType(), True),
-                    StructField("color", color_struct, True),
-                ]
-            )
-
-        def _get_drafts_schema(self) -> StructType:
-            """Return schema for drafts table."""
-            header_struct = self._get_header_struct()
-            body_struct = self._get_body_struct()
-
-            part_struct = StructType(
-                [
-                    StructField("partId", StringType(), True),
-                    StructField("mimeType", StringType(), True),
-                    StructField("filename", StringType(), True),
-                    StructField("headers", ArrayType(header_struct), True),
-                    StructField("body", body_struct, True),
-                ]
-            )
-
-            payload_struct = StructType(
-                [
-                    StructField("partId", StringType(), True),
-                    StructField("mimeType", StringType(), True),
-                    StructField("filename", StringType(), True),
-                    StructField("headers", ArrayType(header_struct), True),
-                    StructField("body", body_struct, True),
-                    StructField("parts", ArrayType(part_struct), True),
-                ]
-            )
-
-            message_struct = StructType(
-                [
-                    StructField("id", StringType(), True),
-                    StructField("threadId", StringType(), True),
-                    StructField("labelIds", ArrayType(StringType()), True),
-                    StructField("snippet", StringType(), True),
-                    StructField("historyId", StringType(), True),
-                    StructField("internalDate", StringType(), True),
-                    StructField("sizeEstimate", LongType(), True),
-                    StructField("payload", payload_struct, True),
-                ]
-            )
-
-            return StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("message", message_struct, True),
-                ]
-            )
-
-        def _get_profile_schema(self) -> StructType:
-            """Return schema for profile table."""
-            return StructType(
-                [
-                    StructField("emailAddress", StringType(), False),
-                    StructField("messagesTotal", LongType(), True),
-                    StructField("threadsTotal", LongType(), True),
-                    StructField("historyId", StringType(), True),
-                ]
-            )
-
-        def _get_settings_schema(self) -> StructType:
-            """Return schema for settings table (combined IMAP, POP, vacation, language)."""
-            # Auto-forwarding settings
-            auto_forwarding_struct = StructType(
-                [
-                    StructField("enabled", BooleanType(), True),
-                    StructField("emailAddress", StringType(), True),
-                    StructField("disposition", StringType(), True),
-                ]
-            )
-
-            # IMAP settings
-            imap_struct = StructType(
-                [
-                    StructField("enabled", BooleanType(), True),
-                    StructField("autoExpunge", BooleanType(), True),
-                    StructField("expungeBehavior", StringType(), True),
-                    StructField("maxFolderSize", LongType(), True),
-                ]
-            )
-
-            # POP settings
-            pop_struct = StructType(
-                [
-                    StructField("accessWindow", StringType(), True),
-                    StructField("disposition", StringType(), True),
-                ]
-            )
-
-            # Language settings
-            language_struct = StructType(
-                [
-                    StructField("displayLanguage", StringType(), True),
-                ]
-            )
-
-            # Vacation settings
-            vacation_struct = StructType(
-                [
-                    StructField("enableAutoReply", BooleanType(), True),
-                    StructField("responseSubject", StringType(), True),
-                    StructField("responseBodyPlainText", StringType(), True),
-                    StructField("responseBodyHtml", StringType(), True),
-                    StructField("restrictToContacts", BooleanType(), True),
-                    StructField("restrictToDomain", BooleanType(), True),
-                    StructField("startTime", StringType(), True),
-                    StructField("endTime", StringType(), True),
-                ]
-            )
-
-            return StructType(
-                [
-                    StructField("emailAddress", StringType(), False),
-                    StructField("autoForwarding", auto_forwarding_struct, True),
-                    StructField("imap", imap_struct, True),
-                    StructField("pop", pop_struct, True),
-                    StructField("language", language_struct, True),
-                    StructField("vacation", vacation_struct, True),
-                ]
-            )
-
-        def _get_filters_schema(self) -> StructType:
-            """Return schema for filters table."""
-            # Filter criteria
-            criteria_struct = StructType(
-                [
-                    StructField("from", StringType(), True),
-                    StructField("to", StringType(), True),
-                    StructField("subject", StringType(), True),
-                    StructField("query", StringType(), True),
-                    StructField("negatedQuery", StringType(), True),
-                    StructField("hasAttachment", BooleanType(), True),
-                    StructField("excludeChats", BooleanType(), True),
-                    StructField("size", LongType(), True),
-                    StructField("sizeComparison", StringType(), True),
-                ]
-            )
-
-            # Filter action
-            action_struct = StructType(
-                [
-                    StructField("addLabelIds", ArrayType(StringType()), True),
-                    StructField("removeLabelIds", ArrayType(StringType()), True),
-                    StructField("forward", StringType(), True),
-                ]
-            )
-
-            return StructType(
-                [
-                    StructField("id", StringType(), False),
-                    StructField("criteria", criteria_struct, True),
-                    StructField("action", action_struct, True),
-                ]
-            )
-
-        def _get_forwarding_addresses_schema(self) -> StructType:
-            """Return schema for forwarding_addresses table."""
-            return StructType(
-                [
-                    StructField("forwardingEmail", StringType(), False),
-                    StructField("verificationStatus", StringType(), True),
-                ]
-            )
-
-        def _get_send_as_schema(self) -> StructType:
-            """Return schema for send_as table."""
-            # SMIME info struct
-            smime_struct = StructType(
-                [
-                    StructField("id", StringType(), True),
-                    StructField("issuerCn", StringType(), True),
-                    StructField("isDefault", BooleanType(), True),
-                    StructField("expiration", StringType(), True),
-                ]
-            )
-
-            return StructType(
-                [
-                    StructField("sendAsEmail", StringType(), False),
-                    StructField("displayName", StringType(), True),
-                    StructField("replyToAddress", StringType(), True),
-                    StructField("signature", StringType(), True),
-                    StructField("isPrimary", BooleanType(), True),
-                    StructField("isDefault", BooleanType(), True),
-                    StructField("treatAsAlias", BooleanType(), True),
-                    StructField("verificationStatus", StringType(), True),
-                    StructField("smtpMsa", StructType([
-                        StructField("host", StringType(), True),
-                        StructField("port", LongType(), True),
-                        StructField("username", StringType(), True),
-                        StructField("securityMode", StringType(), True),
-                    ]), True),
-                ]
-            )
-
-        def _get_delegates_schema(self) -> StructType:
-            """Return schema for delegates table."""
-            return StructType(
-                [
-                    StructField("delegateEmail", StringType(), False),
-                    StructField("verificationStatus", StringType(), True),
-                ]
-            )
-
-        def read_table_metadata(
-            self, table_name: str, table_options: Dict[str, str]
-        ) -> Dict:
-            """
-            Fetch the metadata of a table.
-
-            Args:
-                table_name: The name of the table
-                table_options: Additional options
-
-            Returns:
-                Dictionary with primary_keys, cursor_field, and ingestion_type
-            """
+        def read_table_metadata(self, table_name: str, table_options: Dict[str, str]) -> Dict:
+            """Fetch the metadata of a table."""
             self._validate_table(table_name)
-
-            metadata_map = {
-                "messages": {
-                    "primary_keys": ["id"],
-                    "cursor_field": "historyId",
-                    "ingestion_type": "cdc",
-                },
-                "threads": {
-                    "primary_keys": ["id"],
-                    "cursor_field": "historyId",
-                    "ingestion_type": "cdc",
-                },
-                "labels": {
-                    "primary_keys": ["id"],
-                    "ingestion_type": "snapshot",
-                },
-                "drafts": {
-                    "primary_keys": ["id"],
-                    "ingestion_type": "snapshot",
-                },
-                "profile": {
-                    "primary_keys": ["emailAddress"],
-                    "ingestion_type": "snapshot",
-                },
-                "settings": {
-                    "primary_keys": ["emailAddress"],
-                    "ingestion_type": "snapshot",
-                },
-                "filters": {
-                    "primary_keys": ["id"],
-                    "ingestion_type": "snapshot",
-                },
-                "forwarding_addresses": {
-                    "primary_keys": ["forwardingEmail"],
-                    "ingestion_type": "snapshot",
-                },
-                "send_as": {
-                    "primary_keys": ["sendAsEmail"],
-                    "ingestion_type": "snapshot",
-                },
-                "delegates": {
-                    "primary_keys": ["delegateEmail"],
-                    "ingestion_type": "snapshot",
-                },
-            }
-            return metadata_map[table_name]
+            return TABLE_METADATA[table_name]
 
         def read_table(
             self, table_name: str, start_offset: dict, table_options: Dict[str, str]
@@ -959,14 +908,6 @@ def register_lakeflow_source(spark):
             For messages and threads with a start_offset containing historyId,
             uses the History API for incremental reads. Otherwise, performs
             a full list operation.
-
-            Args:
-                table_name: The name of the table to read
-                start_offset: Offset containing historyId for incremental reads
-                table_options: Additional options like 'q' (query), 'labelIds', 'maxResults'
-
-            Returns:
-                Tuple of (records iterator, next offset)
             """
             self._validate_table(table_name)
 
@@ -984,6 +925,91 @@ def register_lakeflow_source(spark):
             }
             return read_map[table_name](start_offset, table_options)
 
+        def read_table_deletes(
+            self, table_name: str, start_offset: dict, table_options: Dict[str, str]
+        ) -> (Iterator[dict], dict):
+            """
+            Read deleted records from Gmail using History API.
+
+            Gmail History API provides messagesDeleted events for tracking deletions.
+            This is only applicable for messages and threads (CDC tables).
+            """
+            self._validate_table(table_name)
+
+            # Only messages and threads support delete tracking
+            if table_name not in ("messages", "threads"):
+                return iter([]), {}
+
+            start_history_id = start_offset.get("historyId") if start_offset else None
+            if not start_history_id:
+                return iter([]), {}
+
+            params = {
+                "startHistoryId": start_history_id,
+                "maxResults": 500,
+                "historyTypes": "messageDeleted",
+            }
+
+            page_token = None
+            latest_history_id = start_history_id
+            deleted_records = []
+            seen_ids = set()
+
+            while True:
+                if page_token:
+                    params["pageToken"] = page_token
+
+                response = self.api.make_request("GET", f"/users/{self.user_id}/history", params=params)
+
+                if response is None:
+                    break
+
+                if response.get("historyId"):
+                    latest_history_id = response["historyId"]
+
+                for history_record in response.get("history", []):
+                    for deleted in history_record.get("messagesDeleted", []):
+                        msg = deleted.get("message", {})
+                        if msg.get("id"):
+                            if table_name == "messages":
+                                if msg["id"] not in seen_ids:
+                                    seen_ids.add(msg["id"])
+                                    deleted_records.append(
+                                        {
+                                            "id": msg["id"],
+                                            "threadId": msg.get("threadId"),
+                                            "historyId": history_record.get("id", latest_history_id),
+                                        }
+                                    )
+                            elif table_name == "threads":
+                                thread_id = msg.get("threadId")
+                                if thread_id and thread_id not in seen_ids:
+                                    seen_ids.add(thread_id)
+                                    deleted_records.append(
+                                        {
+                                            "id": thread_id,
+                                            "historyId": history_record.get("id", latest_history_id),
+                                        }
+                                    )
+
+                page_token = response.get("nextPageToken")
+                if not page_token:
+                    break
+
+            next_offset = {"historyId": latest_history_id}
+            return iter(deleted_records), next_offset
+
+        # ─── Helpers ──────────────────────────────────────────────────────────────
+
+        def _validate_table(self, table_name: str) -> None:
+            """Validate that the table is supported."""
+            if table_name not in SUPPORTED_TABLES:
+                raise ValueError(
+                    f"Unsupported table: '{table_name}'. Supported tables are: {SUPPORTED_TABLES}"
+                )
+
+        # ─── Table Readers ────────────────────────────────────────────────────────
+
         def _read_messages(
             self, start_offset: dict, table_options: Dict[str, str]
         ) -> (Iterator[dict], dict):
@@ -991,9 +1017,7 @@ def register_lakeflow_source(spark):
             max_results = int(table_options.get("maxResults", "100"))
             query = table_options.get("q")
             label_ids = table_options.get("labelIds")
-            include_spam_trash = (
-                table_options.get("includeSpamTrash", "false").lower() == "true"
-            )
+            include_spam_trash = table_options.get("includeSpamTrash", "false").lower() == "true"
 
             start_history_id = start_offset.get("historyId") if start_offset else None
 
@@ -1025,54 +1049,52 @@ def register_lakeflow_source(spark):
             format_type = table_options.get("format", "full")
 
             def fetch_message(mid):
-                return self._make_request(
+                return self.api.make_request(
                     "GET",
                     f"/users/{self.user_id}/messages/{mid}",
-                    {"format": format_type}
+                    {"format": format_type},
                 )
 
-            def message_generator() -> Generator[Dict, None, None]:
-                page_token = None
+            all_messages = []
+            page_token = None
 
-                while True:
-                    if page_token:
-                        params["pageToken"] = page_token
+            while True:
+                if page_token:
+                    params["pageToken"] = page_token
 
-                    response = self._make_request(
-                        "GET", f"/users/{self.user_id}/messages", params=params
-                    )
+                response = self.api.make_request(
+                    "GET", f"/users/{self.user_id}/messages", params=params
+                )
 
-                    if not response or "messages" not in response:
-                        break
+                if not response or "messages" not in response:
+                    break
 
-                    message_ids = [m["id"] for m in response.get("messages", [])]
+                message_ids = [m["id"] for m in response.get("messages", [])]
 
-                    # Fetch messages in parallel for better performance
-                    with ThreadPoolExecutor(max_workers=self.MAX_WORKERS) as executor:
-                        results = list(executor.map(fetch_message, message_ids))
+                # Fetch messages in parallel for better performance
+                with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                    results = list(executor.map(fetch_message, message_ids))
 
-                    for msg_detail in results:
-                        if msg_detail:
-                            if msg_detail.get("historyId"):
-                                if (
-                                    not state["latest_history_id"]
-                                    or msg_detail["historyId"] > state["latest_history_id"]
-                                ):
-                                    state["latest_history_id"] = msg_detail["historyId"]
-                            yield msg_detail
+                for msg_detail in results:
+                    if msg_detail:
+                        if msg_detail.get("historyId"):
+                            if (
+                                not state["latest_history_id"]
+                                or msg_detail["historyId"] > state["latest_history_id"]
+                            ):
+                                state["latest_history_id"] = msg_detail["historyId"]
+                        all_messages.append(msg_detail)
 
-                    page_token = response.get("nextPageToken")
-                    if not page_token:
-                        break
+                page_token = response.get("nextPageToken")
+                if not page_token:
+                    break
 
-            generator = message_generator()
-            records = list(generator)
             next_offset = (
                 {"historyId": state["latest_history_id"]}
                 if state["latest_history_id"]
                 else {}
             )
-            return iter(records), next_offset
+            return iter(all_messages), next_offset
 
         def _read_messages_incremental(
             self, start_history_id: str, table_options: Dict[str, str]
@@ -1092,9 +1114,7 @@ def register_lakeflow_source(spark):
                 if page_token:
                     params["pageToken"] = page_token
 
-                response = self._make_request(
-                    "GET", f"/users/{self.user_id}/history", params=params
-                )
+                response = self.api.make_request("GET", f"/users/{self.user_id}/history", params=params)
 
                 if response is None:
                     return self._read_messages_streaming(
@@ -1118,12 +1138,12 @@ def register_lakeflow_source(spark):
             message_ids = list(all_message_ids)
             format_type = table_options.get("format", "full")
 
-            for i in range(0, len(message_ids), self.BATCH_SIZE):
-                batch_ids = message_ids[i : i + self.BATCH_SIZE]
+            for i in range(0, len(message_ids), BATCH_SIZE):
+                batch_ids = message_ids[i : i + BATCH_SIZE]
                 endpoints = [f"/users/{self.user_id}/messages/{mid}" for mid in batch_ids]
                 params_list = [{"format": format_type}] * len(batch_ids)
 
-                batch_results = self._make_batch_request(endpoints, params_list)
+                batch_results = self.api.make_batch_request(endpoints, params_list)
                 all_messages.extend([r for r in batch_results if r])
 
             next_offset = {"historyId": latest_history_id}
@@ -1172,19 +1192,17 @@ def register_lakeflow_source(spark):
             format_type = table_options.get("format", "full")
 
             def fetch_thread(tid):
-                return self._make_request(
+                return self.api.make_request(
                     "GET",
                     f"/users/{self.user_id}/threads/{tid}",
-                    {"format": format_type}
+                    {"format": format_type},
                 )
 
             while True:
                 if page_token:
                     params["pageToken"] = page_token
 
-                response = self._make_request(
-                    "GET", f"/users/{self.user_id}/threads", params=params
-                )
+                response = self.api.make_request("GET", f"/users/{self.user_id}/threads", params=params)
 
                 if not response or "threads" not in response:
                     break
@@ -1192,7 +1210,7 @@ def register_lakeflow_source(spark):
                 thread_ids = [t["id"] for t in response.get("threads", [])]
 
                 # Fetch threads in parallel for better performance
-                with ThreadPoolExecutor(max_workers=self.MAX_WORKERS) as executor:
+                with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                     results = list(executor.map(fetch_thread, thread_ids))
 
                 for thread_detail in results:
@@ -1234,9 +1252,7 @@ def register_lakeflow_source(spark):
                 if page_token:
                     params["pageToken"] = page_token
 
-                response = self._make_request(
-                    "GET", f"/users/{self.user_id}/history", params=params
-                )
+                response = self.api.make_request("GET", f"/users/{self.user_id}/history", params=params)
 
                 if response is None:
                     return self._read_threads_streaming(100, None, None, False, table_options)
@@ -1258,12 +1274,12 @@ def register_lakeflow_source(spark):
             thread_ids = list(all_thread_ids)
             format_type = table_options.get("format", "full")
 
-            for i in range(0, len(thread_ids), self.BATCH_SIZE):
-                batch_ids = thread_ids[i : i + self.BATCH_SIZE]
+            for i in range(0, len(thread_ids), BATCH_SIZE):
+                batch_ids = thread_ids[i : i + BATCH_SIZE]
                 endpoints = [f"/users/{self.user_id}/threads/{tid}" for tid in batch_ids]
                 params_list = [{"format": format_type}] * len(batch_ids)
 
-                batch_results = self._make_batch_request(endpoints, params_list)
+                batch_results = self.api.make_batch_request(endpoints, params_list)
                 all_threads.extend([r for r in batch_results if r])
 
             next_offset = {"historyId": latest_history_id}
@@ -1273,7 +1289,7 @@ def register_lakeflow_source(spark):
             self, start_offset: dict, table_options: Dict[str, str]
         ) -> (Iterator[dict], dict):
             """Read all labels (snapshot mode)."""
-            response = self._make_request("GET", f"/users/{self.user_id}/labels")
+            response = self.api.make_request("GET", f"/users/{self.user_id}/labels")
 
             if not response or "labels" not in response:
                 return iter([]), {}
@@ -1286,7 +1302,7 @@ def register_lakeflow_source(spark):
             for label in labels:
                 label_id = label.get("id")
                 if label_id:
-                    detail = self._make_request("GET", f"/users/{self.user_id}/labels/{label_id}")
+                    detail = self.api.make_request("GET", f"/users/{self.user_id}/labels/{label_id}")
                     if detail:
                         all_labels.append(detail)
                     else:
@@ -1309,9 +1325,7 @@ def register_lakeflow_source(spark):
                 if page_token:
                     params["pageToken"] = page_token
 
-                response = self._make_request(
-                    "GET", f"/users/{self.user_id}/drafts", params=params
-                )
+                response = self.api.make_request("GET", f"/users/{self.user_id}/drafts", params=params)
 
                 if not response or "drafts" not in response:
                     break
@@ -1320,13 +1334,13 @@ def register_lakeflow_source(spark):
 
                 # Fetch drafts in parallel for better performance
                 def fetch_draft(draft_id):
-                    return self._make_request(
+                    return self.api.make_request(
                         "GET",
                         f"/users/{self.user_id}/drafts/{draft_id}",
-                        {"format": format_type}
+                        {"format": format_type},
                     )
 
-                with ThreadPoolExecutor(max_workers=self.MAX_WORKERS) as executor:
+                with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                     results = list(executor.map(fetch_draft, draft_ids))
                     all_drafts.extend([r for r in results if r])
 
@@ -1340,7 +1354,7 @@ def register_lakeflow_source(spark):
             self, start_offset: dict, table_options: Dict[str, str]
         ) -> (Iterator[dict], dict):
             """Read user profile (single record)."""
-            response = self._make_request("GET", f"/users/{self.user_id}/profile")
+            response = self.api.make_request("GET", f"/users/{self.user_id}/profile")
 
             if not response:
                 return iter([]), {}
@@ -1360,10 +1374,10 @@ def register_lakeflow_source(spark):
                 f"/users/{self.user_id}/settings/vacation",
             ]
 
-            results = self._make_batch_request(endpoints)
+            results = self.api.make_batch_request(endpoints)
 
             # Get email address from profile
-            profile = self._make_request("GET", f"/users/{self.user_id}/profile")
+            profile = self.api.make_request("GET", f"/users/{self.user_id}/profile")
             email_address = profile.get("emailAddress", self.user_id) if profile else self.user_id
 
             # Combine all settings into one record
@@ -1382,7 +1396,7 @@ def register_lakeflow_source(spark):
             self, start_offset: dict, table_options: Dict[str, str]
         ) -> (Iterator[dict], dict):
             """Read all email filters."""
-            response = self._make_request("GET", f"/users/{self.user_id}/settings/filters")
+            response = self.api.make_request("GET", f"/users/{self.user_id}/settings/filters")
 
             if not response or "filter" not in response:
                 return iter([]), {}
@@ -1393,7 +1407,7 @@ def register_lakeflow_source(spark):
             self, start_offset: dict, table_options: Dict[str, str]
         ) -> (Iterator[dict], dict):
             """Read all forwarding addresses."""
-            response = self._make_request(
+            response = self.api.make_request(
                 "GET", f"/users/{self.user_id}/settings/forwardingAddresses"
             )
 
@@ -1406,7 +1420,7 @@ def register_lakeflow_source(spark):
             self, start_offset: dict, table_options: Dict[str, str]
         ) -> (Iterator[dict], dict):
             """Read all send-as aliases."""
-            response = self._make_request("GET", f"/users/{self.user_id}/settings/sendAs")
+            response = self.api.make_request("GET", f"/users/{self.user_id}/settings/sendAs")
 
             if not response or "sendAs" not in response:
                 return iter([]), {}
@@ -1417,100 +1431,12 @@ def register_lakeflow_source(spark):
             self, start_offset: dict, table_options: Dict[str, str]
         ) -> (Iterator[dict], dict):
             """Read all delegates."""
-            response = self._make_request("GET", f"/users/{self.user_id}/settings/delegates")
+            response = self.api.make_request("GET", f"/users/{self.user_id}/settings/delegates")
 
             if not response or "delegates" not in response:
                 return iter([]), {}
 
             return iter(response.get("delegates", [])), {}
-
-        def read_table_deletes(
-            self, table_name: str, start_offset: dict, table_options: Dict[str, str]
-        ) -> (Iterator[dict], dict):
-            """
-            Read deleted records from Gmail using History API.
-
-            Gmail History API provides messagesDeleted events for tracking deletions.
-            This is only applicable for messages and threads (CDC tables).
-
-            Args:
-                table_name: The table to read deletes from
-                start_offset: Offset containing historyId
-                table_options: Additional options
-
-            Returns:
-                Tuple of (deleted records iterator, next offset)
-            """
-            self._validate_table(table_name)
-
-            # Only messages and threads support delete tracking
-            if table_name not in ("messages", "threads"):
-                return iter([]), {}
-
-            start_history_id = start_offset.get("historyId") if start_offset else None
-            if not start_history_id:
-                return iter([]), {}
-
-            params = {
-                "startHistoryId": start_history_id,
-                "maxResults": 500,
-                "historyTypes": "messageDeleted",
-            }
-
-            page_token = None
-            latest_history_id = start_history_id
-            deleted_records = []
-            seen_ids = set()
-
-            while True:
-                if page_token:
-                    params["pageToken"] = page_token
-
-                response = self._make_request(
-                    "GET", f"/users/{self.user_id}/history", params=params
-                )
-
-                if response is None:
-                    break
-
-                if response.get("historyId"):
-                    latest_history_id = response["historyId"]
-
-                for history_record in response.get("history", []):
-                    for deleted in history_record.get("messagesDeleted", []):
-                        msg = deleted.get("message", {})
-                        if msg.get("id"):
-                            if table_name == "messages":
-                                if msg["id"] not in seen_ids:
-                                    seen_ids.add(msg["id"])
-                                    deleted_records.append(
-                                        {
-                                            "id": msg["id"],
-                                            "threadId": msg.get("threadId"),
-                                            "historyId": history_record.get(
-                                                "id", latest_history_id
-                                            ),
-                                        }
-                                    )
-                            elif table_name == "threads":
-                                thread_id = msg.get("threadId")
-                                if thread_id and thread_id not in seen_ids:
-                                    seen_ids.add(thread_id)
-                                    deleted_records.append(
-                                        {
-                                            "id": thread_id,
-                                            "historyId": history_record.get(
-                                                "id", latest_history_id
-                                            ),
-                                        }
-                                    )
-
-                page_token = response.get("nextPageToken")
-                if not page_token:
-                    break
-
-            next_offset = {"historyId": latest_history_id}
-            return iter(deleted_records), next_offset
 
 
     ########################################################
