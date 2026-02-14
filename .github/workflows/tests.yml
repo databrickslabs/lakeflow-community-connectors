@@ -15,7 +15,7 @@ jobs:
       pipeline: ${{ steps.check.outputs.pipeline }}
       example: ${{ steps.check.outputs.example }}
       community_connector: ${{ steps.check.outputs.community_connector }}
-      gmail: ${{ steps.check.outputs.gmail }}
+      sources: ${{ steps.check.outputs.sources }}
     steps:
       - uses: actions/checkout@v4
       # cannot use dorny because of ip allowlisting
@@ -49,21 +49,21 @@ jobs:
           echo "$CHANGED_FILES"
 
           # Check libs
-          if echo "$CHANGED_FILES" | grep -q '^libs/'; then
+          if echo "$CHANGED_FILES" | grep -qE '^(src/databricks/labs/community_connector/libs/|tests/unit/libs/)'; then
             echo "libs=true" >> $GITHUB_OUTPUT
           else
             echo "libs=false" >> $GITHUB_OUTPUT
           fi
 
           # Check pipeline
-          if echo "$CHANGED_FILES" | grep -q '^pipeline/'; then
+          if echo "$CHANGED_FILES" | grep -qE '^(src/databricks/labs/community_connector/pipeline/|tests/unit/pipeline/)'; then
             echo "pipeline=true" >> $GITHUB_OUTPUT
           else
             echo "pipeline=false" >> $GITHUB_OUTPUT
           fi
 
           # Check example (also triggers on interface changes)
-          if echo "$CHANGED_FILES" | grep -qE '^sources/(example|interface)/'; then
+          if echo "$CHANGED_FILES" | grep -qE '^(src/databricks/labs/community_connector/sources/(example|interface)/|tests/unit/sources/(example/|test_suite\.py|test_utils\.py|lakeflow_connect_test_utils\.py))'; then
             echo "example=true" >> $GITHUB_OUTPUT
           else
             echo "example=false" >> $GITHUB_OUTPUT
@@ -76,12 +76,62 @@ jobs:
             echo "community_connector=false" >> $GITHUB_OUTPUT
           fi
 
-          # Check gmail source (also triggers on interface changes)
-          if echo "$CHANGED_FILES" | grep -qE '^sources/(gmail|interface)/'; then
-            echo "gmail=true" >> $GITHUB_OUTPUT
-          else
-            echo "gmail=false" >> $GITHUB_OUTPUT
+          # Detect per-source connector changes
+          # Triggers when source code, test code, or libs/utils.py changes
+          UTILS_CHANGED=false
+          if echo "$CHANGED_FILES" | grep -qE '^src/databricks/labs/community_connector/libs/utils\.py$'; then
+            UTILS_CHANGED=true
           fi
+
+          # Read exclude list into a temp file (skip comments and blank lines)
+          EXCLUDE_FILE=".github/workflows/test_exclude.txt"
+          EXCLUDES_TMP=$(mktemp)
+          if [ -f "$EXCLUDE_FILE" ]; then
+            grep -v '^\s*#' "$EXCLUDE_FILE" | grep -v '^\s*$' > "$EXCLUDES_TMP" || true
+          fi
+
+          # Find all source connector directories and check for changes
+          CHANGED_SOURCES=""
+          for source_dir in src/databricks/labs/community_connector/sources/*/; do
+            source_name=$(basename "$source_dir")
+
+            # Skip non-connector directories
+            if [ "$source_name" = "interface" ] || [ "$source_name" = "__pycache__" ]; then
+              continue
+            fi
+
+            # Check if this source's code, tests, or utils.py changed
+            SOURCE_TRIGGERED=false
+            if [ "$UTILS_CHANGED" = "true" ]; then
+              SOURCE_TRIGGERED=true
+            elif echo "$CHANGED_FILES" | grep -qE "^src/databricks/labs/community_connector/sources/${source_name}/"; then
+              SOURCE_TRIGGERED=true
+            elif echo "$CHANGED_FILES" | grep -qE "^tests/unit/sources/${source_name}/"; then
+              SOURCE_TRIGGERED=true
+            fi
+
+            if [ "$SOURCE_TRIGGERED" = "true" ] && [ -d "tests/unit/sources/${source_name}" ]; then
+              # Check if source has at least one non-excluded test file
+              HAS_RUNNABLE_TESTS=false
+              for test_file in tests/unit/sources/${source_name}/test_*.py; do
+                if [ -f "$test_file" ] && ! grep -qxF "$test_file" "$EXCLUDES_TMP"; then
+                  HAS_RUNNABLE_TESTS=true
+                  break
+                fi
+              done
+
+              if [ "$HAS_RUNNABLE_TESTS" = "true" ]; then
+                CHANGED_SOURCES="${CHANGED_SOURCES:+$CHANGED_SOURCES,}\"${source_name}\""
+                echo "Source to test: $source_name"
+              else
+                echo "Skipping $source_name (all tests excluded)"
+              fi
+            fi
+          done
+
+          rm -f "$EXCLUDES_TMP"
+          echo "sources=[${CHANGED_SOURCES}]" >> $GITHUB_OUTPUT
+          echo "Sources to test: [${CHANGED_SOURCES}]"
 
   # Test libs
   test-libs:
@@ -103,7 +153,7 @@ jobs:
           pip install -e ".[dev]"
       - name: Run libs tests
         run: |
-          pytest libs/test/ -v
+          pytest tests/unit/libs/ -v
 
   # Test pipeline
   test-pipeline:
@@ -125,7 +175,7 @@ jobs:
           pip install -e ".[dev]"
       - name: Run pipeline tests
         run: |
-          pytest pipeline/test/ -v
+          pytest tests/unit/pipeline/ -v
 
   # Test example source
   test-example:
@@ -147,7 +197,7 @@ jobs:
           pip install -e ".[dev]"
       - name: Run example tests
         run: |
-          pytest sources/example/test/ -v
+          pytest tests/unit/sources/example/ -v
 
   # Test community connector tool
   test-community-connector:
@@ -173,24 +223,44 @@ jobs:
           cd tools/community_connector
           pytest tests/ -v
 
-  # Test Gmail connector (unit tests only - no credentials needed)
-  test-gmail:
+  # Test source connectors (per-source, triggered by source/test/utils changes)
+  test-source:
     needs: changes
-    if: ${{ needs.changes.outputs.gmail == 'true' }}
+    if: ${{ needs.changes.outputs.sources != '[]' }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10"]
+        source: ${{ fromJson(needs.changes.outputs.sources) }}
+      fail-fast: false
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python 3.10
         uses: actions/setup-python@v3
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.10"
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-      - name: Run Gmail unit tests
+          # Install source-specific dependencies if the source has its own pyproject.toml
+          SOURCE_DIR="src/databricks/labs/community_connector/sources/${{ matrix.source }}"
+          if [ -f "$SOURCE_DIR/pyproject.toml" ]; then
+            pip install -e "$SOURCE_DIR"
+          fi
+      - name: Run ${{ matrix.source }} tests
         run: |
-          pytest sources/gmail/test/ -v -k "unit"
+          IGNORE_FLAGS=""
+          EXCLUDE_FILE=".github/workflows/test_exclude.txt"
+          if [ -f "$EXCLUDE_FILE" ]; then
+            while IFS= read -r line; do
+              # Skip comments and empty lines
+              [[ "$line" =~ ^[[:space:]]*# ]] && continue
+              [[ -z "${line// }" ]] && continue
+              # Add --ignore for excluded tests in this source's directory
+              if [[ "$line" == tests/unit/sources/${{ matrix.source }}/* ]]; then
+                IGNORE_FLAGS="$IGNORE_FLAGS --ignore=$line"
+              fi
+            done < "$EXCLUDE_FILE"
+          fi
+          echo "Ignore flags: $IGNORE_FLAGS"
+          pytest tests/unit/sources/${{ matrix.source }}/ $IGNORE_FLAGS -v
