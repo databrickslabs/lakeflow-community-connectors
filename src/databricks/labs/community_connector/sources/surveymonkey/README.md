@@ -28,12 +28,12 @@ Provide the following **connection-level** options when configuring the connecto
 |----------------|--------|----------|----------------------------------------------------------------------------------------------------------------|------------------------------------------|
 | `access_token` | string | yes      | SurveyMonkey OAuth 2.0 access token for authentication.                                                        | `SjM5Y...xxxxx`                          |
 | `base_url`     | string | no       | Base URL for the SurveyMonkey API. Defaults to `https://api.surveymonkey.com/v3`. Use `https://api.eu.surveymonkey.com/v3` for EU data center. | `https://api.surveymonkey.com/v3` |
-| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names allowed to be passed to the connector. Required for child tables. | `survey_id,page_id` |
+| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names allowed to be passed to the connector. Required for child tables. | `survey_id,page_id,group_id` |
 
 The full list of supported table-specific options for `externalOptionsAllowList` is:
-`survey_id,page_id`
+`survey_id,page_id,group_id`
 
-> **Note**: Table-specific options such as `survey_id` and `page_id` are **not** connection parameters. They are provided per-table via table options in the pipeline specification. These option names must be included in `externalOptionsAllowList` for the connection to allow them.
+> **Note**: Table-specific options such as `survey_id`, `page_id`, and `group_id` are **not** connection parameters. They are provided per-table via table options in the pipeline specification. These option names must be included in `externalOptionsAllowList` for the connection to allow them.
 
 
 ### Obtaining the Access Token
@@ -77,7 +77,7 @@ A Unity Catalog connection for this connector can be created in two ways via the
 
 1. Follow the **Lakeflow Community Connector** UI flow from the **Add Data** page.
 2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
-3. Set `externalOptionsAllowList` to `survey_id,page_id` (required to pass table-specific options for child tables).
+3. Set `externalOptionsAllowList` to `survey_id,page_id,group_id` (required to pass table-specific options for child tables).
 
 The connection can also be created using the standard Unity Catalog API.
 
@@ -94,46 +94,78 @@ The SurveyMonkey connector exposes a **static list** of tables:
 - `contact_lists`
 - `contacts`
 - `users`
+- `groups`
+- `group_members`
+- `workgroups`
+- `survey_folders`
+- `survey_categories`
+- `survey_templates`
+- `survey_languages`
+- `webhooks`
+- `survey_rollups`
+- `benchmark_bundles`
 
 
 ### Object Summary, Primary Keys, and Ingestion Mode
 
-| Table              | Description                                      | Ingestion Type | Primary Key | Incremental Cursor |
-|--------------------|--------------------------------------------------|----------------|-------------|---------------------|
-| `surveys`          | Survey metadata and configuration                | `cdc`          | `id`        | `date_modified`     |
-| `survey_responses` | Individual responses to a survey                 | `cdc`          | `id`        | `date_modified`     |
-| `survey_pages`     | Pages within a survey                            | `snapshot`     | `id`        | N/A                 |
-| `survey_questions` | Questions within survey pages                    | `snapshot`     | `id`        | N/A                 |
-| `collectors`       | Collection channels for surveys                  | `cdc`          | `id`        | `date_modified`     |
-| `contact_lists`    | Contact list metadata                            | `snapshot`     | `id`        | N/A                 |
-| `contacts`         | Individual contacts                              | `snapshot`     | `id`        | N/A                 |
-| `users`            | Current authenticated user information           | `snapshot`     | `id`        | N/A                 |
+| Table                | Description                                      | Ingestion Type | Primary Key | Incremental Cursor |
+|----------------------|--------------------------------------------------|----------------|-------------|---------------------|
+| `surveys`            | Survey metadata and configuration                | `cdc`          | `id`        | `date_modified`     |
+| `survey_responses`   | Individual responses to a survey                 | `cdc`          | `id`        | `date_modified`     |
+| `survey_pages`       | Pages within a survey                            | `snapshot`     | `id`        | N/A                 |
+| `survey_questions`   | Questions within survey pages                    | `snapshot`     | `id`        | N/A                 |
+| `collectors`         | Collection channels for surveys                  | `cdc`          | `id`        | `date_modified`     |
+| `contact_lists`      | Contact list metadata                            | `snapshot`     | `id`        | N/A                 |
+| `contacts`           | Individual contacts                              | `snapshot`     | `id`        | N/A                 |
+| `users`              | Current authenticated user information           | `snapshot`     | `id`        | N/A                 |
+| `groups`             | Team/group information                           | `snapshot`     | `id`        | N/A                 |
+| `group_members`      | Members within a group                           | `snapshot`     | `id`        | N/A                 |
+| `workgroups`         | Workgroup configuration and membership           | `snapshot`     | `id`        | N/A                 |
+| `survey_folders`     | Folder structure for organizing surveys          | `snapshot`     | `id`        | N/A                 |
+| `survey_categories`  | Available survey categories                      | `snapshot`     | `id`        | N/A                 |
+| `survey_templates`   | Available survey templates                       | `snapshot`     | `id`        | N/A                 |
+| `survey_languages`   | Supported survey languages                       | `snapshot`     | `id`        | N/A                 |
+| `webhooks`           | Configured webhooks                              | `snapshot`     | `id`        | N/A                 |
+| `survey_rollups`     | Aggregated survey response statistics            | `snapshot`     | `id`        | N/A                 |
+| `benchmark_bundles`  | Benchmark data bundles for comparison            | `snapshot`     | `id`        | N/A                 |
 
 
 ### Required and Optional Table Options
 
 Some tables require additional configuration via table options:
 
-| Table              | Required Options     | Optional Options | Notes |
-|--------------------|---------------------|------------------|-------|
-| `surveys`          | None                | None             | Lists all surveys accessible to the authenticated user. |
-| `survey_responses` | None                | `survey_id`      | If `survey_id` is provided, reads responses for that survey only. If omitted, iterates through all surveys and combines responses. |
-| `survey_pages`     | None                | `survey_id`      | If `survey_id` is provided, reads pages for that survey only. If omitted, iterates through all surveys. |
-| `survey_questions` | None                | `survey_id`, `page_id` | If both are provided, reads questions for that specific page. If only `survey_id` is provided, iterates through all pages of that survey. If neither is provided, iterates through all surveys and their pages. |
-| `collectors`       | None                | `survey_id`      | If `survey_id` is provided, reads collectors for that survey only. If omitted, iterates through all surveys. |
-| `contact_lists`    | None                | None             | Lists all contact lists. |
-| `contacts`         | None                | None             | Lists all contacts. |
-| `users`            | None                | None             | Returns the authenticated user's information. |
+| Table                | Required Options     | Optional Options       | Notes |
+|----------------------|---------------------|------------------------|-------|
+| `surveys`            | None                | None                   | Lists all surveys accessible to the authenticated user. |
+| `survey_responses`   | None                | `survey_id`            | If `survey_id` is provided, reads responses for that survey only. If omitted, iterates through all surveys and combines responses. |
+| `survey_pages`       | None                | `survey_id`            | If `survey_id` is provided, reads pages for that survey only. If omitted, iterates through all surveys. |
+| `survey_questions`   | None                | `survey_id`, `page_id` | If both are provided, reads questions for that specific page. If only `survey_id` is provided, iterates through all pages of that survey. If neither is provided, iterates through all surveys and their pages. |
+| `collectors`         | None                | `survey_id`            | If `survey_id` is provided, reads collectors for that survey only. If omitted, iterates through all surveys. |
+| `contact_lists`      | None                | None                   | Lists all contact lists. |
+| `contacts`           | None                | None                   | Lists all contacts. |
+| `users`              | None                | None                   | Returns the authenticated user's information. |
+| `groups`             | None                | None                   | Lists all groups in the account. |
+| `group_members`      | None                | `group_id`             | If `group_id` is provided, reads members for that group only. If omitted, iterates through all groups. |
+| `workgroups`         | None                | None                   | Lists all workgroups. |
+| `survey_folders`     | None                | None                   | Lists all survey folders. |
+| `survey_categories`  | None                | None                   | Lists available survey categories. |
+| `survey_templates`   | None                | None                   | Lists available survey templates. |
+| `survey_languages`   | None                | None                   | Lists supported survey languages. |
+| `webhooks`           | None                | None                   | Lists configured webhooks. |
+| `survey_rollups`     | None                | `survey_id`            | If `survey_id` is provided, reads rollups for that survey only. If omitted, iterates through all surveys. |
+| `benchmark_bundles`  | None                | None                   | Lists available benchmark bundles. |
 
 
 ### Object Hierarchy Notes
 
-- `survey_responses`, `survey_pages`, `survey_questions`, and `collectors` are child objects of `surveys`.
+- `survey_responses`, `survey_pages`, `survey_questions`, `collectors`, and `survey_rollups` are child objects of `surveys`.
+- `group_members` is a child object of `groups`.
 - When `survey_id` is not provided for child tables, the connector will:
   1. List all parent surveys.
   2. For each survey, fetch the child objects.
   3. Combine results into a single output with `survey_id` added to each record.
 - For `survey_questions`, when `page_id` is also omitted, the connector iterates through all pages of each survey.
+- When `group_id` is not provided for `group_members`, the connector iterates through all groups.
 
 
 ### Schema Highlights
@@ -309,8 +341,8 @@ For incremental tables (`surveys`, `survey_responses`, `collectors`):
 
 ## References
 
-- Connector implementation: `sources/surveymonkey/surveymonkey.py`
-- Connector API documentation: `sources/surveymonkey/surveymonkey_api_doc.md`
+- Connector implementation: `src/databricks/labs/community_connector/sources/surveymonkey/surveymonkey.py`
+- Connector API documentation: `src/databricks/labs/community_connector/sources/surveymonkey/surveymonkey_api_doc.md`
 - Official SurveyMonkey API documentation:
   - `https://developer.surveymonkey.com/api/v3/`
   - `https://developer.surveymonkey.com/api/v3/#surveys`

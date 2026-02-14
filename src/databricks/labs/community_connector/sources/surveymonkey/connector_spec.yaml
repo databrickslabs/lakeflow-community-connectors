@@ -1,0 +1,35 @@
+# surveymonkey Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: SurveyMonkey
+connection:
+  parameters:
+    - name: access_token
+      type: string
+      required: true
+      secret: true
+      description: >
+        SurveyMonkey OAuth 2.0 access token for API authentication.
+        Must be obtained via SurveyMonkey's OAuth flow with appropriate scopes.
+
+    - name: base_url
+      type: string
+      required: false
+      description: >
+        Base URL for the SurveyMonkey API. Defaults to
+        https://api.surveymonkey.com/v3 (US data center). Set to
+        https://api.eu.surveymonkey.com/v3 for EU data center.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# If no table-specific options are needed, set to empty string or omit.
+# ============================================================================
+external_options_allowlist: "survey_id,page_id,group_id"
