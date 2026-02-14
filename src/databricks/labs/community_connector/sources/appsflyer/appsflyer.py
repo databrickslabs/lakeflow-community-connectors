@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from typing import Iterator, Any
 import csv
 import io
+import time
 import requests
 from pyspark.sql.types import (
     StructType,
@@ -14,6 +15,12 @@ from pyspark.sql.types import (
 )
 
 from databricks.labs.community_connector.interface.lakeflow_connect import LakeflowConnect
+
+
+_MAX_RETRIES = 3
+_RETRY_BACKOFF_BASE = 2  # seconds; exponential: 2, 4, 8
+_RATE_LIMIT_DEFAULT_WAIT = 60  # seconds when Retry-After header is missing
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 class AppsflyerLakeflowConnect(LakeflowConnect):
@@ -45,6 +52,45 @@ class AppsflyerLakeflowConnect(LakeflowConnect):
                 "Accept": "application/json",
             }
         )
+
+    def _request_with_retry(self, method: str, url: str, **kwargs) -> requests.Response:
+        """Make an HTTP request with retry on transient errors and rate limiting."""
+        last_exception = None
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                response = self._session.request(method, url, **kwargs)
+            except (requests.ConnectionError, requests.Timeout) as exc:
+                last_exception = exc
+                if attempt == _MAX_RETRIES:
+                    raise
+                wait = _RETRY_BACKOFF_BASE ** (attempt + 1)
+                print(f"[AppsFlyer] Connection error (attempt {attempt + 1}), retrying in {wait}s: {exc}")
+                time.sleep(wait)
+                continue
+
+            if response.status_code not in _RETRYABLE_STATUS_CODES:
+                return response
+
+            if attempt == _MAX_RETRIES:
+                return response
+
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After")
+                try:
+                    wait = int(retry_after)
+                except (TypeError, ValueError):
+                    wait = _RATE_LIMIT_DEFAULT_WAIT
+                print(f"[AppsFlyer] Rate limited (429), sleeping {wait}s")
+            else:
+                wait = _RETRY_BACKOFF_BASE ** (attempt + 1)
+                print(
+                    f"[AppsFlyer] Server error {response.status_code} "
+                    f"(attempt {attempt + 1}), retrying in {wait}s"
+                )
+            time.sleep(wait)
+
+        # Should not reach here, but just in case
+        raise RuntimeError(f"Request failed after {_MAX_RETRIES + 1} attempts: {last_exception}")
 
     def list_tables(self) -> list[str]:
         """
@@ -351,7 +397,7 @@ class AppsflyerLakeflowConnect(LakeflowConnect):
         Read the apps snapshot table.
         """
         url = f"{self.base_url}/api/mng/apps"
-        response = self._session.get(url, timeout=60)
+        response = self._request_with_retry("GET", url, timeout=60)
 
         if response.status_code != 200:
             raise RuntimeError(
@@ -529,7 +575,7 @@ class AppsflyerLakeflowConnect(LakeflowConnect):
         # Make API request with CSV Accept header
         # Note: Raw Data Export API expects CSV format
         headers = {"Accept": "text/csv"}
-        response = self._session.get(url, params=params, headers=headers, timeout=120)
+        response = self._request_with_retry("GET", url, params=params, headers=headers, timeout=120)
 
         if response.status_code != 200:
             raise RuntimeError(
