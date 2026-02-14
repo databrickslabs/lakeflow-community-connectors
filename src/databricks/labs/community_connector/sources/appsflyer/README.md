@@ -15,7 +15,7 @@ For local testing and development:
 
 1. **Copy example configuration files**:
    ```bash
-   cd sources/appsflyer/configs
+   cd tests/unit/sources/appsflyer/configs
    cp dev_config.json local_config.json
    cp dev_table_config.json local_table_config.json
    ```
