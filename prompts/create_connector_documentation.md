@@ -4,7 +4,7 @@
 Generate the **public-facing documentation** for the **{{source_name}}** connector, targeted at end users.
 
 ## Output Contract
-Produce a Markdown file strictly following the standard template [community_connector_doc_template.md](template/community_connector_doc_template.md) as `sources/{{source_name}}/README.md`.
+Produce a Markdown file strictly following the standard template [community_connector_doc_template.md](templates/community_connector_doc_template.md) as `src/databricks/labs/community_connector/sources/{{source_name}}/README.md`.
 
 ## Documentation Requirements
 

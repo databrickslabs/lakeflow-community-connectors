@@ -1,5 +1,8 @@
-from pipeline.ingestion_pipeline import ingest
-from libs.source_loader import get_register_function
+from databricks.labs.community_connector.pipeline import ingest
+from databricks.labs.community_connector import register
+
+# Enable the injection of connection options from Unity Catalog connections into connectors
+spark.conf.set("spark.databricks.unityCatalog.connectionDfOptionInjection.enabled", "true")
 
 # Connector source name. Update this to the name of the connector source you want to use.
 source_name = "<YOUR_SOURCE_NAME>"  # e.g., "github", "salesforce"
@@ -52,8 +55,19 @@ pipeline_spec = {
 
 
 # Dynamically import and register the LakeFlow source
-register_lakeflow_source = get_register_function(source_name)
-register_lakeflow_source(spark)
+# Register through source name. Run the pipeline with the source code.
+register(spark, source_name)
+
+# register the LakeflowConnect
+from databricks.labs.community_connector.sources.github import GithubLakeflowConnect
+
+register(spark, GithubLakeflowConnect)
+
+# register the Python DataSource implementation
+from my_source import MyDataSource
+
+register(spark, MyDataSource)
+
 
 # Ingest the tables specified in the pipeline spec
 ingest(spark, pipeline_spec)

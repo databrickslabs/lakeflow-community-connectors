@@ -4,7 +4,7 @@
 Generate a **connector spec YAML file** for the **{{source_name}}** connector that defines the connector specification including connection parameters and external options allowlist.
 
 ## Output Contract
-Produce a YAML file following the template [connector_spec_template.yaml](templates/connector_spec_template.yaml) as `sources/{{source_name}}/connector_spec.yaml`.
+Produce a YAML file following the template [connector_spec_template.yaml](templates/connector_spec_template.yaml) as `src/databricks/labs/community_connector/sources/{{source_name}}/connector_spec.yaml`.
 
 ## Requirements
 
@@ -25,7 +25,7 @@ connection:
 ```
 
 #### Option B: Multiple Authentication Methods
-Use `auth_methods` and `common_parameters` when the connector supports multiple ways to authenticate (e.g., API key vs. OAuth, or service account vs. API secret):
+Use `auth_methods` when the connector supports multiple ways to authenticate (e.g., API key vs. OAuth, or service account vs. API secret). Shared parameters go in `parameters` at the connection level:
 
 ```yaml
 connection:
@@ -50,7 +50,8 @@ connection:
           required: true
           description: OAuth 2.0 access token.
 
-  common_parameters:
+  # Shared parameters (apply to all authentication methods)
+  parameters:
     - name: subdomain
       type: string
       required: true
@@ -58,7 +59,7 @@ connection:
 ```
 
 ### Determining Which Structure to Use
-- Analyze the connector's `__init__` method in `sources/{{source_name}}/{{source_name}}.py`.
+- Analyze the connector's `__init__` method in `src/databricks/labs/community_connector/sources/{{source_name}}/{{source_name}}.py`.
 - Look for conditional logic that checks for mutually exclusive credentials (e.g., "if username and secret ... elif api_secret ...").
 - If the connector accepts multiple authentication approaches, use Option B with `auth_methods`.
 - If there's only one way to authenticate, use Option A with flat `parameters`.
@@ -87,6 +88,6 @@ For `auth_methods`, also include:
 - If no table-specific options are used, set `external_options_allowlist` to an empty string.
 
 ### Reference Sources
-- Use the connector implementation (`sources/{{source_name}}/{{source_name}}.py`) as the primary source of truth.
-- Cross-reference with the connector's README (`sources/{{source_name}}/README.md`) if available.
+- Use the connector implementation (`src/databricks/labs/community_connector/sources/{{source_name}}/{{source_name}}.py`) as the primary source of truth.
+- Cross-reference with the connector's README (`src/databricks/labs/community_connector/sources/{{source_name}}/README.md`) if available.
 - If inconsistency found between the 2 above, please fix the README and flag errors to user.

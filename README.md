@@ -12,10 +12,15 @@ Developers only need to implement or modify the source connector logic, while co
 
 ## Project Structure
 
-- `sources/` — Source connectors (e.g., `github/`, `zendesk/`, `stripe/`). The `interface/` subfolder defines the `LakeflowConnect` base interface.
+Core modules live under `src/databricks/labs/community_connector/`:
+- `interface/` — The `LakeflowConnect` base interface definition
+- `sources/` — Source connectors (e.g., `github/`, `zendesk/`, `stripe/`)
+- `sparkpds/` — PySpark Data Source implementation (`lakeflow_datasource.py`, `registry.py`)
 - `libs/` — Shared utilities for data type parsing, spec parsing, and module loading
 - `pipeline/` — Core ingestion logic: PySpark Data Source implementation and SDP orchestration
-- `tools/` — Tools to build and deploy community connectors tools 
+
+Other directories:
+- `tools/` — Tools to build and deploy community connectors
 - `tests/` — Generic test suites for validating connector implementations
 - `prompts/` — Templates for AI-assisted connector development
 
@@ -40,7 +45,7 @@ TODO: Add instructions and good practise of using Claude Code.
 Connectors are built on the [Python Data Source API](https://spark.apache.org/docs/latest/api/python/tutorial/sql/python_data_source.html), with an abstraction layer (`LakeflowConnect`) that simplifies development. 
 Developers can also choose to directly implement Python Data Source API (not recommended) as long as the implementation meets the API contracts of the community connectors.
 
-**Please see more details under** [`sources/interface/README.md`](sources/interface/README.md).
+**Please see more details under** [`src/databricks/labs/community_connector/interface/README.md`](src/databricks/labs/community_connector/interface/README.md).
 
 ```python
 class LakeflowConnect:
@@ -68,7 +73,7 @@ class LakeflowConnect:
 Each connector must include tests that run the **generic test suite** against a live source environment. These tests validate API usage, data parsing, and successful data retrieval.
 
 - **Generic test suite** — Connects to a real source using provided credentials to verify end-to-end functionality
-- **Write-back testing** *(recommended)* — Use the provided test harness to write data, read it back, and verify incremental reads work correctly
+- **Write-back testing** *(recommended)* — Use the provided test harness to write data, read it back, and verify incremental reads and deletes(only for tables with ingestion type `cdc_with_deletes`) work correctly.
 - **Unit tests** — Recommended for complex library code or connector-specific logic
 
 ## Using and Testing Community Connectors
@@ -76,8 +81,8 @@ Each connector must include tests that run the **generic test suite** against a 
 Each connector runs as a configurable SDP. Define a **pipeline spec** to specify which tables to ingest and where to store them. See more details in this [example](pipeline-spec/example_ingest.py). You don't need to manually create files below, as both UI and CLI tool will automatically generate these files when setting the connector.
 
 ```python
-from pipeline.ingestion_pipeline import ingest
-from libs.source_loader import get_register_function
+from databricks.labs.community_connector.pipeline import ingest
+from databricks.labs.community_connector import register
 
 source_name = "github"  # or "zendesk", "stripe", etc.
 pipeline_spec = {

@@ -1,0 +1,100 @@
+# OSI PI Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+#
+# OSI PI supports three authentication methods:
+# 1. Bearer Token - Direct access token authentication
+# 2. OIDC Client Credentials - OAuth 2.0 client credentials flow via Databricks
+# 3. Basic Auth - Username/password authentication (when enabled on PI Web API)
+# ============================================================================
+display_name: OSI PI
+connection:
+  # ---------------------------------------------------------------------------
+  # Authentication Methods
+  # ---------------------------------------------------------------------------
+  auth_methods:
+    - name: bearer_token
+      description: >
+        Authenticate using a bearer token. Provide an OAuth access token or
+        API token generated from your PI Web API or identity provider.
+      parameters:
+        - name: access_token
+          type: string
+          required: true
+          secret: true
+          description: >
+            Bearer token for PI Web API authentication. Can be obtained from
+            your identity provider or PI Web API token endpoint.
+
+    - name: oidc_client_credentials
+      description: >
+        Authenticate using OIDC client credentials flow via Databricks.
+        Recommended for production deployments with service account access.
+      parameters:
+        - name: workspace_host
+          type: string
+          required: true
+          description: >
+            Databricks workspace URL (e.g., https://your-workspace.cloud.databricks.com).
+            Used to obtain access tokens via OIDC token endpoint.
+
+        - name: client_id
+          type: string
+          required: true
+          description: >
+            OIDC client ID for the service principal or application.
+
+        - name: client_secret
+          type: string
+          required: true
+          secret: true
+          description: >
+            OIDC client secret for the service principal or application.
+
+    - name: basic_auth
+      description: >
+        Authenticate using basic authentication (username/password).
+        Only available when enabled on the PI Web API host.
+      parameters:
+        - name: username
+          type: string
+          required: true
+          description: >
+            Username for basic authentication to PI Web API.
+
+        - name: password
+          type: string
+          required: true
+          secret: true
+          description: >
+            Password for basic authentication to PI Web API.
+
+  # ---------------------------------------------------------------------------
+  # Shared Parameters (apply to all authentication methods)
+  # ---------------------------------------------------------------------------
+  parameters:
+    - name: pi_base_url
+      type: string
+      required: true
+      description: >
+        Base URL for the PI Web API endpoint (e.g., https://piwebapi.example.com).
+        This is the root URL without any path suffix.
+
+    - name: verify_ssl
+      type: string
+      required: false
+      description: >
+        Whether to verify SSL certificates when connecting to PI Web API.
+        Set to 'false' for self-signed certificates (not recommended for production).
+        Default is 'true'.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# ============================================================================
+external_options_allowlist: "maxCount,startIndex,nameFilter,dataserver_webid,maxTotalCount,point_webids,default_points,selectedFields,tag_webids,default_tags,lookback_minutes,prefer_streamset,startTime,endTime,time,interval,sampleInterval,intervals,tags_per_request,window_seconds,summaryType,calculationBasis,timeType,summaryDuration,sampleType,timeZone,filterExpression,calculationType,calculation_type,assetdatabase_webid,element_webids,default_elements,elementtemplate_webid,table_webid,table_webids,default_tables,event_frame_webids,default_event_frames,lookback_days,searchMode,eventframe_template_webid"

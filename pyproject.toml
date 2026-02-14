@@ -20,14 +20,15 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["libs*", "pipeline*", "sources*", "tests*"]
+where = ["src"]
+include = ["databricks*"]
+exclude = ["databricks.labs.community_connector.sources*"]
 
 [tool.setuptools.package-data]
-"*" = ["*.json", "*.md"]
+"*" = ["*.json", "*.md", "*.yaml"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "sources"]
+testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

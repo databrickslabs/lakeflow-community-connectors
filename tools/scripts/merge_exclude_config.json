@@ -1,0 +1,20 @@
+{
+  "description": "Configuration for files to exclude from the merge_python_source.py script",
+  "global_exclude": [
+    "*_test*.py",
+    "pyproject.toml"
+  ],
+  "source_exclude": {
+    "example": [],
+    "osipi": [
+        "ingest.py"
+    ],
+    "zoho_crm": [
+      "zoho_crm_oauth_setup.py"
+    ]
+  },
+  "_comments": {
+    "zoho_crm_oauth_setup.py": "Databricks notebook to help users set up OAuth credentials for Zoho CRM. Not part of the connector runtime.",
+    "osipi/ingest.py": "Databricks notebook example for ingestion. Not part of the connector runtime."
+  }
+}
