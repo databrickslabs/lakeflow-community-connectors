@@ -1,7 +1,8 @@
-import requests
 import time
-from pyspark.sql.types import StructType
 from typing import Dict, List, Tuple, Iterator
+
+import requests
+from pyspark.sql.types import StructType
 
 from databricks.labs.community_connector.interface.lakeflow_connect import LakeflowConnect
 from databricks.labs.community_connector.sources.surveymonkey.surveymonkey_schemas import (
@@ -71,7 +72,13 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
         requires_group_id = config.get("requires_group_id", False)
 
         # Tables that can iterate over all parent objects if parent_id not provided
-        can_iterate_surveys = table_name in ["survey_responses", "survey_pages", "survey_questions", "collectors", "survey_rollups"]
+        can_iterate_surveys = table_name in [
+            "survey_responses",
+            "survey_pages",
+            "survey_questions",
+            "collectors",
+            "survey_rollups",
+        ]
         can_iterate_pages = table_name in ["survey_questions"]
         can_iterate_groups = table_name in ["group_members"]
 
@@ -178,39 +185,51 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
 
     # ─── Table Readers ────────────────────────────────────────────────────────
 
+    def _get_special_handler(self, table_name: str, table_options: Dict[str, str]):
+        """Return a special handler for a table, or None."""
+        handlers = {
+            "users": lambda: self._read_single_user(),
+            "survey_pages": lambda: self._read_survey_pages(table_options),
+            "survey_questions": lambda: (self._read_all_survey_questions(table_options)),
+            "survey_rollups": lambda: self._read_survey_rollups(table_options),
+        }
+
+        if table_name in handlers:
+            return handlers[table_name]
+
+        # Conditional handlers that depend on missing parent IDs
+        conditional = {
+            "survey_responses": (
+                "survey_id",
+                lambda: self._read_all_survey_responses(table_options, start_modified_at=None),
+            ),
+            "collectors": (
+                "survey_id",
+                lambda: self._read_all_collectors(table_options),
+            ),
+            "group_members": (
+                "group_id",
+                lambda: self._read_all_group_members(table_options),
+            ),
+        }
+
+        if table_name in conditional:
+            parent_key, handler = conditional[table_name]
+            if not table_options.get(parent_key):
+                return handler
+
+        return None
+
     def _read_data_full(
         self, table_name: str, table_options: Dict[str, str]
     ) -> Tuple[Iterator[dict], dict]:
         """Read all data from a SurveyMonkey table (full refresh)."""
         config = OBJECT_CONFIG[table_name]
 
-        # Handle special case for users (single record endpoint)
-        if table_name == "users":
-            return self._read_single_user()
-
-        # Handle special case for survey_responses - need to iterate over surveys
-        if table_name == "survey_responses" and not table_options.get("survey_id"):
-            return self._read_all_survey_responses(table_options, start_modified_at=None)
-
-        # Handle special case for survey_pages - use details endpoint
-        if table_name == "survey_pages":
-            return self._read_survey_pages(table_options)
-
-        # Handle special case for survey_questions - use details endpoint
-        if table_name == "survey_questions":
-            return self._read_all_survey_questions(table_options)
-
-        # Handle special case for collectors - need to iterate over surveys
-        if table_name == "collectors" and not table_options.get("survey_id"):
-            return self._read_all_collectors(table_options)
-
-        # Handle special case for group_members - need to iterate over groups
-        if table_name == "group_members" and not table_options.get("group_id"):
-            return self._read_all_group_members(table_options)
-
-        # Handle special case for survey_rollups - need survey_id
-        if table_name == "survey_rollups":
-            return self._read_survey_rollups(table_options)
+        # Dispatch to special handlers for specific tables
+        handler = self._get_special_handler(table_name, table_options)
+        if handler:
+            return handler()
 
         url = self._build_endpoint_url(table_name, table_options)
         per_page = config["per_page"]
@@ -227,7 +246,9 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
 
             # For surveys, request additional fields
             if table_name == "surveys":
-                params["include"] = "response_count,date_created,date_modified,language,question_count"
+                params["include"] = (
+                    "response_count,date_created,date_modified,language,question_count"
+                )
                 params["sort_by"] = "date_modified"
                 params["sort_order"] = "ASC"
 
@@ -309,7 +330,9 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
 
             # For surveys, request additional fields
             if table_name == "surveys":
-                params["include"] = "response_count,date_created,date_modified,language,question_count"
+                params["include"] = (
+                    "response_count,date_created,date_modified,language,question_count"
+                )
 
             data = self._make_request(url, params)
             records = data.get("data", [])
