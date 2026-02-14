@@ -1,55 +1,21 @@
-"""
-Tests for the AppsFlyer LakeflowConnect connector.
-
-To run these tests:
-1. Copy the example configs and add your credentials:
-   cp sources/appsflyer/configs/dev_config.json \
-      sources/appsflyer/configs/local_config.json
-   cp sources/appsflyer/configs/dev_table_config.json \
-      sources/appsflyer/configs/local_table_config.json
-
-2. Edit local_config.json with your API token:
-   {
-     "api_token": "YOUR_ACTUAL_API_TOKEN",
-     "base_url": "https://hq1.appsflyer.com"
-   }
-
-3. Edit local_table_config.json with your app configuration and table-specific options.
-   See dev_table_config.json for the expected format.
-
-4. Run: pytest sources/appsflyer/test/test_appsflyer_lakeflow_connect.py -v
-
-Note: local_*.json files are git-ignored for security.
-"""
-
 from pathlib import Path
 
-from tests import test_suite
-from tests.test_suite import LakeflowConnectTester
-from tests.test_utils import load_config
-from sources.appsflyer.appsflyer import LakeflowConnect
+from tests.unit.sources import test_suite
+from tests.unit.sources.test_suite import LakeflowConnectTester
+from tests.unit.sources.test_utils import load_config
+from databricks.labs.community_connector.sources.appsflyer.appsflyer import AppsflyerLakeflowConnect
 
 
 def test_appsflyer_connector():
     """Test the AppsFlyer connector using the shared LakeflowConnect test suite."""
     # Inject the AppsFlyer LakeflowConnect class into the shared test_suite namespace
     # so that LakeflowConnectTester can instantiate it.
-    test_suite.LakeflowConnect = LakeflowConnect
+    test_suite.LakeflowConnect = AppsflyerLakeflowConnect
 
-    # Load connection-level configuration (e.g. api_token, base_url)
-    # Try local_config.json first (with actual credentials), fall back to dev_config.json
-    parent_dir = Path(__file__).parent.parent
-    local_config_path = parent_dir / "configs" / "local_config.json"
-    dev_config_path = parent_dir / "configs" / "dev_config.json"
-    config_path = local_config_path if local_config_path.exists() else dev_config_path
-
-    # Load table-specific configuration
-    local_table_config_path = parent_dir / "configs" / "local_table_config.json"
-    dev_table_config_path = parent_dir / "configs" / "dev_table_config.json"
-    table_config_path = (
-        local_table_config_path if local_table_config_path.exists()
-        else dev_table_config_path
-    )
+    # Load connection-level configuration
+    config_dir = Path(__file__).parent / "configs"
+    config_path = config_dir / "dev_config.json"
+    table_config_path = config_dir / "dev_table_config.json"
 
     config = load_config(config_path)
     table_config = load_config(table_config_path)

@@ -13,8 +13,10 @@ from pyspark.sql.types import (
     ArrayType,
 )
 
+from databricks.labs.community_connector.interface.lakeflow_connect import LakeflowConnect
 
-class LakeflowConnect:
+
+class AppsflyerLakeflowConnect(LakeflowConnect):
     def __init__(self, options: dict[str, str]) -> None:
         """
         Initialize the AppsFlyer connector with connection-level options.
