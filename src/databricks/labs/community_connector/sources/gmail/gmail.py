@@ -16,8 +16,10 @@ from pyspark.sql.types import (
     ArrayType,
 )
 
+from databricks.labs.community_connector.interface.lakeflow_connect import LakeflowConnect
 
-class LakeflowConnect:
+
+class GmailLakeflowConnect(LakeflowConnect):
     """Gmail connector implementing the LakeflowConnect interface with 100% API coverage."""
 
     # Supported tables - Full Gmail API coverage

@@ -5,13 +5,13 @@ Unit tests run without credentials and validate connector structure.
 Integration tests require real credentials and validate API functionality.
 
 To run unit tests only (no credentials):
-    PYTHONPATH=. pytest sources/gmail/test/test_gmail_lakeflow_connect.py -v -k "unit"
+    pytest tests/unit/sources/gmail/test_gmail_lakeflow_connect.py -v -k "unit"
 
 To run integration tests (requires credentials in dev_config.json):
-    PYTHONPATH=. pytest sources/gmail/test/test_gmail_lakeflow_connect.py -v -k "integration"
+    pytest tests/unit/sources/gmail/test_gmail_lakeflow_connect.py -v -k "integration"
 
 To run all tests:
-    PYTHONPATH=. pytest sources/gmail/test/test_gmail_lakeflow_connect.py -v
+    pytest tests/unit/sources/gmail/test_gmail_lakeflow_connect.py -v
 """
 
 import os
@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 from pyspark.sql.types import StructType, IntegerType, LongType
 
-from sources.gmail.gmail import LakeflowConnect
+from databricks.labs.community_connector.sources.gmail.gmail import GmailLakeflowConnect
 
 
 # =============================================================================
@@ -33,7 +33,7 @@ class TestGmailConnectorUnit:
     @pytest.fixture
     def connector(self):
         """Create connector with dummy credentials for structure tests."""
-        return LakeflowConnect({
+        return GmailLakeflowConnect({
             "client_id": "dummy_client_id",
             "client_secret": "dummy_client_secret",
             "refresh_token": "dummy_refresh_token",
@@ -49,7 +49,7 @@ class TestGmailConnectorUnit:
     def test_unit_initialization_missing_client_id(self):
         """Test initialization fails without client_id."""
         with pytest.raises(ValueError, match="client_id"):
-            LakeflowConnect({
+            GmailLakeflowConnect({
                 "client_secret": "secret",
                 "refresh_token": "token",
             })
@@ -57,7 +57,7 @@ class TestGmailConnectorUnit:
     def test_unit_initialization_missing_client_secret(self):
         """Test initialization fails without client_secret."""
         with pytest.raises(ValueError, match="client_secret"):
-            LakeflowConnect({
+            GmailLakeflowConnect({
                 "client_id": "id",
                 "refresh_token": "token",
             })
@@ -65,7 +65,7 @@ class TestGmailConnectorUnit:
     def test_unit_initialization_missing_refresh_token(self):
         """Test initialization fails without refresh_token."""
         with pytest.raises(ValueError, match="refresh_token"):
-            LakeflowConnect({
+            GmailLakeflowConnect({
                 "client_id": "id",
                 "client_secret": "secret",
             })
@@ -170,11 +170,11 @@ class TestGmailConnectorUnit:
 
 def _load_test_config():
     """Load test configuration if available."""
-    from tests.test_utils import load_config
-    
-    parent_dir = Path(__file__).parent.parent
-    config_path = parent_dir / "configs" / "dev_config.json"
-    table_config_path = parent_dir / "configs" / "dev_table_config.json"
+    from tests.unit.sources.test_utils import load_config
+
+    config_dir = Path(__file__).parent / "configs"
+    config_path = config_dir / "dev_config.json"
+    table_config_path = config_dir / "dev_table_config.json"
     
     if not config_path.exists():
         return None, None
@@ -212,7 +212,7 @@ class TestGmailConnectorIntegration:
     def connector(self):
         """Create connector with real credentials."""
         config, _ = _load_test_config()
-        return LakeflowConnect(config)
+        return GmailLakeflowConnect(config)
 
     def test_integration_read_profile(self, connector):
         """Test reading user profile from Gmail API."""
@@ -262,10 +262,10 @@ class TestGmailConnectorIntegration:
 
     def test_integration_full_test_suite(self):
         """Run the full LakeflowConnect test suite."""
-        from tests import test_suite
-        from tests.test_suite import LakeflowConnectTester
-        
-        test_suite.LakeflowConnect = LakeflowConnect
+        from tests.unit.sources import test_suite
+        from tests.unit.sources.test_suite import LakeflowConnectTester
+
+        test_suite.LakeflowConnect = GmailLakeflowConnect
         tester = LakeflowConnectTester(self.config, self.table_config)
         
         report = tester.run_all_tests()
@@ -294,7 +294,7 @@ class TestGmailTableOptions:
     def connector(self):
         """Create connector with real credentials."""
         config, _ = _load_test_config()
-        return LakeflowConnect(config)
+        return GmailLakeflowConnect(config)
 
     def test_integration_messages_with_query_filter(self, connector):
         """Test messages table with q (query) option."""
