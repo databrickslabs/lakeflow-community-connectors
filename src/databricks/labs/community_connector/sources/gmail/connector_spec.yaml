@@ -11,11 +11,13 @@
 # Connection Parameters
 # These are provided when creating the Unity Catalog connection.
 # ============================================================================
+display_name: Gmail
 connection:
   parameters:
     - name: client_id
       type: string
       required: true
+      secret: true
       description: >
         OAuth 2.0 client ID from Google Cloud Console.
         Create this in APIs & Services → Credentials → OAuth 2.0 Client IDs.
@@ -23,6 +25,7 @@ connection:
     - name: client_secret
       type: string
       required: true
+      secret: true
       description: >
         OAuth 2.0 client secret from Google Cloud Console.
         Obtained alongside the client_id when creating OAuth credentials.
@@ -30,6 +33,7 @@ connection:
     - name: refresh_token
       type: string
       required: true
+      secret: true
       description: >
         Long-lived OAuth 2.0 refresh token obtained via the OAuth consent flow.
         Use Google OAuth Playground or implement OAuth flow to obtain this token.

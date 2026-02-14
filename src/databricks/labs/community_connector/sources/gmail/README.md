@@ -350,7 +350,7 @@ Table-specific options are passed via the pipeline spec under `table` in `object
 |----------------|----------------|-------|
 | string | `StringType` | Standard text fields |
 | string (int64) | `StringType` | `historyId`, `internalDate` stored as strings |
-| integer | `IntegerType` | `sizeEstimate`, message counts |
+| integer | `LongType` | `sizeEstimate`, message counts |
 | boolean | `BooleanType` | Flag fields |
 | array[string] | `ArrayType(StringType)` | `labelIds` |
 | array[object] | `ArrayType(StructType)` | `headers`, `parts`, `messages` |
@@ -549,7 +549,7 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration:
 
 - **"Source not found" or module import errors**:
   - Ensure `source_name = "gmail"` is set correctly
-  - Verify the Gmail connector files are in `sources/gmail/` directory
+  - Verify the Gmail connector files are in `src/databricks/labs/community_connector/sources/gmail/` directory
 
 **API and Authentication Issues:**
 
@@ -586,8 +586,8 @@ This connector includes several optimizations for high-performance data ingestio
 
 ## References
 
-- Connector implementation: `sources/gmail/gmail.py`
-- Connector API documentation: `sources/gmail/gmail_api_doc.md`
+- Connector implementation: `src/databricks/labs/community_connector/sources/gmail/gmail.py`
+- Connector API documentation: `src/databricks/labs/community_connector/sources/gmail/gmail_api_doc.md`
 - Official Gmail API documentation:
   - https://developers.google.com/workspace/gmail/api/reference/rest
   - https://developers.google.com/workspace/gmail/api/guides
