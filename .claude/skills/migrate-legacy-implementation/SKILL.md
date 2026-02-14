@@ -37,6 +37,7 @@ then run other python commands or pytest.
 4. If `{source_name}.py` is too large (>1000 lines), consider refactoring it into multiple files. One example to follow is `github`.
 
 5. Run the tests — they will fail but should not be syntax or import errors.
+   - Add the unit test that requires credentials (the one built on top of the source test_suite) to .github/workflows/test_exclude.txt
    - Commit the changes so far.
 
 6. Update the `README.md` under `{source_name}` directory to make sure all references and content match the latest changes.

@@ -5,6 +5,7 @@
 # Remove a test file from this list to enable auto-triggered testing for it.
 # Lines starting with '#' and blank lines are ignored.
 
+tests/unit/sources/appsflyer/test_appsflyer_lakeflow_connect.py
 tests/unit/sources/example/test_example_lakeflow_connect.py
 tests/unit/sources/github/test_github_lakeflow_connect.py
 tests/unit/sources/hubspot/test_hubspot_lakeflow_connect.py
