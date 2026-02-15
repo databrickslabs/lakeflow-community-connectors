@@ -28,8 +28,8 @@ Usage:
 3. Run this script as a Databricks notebook or pipeline
 """
 
-from pipeline.ingestion_pipeline import ingest
-from libs.source_loader import get_register_function
+from databricks.labs.community_connector.pipeline import ingest
+from databricks.labs.community_connector import register
 
 # ==============================================================================
 # CONFIGURATION
@@ -51,8 +51,11 @@ MAX_PAGES_PER_BATCH = "200"          # Max pages per batch (controls checkpoint 
 # ==============================================================================
 # SETUP
 # ==============================================================================
-register_lakeflow_source = get_register_function(source_name)
-register_lakeflow_source(spark)
+# Enable the injection of connection options from Unity Catalog connections into connectors
+spark.conf.set("spark.databricks.unityCatalog.connectionDfOptionInjection.enabled", "true")
+
+# Register the LakeFlow source
+register(spark, source_name)
 
 # ==============================================================================
 # PIPELINE SPECIFICATION - FULLY AUTOMATED MODE
