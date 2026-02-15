@@ -1,0 +1,21 @@
+{
+  "channels": {
+    "fetch_all_teams": "true"
+  },
+  "members": {
+    "fetch_all_teams": "true"
+  },
+  "messages": {
+    "fetch_all_teams": "true",
+    "fetch_all_channels": "true",
+    "use_delta_api": "true",
+    "max_pages_per_batch": "2"
+  },
+  "message_replies": {
+    "fetch_all_teams": "true",
+    "fetch_all_channels": "true",
+    "fetch_all_messages": "true",
+    "use_delta_api": "false",
+    "max_pages_per_batch": "2"
+  }
+}

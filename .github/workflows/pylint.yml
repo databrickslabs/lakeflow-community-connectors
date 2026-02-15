@@ -28,4 +28,4 @@ jobs:
         --max-locals=20 \
         --disable=W,C0114,C0115,R0801,R1705 \
         --ignore-long-lines='^\s*(#|f?".*"|f?'\''.*'\'')$' \
-        $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py' | grep -v 'tools/scripts/merge_python_source.py' | grep -v 'community_connector_cli/templates/ingest_template' | grep -v 'community_connector/sources/hubspot/' | grep -v 'community_connector/sources/stripe/' | grep -v 'community_connector/sources/mixpanel/' | grep -v '^tests/')
+        $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py' | grep -v 'tools/scripts/merge_python_source.py' | grep -v 'community_connector_cli/templates/ingest_template' | grep -v 'community_connector/sources/hubspot/' | grep -v 'community_connector/sources/stripe/' | grep -v 'community_connector/sources/mixpanel/' | grep -v 'microsoft_teams/sample-ingest.py' | grep -v '^tests/')
