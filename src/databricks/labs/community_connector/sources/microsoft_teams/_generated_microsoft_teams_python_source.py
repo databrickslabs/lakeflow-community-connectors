@@ -642,7 +642,7 @@ def register_lakeflow_source(spark):
             except requests.RequestException as e:
                 raise RuntimeError(f"Token acquisition request failed: {str(e)}")
 
-        def make_request(
+        def make_request(  # pylint: disable=too-many-branches
             self, url: str, params: dict = None, max_retries: int = 3
         ) -> dict:
             """
@@ -1502,7 +1502,7 @@ def register_lakeflow_source(spark):
 
             return records, message_key, new_delta_link
 
-        def _read_message_replies_legacy(
+        def _read_message_replies_legacy(  # pylint: disable=too-many-locals
             self, start_offset: dict, table_options: dict[str, str]
         ) -> tuple[Iterator[dict], dict]:
             """Read message replies with timestamp filtering."""
