@@ -1,0 +1,35 @@
+{
+    "employees": {
+        "organisation_id": "your-org-id"
+    },
+    "certifications": {
+        "organisation_id": "your-org-id"
+    },
+    "cost_centres": {
+        "organisation_id": "your-org-id"
+    },
+    "custom_fields": {
+        "organisation_id": "your-org-id"
+    },
+    "employing_entities": {
+        "organisation_id": "your-org-id"
+    },
+    "leave_categories": {
+        "organisation_id": "your-org-id"
+    },
+    "policies": {
+        "organisation_id": "your-org-id"
+    },
+    "roles": {
+        "organisation_id": "your-org-id"
+    },
+    "teams": {
+        "organisation_id": "your-org-id"
+    },
+    "work_locations": {
+        "organisation_id": "your-org-id"
+    },
+    "work_sites": {
+        "organisation_id": "your-org-id"
+    }
+}

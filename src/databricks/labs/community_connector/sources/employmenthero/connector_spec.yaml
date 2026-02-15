@@ -1,0 +1,44 @@
+# Employment Hero Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+connection:
+  parameters:
+    - name: client_id
+      type: string
+      required: true
+      description: >
+        Client ID from OAuth 2.0 application credentials
+
+    - name: client_secret
+      type: string
+      required: true
+      description: >
+        Secret from OAuth 2.0 application credentials
+
+    - name: redirect_uri
+      type: string
+      required: true
+      description: >
+        Redirect URI registered with the OAuth 2.0 application (must match the callback URL used to obtain the authorization code).
+        E.g., https://<workspace>.cloud.databricks.com/oauth/callback
+
+    - name: authorization_code
+      type: string
+      required: true
+      description: >
+        Authorization code from the OAuth callback (redirect after user authorizes the app)
+
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# If no table-specific options are needed, set to empty string or omit.
+# ============================================================================
+external_options_allowlist: "refresh_token,base_url,oauth_url,organisation_id"
