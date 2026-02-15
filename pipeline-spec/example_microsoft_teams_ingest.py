@@ -24,8 +24,8 @@ Configuration:
 4. Run the pipeline
 """
 
-from pipeline.ingestion_pipeline import ingest
-from libs.source_loader import get_register_function
+from databricks.labs.community_connector.pipeline import ingest
+from databricks.labs.community_connector import register
 
 # ==============================================================================
 # CONFIGURATION - Update these values
@@ -67,8 +67,11 @@ MAX_PAGES_PER_BATCH = "10"
 # DO NOT EDIT BELOW THIS LINE
 # ==============================================================================
 
-register_lakeflow_source = get_register_function(source_name)
-register_lakeflow_source(spark)
+# Enable the injection of connection options from Unity Catalog connections into connectors
+spark.conf.set("spark.databricks.unityCatalog.connectionDfOptionInjection.enabled", "true")
+
+# Register the LakeFlow source
+register(spark, source_name)
 
 # Build pipeline specification
 pipeline_spec = {
