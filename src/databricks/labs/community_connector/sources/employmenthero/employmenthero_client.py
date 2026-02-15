@@ -62,8 +62,16 @@ class EmploymentHeroAPIClient:  # pylint: disable=too-many-instance-attributes
         # HTTP session for connection pooling
         self._session = session or requests.Session()
 
-    def _request_token(self) -> dict:
-        """POST to the OAuth token endpoint and return the JSON response."""
+    def _get_access_token(self) -> str:
+        """
+        Return a valid access token, obtaining or refreshing via the OAuth token endpoint.
+        Access tokens expire after 15 minutes (900 seconds). Uses authorization_code
+        when no refresh_token is available, otherwise refresh_token grant.
+        """
+        if self._access_token and self._token_expires_at:
+            if datetime.now() < self._token_expires_at - timedelta(minutes=5):
+                return self._access_token
+
         data = {
             "client_id": self.client_id,
             "client_secret": self.client_secret,
@@ -81,19 +89,7 @@ class EmploymentHeroAPIClient:  # pylint: disable=too-many-instance-attributes
         token_data = response.json()
         if "access_token" not in token_data:
             raise ValueError("Token response missing access_token")
-        return token_data
 
-    def _get_access_token(self) -> str:
-        """
-        Return a valid access token, obtaining or refreshing via the OAuth token endpoint.
-        Access tokens expire after 15 minutes (900 seconds). Uses authorization_code
-        when no refresh_token is available, otherwise refresh_token grant.
-        """
-        if self._access_token and self._token_expires_at:
-            if datetime.now() < self._token_expires_at - timedelta(minutes=5):
-                return self._access_token
-
-        token_data = self._request_token()
         self._access_token = token_data["access_token"]
         expires_in = token_data.get("expires_in", 900)
         self._token_expires_at = datetime.now() + timedelta(seconds=expires_in)
