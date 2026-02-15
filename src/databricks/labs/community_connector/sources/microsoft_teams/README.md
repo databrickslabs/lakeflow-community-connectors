@@ -1,5 +1,10 @@
 # Lakeflow Microsoft Teams Community Connector
 
+## Authors
+- eduardo.lomonaco@databricks.com
+- amitabh.arora@databricks.com
+- abhay.singh@databricks.com
+
 Production-grade connector for ingesting Microsoft Teams data into Databricks using the Microsoft Graph API v1.0.
 
 ## Overview
