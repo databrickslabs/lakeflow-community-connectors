@@ -56,7 +56,10 @@ class MicrosoftGraphClient:
         try:
             response = requests.post(token_url, data=data, timeout=30)
             if response.status_code != 200:
-                tenant_preview = f"{self.tenant_id[:8]}..." if self.tenant_id and len(self.tenant_id) > 8 else "INVALID"
+                if self.tenant_id and len(self.tenant_id) > 8:
+                    tenant_preview = f"{self.tenant_id[:8]}..."
+                else:
+                    tenant_preview = "INVALID"
                 raise RuntimeError(
                     f"Token acquisition failed: {response.status_code}\n"
                     f"URL: {token_url}\n"
@@ -133,19 +136,15 @@ class MicrosoftGraphClient:
                         f"Request failed with status {response.status_code}: {response.text}"
                     )
 
-            except requests.Timeout:
-                if attempt < max_retries - 1:
-                    time.sleep(2**attempt)
-                    continue
-                raise RuntimeError(
-                    f"Request timeout after {max_retries} attempts: {url}"
-                )
-
             except requests.RequestException as e:
                 if attempt < max_retries - 1:
                     time.sleep(2**attempt)
                     continue
-                raise RuntimeError(f"Request exception: {str(e)}")
+                if isinstance(e, requests.Timeout):
+                    raise RuntimeError(
+                        f"Request timeout after {max_retries} attempts: {url}"
+                    ) from e
+                raise RuntimeError(f"Request exception: {str(e)}") from e
 
         raise RuntimeError(f"Max retries ({max_retries}) exceeded for: {url}")
 
