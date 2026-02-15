@@ -611,7 +611,7 @@ class MicrosoftTeamsLakeflowConnect(LakeflowConnect):
 
         return records, message_key, new_delta_link
 
-    def _read_message_replies_legacy(
+    def _read_message_replies_legacy(  # pylint: disable=too-many-locals
         self, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
         """Read message replies with timestamp filtering."""

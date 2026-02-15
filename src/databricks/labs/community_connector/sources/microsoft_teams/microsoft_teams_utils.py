@@ -80,7 +80,7 @@ class MicrosoftGraphClient:
         except requests.RequestException as e:
             raise RuntimeError(f"Token acquisition request failed: {str(e)}")
 
-    def make_request(
+    def make_request(  # pylint: disable=too-many-branches
         self, url: str, params: dict = None, max_retries: int = 3
     ) -> dict:
         """
