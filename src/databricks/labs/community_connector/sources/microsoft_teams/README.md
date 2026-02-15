@@ -592,7 +592,7 @@ Before running in production, verify your setup with the unit test suite:
 
 ```bash
 # Run the comprehensive test suite
-pytest sources/microsoft_teams/test/test_microsoft_teams.py -v
+pytest tests/unit/sources/microsoft_teams/test_microsoft_teams_lakeflow_connect.py -v
 ```
 
 ---
@@ -612,8 +612,8 @@ This demonstrates:
 ### Simple Example
 
 ```python
-from pipeline.ingestion_pipeline import ingest
-from libs.source_loader import get_register_function
+from databricks.labs.community_connector.pipeline.ingestion_pipeline import ingest
+from databricks.labs.community_connector.libs.source_loader import get_register_function
 
 # Setup
 source_name = "microsoft_teams"
@@ -818,8 +818,7 @@ If you need reaction data for specific use cases:
 
 ### Connector Documentation
 
-- **Source Code:** [microsoft_teams.py](microsoft_teams.py)
-- **Test Suite:** [test/test_microsoft_teams.py](test/test_microsoft_teams.py)
+- **Source Code:** [microsoft_teams.py](microsoft_teams.py), [microsoft_teams_schemas.py](microsoft_teams_schemas.py), [microsoft_teams_utils.py](microsoft_teams_utils.py)
 - **Generated Bundle:** [_generated_microsoft_teams_python_source.py](_generated_microsoft_teams_python_source.py)
 
 ### Microsoft Documentation
