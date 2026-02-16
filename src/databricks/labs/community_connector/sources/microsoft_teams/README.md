@@ -74,6 +74,7 @@ The Microsoft Teams connector enables you to:
    |------------|----------|--------------|
    | `Team.ReadBasic.All` | Microsoft Teams | Read team names and basic properties |
    | `Channel.ReadBasic.All` | Microsoft Teams | Read channel names and properties |
+   | `Group.Read.All` | Microsoft Teams | Read group names and properties |
    | `ChannelMessage.Read.All` | Microsoft Teams | Read messages in all channels |
    | `TeamMember.Read.All` | Microsoft Teams | Read team membership information |
 
@@ -84,7 +85,7 @@ The Microsoft Teams connector enables you to:
    - Click **Add permissions**
    - Repeat for each permission
 
-3. **Grant Admin Consent** ⚠️ **CRITICAL STEP**
+4. **Grant Admin Consent** ⚠️ **CRITICAL STEP**
 
    After adding all permissions:
    - Click **Grant admin consent for [Your Organization Name]**
@@ -102,6 +103,7 @@ API / Permissions name              Type         Status
 Microsoft Graph
   Team.ReadBasic.All               Application  ✓ Granted for [Org]
   Channel.ReadBasic.All            Application  ✓ Granted for [Org]
+  Group.Read.All                   Application  ✓ Granted for [Org]
   ChannelMessage.Read.All          Application  ✓ Granted for [Org]
   TeamMember.Read.All              Application  ✓ Granted for [Org]
 ```
