@@ -85,7 +85,7 @@ The Microsoft Teams connector enables you to:
    - Click **Add permissions**
    - Repeat for each permission
 
-4. **Grant Admin Consent** ⚠️ **CRITICAL STEP**
+3. **Grant Admin Consent** ⚠️ **CRITICAL STEP**
 
    After adding all permissions:
    - Click **Grant admin consent for [Your Organization Name]**
