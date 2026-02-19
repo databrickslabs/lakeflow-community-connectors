@@ -41,4 +41,4 @@ connection:
 # Use a comma-separated string of option names.
 # If no table-specific options are needed, set to empty string or omit.
 # ============================================================================
-external_options_allowlist: "organisation_id"
+external_options_allowlist: "organisation_id,start_date"

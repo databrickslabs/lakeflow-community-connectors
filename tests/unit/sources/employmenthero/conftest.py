@@ -10,7 +10,7 @@ from tests.unit.sources.test_utils import load_config
 
 # Shared paths (import in test modules if needed: from ...conftest import CONFIGS_DIR, DATA_PATH)
 CONFIGS_DIR = Path(__file__).resolve().parent / "configs"
-DATA_PATH = CONFIGS_DIR / "dev_table_data.json"
+DATA_PATH = Path(__file__).resolve().parent / "data"
 
 
 @pytest.fixture(autouse=True)
@@ -25,4 +25,5 @@ def _patch_time_sleep():
 @pytest.fixture
 def employees_data() -> dict:
     """Load mock employee data from config JSON (pagination + pages). Shared by mock and tests."""
-    return load_config(DATA_PATH)["employees"]
+    employees_data_path = DATA_PATH / "employees.json"
+    return load_config(employees_data_path)

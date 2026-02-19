@@ -6,12 +6,13 @@ Employment Hero REST API documentation.
 """
 
 from pyspark.sql.types import (
-    StructType,
-    StructField,
+    ArrayType,
+    BooleanType,
+    DoubleType,
     LongType,
     StringType,
-    BooleanType,
-    ArrayType,
+    StructField,
+    StructType,
 )
 
 
@@ -101,6 +102,22 @@ HR_POSITION_STRUCT = StructType(
         StructField("cost_centre", REFERENCE_STRUCT, True),
         StructField("color", StringType(), True),
         StructField("team_assign_mode", StringType(), True),
+    ]
+)
+
+"""Nested struct for leave request hours_per_day array (date, hours)."""
+HOURS_PER_DAY_STRUCT = StructType(
+    [
+        StructField("date", StringType(), True),
+        StructField("hours", DoubleType(), True),
+    ]
+)
+
+"""Nested struct for time interval array (start_time, end_time)."""
+TIME_INTERVAL_STRUCT = StructType(
+    [
+        StructField("start_time", StringType(), True),
+        StructField("end_time", StringType(), True),
     ]
 )
 
@@ -285,6 +302,46 @@ WORK_SITES_SCHEMA = StructType(
     ]
 )
 
+"""Schema for the leave_requests table (Get Leave Requests API)."""
+LEAVE_REQUESTS_SCHEMA = StructType(
+    [
+        StructField("id", StringType(), True),
+        StructField("start_date", StringType(), True),
+        StructField("end_date", StringType(), True),
+        StructField("total_hours", DoubleType(), True),
+        StructField("comment", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("leave_balance_amount", DoubleType(), True),
+        StructField("leave_category_name", StringType(), True),
+        StructField("reason", StringType(), True),
+        StructField("employee_id", StringType(), True),
+        StructField("hours_per_day", ArrayType(HOURS_PER_DAY_STRUCT), True),
+    ]
+)
+
+"""Schema for the timesheet_entries table (Get Timesheet Entries API)."""
+TIMESHEET_ENTRIES_SCHEMA = StructType(
+    [
+        StructField("id", StringType(), True),
+        StructField("date", StringType(), True),
+        StructField("start_time", StringType(), True),
+        StructField("end_time", StringType(), True),
+        StructField("status", StringType(), True),
+        StructField("units", DoubleType(), True),
+        StructField("unit_type", StringType(), True),
+        StructField("break_units", DoubleType(), True),
+        StructField("breaks", ArrayType(TIME_INTERVAL_STRUCT), True),
+        StructField("reason", StringType(), True),
+        StructField("comment", StringType(), True),
+        StructField("time", LongType(), True),  # milliseconds
+        StructField("cost_centre", REFERENCE_STRUCT, True),
+        StructField("work_site_id", StringType(), True),
+        StructField("work_site_name", StringType(), True),
+        StructField("position_id", StringType(), True),
+        StructField("position_name", StringType(), True),
+    ]
+)
+
 
 # =============================================================================
 # Schema Mapping
@@ -298,9 +355,11 @@ TABLE_SCHEMAS: dict[str, StructType] = {
     "custom_fields": CUSTOM_FIELDS_SCHEMA,
     "employing_entities": EMPLOYING_ENTITIES_SCHEMA,
     "leave_categories": LEAVE_CATEGORIES_SCHEMA,
+    "leave_requests": LEAVE_REQUESTS_SCHEMA,
     "policies": POLICIES_SCHEMA,
     "roles": ROLES_SCHEMA,
     "teams": TEAMS_SCHEMA,
+    "timesheet_entries": TIMESHEET_ENTRIES_SCHEMA,
     "work_locations": WORK_LOCATIONS_SCHEMA,
     "work_sites": WORK_SITES_SCHEMA,
 }
@@ -336,6 +395,10 @@ TABLE_METADATA: dict[str, dict] = {
         "primary_keys": ["id"],
         "ingestion_type": "snapshot",
     },
+    "leave_requests": {
+        "primary_keys": ["id"],
+        "ingestion_type": "snapshot",
+    },
     "policies": {
         "primary_keys": ["id"],
         "ingestion_type": "snapshot",
@@ -347,6 +410,11 @@ TABLE_METADATA: dict[str, dict] = {
     "teams": {
         "primary_keys": ["id"],
         "ingestion_type": "snapshot",
+    },
+    "timesheet_entries": {
+        "primary_keys": ["id"],
+        "ingestion_type": "snapshot",
+        "endpoint_suffix": "employees/-/timesheet_entries",
     },
     "work_locations": {
         "primary_keys": ["id"],
