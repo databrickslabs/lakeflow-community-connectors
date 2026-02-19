@@ -1,10 +1,10 @@
 import pytest
 from pathlib import Path
 
-from tests import test_suite
-from tests.test_suite import LakeflowConnectTester
-from tests.test_utils import load_config
-from sources.google_analytics_aggregated.google_analytics_aggregated import LakeflowConnect
+from tests.unit.sources import test_suite
+from tests.unit.sources.test_suite import LakeflowConnectTester
+from tests.unit.sources.test_utils import load_config
+from databricks.labs.community_connector.sources.google_analytics_aggregated.google_analytics_aggregated import GoogleAnalyticsAggregatedLakeflowConnect
 
 
 def test_google_analytics_aggregated_connector():
@@ -16,18 +16,18 @@ def test_google_analytics_aggregated_connector():
     This test suite covers both single and multiple property scenarios.
     """
     # Inject the LakeflowConnect class into test_suite module's namespace
-    test_suite.LakeflowConnect = LakeflowConnect
+    test_suite.LakeflowConnect = GoogleAnalyticsAggregatedLakeflowConnect
 
     # Load configuration
-    parent_dir = Path(__file__).parent.parent
-    config_path = parent_dir / "configs" / "dev_config.json"
-    table_config_path = parent_dir / "configs" / "dev_table_config.json"
+    config_dir = Path(__file__).parent / "configs"
+    config_path = config_dir / "dev_config.json"
+    table_config_path = config_dir / "dev_table_config.json"
 
     config = load_config(config_path)
     table_config = load_config(table_config_path)
 
     # Initialize connector (property_id field is always included regardless of count)
-    connector = LakeflowConnect(config)
+    connector = GoogleAnalyticsAggregatedLakeflowConnect(config)
     
     # Get property count for informational purposes
     property_ids = config.get("property_ids", [])
@@ -213,14 +213,13 @@ def test_google_analytics_aggregated_connector():
     print(f"✅ PASSED: Loaded {len(prebuilt_reports)} prebuilt reports")
     print(f"  Available reports: {', '.join(sorted(prebuilt_reports.keys()))}")
 
-    # Test 10: Using prebuilt report
+    # Test 10: Using prebuilt report (primary_keys auto-inferred from dimensions)
     print("\n" + "="*50)
     print("TEST: Using prebuilt report (traffic_by_country)")
     print("="*50)
     
     prebuilt_table_options = {
-        "prebuilt_report": "traffic_by_country",
-        "primary_keys": ["date", "country"]
+        "prebuilt_report": "traffic_by_country"
     }
     
     try:
@@ -233,14 +232,13 @@ def test_google_analytics_aggregated_connector():
         print(f"❌ FAILED: {str(e)}")
         raise
 
-    # Test 11: Prebuilt report with overrides
+    # Test 11: Prebuilt report with overrides (primary_keys still auto-inferred)
     print("\n" + "="*50)
     print("TEST: Prebuilt report with overrides")
     print("="*50)
     
     override_options = {
         "prebuilt_report": "traffic_by_country",
-        "primary_keys": ["date", "country"],
         "start_date": "7daysAgo",
         "lookback_days": "1"
     }
@@ -353,7 +351,7 @@ def test_google_analytics_aggregated_connector():
     shadow_options = {
         "dimensions": '["date", "city"]',  # Different from prebuilt!
         "metrics": '["sessions"]',
-        "primary_keys": ["property_id", "date", "city"]  # Always include property_id
+        "primary_keys": ["property_id", "date", "city"]  # Must explicitly define
     }
     
     try:
@@ -365,12 +363,12 @@ def test_google_analytics_aggregated_connector():
         print(f"✅ Custom dimensions override prebuilt report")
         print(f"  Fields: {', '.join(field_names)}")
         
-        # Metadata should also use custom config
+        # Metadata should use explicit primary_keys
         metadata = connector.read_table_metadata("traffic_by_country", shadow_options)
         expected_shadow_keys = ["property_id", "date", "city"]
         assert metadata["primary_keys"] == expected_shadow_keys, \
-            f"Should use custom primary_keys: {expected_shadow_keys}"
-        print(f"✅ Custom primary_keys override prebuilt report")
+            f"Should use explicit primary_keys: {expected_shadow_keys}"
+        print(f"✅ Custom primary_keys used correctly")
         print(f"  Primary keys: {metadata['primary_keys']}")
         
         print(f"\n✅ PASSED: Can shadow prebuilt report names with explicit dimensions")
@@ -388,7 +386,7 @@ def test_google_analytics_aggregated_connector():
         single_property_config = config.copy()
         single_property_config["property_ids"] = [connector.property_ids[0]]  # Take first property only
         
-        single_connector = LakeflowConnect(single_property_config)
+        single_connector = GoogleAnalyticsAggregatedLakeflowConnect(single_property_config)
         assert len(single_connector.property_ids) == 1, "Should have exactly 1 property"
         print(f"✅ Single property connector initialized: {single_connector.property_ids}")
         
@@ -417,8 +415,150 @@ def test_google_analytics_aggregated_connector():
         print(f"❌ FAILED: {str(e)}")
         raise
 
+    # Test 16b: Custom reports with/without explicit primary_keys
     print("\n" + "="*50)
-    print("ALL TESTS PASSED (INCLUDING MULTI-PROPERTY SUPPORT)")
+    print("TEST: Custom reports with/without explicit primary_keys")
     print("="*50)
+    
+    try:
+        # Test 1: Custom report WITH primary_keys should work
+        with_pk_options = {
+            "dimensions": '["date", "country", "city"]',
+            "metrics": '["sessions"]',
+            "primary_keys": ["property_id", "city", "date"],  # Non-standard order to verify it's respected
+            "start_date": "7daysAgo"
+        }
+        
+        metadata = connector.read_table_metadata("custom_with_pk", with_pk_options)
+        assert metadata["primary_keys"] == ["property_id", "city", "date"], \
+            f"Should use explicit primary_keys in specified order, got: {metadata['primary_keys']}"
+        print(f"✅ Custom report with explicit primary_keys works: {metadata['primary_keys']}")
+        
+        # Test 2: Custom report WITHOUT explicit primary_keys - infers from dimensions
+        without_pk_options = {
+            "dimensions": '["date", "country"]',
+            "metrics": '["sessions"]',
+            "start_date": "7daysAgo"
+        }
+        
+        metadata = connector.read_table_metadata("custom_without_pk", without_pk_options)
+        expected_inferred = ["property_id", "date", "country"]
+        assert metadata["primary_keys"] == expected_inferred, \
+            f"Should infer primary_keys from dimensions, got: {metadata['primary_keys']}"
+        print(f"✅ Custom report without explicit primary_keys infers: {metadata['primary_keys']}")
+        
+        print(f"\n✅ PASSED: Primary keys handling works correctly (auto-inference enabled)")
+    except Exception as e:
+        print(f"❌ FAILED: {str(e)}")
+        raise
 
+    # Test 17: API Limit - 10 dimensions (exceeds maximum of 9)
+    print("\n" + "="*50)
+    print("TEST: API Limit - 10 dimensions (exceeds maximum of 9)")
+    print("="*50)
+    
+    ten_dimensions_options = {
+        "dimensions": '["date", "country", "city", "deviceCategory", "browser", "operatingSystem", "language", "sessionSource", "sessionMedium", "newVsReturning"]',
+        "metrics": '["activeUsers"]',
+        "start_date": "7daysAgo"
+    }
+    
+    try:
+        schema = connector.get_table_schema("test_10_dimensions", ten_dimensions_options)
+        print("❌ FAILED: 10 dimensions should have been rejected by validation")
+        raise AssertionError("Validation accepted 10 dimensions, expected rejection")
+    except ValueError as e:
+        error_msg = str(e)
+        assert "Too many dimensions" in error_msg and "maximum 9" in error_msg, \
+            f"Expected dimension limit error, got: {error_msg}"
+        print(f"✅ PASSED: Validation caught 10 dimensions before API call")
 
+    # Test 18: API Limit - 11 metrics (exceeds maximum of 10)
+    print("\n" + "="*50)
+    print("TEST: API Limit - 11 metrics (exceeds maximum of 10)")
+    print("="*50)
+    
+    eleven_metrics_options = {
+        "dimensions": '["date"]',
+        "metrics": '["activeUsers", "sessions", "screenPageViews", "eventCount", "newUsers", "engagementRate", "averageSessionDuration", "bounceRate", "sessionsPerUser", "screenPageViewsPerSession", "totalUsers"]',
+        "start_date": "7daysAgo"
+    }
+    
+    try:
+        schema = connector.get_table_schema("test_11_metrics", eleven_metrics_options)
+        print("❌ FAILED: 11 metrics should have been rejected by validation")
+        raise AssertionError("Validation accepted 11 metrics, expected rejection")
+    except ValueError as e:
+        error_msg = str(e)
+        assert "Too many metrics" in error_msg and "maximum 10" in error_msg, \
+            f"Expected metric limit error, got: {error_msg}"
+        print(f"✅ PASSED: Validation caught 11 metrics before API call")
+
+    # Test 19: Validation - Combined limits and unknown fields
+    print("\n" + "="*50)
+    print("TEST: Validation catches combined issues (limits + unknown fields)")
+    print("="*50)
+    
+    try:
+        combined_validation = {
+            "dimensions": '["date", "country", "city", "deviceCategory", "browser", "operatingSystem", "language", "sessionSource", "sessionMedium", "invalidDim"]',
+            "metrics": '["activeUsers", "sessions", "screenPageViews", "eventCount", "newUsers", "engagementRate", "averageSessionDuration", "bounceRate", "sessionsPerUser", "screenPageViewsPerSession", "invalidMetric"]',
+            "start_date": "7daysAgo"
+        }
+        schema = connector.get_table_schema("test_validation_combined", combined_validation)
+        print(f"❌ FAILED: Validation should have caught multiple issues")
+        raise AssertionError("Combined validation not working")
+    except ValueError as e:
+        error_msg = str(e)
+        assert "Too many dimensions" in error_msg, "Error should mention dimension limit"
+        assert "Too many metrics" in error_msg, "Error should mention metric limit"
+        assert "Unknown dimensions" in error_msg or "invalidDim" in error_msg, "Error should mention unknown dimension"
+        assert "Unknown metrics" in error_msg or "invalidMetric" in error_msg, "Error should mention unknown metric"
+        print(f"✅ PASSED: Validation caught all issues (limits + unknown fields)")
+        print(f"  Error message covers dimension limits, metric limits, and unknown fields")
+    except Exception as e:
+        print(f"❌ FAILED: Wrong error type: {type(e).__name__}")
+        raise
+    
+    # Test 20: Date Ranges Limit - 5 date ranges (exceeds maximum of 4)
+    print("\n" + "="*50)
+    print("TEST: Date Ranges Limit - 5 date ranges (exceeds maximum of 4)")
+    print("="*50)
+    
+    try:
+        # Test with 5 date ranges by directly calling the API
+        request_body_5_ranges = {
+            "dateRanges": [
+                {"startDate": "2024-01-01", "endDate": "2024-01-07"},
+                {"startDate": "2024-01-08", "endDate": "2024-01-14"},
+                {"startDate": "2024-01-15", "endDate": "2024-01-21"},
+                {"startDate": "2024-01-22", "endDate": "2024-01-28"},
+                {"startDate": "2024-01-29", "endDate": "2024-02-04"}
+            ],
+            "dimensions": [{"name": "date"}],
+            "metrics": [{"name": "activeUsers"}],
+            "limit": 100
+        }
+        
+        # Call the API directly using the connector's internal method
+        response = connector._make_api_request(
+            "runReport",
+            request_body_5_ranges,
+            connector.property_ids[0]
+        )
+        
+        print(f"❌ FAILED: 5 date ranges should have been rejected by API")
+        raise AssertionError("API accepted 5 date ranges, expected rejection")
+        
+    except AssertionError:
+        raise
+    except Exception as e:
+        error_msg = str(e)
+        assert "400" in error_msg and "dateRange" in error_msg, \
+            f"Expected 400 error with dateRange limit message, got: {error_msg}"
+        print(f"✅ PASSED: 5 date ranges rejected by API")
+        print(f"  Error confirms limit: 'Requests are limited to 4 dateRanges'")
+    
+    print("\n" + "="*50)
+    print("ALL TESTS PASSED")
+    print("="*50)

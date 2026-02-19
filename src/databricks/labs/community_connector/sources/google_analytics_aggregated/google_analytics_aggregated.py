@@ -25,40 +25,44 @@ except ImportError:
         "Install it with: pip install google-auth"
     )
 
+from databricks.labs.community_connector.interface.lakeflow_connect import (
+    LakeflowConnect,
+)
 
-class LakeflowConnect:
+
+class GoogleAnalyticsAggregatedLakeflowConnect(LakeflowConnect):
     # Class-level cache for prebuilt reports (loaded once)
     _prebuilt_reports_cache = None
-    
+
     def __init__(self, options: dict[str, str]) -> None:
         """
         Initialize the Google Analytics Aggregated Data connector with connection-level options.
 
         Expected options:
             - property_ids: List of Google Analytics 4 property IDs (JSON array of numeric strings)
-              Examples: 
+              Examples:
                 - Single property: '["123456789"]'
                 - Multiple properties: '["123456789", "987654321"]'
             - credentials_json: Service account JSON credentials as a JSON object or string.
         """
         property_ids_json = options.get("property_ids")
-        
+
         if not property_ids_json:
             raise ValueError(
                 "Google Analytics connector requires 'property_ids' (list) in options. "
                 "Example: property_ids=['123456789'] or property_ids=['123456789', '987654321']"
             )
-        
+
         # Parse property_ids
         try:
             if isinstance(property_ids_json, str):
                 self.property_ids = json.loads(property_ids_json)
             else:
                 self.property_ids = property_ids_json
-                
+
             if not isinstance(self.property_ids, list) or len(self.property_ids) == 0:
                 raise ValueError("property_ids must be a non-empty list")
-                
+
             # Validate all are strings
             for pid in self.property_ids:
                 if not isinstance(pid, str):
@@ -102,76 +106,76 @@ class LakeflowConnect:
 
         # Fetch and cache metadata for type information
         self._metadata_cache = None
-    
+
     @classmethod
     def _load_prebuilt_reports(cls) -> dict:
         """
         Load prebuilt report configurations from prebuilt_reports.json.
         Uses class-level caching to avoid repeated file reads.
-        
+
         Returns:
             Dictionary mapping report names to their configurations
         """
         if cls._prebuilt_reports_cache is not None:
             return cls._prebuilt_reports_cache
-        
+
         # Find the prebuilt_reports.json file relative to this module
         current_file = Path(__file__).resolve()
         prebuilt_reports_path = current_file.parent / "prebuilt_reports.json"
-        
+
         if not prebuilt_reports_path.exists():
             # If file doesn't exist, return empty dict (all reports are custom)
             cls._prebuilt_reports_cache = {}
             return cls._prebuilt_reports_cache
-        
+
         try:
             with open(prebuilt_reports_path, 'r') as f:
                 cls._prebuilt_reports_cache = json.load(f)
             return cls._prebuilt_reports_cache
         except Exception as e:
             raise ValueError(f"Failed to load prebuilt reports from {prebuilt_reports_path}: {e}")
-    
+
     def _resolve_table_options(self, table_options: dict[str, str]) -> dict[str, str]:
         """
         Resolve table options by merging prebuilt report configuration with user overrides.
-        
+
         If table_options contains 'prebuilt_report', loads that report's configuration
         and merges it with any additional options provided by the user.
-        
+
         Args:
             table_options: Raw table options from pipeline spec
-            
+
         Returns:
             Resolved table options with prebuilt config merged in
-            
+
         Raises:
             ValueError: If prebuilt_report is specified but not found
         """
         prebuilt_report_name = table_options.get("prebuilt_report")
-        
+
         if not prebuilt_report_name:
             # No prebuilt report specified, return options as-is
             return table_options
-        
+
         # Load prebuilt reports
         prebuilt_reports = self._load_prebuilt_reports()
-        
+
         if prebuilt_report_name not in prebuilt_reports:
             available_reports = ', '.join(sorted(prebuilt_reports.keys()))
             raise ValueError(
                 f"Prebuilt report '{prebuilt_report_name}' not found. "
                 f"Available prebuilt reports: {available_reports}"
             )
-        
+
         # Start with prebuilt config
         prebuilt_config = prebuilt_reports[prebuilt_report_name].copy()
-        
+
         # Merge with user-provided options (user options take precedence)
         resolved_options = prebuilt_config.copy()
         for key, value in table_options.items():
             if key != "prebuilt_report":  # Don't include the prebuilt_report key itself
                 resolved_options[key] = value
-        
+
         return resolved_options
 
     def _get_access_token(self) -> str:
@@ -193,7 +197,7 @@ class LakeflowConnect:
           - 'metric_types': mapping of metric names to their types
           - 'available_dimensions': set of valid dimension names
           - 'available_metrics': set of valid metric names
-        
+
         This is called once and cached for type inference and validation.
         For multi-property connectors, fetches metadata from the first property
         (standard dimensions/metrics are the same across all properties).
@@ -247,10 +251,10 @@ class LakeflowConnect:
     def _get_pyspark_type_for_metric(self, metric_type: str):
         """
         Map Google Analytics metric type to PySpark data type.
-        
+
         Args:
             metric_type: Type string from GA4 metadata (e.g., "TYPE_INTEGER", "TYPE_FLOAT")
-            
+
         Returns:
             PySpark DataType (LongType, DoubleType, or StringType as fallback)
         """
@@ -277,44 +281,92 @@ class LakeflowConnect:
 
     def _validate_dimensions_and_metrics(self, dimensions: list, metrics: list):
         """
-        Validate that requested dimensions and metrics exist in the property metadata.
-        This catches typos and non-existent fields without making extra API calls.
-        
-        Note: This only validates existence, not semantic compatibility.
+        Validate that requested dimensions and metrics exist in the property metadata
+        and that they don't exceed API limits.
+        This catches typos, non-existent fields, and limit violations without
+        making extra API calls.
+
+        API Limits validated:
+        - Maximum 9 dimensions per request
+        - Maximum 10 metrics per request
+        - Date ranges limit (4 max) is validated separately in read_table (not user-configurable)
+
+        Note: This only validates existence and counts, not semantic compatibility.
         The runReport API will validate dimension/metric compatibility and return
         clear errors for incompatible combinations.
-        
+
         Args:
             dimensions: List of dimension names to validate
             metrics: List of metric names to validate
-            
+
         Raises:
-            ValueError: If any dimensions or metrics are not found in metadata
+            ValueError: If any dimensions or metrics are not found in metadata,
+                or if limits are exceeded
         """
         metadata = self._fetch_metadata()
         available_dimensions = metadata.get("available_dimensions", set())
         available_metrics = metadata.get("available_metrics", set())
 
+        # Check for API limits (validated empirically via test suite)
+        MAX_DIMENSIONS = 9
+        MAX_METRICS = 10
+        MAX_DATE_RANGES = 4  # Not currently configurable by users, but enforced by API
+
+        dimension_count = len(dimensions)
+        metric_count = len(metrics)
+
         # Check for unknown dimensions
         unknown_dimensions = [d for d in dimensions if d not in available_dimensions]
-        
+
         # Check for unknown metrics
         unknown_metrics = [m for m in metrics if m not in available_metrics]
 
-        if unknown_dimensions or unknown_metrics:
+        # Build comprehensive error message if any validation fails
+        has_errors = (unknown_dimensions or unknown_metrics or
+                      dimension_count > MAX_DIMENSIONS or metric_count > MAX_METRICS)
+        if has_errors:
             error_parts = ["Invalid report configuration:"]
-            
+
+            # Report limit violations first (most critical)
+            if dimension_count > MAX_DIMENSIONS:
+                error_parts.append(
+                    f"\n  Too many dimensions: {dimension_count} (max {MAX_DIMENSIONS})")
+                error_parts.append(
+                    f"    The GA4 API limits requests to {MAX_DIMENSIONS} dimensions.")
+                error_parts.append(f"    Your request has: {dimensions}")
+
+            if metric_count > MAX_METRICS:
+                error_parts.append(
+                    f"\n  Too many metrics: {metric_count} (max {MAX_METRICS})")
+                error_parts.append(
+                    f"    The GA4 API limits requests to {MAX_METRICS} metrics.")
+                error_parts.append(f"    Your request has: {metrics}")
+
+            # Report unknown fields
             if unknown_dimensions:
                 error_parts.append(f"\n  Unknown dimensions: {unknown_dimensions}")
-                error_parts.append(f"\n  Available dimensions include: {sorted(list(available_dimensions))[:10]}...")
-            
+                sample_dims = sorted(list(available_dimensions))[:10]
+                error_parts.append(f"    Available dimensions include: {sample_dims}...")
+
             if unknown_metrics:
                 error_parts.append(f"\n  Unknown metrics: {unknown_metrics}")
-                error_parts.append(f"\n  Available metrics include: {sorted(list(available_metrics))[:10]}...")
-            
-            error_parts.append("\n\nTo see all available dimensions and metrics for your property:")
-            error_parts.append(f"\n  GET https://analyticsdata.googleapis.com/v1beta/properties/{self.property_ids[0]}/metadata")
-            
+                sample_metrics = sorted(list(available_metrics))[:10]
+                error_parts.append(f"    Available metrics include: {sample_metrics}...")
+
+            error_parts.append(
+                "\n\nTo see all available dimensions and metrics for your property:")
+            prop_id = self.property_ids[0]
+            error_parts.append(
+                f"\n  GET https://analyticsdata.googleapis.com/v1beta/"
+                f"properties/{prop_id}/metadata")
+
+            if dimension_count > MAX_DIMENSIONS or metric_count > MAX_METRICS:
+                error_parts.append("\n\nTo work around dimension/metric limits:")
+                error_parts.append(
+                    "\n  - Split your report into multiple smaller reports")
+                error_parts.append(
+                    "\n  - Prioritize the most important dimensions and metrics")
+
             raise ValueError("".join(error_parts))
 
     def _make_api_request(
@@ -341,7 +393,7 @@ class LakeflowConnect:
         }
 
         for attempt in range(retry_count):
-            response = requests.post(url, headers=headers, json=body)
+            response = requests.post(url, headers=headers, json=body, timeout=120)
 
             if response.status_code == 200:
                 return response.json()
@@ -356,10 +408,10 @@ class LakeflowConnect:
                 if attempt < retry_count - 1:
                     time.sleep(wait_time)
                     continue
-                else:
-                    raise Exception(
-                        f"Rate limit exceeded after {retry_count} retries: {response.text}"
-                    )
+                raise Exception(
+                    f"Rate limit exceeded after {retry_count} retries: "
+                    f"{response.text}"
+                )
 
             elif response.status_code == 401:
                 # Token might be expired, try refreshing once
@@ -370,14 +422,15 @@ class LakeflowConnect:
                     access_token = self._credentials.token
                     headers["Authorization"] = f"Bearer {access_token}"
                     continue
-                else:
-                    raise Exception(
-                        f"Authentication failed: {response.status_code} - {response.text}"
-                    )
+                raise Exception(
+                    f"Authentication failed: {response.status_code} - "
+                    f"{response.text}"
+                )
 
             elif response.status_code == 403:
                 raise Exception(
-                    f"Permission denied. Ensure service account has access to property {property_id}: {response.text}"
+                    f"Permission denied. Ensure service account has access to "
+                    f"property {property_id}: {response.text}"
                 )
 
             else:
@@ -394,7 +447,7 @@ class LakeflowConnect:
         Returns the list of available prebuilt reports. Users can:
         1. Use a prebuilt report name directly as the source_table (simplest)
         2. Define custom reports with any name via table_options
-        
+
         Prebuilt reports are automatically configured - users don't need to specify
         dimensions, metrics, or primary_keys.
         """
@@ -411,21 +464,25 @@ class LakeflowConnect:
         For Google Analytics, supports two modes:
         1. Prebuilt reports: table_name matches a prebuilt report name (no table_options needed)
         2. Custom reports: configured via table_options (dimensions, metrics, or prebuilt_report)
-        
-        If table_name matches a prebuilt report BUT explicit dimensions are provided in 
+
+        If table_name matches a prebuilt report BUT explicit dimensions are provided in
         table_options, the custom dimensions take precedence (shadowing the prebuilt report).
         """
         # Check if this is a prebuilt report (identified by table name)
         prebuilt_reports = self._load_prebuilt_reports()
-        
-        # Check for explicit override: if dimensions are provided, use custom config even if name matches prebuilt
-        if table_name in prebuilt_reports and "dimensions" not in table_options:
+
+        # Check for explicit override: if dimensions are provided,
+        # use custom config even if name matches prebuilt
+        is_prebuilt = table_name in prebuilt_reports
+        has_custom_dims = "dimensions" in table_options
+        if is_prebuilt and not has_custom_dims:
             # Load configuration from prebuilt report (no override)
             table_options = prebuilt_reports[table_name].copy()
-        elif table_name in prebuilt_reports and "dimensions" in table_options:
-            # User is shadowing a prebuilt report name with custom config - log warning
-            print(f"⚠️  WARNING: Using custom configuration for '{table_name}' (shadowing prebuilt report)")
-            print(f"    To avoid confusion, consider using a different source_table name.")
+        elif is_prebuilt and has_custom_dims:
+            # User is shadowing a prebuilt report name with custom config
+            print(f"⚠️  WARNING: Custom config for '{table_name}' "
+                  f"(shadowing prebuilt report)")
+            print("    Consider using a different source_table name.")
             # Use custom config
             table_options = self._resolve_table_options(table_options)
         else:
@@ -466,12 +523,14 @@ class LakeflowConnect:
         # Build schema fields
         schema_fields = []
 
-        # Always add property_id field for schema stability (allows adding properties later without schema changes)
+        # Always add property_id field for schema stability
+        # (allows adding properties later without schema changes)
         schema_fields.append(StructField("property_id", StringType(), False))
 
         # Add dimension fields
-        # Date-related dimensions use DateType, others use StringType
-        date_dimensions = ["date", "firstSessionDate", "dateHour", "dateHourMinute"]
+        # Only pure date dimensions (YYYYMMDD format) use DateType
+        # dateHour and dateHourMinute contain time components and must remain StringType
+        date_dimensions = ["date", "firstSessionDate"]
         for dim in dimensions:
             if dim in date_dimensions:
                 schema_fields.append(StructField(dim, DateType(), True))
@@ -500,55 +559,67 @@ class LakeflowConnect:
         For Google Analytics, supports two modes:
         1. Prebuilt reports: table_name matches a prebuilt report name (e.g., "traffic_by_country")
         2. Custom reports: table_name is user-defined, configured via table_options
-        
-        If table_name matches a prebuilt report BUT explicit dimensions are provided in 
+
+        If table_name matches a prebuilt report BUT explicit dimensions are provided in
         table_options, the custom dimensions take precedence (shadowing the prebuilt report).
         """
         # Check if this is a prebuilt report (identified by table name)
         prebuilt_reports = self._load_prebuilt_reports()
-        
-        # Check for explicit override: if dimensions are provided, use custom config even if name matches prebuilt
-        if table_name in prebuilt_reports and "dimensions" not in table_options:
+
+        # Check for explicit override: if dimensions are provided,
+        # use custom config even if name matches prebuilt
+        is_prebuilt = table_name in prebuilt_reports
+        has_custom_dims = "dimensions" in table_options
+        if is_prebuilt and not has_custom_dims:
             # Load configuration from prebuilt report (no override)
             report_config = prebuilt_reports[table_name]
-            
-            # Primary keys are defined in the prebuilt report
-            primary_keys = report_config.get("primary_keys", [])
-            
-            # Always prepend 'property_id' field to primary keys for schema stability
-            primary_keys = ["property_id"] + primary_keys
-            
-            # Parse dimensions to determine cursor field
+
+            # Parse dimensions to determine primary keys and cursor field
             dimensions_json = report_config.get("dimensions", "[]")
             try:
                 dimensions = json.loads(dimensions_json)
             except json.JSONDecodeError:
                 dimensions = []
-            
+
+            # Primary keys: Use explicit primary_keys if defined in prebuilt
+            # config, otherwise infer from dimensions.
+            # Always prepend 'property_id' field for schema stability
+            explicit_primary_keys = report_config.get("primary_keys")
+            if explicit_primary_keys:
+                # Prebuilt report defines explicit primary_keys
+                primary_keys = ["property_id"] + explicit_primary_keys
+            else:
+                # Infer from dimensions
+                primary_keys = ["property_id"] + dimensions
+
             # Determine cursor field and ingestion type
             cursor_field = None
             if "date" in dimensions:
                 cursor_field = "date"
-                ingestion_type = "append"
+                # Use "cdc" instead of "append" to enable MERGE behavior
+                # This allows lookback_days to re-fetch and update settled data
+                # without being blocked by streaming checkpoints
+                ingestion_type = "cdc"
             else:
                 ingestion_type = "snapshot"
-            
+
             metadata = {
                 "primary_keys": primary_keys,
                 "ingestion_type": ingestion_type,
             }
-            
+
             if cursor_field:
                 metadata["cursor_field"] = cursor_field
-            
+
             return metadata
-        
-        elif table_name in prebuilt_reports and "dimensions" in table_options:
-            # User is shadowing a prebuilt report name with custom config - log warning
-            print(f"⚠️  WARNING: Using custom configuration for '{table_name}' (shadowing prebuilt report)")
-            print(f"    To avoid confusion, consider using a different source_table name.")
+
+        elif is_prebuilt and has_custom_dims:
+            # User is shadowing a prebuilt report name with custom config
+            print(f"⚠️  WARNING: Custom config for '{table_name}' "
+                  f"(shadowing prebuilt report)")
+            print("    Consider using a different source_table name.")
             # Fall through to custom report logic below
-        
+
         # Not a prebuilt report (or explicitly overridden) - treat as custom report
         # Resolve prebuilt report if specified in table_options
         table_options = self._resolve_table_options(table_options)
@@ -565,45 +636,23 @@ class LakeflowConnect:
         if not isinstance(dimensions, list):
             raise ValueError("'dimensions' must be a JSON array of strings")
 
-        # TODO: UX IMPROVEMENT - Remove need to explicitly specify primary_keys
-        #
-        # ARCHITECTURAL ISSUE: The ingestion pipeline calls _get_table_metadata() BEFORE
-        # table configurations are available (line 124 in ingestion_pipeline.py). The 
-        # metadata call only passes table names via tableNameList, not table_options.
-        #
-        # For Google Analytics Aggregated, primary_keys are derived FROM dimensions 
-        # (in table_options), so read_table_metadata() receives empty table_options 
-        # and returns empty primary_keys, causing "APPLY CHANGES query requires at 
-        # least one join key" errors.
-        #
-        # WORKAROUND: For prebuilt reports, use the report name as source_table directly.
-        # The connector can then look up primary_keys from prebuilt_reports.json by name.
-        #
-        # For custom reports, the fix still requires changes in ingestion_pipeline.py:
-        # 1. Get table configurations before metadata retrieval (before line 124):
-        #      table_configs = {t: spec.get_table_configuration(t) for t in table_list}
-        # 2. Pass table_configs to _get_table_metadata():
-        #      metadata = _get_table_metadata(spark, connection_name, table_list, table_configs)
-        # 3. Modify _get_table_metadata() to call metadata per-table with .options(**table_config):
-        #      df = spark.read.format("lakeflow_connect")
-        #            .option("databricks.connection", connection_name)
-        #            .option("tableName", "_lakeflow_metadata")
-        #            .option("tableNameList", table_name)  # Single table
-        #            .options(**table_config)  # Include table-specific options!
-        #            .load()
-        #
-        # Until fixed, users MUST explicitly specify primary_keys for custom reports.
-        #
-        # Primary keys are all dimensions (composite key)
-        # Always prepend 'property_id' field for schema stability
-        primary_keys = ["property_id"] + (dimensions if dimensions else [])
+        # Primary keys: Use from table_options if provided, otherwise infer from dimensions
+        # Always prepend 'property_id' for schema stability (allows adding properties later)
+        if "primary_keys" in table_options:
+            primary_keys = table_options.get("primary_keys")
+        else:
+            # Infer from dimensions: property_id + all dimensions
+            primary_keys = ["property_id"] + dimensions
 
         # Determine cursor field and ingestion type
         # If 'date' dimension is present, use it as cursor for append ingestion
         cursor_field = None
         if "date" in dimensions:
             cursor_field = "date"
-            ingestion_type = "append"
+            # Use "cdc" instead of "append" to enable MERGE behavior
+            # This allows lookback_days to re-fetch and update settled data
+            # without being blocked by streaming checkpoints
+            ingestion_type = "cdc"
         else:
             # Without date dimension, treat as snapshot
             ingestion_type = "snapshot"
@@ -622,11 +671,11 @@ class LakeflowConnect:
     def _parse_metric_value(self, value_str: str, metric_type: str):
         """
         Parse metric value string according to its type from the API.
-        
+
         Args:
             value_str: String value from API response
             metric_type: Type from metricHeader.type (e.g., "TYPE_INTEGER", "TYPE_FLOAT")
-            
+
         Returns:
             Parsed value in appropriate Python type (int, float, or string)
         """
@@ -665,26 +714,29 @@ class LakeflowConnect:
         1. Prebuilt reports: table_name matches a prebuilt report name (no table_options needed)
         2. Custom reports: configured via table_options
 
-        If table_name matches a prebuilt report BUT explicit dimensions are provided in 
+        If table_name matches a prebuilt report BUT explicit dimensions are provided in
         table_options, the custom dimensions take precedence (shadowing the prebuilt report).
 
         Table options (for custom reports):
-            - prebuilt_report (optional): Name of a prebuilt report (e.g., "traffic_by_country")
+            - prebuilt_report: Name of a prebuilt report (e.g., "traffic_by_country")
             OR
             - dimensions (required): JSON array of dimension names
             - metrics (required): JSON array of metric names
             Plus optional:
-            - start_date (optional): Start date for first sync (YYYY-MM-DD or relative like "30daysAgo")
-            - lookback_days (optional): Number of days to look back for incremental syncs (default: 3)
-            - dimension_filter (optional): Filter expression for dimensions (JSON object)
-            - metric_filter (optional): Filter expression for metrics (JSON object)
-            - page_size (optional): Number of rows per page (default: 10000, max: 100000)
+            - start_date: Start date for first sync (YYYY-MM-DD or "30daysAgo")
+            - lookback_days: Days to look back for incremental syncs (default: 3)
+            - dimension_filter: Filter expression for dimensions (JSON object)
+            - metric_filter: Filter expression for metrics (JSON object)
+            - page_size: Rows per page (default: 10000, max: 100000)
         """
         # Check if this is a prebuilt report (identified by table name)
         prebuilt_reports = self._load_prebuilt_reports()
-        
-        # Check for explicit override: if dimensions are provided, use custom config even if name matches prebuilt
-        if table_name in prebuilt_reports and "dimensions" not in table_options:
+
+        # Check for explicit override: if dimensions are provided,
+        # use custom config even if name matches prebuilt
+        is_prebuilt = table_name in prebuilt_reports
+        has_custom_dims = "dimensions" in table_options
+        if is_prebuilt and not has_custom_dims:
             # Load configuration from prebuilt report (no override)
             # User can still override settings like start_date via table_options
             base_config = prebuilt_reports[table_name].copy()
@@ -692,10 +744,11 @@ class LakeflowConnect:
             for key, value in table_options.items():
                 base_config[key] = value
             table_options = base_config
-        elif table_name in prebuilt_reports and "dimensions" in table_options:
-            # User is shadowing a prebuilt report name with custom config - log warning
-            print(f"⚠️  WARNING: Using custom configuration for '{table_name}' (shadowing prebuilt report)")
-            print(f"    To avoid confusion, consider using a different source_table name.")
+        elif is_prebuilt and has_custom_dims:
+            # User is shadowing a prebuilt report name with custom config
+            print(f"⚠️  WARNING: Custom config for '{table_name}' "
+                  f"(shadowing prebuilt report)")
+            print("    Consider using a different source_table name.")
             # Use custom config
             table_options = self._resolve_table_options(table_options)
         else:
@@ -742,8 +795,20 @@ class LakeflowConnect:
             end_date_str = "today"
 
         # Build the request body
+        # API limit: maximum 4 date ranges per request (validated empirically)
+        date_ranges = [{"startDate": start_date_str, "endDate": end_date_str}]
+
+        # Defensive check: ensure we don't exceed the date ranges limit
+        # (Currently hardcoded to 1, but prevents future issues if modified)
+        MAX_DATE_RANGES = 4
+        if len(date_ranges) > MAX_DATE_RANGES:
+            raise ValueError(
+                f"Too many date ranges: {len(date_ranges)} (maximum {MAX_DATE_RANGES}). "
+                f"The Google Analytics Data API limits requests to {MAX_DATE_RANGES} date ranges."
+            )
+
         request_body = {
-            "dateRanges": [{"startDate": start_date_str, "endDate": end_date_str}],
+            "dateRanges": date_ranges,
             "dimensions": [{"name": dim} for dim in dimensions],
             "metrics": [{"name": metric} for metric in metrics],
             "limit": page_size,
@@ -778,12 +843,12 @@ class LakeflowConnect:
         # Fetch data from all properties
         all_rows = []
         max_date = None
-        
+
         # Loop through each property and fetch data
         for property_id in self.property_ids:
             # Fetch all pages for this property
             offset = 0
-            
+
             while True:
                 request_body["offset"] = offset
 
@@ -801,7 +866,7 @@ class LakeflowConnect:
                 # Parse rows into dictionaries
                 for row in rows:
                     record = {}
-                    
+
                     # Always add property_id field for schema stability
                     record["property_id"] = property_id
 
@@ -813,9 +878,12 @@ class LakeflowConnect:
                             dimension_values[i]["value"] if i < len(dimension_values) else None
                         )
 
-                        # Parse date dimensions from YYYYMMDD to YYYY-MM-DD string format
-                        # PySpark will convert the string to DateType based on the schema
-                        if dim_name in ["date", "firstSessionDate"] and dim_value and len(dim_value) == 8:
+                        # Parse date dimensions from YYYYMMDD to YYYY-MM-DD string
+                        # PySpark will convert the string to DateType based on schema
+                        date_dims = ["date", "firstSessionDate"]
+                        is_date_dim = (dim_name in date_dims and dim_value and
+                                       len(dim_value) == 8)
+                        if is_date_dim:
                             try:
                                 # Convert YYYYMMDD to YYYY-MM-DD string
                                 year = int(dim_value[0:4])
@@ -841,7 +909,7 @@ class LakeflowConnect:
                         metric_value_str = (
                             metric_values[i]["value"] if i < len(metric_values) else None
                         )
-                        
+
                         # Parse the string value to the appropriate type
                         if metric_value_str is None or metric_value_str == "":
                             record[metric_name] = None

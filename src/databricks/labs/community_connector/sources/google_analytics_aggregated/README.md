@@ -89,10 +89,10 @@ Provide the following **connection-level** options when configuring the connecto
 |----------------------------|--------|----------|---------------------------------------------------------------------------------------------------------------------------------|------------------------------------|
 | `property_ids`             | array  | yes      | List of Google Analytics 4 property IDs (numeric strings). For a single property, use a list with one element.                 | `["123456789"]` or `["123456789", "987654321"]` |
 | `credentials_json`         | object | yes      | Complete service account JSON key as a JSON object (paste the entire content of the downloaded JSON file). The service account must have access to all properties listed in `property_ids`. | `{"type": "service_account", ...}` |
-| `externalOptionsAllowList` | string | yes      | Comma-separated list of table-specific option names that are allowed to be passed through to the connector. This connector requires table-specific options, so this parameter must be set. | `dimensions,metrics,start_date,lookback_days,dimension_filter,metric_filter,page_size` |
+| `externalOptionsAllowList` | string | yes      | Comma-separated list of table-specific option names that are allowed to be passed through to the connector. This connector requires table-specific options, so this parameter must be set. | `dimensions,metrics,start_date,lookback_days,dimension_filter,metric_filter,page_size,tableConfigs` |
 
 The full list of supported table-specific options for `externalOptionsAllowList` is:
-`dimensions,metrics,start_date,lookback_days,dimension_filter,metric_filter,page_size`
+`dimensions,metrics,start_date,lookback_days,dimension_filter,metric_filter,page_size,tableConfigs`
 
 > **Note**: Table-specific options such as `dimensions`, `metrics`, or `start_date` are **not** connection parameters. They are provided per-table via table options in the pipeline specification. These option names must be included in `externalOptionsAllowList` for the connection to allow them.
 
@@ -193,7 +193,7 @@ A Unity Catalog connection for this connector can be created via the UI:
 
 1. Follow the **Lakeflow Community Connector** UI flow from the **Add Data** page.
 2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
-3. Set `externalOptionsAllowList` to `dimensions,metrics,start_date,lookback_days,dimension_filter,metric_filter,page_size` (required for this connector to pass table-specific options).
+3. Set `externalOptionsAllowList` to `dimensions,metrics,start_date,lookback_days,dimension_filter,metric_filter,page_size,tableConfigs` (required for this connector to pass table-specific options).
 
 The connection can also be created using the standard Unity Catalog API.
 
@@ -207,9 +207,23 @@ The connector includes predefined report configurations for common analytics nee
 
 **Available Prebuilt Reports:**
 
-| Report Name | Description | Dimensions | Metrics | Primary Keys |
-|-------------|-------------|------------|---------|--------------|
-| `traffic_by_country` | Daily active users, sessions, and page views by country | `date`, `country` | `activeUsers`, `sessions`, `screenPageViews` | `["property_id", "date", "country"]` |
+| Report Name | Description | Dimensions | Metrics |
+|-------------|-------------|------------|---------|
+| `traffic_by_country` | Daily active users, sessions, and page views by country | `date`, `country` | `activeUsers`, `sessions`, `screenPageViews` |
+| `user_acquisition` | Daily traffic sources and campaign performance | `date`, `sessionSource`, `sessionMedium` | `sessions`, `activeUsers`, `newUsers`, `engagementRate` |
+| `events_summary` | Daily event breakdown by event name | `date`, `eventName` | `eventCount`, `activeUsers` |
+| `page_performance` | Daily page views by page path and title | `date`, `pagePath`, `pageTitle` | `screenPageViews`, `averageSessionDuration`, `bounceRate` |
+| `device_breakdown` | Daily users by device category and browser | `date`, `deviceCategory`, `browser` | `activeUsers`, `sessions`, `engagementRate` |
+| `landing_page_performance` | Performance of the first page users land on | `date`, `landingPage` | `sessions`, `activeUsers`, `newUsers`, `keyEvents`, `totalRevenue` |
+| `ecommerce_purchases` | Item-level performance for ecommerce sales | `date`, `itemName`, `itemId` | `itemsViewed`, `itemsAddedToCart`, `itemsPurchased`, `itemRevenue` |
+| `purchase_journey` | User activity across shopping stages (View Item, Add to Cart, etc.) | `date`, `eventName` | `activeUsers`, `eventCount` |
+| `checkout_journey` | Daily active users at specific checkout steps | `date`, `eventName` | `activeUsers`, `eventCount` |
+| `promotions_performance` | Internal promotion clicks and views | `date`, `itemPromotionName` | `itemsViewedInPromotion`, `itemsClickedInPromotion`, `itemRevenue` |
+| `user_retention` | Comparison of new vs returning users | `date`, `newVsReturning` | `activeUsers`, `sessions`, `engagementRate` |
+| `demographic_details` | User breakdown by language and geographic location | `date`, `language`, `country` | `activeUsers`, `newUsers`, `engagedSessions` |
+| `audience_performance` | Performance metrics for defined user audiences | `date`, `audienceName` | `activeUsers`, `sessions`, `keyEvents` |
+| `tech_details` | Detailed breakdown of browsers and operating systems | `date`, `browser`, `operatingSystem` | `activeUsers`, `sessions`, `engagementRate` |
+| `advertising_channels` | Performance by channel group, ad cost, and ROAS | `date`, `defaultChannelGroup` | `keyEvents`, `advertiserAdCost`, `totalRevenue` |
 
 > **Note**: The `property_id` field is **always automatically included** as the first element in primary keys for schema stability.
 
@@ -232,7 +246,7 @@ No `table_configuration` needed. The connector automatically knows:
 - Dimensions: `["date", "country"]`
 - Metrics: `["activeUsers", "sessions", "screenPageViews"]`
 - Primary Keys: `["property_id", "date", "country"]` (property_id always included)
-- Ingestion Type: `append` (with `date` as cursor)
+- Ingestion Type: `cdc` (with `date` as cursor, enables settlement-aware sync)
 
 **Example with optional overrides:**
 ```json
@@ -249,7 +263,7 @@ No `table_configuration` needed. The connector automatically knows:
 
 > **Reserved Names**: Prebuilt report names are reserved for automatic configuration. To use a custom report with a prebuilt name, explicitly provide `dimensions` in `table_configuration` (though a different name is recommended to avoid confusion).
 
-> **Note**: More prebuilt reports can be added to `prebuilt_reports.json` as needed. You can also request additional common reports to be included.
+> **Note**: The connector ships with 15 prebuilt reports covering common analytics use cases. More reports can be added to `prebuilt_reports.json` as needed.
 
 ### 2. Custom Reports (For Specific Needs)
 
@@ -267,7 +281,6 @@ For reports not covered by prebuilt options, you can manually configure dimensio
     "table_configuration": {
       "dimensions": "[\"date\", \"deviceCategory\"]",
       "metrics": "[\"activeUsers\", \"engagementRate\"]",
-      "primary_keys": ["property_id", "date", "deviceCategory"],
       "start_date": "30daysAgo",
       "lookback_days": "3"
     }
@@ -275,7 +288,7 @@ For reports not covered by prebuilt options, you can manually configure dimensio
 }
 ```
 
-> **Important**: For custom reports, always prepend `"property_id"` to your `primary_keys` list for schema stability.
+> **Note**: Primary keys are automatically inferred as `["property_id", "date", "deviceCategory"]` from the dimensions.
 
 ### Object summary, primary keys, and ingestion mode
 
@@ -283,34 +296,20 @@ The connector defines the ingestion mode and primary key dynamically based on th
 
 | Configuration   | Description                                           | Ingestion Type | Primary Key                                           | Incremental Cursor (if any) |
 |-----------------|-------------------------------------------------------|----------------|-------------------------------------------------------|------------------------------|
-| Any report name | User-defined aggregated data report with custom dimensions/metrics | `append` or `snapshot` | Composite of all dimensions                           | `date` dimension (if present) |
+| Any report name | User-defined aggregated data report with custom dimensions/metrics | `cdc` or `snapshot` | Composite of all dimensions                           | `date` dimension (if present) |
 
 **Ingestion Type Logic**:
-- **`append`**: Used when the `date` dimension is included. The connector tracks the maximum date and incrementally fetches new data with a lookback window.
+- **`cdc`**: Used when the `date` dimension is included. This enables MERGE behavior (via `apply_changes`) so the lookback window can re-fetch and update settled data. GA4 data typically settles within 48-72 hours as attribution models finalize.
 - **`snapshot`**: Used when no `date` dimension is present. The entire report is refreshed on each sync.
 
 **Primary Key Logic**:
 
-**For Prebuilt Reports** (using report name as `source_table`):
-- ✅ Primary keys are **automatically configured** - no need to specify them
-- The connector retrieves primary keys from the prebuilt report definition
-- `property_id` is **always automatically prepended** to the primary keys
-
-**For Custom Reports**:
-<!-- TODO: UX IMPROVEMENT - This requirement should be removed in future versions -->
-<!-- ARCHITECTURAL ISSUE: The ingestion pipeline calls _get_table_metadata() before -->
-<!-- table configurations are available (ingestion_pipeline.py line 124). Since GA4's -->
-<!-- primary_keys are derived FROM dimensions (in table_options), the connector receives -->
-<!-- empty table_options and returns empty primary_keys, causing "APPLY CHANGES query -->
-<!-- requires at least one join key" errors. -->
-<!-- -->
-<!-- FIX: Modify ingestion_pipeline.py to retrieve table configs before metadata and -->
-<!-- pass them to _get_table_metadata() with .options(**table_config). -->
-<!-- Until fixed, primary_keys MUST be explicitly specified for custom reports. -->
-- The primary key **must be explicitly defined** in `table_configuration` as `primary_keys`
-- **Always start with `"property_id"`** as the first element for schema stability
-- Follow with **all dimensions** in your report (in the same order)
-- Example: If dimensions are `["date", "country"]`, set `"primary_keys": ["property_id", "date", "country"]`
+**For All Reports** (both prebuilt and custom):
+- Primary keys are **automatically inferred** from dimensions
+- The connector automatically constructs primary keys as: `["property_id"] + dimensions`
+- `property_id` is **always automatically prepended** for schema stability
+- Example: If dimensions are `["date", "country"]`, primary keys will be `["property_id", "date", "country"]`
+- **Optional override**: You can still explicitly define `primary_keys` if you need a custom order or subset
 
 ### Required and optional table options
 
@@ -330,15 +329,13 @@ Optional overrides:
 | `metric_filter` | string (JSON object) | no | null | Add filter expression for metrics. |
 | `page_size` | string | no | `"10000"` | Override the default page size. |
 
-> **Important architectural limitation**: Due to how the ingestion pipeline retrieves metadata, `primary_keys` must be explicitly specified even for prebuilt reports, matching the prebuilt report's dimensions. This is redundant but currently required. See the TODO comments in the code for the architectural fix needed.
-
 **For Custom Reports:**
 
 | Option | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
-| `dimensions` | string (JSON array) | yes | N/A | List of dimension names as a JSON string (e.g., `"[\"date\", \"country\"]"`). Up to 9 dimensions. |
-| `metrics` | string (JSON array) | yes | N/A | List of metric names as a JSON string (e.g., `"[\"activeUsers\", \"sessions\"]"`). At least 1 metric required, up to 10 metrics. |
-| `primary_keys` | array | yes | N/A | Composite key starting with `"property_id"` followed by all dimension names (e.g., `["property_id", "date", "country"]`). **Must always start with `"property_id"`** for schema stability. <!-- TODO: Remove this redundant requirement --> |
+| `dimensions` | string (JSON array) | yes | N/A | List of dimension names as a JSON string (e.g., `"[\"date\", \"country\"]"`). **API Limit: Maximum 9 dimensions per report.** The connector validates this before making API calls. |
+| `metrics` | string (JSON array) | yes | N/A | List of metric names as a JSON string (e.g., `"[\"activeUsers\", \"sessions\"]"`). At least 1 metric required. **API Limit: Maximum 10 metrics per report.** The connector validates this before making API calls. |
+| `primary_keys` | array | no | Auto-inferred | Optional override for primary keys. By default, automatically inferred as `["property_id"] + dimensions`. If specified, **must always start with `"property_id"`** for schema stability. |
 | `start_date` | string | no | `"30daysAgo"` | Initial start date for first sync. Can be YYYY-MM-DD format or relative like `"30daysAgo"`, `"7daysAgo"`, `"yesterday"`. |
 | `lookback_days` | string | no | `"3"` | Number of days to look back for incremental syncs (accounts for data processing delays). |
 | `dimension_filter` | string (JSON object) | no | null | Filter expression for dimensions as a JSON string (see Google Analytics Data API documentation for filter syntax). |
@@ -347,9 +344,11 @@ Optional overrides:
 
 > **Important**: 
 > - For **prebuilt reports**: Only specify `prebuilt_report` name, other settings are optional overrides
-> - For **custom reports**: `dimensions`, `metrics`, and filter options must be provided as **JSON strings** (e.g., `"[\"date\", \"country\"]"`)
-> - `primary_keys` is a **native array** (e.g., `["property_id", "date", "country"]`) and **must always start with `"property_id"`** for schema stability
+> - For **custom reports**: `dimensions` and `metrics` must be provided as **JSON strings** (e.g., `"[\"date\", \"country\"]"`)
+> - `primary_keys` (if specified) is a **native array** (e.g., `["property_id", "date", "country"]`) and **must always start with `"property_id"`** for schema stability
 > - All other options are regular strings (e.g., `"30daysAgo"`, `"3"`)
+> - **Automatic Inference**: Primary keys and ingestion type are automatically inferred from your report configuration - no manual specification needed
+> - **API Limits Validation**: The connector automatically validates that your report configuration doesn't exceed API limits (9 dimensions, 10 metrics) before making requests. If limits are exceeded, you'll receive a clear error message with suggestions for splitting your report.
 
 ### Common Dimensions and Metrics
 
@@ -401,10 +400,11 @@ This is useful for discovering custom dimensions/metrics defined in your GA4 pro
 - **Type Inference**: The connector automatically determines proper data types by querying the Google Analytics metadata API:
   - **Property ID**: `StringType` - Always the first field in the schema
   - **Date Dimensions** (`date`, `firstSessionDate`): `DateType` - Automatically parsed from YYYYMMDD format
+  - **DateTime Dimensions** (`dateHour`, `dateHourMinute`): `StringType` - Kept as strings since they contain time components
   - **String Dimensions** (all others): `StringType`
   - **Integer Metrics** (`activeUsers`, `sessions`, etc.): `LongType` (64-bit integer)
   - **Float Metrics** (`engagementRate`, `bounceRate`, etc.): `DoubleType` (64-bit float)
-- **Validation**: The connector validates that requested dimensions and metrics exist in your property, catching typos and non-existent fields before making data requests.
+- **Validation**: The connector validates that requested dimensions and metrics exist in your property and don't exceed API limits, catching typos, non-existent fields, and limit violations before making data requests.
 
 ## Data Type Mapping
 
@@ -415,6 +415,7 @@ The connector automatically infers proper data types using the Google Analytics 
 | **Property ID** (added by connector) | property_id | StringType | "123456789" | **Always included** as the first field for schema stability |
 | Dimension (any)  | country, city, deviceCategory   | StringType     | "United States", "desktop" | All non-date dimensions are strings |
 | Date dimension   | date, firstSessionDate          | DateType       | 2025-12-24 | Parsed from YYYYMMDD format (e.g., "20251224" → date(2025, 12, 24)) |
+| DateTime dimension | dateHour, dateHourMinute       | StringType     | "2024011514", "202401151430" | Kept as strings (contain time components that DateType cannot represent) |
 | TYPE_INTEGER     | activeUsers, sessions, newUsers | LongType       | 1234 | 64-bit integers, parsed from API string responses |
 | TYPE_FLOAT       | engagementRate, bounceRate      | DoubleType     | 56.78 | 64-bit floats, parsed from API string responses |
 | TYPE_CURRENCY    | totalRevenue                    | DoubleType     | 1234.56 | Currency values as floats |
@@ -463,7 +464,6 @@ Example `pipeline_spec` mixing prebuilt and custom reports:
         "table_configuration": {
           "dimensions": "[\"date\", \"deviceCategory\"]",
           "metrics": "[\"activeUsers\", \"engagementRate\"]",
-          "primary_keys": ["property_id", "date", "deviceCategory"],
           "start_date": "30daysAgo",
           "lookback_days": "3"
         }
@@ -480,7 +480,7 @@ Example `pipeline_spec` mixing prebuilt and custom reports:
     - **For custom reports**: Use any unique name you choose
   - `table_configuration` (optional for prebuilt, required for custom):
     - **Prebuilt**: Omit entirely for zero-config, or include to override defaults (start_date, lookback_days, filters)
-    - **Custom**: `dimensions`, `metrics`, `primary_keys`, and other settings
+    - **Custom**: `dimensions`, `metrics`, and optional settings (primary_keys are auto-inferred)
   
 > **Note**: Each report must have a unique `source_table` name to avoid conflicts in the ingestion pipeline.
 
@@ -520,7 +520,7 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 No configuration needed! The connector automatically knows:
 - Dimensions: `["date", "country"]`
 - Metrics: `["activeUsers", "sessions", "screenPageViews"]`
-- Primary Keys: `["date", "country"]`
+- Primary Keys: `["property_id", "date", "country"]`
 
 **Example 2: Prebuilt report with overrides**
 ```json
@@ -543,7 +543,6 @@ No configuration needed! The connector automatically knows:
     "table_configuration": {
       "dimensions": "[\"date\", \"deviceCategory\", \"browser\"]",
       "metrics": "[\"activeUsers\", \"sessions\", \"bounceRate\"]",
-      "primary_keys": ["property_id", "date", "deviceCategory", "browser"],
       "start_date": "7daysAgo",
       "lookback_days": "2"
     }
@@ -559,7 +558,6 @@ No configuration needed! The connector automatically knows:
     "table_configuration": {
       "dimensions": "[\"date\", \"sessionSource\", \"sessionMedium\", \"sessionCampaignName\"]",
       "metrics": "[\"sessions\", \"conversions\", \"totalRevenue\"]",
-      "primary_keys": ["property_id", "date", "sessionSource", "sessionMedium", "sessionCampaignName"],
       "start_date": "90daysAgo",
       "lookback_days": "7"
     }
@@ -575,7 +573,6 @@ No configuration needed! The connector automatically knows:
     "table_configuration": {
       "dimensions": "[\"pagePath\", \"pageTitle\"]",
       "metrics": "[\"screenPageViews\", \"averageSessionDuration\"]",
-      "primary_keys": ["property_id", "pagePath", "pageTitle"],
       "start_date": "7daysAgo",
       "scd_type": "SCD_TYPE_1"
     }
@@ -656,6 +653,12 @@ The connector automatically handles rate limiting with exponential backoff and r
 
 ## Known Limitations
 
+- **API Request Limits**: The Google Analytics Data API enforces the following limits per request:
+  - **Maximum 9 dimensions** per report
+  - **Maximum 10 metrics** per report
+  - **Maximum 4 date ranges** per request (not user-configurable; connector uses 1 date range)
+  - The connector validates dimensions and metrics limits before making API calls and provides clear error messages if exceeded
+  - To work with more dimensions or metrics, split your report into multiple separate reports
 - **Data Freshness**: Google Analytics data is typically processed within 24-48 hours. Recent data may be incomplete or updated as processing completes.
 - **Sampling**: Very large queries may be sampled by Google Analytics. Breaking queries into smaller date ranges can help avoid sampling.
 - **Thresholding**: Google applies data thresholding for privacy when volumes are low. Some small metric values may be withheld.
@@ -683,21 +686,19 @@ The connector uses the following Google Analytics Data API endpoints:
 - **Initialization**: ~0.3-0.5 seconds (includes metadata fetch and caching)
 - **Schema generation**: < 0.1 seconds (uses cached metadata)
 - **Data fetching**: Varies by report size (10,000 rows/page, automatic pagination)
+- **Automatic Inference**: Zero additional API calls or configuration overhead
+  - Primary keys automatically inferred from dimensions
+  - Ingestion type automatically determined (cdc vs snapshot)
+  - No redundant configuration needed
 - **Validation**: Zero additional API calls (uses cached metadata)
-
-### Design Decisions
-
-- **Type Inference via `getMetadata`**: See `VALIDATION_RATIONALE.md` for why we use lightweight validation instead of `checkCompatibility` API
-- **Individual Reports vs. Batch**: See `BATCH_RATIONALE.md` for why we use individual `runReport` calls instead of `batchRunReports`
+  - Validates dimension/metric existence (catches typos)
+  - Validates API limits (9 dimensions max, 10 metrics max)
+  - Catches errors before making expensive data requests
 
 ## References
 
-- Connector implementation: `sources/google_analytics_aggregated/google_analytics_aggregated.py`
-- Connector API documentation: `sources/google_analytics_aggregated/google_analytics_aggregated_api_doc.md`
-- Design decisions:
-  - `VALIDATION_RATIONALE.md` - Why lightweight validation is used
-  - `BATCH_RATIONALE.md` - Why individual reports are used
-  - `TEST_SUMMARY.md` - Comprehensive test results
+- Connector implementation: `src/databricks/labs/community_connector/sources/google_analytics_aggregated/google_analytics_aggregated.py`
+- Connector API documentation: `src/databricks/labs/community_connector/sources/google_analytics_aggregated/google_analytics_aggregated_api_doc.md`
 - Official Google Analytics Data API documentation:
   - [Google Analytics Data API Overview](https://developers.google.com/analytics/devguides/reporting/data/v1)
   - [getMetadata Method Reference](https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/getMetadata)

@@ -19,7 +19,7 @@ source_name = "google_analytics_aggregated"
 #    - Use the prebuilt report name as the source_table
 #    - No table_configuration needed
 #    - Dimensions, metrics, and primary_keys are automatically configured
-#    - Available reports: traffic_by_country
+#    - See "AVAILABLE PREBUILT REPORTS" section below for all 15 reports
 #    - Can override any settings (start_date, lookback_days, filters, etc.)
 #
 # 2. CUSTOM REPORTS (For specific needs)
@@ -27,6 +27,7 @@ source_name = "google_analytics_aggregated"
 #    - Manually specify dimensions, metrics, and primary_keys
 #    - Full control over report configuration
 #    - Required fields: dimensions, metrics, primary_keys
+#    - Primary keys must always start with "property_id" followed by dimensions
 #
 # =============================================================================
 #
@@ -40,7 +41,7 @@ source_name = "google_analytics_aggregated"
 #         ├── destination_schema (optional): Target schema
 #         ├── destination_table (optional): Target table name (defaults to source_table)
 #         └── table_configuration (optional for prebuilt, required for custom): Report settings
-#             
+#
 #             FOR PREBUILT REPORTS (Optional - only to override defaults):
 #             ├── start_date (optional): Override default "30daysAgo"
 #             ├── lookback_days (optional): Override default 3
@@ -48,14 +49,12 @@ source_name = "google_analytics_aggregated"
 #             ├── metric_filter (optional): Add filters
 #             ├── page_size (optional): Override default 10000
 #             ├── scd_type (optional): Override default "SCD_TYPE_1"
-#             
+#
 #             FOR CUSTOM REPORTS (Required):
 #             ├── dimensions (required): JSON array e.g., '["date", "country"]'
 #             ├── metrics (required): JSON array e.g., '["activeUsers", "sessions"]'
-#             ├── primary_keys (required): List with "property_id" first, then dimensions
-#             │                            e.g., ["property_id", "date", "country"]
-#             │                            TODO: This is redundant but required due to
-#             │                            architectural limitation. See connector code.
+#             ├── primary_keys (auto-inferred): Automatically set as ["property_id"] + dimensions
+#             │                                 Can be overridden if needed
 #             ├── start_date (optional): Initial date range start (default: "30daysAgo")
 #             ├── lookback_days (optional): Days to look back (default: 3)
 #             ├── page_size (optional): Records per request (default: 10000, max: 100000)
@@ -70,14 +69,14 @@ reports = [
     {
         "table": {
             "source_table": "traffic_by_country",  # Matches prebuilt report name
-            # No table_configuration needed - dimensions, metrics, and primary_keys are automatic
+            # No table_configuration needed - dimensions, metrics, and primary keys are automatic
             # Optionally override defaults like start_date, lookback_days, filters:
             # "table_configuration": {
             #     "start_date": "90daysAgo",
             # }
         }
     },
-    
+
     # Example 2: Custom report with engagement metrics
     {
         "table": {
@@ -85,14 +84,13 @@ reports = [
             "table_configuration": {
                 "dimensions": '["date", "deviceCategory"]',
                 "metrics": '["activeUsers", "engagementRate", "averageSessionDuration"]',
-                "primary_keys": ["property_id", "date", "deviceCategory"],
                 "start_date": "90daysAgo",
                 "lookback_days": "3",
                 "page_size": "5000",
             },
         }
     },
-    
+
     # Example 3: Custom report with filters
     {
         "table": {
@@ -100,22 +98,22 @@ reports = [
             "table_configuration": {
                 "dimensions": '["date", "platform", "browser"]',
                 "metrics": '["sessions"]',
-                "primary_keys": ["property_id", "date", "platform", "browser"],
                 "start_date": "7daysAgo",
                 "lookback_days": "3",
-                "dimension_filter": '{"filter": {"fieldName": "platform", "stringFilter": {"matchType": "EXACT", "value": "web"}}}',
+                # Filter to only include web traffic
+                "dimension_filter": '{"filter": {"fieldName": "platform", '
+                                    '"stringFilter": {"matchType": "EXACT", "value": "web"}}}',
             },
         }
     },
-    
+
     # Example 4: Custom snapshot report (no date dimension)
     {
         "table": {
-            "source_table": "all_time_by_country", 
+            "source_table": "all_time_by_country",
             "table_configuration": {
                 "dimensions": '["country"]',
                 "metrics": '["totalUsers", "sessions"]',
-                "primary_keys": ["property_id", "country"],
                 "start_date": "2020-01-01",
                 "scd_type": "SCD_TYPE_1",
             },
@@ -130,18 +128,39 @@ pipeline_spec = {
 }
 
 # =============================================================================
-# AVAILABLE PREBUILT REPORTS
+# AVAILABLE PREBUILT REPORTS (15 reports)
 # =============================================================================
+# Traffic & Acquisition:
 # - traffic_by_country: Daily active users, sessions, and page views by country
+# - user_acquisition: Daily traffic sources and campaign performance
+# - landing_page_performance: Performance of the first page users land on
+#
+# Engagement:
+# - events_summary: Daily event breakdown by event name
+# - page_performance: Daily page views by page path and title
+# - device_breakdown: Daily users by device category and browser
+# - tech_details: Detailed breakdown of browsers and operating systems
+#
+# Ecommerce:
+# - ecommerce_purchases: Item-level performance for ecommerce sales
+# - purchase_journey: User activity across shopping stages
+# - checkout_journey: Daily active users at specific checkout steps
+# - promotions_performance: Internal promotion clicks and views
+#
+# Users:
+# - user_retention: Comparison of new vs returning users
+# - demographic_details: User breakdown by language and location
+# - audience_performance: Performance metrics for defined audiences
+#
+# Advertising:
+# - advertising_channels: Performance by channel group, ad cost, and ROAS
 #
 # To use a prebuilt report, just use its name as the source_table
-# No need to specify dimensions, metrics, or primary_keys - it's all automatic.
+# No need to specify dimensions, metrics, or primary keys - it's all automatic.
 #
 # RESERVED NAMES: Prebuilt report names are "reserved" to enable zero-config usage.
 # If you need a custom report with a prebuilt name, provide explicit "dimensions"
 # in table_configuration to override (though a different name is recommended).
-#
-# More prebuilt reports can be added to prebuilt_reports.json as needed.
 # =============================================================================
 
 # =============================================================================
@@ -155,7 +174,8 @@ pipeline_spec = {
 # - eventName: Event dimensions
 #
 # For full list, see: https://developers.google.com/analytics/devguides/reporting/data/v1/api-schema
-# Or use the Metadata API: GET https://analyticsdata.googleapis.com/v1beta/properties/{propertyId}/metadata
+# Or use the Metadata API:
+#   GET https://analyticsdata.googleapis.com/v1beta/properties/{propertyId}/metadata
 # =============================================================================
 
 # =============================================================================
@@ -167,8 +187,9 @@ pipeline_spec = {
 # - conversions, eventCount: Event and conversion metrics
 # - bounceRate, sessionConversionRate: Conversion rates
 #
-# For full list, see: https://developers.google.com/analytics/devguides/reporting/data/v1/api-schema
-# Or use the Metadata API: GET https://analyticsdata.googleapis.com/v1beta/properties/{propertyId}/metadata
+# For full list, see the GA4 API schema documentation.
+# Or use the Metadata API:
+#   GET https://analyticsdata.googleapis.com/v1beta/properties/{propertyId}/metadata
 # =============================================================================
 
 # Dynamically import and register the LakeFlow source

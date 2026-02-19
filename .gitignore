@@ -1,42 +1,22 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
 # Virtual environments
 .venv/
 venv/
-ENV/
 env/
+
+# Python build artifacts
+*.egg-info/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.python-version
 
 # IDE
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
-
-# Test artifacts
-sources/*/schema_validation_results.json
-*.pyc
 
 # OS
 .DS_Store
-Thumbs.db
+
+# Development config files with credentials
+sources/google_analytics_aggregated/configs/dev_config.json
