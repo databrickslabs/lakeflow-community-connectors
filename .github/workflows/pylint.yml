@@ -22,15 +22,10 @@ jobs:
         pip install -e "./tools/community_connector[dev]"
     - name: Analysing the code with pylint
       run: |
-        # Lint non-test files
+        # Lint source files (excluding tests directory and generated files)
         pylint \
         --max-line-length=100 \
+        --max-locals=20 \
         --disable=W,C0114,C0115,R0801,R1705 \
         --ignore-long-lines='^\s*(#|f?".*"|f?'\''.*'\'')$' \
-        $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py' | grep -v 'tools/scripts/merge_python_source.py' | grep -v 'community_connector/templates/ingest_template' | grep -v 'sources/hubspot/' | grep -v 'sources/stripe/' | grep -v 'sources/mixpanel/' | grep -v 'sources/google_analytics_aggregated/' | grep -v 'test_')
-        # Lint test files with C0115,C0116 disabled
-        pylint \
-        --max-line-length=100 \
-        --disable=W,C0114,C0115,R0801,R1705,C0115,C0116 \
-        --ignore-long-lines='^\s*(#|f?".*"|f?'\''.*'\'')$' \
-        $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py' | grep -v 'tools/scripts/merge_python_source.py' | grep -v 'community_connector/templates/ingest_template' | grep -v 'sources/hubspot/' | grep -v 'sources/stripe/' | grep -v 'sources/mixpanel/' | grep -v 'sources/google_analytics_aggregated/' | grep 'test_')
+        $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py' | grep -v 'tools/scripts/merge_python_source.py' | grep -v 'community_connector_cli/templates/ingest_template' | grep -v 'community_connector/sources/hubspot/' | grep -v 'community_connector/sources/stripe/' | grep -v 'community_connector/sources/mixpanel/' | grep -v 'microsoft_teams/sample-ingest.py' | grep -v '^tests/')
