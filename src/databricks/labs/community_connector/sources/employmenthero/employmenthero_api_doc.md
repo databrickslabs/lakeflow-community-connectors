@@ -40,9 +40,11 @@ The connector exposes the following organisation-scoped list endpoints as **tabl
 | `custom_fields`    | Custom field definitions for the organisation            | `GET /api/v1/organisations/{organisation_id}/custom_fields`          | `snapshot`     |
 | `employing_entities` | Employing entities for the organisation               | `GET /api/v1/organisations/{organisation_id}/employing_entities`     | `snapshot`     |
 | `leave_categories` | Leave categories for the organisation                    | `GET /api/v1/organisations/{organisation_id}/leave_categories`       | `snapshot`     |
+| `leave_requests`   | Leave requests for the organisation (optional date filter) | `GET /api/v1/organisations/{organisation_id}/leave_requests`         | `snapshot`     |
 | `policies`         | Policies for the organisation                            | `GET /api/v1/organisations/{organisation_id}/policies`               | `snapshot`     |
 | `roles`            | Roles/tags for the organisation                           | `GET /api/v1/organisations/{organisation_id}/roles`                  | `snapshot`     |
 | `teams`            | Teams (shown as Groups in the UI) for the organisation    | `GET /api/v1/organisations/{organisation_id}/teams`                   | `snapshot`     |
+| `timesheet_entries`| Timesheet entries across all employees (optional date range) | `GET /api/v1/organisations/{organisation_id}/employees/-/timesheet_entries` | `snapshot`     |
 | `work_locations`   | Work locations for the organisation                       | `GET /api/v1/organisations/{organisation_id}/work_locations`         | `snapshot`     |
 | `work_sites`       | Work sites (with departments, HR positions, address)      | `GET /api/v1/organisations/{organisation_id}/work_sites`              | `snapshot`     |
 
@@ -207,6 +209,28 @@ curl -X GET \
 | `unit_type` | string | e.g. `days`, `hours`. |
 
 
+### `leave_requests` object
+
+**Source endpoint**:  
+`GET /api/v1/organisations/{organisation_id}/leave_requests`
+
+**Key behavior**: Returns a paginated list of leave requests for the organisation. The API supports optional query parameters **`start_date`** and **`end_date`** (`YYYY-MM-DD`) to filter by leave request start/end date. The connector passes `start_date` from table options when provided. See [Get Leave Requests](https://developer.employmenthero.com/api-references#get-leave-requests).
+
+| Column Name | Type | Description |
+|------------|------|-------------|
+| `id` | string (UUID) | Leave request ID. |
+| `start_date` | string | Start date of the leave request. |
+| `end_date` | string | End date of the leave request. |
+| `total_hours` | double | Total hours of leave. |
+| `comment` | string | Comment (e.g. from owner/admin). |
+| `status` | string | e.g. `Approved`, `Pending`. |
+| `leave_balance_amount` | double | Leave balance amount. |
+| `leave_category_name` | string | Category name (e.g. Annual Leave). |
+| `reason` | string | Reason for leave. |
+| `employee_id` | string (UUID) | Employee who requested leave. |
+| `hours_per_day` | array\<struct\> | Custom hours per date; elements have `date` (string), `hours` (double). |
+
+
 ### `policies` object
 
 **Source endpoint**:  
@@ -243,6 +267,37 @@ The API uses "teams"; the Employment Hero UI uses "Groups". Same resource.
 | `id` | string (UUID) | Team ID. |
 | `name` | string | Name. |
 | `status` | string | e.g. `active`. |
+
+
+### `timesheet_entries` object
+
+**Source endpoint**:  
+`GET /api/v1/organisations/{organisation_id}/employees/{employee_id}/timesheet_entries`
+
+The connector uses **`employee_id = "-"`** (wildcard) to fetch timesheet entries for **all employees** in one table:  
+`GET /api/v1/organisations/{organisation_id}/employees/-/timesheet_entries`
+
+**Key behavior**: Returns a paginated list of timesheet entries. The API supports optional query parameters **`start_date`** and **`end_date`** (format `dd/mm/yyyy`) to filter by date range. The connector passes `start_date` from table options when provided. See [Get Timesheet Entries](https://developer.employmenthero.com/api-references#get-timesheet-entries).
+
+| Column Name | Type | Description |
+|------------|------|-------------|
+| `id` | string (UUID) | Timesheet entry ID. |
+| `date` | string | Date of the timesheet entry. |
+| `start_time` | string | Start time. |
+| `end_time` | string | End time. |
+| `status` | string | e.g. `pending`, `approved`. |
+| `units` | double | Productive working hours (excludes breaks). |
+| `unit_type` | string | e.g. `hours`. |
+| `break_units` | double | Total break hours. |
+| `breaks` | array\<struct\> | Break periods; elements have `start_time`, `end_time`. |
+| `reason` | string | Reason. |
+| `comment` | string | Comment. |
+| `time` | long | Time in milliseconds (when start/end time empty). |
+| `cost_centre` | struct | Cost centre (`id`, `name`). |
+| `work_site_id` | string (UUID) | Work site ID. |
+| `work_site_name` | string | Work site name. |
+| `position_id` | string (UUID) | Position ID. |
+| `position_name` | string | Position name. |
 
 
 ### `work_locations` object
@@ -351,7 +406,8 @@ curl -X GET \
 |---------------------|----------------|-------|
 | UUID | string | All IDs are UUIDs, stored as string. |
 | string | string | Text, enums, dates/datetimes as returned by API. |
-| number (integer) | long | e.g. counts, lengths; use 64-bit where applicable. |
+| number (integer) | long | e.g. counts, lengths, milliseconds; use 64-bit where applicable. |
+| number (decimal) | double | e.g. `total_hours`, `units`, `break_units`, `hours` in leave_requests/timesheet_entries. |
 | boolean | boolean | Standard true/false. |
 | object | struct | Nested struct with fixed fields (e.g. address, reference). |
 | array of objects | array\<struct\> | e.g. teams, custom_field_options, departments. |
@@ -371,6 +427,6 @@ The Employment Hero UI uses **Groups**; the API and connector use **teams**. End
   - Introduction, API versioning, regional data, terminology (Teams/Groups).
   - Authentication (OAuth 2.0, authorization, token exchange, refresh, use of Bearer token).
   - Errors and rate limits.
-  - Endpoint documentation for certifications, cost centres, custom fields, employees, employing entities, leave categories, policies, roles, teams, work locations, work sites, and related resources.
+  - Endpoint documentation for certifications, cost centres, custom fields, employees, employing entities, leave categories, leave requests, policies, roles, teams, timesheet entries, work locations, work sites, and related resources.
 
 When in doubt, the **official Employment Hero API documentation** is the source of truth for endpoint behaviour, request/response shape, and rate limits.

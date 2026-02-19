@@ -23,11 +23,11 @@ Provide the following **connection-level** options when configuring the connecto
 | `client_secret`      | string | yes      | Client secret from your OAuth 2.0 application credentials.                                       |
 | `redirect_uri`       | string | yes      | Redirect URI registered with the OAuth 2.0 application (must match the callback URL used to obtain the authorization code). E.g. `https://<workspace>.cloud.databricks.com/oauth/callback` |
 | `authorization_code` | string | yes      | Authorization code from the OAuth callback (redirect after the user authorises the app).          |
-| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names allowed to be passed through. This connector requires `organisation_id` for all tables. | `organisation_id` |
+| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names allowed to be passed through. This connector requires `organisation_id` for all tables. | `organisation_id,start_date` |
 
 The supported table-specific option for `externalOptionsAllowList` is:
 
-`organisation_id`
+`organisation_id,start_date`
 
 > **Note**: The table-specific option `organisation_id` is **not** a connection parameter. It is provided per table via table options in the pipeline specification. The option name must be included in `externalOptionsAllowList` for the connection to allow it.
 
@@ -50,7 +50,7 @@ A Unity Catalog connection for this connector can be created in two ways via the
 
 1. Follow the **Lakeflow Community Connector** UI flow from the **Add Data** page.
 2. Select or create a connection that uses this Employment Hero connector.
-3. Set `externalOptionsAllowList` to `organisation_id` so that the connector can receive the organisation ID per table.
+3. Set `externalOptionsAllowList` to `organisation_id,start_date` so that the connector can receive the organisation ID per table, and start date for tables that use it.
 
 The connection can also be created using the standard Unity Catalog API.
 
@@ -64,9 +64,11 @@ The Employment Hero connector exposes a **static list** of tables, each correspo
 - `custom_fields`
 - `employing_entities`
 - `leave_categories`
+- `leave_requests`
 - `policies`
 - `roles`
 - `teams`
+- `timesheet_entries`
 - `work_locations`
 - `work_sites`
 
@@ -82,9 +84,11 @@ All supported tables currently use **snapshot** ingestion and are keyed by `id`:
 | `custom_fields`     | Custom field definitions for the organisation                              | `snapshot`     | `id`        |
 | `employing_entities`| Employing entities in the organisation                                     | `snapshot`     | `id`        |
 | `leave_categories`  | Leave categories (e.g. Annual Leave, Sick Leave)                            | `snapshot`     | `id`        |
+| `leave_requests`    | Leave requests for the organisation (supports optional `start_date`)       | `snapshot`     | `id`        |
 | `policies`          | Policies (e.g. induction policies)                                          | `snapshot`     | `id`        |
 | `roles`             | Roles/tags (standalone HR or payroll-connected)                             | `snapshot`     | `id`        |
 | `teams`             | Teams (shown as Groups in the Employment Hero UI)                           | `snapshot`     | `id`        |
+| `timesheet_entries` | Timesheet entries across all employees (supports optional `start_date`)    | `snapshot`     | `id`        |
 | `work_locations`    | Work locations (e.g. offices)                                               | `snapshot`     | `id`        |
 | `work_sites`        | Work sites with address, departments, and HR positions                      | `snapshot`     | `id`        |
 
@@ -96,6 +100,25 @@ For **all** tables, you must provide the following option in the pipeline table 
 
 No other table-specific options are required. Omitted optional API query parameters (e.g. filters) use their defaults in the connector.
 
+### Optional table options
+
+The following tables support an optional **`start_date`** table option. When provided, the connector passes it to the API as a date filter so only records on or after that date are returned:
+
+- **`leave_requests`**: `start_date` (string, `YYYY-MM-DD`) — filter leave requests by start date. See [Get Leave Requests](https://developer.employmenthero.com/api-references#get-leave-requests).
+- **`timesheet_entries`**: `start_date` (string, `dd/mm/yyyy` per API) — start of the date range for timesheet entries. The API also supports `end_date`; the connector currently forwards `start_date` when present. See [Get Timesheet Entries](https://developer.employmenthero.com/api-references#get-timesheet-entries).
+
+Include `start_date` in `externalOptionsAllowList` (e.g. `organisation_id,start_date`) if you use it. Example table config:
+
+```json
+{
+  "table": {
+    "source_table": "leave_requests",
+    "organisation_id": "bdfcb02b-fcc3-4f09-8636-c06c14345b86",
+    "start_date": "2025-01-01"
+  }
+}
+```
+
 ### Schema highlights
 
 Schemas are defined in `employmenthero_schemas.py` and align with the [Employment Hero API documentation](https://developer.employmenthero.com/api-references):
@@ -104,8 +127,10 @@ Schemas are defined in `employmenthero_schemas.py` and align with the [Employmen
 - **`certifications`**, **`cost_centres`**, **`employing_entities`**, **`roles`**, **`work_locations`**: Simple tables with `id` and `name` (and, where applicable, `type`, `country`, or `status`).
 - **`custom_fields`**: Includes `custom_field_permissions` and `custom_field_options` as array-of-struct fields.
 - **`leave_categories`**: `id`, `name`, `unit_type` (e.g. `days`, `hours`).
+- **`leave_requests`**: Leave requests with `id`, `start_date`, `end_date`, `total_hours`, `comment`, `status`, `leave_balance_amount`, `leave_category_name`, `reason`, `employee_id`, and `hours_per_day` (array of `{date`, `hours}`). Supports optional table option `start_date` to filter by start date.
 - **`policies`**: `id`, `name`, `induction`, `created_at`.
 - **`teams`**: `id`, `name`, `status` (API uses “team”; UI shows “Groups”).
+- **`timesheet_entries`**: Timesheet entries with `id`, `date`, `start_time`, `end_time`, `status`, `units`, `unit_type`, `break_units`, `breaks` (array of `{start_time`, `end_time}`), `reason`, `comment`, `time` (milliseconds), `cost_centre`, and work site/position fields. Fetched for all employees via `employees/-/timesheet_entries`. Supports optional table option `start_date` for the date range.
 - **`work_sites`**: `id`, `name`, `status`, `roster_positions_count`, plus nested `hr_positions`, `address`, and `departments`.
 
 You do not need to customize the schema; it is static and defined by the connector.
