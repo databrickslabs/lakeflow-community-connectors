@@ -1,0 +1,35 @@
+# google_analytics_aggregated Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: Google Analytics Aggregated Data
+connection:
+  parameters:
+    - name: property_ids
+      type: string
+      required: true
+      description: >
+        List of Google Analytics 4 property IDs as a JSON array of numeric strings.
+        For a single property: '["123456789"]'.
+        For multiple properties: '["123456789", "987654321"]'.
+
+    - name: credentials_json
+      type: string
+      required: true
+      secret: true
+      description: >
+        Complete service account JSON key as a JSON object. The service account
+        must have Viewer or Analyst access to all properties listed in property_ids.
+        Paste the entire content of the downloaded JSON key file.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# ============================================================================
+external_options_allowlist: "dimensions,metrics,start_date,lookback_days,dimension_filter,metric_filter,page_size,primary_keys,prebuilt_report"

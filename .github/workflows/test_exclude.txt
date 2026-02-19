@@ -8,6 +8,7 @@
 tests/unit/sources/appsflyer/test_appsflyer_lakeflow_connect.py
 tests/unit/sources/example/test_example_lakeflow_connect.py
 tests/unit/sources/github/test_github_lakeflow_connect.py
+tests/unit/sources/google_analytics_aggregated/test_google_analytics_aggregated_lakeflow_connect.py
 tests/unit/sources/gmail/test_gmail_lakeflow_connect.py
 tests/unit/sources/hubspot/test_hubspot_lakeflow_connect.py
 tests/unit/sources/microsoft_teams/test_microsoft_teams_lakeflow_connect.py

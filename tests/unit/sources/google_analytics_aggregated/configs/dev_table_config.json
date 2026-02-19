@@ -1,0 +1,107 @@
+{
+  "traffic_by_country": {
+    "description": "Daily active users, sessions, and page views by country",
+    "dimensions": "[\"date\", \"country\"]",
+    "metrics": "[\"activeUsers\", \"sessions\", \"screenPageViews\"]",
+    "start_date": "30daysAgo",
+    "lookback_days": "3"
+  },
+  "user_acquisition": {
+    "description": "Daily traffic sources and campaign performance",
+    "dimensions": "[\"date\", \"sessionSource\", \"sessionMedium\"]",
+    "metrics": "[\"sessions\", \"activeUsers\", \"newUsers\", \"engagementRate\"]",
+    "start_date": "30daysAgo",
+    "lookback_days": "3"
+  },
+  "events_summary": {
+    "description": "Daily event breakdown by event name",
+    "dimensions": "[\"date\", \"eventName\"]",
+    "metrics": "[\"eventCount\", \"activeUsers\"]",
+    "start_date": "30daysAgo",
+    "lookback_days": "3"
+  },
+  "page_performance": {
+    "description": "Daily page views by page path and title",
+    "dimensions": "[\"date\", \"pagePath\", \"pageTitle\"]",
+    "metrics": "[\"screenPageViews\", \"averageSessionDuration\", \"bounceRate\"]",
+    "start_date": "30daysAgo",
+    "lookback_days": "3"
+  },
+  "device_breakdown": {
+    "description": "Daily users by device category and browser",
+    "dimensions": "[\"date\", \"deviceCategory\", \"browser\"]",
+    "metrics": "[\"activeUsers\", \"sessions\", \"engagementRate\"]",
+    "start_date": "30daysAgo",
+    "lookback_days": "3"
+  },
+  "landing_page_performance": {
+    "description": "Performance of the first page users land on",
+    "dimensions": "[\"date\", \"landingPage\"]",
+    "metrics": "[\"sessions\", \"activeUsers\", \"newUsers\", \"keyEvents\", \"totalRevenue\"]",
+    "start_date": "30daysAgo",
+    "lookback_days": "3"
+  },
+  "ecommerce_purchases": {
+    "description": "Item-level performance for ecommerce sales",
+    "dimensions": "[\"date\", \"itemName\", \"itemId\"]",
+    "metrics": "[\"itemsViewed\", \"itemsAddedToCart\", \"itemsPurchased\", \"itemRevenue\"]",
+    "start_date": "30daysAgo",
+    "lookback_days": "3"
+  },
+  "purchase_journey": {
+    "description": "User activity across shopping stages",
+    "dimensions": "[\"date\", \"eventName\"]",
+    "metrics": "[\"activeUsers\", \"eventCount\"]",
+    "start_date": "30daysAgo",
+    "lookback_days": "3"
+  },
+  "checkout_journey": {
+    "description": "Daily active users at checkout steps",
+    "dimensions": "[\"date\", \"eventName\"]",
+    "metrics": "[\"activeUsers\", \"eventCount\"]",
+    "start_date": "30daysAgo",
+    "lookback_days": "3"
+  },
+  "promotions_performance": {
+    "description": "Internal promotion clicks and views",
+    "dimensions": "[\"date\", \"itemPromotionName\"]",
+    "metrics": "[\"itemsViewedInPromotion\", \"itemsClickedInPromotion\", \"itemRevenue\"]",
+    "start_date": "30daysAgo",
+    "lookback_days": "3"
+  },
+  "user_retention": {
+    "description": "Comparison of new vs returning users (standard report compatible)",
+    "dimensions": "[\"date\", \"newVsReturning\"]",
+    "metrics": "[\"activeUsers\", \"sessions\", \"engagementRate\"]",
+    "start_date": "30daysAgo",
+    "lookback_days": "3"
+  },
+  "demographic_details": {
+    "description": "User breakdown by language and location",
+    "dimensions": "[\"date\", \"language\", \"country\"]",
+    "metrics": "[\"activeUsers\", \"newUsers\", \"engagedSessions\"]",
+    "start_date": "30daysAgo",
+    "lookback_days": "3"
+  },
+  "audience_performance": {
+    "description": "Performance metrics for defined user audiences",
+    "dimensions": "[\"date\", \"audienceName\"]",
+    "metrics": "[\"activeUsers\", \"sessions\", \"keyEvents\"]",
+    "start_date": "30daysAgo",
+    "lookback_days": "3"
+  },
+  "tech_details": {
+    "description": "Breakdown of browsers and operating systems",
+    "dimensions": "[\"date\", \"browser\", \"operatingSystem\"]",
+    "metrics": "[\"activeUsers\", \"sessions\", \"engagementRate\"]",
+    "start_date": "30daysAgo",
+    "lookback_days": "3"
+  },
+  "advertising_channels": {
+    "description": "Performance by channel group and ad cost",
+    "dimensions": "[\"date\", \"defaultChannelGroup\"]",
+    "metrics": "[\"keyEvents\", \"advertiserAdCost\", \"totalRevenue\"]",
+    "start_date": "30daysAgo",
+    "lookback_days": "3"
+  }
+}
