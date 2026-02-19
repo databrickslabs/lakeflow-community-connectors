@@ -131,7 +131,7 @@ class LakeflowSource(DataSource):
         self.options = options
         # TEMPORARY: LakeflowConnectImpl is replaced with the actual implementation
         # class during merge. See the placeholder comment at the top of this file.
-        self.lakeflow_connect = LakeflowConnectImpl(options)
+        self.lakeflow_connect = LakeflowConnectImpl(options)  # pylint: disable=abstract-class-instantiated
 
     @classmethod
     def name(cls):
