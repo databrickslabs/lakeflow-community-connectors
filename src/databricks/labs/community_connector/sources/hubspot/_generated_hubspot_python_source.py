@@ -230,6 +230,7 @@ def register_lakeflow_source(spark):
                 options: A dictionary of parameters like authentication tokens, table names,
                     and other configurations.
             """
+            self.options = options
 
         @abstractmethod
         def list_tables(self) -> list[str]:

@@ -169,8 +169,9 @@ def get_source_lib_files(source_name: str) -> List[Path]:
         # Skip files matching exclude patterns from config
         if should_exclude_file(filename, source_name, exclude_config):
             continue
-        # Skip files in special directories (configs, etc.)
-        if any(part.startswith(".") or part == "configs" for part in rel_path.parts):
+        # Skip files in special directories (configs, build artifacts, etc.)
+        _SKIP_DIRS = {"configs", "build", "dist", ".venv", "venv", "__pycache__"}
+        if any(part.startswith(".") or part in _SKIP_DIRS for part in rel_path.parts):
             continue
         lib_files.append(py_file)
 
