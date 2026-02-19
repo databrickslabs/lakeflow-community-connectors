@@ -1,5 +1,3 @@
-# pylint: disable=undefined-variable,invalid-name,no-name-in-module
-# This is a template file - variables like `spark` and `PIPELINE_SPEC` are substituted at runtime
 from databricks.labs.community_connector.pipeline import ingest
 from databricks.labs.community_connector import register
 

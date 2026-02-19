@@ -11,10 +11,14 @@
     ],
     "zoho_crm": [
       "zoho_crm_oauth_setup.py"
+    ],
+    "microsoft_teams": [
+      "sample-ingest.py"
     ]
   },
   "_comments": {
     "zoho_crm_oauth_setup.py": "Databricks notebook to help users set up OAuth credentials for Zoho CRM. Not part of the connector runtime.",
-    "osipi/ingest.py": "Databricks notebook example for ingestion. Not part of the connector runtime."
+    "osipi/ingest.py": "Databricks notebook example for ingestion. Not part of the connector runtime.",
+    "microsoft_teams/sample-ingest.py": "Databricks notebook sample for fully automated ingestion. Not part of the connector runtime."
   }
 }

@@ -751,6 +751,79 @@ class TestComplexNestedStructures:
 
 
 # =============================================================================
+# Tests for fromJson Bug Fix
+# =============================================================================
+class TestFromJsonBugFix:
+    """
+    Test fix for KeyError: 'fields' bug.
+    
+    Bug: The original code checked `hasattr(field_type, "fromJson")` and called it
+    with the data value. This is incorrect because StructType.fromJson() expects
+    a schema definition JSON, not actual data.
+    
+    When StructType.fromJson(data) is called with data like {"name": "Alice"},
+    it raises KeyError: 'fields' because it expects {"fields": [...], "type": "struct"}.
+    
+    The fix ensures we only use fromJson for actual custom UDTs, not built-in types.
+    """
+
+    def test_struct_type_not_misinterpreted_as_udt(self):
+        """
+        Verify StructType is parsed correctly without calling fromJson incorrectly.
+        
+        This test would fail with KeyError: 'fields' before the fix.
+        """
+        schema = StructType([
+            StructField("name", StringType(), True),
+            StructField("value", IntegerType(), True),
+        ])
+        
+        # This should work - parse_value should call _parse_struct, not fromJson
+        result = parse_value({"name": "test", "value": 42}, schema)
+        
+        assert isinstance(result, Row)
+        assert result.name == "test"
+        assert result.value == 42
+
+    def test_nested_struct_not_misinterpreted_as_udt(self):
+        """
+        Verify nested StructType works correctly.
+        
+        Nested structs were particularly susceptible to the fromJson bug
+        when code was merged into a single file with different scopes.
+        """
+        schema = StructType([
+            StructField("outer", StructType([
+                StructField("inner", StringType(), True),
+            ]), True),
+        ])
+        
+        result = parse_value({"outer": {"inner": "nested_value"}}, schema)
+        
+        assert result.outer.inner == "nested_value"
+
+    def test_array_of_structs_not_misinterpreted_as_udt(self):
+        """
+        Verify ArrayType containing StructType works correctly.
+        """
+        schema = ArrayType(StructType([
+            StructField("id", IntegerType(), True),
+            StructField("name", StringType(), True),
+        ]))
+        
+        data = [
+            {"id": 1, "name": "first"},
+            {"id": 2, "name": "second"},
+        ]
+        
+        result = parse_value(data, schema)
+        
+        assert len(result) == 2
+        assert result[0].id == 1
+        assert result[1].name == "second"
+
+
+# =============================================================================
 # Tests for Error Cases
 # =============================================================================
 class TestErrorCases:
