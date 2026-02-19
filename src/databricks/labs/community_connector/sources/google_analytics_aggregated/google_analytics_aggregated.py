@@ -1,9 +1,8 @@
 import json
-import os
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Iterator, Any
+from typing import Iterator
 import requests
 
 from pyspark.sql.types import (
@@ -13,7 +12,6 @@ from pyspark.sql.types import (
     StringType,
     DoubleType,
     DateType,
-    ArrayType,
 )
 
 try:
@@ -148,7 +146,7 @@ class GoogleAnalyticsAggregatedLakeflowConnect(LakeflowConnect):
             return cls._prebuilt_reports_cache
 
         try:
-            with open(prebuilt_reports_path, 'r') as f:
+            with open(prebuilt_reports_path, 'r', encoding='utf-8') as f:
                 cls._prebuilt_reports_cache = json.load(f)
             return cls._prebuilt_reports_cache
         except Exception as e:
@@ -447,7 +445,7 @@ class GoogleAnalyticsAggregatedLakeflowConnect(LakeflowConnect):
                 if attempt < retry_count - 1:
                     time.sleep(wait_time)
                     continue
-                raise Exception(
+                raise RuntimeError(
                     f"Rate limit exceeded after {retry_count} retries: "
                     f"{response.text}"
                 )
@@ -459,24 +457,24 @@ class GoogleAnalyticsAggregatedLakeflowConnect(LakeflowConnect):
                     access_token = self._credentials.token
                     headers["Authorization"] = f"Bearer {access_token}"
                     continue
-                raise Exception(
+                raise RuntimeError(
                     f"Authentication failed: {response.status_code} - "
                     f"{response.text}"
                 )
 
             elif response.status_code == 403:
-                raise Exception(
+                raise RuntimeError(
                     f"Permission denied. Ensure service account has "
                     f"access to property {property_id}: {response.text}"
                 )
 
             else:
-                raise Exception(
+                raise RuntimeError(
                     f"API request failed: {response.status_code} - "
                     f"{response.text}"
                 )
 
-        raise Exception(
+        raise RuntimeError(
             f"API request failed after {retry_count} retries"
         )
 
@@ -818,6 +816,7 @@ class GoogleAnalyticsAggregatedLakeflowConnect(LakeflowConnect):
 
     def _fetch_property_data(self, property_id, request_body, page_size):
         """Fetch all pages of report data for a single property."""
+        request_body = {**request_body}
         rows_list = []
         max_date = None
         offset = 0
@@ -888,16 +887,14 @@ class GoogleAnalyticsAggregatedLakeflowConnect(LakeflowConnect):
         dimensions, metrics = self._parse_dimensions_and_metrics(
             table_options
         )
+        self._validate_dimensions_and_metrics(dimensions, metrics)
 
         request_body = self._build_report_request(
             dimensions, metrics, table_options, start_offset
         )
-        page_size = min(
-            int(table_options.get("page_size", 10000)), 100000
-        )
 
         all_rows, max_date = self._fetch_report_data(
-            request_body, page_size
+            request_body, request_body["limit"]
         )
 
         if max_date:

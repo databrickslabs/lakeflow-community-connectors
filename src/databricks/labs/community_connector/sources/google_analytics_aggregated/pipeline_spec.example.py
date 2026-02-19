@@ -1,5 +1,8 @@
-from pipeline.ingestion_pipeline import ingest
-from libs.source_loader import get_register_function
+from databricks.labs.community_connector.pipeline import ingest
+from databricks.labs.community_connector import register
+
+# Enable the injection of connection options from Unity Catalog connections into connectors
+spark.conf.set("spark.databricks.unityCatalog.connectionDfOptionInjection.enabled", "true")
 
 source_name = "google_analytics_aggregated"
 
@@ -193,8 +196,7 @@ pipeline_spec = {
 # =============================================================================
 
 # Dynamically import and register the LakeFlow source
-register_lakeflow_source = get_register_function(source_name)
-register_lakeflow_source(spark)
+register(spark, source_name)
 
 # Ingest the tables specified in the pipeline spec
 ingest(spark, pipeline_spec)
