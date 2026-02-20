@@ -4,6 +4,7 @@ description: "Implement write-back test utilities that write test data to the so
 model: opus
 color: orange
 memory: project
+permissionMode: acceptEdits
 skills:
   - write-back-testing
 ---

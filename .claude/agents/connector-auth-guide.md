@@ -4,6 +4,7 @@ description: "Sets up authentication for a new connector by reading API docs, ge
 tools: Bash, Glob, Grep, Read, Edit, Write, NotebookEdit, Skill, TaskCreate, TaskGet, TaskUpdate, TaskList, EnterWorktree, ToolSearch
 model: sonnet 
 color: red
+permissionMode: acceptEdits
 memory: project
 ---
 

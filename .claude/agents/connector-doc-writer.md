@@ -4,6 +4,7 @@ description: "Generate public-facing end-user documentation for a completed conn
 tools: Bash, Glob, Grep, Read, Edit, Write, NotebookEdit, WebFetch, WebSearch, Skill, TaskUpdate, EnterWorktree, ToolSearch, TaskGet
 model: opus
 color: purple
+permissionMode: acceptEdits
 memory: local
 skills:
   - create-connector-document

@@ -3,6 +3,7 @@ name: connector-builder
 description: "Create a pyproject.toml for a source connector and build it as an independent Python package."
 model: sonnet
 color: green
+permissionMode: acceptEdits
 skills:
   - build-source-project
 ---
