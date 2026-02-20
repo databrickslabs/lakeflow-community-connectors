@@ -2,7 +2,7 @@
 name: connector-auth-guide
 description: "Sets up authentication for a new connector by reading API docs, generating a connection spec, guiding the user through credential setup via the authenticate script, and creating an auth verification test."
 tools: Bash, Glob, Grep, Read, Edit, Write, NotebookEdit, Skill, TaskCreate, TaskGet, TaskUpdate, TaskList, EnterWorktree, ToolSearch
-model: opus
+model: haiku
 color: red
 memory: project
 ---
