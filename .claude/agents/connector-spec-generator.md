@@ -1,7 +1,7 @@
 ---
 name: connector-spec-generator
 description: "Generate the connector spec YAML file for a completed connector implementation, defining connection parameters and external options allowlist."
-model: sonnet
+model: haiku
 color: yellow
 skills:
   - generate-connector-spec
