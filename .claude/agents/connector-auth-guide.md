@@ -1,5 +1,5 @@
 ---
-name: auth-spec-generator
+name: connector-auth-guide
 description: "Sets up authentication for a new connector by reading API docs, generating a connection spec, guiding the user through credential setup via the authenticate script, and creating an auth verification test."
 tools: Bash, Glob, Grep, Read, Edit, Write, NotebookEdit, Skill, TaskCreate, TaskGet, TaskUpdate, TaskList, EnterWorktree, ToolSearch
 model: opus
@@ -155,6 +155,7 @@ Debug if the authentication failed and tell user if it is because the parameters
 ## Edge Cases
 
 - **OAuth 2.0 flows**: If the source uses OAuth, note that `authenticate.py` handles the browser-based flow; the spec should still capture `client_id`, `client_secret`, and the resulting `access_token`/`refresh_token` fields
+- **Subdomain-based URLs**: Capture `subdomain` or `instance_url` as a credential field
 - **Multiple auth methods**: Document the simplest/recommended one first, mention alternatives
 - **API versioning in auth**: Note if auth tokens are version-specific
 - **Missing source name**: If you cannot determine the `source_name` from context, ask the user before proceeding
