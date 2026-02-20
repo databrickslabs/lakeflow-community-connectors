@@ -33,7 +33,7 @@ Connector API documentation live under `src/databricks/labs/community_connector/
 
 ## Step 2: Generate the Connector Spec (Connection Section Only)
 
-Following the `/generate-connector-spec` skill pattern, generate an intermediate connector spec focused **only on the connection/authentication portion**. Need to follow `templates/connector_spec_template.yaml`.
+Following the `/generate-connector-spec` skill pattern, generate an intermediate connector spec focused **only on the connection/authentication portion**. Need to follow `templates/connector_spec_template.yaml`. However, only include the parameters strictly required for authentication — the goal at this stage is to verify the connection, not to pull data.
 
 ---
 
