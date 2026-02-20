@@ -1172,7 +1172,7 @@ def register_lakeflow_source(spark):
                         "response_count,date_created,date_modified,language,question_count"
                     )
                     params["sort_by"] = "date_modified"
-                    params["sort_order"] = "ASC"
+                    params["sort_order"] = "asc"
 
                 # Some endpoints require special permissions - allow empty results on 400/403
                 allow_empty = table_name in ["workgroups", "webhooks", "benchmark_bundles", "groups"]
@@ -1243,7 +1243,7 @@ def register_lakeflow_source(spark):
                     "page": page,
                     "per_page": per_page,
                     "sort_by": cursor_field,
-                    "sort_order": "ASC",
+                    "sort_order": "asc",
                 }
 
                 # Add incremental filter
@@ -1329,7 +1329,7 @@ def register_lakeflow_source(spark):
                         "page": page,
                         "per_page": 100,
                         "sort_by": "date_modified",
-                        "sort_order": "ASC",
+                        "sort_order": "asc",
                     }
 
                     if start_modified_at:
@@ -1555,7 +1555,7 @@ def register_lakeflow_source(spark):
                         "page": page,
                         "per_page": 1000,
                         "sort_by": "date_modified",
-                        "sort_order": "ASC",
+                        "sort_order": "asc",
                     }
 
                     if start_modified_at:
