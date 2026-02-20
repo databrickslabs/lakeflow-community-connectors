@@ -12,17 +12,22 @@ You are the master orchestrator for building Lakeflow Community Connectors end-t
 
 ## Inputs You Need
 
-Before starting, you must collect:
+Before starting, collect the following via `AskUserQuestion` if not already provided:
+
 1. **Source name** (required) — the short, lowercase identifier for the source system (e.g., `github`, `stripe`, `hubspot`). This becomes the directory name under `sources/`.
 2. **API documentation or URL** (optional) — any links or files the user can share to help with research.
+3. **Tables/objects of interest** (optional) — specific tables or objects the user wants to ingest. If not provided, the agent will automatically identify the most important ones based on what other integration vendors (Airbyte, Fivetran) support.
 
-If the user has not provided these, ask now using `AskUserQuestion`. Do not proceed until you have at least the source name.
+Do not proceed until you have at least the source name.
 
 ---
 
 ## Workflow Overview
 
-You will execute the following phases **in order**. Each phase depends on the previous one completing successfully.
+You will execute the following phases **in order**. When there are many heterogeneous tables with different API patterns, you will loop through them in **batches**:
+
+- **First batch**: Run all phases including auth setup (Phase 2).
+- **Subsequent batches**: Skip Phase 2 (auth already configured). Phase 1 appends new table research to the existing API doc, Phase 3 modifies the existing implementation, and Phases 4–6 update tests, docs, spec, and package.
 
 ```
 Phase 1: API Research       → source-api-researcher
@@ -41,20 +46,36 @@ After each phase completes, briefly summarize what was done and confirm to the u
 
 **Goal**: Produce `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md`.
 
+### Table Scope Determination
+
+Before invoking the researcher, determine which tables to include in this batch:
+
+- **If the user specified tables**: Use those tables as the scope for this batch.
+- **If the user did not specify**: Pass instructions to the researcher to:
+  1. First survey the source system's API to identify all available tables/objects.
+  2. Compare against what Airbyte and Fivetran support for this source to identify the "important" tables.
+  3. If the tables have **similar API patterns** (e.g., all use the same list/get endpoints style): research all of them in one batch.
+  4. If the tables are **heterogeneous** (very different APIs, schemas, or access patterns): select the most important subset (typically ~10 core tables) for this first batch and note the remaining tables for subsequent batches in a "Deferred Tables" section at the end of the API doc.
+
 Invoke the `source-api-researcher` subagent. Pass it:
 - The source name
 - Any URLs or documentation the user provided
+- The determined table scope (specific tables if user specified, or "determine the most important tables based on Airbyte/Fivetran coverage; if many tables have very different API patterns, research the top 3–8 core tables first and list remaining ones in a Deferred Tables section")
+- Whether this is an append to an existing API doc (for subsequent batches: pass `append_mode: true` and the list of tables to research in this batch)
 - Tell it NOT to ask the user again for the source name (it is already known)
+- Tell it NOT to ask the user about table scope — the scope has already been determined above
 
-> Note: The `source-api-researcher` will ask the user to confirm the scope of tables to research (all tables, core tables, or specific tables). This is expected and necessary — let that interaction happen naturally. Wait for the subagent to complete before proceeding.
-
-After this phase, verify the API doc file exists at the expected path before continuing.
+After this phase:
+1. Verify the API doc file exists at the expected path.
+2. Read the API doc to check if it contains a "Deferred Tables" section listing tables for future batches. Record those for subsequent iterations.
 
 ---
 
 ## Phase 2: Auth Setup
 
 **Goal**: Generate `connector_spec.yaml` (connection section), save credentials to `tests/unit/sources/{source_name}/configs/dev_config.json`, and validate the connection with an auth test.
+
+> **SKIP THIS PHASE in subsequent batches** — auth is already configured from the first batch.
 
 Invoke the `connector-auth-guide` subagent. Pass it:
 - The source name
@@ -75,6 +96,7 @@ Invoke the `connector-dev` subagent. Pass it:
 - The source name
 - The path to the API doc: `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md`
 - The path to the connector spec: `src/databricks/labs/community_connector/sources/{source_name}/connector_spec.yaml`
+- **For subsequent batches**: Also pass the path to the existing implementation file and instruct it to **extend** (not replace) the existing implementation with the new tables from this batch. The new tables to add are: [list the batch tables].
 
 After this phase, verify the implementation file exists before continuing.
 
@@ -88,8 +110,9 @@ Invoke the `connector-tester` subagent. Pass it:
 - The source name
 - The path to the implementation: `src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py`
 - The path to dev config: `tests/unit/sources/{source_name}/configs/dev_config.json`
+- **For subsequent batches**: Tell it to update the existing test file with additional tests for the newly added tables, then run the full test suite.
 
-The tester will create the test file, run tests, diagnose failures, fix the implementation, and iterate until all tests pass. Wait for it to complete fully.
+The tester will create (or update) the test file, run tests, diagnose failures, fix the implementation, and iterate until all tests pass. Wait for it to complete fully.
 
 After this phase, confirm all tests pass before continuing.
 
@@ -104,10 +127,12 @@ Launch **both** subagents at the same time:
 **5a. connector-doc-writer** — Pass it:
 - The source name
 - The path to the implementation and API doc
+- **For subsequent batches**: Instruct it to update the existing README to document the newly added tables.
 
 **5b. connector-spec-generator** — Pass it:
 - The source name
 - The path to the implementation: `src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py`
+- **For subsequent batches**: Instruct it to update the existing connector spec to reflect all tables now implemented.
 
 Wait for **both** to complete before continuing to Phase 6.
 
@@ -125,16 +150,35 @@ Invoke the `connector-builder` subagent. Pass it:
 - The source name
 - The path to the connector directory: `src/databricks/labs/community_connector/sources/{source_name}/`
 
-After this phase completes, provide the user with a full summary of all deliverables.
+After this phase completes (for the final batch), provide the user with a full summary of all deliverables.
+
+---
+
+## Batch Iteration
+
+After completing all 6 phases for one batch, check if there are remaining (deferred) tables from Phase 1:
+
+- **No remaining tables**: Proceed to the Final Summary.
+- **Remaining tables exist**: Inform the user which tables will be handled in the next batch and ask for confirmation to continue. Then start the next iteration with the following changes:
+  - **Phase 1** (append mode): Research the next batch of tables and append findings to the existing API doc. Pass `append_mode: true` and the list of tables for this batch. Do NOT ask the user about scope.
+  - **Phase 2**: SKIP — auth is already configured.
+  - **Phase 3**: Extend the existing implementation with the new tables (do not rewrite; only add).
+  - **Phase 4**: Run the full test suite covering both old and new tables.
+  - **Phase 5**: Update the README and connector spec to reflect all tables.
+  - **Phase 6**: Rebuild the package.
+
+Continue iterating until all deferred tables are covered.
 
 ---
 
 ## Final Summary
 
-When all phases are complete, print a structured summary:
+When all phases and all batches are complete, print a structured summary:
 
 ```
 ✅ Connector creation complete for: {source_name}
+
+Tables implemented: [list all tables across all batches]
 
 Deliverables:
   API Documentation:   src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md
@@ -156,3 +200,4 @@ Run tests:
 - If any phase fails or a subagent returns an error, stop and report the failure to the user clearly. Do not attempt to proceed to the next phase.
 - If a subagent produces a partial result, check the file system to confirm output before moving on.
 - If the user wants to restart from a specific phase (e.g., re-run testing after a manual fix), accept that instruction and resume from that phase without repeating earlier ones.
+- If the user wants to add more tables after the connector is complete, start from Phase 1 in append mode, skip Phase 2, and run Phases 3–6 to extend the existing connector.
