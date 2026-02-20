@@ -5,9 +5,15 @@ description: Generate public-facing documentation for a connector targeted at en
 
 # Create Public Connector Documentation
 
-## Description
+## Goal
+Generate the **public-facing documentation** for the **{{source_name}}** connector, targeted at end users.
 
-This skill helps you generate public-facing documentation for a connector that is targeted at end users. It guides you through creating comprehensive documentation that follows the standard template, including connection parameters, supported tables, and usage examples.
+## Output Contract
+Produce a Markdown file strictly following the standard template [community_connector_doc_template.md](templates/community_connector_doc_template.md) as `src/databricks/labs/community_connector/sources/{{source_name}}/README.md`.
 
-## Instructions
-Read and follow **[prompts/create_connector_documentation.md](../../../prompts/create_connector_documentation.md)**
+## Documentation Requirements
+
+- Please use the code implementation as the source of truth.
+- Use the source API documentation to cover anything missing.
+- Always include a section about how to configure the parameters needed to connect to the source system.
+- AVOID mentioning internal implementation terms such as function or argument names from the `LakeflowConnect`.

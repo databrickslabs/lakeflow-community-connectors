@@ -2,7 +2,7 @@
 
 ## Goal
 
-Manually validate that a connector's CDC/incremental sync implementation is correct by:
+Manually validate that a connector's CDC/incremental or Append-Only sync implementation is correct by:
 1. Understanding how the offset structure works from the code
 2. Verifying the offset matches the cursor field of the last record
 3. Testing that passing an offset filters records correctly
