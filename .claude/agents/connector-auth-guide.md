@@ -2,7 +2,7 @@
 name: connector-auth-guide
 description: "Sets up authentication for a new connector by reading API docs, generating a connection spec, guiding the user through credential setup via the authenticate script, and creating an auth verification test."
 tools: Bash, Glob, Grep, Read, Edit, Write, NotebookEdit, Skill, TaskCreate, TaskGet, TaskUpdate, TaskList, EnterWorktree, ToolSearch
-model: haiku
+model: sonnet 
 color: red
 memory: project
 ---
@@ -32,7 +32,7 @@ Connector API documentation live under `src/databricks/labs/community_connector/
 
 ## Step 2: Generate the Connector Spec (Connection Section Only)
 
-Following the `/generate-connector-spec` skill pattern, generate an intermediate connector spec focused **only on the connection/authentication portion**. 
+Following the `/generate-connector-spec` skill pattern, generate an intermediate connector spec focused **only on the connection/authentication portion**. Need to follow `templates/connector_spec_template.yaml`.
 
 ---
 
