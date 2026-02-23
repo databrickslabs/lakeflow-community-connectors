@@ -79,6 +79,24 @@ connection:
   #     description: >
   #       Base URL for the API. Override if using a custom instance.
 
+  # ---------------------------------------------------------------------------
+  # OAuth 2.0 Authorization Code Flow (optional)
+  # Uncomment this section if the source uses OAuth 2.0 for authentication.
+  # The authenticate tool will run the browser-based OAuth flow automatically
+  # so the user only needs to provide client_id and client_secret; the
+  # refresh_token is obtained via the redirect.  These three parameter names
+  # are the standard OAuth 2.0 names and are expected in the parameters list.
+  # The authorization_url, token_url, and scopes are defaults that the user
+  # can override at runtime.
+  # ---------------------------------------------------------------------------
+  # oauth:
+  #   authorization_url: "https://example.com/oauth/authorize"
+  #   token_url: "https://example.com/oauth/token"
+  #   scopes: "read write"
+  #   extra_auth_params:
+  #     access_type: "offline"
+  #     prompt: "consent"
+
 # ============================================================================
 # External Options Allowlist
 # These table-specific options must be included in the externalOptionsAllowList

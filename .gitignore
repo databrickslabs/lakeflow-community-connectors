@@ -40,3 +40,9 @@ sources/*/schema_validation_results.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude
+.claude/agent-memory-local/
+
+# Dev config
+tests/unit/sources/*/configs/dev_config.json

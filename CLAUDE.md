@@ -28,7 +28,9 @@ tests/
       test_suite.py      # Shared test harness
       test_utils.py      # Test utilities
       lakeflow_connect_test_utils.py  # Write-back test utilities
-prompts/                 # Templates for AI-assisted development
+prompts/                 # Templates and guide for AI-assisted development
+.claude/skills/          # Claude skill files (development workflow steps)
+.claude/agents/          # Claude subagent that handles different phases of connector development
 ```
 
 ## Core Interface
@@ -97,7 +99,10 @@ python tools/scripts/merge_python_source.py {source_name}
 - `src/databricks/labs/community_connector/sources/example/example.py` - Reference implementation
 - `tests/unit/sources/test_suite.py` - Test harness
 - `tests/unit/sources/example/test_example_lakeflow_connect.py` - Reference test implementation
-- `prompts/README.md` - Detailed development guide
+- `prompts/README.md` - Development workflow guide (references `.claude/skills/`)
 - `prompts/templates/source_api_doc_template.md` - API documentation template
 - `prompts/templates/community_connector_doc_template.md` - User documentation template
+- `.claude/skills/` - Claude skill files for each development step
+- `.claude/agents/` - Claude subagents that handle different phases of connector development
+
 

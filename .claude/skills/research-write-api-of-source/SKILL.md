@@ -1,4 +1,9 @@
-# Document Write-Back APIs 
+---
+name: research-write-api-of-source 
+description: Research and document write/create APIs of a source system to enable write-back testing functionality.
+---
+
+# Research Write APIs of Source System 
 
 ## Goal
 Research and document the write/create APIs for the source system to enable write-back testing. This step is **completely separate** from the core connector implementation and should only be done if comprehensive end-to-end validation is needed.

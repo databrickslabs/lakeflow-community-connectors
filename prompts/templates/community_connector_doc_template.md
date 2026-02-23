@@ -61,8 +61,10 @@ Follow the Lakeflow Community Connector UI, which will guide you through setting
         {
             "table": {
                 "source_table": "<YOUR_TABLE_NAME>",
-                "<option_a>": "...",
-                "<option_b>": "...",
+                "table_configuration": {
+                    "<option_a>": "...",
+                    "<option_b>": "...",
+                }
             }
         },
         {
