@@ -1,0 +1,29 @@
+{
+    "accounts": {
+        "num_rows": 1
+    },
+    "campaigns": {
+        "num_rows": 2
+    },
+    "ad_groups": {
+        "num_rows": 2
+    },
+    "ads": {
+        "num_rows": 2
+    },
+    "keywords": {
+        "num_rows": 10
+    },
+    "campaign_performance_report": {
+        "num_rows": 1000
+    },
+    "ad_group_performance_report": {
+        "num_rows": 1000
+    },
+    "ad_performance_report": {
+        "num_rows": 1000
+    },
+    "keyword_performance_report": {
+        "num_rows": 1000
+    }
+}
