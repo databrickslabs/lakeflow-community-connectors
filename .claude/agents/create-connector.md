@@ -21,6 +21,55 @@ Do not proceed until you have at least the source name.
 
 ---
 
+## High-Level Plan (Required Before Starting)
+
+Before invoking any subagent, always present a high-level plan to the user summarizing:
+
+1. **What you will build** — the source system name and what a connector does
+2. **Tables in scope** — which tables/objects will be implemented in this first batch (and which, if any, will be deferred to subsequent batches)
+3. **The phases you will run**, in order:
+   - Phase 1: API Research (`source-api-researcher`)
+   - Phase 2: Auth Setup (`connector-auth-guide`) — interactive: you will need to provide credentials via a browser UI
+   - Phase 3: Implementation (`connector-dev`)
+   - Phase 4: Testing & Fixes (`connector-tester`)
+   - Phase 5: Docs + Spec (`connector-doc-writer` + `connector-spec-generator`, in parallel)
+   - Phase 6: Packaging (`connector-builder`)
+4. **What deliverables will be produced** — list the output files
+
+Example format:
+
+```
+Here's what I'll build for you:
+
+**Connector**: {source_name}
+**Tables (first batch)**: boards, items, users, ...  ← or "will be determined automatically"
+
+**Phases**:
+  Phase 1 — API Research       source-api-researcher      [background]
+  Phase 2 — Auth Setup         connector-auth-guide       [interactive: browser UI for credentials]
+  Phase 3 — Implementation     connector-dev              [background]
+  Phase 4 — Testing & Fixes    connector-tester           [background]
+  Phase 5 — Docs + Spec        connector-doc-writer
+                               connector-spec-generator   [both in background, parallel]
+  Phase 6 — Packaging          connector-builder          [background]
+
+**Deliverables**:
+  {source_name}_api_doc.md, {source_name}.py, connector_spec.yaml, README.md,
+  auth_test.py, test_{source_name}_lakeflow_connect.py, pyproject.toml
+
+Does this look good? You can also tell me:
+  • Which specific tables/objects to focus on (optional — I'll auto-select if not specified)
+  • Any other preferences before I start
+```
+
+After printing the plan, use `AskUserQuestion` to ask:
+- Whether to proceed (yes/go ahead vs. adjustments needed)
+- Optionally: which specific tables to focus on (if they haven't already told you)
+
+Do not start Phase 1 until the user confirms.
+
+---
+
 ## Workflow Overview
 
 You will execute the following phases **in order**. When there are many heterogeneous tables with different API patterns, you will loop through them in **batches**:
@@ -56,13 +105,27 @@ Before invoking the researcher, determine which tables to include in this batch:
   3. If the tables have **similar API patterns** (e.g., all use the same list/get endpoints style): research all of them in one batch.
   4. If the tables are **heterogeneous** (very different APIs, schemas, or access patterns): select the most important subset (typically ~10 core tables) for this first batch and note the remaining tables for subsequent batches in a "Deferred Tables" section at the end of the API doc.
 
-Invoke the `source-api-researcher` subagent. Pass it:
+**Before launching**, print a clear status message to the user:
+```
+─────────────────────────────────────────────
+▶ Phase 1 / 6 — API Research
+  Agent   : source-api-researcher
+  Status  : running in background…
+─────────────────────────────────────────────
+```
+
+Then use the **Task tool** with `run_in_background: true` to launch the `source-api-researcher` subagent. Pass it:
 - The source name
 - Any URLs or documentation the user provided
 - The determined table scope (specific tables if user specified, or "determine the most important tables based on Airbyte/Fivetran coverage; if many tables have very different API patterns, research the top 3–8 core tables first and list remaining ones in a Deferred Tables section")
 - Whether this is an append to an existing API doc (for subsequent batches: pass `append_mode: true` and the list of tables to research in this batch)
 - Tell it NOT to ask the user again for the source name (it is already known)
 - Tell it NOT to ask the user about table scope — the scope has already been determined above
+
+Use `TaskOutput` (with `block: true`) to wait for the subagent to finish. Once done, print a completion message:
+```
+✓ Phase 1 complete — API doc written to sources/{source_name}/{source_name}_api_doc.md
+```
 
 After this phase:
 1. Verify the API doc file exists at the expected path.
@@ -76,14 +139,27 @@ After this phase:
 
 > **SKIP THIS PHASE in subsequent batches** — auth is already configured from the first batch.
 
-Invoke the `connector-auth-guide` subagent. Pass it:
+**Before launching**, print a clear status message to the user:
+```
+─────────────────────────────────────────────
+▶ Phase 2 / 6 — Auth Setup
+  Agent   : connector-auth-guide
+  Status  : running (interactive — you will be asked to enter credentials in your browser)
+─────────────────────────────────────────────
+```
+
+Use the **Task tool** (foreground, NOT background — this phase is interactive) to launch the `connector-auth-guide` subagent. Pass it:
 - The source name
 - The path to the API doc generated in Phase 1: `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md`
 - Tell it to read the API doc to understand the authentication method — it does NOT need to ask the user what the source is
 
-> Note: The `connector-auth-guide` will reach a point where it asks the user to run `python ./tools/scripts/authenticate.py -s {source_name}` in a separate terminal. This is a required interactive step. The subagent will wait for user confirmation before continuing. This is expected — do not try to skip it.
+> Note: The `connector-auth-guide` will automatically run the authenticate script, open a browser form, and wait for the user to submit credentials. It will then run the auth verification test. This is an interactive phase — the subagent handles all of it.
 
-After this phase, confirm that `dev_config.json` exists and the auth test passed before continuing.
+After this phase, print:
+```
+✓ Phase 2 complete — credentials saved, auth verified
+```
+Then confirm that `dev_config.json` exists and the auth test passed before continuing.
 
 ---
 
@@ -91,11 +167,25 @@ After this phase, confirm that `dev_config.json` exists and the auth test passed
 
 **Goal**: Produce `src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py` — a complete `LakeflowConnect` implementation.
 
-Invoke the `connector-dev` subagent. Pass it:
+**Before launching**, print a clear status message to the user:
+```
+─────────────────────────────────────────────
+▶ Phase 3 / 6 — Implementation
+  Agent   : connector-dev
+  Status  : running in background…
+─────────────────────────────────────────────
+```
+
+Use the **Task tool** with `run_in_background: true` to launch the `connector-dev` subagent. Pass it:
 - The source name
 - The path to the API doc: `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md`
 - The path to the connector spec: `src/databricks/labs/community_connector/sources/{source_name}/connector_spec.yaml`
 - **For subsequent batches**: Also pass the path to the existing implementation file and instruct it to **extend** (not replace) the existing implementation with the new tables from this batch. The new tables to add are: [list the batch tables].
+
+Use `TaskOutput` (with `block: true`) to wait for completion. Then print:
+```
+✓ Phase 3 complete — implementation written to sources/{source_name}/{source_name}.py
+```
 
 After this phase, verify the implementation file exists before continuing.
 
@@ -105,13 +195,27 @@ After this phase, verify the implementation file exists before continuing.
 
 **Goal**: All tests in `tests/unit/sources/{source_name}/` pass against the real source system.
 
-Invoke the `connector-tester` subagent. Pass it:
+**Before launching**, print a clear status message to the user:
+```
+─────────────────────────────────────────────
+▶ Phase 4 / 6 — Testing & Fixes
+  Agent   : connector-tester
+  Status  : running in background… (may take a while — iterates until all tests pass)
+─────────────────────────────────────────────
+```
+
+Use the **Task tool** with `run_in_background: true` to launch the `connector-tester` subagent. Pass it:
 - The source name
 - The path to the implementation: `src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py`
 - The path to dev config: `tests/unit/sources/{source_name}/configs/dev_config.json`
 - **For subsequent batches**: Tell it to update the existing test file with additional tests for the newly added tables, then run the full test suite.
 
-The tester will create (or update) the test file, run tests, diagnose failures, fix the implementation, and iterate until all tests pass. Wait for it to complete fully.
+The tester will create (or update) the test file, run tests, diagnose failures, fix the implementation, and iterate until all tests pass.
+
+Use `TaskOutput` (with `block: true`) to wait for completion. Then print:
+```
+✓ Phase 4 complete — all tests pass
+```
 
 After this phase, confirm all tests pass before continuing.
 
@@ -121,7 +225,17 @@ After this phase, confirm all tests pass before continuing.
 
 **Goal**: Produce the user-facing README and the complete connector spec YAML.
 
-Launch **both** subagents at the same time:
+**Before launching**, print a clear status message to the user:
+```
+─────────────────────────────────────────────
+▶ Phase 5 / 6 — Docs + Spec (parallel)
+  Agent 1 : connector-doc-writer     [background]
+  Agent 2 : connector-spec-generator [background]
+  Status  : both running in background simultaneously…
+─────────────────────────────────────────────
+```
+
+Use the **Task tool** with `run_in_background: true` to launch **both** subagents simultaneously in a single message:
 
 **5a. connector-doc-writer** — Pass it:
 - The source name
@@ -133,7 +247,10 @@ Launch **both** subagents at the same time:
 - The path to the implementation: `src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py`
 - **For subsequent batches**: Instruct it to update the existing connector spec to reflect all tables now implemented.
 
-Wait for **both** to complete before continuing to Phase 6.
+Use `TaskOutput` (with `block: true`) on both task IDs to wait for both to finish. Then print:
+```
+✓ Phase 5 complete — README.md and connector_spec.yaml written
+```
 
 After this phase, verify these files exist:
 - `src/databricks/labs/community_connector/sources/{source_name}/README.md`
@@ -145,9 +262,23 @@ After this phase, verify these files exist:
 
 **Goal**: Create `pyproject.toml` and build a distributable Python package for the connector.
 
-Invoke the `connector-builder` subagent. Pass it:
+**Before launching**, print a clear status message to the user:
+```
+─────────────────────────────────────────────
+▶ Phase 6 / 6 — Packaging
+  Agent   : connector-builder
+  Status  : running in background…
+─────────────────────────────────────────────
+```
+
+Use the **Task tool** with `run_in_background: true` to launch the `connector-builder` subagent. Pass it:
 - The source name
 - The path to the connector directory: `src/databricks/labs/community_connector/sources/{source_name}/`
+
+Use `TaskOutput` (with `block: true`) to wait for completion. Then print:
+```
+✓ Phase 6 complete — Python package built
+```
 
 After this phase completes (for the final batch), provide the user with a full summary of all deliverables.
 
