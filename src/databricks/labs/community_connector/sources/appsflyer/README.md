@@ -195,17 +195,21 @@ Follow the Lakeflow Community Connector UI, which will guide you through setting
       {
         "table": {
           "source_table": "installs_report",
-          "app_id": "id123456789",
-          "start_date": "2025-01-01",
-          "lookback_hours": "6",
-          "max_days_per_batch": "7"
+          "table_configuration": {
+            "app_id": "id123456789",
+            "start_date": "2025-01-01",
+            "lookback_hours": "6",
+            "max_days_per_batch": "7"
+          }
         }
       },
       {
         "table": {
           "source_table": "in_app_events_report",
-          "app_id": "id123456789",
-          "start_date": "2025-01-01"
+          "table_configuration": {
+            "app_id": "id123456789",
+            "start_date": "2025-01-01"
+          }
         }
       },
       {

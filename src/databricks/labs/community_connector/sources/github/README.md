@@ -172,24 +172,30 @@ Example `pipeline_spec` snippet for a single repository:
       {
         "table": {
           "source_table": "issues",
-          "owner": "my-org-or-user",
-          "repo": "my-repo",
-          "state": "all",
-          "start_date": "2024-01-01T00:00:00Z"
+          "table_configuration": {
+            "owner": "my-org-or-user",
+            "repo": "my-repo",
+            "state": "all",
+            "start_date": "2024-01-01T00:00:00Z"
+          }
         }
       },
       {
         "table": {
           "source_table": "repositories",
-          "owner": "my-org-or-user"
+          "table_configuration": {
+            "owner": "my-org-or-user"
+          }
         }
       },
       {
         "table": {
           "source_table": "commits",
-          "owner": "my-org-or-user",
-          "repo": "my-repo",
-          "start_date": "2024-01-01T00:00:00Z"
+          "table_configuration": {
+            "owner": "my-org-or-user",
+            "repo": "my-repo",
+            "start_date": "2024-01-01T00:00:00Z"
+          }
         }
       }
     ]
@@ -200,7 +206,7 @@ Example `pipeline_spec` snippet for a single repository:
 - `connection_name` must point to the UC connection configured with your GitHub `token` (and optional `base_url`).
 - For each `table`:
   - `source_table` must be one of the supported table names listed above.
-  - Table options such as `owner`, `repo`, `state`, `start_date`, `per_page`, and `max_pages_per_batch` are passed directly to the connector and used to control how data is read.
+  - Table options such as `owner`, `repo`, `state`, `start_date`, `per_page`, and `max_pages_per_batch` are placed under `table_configuration` and used to control how data is read.
 
 You can ingest additional tables (e.g. `pull_requests`, `comments`, `assignees`, `branches`, `collaborators`, `reviews`) by adding more `table` entries with the appropriate options.
 

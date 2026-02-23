@@ -30,18 +30,21 @@ Other directories:
 
 Follow the instructions in [`prompts/README.md`](prompts/README.md) to create new connectors. The development workflow:
 
-1. **Understand the source** — Gather API specs, auth mechanisms, and schemas using the provided template
-2. **Implement the connector** — Implement the `LakeflowConnect` interface methods
-3. **Test & iterate** — Run the standard test suites against a real source system
+1. **Understand the source** — Research API specs, auth mechanisms, and schemas using the provided template
+2. **Auth setup** — Generate the connection spec, configure credentials, and verify connectivity
+3. **Implement the connector** — Implement the `LakeflowConnect` interface methods
+4. **Test & iterate** — Run the standard test suites against a real source system
    - *(Optional)* Implement write-back testing for end-to-end validation (write → read → verify cycle)
-4. **Generate documentation** — Create user-facing docs and connector spec
+5. **Generate documentation** — Create user-facing docs and connector spec
    - Create the public-facing README using the documentation template
    - Generate the connector spec YAML file (connection parameters and allowlist options)
-   - *(Temporary)* Run `tools/scripts/merge_python_source.py` to generate the deployable file
+6. **Build & deploy** — Build the connector as a Python package and generate the deployable file
+   - *(Temporary)* Run `tools/scripts/merge_python_source.py` to generate the single-file deployment artifact
 
-### Claude Code
-Each step of the development is packaged as a SKILL under `.claude/skills`. 
-TODO: Add instructions and good practise of using Claude Code.
+### AI-Assisted Development with Claude
+Each step of the development workflow is packaged as a **skill** under `.claude/skills/`, which can be triggered individually. See [`prompts/README.md`](prompts/README.md) for the full step-by-step guide.
+
+For a fully autonomous experience, the entire workflow is also wrapped as a **create-connector agent** (`.claude/agents/create-connector.md`) that orchestrates all phases end-to-end — from API research through auth setup, implementation, testing, documentation, and packaging — without manual intervention at each stage. Developers can invoke this agent directly and let it build a complete connector autonomously.
 
 ### API to Implement
 Connectors are built on the [Python Data Source API](https://spark.apache.org/docs/latest/api/python/tutorial/sql/python_data_source.html), with an abstraction layer (`LakeflowConnect`) that simplifies development. 
