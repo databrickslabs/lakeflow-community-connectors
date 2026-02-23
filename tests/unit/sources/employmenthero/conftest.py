@@ -41,4 +41,3 @@ def timesheet_entries_data() -> dict:
     """Load mock timesheet_entries data from config JSON (pagination + pages). Shared by mock and tests."""
     timesheet_entries_data_path = DATA_PATH / "timesheet_entries.json"
     return load_config(timesheet_entries_data_path)
-
