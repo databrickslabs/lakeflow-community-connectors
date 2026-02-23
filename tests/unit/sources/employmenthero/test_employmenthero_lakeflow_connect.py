@@ -164,7 +164,7 @@ def test_employmenthero_connector_fails_on_missing_organisation_id():
     mock_client = MagicMock(spec=EmploymentHeroAPIClient)
     connector = EmploymentHeroLakeflowConnect(options={}, client=mock_client)
 
-    with pytest.raises(ValueError, match=r"table_options must contain 'organisation_id'"):
+    with pytest.raises(ValueError, match=r"'employees' table_options must contain 'organisation_id'"):
         connector.read_table(
             table_name="employees",
             start_offset={},

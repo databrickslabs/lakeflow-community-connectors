@@ -90,7 +90,7 @@ class EmploymentHeroLakeflowConnect(LakeflowConnect):
         endpoint_suffix = table_medata.get("endpoint_suffix", table_name)
         organisation_id = table_options.get("organisation_id")
         if not organisation_id:
-            raise ValueError("table_options must contain 'organisation_id'")
+            raise ValueError(f"'{table_name}' table_options must contain 'organisation_id'")
         table_endpoint = f"{ORGANISATIONS_ENDPOINT}/{organisation_id}/{endpoint_suffix}"
 
         if ingestion_type == "snapshot":
