@@ -1,1 +1,1 @@
-"""Example connector tests."""
+"""Employment Hero connector tests."""
