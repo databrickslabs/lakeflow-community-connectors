@@ -45,6 +45,10 @@ This skill is useful for both **development** (testing during implementation) an
 
 - **Validate Incremental Sync** ([`.claude/skills/validate-incremental-sync/SKILL.md`](../.claude/skills/validate-incremental-sync/SKILL.md)): Manual validation process to verify CDC implementation by checking offset structure, validating offset matches max cursor, and testing incremental filtering.
 
+## Automated End-to-End Agent
+
+In addition to manually triggering individual skills step-by-step, the entire development workflow is wrapped as a **create-connector** Claude agent (`.claude/agents/`) that orchestrates all the steps above autonomously. Developers can invoke this agent directly and let it execute the full pipeline — from API research through authentication, implementation, testing, documentation, and packaging — without manual intervention at each stage.
+
 ## Notes & Tips
 - The **context window** grows larger as you proceed through each step. Consider starting a new session for each step to maintain explicit context isolation—this way, each step only references the output from previous ones, conserving context space.
 - Each step is wrapped as a SKILL for Claude, located under `.claude/skills/`.
