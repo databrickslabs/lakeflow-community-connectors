@@ -126,6 +126,23 @@ TIME_INTERVAL_STRUCT = StructType(
 # Table Schema Definitions
 # =============================================================================
 
+# --- Top-level endpoint (no organisation_id in path) ---
+
+"""Schema for the organisations table (Get Organisations API).
+
+GET /api/v1/organisations returns a paginated list of organisations; each item has:
+id, name, phone, country, logo_url.
+"""
+ORGANISATIONS_SCHEMA = StructType(
+    [
+        StructField("id", StringType(), True),
+        StructField("name", StringType(), True),
+        StructField("phone", StringType(), True),
+        StructField("country", StringType(), True),
+        StructField("logo_url", StringType(), True),
+    ]
+)
+
 # --- Organisation-scoped list endpoints (only require organisation_id in path) ---
 
 """Schema for the employees table (Get Employees / Get Employee API response)."""
@@ -349,6 +366,7 @@ TIMESHEET_ENTRIES_SCHEMA = StructType(
 
 """Mapping of table names to their StructType schemas."""
 TABLE_SCHEMAS: dict[str, StructType] = {
+    "organisations": ORGANISATIONS_SCHEMA,
     "employees": EMPLOYEES_SCHEMA,
     "certifications": CERTIFICATIONS_SCHEMA,
     "cost_centres": COST_CENTRES_SCHEMA,
@@ -371,6 +389,10 @@ TABLE_SCHEMAS: dict[str, StructType] = {
 
 """Metadata for each table including primary keys, cursor field, and ingestion type."""
 TABLE_METADATA: dict[str, dict] = {
+    "organisations": {
+        "primary_keys": ["id"],
+        "ingestion_type": "snapshot",
+    },
     "employees": {
         "primary_keys": ["id"],
         "ingestion_type": "snapshot",

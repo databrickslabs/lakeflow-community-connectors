@@ -1,8 +1,6 @@
-import random
 from typing import Dict, List, Iterator, Optional, Tuple
 
-from pydantic import BaseModel, PositiveInt, ConfigDict
-from pyspark.sql.types import StructType, StructField, LongType, StringType
+from pyspark.sql.types import StructType
 
 from databricks.labs.community_connector.interface import LakeflowConnect
 from databricks.labs.community_connector.sources.employmenthero.employmenthero_client import EmploymentHeroAPIClient
@@ -11,6 +9,8 @@ from databricks.labs.community_connector.sources.employmenthero.employmenthero_s
     TABLE_METADATA,
     SUPPORTED_TABLES,
 )
+
+ORGANISATIONS_ENDPOINT = "/api/v1/organisations"
 
 
 class EmploymentHeroLakeflowConnect(LakeflowConnect):
@@ -55,21 +55,17 @@ class EmploymentHeroLakeflowConnect(LakeflowConnect):
         return TABLE_METADATA[table_name]
 
     def _read_snapshot_table(
-        self, table_name: str, table_options: Dict[str, str], endpoint_suffix: Optional[str] = None
+        self, table_endpoint: str, table_options: Dict[str, str]
     ) -> Tuple[Iterator[dict], dict]:
         """
         Reads a full snapshot of the specified table.
         """
-        organisation_id = table_options.get("organisation_id")
-        if not organisation_id:
-            raise ValueError("table_options must contain 'organisation_id'")
         params = {}
         start_date = table_options.get("start_date")
         if start_date:
             params["start_date"] = start_date
-        endpoint = f"/api/v1/organisations/{organisation_id}/{endpoint_suffix or table_name}"
         records = self.client.paginate(
-            endpoint=endpoint,
+            endpoint=table_endpoint,
             params=params,
             data_key="data",
             per_page=200,
@@ -85,12 +81,20 @@ class EmploymentHeroLakeflowConnect(LakeflowConnect):
         if table_name not in SUPPORTED_TABLES:
             raise ValueError(f"Unsupported table: {table_name!r}")
 
+        if table_name == "organisations":
+            # Top-level organisations endpoint — no organisation_id in path
+            return self._read_snapshot_table(ORGANISATIONS_ENDPOINT, table_options)
+
         table_medata = self.read_table_metadata(table_name, table_options)
         ingestion_type = table_medata.get("ingestion_type")
-        endpoint_suffix = table_medata.get("endpoint_suffix")
+        endpoint_suffix = table_medata.get("endpoint_suffix", table_name)
+        organisation_id = table_options.get("organisation_id")
+        if not organisation_id:
+            raise ValueError("table_options must contain 'organisation_id'")
+        table_endpoint = f"{ORGANISATIONS_ENDPOINT}/{organisation_id}/{endpoint_suffix}"
 
         if ingestion_type == "snapshot":
-            return self._read_snapshot_table(table_name, table_options, endpoint_suffix)
+            return self._read_snapshot_table(table_endpoint, table_options)
 
         raise NotImplementedError(
             f"Ingestion type '{ingestion_type}' for table '{table_name}' is not yet implemented."

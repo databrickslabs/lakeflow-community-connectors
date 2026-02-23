@@ -27,3 +27,18 @@ def employees_data() -> dict:
     """Load mock employee data from config JSON (pagination + pages). Shared by mock and tests."""
     employees_data_path = DATA_PATH / "employees.json"
     return load_config(employees_data_path)
+
+
+@pytest.fixture
+def organisations_data() -> dict:
+    """Load mock organisations data from config JSON (pagination + pages). Shared by mock and tests."""
+    organisations_data_path = DATA_PATH / "organisations.json"
+    return load_config(organisations_data_path)
+
+
+@pytest.fixture
+def timesheet_entries_data() -> dict:
+    """Load mock timesheet_entries data from config JSON (pagination + pages). Shared by mock and tests."""
+    timesheet_entries_data_path = DATA_PATH / "timesheet_entries.json"
+    return load_config(timesheet_entries_data_path)
+

@@ -5,7 +5,6 @@ Handles authentication, HTTP requests, and pagination for the Employment Hero AP
 This module separates API concerns from business logic.
 """
 
-import re
 import time
 from datetime import datetime, timedelta
 from typing import Iterator, Optional

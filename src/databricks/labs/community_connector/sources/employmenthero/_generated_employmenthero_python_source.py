@@ -16,15 +16,12 @@ from typing import (
     Tuple,
 )
 import json
-import re
 import time
 
-from pydantic import BaseModel, ConfigDict, PositiveInt
 from pyspark.sql import Row
 from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
 from pyspark.sql.types import *
 import base64
-import random
 import requests
 
 
@@ -637,6 +634,23 @@ def register_lakeflow_source(spark):
     # Table Schema Definitions
     # =============================================================================
 
+    # --- Top-level endpoint (no organisation_id in path) ---
+
+    """Schema for the organisations table (Get Organisations API).
+
+    GET /api/v1/organisations returns a paginated list of organisations; each item has:
+    id, name, phone, country, logo_url.
+    """
+    ORGANISATIONS_SCHEMA = StructType(
+        [
+            StructField("id", StringType(), True),
+            StructField("name", StringType(), True),
+            StructField("phone", StringType(), True),
+            StructField("country", StringType(), True),
+            StructField("logo_url", StringType(), True),
+        ]
+    )
+
     # --- Organisation-scoped list endpoints (only require organisation_id in path) ---
 
     """Schema for the employees table (Get Employees / Get Employee API response)."""
@@ -860,6 +874,7 @@ def register_lakeflow_source(spark):
 
     """Mapping of table names to their StructType schemas."""
     TABLE_SCHEMAS: dict[str, StructType] = {
+        "organisations": ORGANISATIONS_SCHEMA,
         "employees": EMPLOYEES_SCHEMA,
         "certifications": CERTIFICATIONS_SCHEMA,
         "cost_centres": COST_CENTRES_SCHEMA,
@@ -882,6 +897,10 @@ def register_lakeflow_source(spark):
 
     """Metadata for each table including primary keys, cursor field, and ingestion type."""
     TABLE_METADATA: dict[str, dict] = {
+        "organisations": {
+            "primary_keys": ["id"],
+            "ingestion_type": "snapshot",
+        },
         "employees": {
             "primary_keys": ["id"],
             "ingestion_type": "snapshot",
@@ -950,6 +969,9 @@ def register_lakeflow_source(spark):
     # src/databricks/labs/community_connector/sources/employmenthero/employmenthero.py
     ########################################################
 
+    ORGANISATIONS_ENDPOINT = "/api/v1/organisations"
+
+
     class EmploymentHeroLakeflowConnect(LakeflowConnect):
         def __init__(self, options: Dict[str, str], client: Optional[EmploymentHeroAPIClient] = None) -> None:
             """
@@ -992,21 +1014,17 @@ def register_lakeflow_source(spark):
             return TABLE_METADATA[table_name]
 
         def _read_snapshot_table(
-            self, table_name: str, table_options: Dict[str, str], endpoint_suffix: Optional[str] = None
+            self, table_endpoint: str, table_options: Dict[str, str]
         ) -> Tuple[Iterator[dict], dict]:
             """
             Reads a full snapshot of the specified table.
             """
-            organisation_id = table_options.get("organisation_id")
-            if not organisation_id:
-                raise ValueError("table_options must contain 'organisation_id'")
             params = {}
             start_date = table_options.get("start_date")
             if start_date:
                 params["start_date"] = start_date
-            endpoint = f"/api/v1/organisations/{organisation_id}/{endpoint_suffix or table_name}"
             records = self.client.paginate(
-                endpoint=endpoint,
+                endpoint=table_endpoint,
                 params=params,
                 data_key="data",
                 per_page=200,
@@ -1022,12 +1040,20 @@ def register_lakeflow_source(spark):
             if table_name not in SUPPORTED_TABLES:
                 raise ValueError(f"Unsupported table: {table_name!r}")
 
+            if table_name == "organisations":
+                # Top-level organisations endpoint — no organisation_id in path
+                return self._read_snapshot_table(ORGANISATIONS_ENDPOINT, table_options)
+
             table_medata = self.read_table_metadata(table_name, table_options)
             ingestion_type = table_medata.get("ingestion_type")
-            endpoint_suffix = table_medata.get("endpoint_suffix")
+            endpoint_suffix = table_medata.get("endpoint_suffix", table_name)
+            organisation_id = table_options.get("organisation_id")
+            if not organisation_id:
+                raise ValueError("table_options must contain 'organisation_id'")
+            table_endpoint = f"{ORGANISATIONS_ENDPOINT}/{organisation_id}/{endpoint_suffix}"
 
             if ingestion_type == "snapshot":
-                return self._read_snapshot_table(table_name, table_options, endpoint_suffix)
+                return self._read_snapshot_table(table_endpoint, table_options)
 
             raise NotImplementedError(
                 f"Ingestion type '{ingestion_type}' for table '{table_name}' is not yet implemented."

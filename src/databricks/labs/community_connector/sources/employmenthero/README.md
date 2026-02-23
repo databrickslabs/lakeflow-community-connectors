@@ -23,13 +23,13 @@ Provide the following **connection-level** options when configuring the connecto
 | `client_secret`      | string | yes      | Client secret from your OAuth 2.0 application credentials.                                       |
 | `redirect_uri`       | string | yes      | Redirect URI registered with the OAuth 2.0 application (must match the callback URL used to obtain the authorization code). E.g. `https://<workspace>.cloud.databricks.com/oauth/callback` |
 | `authorization_code` | string | yes      | Authorization code from the OAuth callback (redirect after the user authorises the app).          |
-| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names allowed to be passed through. This connector requires `organisation_id` for all tables. | `organisation_id,start_date` |
+| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names allowed to be passed through. Use `organisation_id,start_date` so org-scoped tables can receive `organisation_id` (and optional `start_date` where supported). The top-level `organisations` table does not require `organisation_id`. | `organisation_id,start_date` |
 
-The supported table-specific option for `externalOptionsAllowList` is:
+The supported table-specific options for `externalOptionsAllowList` are:
 
 `organisation_id,start_date`
 
-> **Note**: The table-specific option `organisation_id` is **not** a connection parameter. It is provided per table via table options in the pipeline specification. The option name must be included in `externalOptionsAllowList` for the connection to allow it.
+> **Note**: The table-specific option `organisation_id` is **not** a connection parameter. It is provided per table via table options in the pipeline specification for **organisation-scoped** tables. The top-level **`organisations`** table does not need `organisation_id`. The option name must be included in `externalOptionsAllowList` for the connection to allow it when you use org-scoped tables.
 
 ### Obtaining the Required Parameters
 
@@ -42,7 +42,7 @@ The supported table-specific option for `externalOptionsAllowList` is:
   5. After the user grants access, the browser redirects to your redirect URI with an `code` query parameter. Use this as the initial `authorization_code` connection option.
   6. The connector exchanges the authorization code for an access token and refresh token. Access tokens expire after **15 minutes**; the connector uses the refresh token to obtain new access tokens. Store and reuse the refresh token when reconfiguring the connection if your setup supports it.
 
-- **Organisation ID**: Each supported table is scoped to an organisation. Obtain the organisation ID from the Employment Hero API (e.g. from the [Get Organisations](https://developer.employmenthero.com/api-references) endpoint) or from your Employment Hero admin. You will pass this as the `organisation_id` table option when configuring each table in the pipeline.
+- **Organisation ID**: Most tables are scoped to an organisation and require an `organisation_id` table option. You can obtain organisation IDs from the **`organisations`** table (top-level endpoint; no `organisation_id` required) or from your Employment Hero admin. Pass `organisation_id` when configuring each organisation-scoped table in the pipeline.
 
 ### Create a Unity Catalog Connection
 
@@ -56,49 +56,52 @@ The connection can also be created using the standard Unity Catalog API.
 
 ## Supported Objects
 
-The Employment Hero connector exposes a **static list** of tables, each corresponding to an organisation-scoped list endpoint that only requires `organisation_id` in the API path:
+The Employment Hero connector exposes a **static list** of tables:
 
-- `employees`
-- `certifications`
-- `cost_centres`
-- `custom_fields`
-- `employing_entities`
-- `leave_categories`
-- `leave_requests`
-- `policies`
-- `roles`
-- `teams`
-- `timesheet_entries`
-- `work_locations`
-- `work_sites`
+- **`organisations`** — Top-level list of organisations the authenticated user can access. **Does not require** `organisation_id`; use this table to discover organisation IDs for the other tables.
+- **Organisation-scoped tables** — Each of the following corresponds to a list endpoint under `/api/v1/organisations/{organisation_id}/...` and **requires** `organisation_id` in the table options:
+  - `employees`
+  - `certifications`
+  - `cost_centres`
+  - `custom_fields`
+  - `employing_entities`
+  - `leave_categories`
+  - `leave_requests`
+  - `policies`
+  - `roles`
+  - `teams`
+  - `timesheet_entries`
+  - `work_locations`
+  - `work_sites`
 
 ### Object summary, primary keys, and ingestion mode
 
-All supported tables currently use **snapshot** ingestion and are keyed by `id`:
+All supported tables use **snapshot** ingestion and are keyed by `id`:
 
-| Table               | Description                                                                 | Ingestion Type | Primary Key |
-|---------------------|-----------------------------------------------------------------------------|----------------|-------------|
-| `employees`         | Employees (and contractors) for the organisation                            | `snapshot`     | `id`        |
-| `certifications`    | Certifications defined for the organisation                                | `snapshot`     | `id`        |
-| `cost_centres`      | Cost centres in the organisation                                            | `snapshot`     | `id`        |
-| `custom_fields`     | Custom field definitions for the organisation                              | `snapshot`     | `id`        |
-| `employing_entities`| Employing entities in the organisation                                     | `snapshot`     | `id`        |
-| `leave_categories`  | Leave categories (e.g. Annual Leave, Sick Leave)                            | `snapshot`     | `id`        |
-| `leave_requests`    | Leave requests for the organisation (supports optional `start_date`)       | `snapshot`     | `id`        |
-| `policies`          | Policies (e.g. induction policies)                                          | `snapshot`     | `id`        |
-| `roles`             | Roles/tags (standalone HR or payroll-connected)                             | `snapshot`     | `id`        |
-| `teams`             | Teams (shown as Groups in the Employment Hero UI)                           | `snapshot`     | `id`        |
-| `timesheet_entries` | Timesheet entries across all employees (supports optional `start_date`)    | `snapshot`     | `id`        |
-| `work_locations`    | Work locations (e.g. offices)                                               | `snapshot`     | `id`        |
-| `work_sites`        | Work sites with address, departments, and HR positions                      | `snapshot`     | `id`        |
+| Table               | Description                                                                 | Ingestion Type | Primary Key | Table options |
+|---------------------|-----------------------------------------------------------------------------|----------------|-------------|----------------|
+| `organisations`     | Top-level list of organisations (no `organisation_id` required)              | `snapshot`     | `id`        | None           |
+| `employees`         | Employees (and contractors) for the organisation                            | `snapshot`     | `id`        | `organisation_id` |
+| `certifications`    | Certifications defined for the organisation                                | `snapshot`     | `id`        | `organisation_id` |
+| `cost_centres`      | Cost centres in the organisation                                            | `snapshot`     | `id`        | `organisation_id` |
+| `custom_fields`     | Custom field definitions for the organisation                              | `snapshot`     | `id`        | `organisation_id` |
+| `employing_entities`| Employing entities in the organisation                                     | `snapshot`     | `id`        | `organisation_id` |
+| `leave_categories`  | Leave categories (e.g. Annual Leave, Sick Leave)                            | `snapshot`     | `id`        | `organisation_id` |
+| `leave_requests`    | Leave requests for the organisation (supports optional `start_date`)       | `snapshot`     | `id`        | `organisation_id` |
+| `policies`          | Policies (e.g. induction policies)                                          | `snapshot`     | `id`        | `organisation_id` |
+| `roles`             | Roles/tags (standalone HR or payroll-connected)                             | `snapshot`     | `id`        | `organisation_id` |
+| `teams`             | Teams (shown as Groups in the Employment Hero UI)                           | `snapshot`     | `id`        | `organisation_id` |
+| `timesheet_entries` | Timesheet entries across all employees (supports optional `start_date`)    | `snapshot`     | `id`        | `organisation_id` |
+| `work_locations`    | Work locations (e.g. offices)                                               | `snapshot`     | `id`        | `organisation_id` |
+| `work_sites`        | Work sites with address, departments, and HR positions                      | `snapshot`     | `id`        | `organisation_id` |
 
 ### Required table options
 
-For **all** tables, you must provide the following option in the pipeline table configuration:
+- **`organisations`** table: No table options are required. The connector calls the top-level endpoint `GET /api/v1/organisations` and returns all organisations the authenticated user can access. Use this table to discover organisation IDs for the other tables.
 
-- **`organisation_id`** (string, required): The UUID of the Employment Hero organisation whose data to read. The connector calls the API with path `/api/v1/organisations/{organisation_id}/{table_name}`.
+- **All other (organisation-scoped) tables**: You must provide **`organisation_id`** (string, required) in the pipeline table configuration. The connector calls the API with path `/api/v1/organisations/{organisation_id}/{resource}`. Obtain organisation IDs from the `organisations` table or your Employment Hero admin.
 
-No other table-specific options are required. Omitted optional API query parameters (e.g. filters) use their defaults in the connector.
+No other table-specific options are required for basic use. Omitted optional API query parameters (e.g. filters) use their defaults in the connector.
 
 ### Optional table options
 
@@ -123,6 +126,7 @@ Include `start_date` in `externalOptionsAllowList` (e.g. `organisation_id,start_
 
 Schemas are defined in `employmenthero_schemas.py` and align with the [Employment Hero API documentation](https://developer.employmenthero.com/api-references):
 
+- **`organisations`**: Top-level organisations list with `id`, `name`, `phone`, `country`, `logo_url`, and related fields. No `organisation_id` in the path.
 - **`employees`**: Rich schema including identity, contact, employment, and contractor fields; nested structs for `teams`, `primary_cost_centre`, `primary_manager`, `business_detail`, addresses, etc.
 - **`certifications`**, **`cost_centres`**, **`employing_entities`**, **`roles`**, **`work_locations`**: Simple tables with `id` and `name` (and, where applicable, `type`, `country`, or `status`).
 - **`custom_fields`**: Includes `custom_field_permissions` and `custom_field_options` as array-of-struct fields.
@@ -161,16 +165,21 @@ Use the Lakeflow Community Connector UI to copy or reference the Employment Hero
 
 In your pipeline configuration (e.g. pipeline spec or ingestion_pipeline entrypoint), reference:
 
-- A **Unity Catalog connection** that uses this Employment Hero connector and has `externalOptionsAllowList` set to `organisation_id`.
-- One or more **tables** to ingest, each with table options including `organisation_id`.
+- A **Unity Catalog connection** that uses this Employment Hero connector and has `externalOptionsAllowList` set to `organisation_id,start_date` (so org-scoped tables can receive `organisation_id` and optional `start_date`).
+- One or more **tables** to ingest. The **`organisations`** table needs no table options; all other tables need `organisation_id` (and optionally `start_date` where supported).
 
-Example pipeline spec snippet for one organisation and several tables:
+Example pipeline spec snippet: ingest the top-level **organisations** table (no options) and several organisation-scoped tables:
 
 ```json
 {
   "pipeline_spec": {
     "connection_name": "employmenthero_connection",
     "object": [
+      {
+        "table": {
+          "source_table": "organisations"
+        }
+      },
       {
         "table": {
           "source_table": "employees",
@@ -195,7 +204,8 @@ Example pipeline spec snippet for one organisation and several tables:
 ```
 
 - `connection_name` must point to the UC connection configured with your Employment Hero OAuth credentials (`client_id`, `client_secret`, `redirect_uri`, `authorization_code`).
-- For each `table`, `source_table` must be one of the supported table names listed above, and `organisation_id` must be the UUID of the organisation to sync.
+- For **`organisations`**, no table options are required.
+- For each **organisation-scoped** `table`, `source_table` must be one of the supported table names (e.g. `employees`, `teams`), and `organisation_id` must be the UUID of the organisation to sync. You can obtain these IDs from the `organisations` table.
 
 You can add more tables (e.g. `certifications`, `custom_fields`, `leave_categories`, `policies`, `roles`, `work_locations`, `work_sites`) by adding more `table` entries with the same `organisation_id` (or a different one for multi-org setups).
 
@@ -217,7 +227,7 @@ Run the pipeline using your usual Lakeflow or Databricks orchestration (e.g. sch
   - Ensure the OAuth application scopes include access to the endpoints you need (e.g. employees, organisations).
 
 - **Missing or invalid `organisation_id`**  
-  - The connector raises an error if `organisation_id` is missing for a table. Add `organisation_id` to the table options and ensure it is in `externalOptionsAllowList`.
+  - The connector raises an error if `organisation_id` is missing for an organisation-scoped table. Add `organisation_id` to the table options and ensure it is in `externalOptionsAllowList`. The **`organisations`** table does not require `organisation_id`.
 
 - **404 or empty data**  
   - Confirm the organisation ID exists and that the authenticated user has access to that organisation.  

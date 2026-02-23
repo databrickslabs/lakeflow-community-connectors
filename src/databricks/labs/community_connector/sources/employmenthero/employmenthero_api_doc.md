@@ -1,6 +1,6 @@
 # **Employment Hero API Documentation**
 
-This document describes the Employment Hero REST API information relevant to the Employment Hero Lakeflow connector. The connector uses the official Employment Hero API (OAuth 2.0, v1 organisation-scoped list endpoints) for snapshot ingestion.
+This document describes the Employment Hero REST API information relevant to the Employment Hero Lakeflow connector. The connector uses the official Employment Hero API (OAuth 2.0, v1) for snapshot ingestion: a **top-level organisations endpoint** (no organisation ID in the path) and **organisation-scoped list endpoints** that require an organisation ID.
 
 **Official reference**: [Employment Hero API References](https://developer.employmenthero.com/api-references)
 
@@ -30,10 +30,14 @@ curl -X GET \
 
 ## **Object List**
 
-The connector exposes the following organisation-scoped list endpoints as **tables**. All require an `organisation_id` (path parameter) supplied via connector table options. The object list is **static** (defined by the connector), not discovered dynamically from the API.
+The connector exposes the following **tables**. The object list is **static** (defined by the connector), not discovered dynamically from the API.
+
+- **`organisations`** — Top-level endpoint; **does not require** `organisation_id`. Use it to discover organisation IDs for the other tables.
+- **All other tables** — Organisation-scoped; require `organisation_id` in connector table options (path parameter).
 
 | Object Name        | Description                                              | Primary Endpoint                                                    | Ingestion Type |
 |--------------------|----------------------------------------------------------|---------------------------------------------------------------------|----------------|
+| `organisations`    | Top-level list of organisations (no organisation_id)    | `GET /api/v1/organisations`                                         | `snapshot`     |
 | `employees`        | Employees for the organisation                           | `GET /api/v1/organisations/{organisation_id}/employees`             | `snapshot`     |
 | `certifications`   | Certifications (checks/training) for the organisation     | `GET /api/v1/organisations/{organisation_id}/certifications`       | `snapshot`     |
 | `cost_centres`     | Cost centres for the organisation                        | `GET /api/v1/organisations/{organisation_id}/cost_centres`           | `snapshot`     |
@@ -48,7 +52,7 @@ The connector exposes the following organisation-scoped list endpoints as **tabl
 | `work_locations`   | Work locations for the organisation                       | `GET /api/v1/organisations/{organisation_id}/work_locations`         | `snapshot`     |
 | `work_sites`       | Work sites (with departments, HR positions, address)      | `GET /api/v1/organisations/{organisation_id}/work_sites`              | `snapshot`     |
 
-**Connector scope**: All listed tables are implemented as **snapshot** ingestion: full read per table per organisation on each sync. No incremental cursor or date-based filtering is used for these endpoints.
+**Connector scope**: All listed tables are implemented as **snapshot** ingestion: full read per table on each sync. For organisation-scoped tables, each sync is per organisation. No incremental cursor is used; optional date-based filtering (`start_date`) is supported for `leave_requests` and `timesheet_entries`.
 
 
 ## **Object Schema**
@@ -59,6 +63,30 @@ The connector exposes the following organisation-scoped list endpoints as **tabl
 - Identifiers are **UUIDs** (strings). The connector models them as string type.
 - Nested JSON objects (e.g. `residential_address`, `primary_manager`, `custom_field_options`) are represented as **nested structs or arrays** in the connector schema rather than flattened.
 - Some API fields are **regional**: they appear only for certain regions (e.g. AU, UK, NZ, CA, SG, MY). For employees outside that region, regional fields may be omitted from the response. The connector schema includes them as optional (nullable) where applicable.
+
+
+### `organisations` object
+
+**Source endpoint**:  
+`GET /api/v1/organisations`
+
+**Key behavior**: Top-level endpoint that returns a paginated list of organisations the authenticated user can access. **No organisation ID is required** in the path or in table options. Use this table to discover organisation IDs for all other (organisation-scoped) tables.
+
+| Column Name | Type | Description |
+|------------|------|-------------|
+| `id` | string (UUID) | Organisation identifier. Use this as `organisation_id` for other tables. |
+| `name` | string | Organisation name. |
+| `phone` | string | Phone number. |
+| `country` | string | Country code (e.g. AU). |
+| `logo_url` | string | URL of the organisation logo. |
+
+**Example request**:
+
+```bash
+curl -X GET \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  "https://api.employmenthero.com/api/v1/organisations?page_index=1&item_per_page=20"
+```
 
 
 ### `employees` object
@@ -331,12 +359,23 @@ The connector uses **`employee_id = "-"`** (wildcard) to fetch timesheet entries
 ## **Primary keys and ingestion type**
 
 - All connector tables use **primary key**: `id` (UUID string).
-- **Ingestion type**: All tables are **snapshot**. The connector performs a full read per table per organisation on each sync; there is no incremental cursor or delete stream for these endpoints.
+- **Ingestion type**: All tables are **snapshot**. The **organisations** table is read from the top-level endpoint (full list in one sync). Organisation-scoped tables are read per organisation on each sync. There is no incremental cursor or delete stream for these endpoints.
 
 
 ## **Read API for Data Retrieval**
 
+### Top-level organisations endpoint
+
+For the **organisations** table only:
+
+- **Endpoint**: `GET /api/v1/organisations`
+- **Path parameters**: None. No `organisation_id` is required.
+- **Query parameters**: Same pagination as below (`page_index`, `item_per_page`).
+- **Response**: Same `data` wrapper with `items` and pagination fields. Use the `id` of each organisation as `organisation_id` when reading other tables.
+
 ### Common pattern for organisation-scoped list endpoints
+
+For all other tables (employees, teams, certifications, etc.):
 
 - **HTTP method**: `GET`
 - **Endpoint pattern**: `/api/v1/organisations/{organisation_id}/{resource}`
@@ -346,7 +385,7 @@ The connector uses **`employee_id = "-"`** (wildcard) to fetch timesheet entries
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `organisation_id` | string (UUID) | yes | Organisation ID. Supplied via connector **table options** (`organisation_id`), not connection parameters. |
+| `organisation_id` | string (UUID) | yes | Organisation ID. Supplied via connector **table options** (`organisation_id`), not connection parameters. Obtain from the **organisations** table or your admin. |
 
 **Query parameters (pagination)**:
 

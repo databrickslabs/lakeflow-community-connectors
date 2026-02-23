@@ -59,7 +59,87 @@ def test_employmenthero_connector_reads_snapshot_table(employees_data: dict):
         per_page=200,
     )
     records = list(records_iter)
-    assert len(records) == len(expected_records) == 3
+    assert records == expected_records
+    assert next_offset == {}
+
+
+def test_employmenthero_connector_reads_snapshot_table_with_start_date(timesheet_entries_data):
+    """Read snapshot table passing in the start_date parameter.
+
+    Mocks EmploymentHeroAPIClient so paginate returns the 2 timesheet entry records from the fixture.
+    Asserts paginate was called with the start_date param and that the special timesheet_entries
+    endpoint (with employee "-" wildcard) is constructed correctly.
+    """
+    expected_records = list(timesheet_entries_data["pages"][0]["items"])
+    organisation_id = "test-org-id"
+    start_date = "01/02/2025"  # dd/mm/yyyy per Employment Hero API
+    expected_endpoint = f"/api/v1/organisations/{organisation_id}/employees/-/timesheet_entries"
+
+    mock_client = MagicMock(spec=EmploymentHeroAPIClient)
+    mock_client.paginate.return_value = iter(expected_records)
+
+    options = {
+        "client_id": "test_id",
+        "client_secret": "test_secret",
+        "redirect_uri": "https://example.com/callback",
+        "authorization_code": "test_code",
+    }
+    connector = EmploymentHeroLakeflowConnect(options=options, client=mock_client)
+
+    records_iter, next_offset = connector.read_table(
+        table_name="timesheet_entries",
+        start_offset={},
+        table_options={
+            "organisation_id": organisation_id,
+            "start_date": start_date,
+        },
+    )
+
+    mock_client.paginate.assert_called_once_with(
+        endpoint=expected_endpoint,
+        params={"start_date": start_date},
+        data_key="data",
+        per_page=200,
+    )
+    records = list(records_iter)
+    assert records == expected_records
+    assert next_offset == {}
+
+
+def test_employmenthero_connector_reads_organisations(organisations_data: dict):
+    """Read data from the top-level organisations endpoint; no organisation_id required.
+
+    Mocks EmploymentHeroAPIClient so paginate returns the 2 organisation records from the fixture.
+    Asserts paginate was called with /api/v1/organisations (no organisation_id in path) and
+    that the result matches the expected records.
+    """
+    expected_records = list(organisations_data["pages"][0]["items"])
+    expected_endpoint = "/api/v1/organisations"
+
+    mock_client = MagicMock(spec=EmploymentHeroAPIClient)
+    mock_client.paginate.return_value = iter(expected_records)
+
+    options = {
+        "client_id": "test_id",
+        "client_secret": "test_secret",
+        "redirect_uri": "https://example.com/callback",
+        "authorization_code": "test_code",
+    }
+    connector = EmploymentHeroLakeflowConnect(options=options, client=mock_client)
+
+    records_iter, next_offset = connector.read_table(
+        table_name="organisations",
+        start_offset={},
+        table_options={},
+    )
+
+    mock_client.paginate.assert_called_once_with(
+        endpoint=expected_endpoint,
+        params={},
+        data_key="data",
+        per_page=200,
+    )
+    records = list(records_iter)
     assert records == expected_records
     assert next_offset == {}
 
