@@ -1,35 +1,39 @@
 # Connector Vibe-Coding Prompts
 
+All development prompts have been migrated to Claude skills under `.claude/skills/`.
+
 ## Connector Development Workflow 
 These steps build a working read-only connector:
 - **Step 1: Document Source API** - Research and document READ operations only.
-  - See details in [understand_and_document_source.md](understand_and_document_source.md)
-- **Step 2: Implement Connector** - Implement the LakeflowConnect interface
-  - See details in [implement_connector.md](implement_connector.md)
-- **Step 3: Test and Fix Connector** - Validate read operations work correctly
-  - See details in [test_and_fix_connector.md](test_and_fix_connector.md)
+  - See skill: [`.claude/skills/research-source-api/SKILL.md`](../.claude/skills/research-source-api/SKILL.md)
+- **Step 2: Auth Setup** - Generate the connection spec, guide credential entry via the authenticate script, and verify connectivity.
+  - See skill: [`.claude/skills/connector-auth-guide/SKILL.md`](../.claude/skills/connector-auth-guide/SKILL.md)
+- **Step 3: Implement Connector** - Implement the LakeflowConnect interface
+  - See skill: [`.claude/skills/implement-connector/SKILL.md`](../.claude/skills/implement-connector/SKILL.md)
+- **Step 4: Test and Fix Connector** - Validate read operations work correctly
+  - See skill: [`.claude/skills/test-and-fix-connector/SKILL.md`](../.claude/skills/test-and-fix-connector/SKILL.md)
 
 At this point, you have a **production-ready connector** that can ingest data.
 
 ### Write-Back Testing (Optional)
 If you need comprehensive end-to-end validation:
-- **Step 4: Document Write-Back APIs** - Research and document WRITE operations (separate from Step 1)
-  - See details in [document_write_back_api_of_source.md](document_write_back_api_of_source.md)
-- **Step 5: Implement Write-Back Testing** - Create test utilities that write data and validate ingestion
-  - See details in [implement_write_back_testing.md](implement_write_back_testing.md)
+- **Step 5: Document Write-Back APIs** - Research and document WRITE operations (separate from Step 1)
+  - See skill: [`.claude/skills/research-write-api-of-source/SKILL.md`](../.claude/skills/research-write-api-of-source/SKILL.md)
+- **Step 6: Implement Write-Back Testing** - Create test utilities that write data and validate ingestion
+  - See skill: [`.claude/skills/write-back-testing/SKILL.md`](../.claude/skills/write-back-testing/SKILL.md)
 
-**Skip Steps 4-5 if:**
+**Skip Steps 5-6 if:**
 - You want to ship quickly (read-only testing is sufficient)
 - Source is read-only
 - Only production access available
 - Write operations are expensive/risky
 
 ### Final Step (Required)
-- **Step 6: Create Public Documentation** - Generate user-facing README
-  - See details in [create_connector_documentation.md](create_connector_documentation.md)
-- **Step 7: Create connector spec YAML file**
-  - See details in [generate_connector_spec_yaml.md](generate_connector_spec_yaml.md)
-- **(Temporary) Step 8: Run merge scripts**
+- **Step 7: Create Public Documentation** - Generate user-facing README
+  - See skill: [`.claude/skills/create-connector-document/SKILL.md`](../.claude/skills/create-connector-document/SKILL.md)
+- **Step 8: Create connector spec YAML file**
+  - See skill: [`.claude/skills/generate-connector-spec/SKILL.md`](../.claude/skills/generate-connector-spec/SKILL.md)
+- **(Temporary) Step 9: Run merge scripts**
   - As a temporary workaround for current compatibility issues with Python Data Source and SDP, please run `tools/scripts/merge_python_source.py` on your newly developed source. This will combine the source implementation into a single file.
 
 ## Templates
@@ -37,10 +41,10 @@ If you need comprehensive end-to-end validation:
 - [Community Connector Documentation Template](templates/community_connector_doc_template.md): Used to create consistent, public-facing documentation across different connectors.
 
 ## Quality Review & Validation
-This prompt is useful for both **development** (testing during implementation) and **quality review** (validating existing connectors):
+This skill is useful for both **development** (testing during implementation) and **quality review** (validating existing connectors):
 
-- **[Validate Incremental Sync](validate_incremental_sync.md)**: Manual validation process to verify CDC implementation by checking offset structure, validating offset matches max cursor, and testing incremental filtering. See the **validate-incremental-sync** Claude skill.
+- **Validate Incremental Sync** ([`.claude/skills/validate-incremental-sync/SKILL.md`](../.claude/skills/validate-incremental-sync/SKILL.md)): Manual validation process to verify CDC implementation by checking offset structure, validating offset matches max cursor, and testing incremental filtering.
 
 ## Notes & Tips
 - The **context window** grows larger as you proceed through each step. Consider starting a new session for each step to maintain explicit context isolation—this way, each step only references the output from previous ones, conserving context space.
-- Each step is wrapped as a SKILL for Claude, which can be triggered automatically by Claude Code.
+- Each step is wrapped as a SKILL for Claude, located under `.claude/skills/`.

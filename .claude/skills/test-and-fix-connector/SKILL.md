@@ -32,4 +32,3 @@ Validate the generated connector for **{{source_name}}** by executing the provid
 - This step is more interactive. Based on testing results, we need to make various adjustments.
 - Remove the `dev_config.json` after this step.
 - Avoid mocking data in tests. Config files will be supplied to enable connections to an actual instance.
-

@@ -42,5 +42,3 @@ See `src/databricks/labs/community_connector/sources/github/` for an example of 
   - for each parent object, list the child objects
   - combine the results into a single output table with the parent object identifier as the extra field.
 - Refer to `src/databricks/labs/community_connector/sources/example/example.py` or other connectors under `src/databricks/labs/community_connector/sources` as examples
-
-

@@ -21,7 +21,7 @@ Follow the instructions and methodology from the **research-source-api skill** t
 
 - **Single deliverable**: `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md`
 - **Follow the template**: `prompts/templates/source_api_doc_template.md`
-- **Reference the guide**: `prompts/understand_and_document_source.md`
+- **Reference the skill**: `.claude/skills/research-source-api/SKILL.md`
 
 ## Before Starting Research
 

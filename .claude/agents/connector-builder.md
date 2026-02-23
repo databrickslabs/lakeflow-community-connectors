@@ -16,6 +16,5 @@ Follow the instructions and methodology from the **build-source-project skill** 
 
 ## Key References
 
-- **Skill**: build-source-project (loaded above)
-- **Guide**: `prompts/build_source_project.md`
+- **Skill**: build-source-project (loaded above, at `.claude/skills/build-source-project/SKILL.md`)
 - **Connector source**: `src/databricks/labs/community_connector/sources/{source_name}/`
