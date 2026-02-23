@@ -13,6 +13,7 @@ from pyspark.sql.types import (
     DoubleType,
     DateType,
 )
+from databricks.labs.community_connector.interface.lakeflow_connect import LakeflowConnect
 
 try:
     from google.oauth2 import service_account
@@ -22,10 +23,6 @@ except ImportError:
         "google-auth library is required for Google Analytics connector. "
         "Install it with: pip install google-auth"
     )
-
-from databricks.labs.community_connector.interface.lakeflow_connect import (
-    LakeflowConnect,
-)
 
 
 class GoogleAnalyticsAggregatedLakeflowConnect(LakeflowConnect):

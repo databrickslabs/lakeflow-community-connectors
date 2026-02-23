@@ -365,10 +365,6 @@ def register_lakeflow_source(spark):
             "Install it with: pip install google-auth"
         )
 
-    from databricks.labs.community_connector.interface.lakeflow_connect import (
-        LakeflowConnect,
-    )
-
 
     class GoogleAnalyticsAggregatedLakeflowConnect(LakeflowConnect):
         # Class-level cache for prebuilt reports (loaded once)

@@ -788,6 +788,31 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
 
     merged_content = "\n".join(merged_lines)
 
+    # Validate: check for internal imports that leaked into the merged output.
+    # The deduplicate_imports step strips these from top-level imports, but if
+    # a source file has non-import constructs (e.g. try/except) before an
+    # internal import, extract_imports_and_code may misclassify it as code,
+    # causing it to slip through. Fail early so the source file can be fixed.
+    leaked_import_patterns = [
+        "from databricks.labs.community_connector.",
+        "import databricks.labs.community_connector.",
+    ]
+    leaked = []
+    for line_num, line in enumerate(merged_lines, 1):
+        stripped = line.strip()
+        if any(stripped.startswith(p) for p in leaked_import_patterns):
+            leaked.append((line_num, stripped))
+    if leaked:
+        error_lines = "\n".join(f"  line {num}: {text}" for num, text in leaked)
+        raise ValueError(
+            f"Internal imports found in merged output for '{source_name}'.\n"
+            f"These imports reference modules that are inlined in the merged file "
+            f"and will cause ImportError at runtime:\n{error_lines}\n\n"
+            f"Fix: move these imports to the top of the source file (before any "
+            f"non-import statements like try/except blocks) so that the merge "
+            f"script can properly detect and strip them."
+        )
+
     # Write to output file
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
