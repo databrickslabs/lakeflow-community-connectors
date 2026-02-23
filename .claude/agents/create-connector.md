@@ -88,7 +88,7 @@ Phase 5: Docs + Spec        → connector-doc-writer  +  connector-spec-generato
 Phase 6: Packaging          → connector-builder
 ```
 
-After each phase completes, briefly summarize what was done and confirm to the user before starting the next phase.
+After each phase completes, use `AskUserQuestion` to surface a summary to the user and get explicit confirmation before starting the next phase. This is the only way to show progress — plain text output from inside a subagent is NOT visible to the user. Always use `AskUserQuestion` (not just print statements) for phase transition summaries.     
 
 ---
 
