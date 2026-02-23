@@ -22,7 +22,9 @@ Core modules live under `src/databricks/labs/community_connector/`:
 Other directories:
 - `tools/` — Tools to build and deploy community connectors
 - `tests/` — Generic test suites for validating connector implementations
-- `prompts/` — Templates for AI-assisted connector development
+- `prompts/` — Templates and guide for AI-assisted connector development
+- `.claude/skills/` — Claude skill files for each development workflow step
+- `.claude/agents/` - Claude subagents that handle different phases of connector development
 
 ## Developing New Connectors
 

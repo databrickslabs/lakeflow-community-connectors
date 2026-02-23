@@ -1,4 +1,13 @@
-# Understand and Document Source API
+---
+name: research-source-api 
+description: Research and document APIs of a source system to enable connector implementation.
+---
+
+# Research Source API
+
+## Description
+
+This skill helps you create comprehensive API documentation for a new data source connector. It guides you through researching the source API, documenting endpoints, authentication, schemas, pagination, and incremental sync strategies.
 
 ## Goal 
 
@@ -70,3 +79,13 @@ Before completion, verify:
 - [ ] Research Log completed with full URLs
 - [ ] No unverifiable claims; gaps marked `TBD:` with rationale
 
+## Git Commit on Completion
+
+After writing (or updating) the API doc, commit it to git before returning:
+
+```bash
+git add src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md
+git commit -m "Add {source_name} API doc"
+```
+
+Use the exact source name in the commit message. Do not push — only commit locally.
