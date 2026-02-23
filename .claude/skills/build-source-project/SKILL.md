@@ -105,3 +105,14 @@ The wheel should contain files under the path:
 
 - Refer to existing source pyproject.toml files under `src/databricks/labs/community_connector/sources/` for examples
 - The main project pyproject.toml excludes sources using: `exclude = ["databricks.labs.community_connector.sources*"]`
+
+## Git Commit on Completion
+
+After creating the `pyproject.toml`, commit it to git before returning:
+
+```bash
+git add src/databricks/labs/community_connector/sources/{source_name}/pyproject.toml
+git commit -m "Add {source_name} connector pyproject.toml"
+```
+
+Use the exact source name in the commit message. Do not push — only commit locally.

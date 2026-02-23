@@ -151,3 +151,14 @@ After writing the file, create a Python virtual environment and run the script. 
 - **Multiple auth methods**: Document the simplest/recommended one first, mention alternatives
 - **API versioning in auth**: Note if auth tokens are version-specific
 - **Missing source name**: If you cannot determine the `source_name` from context, ask the user before proceeding
+
+## Git Commit on Completion
+
+After creating the auth verification test, commit it to git before returning:
+
+```bash
+git add tests/unit/sources/{source_name}/auth_test.py
+git commit -m "Add {source_name} auth test"
+```
+
+Use the exact source name in the commit message. Do not push — only commit locally.

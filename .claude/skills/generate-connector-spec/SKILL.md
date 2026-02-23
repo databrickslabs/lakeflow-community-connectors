@@ -97,4 +97,13 @@ For `auth_methods`, also include:
 - Cross-reference with the connector's README (`src/databricks/labs/community_connector/sources/{{source_name}}/README.md`) if available.
 - If inconsistency found between the 2 above, please fix the README and flag errors to user.
 
+## Git Commit on Completion
 
+After generating the connector spec, commit it to git before returning:
+
+```bash
+git add src/databricks/labs/community_connector/sources/{source_name}/{source_name}_spec.yaml
+git commit -m "Add {source_name} connector spec"
+```
+
+Use the exact source name in the commit message. Do not push — only commit locally.

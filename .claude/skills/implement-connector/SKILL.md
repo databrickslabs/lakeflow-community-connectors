@@ -42,3 +42,14 @@ See `src/databricks/labs/community_connector/sources/github/` for an example of 
   - for each parent object, list the child objects
   - combine the results into a single output table with the parent object identifier as the extra field.
 - Refer to `src/databricks/labs/community_connector/sources/example/example.py` or other connectors under `src/databricks/labs/community_connector/sources` as examples
+
+## Git Commit on Completion
+
+After writing the initial connector implementation, commit it to git before returning:
+
+```bash
+git add src/databricks/labs/community_connector/sources/{source_name}/
+git commit -m "Add initial {source_name} connector implementation"
+```
+
+Use the exact source name in the commit message. Do not push — only commit locally.

@@ -32,3 +32,15 @@ Validate the generated connector for **{{source_name}}** by executing the provid
 - This step is more interactive. Based on testing results, we need to make various adjustments.
 - Remove the `dev_config.json` after this step.
 - Avoid mocking data in tests. Config files will be supplied to enable connections to an actual instance.
+
+## Git Commit on Completion
+
+After all tests pass, commit any changes to the connector implementation and test files before returning:
+
+```bash
+git add src/databricks/labs/community_connector/sources/{source_name}/
+git add tests/unit/sources/{source_name}/
+git commit -m "Fix {source_name} connector and add tests"
+```
+
+Only commit files that were actually modified or created. Use the exact source name in the commit message. Do not push — only commit locally.
