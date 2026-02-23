@@ -12,9 +12,6 @@
 # ============================================================================
 display_name: Zoho CRM
 connection:
-  # ---------------------------------------------------------------------------
-  # Single Authentication Method: OAuth2 with Refresh Token
-  # ---------------------------------------------------------------------------
   parameters:
     - name: client_id
       type: string
@@ -56,6 +53,22 @@ connection:
         ISO 8601 formatted date for the starting point of the first sync.
         If omitted, the connector syncs all historical data.
         Example: 2024-01-01T00:00:00Z
+
+  # ---------------------------------------------------------------------------
+  # OAuth 2.0 Authorization Code Flow
+  # The authenticate tool uses this section to run the OAuth flow
+  # automatically — the user only needs to provide client_id and
+  # client_secret, and the refresh_token is obtained via browser redirect.
+  # The authorization_url, token_url, and scopes shown below are defaults
+  # that the user can override at runtime.
+  # ---------------------------------------------------------------------------
+  oauth:
+    authorization_url: "https://accounts.zoho.com/oauth/v2/auth"
+    token_url: "https://accounts.zoho.com/oauth/v2/token"
+    scopes: "ZohoCRM.modules.ALL,ZohoCRM.settings.ALL"
+    extra_auth_params:
+      access_type: "offline"
+      prompt: "consent"
 
 # ============================================================================
 # External Options Allowlist
