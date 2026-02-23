@@ -44,6 +44,7 @@ def find_project_root() -> Path:
 
 
 def resolve_spec_path(source_name: str, project_root: Path) -> Path:
+    """Locate and validate the connector_spec.yaml for a source."""
     spec_path = project_root / SOURCES_DIR / source_name / "connector_spec.yaml"
     if not spec_path.exists():
         print(f"Error: spec file not found: {spec_path}", file=sys.stderr)
@@ -52,11 +53,13 @@ def resolve_spec_path(source_name: str, project_root: Path) -> Path:
 
 
 def load_spec(spec_path: Path) -> dict:
+    """Parse and return a YAML spec file."""
     with open(spec_path) as f:
         return yaml.safe_load(f)
 
 
 def extract_parameters(spec: dict) -> list[dict]:
+    """Extract connection parameters from the spec, or exit on error."""
     try:
         return spec["connection"]["parameters"]
     except (KeyError, TypeError):
@@ -65,6 +68,7 @@ def extract_parameters(spec: dict) -> list[dict]:
 
 
 def extract_oauth_config(spec: dict) -> dict | None:
+    """Return the oauth section from the spec, or None."""
     return spec.get("connection", {}).get("oauth")
 
 
@@ -119,6 +123,7 @@ def _exchange_code(
 # ---------------------------------------------------------------------------
 
 def prompt_for_parameter(param: dict) -> str | None:
+    """Prompt the user for a single parameter value in the terminal."""
     name = param["name"]
     description = param.get("description", "").strip()
     required = param.get("required", False)
@@ -153,20 +158,21 @@ def _prompt_oauth_setting(name: str, default: str) -> str:
     return value or default
 
 
-def _run_oauth_flow_cli(
+def _run_oauth_flow_cli(  # pylint: disable=too-many-statements
     oauth_cfg: dict,
     client_id: str,
     client_secret: str,
     port: int,
 ) -> str | None:
-    """Start a temporary local server, run the browser-based OAuth flow, return the refresh token."""
+    """Start a temporary local server, open the browser for OAuth, return the refresh token."""
     state = secrets.token_urlsafe(32)
     result: dict[str, str] = {}
     done = threading.Event()
     redirect_uri = f"http://localhost:{port}/oauth/callback"
 
     class CallbackHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
+        def do_GET(self):  # pylint: disable=invalid-name
+            """Handle the OAuth callback redirect."""
             parsed = urllib.parse.urlparse(self.path)
             if not parsed.path.rstrip("/").endswith("/oauth/callback"):
                 self.send_response(404)
@@ -246,7 +252,11 @@ def _run_oauth_flow_cli(
 
     auth_url = _build_auth_url(oauth_cfg, client_id, redirect_uri, state)
 
-    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.5}, daemon=True)
+    thread = threading.Thread(
+        target=server.serve_forever,
+        kwargs={"poll_interval": 0.5},
+        daemon=True,
+    )
     thread.start()
 
     print("\n  Redirect URI (register in your OAuth app if not done):")
@@ -273,7 +283,10 @@ def _run_oauth_flow_cli(
     return result.get("refresh_token")
 
 
-def run_cli(source_name: str, output_file: Path, port: int) -> None:
+def run_cli(  # pylint: disable=too-many-locals,too-many-statements
+    source_name: str, output_file: Path, port: int,
+) -> None:
+    """Run the CLI-based interactive authentication flow."""
     project_root = find_project_root()
     spec_path = resolve_spec_path(source_name, project_root)
     spec = load_spec(spec_path)
@@ -281,8 +294,12 @@ def run_cli(source_name: str, output_file: Path, port: int) -> None:
     parameters = extract_parameters(spec)
     oauth_cfg = extract_oauth_config(spec)
 
-    # When OAuth is configured, refresh_token is obtained automatically
-    manual_params = [p for p in parameters if p["name"] != "refresh_token"] if oauth_cfg else parameters
+    if oauth_cfg:
+        manual_params = [
+            p for p in parameters if p["name"] != "refresh_token"
+        ]
+    else:
+        manual_params = parameters
     required = [p for p in manual_params if p.get("required", False)]
     optional = [p for p in manual_params if not p.get("required", False)]
 
@@ -334,7 +351,12 @@ def run_cli(source_name: str, output_file: Path, port: int) -> None:
                 print("\n  ✓ Refresh token obtained")
             else:
                 print("\n  ✗ OAuth flow did not succeed. Enter the token manually:")
-                value = prompt_for_parameter({"name": "refresh_token", "required": True, "secret": True})
+                token_param = {
+                    "name": "refresh_token",
+                    "required": True,
+                    "secret": True,
+                }
+                value = prompt_for_parameter(token_param)
                 if value:
                     collected["refresh_token"] = value
 
@@ -498,7 +520,8 @@ def _render_oauth_section(oauth_cfg: dict, port: int) -> str:
         '<div class="field">',
         '<label for="__oauth_authorization_url">authorization_url'
         '<span class="tag opt">editable</span></label>',
-        f'<input type="text" id="__oauth_authorization_url" value="{auth_url}" autocomplete="off"/>',
+        f'<input type="text" id="__oauth_authorization_url"'
+        f' value="{auth_url}" autocomplete="off"/>',
         '</div>',
         # token_url
         '<div class="field">',
@@ -521,7 +544,9 @@ def _render_oauth_section(oauth_cfg: dict, port: int) -> str:
     return "\n".join(lines)
 
 
-def _build_form_html(spec: dict, source_name: str, port: int) -> str:
+def _build_form_html(  # pylint: disable=too-many-locals
+    spec: dict, source_name: str, port: int,
+) -> str:
     display_name = spec.get("display_name", source_name)
     conn = spec.get("connection", {})
     auth_methods = conn.get("auth_methods", [])
@@ -552,12 +577,17 @@ def _build_form_html(spec: dict, source_name: str, port: int) -> str:
             active = "active" if i == 0 else ""
             parts.append(f'<div class="auth-panel {active}">')
             for param in method.get("parameters", []):
-                parts.append(_render_field(param, disabled=(i != 0)))
+                parts.append(_render_field(param, disabled=i != 0))
             parts.append('</div>')
 
     if shared_params:
-        # When OAuth is configured, skip refresh_token from the params list
-        params_to_show = [p for p in shared_params if p["name"] != "refresh_token"] if oauth_cfg else shared_params
+        if oauth_cfg:
+            params_to_show = [
+                p for p in shared_params
+                if p["name"] != "refresh_token"
+            ]
+        else:
+            params_to_show = shared_params
         required = [p for p in params_to_show if p.get("required", False)]
         optional = [p for p in params_to_show if not p.get("required", False)]
         if required:
@@ -637,7 +667,10 @@ def _build_oauth_popup_html(
     )
 
 
-def run_browser(source_name: str, output_file: Path, port: int) -> None:
+def run_browser(  # pylint: disable=too-many-statements,too-many-locals
+    source_name: str, output_file: Path, port: int,
+) -> None:
+    """Run the browser-based interactive authentication flow."""
     project_root = find_project_root()
     spec_path = resolve_spec_path(source_name, project_root)
     spec = load_spec(spec_path)
@@ -650,7 +683,8 @@ def run_browser(source_name: str, output_file: Path, port: int) -> None:
     shutdown_event = threading.Event()
 
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
+        def do_GET(self):  # pylint: disable=invalid-name
+            """Serve the form or handle OAuth callback."""
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path.rstrip("/")
 
@@ -658,10 +692,10 @@ def run_browser(source_name: str, output_file: Path, port: int) -> None:
                 self._handle_oauth_callback(parsed)
                 return
 
-            # Default: serve the form
             self._send_html(form_html)
 
-        def do_POST(self):
+        def do_POST(self):  # pylint: disable=invalid-name
+            """Handle form submission or OAuth start."""
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path.rstrip("/")
             length = int(self.headers.get("Content-Length", 0))
@@ -741,7 +775,8 @@ def run_browser(source_name: str, output_file: Path, port: int) -> None:
             if rt:
                 self._send_html(_build_oauth_popup_html(refresh_token=rt))
             else:
-                self._send_html(_build_oauth_popup_html(error="No refresh token in provider response."))
+                err = "No refresh token in provider response."
+                self._send_html(_build_oauth_popup_html(error=err))
 
         def _handle_save(self, raw_body: bytes):
             fields = urllib.parse.parse_qs(raw_body.decode(), keep_blank_values=True)
@@ -786,7 +821,11 @@ def run_browser(source_name: str, output_file: Path, port: int) -> None:
     actual_port = server.server_address[1]
     url = f"http://localhost:{actual_port}"
 
-    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.5}, daemon=True)
+    thread = threading.Thread(
+        target=server.serve_forever,
+        kwargs={"poll_interval": 0.5},
+        daemon=True,
+    )
     thread.start()
 
     print(f"\n  Authenticate '{display_name}' in your browser:")
@@ -811,8 +850,12 @@ def run_browser(source_name: str, output_file: Path, port: int) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    """CLI entry point for the authenticate tool."""
     parser = argparse.ArgumentParser(
-        description="Interactively collect connection parameters defined in a connector_spec.yaml and save them as JSON.",
+        description=(
+            "Interactively collect connection parameters defined"
+            " in a connector_spec.yaml and save them as JSON."
+        ),
     )
     parser.add_argument(
         "-s", "--source", required=True,
@@ -824,7 +867,8 @@ def main() -> None:
     )
     parser.add_argument(
         "-m", "--mode", choices=["cli", "browser"], default="cli",
-        help="Interaction mode: 'cli' for terminal prompts (default), 'browser' for a local web form",
+        help="Interaction mode: 'cli' for terminal prompts "
+             "(default), 'browser' for a local web form",
     )
     parser.add_argument(
         "-p", "--port", type=int, default=DEFAULT_PORT,
