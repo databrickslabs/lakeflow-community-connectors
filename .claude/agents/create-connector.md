@@ -62,11 +62,13 @@ Does this look good? You can also tell me:
   • Any other preferences before I start
 ```
 
-After printing the plan, use `AskUserQuestion` to ask:
-- Whether to proceed (yes/go ahead vs. adjustments needed)
-- Optionally: which specific tables to focus on (if they haven't already told you)
+**IMPORTANT**: Do NOT proceed after printing the plan. You MUST use the `AskUserQuestion` tool to ask the user directly whether to proceed. This is a hard stop — Phase 1 must not start until the user explicitly confirms via `AskUserQuestion`. Do not infer confirmation from context or prior messages.
 
-Do not start Phase 1 until the user confirms.
+Use `AskUserQuestion` with:
+- Question: "Does this plan look good? Should I proceed with building the connector?"
+- Options: "Yes, proceed" / "I have adjustments" (+ free-text for specifics)
+
+Only after the user selects "Yes, proceed" (or equivalent) should you begin Phase 1.
 
 ---
 
