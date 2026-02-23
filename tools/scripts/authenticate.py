@@ -283,7 +283,7 @@ def _run_oauth_flow_cli(  # pylint: disable=too-many-statements
     return result.get("refresh_token")
 
 
-def run_cli(  # pylint: disable=too-many-locals,too-many-statements
+def run_cli(  # pylint: disable=too-many-locals,too-many-statements,too-many-branches
     source_name: str, output_file: Path, port: int,
 ) -> None:
     """Run the CLI-based interactive authentication flow."""
@@ -544,7 +544,7 @@ def _render_oauth_section(oauth_cfg: dict, port: int) -> str:
     return "\n".join(lines)
 
 
-def _build_form_html(  # pylint: disable=too-many-locals
+def _build_form_html(  # pylint: disable=too-many-locals,too-many-branches
     spec: dict, source_name: str, port: int,
 ) -> str:
     display_name = spec.get("display_name", source_name)
