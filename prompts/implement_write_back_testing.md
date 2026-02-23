@@ -176,5 +176,3 @@ test_delete_and_read_deletes PASSED - Successfully verified delete flow on table
 4. **Minimal Data**: Generate only required fields, keep test data simple
 5. **Cleanup Consideration**: Some sources may require manual cleanup of test data
 6. **Rate Limiting**: Add delays between writes if source API has rate limits
-
-
