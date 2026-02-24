@@ -22,6 +22,20 @@ To configure the connector, provide the following parameters in your connector o
 | `email` | string | Yes | Email address of the Zendesk user with API access | `admin@mycompany.com` |
 | `api_token` | string | Yes | Zendesk API token for authentication | `abc123def456ghi789` |
 
+### Table-Level Options
+
+The following options can be set per table via `table_options`:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `max_records_per_batch` | integer | `100000` | Maximum number of records per microbatch. Controls memory usage for incremental tables (tickets, organizations, users, ticket_comments). |
+
+To use table-level options, include them in the `externalOptionsAllowList` connection parameter:
+
+```
+max_records_per_batch
+```
+
 ### Getting Your API Token
 
 1. Log in to your Zendesk instance as an admin
