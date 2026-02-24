@@ -21,10 +21,9 @@ class SdpTableConfig:  # pylint: disable=too-many-instance-attributes
     with_deletes: bool = False
 
 
-def _build_view_name(source_table: str, flow_type: str, destination_table: str) -> str:
+def _build_view_name(source_table: str, flow_type: str) -> str:
     """Build a unique view name encoding source, flow type, and destination."""
-    sanitized_dest = destination_table.replace("`", "").replace(".", "_")
-    return f"{source_table}_{flow_type}_to_dest_{sanitized_dest}"
+    return f"source_{source_table}_{flow_type}"
 
 
 def _create_cdc_table(
@@ -52,7 +51,7 @@ def _create_cdc_table(
     )
 
     if config.with_deletes:
-        delete_view_name = _build_view_name(config.source_table, "delete", config.destination_table)
+        delete_view_name = _build_view_name(config.source_table, "delete")
 
         @sdp.view(name=delete_view_name)
         def delete_view():
@@ -178,9 +177,7 @@ def ingest(spark, pipeline_spec: dict) -> None:
             "snapshot": "snapshot",
             "append": "append",
         }
-        view_name = _build_view_name(
-            table, flow_type_map.get(ingestion_type, "upsert"), destination_table
-        )
+        view_name = _build_view_name(table, flow_type_map.get(ingestion_type, "upsert"))
 
         config = SdpTableConfig(
             source_table=table,
