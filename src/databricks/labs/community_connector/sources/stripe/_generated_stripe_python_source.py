@@ -373,6 +373,8 @@ def register_lakeflow_source(spark):
             self.api_key = options["api_key"]
             self.base_url = "https://api.stripe.com/v1"
             self.auth = (self.api_key, "")  # API key as username, empty password
+            self._init_time = int(time.time())
+            self._default_max_records_per_batch = 100_000
 
             # Cache for schemas to avoid repeated computation
             self._schema_cache = {}
@@ -1276,67 +1278,97 @@ def register_lakeflow_source(spark):
             self, table_name: str, start_offset: dict, table_options: Dict[str, str]
         ) -> Tuple[List[Dict], Dict]:
             """
-            Read data from a Stripe table.
+            Read data from a Stripe table with bounded microbatch size.
 
-            Args:
-                table_name: Name of the table to read
-                start_offset: Dictionary containing cursor information for incremental reads
-                    - For incremental: {"created": <unix_timestamp>}
-                    - For full refresh: None or {}
-
-            Returns:
-                Tuple of (records, new_offset)
+            Each call fetches up to ``max_records_per_batch`` records (default
+            100 000).  When more pages remain, the returned offset carries a
+            ``starting_after`` key so the framework calls again to continue.
+            The cursor is capped at ``_init_time`` to guarantee termination
+            for ``availableNow`` triggers.
             """
             if table_name not in self._object_config:
                 raise ValueError(f"Unsupported table: {table_name}")
 
             config = self._object_config[table_name]
-
-            # Determine if this is an incremental read
-            is_incremental = (
-                start_offset is not None
-                and start_offset.get(config["cursor_field"]) is not None
+            cursor_field = config["cursor_field"]
+            max_records = int(
+                table_options.get(
+                    "max_records_per_batch", self._default_max_records_per_batch
+                )
             )
 
-            if is_incremental:
-                return self._read_data_incremental(table_name, start_offset)
+            starting_after = start_offset.get("starting_after") if start_offset else None
+            max_created_so_far = (
+                start_offset.get(cursor_field, 0) if start_offset else 0
+            )
+
+            if starting_after:
+                created_gte = start_offset.get("created_gte")
+            elif max_created_so_far > 0:
+                created_gte = max_created_so_far
             else:
-                return self._read_data_full(table_name)
+                created_gte = None
 
-        def _read_data_full(self, table_name: str) -> Tuple[List[Dict], Dict]:
-            """
-            Read all data from a Stripe table (full refresh).
+            records, has_more, last_id, batch_max_created = self._fetch_records(
+                table_name, created_gte, starting_after, max_records
+            )
 
-            Args:
-                table_name: Name of the table
+            if not records:
+                return [], start_offset or {}
 
-            Returns:
-                Tuple of (all_records, offset)
+            effective_max = max(batch_max_created, max_created_so_far)
+
+            if has_more:
+                next_offset: Dict[str, Any] = {
+                    cursor_field: effective_max,
+                    "starting_after": last_id,
+                }
+                if created_gte is not None:
+                    next_offset["created_gte"] = created_gte
+            else:
+                capped = min(effective_max, self._init_time)
+                next_offset = {cursor_field: capped}
+
+            return records, next_offset
+
+        def _fetch_records(
+            self,
+            table_name: str,
+            created_gte: int | None,
+            starting_after: str | None,
+            max_records: int,
+        ) -> Tuple[List[Dict], bool, str | None, int]:
+            """Fetch up to *max_records* from the Stripe List API.
+
+            Returns ``(records, has_more, last_id, max_cursor_value)``.
+            *has_more* is ``True`` when the batch limit was reached and the
+            API still has more pages.
             """
             config = self._object_config[table_name]
             endpoint = config["endpoint"]
             cursor_field = config["cursor_field"]
 
-            all_records = []
-            starting_after = None
-            latest_cursor_value = 0
+            all_records: List[Dict] = []
+            latest_cursor = 0
+            current_starting_after = starting_after
+            last_has_more = False
 
-            while True:
-                # Build request parameters
-                params = {
-                    "limit": 100  # Max allowed by Stripe
-                }
+            while len(all_records) < max_records:
+                params: Dict[str, Any] = {"limit": 100}
 
-                if starting_after:
-                    params["starting_after"] = starting_after
+                if created_gte is not None and created_gte > 0:
+                    params[f"{cursor_field}[gte]"] = created_gte
 
-                # Make API request
+                if current_starting_after:
+                    params["starting_after"] = current_starting_after
+
                 url = f"{self.base_url}/{endpoint}"
                 response = requests.get(url, auth=self.auth, params=params)
 
                 if response.status_code != 200:
                     raise Exception(
-                        f"Stripe API error for {table_name}: {response.status_code} {response.text}"
+                        f"Stripe API error for {table_name}: "
+                        f"{response.status_code} {response.text}"
                     )
 
                 data = response.json()
@@ -1347,98 +1379,20 @@ def register_lakeflow_source(spark):
 
                 all_records.extend(records)
 
-                # Track the latest cursor value for checkpointing
                 for record in records:
                     cursor_value = record.get(cursor_field, 0)
-                    if cursor_value > latest_cursor_value:
-                        latest_cursor_value = cursor_value
+                    if cursor_value > latest_cursor:
+                        latest_cursor = cursor_value
 
-                # Check if there are more pages
-                has_more = data.get("has_more", False)
-                if not has_more:
+                last_has_more = data.get("has_more", False)
+                if not last_has_more:
                     break
 
-                # Get the last object ID for pagination
-                starting_after = records[-1]["id"]
-
-                # Rate limiting - be nice to the API
+                current_starting_after = records[-1]["id"]
                 time.sleep(0.1)
 
-            # Return records and offset for next incremental sync
-            offset = {cursor_field: latest_cursor_value} if latest_cursor_value > 0 else {}
-            return all_records, offset
-
-        def _read_data_incremental(
-            self, table_name: str, start_offset: dict
-        ) -> Tuple[List[Dict], Dict]:
-            """
-            Read incremental data from a Stripe table using cursor.
-
-            Args:
-                table_name: Name of the table
-                start_offset: Dictionary with cursor field value
-
-            Returns:
-                Tuple of (new_records, new_offset)
-            """
-            config = self._object_config[table_name]
-            endpoint = config["endpoint"]
-            cursor_field = config["cursor_field"]
-
-            # Get the starting point from offset
-            cursor_start = start_offset.get(cursor_field, 0)
-
-            all_records = []
-            starting_after = None
-            latest_cursor_value = cursor_start
-
-            while True:
-                # Build request parameters for incremental fetch
-                params = {
-                    "limit": 100,
-                    f"{cursor_field}[gte]": cursor_start,  # Greater than or equal to last cursor
-                }
-
-                if starting_after:
-                    params["starting_after"] = starting_after
-
-                # Make API request
-                url = f"{self.base_url}/{endpoint}"
-                response = requests.get(url, auth=self.auth, params=params)
-
-                if response.status_code != 200:
-                    raise Exception(
-                        f"Stripe API error for {table_name}: {response.status_code} {response.text}"
-                    )
-
-                data = response.json()
-                records = data.get("data", [])
-
-                if not records:
-                    break
-
-                all_records.extend(records)
-
-                # Track the latest cursor value
-                for record in records:
-                    cursor_value = record.get(cursor_field, 0)
-                    if cursor_value > latest_cursor_value:
-                        latest_cursor_value = cursor_value
-
-                # Check if there are more pages
-                has_more = data.get("has_more", False)
-                if not has_more:
-                    break
-
-                # Get the last object ID for pagination
-                starting_after = records[-1]["id"]
-
-                # Rate limiting
-                time.sleep(0.1)
-
-            # Return new offset for next sync
-            offset = {cursor_field: latest_cursor_value}
-            return all_records, offset
+            last_id = all_records[-1]["id"] if all_records else None
+            return all_records, last_has_more, last_id, latest_cursor
 
         def test_connection(self) -> dict:
             """

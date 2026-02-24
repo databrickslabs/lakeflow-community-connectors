@@ -6,7 +6,7 @@
 # ==============================================================================
 
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Iterator
 import json
@@ -864,18 +864,29 @@ def register_lakeflow_source(spark):
     def compute_next_cursor(
         max_modified: str | None,
         current_cursor: str | None,
+    ) -> str | None:
+        """Return the next cursor value to checkpoint.
+
+        Stores the raw max observed timestamp. Lookback is applied separately
+        at read time via ``apply_lookback``.
+        """
+        return max_modified if max_modified else current_cursor
+
+
+    def apply_lookback(
+        cursor: str | None,
         lookback_seconds: int,
     ) -> str | None:
-        """Compute the next cursor value with a lookback window."""
-        if not max_modified:
-            return current_cursor
+        """Subtract a lookback window from a cursor timestamp at read time."""
+        if not cursor or lookback_seconds <= 0:
+            return cursor
 
         try:
-            dt = datetime.fromisoformat(max_modified.replace("Z", "+00:00"))
+            dt = datetime.fromisoformat(cursor.replace("Z", "+00:00"))
             dt_with_lookback = dt - timedelta(seconds=lookback_seconds)
             return dt_with_lookback.isoformat().replace("+00:00", "Z")
         except Exception:
-            return max_modified
+            return cursor
 
 
     def get_cursor_from_offset(
@@ -1019,6 +1030,7 @@ def register_lakeflow_source(spark):
                 client_id=options.get("client_id"),
                 client_secret=options.get("client_secret"),
             )
+            self._init_time = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         def list_tables(self) -> list[str]:
             return SUPPORTED_TABLES
@@ -1075,6 +1087,31 @@ def register_lakeflow_source(spark):
                     f"No reader for table: {table_name}"
                 )
             return reader(start_offset, table_options)
+
+        def _compute_next_offset(
+            self,
+            next_cursor: str | None,
+            current_cursor: str | None,
+            start_offset: dict | None,
+            records: list,
+        ) -> dict:
+            """Decide the offset to return from a legacy CDC read.
+
+            Caps the cursor at ``_init_time`` so a single trigger run only
+            drains data that existed when the connector was instantiated.
+            """
+            if not records and start_offset:
+                return start_offset
+
+            if not next_cursor:
+                return start_offset if start_offset else {}
+
+            next_cursor = min(next_cursor, self._init_time)
+
+            if next_cursor == current_cursor:
+                return start_offset if start_offset else {"cursor": next_cursor}
+
+            return {"cursor": next_cursor}
 
         # ================================================================
         # Table-Specific Read Methods
@@ -1337,10 +1374,11 @@ def register_lakeflow_source(spark):
                 self._client, table_options, "messages", max_pages,
             )
 
+            since = apply_lookback(cursor, lookback_seconds)
             records: list[dict[str, Any]] = []
             max_modified: str | None = None
             fetch_params = {
-                "cursor": cursor, "top": top,
+                "cursor": since, "top": top,
                 "max_pages": max_pages,
             }
 
@@ -1353,11 +1391,9 @@ def register_lakeflow_source(spark):
                     if not max_modified or ch_max > max_modified:
                         max_modified = ch_max
 
-            next_cursor = compute_next_cursor(
-                max_modified, cursor, lookback_seconds,
-            )
-            next_offset = (
-                {"cursor": next_cursor} if next_cursor else {}
+            next_cursor = compute_next_cursor(max_modified, cursor)
+            next_offset = self._compute_next_offset(
+                next_cursor, cursor, start_offset, records,
             )
             return iter(records), next_offset
 
@@ -1554,8 +1590,9 @@ def register_lakeflow_source(spark):
             max_workers = parse_int_option(
                 table_options, "max_concurrent_threads", 10,
             )
+            since = apply_lookback(cursor, lookback_seconds)
             fetch_params = {
-                "cursor": cursor, "top": top,
+                "cursor": since, "top": top,
                 "max_pages": max_pages,
             }
 
@@ -1586,11 +1623,9 @@ def register_lakeflow_source(spark):
                                 and "403" not in str(e)):
                             raise
 
-            next_cursor = compute_next_cursor(
-                max_modified, cursor, lookback_seconds,
-            )
-            next_offset = (
-                {"cursor": next_cursor} if next_cursor else {}
+            next_cursor = compute_next_cursor(max_modified, cursor)
+            next_offset = self._compute_next_offset(
+                next_cursor, cursor, start_offset, records,
             )
             return iter(records), next_offset
 
