@@ -113,14 +113,14 @@ class TestIngestCDC:
             # Verify apply_changes was called with correct parameters
             mock_sdp.apply_changes.assert_called_once_with(
                 target="users",
-                source="users_staging",
+                source="users_upsert_to_dest_users",
                 keys=["user_id"],
                 sequence_by="col(updated_at)",
                 stored_as_scd_type="1",
             )
 
             # Verify view was created
-            mock_sdp.view.assert_called_once_with(name="users_staging")
+            mock_sdp.view.assert_called_once_with(name="users_upsert_to_dest_users")
 
     def test_cdc_ingestion_with_scd_type_2(self, mock_spark, base_metadata):
         """Test CDC ingestion with SCD Type 2."""
@@ -228,11 +228,11 @@ class TestIngestCDCWithDeletes:
             # Verify streaming table was created once
             mock_sdp.create_streaming_table.assert_called_once_with(name="contacts")
 
-            # Verify two views were created: normal and delete staging
+            # Verify two views were created: upsert and delete
             assert mock_sdp.view.call_count == 2
             view_calls = [call[1]["name"] for call in mock_sdp.view.call_args_list]
-            assert "contacts_staging" in view_calls
-            assert "contacts_delete_staging" in view_calls
+            assert "contacts_upsert_to_dest_contacts" in view_calls
+            assert "contacts_delete_to_dest_contacts" in view_calls
 
             # Verify apply_changes was called twice (normal + delete flow)
             assert mock_sdp.apply_changes.call_count == 2
@@ -272,7 +272,7 @@ class TestIngestCDCWithDeletes:
             # Verify normal flow parameters
             assert normal_flow_call is not None
             assert normal_flow_call["target"] == "contacts"
-            assert normal_flow_call["source"] == "contacts_staging"
+            assert normal_flow_call["source"] == "contacts_upsert_to_dest_contacts"
             assert normal_flow_call["keys"] == ["contact_id"]
             assert normal_flow_call["sequence_by"] == "col(updated_at)"
             assert normal_flow_call["stored_as_scd_type"] == "1"
@@ -280,10 +280,10 @@ class TestIngestCDCWithDeletes:
             # Verify delete flow parameters
             assert delete_flow_call is not None
             assert delete_flow_call["target"] == "contacts"
-            assert delete_flow_call["source"] == "contacts_delete_staging"
+            assert delete_flow_call["source"] == "contacts_delete_to_dest_contacts"
             assert delete_flow_call["keys"] == ["contact_id"]
             assert delete_flow_call["apply_as_deletes"] == "expr(true)"
-            assert delete_flow_call["name"] == "contacts_delete_staging_delete_flow"
+            assert delete_flow_call["name"] == "contacts_delete_to_dest_contacts_flow"
 
     def test_cdc_with_deletes_with_scd_type_2(self, mock_spark, base_metadata):
         """Test cdc_with_deletes with SCD Type 2."""
@@ -371,13 +371,13 @@ class TestIngestSnapshot:
             # Verify apply_changes_from_snapshot was called
             mock_sdp.apply_changes_from_snapshot.assert_called_once_with(
                 target="orders",
-                source="orders_staging",
+                source="orders_snapshot_to_dest_orders",
                 keys=["order_id"],
                 stored_as_scd_type="1",
             )
 
             # Verify view was created
-            mock_sdp.view.assert_called_once_with(name="orders_staging")
+            mock_sdp.view.assert_called_once_with(name="orders_snapshot_to_dest_orders")
 
     def test_snapshot_ingestion_with_scd_type_2(self, mock_spark, base_metadata):
         """Test snapshot ingestion with SCD Type 2."""
@@ -432,8 +432,13 @@ class TestIngestAppend:
             # Verify streaming table was created
             mock_sdp.create_streaming_table.assert_called_once_with(name="events")
 
+            # Verify view was created for the append source
+            mock_sdp.view.assert_called_once_with(name="events_append_to_dest_events")
+
             # Verify append_flow was created (not apply_changes)
-            mock_sdp.append_flow.assert_called_once_with(name="events_staging", target="events")
+            mock_sdp.append_flow.assert_called_once_with(
+                name="events_append_to_dest_events_flow", target="events"
+            )
 
             # Verify apply_changes was NOT called
             mock_sdp.apply_changes.assert_not_called()
@@ -461,8 +466,11 @@ class TestIngestAppend:
         ):
             ingest(mock_spark, spec)
 
-            # Verify append_flow was used instead of apply_changes
-            mock_sdp.append_flow.assert_called_once_with(name="users_staging", target="users")
+            # Verify view and append_flow were used instead of apply_changes
+            mock_sdp.view.assert_called_once_with(name="users_append_to_dest_users")
+            mock_sdp.append_flow.assert_called_once_with(
+                name="users_append_to_dest_users_flow", target="users"
+            )
             mock_sdp.apply_changes.assert_not_called()
 
 
@@ -1008,7 +1016,7 @@ class TestTableConfigFiltering:
             # Execute the captured view function
             assert len(captured_view_funcs) == 1
             view_name, view_func = captured_view_funcs[0]
-            assert view_name == "users_staging"
+            assert view_name == "users_upsert_to_dest_users"
 
             # Call the view function to trigger spark.readStream calls
             view_func()
@@ -1065,7 +1073,7 @@ class TestTableConfigFiltering:
 
             assert len(captured_view_funcs) == 1
             view_name, view_func = captured_view_funcs[0]
-            assert view_name == "orders_staging"
+            assert view_name == "orders_snapshot_to_dest_orders"
 
             view_func()
 
@@ -1080,17 +1088,17 @@ class TestTableConfigFiltering:
             assert "primary_keys" not in passed_options
 
     def test_append_table_config_excludes_reserved_keys(self, base_metadata):
-        """Test that append flow function receives filtered table_config."""
-        captured_flow_funcs = []
+        """Test that append view function receives filtered table_config."""
+        captured_view_funcs = []
 
-        def capture_append_flow(name, target):
+        def capture_view(name):
             def decorator(f):
-                captured_flow_funcs.append((name, target, f))
+                captured_view_funcs.append((name, f))
                 return f
 
             return decorator
 
-        mock_sdp.append_flow = MagicMock(side_effect=capture_append_flow)
+        mock_sdp.view = MagicMock(side_effect=capture_view)
 
         mock_spark = MagicMock()
 
@@ -1116,12 +1124,11 @@ class TestTableConfigFiltering:
         ):
             ingest(mock_spark, spec)
 
-            assert len(captured_flow_funcs) == 1
-            flow_name, flow_target, flow_func = captured_flow_funcs[0]
-            assert flow_name == "events_staging"
-            assert flow_target == "events"
+            assert len(captured_view_funcs) == 1
+            view_name, view_func = captured_view_funcs[0]
+            assert view_name == "events_append_to_dest_events"
 
-            flow_func()
+            view_func()
 
             # Verify options() was called with filtered config
             stream_chain = mock_spark.readStream.format.return_value.option.return_value

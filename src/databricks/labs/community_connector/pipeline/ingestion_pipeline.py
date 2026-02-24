@@ -21,12 +21,16 @@ class SdpTableConfig:  # pylint: disable=too-many-instance-attributes
     with_deletes: bool = False
 
 
+def _build_view_name(source_table: str, flow_type: str, destination_table: str) -> str:
+    """Build a unique view name encoding source, flow type, and destination."""
+    sanitized_dest = destination_table.replace("`", "").replace(".", "_")
+    return f"{source_table}_{flow_type}_to_dest_{sanitized_dest}"
+
+
 def _create_cdc_table(
     spark, connection_name: str, config: SdpTableConfig
 ) -> None:
-    """Create CDC table using streaming and apply_changes
-
-    """
+    """Create CDC table using streaming and apply_changes"""
 
     @sdp.view(name=config.view_name)
     def v():
@@ -47,9 +51,8 @@ def _create_cdc_table(
         stored_as_scd_type=config.scd_type,
     )
 
-    # Delete flow - only enabled for cdc_with_deletes ingestion type
     if config.with_deletes:
-        delete_view_name = config.source_table + "_delete_staging"
+        delete_view_name = _build_view_name(config.source_table, "delete", config.destination_table)
 
         @sdp.view(name=delete_view_name)
         def delete_view():
@@ -69,7 +72,7 @@ def _create_cdc_table(
             sequence_by=col(config.sequence_by),
             stored_as_scd_type=config.scd_type,
             apply_as_deletes=expr("true"),
-            name=delete_view_name + "_delete_flow",
+            name=delete_view_name + "_flow",
         )
 
 
@@ -98,10 +101,8 @@ def _create_snapshot_table(spark, connection_name: str, config: SdpTableConfig) 
 def _create_append_table(spark, connection_name: str, config: SdpTableConfig) -> None:
     """Create append table using streaming without apply_changes"""
 
-    sdp.create_streaming_table(name=config.destination_table)
-
-    @sdp.append_flow(name=config.view_name, target=config.destination_table)
-    def af():
+    @sdp.view(name=config.view_name)
+    def v():
         return (
             spark.readStream.format("lakeflow_connect")
             .option("databricks.connection", connection_name)
@@ -109,6 +110,12 @@ def _create_append_table(spark, connection_name: str, config: SdpTableConfig) ->
             .options(**config.table_config)
             .load()
         )
+
+    sdp.create_streaming_table(name=config.destination_table)
+
+    @sdp.append_flow(name=config.view_name + "_flow", target=config.destination_table)
+    def af():
+        return spark.readStream.table(config.view_name)
 
 
 def _get_table_metadata(
@@ -154,7 +161,6 @@ def ingest(spark, pipeline_spec: dict) -> None:
         primary_keys = metadata[table].get("primary_keys")
         cursor_field = metadata[table].get("cursor_field")
         ingestion_type = metadata[table].get("ingestion_type", "cdc")
-        view_name = table + "_staging"
         table_config = spec.get_table_configuration(table)
         destination_table = spec.get_full_destination_table_name(table)
 
@@ -165,6 +171,16 @@ def ingest(spark, pipeline_spec: dict) -> None:
         if scd_type_raw == "APPEND_ONLY":
             ingestion_type = "append"
         scd_type = "2" if scd_type_raw == "SCD_TYPE_2" else "1"
+
+        flow_type_map = {
+            "cdc": "upsert",
+            "cdc_with_deletes": "upsert",
+            "snapshot": "snapshot",
+            "append": "append",
+        }
+        view_name = _build_view_name(
+            table, flow_type_map.get(ingestion_type, "upsert"), destination_table
+        )
 
         config = SdpTableConfig(
             source_table=table,
