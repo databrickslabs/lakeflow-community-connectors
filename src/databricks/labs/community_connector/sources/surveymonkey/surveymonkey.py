@@ -239,7 +239,7 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
 
         return None
 
-    def _read_data_full(
+    def _read_data_full(  # pylint: disable=too-many-branches
         self, table_name: str, table_options: Dict[str, str], max_records: int
     ) -> Tuple[Iterator[dict], dict]:
         """Read all data from a SurveyMonkey table (full refresh).
@@ -326,7 +326,7 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
 
         return iter(all_records), offset
 
-    def _read_data_incremental(
+    def _read_data_incremental(  # pylint: disable=too-many-branches
         self,
         table_name: str,
         start_offset: dict,
@@ -426,15 +426,10 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
         data = self._clean_empty_dicts(data)
         return iter([data]), {}
 
-    def _read_all_survey_responses(
-        self,
-        table_options: Dict[str, str],
-        start_modified_at: str = None,
-        max_records: int = 100_000,
-    ) -> Tuple[Iterator[dict], dict]:
-        """Read responses across all surveys, bounded by *max_records*."""
+    def _fetch_all_surveys(self) -> List[dict]:
+        """Fetch all surveys via paginated API calls."""
         surveys_url = f"{self.base_url}/surveys"
-        all_surveys = []
+        all_surveys: List[dict] = []
         page = 1
 
         while True:
@@ -452,6 +447,17 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
 
             page += 1
             time.sleep(0.1)
+
+        return all_surveys
+
+    def _read_all_survey_responses(  # pylint: disable=too-many-branches
+        self,
+        table_options: Dict[str, str],
+        start_modified_at: str = None,
+        max_records: int = 100_000,
+    ) -> Tuple[Iterator[dict], dict]:
+        """Read responses across all surveys, bounded by *max_records*."""
+        all_surveys = self._fetch_all_surveys()
 
         all_responses: List[dict] = []
         latest_cursor_value = start_modified_at
@@ -554,28 +560,8 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
 
     def _read_all_questions_all_surveys(self) -> Tuple[Iterator[dict], dict]:
         """Read all questions from all surveys."""
-        # First, get all surveys
-        surveys_url = f"{self.base_url}/surveys"
-        all_surveys = []
-        page = 1
+        all_surveys = self._fetch_all_surveys()
 
-        while True:
-            params = {"page": page, "per_page": 1000}
-            data = self._make_request(surveys_url, params)
-            surveys = data.get("data", [])
-
-            if not surveys:
-                break
-
-            all_surveys.extend(surveys)
-
-            if "next" not in data.get("links", {}):
-                break
-
-            page += 1
-            time.sleep(0.1)
-
-        # Then, get questions for each survey via details endpoint
         all_questions = []
 
         for survey in all_surveys:
@@ -628,27 +614,8 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
             return iter(all_pages), {}
 
         # No survey_id - read pages from all surveys
-        surveys_url = f"{self.base_url}/surveys"
-        all_surveys = []
-        page = 1
+        all_surveys = self._fetch_all_surveys()
 
-        while True:
-            params = {"page": page, "per_page": 1000}
-            data = self._make_request(surveys_url, params)
-            surveys = data.get("data", [])
-
-            if not surveys:
-                break
-
-            all_surveys.extend(surveys)
-
-            if "next" not in data.get("links", {}):
-                break
-
-            page += 1
-            time.sleep(0.1)
-
-        # Get pages for each survey using the details endpoint
         all_pages = []
 
         for survey in all_surveys:
@@ -671,32 +638,14 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
 
         return iter(all_pages), {}
 
-    def _read_all_collectors(
+    def _read_all_collectors(  # pylint: disable=too-many-branches
         self,
         table_options: Dict[str, str],
         start_modified_at: str = None,
         max_records: int = 100_000,
     ) -> Tuple[Iterator[dict], dict]:
         """Read all collectors from all surveys, bounded by *max_records*."""
-        surveys_url = f"{self.base_url}/surveys"
-        all_surveys = []
-        page = 1
-
-        while True:
-            params = {"page": page, "per_page": 1000}
-            data = self._make_request(surveys_url, params)
-            surveys = data.get("data", [])
-
-            if not surveys:
-                break
-
-            all_surveys.extend(surveys)
-
-            if "next" not in data.get("links", {}):
-                break
-
-            page += 1
-            time.sleep(0.1)
+        all_surveys = self._fetch_all_surveys()
 
         all_collectors: List[dict] = []
         latest_cursor_value = start_modified_at

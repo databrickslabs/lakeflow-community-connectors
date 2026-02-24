@@ -232,7 +232,7 @@ class QualtricsLakeflowConnect(LakeflowConnect):  # pylint: disable=too-many-ins
     # HTTP Helpers
     # =========================================================================
 
-    def _fetch_paginated_list(  # pylint: disable=too-many-locals,too-many-branches
+    def _fetch_paginated_list(  # pylint: disable=too-many-locals,too-many-branches,too-many-arguments,too-many-positional-arguments
         self,
         endpoint: str,
         start_offset: dict,
@@ -323,7 +323,7 @@ class QualtricsLakeflowConnect(LakeflowConnect):  # pylint: disable=too-many-ins
         normalized = (normalize_keys(item) for item in all_items)
         return normalized, new_offset
 
-    def _iterate_all_surveys(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    def _iterate_all_surveys(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-statements
         self,
         start_offset: dict,
         table_options: dict[str, str],
@@ -695,9 +695,7 @@ class QualtricsLakeflowConnect(LakeflowConnect):  # pylint: disable=too-many-ins
             # Calculate new offset based on this definition's last_modified
             new_offset = {}
             if survey_last_modified:
-                capped = survey_last_modified
-                if capped > self._init_time:
-                    capped = self._init_time
+                capped = min(survey_last_modified, self._init_time)
                 new_offset["lastModified"] = capped
             elif last_modified_cursor:
                 new_offset["lastModified"] = last_modified_cursor
@@ -820,9 +818,7 @@ class QualtricsLakeflowConnect(LakeflowConnect):  # pylint: disable=too-many-ins
                 if resp.get("recordedDate")
             ]
             if recorded_dates:
-                max_recorded_date = max(recorded_dates)
-                if max_recorded_date > self._init_time:
-                    max_recorded_date = self._init_time
+                max_recorded_date = min(max(recorded_dates), self._init_time)
                 new_offset["recordedDate"] = max_recorded_date
             elif recorded_date_cursor:
                 new_offset["recordedDate"] = recorded_date_cursor

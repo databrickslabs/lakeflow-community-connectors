@@ -178,8 +178,7 @@ class MicrosoftTeamsLakeflowConnect(LakeflowConnect):
         if not next_cursor:
             return start_offset if start_offset else {}
 
-        if next_cursor > self._init_time:
-            next_cursor = self._init_time
+        next_cursor = min(next_cursor, self._init_time)
 
         if next_cursor == current_cursor:
             return start_offset if start_offset else {"cursor": next_cursor}

@@ -174,7 +174,7 @@ class ModuleHandler(TableHandler):
             "ingestion_type": "cdc",
         }
 
-    def read(
+    def read(  # pylint: disable=too-many-locals,too-many-branches
         self,
         table_name: str,
         config: dict,
