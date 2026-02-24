@@ -123,7 +123,7 @@ class GithubLakeflowConnect(LakeflowConnect):
             raise ValueError(f"Unsupported table: {table_name!r}")
         return reader_map[table_name](start_offset, table_options)
 
-    def _compute_next_offset(
+    def _compute_next_offset(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         next_cursor: str | None,
         current_cursor: str | None,
@@ -153,8 +153,7 @@ class GithubLakeflowConnect(LakeflowConnect):
         if not next_cursor:
             return start_offset if start_offset else {}
 
-        if next_cursor > self._init_time:
-            next_cursor = self._init_time
+        next_cursor = min(next_cursor, self._init_time)
 
         if pages_exhausted and next_cursor == current_cursor:
             return start_offset if start_offset else {"cursor": next_cursor}
@@ -412,7 +411,7 @@ class GithubLakeflowConnect(LakeflowConnect):
 
         return iter(records), next_offset
 
-    def _read_commits(
+    def _read_commits(  # pylint: disable=too-many-locals
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
