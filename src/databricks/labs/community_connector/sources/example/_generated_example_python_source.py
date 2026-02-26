@@ -363,7 +363,8 @@ def register_lakeflow_source(spark):
     class ExampleTableOptions(BaseModel):
         model_config = ConfigDict(extra="allow")
 
-        num_rows: PositiveInt
+        total_available_rows: PositiveInt
+        num_rows_per_batch: PositiveInt
 
 
     # This is an example implementation of the LakeflowConnect class.
@@ -428,52 +429,44 @@ def register_lakeflow_source(spark):
         ) -> (Iterator[dict], dict):
             """
             Read data from a table and return an iterator of records along with the next offset.
+            Pagination stops when the returned offset equals start_offset (no more data).
             """
             options = ExampleTableOptions(**table_options)
-            num_rows = options.num_rows
 
-            # Call the helper function to get the iterator
-            data_iterator = self._read_helper(table_name, start_offset, num_rows=num_rows)
-
-            # Calculate the next offset based on how many rows were produced
+            initial_offset = self.offset_id if table_name == "my_table" else self.offset_key
             current_offset = (
-                int(start_offset)
-                if start_offset
-                else (self.offset_id if table_name == "my_table" else self.offset_key)
+                int(start_offset) if start_offset else initial_offset
             )
-            next_offset = current_offset + num_rows
+            max_offset = initial_offset + options.total_available_rows
 
-            return data_iterator, {"offset": next_offset}
+            if current_offset >= max_offset:
+                return iter([]), {"offset": current_offset}
+
+            batch_end = min(current_offset + options.num_rows_per_batch, max_offset)
+            data_iterator = self._read_helper(table_name, current_offset, batch_end)
+
+            return data_iterator, {"offset": batch_end}
 
         def _read_helper(
             self,
             table_name: str,
-            start_offset: dict,
-            num_rows: int = 10,
+            start: int,
+            end: int,
         ) -> Iterator[dict]:
             if table_name not in self.tables:
                 raise ValueError(f"Unknown table: {table_name}")
 
-            current_offset = (
-                int(start_offset)
-                if start_offset
-                else (self.offset_id if table_name == "my_table" else self.offset_key)
-            )
-
-            for i in range(num_rows):
+            for offset in range(start, end):
                 if table_name == "my_table":
-                    record = {
-                        "id": current_offset,
+                    yield {
+                        "id": offset,
                         "name": f"Name_{random.randint(1000, 9999)}",
                     }
                 else:
-                    record = {
-                        "key": str(current_offset),
+                    yield {
+                        "key": str(offset),
                         "value": f"Value_{random.randint(1000, 9999)}",
                     }
-                current_offset += 1
-
-                yield record
 
 
     ########################################################

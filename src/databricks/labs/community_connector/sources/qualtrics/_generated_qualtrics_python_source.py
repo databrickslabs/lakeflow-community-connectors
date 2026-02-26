@@ -6,7 +6,7 @@
 # ==============================================================================
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Iterator
 import io
@@ -784,6 +784,9 @@ def register_lakeflow_source(spark):
                 )
                 self.max_surveys = QualtricsConfig.DEFAULT_MAX_SURVEYS
 
+            self._init_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            self._default_max_records_per_batch = 100_000
+
             # Reader method mappings
             self._reader_methods = {
                 "surveys": self._read_surveys,
@@ -914,42 +917,55 @@ def register_lakeflow_source(spark):
                     f"Unsupported table: {table_name}. Supported tables are: {SUPPORTED_TABLES}"
                 )
 
+            max_records = int(
+                table_options.get(
+                    "max_records_per_batch", self._default_max_records_per_batch
+                )
+            )
+
             reader_method = self._reader_methods[table_name]
 
             # surveys, directories, and users don't need table_options
             if table_name in ("surveys", "directories", "users"):
-                return reader_method(start_offset)
+                return reader_method(start_offset, max_records)
 
-            return reader_method(start_offset, table_options)
+            return reader_method(start_offset, table_options, max_records)
 
         # =========================================================================
         # HTTP Helpers
         # =========================================================================
 
-        def _fetch_paginated_list(  # pylint: disable=too-many-locals,too-many-branches
+        def _fetch_paginated_list(  # pylint: disable=too-many-locals,too-many-branches,too-many-arguments,too-many-positional-arguments
             self,
             endpoint: str,
             start_offset: dict,
             cursor_field: str = None,
-            extra_params: dict = None
+            extra_params: dict = None,
+            max_records: int = None,
         ) -> (Iterator[dict], dict):
             """
             Generic paginated list API helper for standard Qualtrics list endpoints.
+
+            Bounded by *max_records* per call.  When all pages are exhausted
+            and a ``cursor_field`` is present, the cursor is capped at
+            ``_init_time`` to guarantee termination under ``availableNow``.
 
             Args:
                 endpoint: API endpoint path (e.g., "/surveys", "/distributions")
                 start_offset: Dictionary with cursor info
                 cursor_field: Field name for incremental filtering (e.g., "lastModified")
                 extra_params: Additional query params (e.g., {"surveyId": "SV_xxx"})
+                max_records: Maximum number of records to return (None = unlimited)
 
             Returns:
                 Tuple of (iterator of normalized records, new offset)
             """
-            all_items = []
+            all_items: list[dict] = []
             skip_token = start_offset.get("skipToken") if start_offset else None
             cursor_value = start_offset.get(cursor_field) if start_offset and cursor_field else None
+            pages_exhausted = True
 
-            while True:
+            while max_records is None or len(all_items) < max_records:
                 url = f"{self.base_url}{endpoint}"
                 params = {"pageSize": QualtricsConfig.DEFAULT_PAGE_SIZE}
 
@@ -967,13 +983,21 @@ def register_lakeflow_source(spark):
                         break
 
                     if cursor_field and cursor_value:
-                        filtered = [
+                        items_to_add = [
                             item for item in elements
                             if item.get(cursor_field, "") and item.get(cursor_field, "") > cursor_value
                         ]
-                        all_items.extend(filtered)
                     else:
-                        all_items.extend(elements)
+                        items_to_add = elements
+
+                    for item in items_to_add:
+                        all_items.append(item)
+                        if max_records is not None and len(all_items) >= max_records:
+                            pages_exhausted = False
+                            break
+
+                    if not pages_exhausted:
+                        break
 
                     next_page = result.get("nextPage")
                     if next_page and "skipToken=" in next_page:
@@ -985,12 +1009,15 @@ def register_lakeflow_source(spark):
                     logger.error(f"Error fetching {endpoint}: {e}", exc_info=True)
                     break
 
-            new_offset = {}
+            new_offset: dict = {}
             if cursor_field:
                 if all_items:
                     dates = [item.get(cursor_field, "") for item in all_items if item.get(cursor_field)]
                     if dates:
-                        new_offset[cursor_field] = max(dates)
+                        max_date = max(dates)
+                        if pages_exhausted and max_date > self._init_time:
+                            max_date = self._init_time
+                        new_offset[cursor_field] = max_date
                     elif cursor_value:
                         new_offset[cursor_field] = cursor_value
                 elif cursor_value:
@@ -999,13 +1026,14 @@ def register_lakeflow_source(spark):
             normalized = (normalize_keys(item) for item in all_items)
             return normalized, new_offset
 
-        def _iterate_all_surveys(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+        def _iterate_all_surveys(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-statements
             self,
             start_offset: dict,
             table_options: dict[str, str],
             single_survey_reader,
             cursor_field: str,
-            data_type: str
+            data_type: str,
+            max_records: int = None,
         ) -> (Iterator[dict], dict):
             """
             Generic helper to consolidate data across all surveys using parallel processing.
@@ -1014,12 +1042,16 @@ def register_lakeflow_source(spark):
             providing 3-5x speedup compared to sequential processing while respecting
             Qualtrics rate limits (3000 requests/min per brand).
 
+            Bounded by *max_records* total and capped at ``_init_time`` for
+            termination guarantee.
+
             Args:
                 start_offset: Dictionary with per-survey cursors {"surveys": {...}}
                 table_options: Passed to _get_all_survey_ids (currently not used)
                 single_survey_reader: Function(survey_id, offset) -> (Iterator[dict], dict)
                 cursor_field: Field name for global cursor (e.g., "lastModified")
                 data_type: Data type name for logging (e.g., "definitions")
+                max_records: Maximum total records to keep (None = unlimited)
 
             Returns:
                 Tuple of (iterator of all records, consolidated offset dict)
@@ -1037,8 +1069,8 @@ def register_lakeflow_source(spark):
             )
 
             per_survey_offsets = start_offset.get("surveys", {}) if start_offset else {}
-            all_records = []
-            new_per_survey_offsets = {}
+            all_records: list[dict] = []
+            new_per_survey_offsets: dict = {}
             success_count = 0
             failure_count = 0
 
@@ -1054,13 +1086,11 @@ def register_lakeflow_source(spark):
 
             # Use ThreadPoolExecutor for parallel processing
             with ThreadPoolExecutor(max_workers=num_workers) as executor:
-                # Submit all tasks
                 future_to_survey = {
                     executor.submit(fetch_survey_data, survey_id): survey_id
                     for survey_id in survey_ids
                 }
 
-                # Process completed tasks as they finish
                 for future in as_completed(future_to_survey):
                     survey_id = future_to_survey[future]
                     try:
@@ -1068,10 +1098,17 @@ def register_lakeflow_source(spark):
                         if error:
                             logger.warning(f"Failed to fetch {data_type} for survey {sid}: {error}")
                             failure_count += 1
-                            # Preserve old offset if fetch failed
                             if sid in per_survey_offsets:
                                 new_per_survey_offsets[sid] = per_survey_offsets[sid]
                         else:
+                            remaining = None
+                            if max_records is not None:
+                                remaining = max_records - len(all_records)
+                                if remaining <= 0:
+                                    new_per_survey_offsets[sid] = new_offset
+                                    success_count += 1
+                                    continue
+                                records = records[:remaining]
                             all_records.extend(records)
                             new_per_survey_offsets[sid] = new_offset
                             success_count += 1
@@ -1083,16 +1120,21 @@ def register_lakeflow_source(spark):
                         logger.error(f"Unexpected error processing survey {survey_id}: {e}")
                         failure_count += 1
 
+            batch_full = max_records is not None and len(all_records) >= max_records
+
             logger.info(
                 f"Completed fetching {data_type}: {success_count} succeeded, "
                 f"{failure_count} failed, {len(all_records)} total records"
             )
 
-            new_offset = {"surveys": new_per_survey_offsets}
+            new_offset: dict = {"surveys": new_per_survey_offsets}
             if all_records and cursor_field:
                 dates = [r.get(cursor_field, "") for r in all_records if r.get(cursor_field)]
                 if dates:
-                    new_offset[cursor_field] = max(dates)
+                    max_date = max(dates)
+                    if not batch_full and max_date > self._init_time:
+                        max_date = self._init_time
+                    new_offset[cursor_field] = max_date
 
             return iter(all_records), new_offset
 
@@ -1222,24 +1264,31 @@ def register_lakeflow_source(spark):
         # Table Readers: Surveys
         # =========================================================================
 
-        def _read_surveys(self, start_offset: dict) -> (Iterator[dict], dict):
+        def _read_surveys(
+            self, start_offset: dict, max_records: int = None
+        ) -> (Iterator[dict], dict):
             """
             Read surveys from Qualtrics API.
 
             Args:
                 start_offset: Dictionary containing pagination token and cursor timestamp
+                max_records: Maximum number of records to return
 
             Returns:
                 Tuple of (iterator of survey records, new offset)
             """
-            return self._fetch_paginated_list("/surveys", start_offset, cursor_field="lastModified")
+            return self._fetch_paginated_list(
+                "/surveys", start_offset, cursor_field="lastModified",
+                max_records=max_records,
+            )
 
         # =========================================================================
         # Table Readers: Survey Definitions
         # =========================================================================
 
         def _read_survey_definitions(
-            self, start_offset: dict, table_options: dict[str, str]
+            self, start_offset: dict, table_options: dict[str, str],
+            max_records: int = None,
         ) -> (Iterator[dict], dict):
             """
             Read survey definition from Qualtrics API.
@@ -1255,6 +1304,7 @@ def register_lakeflow_source(spark):
                       definitions for specified surveys (comma-separated)
                     - All surveys: omit surveyId - Returns definitions for
                       all surveys (auto-consolidation)
+                max_records: Maximum number of records to return
 
             Returns:
                 Tuple of (iterator of survey definition records, offset dict)
@@ -1274,7 +1324,7 @@ def register_lakeflow_source(spark):
                 )
             else:
                 logger.info("No surveyId provided, auto-consolidating definitions from all surveys")
-            return self._read_all_survey_definitions(start_offset, table_options)
+            return self._read_all_survey_definitions(start_offset, table_options, max_records)
 
         def _read_single_survey_definition(  # pylint: disable=too-many-locals
             self, survey_id: str, start_offset: dict
@@ -1348,7 +1398,8 @@ def register_lakeflow_source(spark):
                 # Calculate new offset based on this definition's last_modified
                 new_offset = {}
                 if survey_last_modified:
-                    new_offset["lastModified"] = survey_last_modified
+                    capped = min(survey_last_modified, self._init_time)
+                    new_offset["lastModified"] = capped
                 elif last_modified_cursor:
                     new_offset["lastModified"] = last_modified_cursor
 
@@ -1359,7 +1410,8 @@ def register_lakeflow_source(spark):
                 raise
 
         def _read_all_survey_definitions(
-            self, start_offset: dict, table_options: dict[str, str]
+            self, start_offset: dict, table_options: dict[str, str],
+            max_records: int = None,
         ) -> (Iterator[dict], dict):
             """
             Read survey definitions for all surveys from Qualtrics API.
@@ -1367,6 +1419,7 @@ def register_lakeflow_source(spark):
             Args:
                 start_offset: Dictionary containing per-survey cursor timestamps
                 table_options: Not used for auto-consolidation
+                max_records: Maximum number of records to return
 
             Returns:
                 Tuple of (iterator of all survey definition records,
@@ -1376,7 +1429,8 @@ def register_lakeflow_source(spark):
                 start_offset, table_options,
                 self._read_single_survey_definition,
                 cursor_field="last_modified",
-                data_type="definitions"
+                data_type="definitions",
+                max_records=max_records,
             )
 
         # =========================================================================
@@ -1384,7 +1438,8 @@ def register_lakeflow_source(spark):
         # =========================================================================
 
         def _read_survey_responses(
-            self, start_offset: dict, table_options: dict[str, str]
+            self, start_offset: dict, table_options: dict[str, str],
+            max_records: int = None,
         ) -> (Iterator[dict], dict):
             """
             Read survey responses using the Qualtrics export API.
@@ -1402,6 +1457,7 @@ def register_lakeflow_source(spark):
                       responses for specified surveys (comma-separated)
                     - All surveys: omit surveyId - Returns responses for
                       all surveys (auto-consolidation)
+                max_records: Maximum number of records to return
 
             Returns:
                 Tuple of (iterator of response records, new offset)
@@ -1421,7 +1477,7 @@ def register_lakeflow_source(spark):
                 )
             else:
                 logger.info("No surveyId provided, auto-consolidating responses from all surveys")
-            return self._read_all_survey_responses(start_offset, table_options)
+            return self._read_all_survey_responses(start_offset, table_options, max_records)
 
         def _read_single_survey_responses(
             self, survey_id: str, start_offset: dict
@@ -1456,28 +1512,27 @@ def register_lakeflow_source(spark):
             # Step 3: Download and parse
             responses = self._download_response_export(survey_id, file_id)
 
-            # Calculate new offset
+            # Calculate new offset with _init_time cap for termination
             new_offset = {}
             if responses:
-                # Find max recordedDate from responses that have it
                 recorded_dates = [
                     resp.get("recordedDate", "")
                     for resp in responses
                     if resp.get("recordedDate")
                 ]
                 if recorded_dates:
-                    max_recorded_date = max(recorded_dates)
+                    max_recorded_date = min(max(recorded_dates), self._init_time)
                     new_offset["recordedDate"] = max_recorded_date
                 elif recorded_date_cursor:
                     new_offset["recordedDate"] = recorded_date_cursor
             elif recorded_date_cursor:
-                # No new data, keep the same cursor
                 new_offset["recordedDate"] = recorded_date_cursor
 
             return iter(responses), new_offset
 
         def _read_all_survey_responses(
-            self, start_offset: dict, table_options: dict[str, str]
+            self, start_offset: dict, table_options: dict[str, str],
+            max_records: int = None,
         ) -> (Iterator[dict], dict):
             """
             Read survey responses for all surveys from Qualtrics API.
@@ -1485,6 +1540,7 @@ def register_lakeflow_source(spark):
             Args:
                 start_offset: Dictionary containing per-survey cursor timestamps
                 table_options: Not used for auto-consolidation
+                max_records: Maximum number of records to return
 
             Returns:
                 Tuple of (iterator of all response records, new offset dict with per-survey cursors)
@@ -1493,7 +1549,8 @@ def register_lakeflow_source(spark):
                 start_offset, table_options,
                 self._read_single_survey_responses,
                 cursor_field="recordedDate",
-                data_type="responses"
+                data_type="responses",
+                max_records=max_records,
             )
 
         def _create_response_export(self, survey_id: str, export_body: dict) -> str:
@@ -1733,7 +1790,8 @@ def register_lakeflow_source(spark):
         # =========================================================================
 
         def _read_distributions(
-            self, start_offset: dict, table_options: dict[str, str]
+            self, start_offset: dict, table_options: dict[str, str],
+            max_records: int = None,
         ) -> (Iterator[dict], dict):
             """
             Read distributions from Qualtrics API.
@@ -1746,6 +1804,7 @@ def register_lakeflow_source(spark):
                       distributions for specified surveys (comma-separated)
                     - All surveys: omit surveyId - Returns distributions for
                       all surveys (auto-consolidation)
+                max_records: Maximum number of records to return
 
             Returns:
                 Tuple of (iterator of distribution records, new offset)
@@ -1754,7 +1813,9 @@ def register_lakeflow_source(spark):
 
             # Single survey (no comma) - use simple offset structure for backward compatibility
             if survey_id_input and "," not in survey_id_input:
-                return self._read_single_survey_distributions(survey_id_input.strip(), start_offset)
+                return self._read_single_survey_distributions(
+                    survey_id_input.strip(), start_offset, max_records
+                )
 
             # Multiple surveys (comma-separated) or all surveys -
             # use consolidated path with per-survey offsets
@@ -1765,10 +1826,11 @@ def register_lakeflow_source(spark):
                 )
             else:
                 logger.info("No surveyId provided, auto-consolidating distributions from all surveys")
-            return self._read_all_survey_distributions(start_offset, table_options)
+            return self._read_all_survey_distributions(start_offset, table_options, max_records)
 
         def _read_single_survey_distributions(
-            self, survey_id: str, start_offset: dict
+            self, survey_id: str, start_offset: dict,
+            max_records: int = None,
         ) -> (Iterator[dict], dict):
             """
             Read distributions for a single survey from Qualtrics API.
@@ -1776,6 +1838,7 @@ def register_lakeflow_source(spark):
             Args:
                 survey_id: The survey ID to fetch distributions for
                 start_offset: Dictionary containing pagination token and cursor timestamp
+                max_records: Maximum number of records to return
 
             Returns:
                 Tuple of (iterator of distribution records, new offset)
@@ -1784,11 +1847,13 @@ def register_lakeflow_source(spark):
                 "/distributions",
                 start_offset,
                 cursor_field="modifiedDate",
-                extra_params={"surveyId": survey_id}
+                extra_params={"surveyId": survey_id},
+                max_records=max_records,
             )
 
         def _read_all_survey_distributions(
-            self, start_offset: dict, table_options: dict[str, str]
+            self, start_offset: dict, table_options: dict[str, str],
+            max_records: int = None,
         ) -> (Iterator[dict], dict):
             """
             Read distributions for all surveys from Qualtrics API.
@@ -1796,6 +1861,7 @@ def register_lakeflow_source(spark):
             Args:
                 start_offset: Dictionary containing per-survey cursor timestamps
                 table_options: Not used for auto-consolidation
+                max_records: Maximum number of records to return
 
             Returns:
                 Tuple of (iterator of all distribution records, new offset dict with per-survey cursors)
@@ -1804,7 +1870,8 @@ def register_lakeflow_source(spark):
                 start_offset, table_options,
                 self._read_single_survey_distributions,
                 cursor_field="modifiedDate",
-                data_type="distributions"
+                data_type="distributions",
+                max_records=max_records,
             )
 
         # =========================================================================
@@ -1812,7 +1879,8 @@ def register_lakeflow_source(spark):
         # =========================================================================
 
         def _read_mailing_list_contacts(
-            self, start_offset: dict, table_options: dict[str, str]
+            self, start_offset: dict, table_options: dict[str, str],
+            max_records: int = None,
         ) -> (Iterator[dict], dict):
             """
             Read contacts from a specific mailing list in Qualtrics API.
@@ -1823,6 +1891,7 @@ def register_lakeflow_source(spark):
             Args:
                 start_offset: Dictionary containing pagination token (ignored for snapshot mode)
                 table_options: Must contain 'directoryId' and 'mailingListId'
+                max_records: Maximum number of records to return
 
             Returns:
                 Tuple of (iterator of contact records, empty offset dict)
@@ -1840,14 +1909,17 @@ def register_lakeflow_source(spark):
                 )
 
             endpoint = f"/directories/{directory_id}/mailinglists/{mailing_list_id}/contacts"
-            return self._fetch_paginated_list(endpoint, start_offset, cursor_field=None)
+            return self._fetch_paginated_list(
+                endpoint, start_offset, cursor_field=None, max_records=max_records,
+            )
 
         # =========================================================================
         # Table Readers: Directory Contacts
         # =========================================================================
 
         def _read_directory_contacts(
-            self, start_offset: dict, table_options: dict[str, str]
+            self, start_offset: dict, table_options: dict[str, str],
+            max_records: int = None,
         ) -> (Iterator[dict], dict):
             """
             Read all contacts from a directory in Qualtrics API.
@@ -1859,6 +1931,7 @@ def register_lakeflow_source(spark):
             Args:
                 start_offset: Dictionary containing pagination token (ignored for snapshot mode)
                 table_options: Must contain 'directoryId'
+                max_records: Maximum number of records to return
 
             Returns:
                 Tuple of (iterator of contact records, empty offset dict)
@@ -1870,14 +1943,17 @@ def register_lakeflow_source(spark):
                 )
 
             endpoint = f"/directories/{directory_id}/contacts"
-            return self._fetch_paginated_list(endpoint, start_offset, cursor_field=None)
+            return self._fetch_paginated_list(
+                endpoint, start_offset, cursor_field=None, max_records=max_records,
+            )
 
         # =========================================================================
         # Table Readers: Mailing Lists
         # =========================================================================
 
         def _read_mailing_lists(
-            self, start_offset: dict, table_options: dict[str, str]
+            self, start_offset: dict, table_options: dict[str, str],
+            max_records: int = None,
         ) -> (Iterator[dict], dict):
             """
             Read mailing lists from Qualtrics API.
@@ -1888,6 +1964,7 @@ def register_lakeflow_source(spark):
             Args:
                 start_offset: Dictionary containing pagination token
                 table_options: Must contain 'directoryId' parameter
+                max_records: Maximum number of records to return
 
             Returns:
                 Tuple of (iterator of mailing list records, offset dict)
@@ -1899,7 +1976,9 @@ def register_lakeflow_source(spark):
                 )
 
             endpoint = f"/directories/{directory_id}/mailinglists"
-            raw_iter, offset = self._fetch_paginated_list(endpoint, start_offset, cursor_field=None)
+            raw_iter, offset = self._fetch_paginated_list(
+                endpoint, start_offset, cursor_field=None, max_records=max_records,
+            )
 
             def convert_timestamps(record):
                 """Convert epoch ms to ISO 8601 for consistency with surveys table."""
@@ -1919,7 +1998,9 @@ def register_lakeflow_source(spark):
         # Table Readers: Directories
         # =========================================================================
 
-        def _read_directories(self, start_offset: dict) -> (Iterator[dict], dict):
+        def _read_directories(
+            self, start_offset: dict, max_records: int = None
+        ) -> (Iterator[dict], dict):
             """
             Read directories (XM Directory pools) from Qualtrics API.
 
@@ -1927,17 +2008,23 @@ def register_lakeflow_source(spark):
 
             Args:
                 start_offset: Dictionary containing pagination token
+                max_records: Maximum number of records to return
 
             Returns:
                 Tuple of (iterator of directory records, offset dict)
             """
-            return self._fetch_paginated_list("/directories", start_offset, cursor_field=None)
+            return self._fetch_paginated_list(
+                "/directories", start_offset, cursor_field=None,
+                max_records=max_records,
+            )
 
         # =========================================================================
         # Table Readers: Users
         # =========================================================================
 
-        def _read_users(self, start_offset: dict) -> (Iterator[dict], dict):
+        def _read_users(
+            self, start_offset: dict, max_records: int = None
+        ) -> (Iterator[dict], dict):
             """
             Read users from Qualtrics API.
 
@@ -1945,11 +2032,15 @@ def register_lakeflow_source(spark):
 
             Args:
                 start_offset: Dictionary containing pagination token
+                max_records: Maximum number of records to return
 
             Returns:
                 Tuple of (iterator of user records, offset dict)
             """
-            return self._fetch_paginated_list("/users", start_offset, cursor_field=None)
+            return self._fetch_paginated_list(
+                "/users", start_offset, cursor_field=None,
+                max_records=max_records,
+            )
 
 
     ########################################################
