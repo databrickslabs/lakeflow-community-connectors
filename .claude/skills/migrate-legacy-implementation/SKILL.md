@@ -14,8 +14,8 @@ This skill migrates an old connector implementation from the legacy `sources/` d
 Handle one specified source at a time.
 Refer other source (e.g. github) as an example.
 Use python3.10 to replace all python command.
-When running any python test or build use virtual environment, run these:
-python3.10 -m venv venv
+When running any python test or build use virtual environment (Python 3.10+ required), run these:
+python3.10 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
 then run other python commands or pytest.
