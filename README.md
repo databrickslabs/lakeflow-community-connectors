@@ -1,5 +1,8 @@
 # Lakeflow Community Connectors
 
+**Note**: Lakeflow community connectors provide access to additional data sources beyond Databricks managed connectors.  
+They are maintained by community contributors and are not subject to official Databricks SLAs, certifications, or guaranteed compatibility.
+
 Lakeflow community connectors are built on top of the [Spark Python Data Source API](https://spark.apache.org/docs/latest/api/python/tutorial/sql/python_data_source.html) and [Spark Declarative Pipeline (SDP)](https://www.databricks.com/product/data-engineering/spark-declarative-pipelines). These connectors enable users to ingest data from various source systems.
 
 Each connector is packaged as Python source code that defines a configurable SDP, which consists of 4 parts:
