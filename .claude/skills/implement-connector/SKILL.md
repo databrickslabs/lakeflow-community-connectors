@@ -47,7 +47,7 @@ See `src/databricks/labs/community_connector/sources/github/` for an example of 
 
 For incremental ingestion of table (CDC and Append-only), the framework calls `read_table` repeatedly within a single trigger run. Each call produces one microbatch. Pagination stops when the returned `end_offset` equals `start_offset`.
 
-**Breaking large data into multiple microbatches (CRITICAL for testing):** For any tables that support incremental read (where `read_table` returns a meaningful offset, not `None`), you **must always** support limiting the number of records or pages per microbatch (e.g., using a `max_pages_per_batch` or `limit` parameter). When the limit is hit, return the current cursor as `end_offset` so the framework calls again. 
+**Breaking large data into multiple microbatches (CRITICAL for testing):** For any tables that support incremental read (where `read_table` returns a meaningful offset, not `None`), you **must always** support limiting the number of records or pages per microbatch (e.g., using a `max_records_per_batch` or `limit` parameter). When the limit is hit, return the current cursor as `end_offset` so the framework calls again. 
 
 *Why this is emphasized:* This limit is not just for production microbatching; it is **heavily used during testing** to sample a smaller number of rows and return early. Without this limit, tests may hang or take too long by attempting to read the entire dataset. When all API pages are consumed within a call, the cursor stabilizes and the stream stops.
 
