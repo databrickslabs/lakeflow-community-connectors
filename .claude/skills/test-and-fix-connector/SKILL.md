@@ -23,6 +23,7 @@ Validate the generated connector for **{{source_name}}** by executing the provid
 ```
    - If `dev_config.json` does not exist, create it and ask the developers to provide the required parameters to connect to a test instance of the source.
    - If needed, create `dev_table_config.json` and ask developers to supply the necessary table_options parameters for testing different cases.
+   - **Batch size limit for incremental tables (do this automatically):** For any table that supports incremental reading (CDC/append), you **must** inspect the connector implementation to find the option that controls per-microbatch record or page limit (e.g. `max_pages_per_batch`, `limit`) and automatically add it to `dev_table_config.json` with a small value (less than 5). Do **not** wait for the user to provide this — read the connector source code, identify the relevant option name, and configure it yourself. This maps to `table_options` at runtime and ensures tests sample only a few records and return quickly instead of reading the entire dataset.
    - Be sure to remove these config files after testing is complete and before committing any changes.
 4. Run the tests using the project virtual environment (Python 3.10+ required):
 ```bash

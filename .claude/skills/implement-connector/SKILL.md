@@ -47,7 +47,9 @@ See `src/databricks/labs/community_connector/sources/github/` for an example of 
 
 For incremental ingestion of table (CDC and Append-only), the framework calls `read_table` repeatedly within a single trigger run. Each call produces one microbatch. Pagination stops when the returned `end_offset` equals `start_offset`.
 
-**Breaking large data into multiple microbatches:** Use a page/batch limit per call (e.g. `max_pages_per_batch`). When the limit is hit, return the current cursor as `end_offset` so the framework calls again. When all API pages are consumed within a call, the cursor stabilizes and the stream stops.
+**Breaking large data into multiple microbatches (CRITICAL for testing):** For any tables that support incremental read (where `read_table` returns a meaningful offset, not `None`), you **must always** support limiting the number of records or pages per microbatch (e.g., using a `max_pages_per_batch` or `limit` parameter). When the limit is hit, return the current cursor as `end_offset` so the framework calls again. 
+
+*Why this is emphasized:* This limit is not just for production microbatching; it is **heavily used during testing** to sample a smaller number of rows and return early. Without this limit, tests may hang or take too long by attempting to read the entire dataset. When all API pages are consumed within a call, the cursor stabilizes and the stream stops.
 
 **Guaranteeing termination:** The connector must ensure `read_table` eventually returns `end_offset == start_offset`. Two approaches:
 - **Cap the cursor at init time (recommended):** Record `datetime.now(UTC)` in `__init__` and cap `end_offset` at that timestamp. The cursor never advances past the connector's creation time, so it always converges. New data arriving after init is picked up by the next trigger (which creates a fresh connector instance). See `github/github.py` for an example.
