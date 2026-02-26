@@ -24,7 +24,13 @@ Validate the generated connector for **{{source_name}}** by executing the provid
    - If `dev_config.json` does not exist, create it and ask the developers to provide the required parameters to connect to a test instance of the source.
    - If needed, create `dev_table_config.json` and ask developers to supply the necessary table_options parameters for testing different cases.
    - Be sure to remove these config files after testing is complete and before committing any changes.
-4. Run the tests using: `pytest tests/unit/sources/{source_name}/test_{source_name}_lakeflow_connect.py -v`
+4. Run the tests using the project virtual environment (Python 3.10+ required):
+```bash
+python3.10 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+pytest tests/unit/sources/{source_name}/test_{source_name}_lakeflow_connect.py -v
+```
 5. Based on test failures, update the implementation under `src/databricks/labs/community_connector/sources/{source_name}` as needed. Use both the test results and the source API documentation, as well as any relevant libraries and test code, to guide your corrections.
 
 ## Notes

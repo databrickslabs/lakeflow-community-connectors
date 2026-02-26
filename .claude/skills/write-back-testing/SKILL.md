@@ -79,7 +79,12 @@ def test_{source_name}_connector():
 
 ### Step 3: Run Tests with Write Validation
 
+Use the project virtual environment (Python 3.10+ required):
+
 ```bash
+python3.10 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
 pytest tests/unit/sources/{source_name}/test_{source_name}_lakeflow_connect.py -v
 ```
 

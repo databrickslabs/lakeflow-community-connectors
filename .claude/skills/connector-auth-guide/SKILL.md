@@ -34,9 +34,12 @@ Using the `/generate-connector-spec` skill, create an intermediate connector spe
 
 ## Step 3: Run the Authentication Script and Direct User to Provide Parameters
 
-Automatically run the authentication script in the background using the Bash tool with `run_in_background: true`:
+Automatically run the authentication script in the background using the Bash tool with `run_in_background: true`. Use the project virtual environment (Python 3.10+ required):
 
 ```bash
+python3.10 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
 python tools/scripts/authenticate.py -s {{source_name}} -m browser
 ```
 
@@ -131,7 +134,14 @@ Customize the template based on:
 - Any source-specific SDK (prefer raw HTTP requests for simplicity)
 - The response structure (extract a useful field like username or account name to print)
 
-After writing the file, create a Python virtual environment and run the script. Debug if authentication fails and tell the user if the issue is incorrect parameters.
+After writing the file, run it using the project virtual environment (Python 3.10+):
+
+```bash
+source .venv/bin/activate  # activate if not already active
+python tests/unit/sources/{source_name}/auth_test.py
+```
+
+Debug if authentication fails and tell the user if the issue is incorrect parameters.
 
 ---
 

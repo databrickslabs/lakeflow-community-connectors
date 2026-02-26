@@ -73,9 +73,13 @@ Instead of manually reading tables, **run the test suite** which already provide
 
 ### 2.1 Run the Test Suite
 
+Use the project virtual environment (Python 3.10+ required):
+
 ```bash
-cd {repo_root}
-python -m pytest sources/{source_name}/test/test_{source_name}_lakeflow_connect.py -v -s
+python3.10 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+python -m pytest tests/unit/sources/{source_name}/test_{source_name}_lakeflow_connect.py -v -s
 ```
 
 ### 2.2 Extract Information from Test Output
@@ -335,6 +339,11 @@ return {..., OFFSET_KEY: max_val}
 ```
 
 ### Quick Python Reference
+
+Activate the virtual environment first:
+```bash
+python3.10 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
+```
 
 ```python
 import json

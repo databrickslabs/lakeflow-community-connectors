@@ -3,7 +3,7 @@ to provide each connection parameter, then writes the result as JSON.
 
 Supports two modes:
   - cli    : Terminal-based prompts (default)
-  - browser: Opens a local web form in the browser
+  - browser: Starts a local web form for configuration
 
 When the connector_spec.yaml includes an ``oauth`` section, the tool can
 run the OAuth 2.0 authorization code flow to obtain a refresh token
@@ -19,7 +19,6 @@ import sys
 import threading
 import urllib.parse
 import urllib.request
-import webbrowser
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
@@ -164,7 +163,7 @@ def _run_oauth_flow_cli(  # pylint: disable=too-many-statements
     client_secret: str,
     port: int,
 ) -> str | None:
-    """Start a temporary local server, open the browser for OAuth, return the refresh token."""
+    """Start a temporary local server for OAuth callback, return the refresh token."""
     state = secrets.token_urlsafe(32)
     result: dict[str, str] = {}
     done = threading.Event()
@@ -261,10 +260,8 @@ def _run_oauth_flow_cli(  # pylint: disable=too-many-statements
 
     print("\n  Redirect URI (register in your OAuth app if not done):")
     print(f"    {redirect_uri}")
-    print("\n  Opening browser for authorization…")
-    print("  If the browser doesn't open, visit:")
+    print("\n  Please visit the following URL in your browser to authorize:")
     print(f"    {auth_url}")
-    webbrowser.open(auth_url)
 
     try:
         done.wait(timeout=300)
@@ -668,7 +665,7 @@ def _build_oauth_popup_html(
 
 
 def run_browser(  # pylint: disable=too-many-statements,too-many-locals
-    source_name: str, output_file: Path, port: int,
+    source_name: str, output_file: Path, port: int
 ) -> None:
     """Run the browser-based interactive authentication flow."""
     project_root = find_project_root()
@@ -834,7 +831,6 @@ def run_browser(  # pylint: disable=too-many-statements,too-many-locals
         print("\n  OAuth redirect URI (register in your app settings):")
         print(f"    {url}/oauth/callback")
     print("\n  Waiting for form submission … (Ctrl+C to cancel)")
-    webbrowser.open(url)
 
     try:
         shutdown_event.wait()
