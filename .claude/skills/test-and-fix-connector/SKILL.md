@@ -34,6 +34,26 @@ pytest tests/unit/sources/{source_name}/test_{source_name}_lakeflow_connect.py -
 ```
 5. Based on test failures, update the implementation under `src/databricks/labs/community_connector/sources/{source_name}` as needed. Use both the test results and the source API documentation, as well as any relevant libraries and test code, to guide your corrections.
 
+## Debugging Hangs and Slow Tests
+
+Tests that hang (no output, no error) are almost always an API call that never returns. Systematic approach:
+
+1. **Enable debug logging** to see where it stalls:
+```bash
+pytest tests/unit/sources/{source_name}/test_{source_name}_lakeflow_connect.py -v -s --log-cli-level=DEBUG
+```
+If `urllib3` logs `Starting new HTTPS connection` with no response line, the HTTP call itself is hanging.
+
+2. **Isolate the HTTP call** — reproduce the exact request (same URL, headers, params) in a standalone script. If that also hangs, the problem is the query parameters, not the connector logic.
+
+3. **Narrow down by elimination** — remove or change one query parameter at a time. Common culprits: unbounded history scans (`date_range=all`), ascending sort on large datasets, missing date-range filters.
+
+4. **Start with the most constrained query** — small `limit`, narrow time window, status filters. Once it works, progressively relax to find the boundary.
+
+5. **Check for missing timeouts** — every `requests.get()`/`session.get()` must have a `timeout` parameter. Without it, a slow API hangs forever with no error. For testing, set a short timeout (e.g., 10 seconds) so failed requests surface quickly instead of blocking for minutes.
+
+6. **Suspect large-account behavior** — test credentials may connect to an account with millions of records. If queries time out, add server-side date filtering or switch to the sliding time-window pattern (see implement-connector SKILL).
+
 ## Notes
 
 - This step is more interactive. Based on testing results, we need to make various adjustments.
