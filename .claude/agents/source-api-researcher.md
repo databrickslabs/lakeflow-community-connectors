@@ -51,6 +51,16 @@ When instructed to determine which tables are important (user or orchestrator di
    - If tables have **very different API patterns** (different endpoints, auth flows, pagination styles, or schema structures): select the top 3–8 core tables for this batch and defer the rest.
 5. Document deferred tables in a **"Deferred Tables"** section at the end of the API doc, listing each table with a brief note on its complexity and why it was deferred.
 
+## Internal Batching
+
+When the table set is large or heterogeneous (very different API patterns), you must split research into batches of ~5 tables automatically:
+
+1. **First batch**: Research the first subset of tables. Create the API doc.
+2. **Subsequent batches**: Research the next subset using append mode — append new table sections to the existing API doc without removing or modifying existing content.
+3. Repeat until all tables in scope are researched.
+
+If all tables share similar API patterns, research them all in a single pass.
+
 ## Append Mode
 
 When invoked with `append_mode: true` (for subsequent batches in an iterative connector build):

@@ -1,7 +1,5 @@
 # CLAUDE.md
 
-This file provides guidance for Claude Code when working with this repository.
-
 ## Project Overview
 
 Lakeflow Community Connectors enable data ingestion from various source systems into Databricks. Built on the Spark Python Data Source API and Spark Declarative Pipeline (SDP).
@@ -37,52 +35,13 @@ prompts/                 # Templates and guide for AI-assisted development
 
 All connectors implement the `LakeflowConnect` class in `src/databricks/labs/community_connector/interface/lakeflow_connect.py`:
 
-```python
-class LakeflowConnect:
-    def __init__(self, options: dict[str, str]) -> None:
-        """Initialize with connection parameters (auth tokens, configs, etc.)"""
-
-    def list_tables(self) -> list[str]:
-        """Return names of all tables supported by this connector."""
-
-    def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
-        """Return the Spark schema for a table."""
-
-    def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
-        """Return metadata: primary_keys, cursor_field, ingestion_type (snapshot|cdc|cdc_with_deletes|append)."""
-
-    def read_table(self, table_name: str, start_offset: dict, table_options: dict[str, str]) -> (Iterator[dict], dict):
-        """Yield records as JSON dicts and return the next offset for incremental reads."""
-
-    def read_table_deletes(self, table_name: str, start_offset: dict, table_options: dict[str, str]) -> (Iterator[dict], dict):
-        """Optional: Yield deleted records for delete synchronization. Only required if ingestion_type is 'cdc_with_deletes'."""
-```
-
-## Build & Test Commands
-
-```bash
-# Run tests for a specific connector
-pytest tests/unit/sources/{source_name}/test_{source_name}_lakeflow_connect.py -v
-
-# Run all unit tests
-pytest tests/unit/ -v
-
-# Generate deployable file (temporary workaround)
-python tools/scripts/merge_python_source.py {source_name}
-```
-
 ## Development Workflow
 
-1. **Understand the source** — Gather API specs, auth mechanisms, and schemas using the provided template
-2. **Implement the connector** — Implement the `LakeflowConnect` interface methods
-3. **Test & iterate** — Run the standard test suites against a real source system
-   - *(Optional)* Implement write-back testing for end-to-end validation (write → read → verify cycle)
-4. **Generate documentation** — Create user-facing docs using the documentation template
-   - *(Temporary)* Run `tools/scripts/merge_python_source.py` to generate the deployable file
+Refer `.claude/agents/create-connector.md`
 
 ## Implementation Guidelines
 
-- When developing a new connector, only modify `src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py` — do **not** change the library, pipeline, or interface code.
+- When developing a new connector, only modify `src/databricks/labs/community_connector/sources/{source_name}` — do **not** change the library, pipeline, or interface code.
 - Shared code (libs, pipeline, interface) should only be updated when explicitly instructed to add new features or improvements to the framework itself.
 
 ## Testing Conventions
@@ -99,10 +58,5 @@ python tools/scripts/merge_python_source.py {source_name}
 - `src/databricks/labs/community_connector/sources/example/example.py` - Reference implementation
 - `tests/unit/sources/test_suite.py` - Test harness
 - `tests/unit/sources/example/test_example_lakeflow_connect.py` - Reference test implementation
-- `prompts/README.md` - Development workflow guide (references `.claude/skills/`)
-- `prompts/templates/source_api_doc_template.md` - API documentation template
-- `prompts/templates/community_connector_doc_template.md` - User documentation template
-- `.claude/skills/` - Claude skill files for each development step
-- `.claude/agents/` - Claude subagents that handle different phases of connector development
 
 
