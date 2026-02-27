@@ -1,6 +1,6 @@
 ---
 name: implement-connector
-description: Implement a Python connector that conforms to the LakeflowConnect interface for data ingestion.
+description: "Single step only: implement the connector in Python when the API doc already exists. Do NOT use for full connector creation — use the create-connector agent instead."
 ---
 
 # Implement the Connector 

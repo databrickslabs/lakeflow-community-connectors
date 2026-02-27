@@ -1,6 +1,6 @@
 ---
 name: connector-auth-guide
-description: Sets up authentication for a new connector by reading API docs, generating a connection spec, guiding the user through credential setup via the authenticate script, and creating an auth verification test.
+description: "Single step only: set up authentication and credentials for an existing connector. Do NOT use for full connector creation — use the create-connector agent instead."
 ---
 
 # Connector Auth Guide

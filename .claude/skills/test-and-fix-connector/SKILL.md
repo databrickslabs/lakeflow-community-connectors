@@ -1,6 +1,6 @@
 ---
 name: test-and-fix-connector
-description: Validate a connector by running the test suite, diagnosing failures, and applying fixes until all tests pass.
+description: "Single step only: run and fix connector tests when the implementation already exists. Do NOT use for full connector creation — use the create-connector agent instead."
 ---
 
 # Test and Fix the Connector

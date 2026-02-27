@@ -1,6 +1,6 @@
 ---
 name: research-source-api 
-description: Research and document APIs of a source system to enable connector implementation.
+description: "Single step only: research and document a source API when explicitly asked. Do NOT use for full connector creation — use the create-connector agent instead."
 ---
 
 # Research Source API
