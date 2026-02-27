@@ -6,8 +6,8 @@ All development prompts have been migrated to Claude skills under `.claude/skill
 These steps build a working read-only connector:
 - **Step 1: Document Source API** - Research and document READ operations only.
   - See skill: [`.claude/skills/research-source-api/SKILL.md`](../.claude/skills/research-source-api/SKILL.md)
-- **Step 2: Auth Setup** - Generate the connection spec, guide credential entry via the authenticate script, and verify connectivity.
-  - See skill: [`.claude/skills/connector-auth-guide/SKILL.md`](../.claude/skills/connector-auth-guide/SKILL.md)
+- **Step 2: Auth Setup** - Generate the connection spec, collect credentials, and verify connectivity.
+  - See skills: [`.claude/skills/generate-connector-spec/SKILL.md`](../.claude/skills/generate-connector-spec/SKILL.md), [`.claude/skills/collect-credentials/SKILL.md`](../.claude/skills/collect-credentials/SKILL.md), [`.claude/skills/validate-connector-auth/SKILL.md`](../.claude/skills/validate-connector-auth/SKILL.md)
 - **Step 3: Implement Connector** - Implement the LakeflowConnect interface
   - See skill: [`.claude/skills/implement-connector/SKILL.md`](../.claude/skills/implement-connector/SKILL.md)
 - **Step 4: Test and Fix Connector** - Validate read operations work correctly
