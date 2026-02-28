@@ -1,6 +1,7 @@
 ---
 name: test-and-fix-connector
-description: Validate a connector by running the test suite, diagnosing failures, and applying fixes until all tests pass.
+description: "Single step only: run and fix connector tests when the implementation already exists. Do NOT use for full connector creation — use the create-connector agent instead."
+disable-model-invocation: true
 ---
 
 # Test and Fix the Connector
@@ -23,6 +24,7 @@ Validate the generated connector for **{{source_name}}** by executing the provid
 ```
    - If `dev_config.json` does not exist, create it and ask the developers to provide the required parameters to connect to a test instance of the source.
    - If needed, create `dev_table_config.json` and ask developers to supply the necessary table_options parameters for testing different cases.
+   - **Batch size limit for incremental tables (do this automatically):** For any table that supports incremental reading (CDC/append), you **must** inspect the connector implementation to find the option that controls per-microbatch record or page limit (e.g. `max_records_per_batch`, `limit`) and automatically add it to `dev_table_config.json` with a small value (less than 5). Do **not** wait for the user to provide this — read the connector source code, identify the relevant option name, and configure it yourself. This maps to `table_options` at runtime and ensures tests sample only a few records and return quickly instead of reading the entire dataset.
    - Be sure to remove these config files after testing is complete and before committing any changes.
 4. Run the tests using the project virtual environment (Python 3.10+ required):
 ```bash
@@ -32,6 +34,26 @@ pip install -e ".[dev]"
 pytest tests/unit/sources/{source_name}/test_{source_name}_lakeflow_connect.py -v
 ```
 5. Based on test failures, update the implementation under `src/databricks/labs/community_connector/sources/{source_name}` as needed. Use both the test results and the source API documentation, as well as any relevant libraries and test code, to guide your corrections.
+
+## Debugging Hangs and Slow Tests
+
+Tests that hang (no output, no error) are almost always an API call that never returns. Systematic approach:
+
+1. **Enable debug logging** to see where it stalls:
+```bash
+pytest tests/unit/sources/{source_name}/test_{source_name}_lakeflow_connect.py -v -s --log-cli-level=DEBUG
+```
+If `urllib3` logs `Starting new HTTPS connection` with no response line, the HTTP call itself is hanging.
+
+2. **Isolate the HTTP call** — reproduce the exact request (same URL, headers, params) in a standalone script. If that also hangs, the problem is the query parameters, not the connector logic.
+
+3. **Narrow down by elimination** — remove or change one query parameter at a time. Common culprits: unbounded history scans (`date_range=all`), ascending sort on large datasets, missing date-range filters.
+
+4. **Start with the most constrained query** — small `limit`, narrow time window, status filters. Once it works, progressively relax to find the boundary.
+
+5. **Check for missing timeouts** — every `requests.get()`/`session.get()` must have a `timeout` parameter. Without it, a slow API hangs forever with no error. For testing, set a short timeout (e.g., 10 seconds) so failed requests surface quickly instead of blocking for minutes.
+
+6. **Suspect large-account behavior** — test credentials may connect to an account with millions of records. If queries time out, add server-side date filtering or switch to the sliding time-window pattern (see implement-connector SKILL).
 
 ## Notes
 

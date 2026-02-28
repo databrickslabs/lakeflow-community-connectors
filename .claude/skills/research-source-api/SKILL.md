@@ -1,6 +1,7 @@
 ---
 name: research-source-api 
-description: Research and document APIs of a source system to enable connector implementation.
+description: "Single step only: research and document a source API when explicitly asked. Do NOT use for full connector creation — use the create-connector agent instead."
+disable-model-invocation: true
 ---
 
 # Research Source API
@@ -15,7 +16,7 @@ Create a comprehensive API documentation file that enables connector implementat
 
 ## Output
 
-Create `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md` following the template at [source_api_doc_template](templates/source_api_doc_template.md).
+Create `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md` following the template at `prompts/templates/source_api_doc_template.md`.
 
 ## Core Principles
 

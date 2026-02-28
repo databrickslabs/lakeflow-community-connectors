@@ -1,14 +1,15 @@
 ---
 name: write-back-testing
 description: Implement test utilities that write test data to the source system and validate end-to-end read cycles.
+disable-model-invocation: true
 ---
 
 # Implement Write-Back Testing
 
 ## Prerequisites
-**⚠️ You must complete "document-write-back-api" first!** This step requires the write-back API documentation.
+**⚠️ You must complete "research-write-api-of-source" first!** This step requires the write-back API documentation.
 
-If you skipped "document-write-back-api", then this step can also be skipped.
+If you skipped "research-write-api-of-source", then this step can also be skipped.
 
 ## Goal
 Implement test utilities that write test data to the source system, then validate your connector correctly reads and ingests that data. This creates a comprehensive end-to-end validation cycle.
@@ -36,7 +37,7 @@ This ensures:
 
 ### Step 1: Create Test Utils File
 
-Create `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_test_utils.py` implementing the interface defined in [lakeflow_connect_test_utils.py](../tests/unit/sources/lakeflow_connect_test_utils.py).
+Create `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_test_utils.py` implementing the interface defined in `tests/unit/sources/lakeflow_connect_test_utils.py`.
 
 **Use the write-back API documentation as your implementation guide:**
 - Write endpoints and payload structure from the "Write-Back APIs" section

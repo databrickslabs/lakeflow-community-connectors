@@ -1,13 +1,14 @@
 ---
 name: implement-connector
-description: Implement a Python connector that conforms to the LakeflowConnect interface for data ingestion.
+description: "Single step only: implement the connector in Python when the API doc already exists. Do NOT use for full connector creation — use the create-connector agent instead."
+disable-model-invocation: true
 ---
 
 # Implement the Connector 
 
 ## Goal
 Implement the Python connector for **{{source_name}}** that conforms exactly to the interface defined in  
-[lakeflow_connect.py](../src/databricks/labs/community_connector/interface/lakeflow_connect.py). The implementation should be based on the source API documentation in `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md` produced by "understand-source".
+[lakeflow_connect.py](../src/databricks/labs/community_connector/interface/lakeflow_connect.py). The implementation should be based on the source API documentation in `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md` produced by the `research-source-api` skill.
 
 ## File Organization
 
@@ -42,6 +43,36 @@ See `src/databricks/labs/community_connector/sources/github/` for an example of 
   - for each parent object, list the child objects
   - combine the results into a single output table with the parent object identifier as the extra field.
 - Refer to `src/databricks/labs/community_connector/sources/example/example.py` or other connectors under `src/databricks/labs/community_connector/sources` as examples
+
+## read_table Pagination and Termination
+
+For incremental ingestion of table (CDC and Append-only), the framework calls `read_table` repeatedly within a single trigger run. Each call produces one microbatch. Pagination stops when the returned `end_offset` equals `start_offset`.
+
+**Breaking large data into multiple microbatches (CRITICAL for testing):** For any tables that support incremental read (where `read_table` returns a meaningful offset, not `None`), you **must always** support limiting the number of records or pages per microbatch (e.g., using a `max_records_per_batch` or `limit` parameter). When the limit is hit, return the current cursor as `end_offset` so the framework calls again. 
+
+*Why this is emphasized:* This limit is not just for production microbatching; it is **heavily used during testing** to sample a smaller number of rows and return early. Without this limit, tests may hang or take too long by attempting to read the entire dataset. When all API pages are consumed within a call, the cursor stabilizes and the stream stops.
+
+**Guaranteeing termination:** The connector must ensure `read_table` eventually returns `end_offset == start_offset`. Two approaches:
+- **Cap the cursor at init time (recommended):** Record `datetime.now(UTC)` in `__init__` and cap `end_offset` at that timestamp. The cursor never advances past the connector's creation time, so it always converges. New data arriving after init is picked up by the next trigger (which creates a fresh connector instance). See `github/github.py` for an example.
+- **Single-batch read:** Return `start_offset` as `end_offset` after one read. Simple but prevents splitting into multiple microbatches.
+
+**Lookback window:** If the source API uses timestamp-based cursors (e.g. `since`/`updated_at`), apply a lookback window **at read time** (subtract N seconds from the cursor when building the API query), not in the stored offset. This avoids drift in the checkpointed cursor while still catching concurrently-updated records. Store the raw `max_updated_at` as the offset.
+
+## API Call Best Practices
+
+- **Always set explicit timeouts:** Every HTTP request must include a `timeout` parameter (e.g., `timeout=30`). Without it, a slow API hangs the connector and tests indefinitely with no error output.
+- **Prefer server-side filtering:** Push filters (`since`/`until` etc.) to the API instead of fetching everything and filtering in Python. Client-side filtering still forces the server to scan the full dataset, which can cause timeouts on large accounts even with a small `limit`.
+- **Design for large accounts:** What works on a small dev account may hang on a production account with millions of records. Avoid unbounded full-history parameters like `date_range=all`. Always scope queries to a bounded range.
+
+## Pagination Patterns
+
+Two common patterns for paginating through API data. Choose based on the source API's behavior:
+
+**Pattern 1 — Cursor-based pagination (default choice):** Paginate through the API using offset or next-page tokens, stop after a batch limit, and store the last record's timestamp or page token as the cursor for the next call. This works well for most APIs and avoids needing to choose a window size upfront. However, it can fail on APIs that perform poorly with unbounded queries — if the API must scan the full dataset to sort or filter, even the first page may time out on large accounts.
+
+**Pattern 2 — Sliding time-window:** Query data in fixed-size time windows (e.g., 1 hour) using `since`/`until` parameters, paginate within each window, then slide forward. The window position is tracked in the offset. This adds a `window_seconds` table option but avoids unbounded queries entirely. Use this when the source API times out on large unbounded queries. 
+
+Start with Pattern 1. If testing reveals timeouts on the target account (see test-and-fix-connector SKILL for diagnosis steps), switch to Pattern 2.
 
 ## Git Commit on Completion
 
