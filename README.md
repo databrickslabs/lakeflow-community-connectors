@@ -12,8 +12,27 @@ Each connector is packaged as Python source code with 4 parts:
 
 Developers **only need to implement the [source connector interface](src/databricks/labs/community_connector/interface/README.md)**, while connector users configure ingestion behavior by **configuring the pipeline spec**.
 
+## Connector Interface and Testing
+
+### Interface to Implement
+There are two ways to implement a connector:
+
+- **`LakeflowConnect` abstraction (recommended)** — Implement the [`LakeflowConnect`](src/databricks/labs/community_connector/interface/lakeflow_connect.py) abstract class. This is a lightweight interface where you define methods for listing tables, returning schemas and metadata, and reading records. The shared libraries handle all Spark PDS integration, streaming, offset management, and pipeline orchestration automatically. This is the recommended approach, especially for REST API-based sources.
+
+- **Direct Python Data Source API** — Implement the [Spark Python Data Source API](https://spark.apache.org/docs/latest/api/python/tutorial/sql/python_data_source.html) directly. This gives full control over data partitioning, schema handling, and read logic, but requires manually implementing the Spark API contracts expected by the shared pipeline and libraries.
+
+See [`src/databricks/labs/community_connector/interface/README.md`](src/databricks/labs/community_connector/interface/README.md) for full details on both approaches.
+
+### Tests to Build
+
+Each connector must include tests that run the **generic test suite** against a live source environment. These tests validate API usage, data parsing, and successful data retrieval.
+
+- **Generic test suite** — Connects to a real source using provided credentials to verify end-to-end functionality
+- **Write-back testing** *(recommended)* — Use the provided test harness to write data, read it back, and verify incremental reads and deletes (only for tables with ingestion type `cdc_with_deletes`) work correctly.
+- **Unit tests** — Recommended for complex library code or connector-specific logic
+
 ## Develop a New Connector
-Build and deploy community connectors using AI-assisted workflows — either as a single guided session or step-by-step with full control.
+Build and deploy connectors using the `LakeflowConnect` abstraction with AI-assisted workflows — either as a single guided session or step-by-step with full control. These workflows do not apply to direct Python Data Source API implementations.
 
 ### Prerequisites
 - Access to [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or [Cursor](https://www.cursor.com/)
@@ -123,15 +142,6 @@ lakeflow-community-connectors/
         |___ agents/             # Subagents for different development phases
         |___ commands/           # Slash commands (e.g., /create-connector)
 ```
-
-
-### Tests
-
-Each connector must include tests that run the **generic test suite** against a live source environment. These tests validate API usage, data parsing, and successful data retrieval.
-
-- **Generic test suite** — Connects to a real source using provided credentials to verify end-to-end functionality
-- **Write-back testing** *(recommended)* — Use the provided test harness to write data, read it back, and verify incremental reads and deletes(only for tables with ingestion type `cdc_with_deletes`) work correctly.
-- **Unit tests** — Recommended for complex library code or connector-specific logic
 
 ## Using and Testing Community Connectors
 
