@@ -85,6 +85,11 @@ Implement write-back test utilities:
 /write-back-testing for {source}
 ```
 
+**Validate Incremental Sync** - Manual validation process to verify CDC implementation by checking offset structure, validating offset matches max cursor, and testing incremental filtering.
+```
+/validate-incremental-sync for {source}
+```
+
 ## Project Structure
 
 Core modules live under `src/databricks/labs/community_connector/`:
