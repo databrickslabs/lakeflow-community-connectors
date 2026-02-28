@@ -91,51 +91,34 @@ def extract_next_link(link_header: str | None) -> str | None:
 def compute_next_cursor(
     max_timestamp: str | None,
     current_cursor: str | None,
-) -> str | None:
-    """
-    Return the next cursor value to checkpoint.
-
-    The offset stores the raw max observed timestamp so that progress is never
-    lost. Lookback is applied separately at read time via ``apply_lookback``.
-
-    Args:
-        max_timestamp: The maximum observed timestamp in ISO 8601 format.
-        current_cursor: The current cursor value (fallback when no data found).
-
-    Returns:
-        max_timestamp if available, otherwise current_cursor.
-    """
-    return max_timestamp if max_timestamp else current_cursor
-
-
-def apply_lookback(
-    cursor: str | None,
     lookback_seconds: int,
     timestamp_format: str = "%Y-%m-%dT%H:%M:%SZ",
 ) -> str | None:
     """
-    Subtract a lookback window from a cursor timestamp.
+    Compute the next cursor value with a lookback window.
 
-    Used at read time to widen the ``since`` filter so that records updated
-    concurrently during the previous batch are not missed.
+    This function takes the maximum observed timestamp and applies a lookback
+    window to avoid missing records that may have been updated concurrently.
 
     Args:
-        cursor: ISO 8601 timestamp string to adjust.
-        lookback_seconds: Seconds to subtract from cursor.
+        max_timestamp: The maximum observed timestamp in ISO 8601 format.
+        current_cursor: The current cursor value (fallback if parsing fails).
+        lookback_seconds: Number of seconds to look back from the max timestamp.
         timestamp_format: The format of the timestamp string.
 
     Returns:
-        The adjusted timestamp, or the original cursor if parsing fails or
-        cursor is None.
+        The computed next cursor value, or current_cursor if computation fails.
     """
-    if not cursor or lookback_seconds <= 0:
-        return cursor
+    if not max_timestamp:
+        return current_cursor
 
     try:
-        dt = datetime.strptime(cursor, timestamp_format)
-        return (dt - timedelta(seconds=lookback_seconds)).strftime(timestamp_format)
+        dt = datetime.strptime(max_timestamp, timestamp_format)
+        dt_with_lookback = dt - timedelta(seconds=lookback_seconds)
+        return dt_with_lookback.strftime(timestamp_format)
     except (ValueError, TypeError):
-        return cursor
+        # Fallback: if parsing fails, return the raw max_timestamp
+        return max_timestamp
 
 
 def get_cursor_from_offset(

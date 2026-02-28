@@ -275,29 +275,18 @@ def parse_int_option(
 def compute_next_cursor(
     max_modified: str | None,
     current_cursor: str | None,
-) -> str | None:
-    """Return the next cursor value to checkpoint.
-
-    Stores the raw max observed timestamp. Lookback is applied separately
-    at read time via ``apply_lookback``.
-    """
-    return max_modified if max_modified else current_cursor
-
-
-def apply_lookback(
-    cursor: str | None,
     lookback_seconds: int,
 ) -> str | None:
-    """Subtract a lookback window from a cursor timestamp at read time."""
-    if not cursor or lookback_seconds <= 0:
-        return cursor
+    """Compute the next cursor value with a lookback window."""
+    if not max_modified:
+        return current_cursor
 
     try:
-        dt = datetime.fromisoformat(cursor.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(max_modified.replace("Z", "+00:00"))
         dt_with_lookback = dt - timedelta(seconds=lookback_seconds)
         return dt_with_lookback.isoformat().replace("+00:00", "Z")
     except Exception:
-        return cursor
+        return max_modified
 
 
 def get_cursor_from_offset(

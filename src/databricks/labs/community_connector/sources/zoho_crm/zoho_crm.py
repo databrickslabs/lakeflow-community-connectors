@@ -123,9 +123,6 @@ class ZohoCRMLakeflowConnect(LakeflowConnect):
         """Read records from a Zoho CRM table."""
         self._validate_table_exists(table_name)
         handler, config = self._get_handler_and_config(table_name)
-        config["max_records_per_batch"] = int(
-            table_options.get("max_records_per_batch", 100_000)
-        )
         return handler.read(table_name, config, start_offset)
 
     def _validate_table_exists(self, table_name: str) -> None:

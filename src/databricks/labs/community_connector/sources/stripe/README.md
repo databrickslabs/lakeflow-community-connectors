@@ -16,20 +16,6 @@ To configure the Stripe connector, you'll need to provide the following paramete
 |-----------|------|----------|-------------|---------|
 | `api_key` | string | Yes | Stripe Secret API Key | `sk_test_51abc...` or `sk_live_51xyz...` |
 
-### Table-Level Options
-
-The following options can be set per table via `table_options`:
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `max_records_per_batch` | integer | `100000` | Maximum number of records per microbatch. Controls memory usage when streaming large Stripe objects (e.g., events, charges). |
-
-To use table-level options, include them in the `externalOptionsAllowList` connection parameter:
-
-```
-max_records_per_batch
-```
-
 ### Getting Your Stripe API Key
 
 1. Log in to your Stripe Dashboard

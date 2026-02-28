@@ -1,5 +1,4 @@
 import time
-from datetime import datetime, timezone
 from typing import Dict, List, Tuple, Iterator
 
 import requests
@@ -30,10 +29,6 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
             "Authorization": f"Bearer {self.access_token}",
             "Content-Type": "application/json",
         }
-        self._init_time = (
-            datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-        )
-        self._default_max_records_per_batch = 100_000
 
     # ─── Interface Methods ────────────────────────────────────────────────────
 
@@ -100,12 +95,6 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
                 f"Table '{table_name}' requires 'group_id' in table_options"
             )
 
-        max_records = int(
-            table_options.get(
-                "max_records_per_batch", self._default_max_records_per_batch
-            )
-        )
-
         # Determine ingestion type and read accordingly
         if config["ingestion_type"] == "cdc":
             cursor_field = config["cursor_field"]
@@ -114,14 +103,12 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
                 and start_offset.get(cursor_field) is not None
             )
             if is_incremental:
-                return self._read_data_incremental(
-                    table_name, start_offset, table_options, max_records
-                )
+                return self._read_data_incremental(table_name, start_offset, table_options)
             else:
-                return self._read_data_full(table_name, table_options, max_records)
+                return self._read_data_full(table_name, table_options)
         else:
             # Snapshot ingestion
-            return self._read_data_full(table_name, table_options, max_records)
+            return self._read_data_full(table_name, table_options)
 
     # ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -198,9 +185,7 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
 
     # ─── Table Readers ────────────────────────────────────────────────────────
 
-    def _get_special_handler(
-        self, table_name: str, table_options: Dict[str, str], max_records: int
-    ):
+    def _get_special_handler(self, table_name: str, table_options: Dict[str, str]):
         """Return a special handler for a table, or None."""
         handlers = {
             "users": lambda: self._read_single_user(),
@@ -216,15 +201,11 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
         conditional = {
             "survey_responses": (
                 "survey_id",
-                lambda: self._read_all_survey_responses(
-                    table_options, max_records=max_records,
-                ),
+                lambda: self._read_all_survey_responses(table_options, start_modified_at=None),
             ),
             "collectors": (
                 "survey_id",
-                lambda: self._read_all_collectors(
-                    table_options, max_records=max_records,
-                ),
+                lambda: self._read_all_collectors(table_options),
             ),
             "group_members": (
                 "group_id",
@@ -239,32 +220,25 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
 
         return None
 
-    def _read_data_full(  # pylint: disable=too-many-branches
-        self, table_name: str, table_options: Dict[str, str], max_records: int
+    def _read_data_full(
+        self, table_name: str, table_options: Dict[str, str]
     ) -> Tuple[Iterator[dict], dict]:
-        """Read all data from a SurveyMonkey table (full refresh).
-
-        For CDC tables sorted ascending, stops after *max_records* and
-        returns the cursor so the framework continues with incremental
-        reads.
-        """
+        """Read all data from a SurveyMonkey table (full refresh)."""
         config = OBJECT_CONFIG[table_name]
 
         # Dispatch to special handlers for specific tables
-        handler = self._get_special_handler(table_name, table_options, max_records)
+        handler = self._get_special_handler(table_name, table_options)
         if handler:
             return handler()
 
         url = self._build_endpoint_url(table_name, table_options)
         per_page = config["per_page"]
-        is_cdc = config["ingestion_type"] == "cdc" and config["cursor_field"]
 
-        all_records: List[dict] = []
+        all_records = []
         latest_cursor_value = None
         page = 1
-        pages_exhausted = True
 
-        while len(all_records) < max_records:
+        while True:
             params = {
                 "page": page,
                 "per_page": per_page,
@@ -292,81 +266,57 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
             if not records:
                 break
 
+            # Add parent identifiers for child objects and clean empty dicts
             for record in records:
                 record = self._add_parent_identifiers(table_name, record, table_options)
                 record = self._clean_empty_dicts(record)
                 all_records.append(record)
 
-                if is_cdc:
+                # Track latest cursor value for cdc tables
+                if config["ingestion_type"] == "cdc" and config["cursor_field"]:
                     cursor_value = record.get(config["cursor_field"])
                     if cursor_value:
                         if latest_cursor_value is None or cursor_value > latest_cursor_value:
                             latest_cursor_value = cursor_value
-
-                if len(all_records) >= max_records:
-                    pages_exhausted = False
-                    break
-
-            if not pages_exhausted:
-                break
 
             # Check for more pages
             if "next" not in data.get("links", {}):
                 break
 
             page += 1
-            time.sleep(0.1)
+            time.sleep(0.1)  # Rate limiting
 
         # Build offset
-        offset: dict = {}
-        if is_cdc and latest_cursor_value:
-            if pages_exhausted and latest_cursor_value > self._init_time:
-                latest_cursor_value = self._init_time
+        offset = {}
+        if config["ingestion_type"] == "cdc" and config["cursor_field"] and latest_cursor_value:
             offset[config["cursor_field"]] = latest_cursor_value
 
         return iter(all_records), offset
 
-    def _read_data_incremental(  # pylint: disable=too-many-branches
-        self,
-        table_name: str,
-        start_offset: dict,
-        table_options: Dict[str, str],
-        max_records: int,
+    def _read_data_incremental(
+        self, table_name: str, start_offset: dict, table_options: Dict[str, str]
     ) -> Tuple[Iterator[dict], dict]:
-        """Read incremental data from a SurveyMonkey table.
-
-        Bounded by *max_records* per call and capped at ``_init_time``
-        for termination guarantee.
-        """
+        """Read incremental data from a SurveyMonkey table."""
         config = OBJECT_CONFIG[table_name]
         cursor_field = config["cursor_field"]
         cursor_start = start_offset.get(cursor_field)
 
-        # Handle special case for survey_responses across all surveys
+        # Handle special case for survey_responses
         if table_name == "survey_responses" and not table_options.get("survey_id"):
-            return self._read_all_survey_responses(
-                table_options,
-                start_modified_at=cursor_start,
-                max_records=max_records,
-            )
+            return self._read_all_survey_responses(table_options, start_modified_at=cursor_start)
 
         # Handle special case for collectors across all surveys
         if table_name == "collectors" and not table_options.get("survey_id"):
-            return self._read_all_collectors(
-                table_options,
-                start_modified_at=cursor_start,
-                max_records=max_records,
-            )
+            return self._read_all_collectors(table_options, start_modified_at=cursor_start)
 
         url = self._build_endpoint_url(table_name, table_options)
         per_page = config["per_page"]
 
-        all_records: List[dict] = []
+        all_records = []
         latest_cursor_value = cursor_start
         page = 1
-        pages_exhausted = True
 
-        while len(all_records) < max_records:
+        while True:
             params = {
                 "page": page,
                 "per_page": per_page,
@@ -374,6 +324,7 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
                 "sort_order": "asc",
             }
 
+            # Add incremental filter
             if cursor_start:
                 params["start_modified_at"] = cursor_start
 
@@ -394,27 +345,18 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
                 record = self._clean_empty_dicts(record)
                 all_records.append(record)
 
+                # Track latest cursor value
                 cursor_value = record.get(cursor_field)
                 if cursor_value:
                     if latest_cursor_value is None or cursor_value > latest_cursor_value:
                         latest_cursor_value = cursor_value
 
-                if len(all_records) >= max_records:
-                    pages_exhausted = False
-                    break
-
-            if not pages_exhausted:
-                break
-
+            # Check for more pages
             if "next" not in data.get("links", {}):
                 break
 
             page += 1
             time.sleep(0.1)
-
-        # Cap cursor at _init_time when pages are truly exhausted
-        if pages_exhausted and latest_cursor_value and latest_cursor_value > self._init_time:
-            latest_cursor_value = self._init_time
 
         offset = {cursor_field: latest_cursor_value} if latest_cursor_value else {}
         return iter(all_records), offset
@@ -426,10 +368,13 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
         data = self._clean_empty_dicts(data)
         return iter([data]), {}
 
-    def _fetch_all_surveys(self) -> List[dict]:
-        """Fetch all surveys via paginated API calls."""
+    def _read_all_survey_responses(
+        self, table_options: Dict[str, str], start_modified_at: str = None
+    ) -> Tuple[Iterator[dict], dict]:
+        """Read responses across all surveys."""
+        # First, get all surveys
         surveys_url = f"{self.base_url}/surveys"
-        all_surveys: List[dict] = []
+        all_surveys = []
         page = 1
 
         while True:
@@ -448,30 +393,16 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
             page += 1
             time.sleep(0.1)
 
-        return all_surveys
-
-    def _read_all_survey_responses(  # pylint: disable=too-many-branches
-        self,
-        table_options: Dict[str, str],
-        start_modified_at: str = None,
-        max_records: int = 100_000,
-    ) -> Tuple[Iterator[dict], dict]:
-        """Read responses across all surveys, bounded by *max_records*."""
-        all_surveys = self._fetch_all_surveys()
-
-        all_responses: List[dict] = []
+        # Then, get responses for each survey
+        all_responses = []
         latest_cursor_value = start_modified_at
-        batch_full = False
 
         for survey in all_surveys:
-            if batch_full:
-                break
-
             survey_id = survey["id"]
             responses_url = f"{self.base_url}/surveys/{survey_id}/responses/bulk"
             page = 1
 
-            while len(all_responses) < max_records:
+            while True:
                 params = {
                     "page": page,
                     "per_page": 100,
@@ -485,6 +416,7 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
                 try:
                     data = self._make_request(responses_url, params)
                 except Exception:
+                    # Skip surveys with no access or errors
                     break
 
                 responses = data.get("data", [])
@@ -502,26 +434,11 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
                         if latest_cursor_value is None or cursor_value > latest_cursor_value:
                             latest_cursor_value = cursor_value
 
-                    if len(all_responses) >= max_records:
-                        batch_full = True
-                        break
-
-                if batch_full:
-                    break
-
                 if "next" not in data.get("links", {}):
                     break
 
                 page += 1
                 time.sleep(0.1)
-
-        # Cap cursor at _init_time when all pages are truly exhausted
-        if (
-            not batch_full
-            and latest_cursor_value
-            and latest_cursor_value > self._init_time
-        ):
-            latest_cursor_value = self._init_time
 
         offset = {"date_modified": latest_cursor_value} if latest_cursor_value else {}
         return iter(all_responses), offset
@@ -560,8 +477,28 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
 
     def _read_all_questions_all_surveys(self) -> Tuple[Iterator[dict], dict]:
         """Read all questions from all surveys."""
-        all_surveys = self._fetch_all_surveys()
+        # First, get all surveys
+        surveys_url = f"{self.base_url}/surveys"
+        all_surveys = []
+        page = 1
 
+        while True:
+            params = {"page": page, "per_page": 1000}
+            data = self._make_request(surveys_url, params)
+            surveys = data.get("data", [])
+
+            if not surveys:
+                break
+
+            all_surveys.extend(surveys)
+
+            if "next" not in data.get("links", {}):
+                break
+
+            page += 1
+            time.sleep(0.1)
+
+        # Then, get questions for each survey via details endpoint
         all_questions = []
 
         for survey in all_surveys:
@@ -614,8 +551,27 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
             return iter(all_pages), {}
 
         # No survey_id - read pages from all surveys
-        all_surveys = self._fetch_all_surveys()
+        surveys_url = f"{self.base_url}/surveys"
+        all_surveys = []
+        page = 1
 
+        while True:
+            params = {"page": page, "per_page": 1000}
+            data = self._make_request(surveys_url, params)
+            surveys = data.get("data", [])
+
+            if not surveys:
+                break
+
+            all_surveys.extend(surveys)
+
+            if "next" not in data.get("links", {}):
+                break
+
+            page += 1
+            time.sleep(0.1)
+
+        # Get pages for each survey using the details endpoint
         all_pages = []
 
         for survey in all_surveys:
@@ -638,28 +594,41 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
 
         return iter(all_pages), {}
 
-    def _read_all_collectors(  # pylint: disable=too-many-branches
-        self,
-        table_options: Dict[str, str],
-        start_modified_at: str = None,
-        max_records: int = 100_000,
+    def _read_all_collectors(
+        self, table_options: Dict[str, str], start_modified_at: str = None
     ) -> Tuple[Iterator[dict], dict]:
-        """Read all collectors from all surveys, bounded by *max_records*."""
-        all_surveys = self._fetch_all_surveys()
+        """Read all collectors from all surveys."""
+        # First, get all surveys
+        surveys_url = f"{self.base_url}/surveys"
+        all_surveys = []
+        page = 1
 
-        all_collectors: List[dict] = []
-        latest_cursor_value = start_modified_at
-        batch_full = False
+        while True:
+            params = {"page": page, "per_page": 1000}
+            data = self._make_request(surveys_url, params)
+            surveys = data.get("data", [])
 
-        for survey in all_surveys:
-            if batch_full:
+            if not surveys:
                 break
 
+            all_surveys.extend(surveys)
+
+            if "next" not in data.get("links", {}):
+                break
+
+            page += 1
+            time.sleep(0.1)
+
+        # Then, get collectors for each survey
+        all_collectors = []
+        latest_cursor_value = start_modified_at
+
+        for survey in all_surveys:
             survey_id = survey["id"]
             collectors_url = f"{self.base_url}/surveys/{survey_id}/collectors"
             page = 1
 
-            while len(all_collectors) < max_records:
+            while True:
                 params = {
                     "page": page,
                     "per_page": 1000,
@@ -673,6 +642,7 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
                 try:
                     data = self._make_request(collectors_url, params)
                 except Exception:
+                    # Skip surveys with no access or errors
                     break
 
                 collectors = data.get("data", [])
@@ -690,26 +660,11 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
                         if latest_cursor_value is None or cursor_value > latest_cursor_value:
                             latest_cursor_value = cursor_value
 
-                    if len(all_collectors) >= max_records:
-                        batch_full = True
-                        break
-
-                if batch_full:
-                    break
-
                 if "next" not in data.get("links", {}):
                     break
 
                 page += 1
                 time.sleep(0.1)
-
-        # Cap cursor at _init_time when all pages are truly exhausted
-        if (
-            not batch_full
-            and latest_cursor_value
-            and latest_cursor_value > self._init_time
-        ):
-            latest_cursor_value = self._init_time
 
         offset = {"date_modified": latest_cursor_value} if latest_cursor_value else {}
         return iter(all_collectors), offset

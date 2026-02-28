@@ -7,7 +7,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Iterator
 import json
@@ -904,51 +904,34 @@ def register_lakeflow_source(spark):
     def compute_next_cursor(
         max_timestamp: str | None,
         current_cursor: str | None,
-    ) -> str | None:
-        """
-        Return the next cursor value to checkpoint.
-
-        The offset stores the raw max observed timestamp so that progress is never
-        lost. Lookback is applied separately at read time via ``apply_lookback``.
-
-        Args:
-            max_timestamp: The maximum observed timestamp in ISO 8601 format.
-            current_cursor: The current cursor value (fallback when no data found).
-
-        Returns:
-            max_timestamp if available, otherwise current_cursor.
-        """
-        return max_timestamp if max_timestamp else current_cursor
-
-
-    def apply_lookback(
-        cursor: str | None,
         lookback_seconds: int,
         timestamp_format: str = "%Y-%m-%dT%H:%M:%SZ",
     ) -> str | None:
         """
-        Subtract a lookback window from a cursor timestamp.
+        Compute the next cursor value with a lookback window.
 
-        Used at read time to widen the ``since`` filter so that records updated
-        concurrently during the previous batch are not missed.
+        This function takes the maximum observed timestamp and applies a lookback
+        window to avoid missing records that may have been updated concurrently.
 
         Args:
-            cursor: ISO 8601 timestamp string to adjust.
-            lookback_seconds: Seconds to subtract from cursor.
+            max_timestamp: The maximum observed timestamp in ISO 8601 format.
+            current_cursor: The current cursor value (fallback if parsing fails).
+            lookback_seconds: Number of seconds to look back from the max timestamp.
             timestamp_format: The format of the timestamp string.
 
         Returns:
-            The adjusted timestamp, or the original cursor if parsing fails or
-            cursor is None.
+            The computed next cursor value, or current_cursor if computation fails.
         """
-        if not cursor or lookback_seconds <= 0:
-            return cursor
+        if not max_timestamp:
+            return current_cursor
 
         try:
-            dt = datetime.strptime(cursor, timestamp_format)
-            return (dt - timedelta(seconds=lookback_seconds)).strftime(timestamp_format)
+            dt = datetime.strptime(max_timestamp, timestamp_format)
+            dt_with_lookback = dt - timedelta(seconds=lookback_seconds)
+            return dt_with_lookback.strftime(timestamp_format)
         except (ValueError, TypeError):
-            return cursor
+            # Fallback: if parsing fails, return the raw max_timestamp
+            return max_timestamp
 
 
     def get_cursor_from_offset(
@@ -1017,7 +1000,6 @@ def register_lakeflow_source(spark):
                 raise ValueError("GitHub connector requires 'token' in options")
 
             self.base_url = options.get("base_url", "https://api.github.com").rstrip("/")
-            self._init_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
             # Configure a session with proper headers for GitHub REST API v3
             self._session = requests.Session()
@@ -1081,7 +1063,7 @@ def register_lakeflow_source(spark):
                 - state: Issue state filter (default: "all").
                 - per_page: Page size (max 100, default 100).
                 - start_date: Initial ISO 8601 timestamp for first run if no start_offset is provided.
-                - lookback_seconds: Lookback window applied to the cursor at read time (default: 300).
+                - lookback_seconds: Lookback window applied when computing next cursor (default: 300).
                 - max_pages_per_batch: Optional safety limit on pages per read_table call.
             """
             reader_map = {
@@ -1103,50 +1085,13 @@ def register_lakeflow_source(spark):
                 raise ValueError(f"Unsupported table: {table_name!r}")
             return reader_map[table_name](start_offset, table_options)
 
-        def _compute_next_offset(  # pylint: disable=too-many-arguments,too-many-positional-arguments
-            self,
-            next_cursor: str | None,
-            current_cursor: str | None,
-            start_offset: dict | None,
-            records: list,
-            pages_exhausted: bool,
-        ) -> dict:
-            """
-            Decide the offset to return from a CDC/append read.
-
-            The cursor is capped at ``_init_time`` (set once in ``__init__``) so
-            that a single trigger run only drains data that existed when the
-            connector was instantiated.  Any records arriving after that point
-            are still emitted (the API has no upper-bound filter) but the
-            checkpoint will not advance past ``_init_time``, guaranteeing
-            termination.  The next trigger creates a fresh connector with a
-            new ``_init_time``.
-
-            Returns start_offset (signalling "no more data") when either:
-            - No records were produced, or
-            - All API pages were consumed and the (capped) cursor has not
-              advanced beyond current_cursor.
-            """
-            if not records and start_offset:
-                return start_offset
-
-            if not next_cursor:
-                return start_offset if start_offset else {}
-
-            next_cursor = min(next_cursor, self._init_time)
-
-            if pages_exhausted and next_cursor == current_cursor:
-                return start_offset if start_offset else {"cursor": next_cursor}
-
-            return {"cursor": next_cursor}
-
         def _paginated_fetch(
             self,
             url: str,
             params: dict,
             pagination: PaginationOptions,
             entity_name: str,
-        ) -> tuple[list[dict], bool]:
+        ) -> list[dict]:
             """
             Generic paginated fetch from GitHub API.
 
@@ -1157,10 +1102,7 @@ def register_lakeflow_source(spark):
                 entity_name: Name of the entity being fetched (for error messages).
 
             Returns:
-                A two-element tuple of (results, pages_exhausted).
-                results: List of raw JSON objects from all fetched pages.
-                pages_exhausted: True if all available pages were consumed,
-                    False if the fetch stopped because max_pages_per_batch was hit.
+                List of raw JSON objects from all fetched pages.
             """
             results: list[dict] = []
             pages_fetched = 0
@@ -1182,16 +1124,18 @@ def register_lakeflow_source(spark):
 
                 results.extend(data)
 
+                # Handle pagination via Link header
                 link_header = response.headers.get("Link", "")
                 next_link = extract_next_link(link_header)
                 if not next_link:
-                    return results, True
+                    break
 
+                # Subsequent requests follow the next URL as provided (no extra params)
                 next_url = next_link
                 next_params = None
                 pages_fetched += 1
 
-            return results, False
+            return results
 
         def _read_issues(
             self, start_offset: dict, table_options: dict[str, str]
@@ -1202,6 +1146,7 @@ def register_lakeflow_source(spark):
             state = table_options.get("state", "all")
             cursor = get_cursor_from_offset(start_offset, table_options)
 
+            # Build initial request
             url = f"{self.base_url}/repos/{owner}/{repo}/issues"
             params = {
                 "state": state,
@@ -1209,12 +1154,12 @@ def register_lakeflow_source(spark):
                 "sort": "updated",
                 "direction": "asc",
             }
-            since = apply_lookback(cursor, pagination.lookback_seconds)
-            if since:
-                params["since"] = since
+            if cursor:
+                params["since"] = cursor
 
-            raw_issues, pages_exhausted = self._paginated_fetch(url, params, pagination, "issues")
+            raw_issues = self._paginated_fetch(url, params, pagination, "issues")
 
+            # Process records and track max updated_at
             records: list[dict[str, Any]] = []
             max_updated_at: str | None = None
 
@@ -1229,10 +1174,14 @@ def register_lakeflow_source(spark):
                     if max_updated_at is None or updated_at > max_updated_at:
                         max_updated_at = updated_at
 
-            next_cursor = compute_next_cursor(max_updated_at, cursor)
-            next_offset = self._compute_next_offset(
-                next_cursor, cursor, start_offset, records, pages_exhausted
-            )
+            # Compute next cursor with lookback
+            next_cursor = compute_next_cursor(max_updated_at, cursor, pagination.lookback_seconds)
+
+            # If no new records, return the same offset to indicate end of stream
+            if not records and start_offset:
+                next_offset = start_offset
+            else:
+                next_offset = {"cursor": next_cursor} if next_cursor else {}
 
             return iter(records), next_offset
 
@@ -1285,7 +1234,7 @@ def register_lakeflow_source(spark):
 
             params = {"per_page": pagination.per_page}
 
-            raw_repos, _ = self._paginated_fetch(url, params, pagination, "repositories")
+            raw_repos = self._paginated_fetch(url, params, pagination, "repositories")
 
             records: list[dict[str, Any]] = []
             for repo_obj in raw_repos:
@@ -1320,11 +1269,10 @@ def register_lakeflow_source(spark):
                 "sort": "updated",
                 "direction": "asc",
             }
-            since = apply_lookback(cursor, pagination.lookback_seconds)
-            if since:
-                params["since"] = since
+            if cursor:
+                params["since"] = cursor
 
-            raw_prs, pages_exhausted = self._paginated_fetch(url, params, pagination, "pull_requests")
+            raw_prs = self._paginated_fetch(url, params, pagination, "pull_requests")
 
             records: list[dict[str, Any]] = []
             max_updated_at: str | None = None
@@ -1340,10 +1288,12 @@ def register_lakeflow_source(spark):
                     if max_updated_at is None or updated_at > max_updated_at:
                         max_updated_at = updated_at
 
-            next_cursor = compute_next_cursor(max_updated_at, cursor)
-            next_offset = self._compute_next_offset(
-                next_cursor, cursor, start_offset, records, pages_exhausted
-            )
+            next_cursor = compute_next_cursor(max_updated_at, cursor, pagination.lookback_seconds)
+
+            if not records and start_offset:
+                next_offset = start_offset
+            else:
+                next_offset = {"cursor": next_cursor} if next_cursor else {}
 
             return iter(records), next_offset
 
@@ -1364,11 +1314,10 @@ def register_lakeflow_source(spark):
                 "sort": "updated",
                 "direction": "asc",
             }
-            since = apply_lookback(cursor, pagination.lookback_seconds)
-            if since:
-                params["since"] = since
+            if cursor:
+                params["since"] = cursor
 
-            raw_comments, pages_exhausted = self._paginated_fetch(url, params, pagination, "comments")
+            raw_comments = self._paginated_fetch(url, params, pagination, "comments")
 
             records: list[dict[str, Any]] = []
             max_updated_at: str | None = None
@@ -1384,14 +1333,16 @@ def register_lakeflow_source(spark):
                     if max_updated_at is None or updated_at > max_updated_at:
                         max_updated_at = updated_at
 
-            next_cursor = compute_next_cursor(max_updated_at, cursor)
-            next_offset = self._compute_next_offset(
-                next_cursor, cursor, start_offset, records, pages_exhausted
-            )
+            next_cursor = compute_next_cursor(max_updated_at, cursor, pagination.lookback_seconds)
+
+            if not records and start_offset:
+                next_offset = start_offset
+            else:
+                next_offset = {"cursor": next_cursor} if next_cursor else {}
 
             return iter(records), next_offset
 
-        def _read_commits(  # pylint: disable=too-many-locals
+        def _read_commits(
             self, start_offset: dict, table_options: dict[str, str]
         ) -> (Iterator[dict], dict):
             """
@@ -1407,7 +1358,7 @@ def register_lakeflow_source(spark):
             if cursor:
                 params["since"] = cursor
 
-            raw_commits, pages_exhausted = self._paginated_fetch(url, params, pagination, "commits")
+            raw_commits = self._paginated_fetch(url, params, pagination, "commits")
 
             records: list[dict[str, Any]] = []
             max_commit_date: str | None = None
@@ -1441,10 +1392,13 @@ def register_lakeflow_source(spark):
                     if max_commit_date is None or author_date > max_commit_date:
                         max_commit_date = author_date
 
-            next_cursor = compute_next_cursor(max_commit_date, cursor)
-            next_offset = self._compute_next_offset(
-                next_cursor, cursor, start_offset, records, pages_exhausted
-            )
+            # For commits we simply reuse the max commit author date as the next cursor.
+            next_cursor = max_commit_date if max_commit_date else cursor
+
+            if not records and start_offset:
+                next_offset = start_offset
+            else:
+                next_offset = {"cursor": next_cursor} if next_cursor else {}
 
             return iter(records), next_offset
 
@@ -1461,7 +1415,7 @@ def register_lakeflow_source(spark):
             url = f"{self.base_url}/repos/{owner}/{repo}/assignees"
             params = {"per_page": pagination.per_page}
 
-            raw_assignees, _ = self._paginated_fetch(url, params, pagination, "assignees")
+            raw_assignees = self._paginated_fetch(url, params, pagination, "assignees")
 
             records: list[dict[str, Any]] = []
             for assignee in raw_assignees:
@@ -1491,7 +1445,7 @@ def register_lakeflow_source(spark):
             url = f"{self.base_url}/repos/{owner}/{repo}/branches"
             params = {"per_page": pagination.per_page}
 
-            raw_branches, _ = self._paginated_fetch(url, params, pagination, "branches")
+            raw_branches = self._paginated_fetch(url, params, pagination, "branches")
 
             records: list[dict[str, Any]] = []
             for branch in raw_branches:
@@ -1520,7 +1474,7 @@ def register_lakeflow_source(spark):
             url = f"{self.base_url}/repos/{owner}/{repo}/collaborators"
             params = {"per_page": pagination.per_page}
 
-            raw_collaborators, _ = self._paginated_fetch(url, params, pagination, "collaborators")
+            raw_collaborators = self._paginated_fetch(url, params, pagination, "collaborators")
 
             records: list[dict[str, Any]] = []
             for collaborator in raw_collaborators:
@@ -1559,7 +1513,7 @@ def register_lakeflow_source(spark):
             url = f"{self.base_url}/user/orgs"
             params = {"per_page": pagination.per_page}
 
-            raw_orgs, _ = self._paginated_fetch(url, params, pagination, "organizations")
+            raw_orgs = self._paginated_fetch(url, params, pagination, "organizations")
 
             records: list[dict[str, Any]] = []
             for org_summary in raw_orgs:
@@ -1604,7 +1558,7 @@ def register_lakeflow_source(spark):
             url = f"{self.base_url}/user/teams"
             params = {"per_page": pagination.per_page}
 
-            raw_teams, _ = self._paginated_fetch(url, params, pagination, "teams")
+            raw_teams = self._paginated_fetch(url, params, pagination, "teams")
 
             records: list[dict[str, Any]] = []
             for team_summary in raw_teams:
@@ -1687,7 +1641,7 @@ def register_lakeflow_source(spark):
                 url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}/reviews"
                 params = {"per_page": pagination.per_page}
 
-                raw_reviews, _ = self._paginated_fetch(
+                raw_reviews = self._paginated_fetch(
                     url, params, pagination, f"reviews for PR #{pull_number}"
                 )
 
@@ -1716,7 +1670,7 @@ def register_lakeflow_source(spark):
             url = f"{self.base_url}/repos/{owner}/{repo}/pulls"
             params = {"state": pr_state, "per_page": pagination.per_page}
 
-            raw_prs, _ = self._paginated_fetch(url, params, pagination, "pull_requests")
+            raw_prs = self._paginated_fetch(url, params, pagination, "pull_requests")
 
             for pr in raw_prs:
                 number = pr.get("number")

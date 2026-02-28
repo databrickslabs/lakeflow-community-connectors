@@ -1,10 +1,8 @@
 {
     "my_table": {
-        "total_available_rows": 1000,
-        "num_rows_per_batch": 100
+        "num_rows": 1000
     },
     "your_table": {
-        "total_available_rows": 1000,
-        "num_rows_per_batch": 100
+        "num_rows": 1000
     }
 }

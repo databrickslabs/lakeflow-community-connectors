@@ -1,5 +1,4 @@
 import base64
-import time
 from datetime import datetime
 from typing import Dict, List, Iterator
 import requests
@@ -20,8 +19,6 @@ class ZendeskLakeflowConnect(LakeflowConnect):
             "Authorization": "Basic " + base64.b64encode(auth_str.encode()).decode(),
             "Content-Type": "application/json",
         }
-        self._init_time = int(time.time())
-        self._default_max_records_per_batch = 100_000
 
     def list_tables(self) -> List[str]:
         """Return the list of available Zendesk tables."""
@@ -292,12 +289,8 @@ class ZendeskLakeflowConnect(LakeflowConnect):
     def read_table(
         self, table_name: str, start_offset: dict, table_options: Dict[str, str]
     ) -> (Iterator[dict], dict):
-        """Read data from the specified Zendesk table with incremental support.
-
-        Each incremental call fetches up to ``max_records_per_batch`` records
-        (default 100 000).  The cursor is capped at ``_init_time`` to
-        guarantee termination for ``availableNow`` triggers.
-        """
+        """Read data from the specified Zendesk table with incremental support."""
+        # Map table names to their API endpoints and response keys
         api_config = {
             "tickets": {
                 "endpoint": "incremental/tickets.json",
@@ -350,16 +343,9 @@ class ZendeskLakeflowConnect(LakeflowConnect):
             raise ValueError(f"Table '{table_name}' is not supported.")
 
         config = api_config[table_name]
-        max_records = int(
-            table_options.get(
-                "max_records_per_batch", self._default_max_records_per_batch
-            )
-        )
 
         if config.get("supports_incremental", False):
-            return self._read_incremental(
-                table_name, config, start_offset, max_records
-            )
+            return self._read_incremental(table_name, config, start_offset)
         else:
             return self._read_paginated(table_name, config, start_offset)
 
@@ -400,36 +386,23 @@ class ZendeskLakeflowConnect(LakeflowConnect):
             max_time = max(max_time, record_time)
         return records, max_time
 
-    def _read_incremental(
-        self,
-        table_name: str,
-        config: dict,
-        start_offset: dict,
-        max_records: int,
-    ):
-        """Read data from incremental API endpoints with bounded batch size.
-
-        Uses Zendesk's ``end_time`` response field to resume pagination
-        across microbatches.  The cursor is capped at ``_init_time`` so
-        that a single trigger run only drains data that existed when the
-        connector was instantiated.
-        """
+    def _read_incremental(self, table_name: str, config: dict, start_offset: dict):
+        """Read data from incremental API endpoints."""
         start_time = start_offset.get("start_time", 0) if start_offset else 0
-        resume_after = start_offset.get("resume_after") if start_offset else None
         endpoint = config["endpoint"]
+        response_key = config["response_key"]
 
-        api_cursor = resume_after if resume_after is not None else start_time
+        # Build URL with query parameters
+        url = f"{self.base_url}/{endpoint}?start_time={start_time}"
+        if "include" in config:
+            url += f"&include={config['include']}"
 
         all_records = []
+        next_page = url
         last_time = start_time
-        reached_end = False
 
-        while len(all_records) < max_records:
-            url = f"{self.base_url}/{endpoint}?start_time={api_cursor}"
-            if "include" in config:
-                url += f"&include={config['include']}"
-
-            resp = requests.get(url, headers=self.auth_header)
+        while next_page:
+            resp = requests.get(next_page, headers=self.auth_header)
             if resp.status_code != 200:
                 raise Exception(
                     f"Zendesk API error for {table_name}: {resp.status_code} {resp.text}"
@@ -440,33 +413,16 @@ class ZendeskLakeflowConnect(LakeflowConnect):
             if table_name == "ticket_comments":
                 records, max_time = self._extract_ticket_comments(data)
             else:
-                records, max_time = self._extract_records_with_time(
-                    data, config["response_key"]
-                )
+                records, max_time = self._extract_records_with_time(data, response_key)
 
             all_records.extend(records)
             last_time = max(last_time, max_time)
 
-            end_time = data.get("end_time")
-            if data.get("end_of_stream", True) or not end_time or end_time == api_cursor:
-                reached_end = True
+            next_page = data.get("next_page")
+            if data.get("end_of_stream", True) or not next_page:
                 break
 
-            api_cursor = end_time
-
-        if not all_records:
-            return [], start_offset or {}
-
-        if not reached_end:
-            next_offset = {
-                "start_time": last_time,
-                "resume_after": api_cursor,
-            }
-        else:
-            capped = min(last_time, self._init_time)
-            next_offset = {"start_time": capped}
-
-        return all_records, next_offset
+        return all_records, {"start_time": last_time}
 
     def _read_paginated(self, table_name: str, config: dict, start_offset: dict):
         """Read data from paginated API endpoints"""
