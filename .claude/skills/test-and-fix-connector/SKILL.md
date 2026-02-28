@@ -1,6 +1,7 @@
 ---
 name: test-and-fix-connector
 description: "Single step only: run and fix connector tests when the implementation already exists. Do NOT use for full connector creation — use the create-connector agent instead."
+disable-model-invocation: true
 ---
 
 # Test and Fix the Connector

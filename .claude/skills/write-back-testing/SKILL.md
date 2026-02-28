@@ -1,6 +1,7 @@
 ---
 name: write-back-testing
 description: Implement test utilities that write test data to the source system and validate end-to-end read cycles.
+disable-model-invocation: true
 ---
 
 # Implement Write-Back Testing

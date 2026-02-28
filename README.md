@@ -6,11 +6,84 @@ Lakeflow community connectors are built on top of the [Spark Python Data Source 
 
 Each connector is packaged as Python source code that defines a configurable SDP, which consists of 4 parts:
 1. Source connector implementation, following a predefined API
-2. Pipeline spec, defined as a Pydantic class
-3. Configurable ingestion pipeline definition
+2. Configurable ingestion pipeline definition
+3. Pipeline spec, defined as a Pydantic class
 4. Shared utilities and libraries that package the source implementation together with the pipeline
 
 Developers only need to implement or modify the source connector logic, while connector users configure ingestion behavior by updating the pipeline spec.
+
+## Develop a New Connector
+Build and deploy community connectors using AI-assisted workflows — either as a single guided session or step-by-step with full control.
+
+### Prerequisites
+- Access to [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or [Cursor](https://www.cursor.com/)
+- Clone the repo:
+```bash
+git clone https://github.com/databrickslabs/lakeflow-community-connectors.git
+```
+
+The development workflow is identical in both Claude Code and Cursor. All skills, agents, and commands are defined under `.claude/` and are automatically discovered by both tools.
+
+### Develop via Agent
+
+The simplest way to build a connector. A single command kicks off an autonomous agent that guides you through the entire workflow — from API research to deployment. Run the command below and it will orchestrate all steps end-to-end:
+```
+/create-connector <source_name> [tables=t1,t2,...] [doc=<url_or_path>]
+```
+Example: `/create-connector github`
+
+Note: the agent will pause once to ask you for credentials/tokens to authenticate with the source system.
+
+### Develop via Skills
+
+For more control over the development process, you can run each step individually as a skill command. This lets you iterate on specific steps more easily and customize the workflow to your needs. Replace `{source}` with your connector name.
+
+**Step 1** — Research and document the source system's READ API endpoints.
+```
+/research-source-api for {source}
+```
+
+**Step 2** — Collect credentials and validate connectivity.
+```
+/authenticate-source for {source}
+```
+
+**Step 3** — Implement connector source code.
+```
+/implement-connector for {source}
+```
+
+**Step 4** — Run tests and fix any failures.
+```
+/test-and-fix-connector for {source}
+```
+
+**Step 5a** — Generate user-facing documentation.
+```
+/create-connector-document for {source}
+```
+
+**Step 5b** — Finalize the connector spec.
+```
+/generate-connector-spec for {source}
+```
+
+**Step 6** — Build and package the connector.
+```
+/build-connector-package for {source}
+```
+
+**Write-Back Testing (Optional)** — For end-to-end validation, run these between Step 4 and Step 5. Skip if the source is read-only, only production access is available, or write operations are expensive/risky.
+
+Research write APIs (separate from Step 1's read-only research):
+```
+/research-write-api-of-source for {source}
+```
+
+Implement write-back test utilities:
+```
+/write-back-testing for {source}
+```
 
 ## Project Structure
 
@@ -25,28 +98,8 @@ Other directories:
 - `tools/` — Tools to build and deploy community connectors
 - `tests/` — Generic test suites for validating connector implementations
 - `prompts/` — Templates and guide for AI-assisted connector development
-- `.claude/skills/` — Claude skill files for each development workflow step
-- `.claude/agents/` - Claude subagents that handle different phases of connector development
-
-## Developing New Connectors
-
-Follow the instructions in [`prompts/README.md`](prompts/README.md) to create new connectors. The development workflow:
-
-1. **Understand the source** — Research API specs, auth mechanisms, and schemas using the provided template
-2. **Auth setup** — Generate the connection spec, configure credentials, and verify connectivity
-3. **Implement the connector** — Implement the `LakeflowConnect` interface methods
-4. **Test & iterate** — Run the standard test suites against a real source system
-   - *(Optional)* Implement write-back testing for end-to-end validation (write → read → verify cycle)
-5. **Generate documentation** — Create user-facing docs and connector spec
-   - Create the public-facing README using the documentation template
-   - Generate the connector spec YAML file (connection parameters and allowlist options)
-6. **Build & deploy** — Build the connector as a Python package and generate the deployable file
-   - *(Temporary)* Run `tools/scripts/merge_python_source.py` to generate the single-file deployment artifact
-
-### AI-Assisted Development with Claude
-Each step of the development workflow is packaged as a **skill** under `.claude/skills/`, which can be triggered individually. See [`prompts/README.md`](prompts/README.md) for the full step-by-step guide.
-
-For a fully autonomous experience, the entire workflow is also wrapped as a **create-connector agent** (`.claude/agents/create-connector.md`) that orchestrates all phases end-to-end — from API research through auth setup, implementation, testing, documentation, and packaging — without manual intervention at each stage. Developers can invoke this agent directly and let it build a complete connector autonomously.
+- `.claude/skills/` — Skill files for each development workflow step (auto-discovered by Claude Code and Cursor)
+- `.claude/agents/` — Subagents that handle different phases of connector development (auto-discovered by Claude Code and Cursor)
 
 ### API to Implement
 Connectors are built on the [Python Data Source API](https://spark.apache.org/docs/latest/api/python/tutorial/sql/python_data_source.html), with an abstraction layer (`LakeflowConnect`) that simplifies development. 

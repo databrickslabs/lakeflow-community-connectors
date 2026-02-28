@@ -1,6 +1,7 @@
 ---
 name: implement-connector
 description: "Single step only: implement the connector in Python when the API doc already exists. Do NOT use for full connector creation — use the create-connector agent instead."
+disable-model-invocation: true
 ---
 
 # Implement the Connector 

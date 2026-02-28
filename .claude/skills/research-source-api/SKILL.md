@@ -1,6 +1,7 @@
 ---
 name: research-source-api 
 description: "Single step only: research and document a source API when explicitly asked. Do NOT use for full connector creation — use the create-connector agent instead."
+disable-model-invocation: true
 ---
 
 # Research Source API

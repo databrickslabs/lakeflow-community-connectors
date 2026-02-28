@@ -1,6 +1,7 @@
 ---
 name: validate-connector-auth
 description: Generate and run an auth verification test to confirm that collected credentials are valid.
+disable-model-invocation: true
 ---
 
 # Connector Auth Validate
@@ -21,6 +22,13 @@ If `dev_config.json` does not exist, stop and report that credentials have not b
 - `tests/unit/sources/{{source_name}}/auth_test.py` — a passing auth verification test
 
 ## Steps
+
+### Step 0: Check if auth_test.py already exists
+
+Check if `tests/unit/sources/{{source_name}}/auth_test.py` already exists.
+
+- **If it exists:** skip to Step 3 — just run the existing test to validate credentials. Do not regenerate.
+- **If it does not exist:** proceed to Step 1.
 
 ### Step 1: Read the API Doc for Auth Details
 

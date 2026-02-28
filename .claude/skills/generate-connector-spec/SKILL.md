@@ -1,6 +1,7 @@
 ---
 name: generate-connector-spec
 description: Generate the connector spec YAML file defining connection parameters and external options allowlist.
+disable-model-invocation: true
 ---
 
 # Generate Connector Spec YAML

@@ -1,6 +1,7 @@
 ---
 name: create-connector-document
 description: Generate public-facing documentation for a connector targeted at end users.
+disable-model-invocation: true
 ---
 
 # Create Public Connector Documentation

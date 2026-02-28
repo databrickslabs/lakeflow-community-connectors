@@ -32,16 +32,9 @@ Gate: summarize tables and auth method found.
 
 ## Step 2 — Auth Setup
 
-Three sub-steps, sequential:
+Run the `/authenticate-source` skill. Read and follow `.claude/skills/authenticate-source/SKILL.md`.
+Finish all the steps in the skill sequentially.
 
-**2a.** Subagent: `connector-spec-generator` → `{SRC}/connector_spec.yaml`
-Prompt: source name, API doc path. Connection/auth section only; `external_options_allowlist` empty.
-
-**2b.** Collect credentials **yourself** — this is interactive (browser form) and cannot run as a background subagent. Read and follow `.claude/skills/collect-credentials/SKILL.md`.
-Verify: `{TESTS}/configs/dev_config.json` exists.
-
-**2c.** Subagent: `connector-auth-validator` → `{TESTS}/auth_test.py`
-Prompt: source name, API doc path, `dev_config.json` path.
 Gate: confirm auth test passes.
 
 ---
@@ -76,7 +69,7 @@ Gate: verify both files exist.
 ---
 
 ## Step 6 — Deployment
-Subagent: `connector-deployer` → `{SRC}/pyproject.toml` + built distribution
+Subagent: `connector-package-builder` → `{SRC}/pyproject.toml` + built distribution
 
 Prompt: source name, connector directory path.
 No gate — proceed directly to final summary.
