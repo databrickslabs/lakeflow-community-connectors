@@ -28,7 +28,8 @@ tests/
       lakeflow_connect_test_utils.py  # Write-back test utilities
 prompts/                 # Templates and guide for AI-assisted development
 .claude/skills/          # Claude skill files (development workflow steps)
-.claude/agents/          # Claude subagent that handles different phases of connector development
+.claude/agents/          # Claude subagents that handle different phases of connector development
+.claude/commands/        # Claude slash commands (e.g., /create-connector)
 ```
 
 ## Core Interface
@@ -37,7 +38,7 @@ All connectors implement the `LakeflowConnect` class in `src/databricks/labs/com
 
 ## Development Workflow
 
-Refer `.claude/agents/create-connector.md`
+Refer `.claude/commands/create-connector.md`
 
 ## Implementation Guidelines
 
