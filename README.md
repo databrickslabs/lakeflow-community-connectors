@@ -4,13 +4,13 @@
 
 Lakeflow community connectors are built on top of the [Spark Python Data Source API](https://spark.apache.org/docs/latest/api/python/tutorial/sql/python_data_source.html) and [Spark Declarative Pipeline (SDP)](https://www.databricks.com/product/data-engineering/spark-declarative-pipelines). These connectors enable users to ingest data from various source systems.
 
-Each connector is packaged as Python source code that defines a configurable SDP, which consists of 4 parts:
+Each connector is packaged as Python source code with 4 parts:
 1. Source connector implementation, following a predefined API
-2. Configurable ingestion pipeline definition
-3. Pipeline spec, defined as a Pydantic class
-4. Shared utilities and libraries that package the source implementation together with the pipeline
+2. Shared and configurable SDP pipeline 
+3. Shared libraries that integrate source connectors as Spark PDS and the pipeline
+4. User-configured pipeline spec 
 
-Developers only need to implement or modify the source connector logic, while connector users configure ingestion behavior by updating the pipeline spec.
+Developers **only need to implement the [source connector interface](src/databricks/labs/community_connector/interface/README.md)**, while connector users configure ingestion behavior by **configuring the pipeline spec**.
 
 ## Develop a New Connector
 Build and deploy community connectors using AI-assisted workflows — either as a single guided session or step-by-step with full control.
@@ -92,46 +92,38 @@ Implement write-back test utilities:
 
 ## Project Structure
 
-Core modules live under `src/databricks/labs/community_connector/`:
-- `interface/` — The `LakeflowConnect` base interface definition
-- `sources/` — Source connectors (e.g., `github/`, `zendesk/`, `stripe/`)
-- `sparkpds/` — PySpark Data Source implementation (`lakeflow_datasource.py`, `registry.py`)
-- `libs/` — Shared utilities for data type parsing, spec parsing, and module loading
-- `pipeline/` — Core ingestion logic: PySpark Data Source implementation and SDP orchestration
-
-Other directories:
-- `tools/` — Tools to build and deploy community connectors
-- `tests/` — Generic test suites for validating connector implementations
-- `prompts/` — Templates and guide for AI-assisted connector development
-- `.claude/skills/` — Skill files for each development workflow step (auto-discovered by Claude Code and Cursor)
-- `.claude/agents/` — Subagents that handle different phases of connector development (auto-discovered by Claude Code and Cursor)
-
-### API to Implement
-Connectors are built on the [Python Data Source API](https://spark.apache.org/docs/latest/api/python/tutorial/sql/python_data_source.html), with an abstraction layer (`LakeflowConnect`) that simplifies development. 
-Developers can also choose to directly implement Python Data Source API (not recommended) as long as the implementation meets the API contracts of the community connectors.
-
-**Please see more details under** [`src/databricks/labs/community_connector/interface/README.md`](src/databricks/labs/community_connector/interface/README.md).
-
-```python
-class LakeflowConnect:
-    def __init__(self, options: dict[str, str]) -> None:
-        """Initialize with connection parameters (auth tokens, configs, etc.)"""
-
-    def list_tables(self) -> list[str]:
-        """Return names of all tables supported by this connector."""
-
-    def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
-        """Return the Spark schema for a table."""
-
-    def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
-        """Return metadata: primary_keys, cursor_field, ingestion_type (snapshot|cdc|cdc_with_deletes|append)."""
-
-    def read_table(self, table_name: str, start_offset: dict, table_options: dict[str, str]) -> (Iterator[dict], dict):
-        """Yield records as JSON dicts and return the next offset for incremental reads."""
-
-    def read_table_deletes(self, table_name: str, start_offset: dict, table_options: dict[str, str]) -> (Iterator[dict], dict):
-        """Optional: Yield deleted records for delete synchronization. Only required if ingestion_type is 'cdc_with_deletes'."""
 ```
+lakeflow-community-connectors/
+|
+|___ src/databricks/labs/community_connector/   # Core modules
+|       |___ interface/          # The interface each source connector needs to implement 
+|       |___ sources/            # Source connectors
+|       |       |___ github/     
+|       |       |___ zendesk/
+|       |       |___ stripe/
+|       |       |___ ...         # Each connector: python code, docs, spec and etc. 
+|       |___ sparkpds/           # PySpark Data Source implementation and registry
+|       |___ libs/               # Shared utilities (spec parsing, data types, module loading)
+|       |___ pipeline/           # SDP ingestion orchestration
+|
+|___ tests/                      # Test suites
+|       |___ unit/
+|               |___ sources/    # Per-connector tests + generic test harness
+|               |___ libs/       # Shared library tests
+|               |___ pipeline/   # Pipeline tests
+|
+|___ tools/                      # Build and deployment tooling
+|       |___ community_connector/  # CLI tool for workspace setup and deployment
+|       |___ scripts/              # Build scripts (e.g., merge_python_source.py)
+|
+|___ prompts/                    # Templates and guide for AI-assisted development
+|
+|___ .claude/                    # AI-assisted development (auto-discovered by Claude Code and Cursor)
+        |___ skills/             # Skill files for each workflow step
+        |___ agents/             # Subagents for different development phases
+        |___ commands/           # Slash commands (e.g., /create-connector)
+```
+
 
 ### Tests
 
