@@ -3,7 +3,7 @@ name: source-write-api-researcher
 description: Autonomous research agent that documents write/create APIs of a source system to enable write-back testing.
 tools: WebSearch, WebFetch, Read, Write, Grep, Glob, Bash
 model: sonnet
-permissionMode: acceptEdits
+permissionMode: bypassPermissions
 memory: local
 skills:
   - research-write-api-of-source

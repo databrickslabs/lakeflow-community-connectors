@@ -3,7 +3,7 @@ name: connector-deployer
 description: "Create a pyproject.toml for a source connector, build it as an independent Python package, and prepare it for deployment."
 model: sonnet
 color: green
-permissionMode: acceptEdits
+permissionMode: bypassPermissions
 skills:
   - build-source-project
 ---

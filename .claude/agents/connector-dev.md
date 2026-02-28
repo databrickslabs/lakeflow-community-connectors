@@ -4,7 +4,7 @@ description: "Develop a Python community connector for a specified source system
 model: opus
 color: cyan
 memory: project
-permissionMode: acceptEdits
+permissionMode: bypassPermissions
 skills:
   - implement-connector
 ---

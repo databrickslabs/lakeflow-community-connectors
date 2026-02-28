@@ -3,7 +3,7 @@ name: source-api-researcher
 description: Autonomous research agent that systematically researches a source system's API and produces a Source Doc Summary. Use when you need to document a new data source for connector development.
 tools: WebSearch, WebFetch, Read, Write, Grep, Glob, Bash
 model: sonnet
-permissionMode: acceptEdits
+permissionMode: bypassPermissions
 memory: local
 skills:
   - research-source-api

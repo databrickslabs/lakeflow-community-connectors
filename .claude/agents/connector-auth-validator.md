@@ -4,7 +4,7 @@ description: "Generate and run an auth verification test to confirm that collect
 tools: Bash, Glob, Grep, Read, Edit, Write
 model: sonnet
 color: red
-permissionMode: acceptEdits
+permissionMode: bypassPermissions
 memory: project
 skills:
   - validate-connector-auth
