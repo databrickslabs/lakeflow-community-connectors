@@ -1,6 +1,7 @@
 ---
 name: migrate-legacy-implementation
 description: Migrate a legacy source connector from the old sources/ directory to the new package structure under src/databricks/labs/community_connector/sources/.
+disable-model-invocation: true
 ---
 
 # Migrate Legacy Source Implementation
@@ -44,7 +45,7 @@ then run other python commands or pytest.
 
 7. Use the `generate-connector-spec` skill to regenerate the spec for this connector.
 
-8. Use the `build-source-project` skill to build the `pyproject.toml` and related files.
+8. Use the `build_connector_package` skill to build the `pyproject.toml` and related files.
    - Commit the changes so far.
 
 10. If there are any .py files that should not be imported as part of {source_name}.py, exclude them in the tools/scripts/merge_exclude_config.json

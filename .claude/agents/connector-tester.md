@@ -4,7 +4,7 @@ description: "Validate a connector implementation by creating and running the te
 model: opus
 color: red
 memory: project
-permissionMode: acceptEdits
+permissionMode: bypassPermissions
 skills:
   - test-and-fix-connector
 ---

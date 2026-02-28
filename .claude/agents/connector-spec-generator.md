@@ -3,7 +3,7 @@ name: connector-spec-generator
 description: "Generate the connector spec YAML file for a completed connector implementation, defining connection parameters and external options allowlist."
 model: haiku
 color: yellow
-permissionMode: acceptEdits
+permissionMode: bypassPermissions
 skills:
   - generate-connector-spec
 ---

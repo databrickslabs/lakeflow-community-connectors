@@ -1,6 +1,7 @@
 ---
 name: research-write-api-of-source 
 description: Research and document write/create APIs of a source system to enable write-back testing functionality.
+disable-model-invocation: true
 ---
 
 # Research Write APIs of Source System 
@@ -24,7 +25,7 @@ Research and document the write/create APIs for the source system to enable writ
 - ✅ You have time for comprehensive testing
 
 ## Input
-- The `{source_name}_api_doc.md` created by "understand-source" (for reference)
+- The `{source_name}_api_doc.md` created by the `research-source-api` skill (for reference)
 - Access to source API documentation
 
 ## Output
@@ -88,7 +89,7 @@ If no transformations exist, state: "Field names are consistent between write an
 
 ## Research Requirements
 
-Follow the same rigorous research process as "understand-source":
+Follow the same rigorous research process as the `research-source-api` skill:
 1. **Check official API documentation** for write/create endpoints
 2. **Find reference implementations** (Airbyte test utilities, Singer tap tests, etc.)
 3. **Cross-reference at least two sources** for payload structure and required fields

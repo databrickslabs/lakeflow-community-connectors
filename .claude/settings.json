@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(.claude/skills/**)",
+      "Read(.claude/agents/**)",
+      "Read(src/**)",
+      "Read(prompts/templates/**)",
+      "Bash(source:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)"
+    ],
+    "deny": [
+      "Read(tests/unit/sources/**/configs/dev_config.json)"
+    ]
+  }
+}

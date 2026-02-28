@@ -1,6 +1,7 @@
 ---
-name: build-source-project
+name: build_connector_package
 description: Create a pyproject.toml for a source connector and build it as an independent Python package.
+disable-model-invocation: true
 ---
 
 # Build Source Project
