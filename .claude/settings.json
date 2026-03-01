@@ -4,7 +4,7 @@
       "Read(.claude/skills/**)",
       "Read(.claude/agents/**)",
       "Read(src/**)",
-      "Read(prompts/templates/**)",
+      "Read(templates/**)",
       "Bash(source:*)",
       "Bash(ls:*)",
       "Bash(find:*)"
