@@ -87,8 +87,7 @@ These are optional; if not provided they default to the pipeline's defaults.
 
 ### 2c. Pipeline name (Required)
 
-- **Create mode**: Ask the user to choose a name for their new pipeline (e.g. `my_github_pipeline`).
-- **Update mode**: Use the pipeline name collected in Step 0. Confirm it with the user.
+In create mode, ask the user to choose a name (e.g. `my_github_pipeline`). In update mode, use the name collected in Step 0 and confirm it.
 
 ### 2d. Tables to ingest
 
@@ -168,26 +167,16 @@ cd tools/community_connector && pip install -e . && cd ../..
 
 ---
 
-## Step 5 — Create or update the pipeline
+## Step 5 — Deploy the pipeline
 
-Write the pipeline spec JSON to a temporary file, then run the appropriate command based on the operation mode.
+The create and update commands have identical syntax — only the verb differs. Use `create_pipeline` or `update_pipeline` based on the mode chosen in Step 0.
 
 1. Write the spec to `tests/unit/sources/{{source_name}}/configs/{PIPELINE_NAME}_spec.json`.
 
-2. Run the command for the chosen mode:
-
-**Create mode:**
+2. Run:
 
 ```bash
-community-connector create_pipeline {{source_name}} <PIPELINE_NAME> \
-  -ps tests/unit/sources/{{source_name}}/configs/pipeline_spec.json \
-  [-c <CATALOG>] [-t <TARGET>]
-```
-
-**Update mode:**
-
-```bash
-community-connector update_pipeline {{source_name}} <PIPELINE_NAME> \
+community-connector <create_pipeline|update_pipeline> {{source_name}} <PIPELINE_NAME> \
   -ps tests/unit/sources/{{source_name}}/configs/pipeline_spec.json \
   [-c <CATALOG>] [-t <TARGET>]
 ```
@@ -196,9 +185,7 @@ Include `-c` and `-t` only if the user provided catalog/schema in Step 2b.
 
 3. After successful execution, delete the temporary pipeline spec file.
 
-4. Verify the output:
-   - **Create mode**: confirm `✓ Pipeline created!` and capture the **Pipeline URL** and **Pipeline ID**.
-   - **Update mode**: confirm `✓ Pipeline updated!` and capture the **Pipeline URL** and **Pipeline ID**.
+4. Confirm `✓ Pipeline created!` or `✓ Pipeline updated!` and capture the **Pipeline URL** and **Pipeline ID**.
 
 ---
 
@@ -206,10 +193,8 @@ Include `-c` and `-t` only if the user provided catalog/schema in Step 2b.
 
 Present the deployment summary:
 
-**Create mode:**
-
 ```
-Pipeline created for {{source_name}}!
+Pipeline <created|updated> for {{source_name}}!
 
 Connection: <CONNECTION_NAME>
 
@@ -224,29 +209,7 @@ Tables configured:
   ...
 
 Next steps:
-  - Open the Pipeline URL to view and start the pipeline
-  - Or run: community-connector run_pipeline <PIPELINE_NAME>
-```
-
-**Update mode:**
-
-```
-Pipeline updated for {{source_name}}!
-
-Connection: <CONNECTION_NAME>
-
-Pipeline:
-  Name: <PIPELINE_NAME>
-  URL:  <PIPELINE_URL>
-  ID:   <PIPELINE_ID>
-
-Tables configured:
-  - <TABLE_1>
-  - <TABLE_2>
-  ...
-
-Next steps:
-  - Open the Pipeline URL to view the updated pipeline
+  - Open the Pipeline URL to view the pipeline
   - Or run: community-connector run_pipeline <PIPELINE_NAME>
 ```
 
