@@ -66,6 +66,11 @@ Prompt: source name, implementation path.
 
 Gate: verify both files exist.
 
+**Post-gate note**: After the user confirms, tell them:
+> The connector for **{source_name}** has been developed and tested. All tests pass against the live source system, documentation and connector spec are in place. The next step (Step 6) will package and deploy the connector — this step is optional and can be done later.
+
+Ask: "Would you like to proceed with packaging and deployment now, or stop here?" ("Proceed with deployment" / "Stop here — I'll deploy later"). If they choose to stop, skip to the Final Summary.
+
 ---
 
 ## Step 6 — Deployment

@@ -36,8 +36,33 @@ The connection can also be created using the standard Unity Catalog API.
 <Describe the primary key columns of each object, if available>
 <Describe the incremental ingestion strategy and cursor field for objects that support incremental reads>
 <If the connector supports delete synchronization (cdc_with_deletes), list which objects support it and explain how deleted records are detected (e.g., archived flag, soft delete endpoint)>
-<Describe the required and optional configurations needed for each object>
 <You don't need to describe the full schema, but highlight any special columns that require attention.>
+
+## Table Configurations 
+
+### Source & Destination
+
+These are set directly under each `table` object in the pipeline spec:
+
+| Option | Required | Description |
+|---|---|---|
+| `source_table` | Yes | Table name in the source system |
+| `destination_catalog` | No | Target catalog (defaults to pipeline's default) |
+| `destination_schema` | No | Target schema (defaults to pipeline's default) |
+| `destination_table` | No | Target table name (defaults to `source_table`) |
+
+### Common `table_configuration` options
+
+These are set inside the `table_configuration` map alongside any source-specific options:
+
+| Option | Required | Description |
+|---|---|---|
+| `scd_type` | No | `SCD_TYPE_1` (default) or `SCD_TYPE_2`. Only applicable to tables with CDC or SNAPSHOT ingestion mode; APPEND_ONLY tables do not support this option. |
+| `primary_keys` | No | List of columns to override the connector's default primary keys |
+| `sequence_by` | No | Column used to order records for SCD Type 2 change tracking |
+
+Special `table_configuration` options
+<Describe the source specific required and optional configurations needed for each object>
 
 
 ## Data Type Mapping

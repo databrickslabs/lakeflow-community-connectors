@@ -32,7 +32,7 @@ Each connector must include tests that run the **generic test suite** against a 
 - **Unit tests** — Recommended for complex library code or connector-specific logic
 
 ## Develop a New Connector
-Build and deploy connectors using the `LakeflowConnect` abstraction with AI-assisted workflows — either as a single guided session or step-by-step with full control. These workflows do not apply to direct Python Data Source API implementations.
+Build connectors using the `LakeflowConnect` abstraction with AI-assisted workflows — either as a single guided session or step-by-step with full control. These workflows do not apply to direct Python Data Source API implementations.
 
 ### Prerequisites
 - Access to [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or [Cursor](https://www.cursor.com/)
@@ -89,7 +89,7 @@ For more control over the development process, you can run each step individuall
 
 **Step 6** — Build and package the connector.
 ```
-/build-connector-package for {source}
+/deploy-connector for {source}
 ```
 
 **Write-Back Testing (Optional)** — For end-to-end validation, run these between Step 4 and Step 5. Skip if the source is read-only, only production access is available, or write operations are expensive/risky.
@@ -143,51 +143,18 @@ lakeflow-community-connectors/
         |___ commands/           # Slash commands (e.g., /create-connector)
 ```
 
-## Using and Testing Community Connectors
+## Deploy and Run Community Connectors
 
-Each connector runs as a configurable SDP. Define a **pipeline spec** to specify which tables to ingest and where to store them. See more details in this [example](pipeline-spec/example_ingest.py). You don't need to manually create files below, as both UI and CLI tool will automatically generate these files when setting the connector.
-
-```python
-from databricks.labs.community_connector.pipeline import ingest
-from databricks.labs.community_connector import register
-
-source_name = "github"  # or "zendesk", "stripe", etc.
-pipeline_spec = {
-    "connection_name": "my_github_connection",
-    "objects": [
-        {"table": {"source_table": "pulls"}},
-        {"table": {"source_table": "issues", "destination_table": "github_issues"}},
-    ],
-}
-
-# Register the source and run ingestion
-register_lakeflow_source = get_register_function(source_name)
-register_lakeflow_source(spark)
-ingest(spark, pipeline_spec)
-```
-
-There are two ways to set up and run the community connectors. By default, the source code from the main repository (databrickslabs/lakeflow-community-connectors) is used to run the community connector. However, both methods described below allow you to override this by using your own Git repository, which should be cloned from the main repository.
+Each connector runs as a configurable SDP. Define a **pipeline spec** to specify which tables to ingest and where to store them. There are two ways to set up and run the community connectors. 
 
 ### Databricks UI
 On Databricks main page, click **“+New”** -> **“Add or upload data”**, and then select the source under **“Community connectors”**.
 If you are using a custom connector from your own Git repository, select **"+ Add Community Connector"**.
 
 ### CLI tool
+**We recommend running `/deploy-connector` in Cursor or Claude Code. This will guide you through the entire deployment process.**
+
 The **"community-connector"** CLI tool provides functionality equivalent to the UI. While access to a Databricks workspace is still required, this tool is particularly useful for validating and testing connectors during the development phase.
 
 See more details at [tools/community_connector](tools/community_connector/README.md)
  
-
-### Pipeline Spec Reference
-
-- `connection_name` *(required)* — Unity Catalog connection name
-- `objects` *(required)* — List of tables to ingest, each containing:
-  - `table` — Table configuration object:
-    - `source_table` *(required)* — Table name in the source system
-    - `destination_catalog` — Target catalog (defaults to pipeline's default)
-    - `destination_schema` — Target schema (defaults to pipeline's default)
-    - `destination_table` — Target table name (defaults to `source_table`)
-    - `table_configuration` — Additional options:
-      - `scd_type` — `SCD_TYPE_1` (default), `SCD_TYPE_2`, or `APPEND_ONLY`
-      - `primary_keys` — List of columns to override connector's default keys
-      - Other source-specific options (see each connector's README)

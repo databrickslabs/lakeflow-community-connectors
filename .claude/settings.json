@@ -7,7 +7,8 @@
       "Read(templates/**)",
       "Bash(source:*)",
       "Bash(ls:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(community-connector:*)"
     ],
     "deny": [
       "Read(tests/unit/sources/**/configs/dev_config.json)"
