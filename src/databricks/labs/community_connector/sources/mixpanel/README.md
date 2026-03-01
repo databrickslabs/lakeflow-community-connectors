@@ -107,6 +107,31 @@ The Mixpanel connector supports the following objects with their respective sche
 - **Key Fields**: `$distinct_id`, `$properties.$first_name`, `$properties.$last_name`, `$properties.$email`, `$properties.$last_seen`, `$properties.custom_properties`
 - **Description**: Individual user profiles with demographic and behavioral data. Standard Mixpanel people properties are available as typed fields, while custom profile properties are preserved in the `custom_properties` map to ensure no data loss
 
+## Table Configurations
+
+### Source & Destination
+
+These are set directly under each `table` object in the pipeline spec:
+
+| Option | Required | Description |
+|---|---|---|
+| `source_table` | Yes | Table name in the source system |
+| `destination_catalog` | No | Target catalog (defaults to pipeline's default) |
+| `destination_schema` | No | Target schema (defaults to pipeline's default) |
+| `destination_table` | No | Target table name (defaults to `source_table`) |
+
+### Common `table_configuration` options
+
+These are set inside the `table_configuration` map alongside any source-specific options:
+
+| Option | Required | Description |
+|---|---|---|
+| `scd_type` | No | `SCD_TYPE_1` (default) or `SCD_TYPE_2`. Only applicable to tables with CDC or SNAPSHOT ingestion mode; APPEND_ONLY tables do not support this option. |
+| `primary_keys` | No | List of columns to override the connector's default primary keys |
+| `sequence_by` | No | Column used to order records for SCD Type 2 change tracking |
+
+This connector does not require any source-specific table configuration options.
+
 ## Data Type Mapping
 
 The Mixpanel connector maps source data types to Databricks data types as follows:

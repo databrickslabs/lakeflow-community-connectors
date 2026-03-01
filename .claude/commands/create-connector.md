@@ -66,13 +66,15 @@ Prompt: source name, implementation path.
 
 Gate: verify both files exist.
 
+**Post-gate**: After confirmation, use `AskUserQuestion` — "The connector is fully developed, tested, and documented. Step 6 (packaging & deployment) is optional." Options: "Proceed with deployment" / "Stop here". If they stop, skip to Final Summary.
+
 ---
 
 ## Step 6 — Deployment
-Subagent: `connector-package-builder` → `{SRC}/pyproject.toml` + built distribution
 
-Prompt: source name, connector directory path.
-No gate — proceed directly to final summary.
+Run the `/deploy-connector` skill. Read and follow `.claude/skills/deploy-connector/SKILL.md`.
+Pass the source name. Finish all the steps in the skill sequentially.
+This is an interactive process — ask the user for input at each step rather than assuming values.
 
 ---
 
