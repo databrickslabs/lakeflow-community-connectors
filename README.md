@@ -135,7 +135,7 @@ lakeflow-community-connectors/
 |       |___ community_connector/  # CLI tool for workspace setup and deployment
 |       |___ scripts/              # Build scripts (e.g., merge_python_source.py)
 |
-|___ prompts/                    # Templates and guide for AI-assisted development
+|___ templates/                  # Templates and guide for AI-assisted development
 |
 |___ .claude/                    # AI-assisted development (auto-discovered by Claude Code and Cursor)
         |___ skills/             # Skill files for each workflow step

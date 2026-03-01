@@ -16,7 +16,7 @@ Create a comprehensive API documentation file that enables connector implementat
 
 ## Output
 
-Create `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md` following the template at `prompts/templates/source_api_doc_template.md`.
+Create `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md` following the template at `templates/source_api_doc_template.md`.
 
 ## Core Principles
 

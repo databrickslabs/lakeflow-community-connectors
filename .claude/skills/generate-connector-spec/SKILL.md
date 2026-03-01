@@ -10,7 +10,7 @@ disable-model-invocation: true
 Generate a **connector spec YAML file** for the **{{source_name}}** connector that defines the connector specification including connection parameters and external options allowlist.
 
 ## Output Contract
-Produce a YAML file following the template at `prompts/templates/connector_spec_template.yaml` as `src/databricks/labs/community_connector/sources/{{source_name}}/connector_spec.yaml`.
+Produce a YAML file following the template at `templates/connector_spec_template.yaml` as `src/databricks/labs/community_connector/sources/{{source_name}}/connector_spec.yaml`.
 
 ## Requirements
 
