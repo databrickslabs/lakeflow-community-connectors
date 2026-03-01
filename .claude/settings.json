@@ -4,6 +4,8 @@
       "Read(.claude/skills/**)",
       "Read(.claude/agents/**)",
       "Read(src/**)",
+      "Write(src/databricks/labs/community_connector/sources/**)",
+      "Edit(src/databricks/labs/community_connector/sources/**)",
       "Read(templates/**)",
       "Bash(source:*)",
       "Bash(ls:*)",
