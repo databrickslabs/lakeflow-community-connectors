@@ -17,5 +17,5 @@ Follow the instructions and methodology from the **generate-connector-spec skill
 ## Key References
 
 - **Skill**: generate-connector-spec (loaded above)
-- **Template**: `prompts/templates/connector_spec_template.yaml`
+- **Template**: `templates/connector_spec_template.yaml`
 - **Connector source**: `src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py`
