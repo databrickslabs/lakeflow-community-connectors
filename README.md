@@ -23,7 +23,7 @@ There are two ways to implement a connector:
 
 See [`src/databricks/labs/community_connector/interface/README.md`](src/databricks/labs/community_connector/interface/README.md) for full details on both approaches.
 
-### Tests to Build
+### Testing
 
 Each connector must include tests that run the **generic test suite** against a live source environment. These tests validate API usage, data parsing, and successful data retrieval.
 
@@ -43,7 +43,7 @@ git clone https://github.com/databrickslabs/lakeflow-community-connectors.git
 
 The development workflow is identical in both Claude Code and Cursor. All skills, agents, and commands are defined under `.claude/` and are automatically discovered by both tools.
 
-### Develop via Agent
+### Develop via an Agent
 
 The simplest way to build a connector. A single command kicks off an autonomous agent that guides you through the entire workflow — from API research to deployment. Run the command below and it will orchestrate all steps end-to-end:
 ```
