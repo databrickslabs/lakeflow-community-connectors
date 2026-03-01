@@ -1,70 +1,124 @@
 ---
 name: deploy-connector
-description: Deploy a fully developed connector to a Databricks workspace — create a UC connection and ingestion pipeline using the community-connector CLI.
+description: Guide the user through creating or updating a pipeline for a source connector — read the docs, build a pipeline spec interactively, and run create_pipeline or update_pipeline.
+args:
+  - name: source_name
+    description: The name of the source connector (e.g. github, stripe, appsflyer)
+    required: true
+  - name: connection_name
+    description: The Unity Catalog connection name to use. If omitted, the user will be prompted for it.
+    required: false
+  - name: mode
+    description: "Whether to create a new pipeline or update an existing one. Values: 'create' or 'update'. If omitted, the user will be prompted."
+    required: false
+  - name: pipeline_name
+    description: The name of the existing pipeline to update. Only used when mode is 'update'. If omitted in update mode, the user will be prompted.
+    required: false
 ---
 
 # Deploy Connector
 
-Deploy the **{{source_name}}** connector to a Databricks workspace by creating a UC connection and an ingestion pipeline.
+Create or update an ingestion pipeline for **{{source_name}}** by reading its docs, interactively building a pipeline spec, and running the CLI.
 
 ## Prerequisites
 
-- Connector implementation at `src/databricks/labs/community_connector/sources/{{source_name}}/{{source_name}}.py`
-- Connector spec at `src/databricks/labs/community_connector/sources/{{source_name}}/connector_spec.yaml`
-- Connector README at `src/databricks/labs/community_connector/sources/{{source_name}}/README.md`
-- Databricks CLI configured with a workspace profile (see `tools/community_connector/README.md`)
-- Python 3.10+
+- Connector source, spec (`connector_spec.yaml`), and README exist under `src/databricks/labs/community_connector/sources/{{source_name}}/`
+- Databricks CLI configured, Python 3.10+
 
 ---
 
-## Step 1 — Ensure dev_config.json exists
+## Step 0 — Determine operation mode
 
-Check if `tests/unit/sources/{{source_name}}/configs/dev_config.json` exists.
+If `{{mode}}` is `create` or `update`, use it. Otherwise ask via `AskQuestion`.
 
-- **If it exists:** proceed to Step 2.
-- **If it does not exist:** trigger the `authenticate-source` skill for {{source_name}} and wait for it to complete before proceeding. The skill will generate the connector spec (if needed), collect credentials via a browser form, and validate auth.
+If **update**, also collect the pipeline name (unless `{{pipeline_name}}` was provided).
 
 ---
 
-## Step 2 — Collect deployment parameters from the user
+## Step 1 — Read the connector documentation
 
-Ask the user (via `AskQuestion`) for the following deployment parameters:
+Read these files to understand the source:
 
-### Required
+1. `src/databricks/labs/community_connector/sources/{{source_name}}/README.md`
+2. `src/databricks/labs/community_connector/sources/{{source_name}}/connector_spec.yaml`
 
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `connection_name` | Name for the UC connection | `my_{{source_name}}_conn` |
-| `pipeline_name` | Name for the ingestion pipeline | `my_{{source_name}}_pipeline` |
+Extract: **supported tables** (descriptions, ingestion types, primary keys), **required/optional table level options**, and **connection parameters**.
 
-### Optional
+---
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `catalog` | UC target catalog | pipeline default |
-| `target` | Target schema | pipeline default |
-| `tables` | List of tables to ingest with optional per-table configuration | all tables (uses default template) |
+## Step 2 — Collect deployment parameters
 
-If the user wants to specify tables, collect them in **pipeline spec** format:
+Use `AskQuestion` for structured choices; text prompts otherwise.
 
-```yaml
-objects:
-  - table:
-      source_table: "<TABLE_NAME>"
-      table_configuration:
-        scd_type: "<SCD_TYPE_1 | SCD_TYPE_2 | APPEND_ONLY>"
-        primary_keys:
-          - "<PK_COL>"
-        # additional table options as needed
+### 2a. UC connection name
+
+If `{{connection_name}}` provided, use it. Otherwise ask if the user has one.
+
+- **Yes**: ask for the name.
+- **No**: show the `create_connection` command:
+  ```
+  community-connector create_connection {{source_name}} <CONNECTION_NAME> -o '<CREDENTIALS_JSON>'
+  ```
+  List each required/optional **credential** parameter from the spec (e.g. `token`, `api_key`) with a short description. Do **not** ask for `externalOptionsAllowList` — the CLI reads the connector spec and adds it automatically. Ask the user to run the command and provide the connection name.
+
+### 2b. Default destination catalog and schema
+
+Ask for **catalog** (e.g. `main`) and **schema** (e.g. `raw_github`). Both optional — omitted values use pipeline defaults.
+
+### 2c. Pipeline name
+
+Create mode: ask user to choose a name. Update mode: confirm the name from Step 0.
+
+### 2d. Tables to ingest
+
+Present the supported tables from Step 1 with brief descriptions. Let the user pick; offer an "all tables" shortcut.
+
+### 2e. Per-table configuration
+
+For each selected table, check the README for two categories of options:
+
+**Destination overrides** (`destination_catalog`, `destination_schema`, `destination_table`) — set on the `table` object. Mention these are available but don't actively prompt; only include if the user requests per-table overrides.
+
+**Source-specific and common options** (set inside `table_configuration`):
+- **Required**: list each with description, ask for values (e.g. `owner`/`repo` for GitHub)
+- **Optional**: list each with description and default, ask if the user wants to set any (includes `scd_type`, `primary_keys`, `sequence_by`, plus source-specific options e.g. `start_date` to filter, `max_records_per_batch` to control batch size)
+
+If multiple tables share options (e.g. same `owner`/`repo`), ask once and reuse — confirm with user.
+
+---
+
+## Step 3 — Generate the pipeline spec
+
+Build the spec JSON:
+
+```json
+{
+  "connection_name": "<CONNECTION_NAME>",
+  "objects": [
+    {
+      "table": {
+        "source_table": "<TABLE_NAME>",
+        "destination_catalog": "<CATALOG>",
+        "destination_schema": "<SCHEMA>",
+        "destination_table": "<TABLE>",
+        "table_configuration": { "<key>": "<value>" }
+      }
+    }
+  ]
+}
 ```
 
-To help the user choose tables, you can read the connector's README or run `connector.list_tables()` to show available tables.
+- `connection_name` and `source_table` are always required.
+- Omit `destination_*` fields unless the user set per-table overrides.
+- Omit `table_configuration` if empty.
+
+Show the spec to the user for review before proceeding.
 
 ---
 
-## Step 3 — Install the CLI tool
+## Step 4 — Ensure the CLI tool is available
 
-Ensure the community-connector CLI is installed:
+Run `community-connector --help`. If it fails, install:
 
 ```bash
 cd tools/community_connector && pip install -e . && cd ../..
@@ -72,86 +126,40 @@ cd tools/community_connector && pip install -e . && cd ../..
 
 ---
 
-## Step 4 — Create the UC connection
+## Step 5 — Deploy the pipeline
 
-Read `tests/unit/sources/{{source_name}}/configs/dev_config.json` and use its contents as the connection options.
+Use `create_pipeline` or `update_pipeline` based on the mode from Step 0.
 
-```bash
-community-connector create_connection {{source_name}} <CONNECTION_NAME> \
-  -o '<DEV_CONFIG_JSON_CONTENTS>' \
-  --spec src/databricks/labs/community_connector/sources/{{source_name}}/connector_spec.yaml
-```
-
-- `<CONNECTION_NAME>`: the connection name from Step 2.
-- `<DEV_CONFIG_JSON_CONTENTS>`: the full JSON string from `dev_config.json`.
-- The `--spec` flag points to the local connector spec for validation.
-
-Verify the output shows `✓ Connection created!`. If it fails, report the error clearly.
-
----
-
-## Step 5 — Create the ingestion pipeline
-
-Build and run the `create_pipeline` command based on the user's choices from Step 2.
-
-### If the user did NOT specify tables (simple mode):
-
-```bash
-community-connector create_pipeline {{source_name}} <PIPELINE_NAME> \
-  -n <CONNECTION_NAME> \
-  [-c <CATALOG>] [-t <TARGET>]
-```
-
-### If the user specified tables (pipeline spec mode):
-
-1. Create a temporary pipeline spec file at `tests/unit/sources/{{source_name}}/configs/pipeline_spec.yaml` with the user's table configuration:
-
-```yaml
-connection_name: "<CONNECTION_NAME>"
-objects:
-  - table:
-      source_table: "<TABLE_1>"
-      table_configuration:
-        scd_type: "SCD_TYPE_1"
-  - table:
-      source_table: "<TABLE_2>"
-      table_configuration:
-        scd_type: "SCD_TYPE_2"
-        primary_keys:
-          - "id"
-```
+1. Write the spec to `tests/unit/sources/{{source_name}}/configs/{PIPELINE_NAME}_spec.json`.
 
 2. Run:
+   ```bash
+   community-connector <create_pipeline|update_pipeline> {{source_name}} <PIPELINE_NAME> \
+     -ps tests/unit/sources/{{source_name}}/configs/{PIPELINE_NAME}_spec.json \
+     [-c <CATALOG>] [-t <TARGET>]
+   ```
+   Include `-c`/`-t` only if catalog/schema were provided in Step 2b.
 
-```bash
-community-connector create_pipeline {{source_name}} <PIPELINE_NAME> \
-  -ps tests/unit/sources/{{source_name}}/configs/pipeline_spec.yaml \
-  [-c <CATALOG>] [-t <TARGET>]
-```
+3. After success, delete the spec file.
 
-3. After successful creation, delete the temporary pipeline spec file.
-
-Verify the output shows `✓ Pipeline created!` and note the **Pipeline URL** and **Pipeline ID**.
+4. Capture the **Pipeline URL** and **Pipeline ID** from the output.
 
 ---
 
 ## Step 6 — Report results
 
-Present the deployment summary to the user:
-
 ```
-Deployment complete for {{source_name}}!
+Pipeline <created|updated> for {{source_name}}!
 
-Connection:
-  Name: <CONNECTION_NAME>
+Connection: <CONNECTION_NAME>
+Pipeline:  <PIPELINE_NAME>
+URL:       <PIPELINE_URL>
+ID:        <PIPELINE_ID>
 
-Pipeline:
-  Name: <PIPELINE_NAME>
-  URL:  <PIPELINE_URL>
-  ID:   <PIPELINE_ID>
+Tables: <TABLE_1>, <TABLE_2>, ...
 
 Next steps:
-  - Open the Pipeline URL to view and run the pipeline
+  - Open the Pipeline URL to view the pipeline
   - Or run: community-connector run_pipeline <PIPELINE_NAME>
 ```
 
@@ -160,7 +168,8 @@ Next steps:
 ## Rules
 
 - Steps run **sequentially** — each depends on the prior step's output.
+- Always read the connector README and spec first.
 - If a CLI command fails, report the error clearly — do not retry silently.
-- Do not modify the connector source code, spec, or README during deployment.
-- Clean up any temporary files (e.g., `pipeline_spec.yaml`) after use.
-- Do not push to git — deployment is a workspace operation, not a code change.
+- Do not modify connector source code, spec, or README during deployment.
+- Clean up temporary files after use.
+- Do not push to git.

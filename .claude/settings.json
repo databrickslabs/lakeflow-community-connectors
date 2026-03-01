@@ -4,10 +4,16 @@
       "Read(.claude/skills/**)",
       "Read(.claude/agents/**)",
       "Read(src/**)",
+      "Write(src/databricks/labs/community_connector/sources/**)",
+      "Edit(src/databricks/labs/community_connector/sources/**)",
+      "Write(tests/unit/sources/**)",
+      "Edit(tests/unit/sources/**)",
+      "Bash(mkdir:*)",
       "Read(templates/**)",
       "Bash(source:*)",
       "Bash(ls:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(community-connector:*)"
     ],
     "deny": [
       "Read(tests/unit/sources/**/configs/dev_config.json)"

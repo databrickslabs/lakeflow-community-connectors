@@ -119,25 +119,45 @@ The connector determines ingestion mode and primary keys dynamically:
 - **`snapshot`**: When no `date` dimension is present. The entire report is refreshed each sync.
 - **Primary keys**: Automatically inferred as `["property_id"] + dimensions`. Can be overridden via `primary_keys` in table options.
 
-## Table Options
+## Table Configurations
 
-Table-specific options are passed via `table_configuration` in the pipeline spec.
+### Source & Destination
 
-**For prebuilt reports**, all options are optional overrides. **For custom reports**, `dimensions` and `metrics` are required.
+These are set directly under each `table` object in the pipeline spec:
+
+| Option | Required | Description |
+|---|---|---|
+| `source_table` | Yes | Table name in the source system |
+| `destination_catalog` | No | Target catalog (defaults to pipeline's default) |
+| `destination_schema` | No | Target schema (defaults to pipeline's default) |
+| `destination_table` | No | Target table name (defaults to `source_table`) |
+
+### Common `table_configuration` options
+
+These are set inside the `table_configuration` map alongside any source-specific options:
+
+| Option | Required | Description |
+|---|---|---|
+| `scd_type` | No | `SCD_TYPE_1` (default) or `SCD_TYPE_2`. Only applicable to tables with CDC or SNAPSHOT ingestion mode; APPEND_ONLY tables do not support this option. |
+| `primary_keys` | No | List of columns to override the connector's default primary keys |
+| `sequence_by` | No | Column used to order records for SCD Type 2 change tracking |
+
+### Source-specific `table_configuration` options
+
+Options are passed via `table_configuration` in the pipeline spec. **For prebuilt reports**, all options are optional overrides. **For custom reports**, `dimensions` and `metrics` are required.
 
 | Option | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
 | `dimensions` | string (JSON array) | custom only | N/A | Dimension names (e.g., `'["date", "country"]'`). Max 9 per report. |
 | `metrics` | string (JSON array) | custom only | N/A | Metric names (e.g., `'["activeUsers", "sessions"]'`). Min 1, max 10 per report. |
 | `prebuilt_report` | string | no | N/A | Load a prebuilt report config by name (alternative to using the name as `source_table`). |
-| `primary_keys` | array | no | Auto-inferred | Override primary keys. Default: `["property_id"] + dimensions`. |
 | `start_date` | string | no | `"30daysAgo"` | Start date for first sync. Accepts `YYYY-MM-DD` or relative values like `"30daysAgo"`, `"7daysAgo"`, `"yesterday"`. |
 | `lookback_days` | string | no | `"3"` | Days to look back for incremental syncs (accounts for data processing delays). |
 | `dimension_filter` | string (JSON object) | no | null | Filter expression for dimensions (see [GA4 filter syntax](https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/FilterExpression)). |
 | `metric_filter` | string (JSON object) | no | null | Filter expression for metrics. |
 | `page_size` | string | no | `"10000"` | Rows per API request (max 100,000). |
 
-> **Note**: `dimensions` and `metrics` are JSON strings (e.g., `'["date", "country"]'`). `primary_keys` is a native array. All other options are plain strings.
+> **Note**: `dimensions` and `metrics` are JSON strings (e.g., `'["date", "country"]'`). All other options are plain strings.
 
 ### Common Dimensions and Metrics
 

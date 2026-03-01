@@ -466,6 +466,31 @@ You can switch between modes at any time by changing the `metadata_mode` paramet
 
 ---
 
+## Table Configurations
+
+### Source & Destination
+
+These are set directly under each `table` object in the pipeline spec:
+
+| Option | Required | Description |
+|---|---|---|
+| `source_table` | Yes | Table name in the source system |
+| `destination_catalog` | No | Target catalog (defaults to pipeline's default) |
+| `destination_schema` | No | Target schema (defaults to pipeline's default) |
+| `destination_table` | No | Target table name (defaults to `source_table`) |
+
+### Common `table_configuration` options
+
+These are set inside the `table_configuration` map alongside any source-specific options:
+
+| Option | Required | Description |
+|---|---|---|
+| `scd_type` | No | `SCD_TYPE_1` (default) or `SCD_TYPE_2`. Only applicable to tables with CDC or SNAPSHOT ingestion mode; APPEND_ONLY tables do not support this option. |
+| `primary_keys` | No | List of columns to override the connector's default primary keys |
+| `sequence_by` | No | Column used to order records for SCD Type 2 change tracking |
+
+This connector does not require any source-specific table configuration options.
+
 ## Data Type Mapping
 
 The following table shows how SAP SuccessFactors OData types are mapped to Spark/Databricks types. This mapping is used by both static mode (hardcoded schemas) and dynamic mode (EDMX metadata parsing).
