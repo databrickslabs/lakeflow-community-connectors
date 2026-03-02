@@ -1,0 +1,218 @@
+"""In-memory data store backing the simulated source.
+
+Each table is registered with:
+  - a schema (list of field descriptors)
+  - metadata (primary keys, cursor field, ingestion type)
+  - a primary key field name for identity
+
+Records are plain dicts.  The store handles thread-safe CRUD, timestamp
+management, and the "deleted records" sidecar for cdc_with_deletes tables.
+"""
+
+from __future__ import annotations
+
+import threading
+from datetime import datetime, timezone
+from typing import Optional
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _iso(dt: datetime) -> str:
+    return dt.isoformat()
+
+
+class TableDef:
+    """Holds the definition and live data for a single table."""
+
+    __slots__ = (
+        "name",
+        "schema_fields",
+        "metadata",
+        "pk_field",
+        "_records",
+        "_deleted_records",
+    )
+
+    def __init__(
+        self,
+        name: str,
+        schema_fields: list[dict],
+        metadata: dict,
+        pk_field: str,
+    ) -> None:
+        self.name = name
+        self.schema_fields = schema_fields
+        self.metadata = metadata
+        self.pk_field = pk_field
+        self._records: dict[str, dict] = {}
+        self._deleted_records: list[dict] = []
+
+
+class Store:
+    """Thread-safe in-memory store for all tables."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._tables: dict[str, TableDef] = {}
+
+    # ── table registration ────────────────────────────────────────────
+
+    def register_table(
+        self,
+        name: str,
+        schema_fields: list[dict],
+        metadata: dict,
+        pk_field: str,
+    ) -> None:
+        with self._lock:
+            self._tables[name] = TableDef(name, schema_fields, metadata, pk_field)
+
+    # ── table introspection ───────────────────────────────────────────
+
+    def list_tables(self) -> list[str]:
+        with self._lock:
+            return list(self._tables.keys())
+
+    def get_table_schema(self, table_name: str) -> list[dict]:
+        with self._lock:
+            return list(self._get_table(table_name).schema_fields)
+
+    def get_table_metadata(self, table_name: str) -> dict:
+        with self._lock:
+            return dict(self._get_table(table_name).metadata)
+
+    # ── record reads ──────────────────────────────────────────────────
+
+    def list_records(
+        self,
+        table_name: str,
+        *,
+        since: Optional[str] = None,
+        until: Optional[str] = None,
+        cursor_field: Optional[str] = None,
+        filters: Optional[dict[str, str]] = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        """List records, optionally filtering by a cursor-field range.
+
+        Args:
+            table_name: Which table to query.
+            since: Exclusive lower bound on ``cursor_field`` (records with
+                   cursor value strictly greater than ``since``).
+            until: Inclusive upper bound on ``cursor_field``.
+            cursor_field: The field name to filter on.  If ``since`` or
+                          ``until`` is given, this must be provided.
+            filters: Optional exact-match filters (field_name → value).
+            limit: Max records to return.
+        """
+        with self._lock:
+            tbl = self._get_table(table_name)
+            records = list(tbl._records.values())
+
+            if cursor_field and since is not None:
+                records = [r for r in records if r.get(cursor_field, "") > since]
+            if cursor_field and until is not None:
+                records = [r for r in records if r.get(cursor_field, "") <= until]
+            if filters:
+                for field, value in filters.items():
+                    records = [r for r in records if r.get(field) == value]
+
+            sort_key = cursor_field or tbl.pk_field
+            records.sort(key=lambda r: r.get(sort_key, ""))
+            return records[:limit]
+
+    def list_deleted_records(
+        self,
+        table_name: str,
+        *,
+        since: Optional[str] = None,
+        cursor_field: Optional[str] = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        with self._lock:
+            tbl = self._get_table(table_name)
+            records = list(tbl._deleted_records)
+
+            if cursor_field and since is not None:
+                records = [r for r in records if r.get(cursor_field, "") > since]
+
+            sort_key = cursor_field or tbl.pk_field
+            records.sort(key=lambda r: r.get(sort_key, ""))
+            return records[:limit]
+
+    def get_all_records(self, table_name: str) -> list[dict]:
+        with self._lock:
+            tbl = self._get_table(table_name)
+            return list(tbl._records.values())
+
+    # ── record writes ─────────────────────────────────────────────────
+
+    def insert_record(self, table_name: str, record: dict, ts_field: Optional[str] = None) -> dict:
+        with self._lock:
+            tbl = self._get_table(table_name)
+            if ts_field:
+                record.setdefault(ts_field, _iso(_now()))
+            pk_val = record[tbl.pk_field]
+            tbl._records[pk_val] = record
+            return record
+
+    def upsert_record(self, table_name: str, record: dict, ts_field: Optional[str] = None) -> dict:
+        with self._lock:
+            tbl = self._get_table(table_name)
+            if ts_field:
+                record[ts_field] = _iso(_now())
+            pk_val = record[tbl.pk_field]
+            tbl._records[pk_val] = record
+            return record
+
+    def delete_record(
+        self,
+        table_name: str,
+        pk_value: str,
+        ts_field: Optional[str] = None,
+        tombstone_fields: Optional[dict] = None,
+    ) -> Optional[dict]:
+        """Remove a record and append a tombstone to the deleted-records sidecar."""
+        with self._lock:
+            tbl = self._get_table(table_name)
+            record = tbl._records.pop(pk_value, None)
+            if record is None:
+                return None
+
+            tombstone = {tbl.pk_field: pk_value}
+            if tombstone_fields:
+                tombstone.update(tombstone_fields)
+            if ts_field:
+                tombstone[ts_field] = _iso(_now())
+
+            for field in tbl.schema_fields:
+                fname = field["name"]
+                if fname not in tombstone:
+                    tombstone[fname] = None
+
+            tbl._deleted_records.append(tombstone)
+            return tombstone
+
+    # ── internal ──────────────────────────────────────────────────────
+
+    def _get_table(self, table_name: str) -> TableDef:
+        tbl = self._tables.get(table_name)
+        if tbl is None:
+            raise ValueError(f"Unknown table: {table_name}. Available: {list(self._tables.keys())}")
+        return tbl
+
+    # ── seeding helper ────────────────────────────────────────────────
+
+    def seed_records(
+        self,
+        table_name: str,
+        records: list[dict],
+    ) -> None:
+        with self._lock:
+            tbl = self._get_table(table_name)
+            for rec in records:
+                pk_val = rec[tbl.pk_field]
+                tbl._records[pk_val] = rec

@@ -1,0 +1,572 @@
+"""Simulated REST API for a data source.
+
+Exposes ``get()``, ``post()``, and ``delete()`` methods that behave like
+``requests.get()``, ``requests.post()``, ``requests.delete()`` — the
+caller passes a URL path and optional query params or JSON body, and
+receives back a response object with ``.status_code`` and ``.json()``.
+
+Authentication
+--------------
+The API requires a ``username`` and ``password`` to initialise.  Any
+non-empty strings are accepted (no specific credentials are enforced).
+Pass them when creating the client::
+
+    api = get_api("my_user", "my_pass")
+
+Tables
+------
+products
+    A product catalog.  Every GET returns the full set of records (no
+    incremental cursor).  Supports an optional ``category`` filter.
+
+events
+    An append-only event log.  New records are timestamped with
+    ``created_at``.  Supports ``since`` for cursor-based reads and
+    ``limit`` for pagination.  Records are never updated or deleted.
+
+users
+    A mutable user directory.  Records carry an ``updated_at`` date that
+    advances on every change.  Supports ``since`` for incremental reads.
+    No deletes.
+
+orders
+    A mutable order ledger with full lifecycle support.  Records carry an
+    ``updated_at`` timestamp.  Supports ``since`` for incremental reads,
+    plus ``user_id`` and ``status`` filters.  Deleted records are
+    accessible via the ``/deleted_records`` endpoint (with ``since``),
+    and individual records can be removed via ``DELETE /records/{pk}``.
+
+All tables above are discoverable via ``GET /tables`` and their schema
+and metadata are available via the corresponding endpoints.
+
+metrics  *(hidden)*
+    A time-series metrics table that cannot be discovered through the API
+    — it is excluded from ``GET /tables`` and its schema and metadata are
+    not available.  Records can still be read directly via
+    ``GET /tables/metrics/records`` if you know the table name.  Supports
+    ``since`` and ``until`` for time-range queries.  The ``value`` field
+    is a struct with subfields ``count`` (integer), ``label`` (string),
+    and ``measure`` (double).
+
+Route table
+-----------
+GET    /tables                           → list table names
+GET    /tables/{table}/schema            → column descriptors
+GET    /tables/{table}/metadata          → table metadata
+GET    /tables/{table}/records           → list records (params vary by table)
+GET    /tables/{table}/deleted_records   → list deleted tombstones (orders only)
+POST   /tables/{table}/records           → insert / upsert a record
+DELETE /tables/{table}/records/{pk}      → delete a record (orders only)
+
+Per-table query param support for GET /records is defined in
+``TABLE_API_CONFIG``.  Global behaviour knobs (null rate for seed data,
+retriable-error rate) live in ``API_CONFIG``.
+"""
+
+from __future__ import annotations
+
+import random
+import re
+import threading
+import uuid
+from datetime import timedelta
+from typing import Optional
+
+from tests.simulated_source.store import Store, _iso, _now
+
+
+class Response:
+    """Mimics a ``requests.Response`` with ``.status_code`` and ``.json()``."""
+
+    __slots__ = ("status_code", "_body")
+
+    def __init__(self, status_code: int, body) -> None:
+        self.status_code = status_code
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+# ── global API configuration ──────────────────────────────────────────
+#
+# null_rate     : probability (0.0–1.0) that a nullable field is None
+#                 in seed data.  Default 0.2 (20%).
+# error_rate    : probability (0.0–1.0) that any API call returns a
+#                 retriable error instead of the real response.
+#                 Default 0.03 (3%).  Error types are chosen uniformly
+#                 from 429 (rate limit), 500 (internal), 503 (unavailable).
+
+API_CONFIG: dict[str, float] = {
+    "null_rate": 0.2,
+    "error_rate": 0.03,
+}
+
+_RETRIABLE_ERRORS = [
+    (429, {"error": "Rate limit exceeded. Please retry after a short delay."}),
+    (500, {"error": "Internal server error. Please retry."}),
+    (503, {"error": "Service temporarily unavailable. Please retry."}),
+]
+
+
+# ── per-table API configuration ──────────────────────────────────────
+#
+# allowed_record_params : query params accepted by GET /records
+# allowed_deleted_params: query params accepted by GET /deleted_records
+#                         (absent key means the endpoint is unsupported)
+# allow_delete          : whether DELETE /records/{pk} is supported
+# filter_params         : subset of allowed_record_params that act as
+#                         exact-match filters (passed to store.list_records)
+# hidden                : if True, excluded from GET /tables, /schema,
+#                         and /metadata — but records endpoint still works
+
+TABLE_API_CONFIG: dict[str, dict] = {
+    "products": {
+        "allowed_record_params": {"category"},
+        "filter_params": {"category"},
+        "allow_delete": False,
+    },
+    "events": {
+        "allowed_record_params": {"since", "limit"},
+        "allow_delete": False,
+    },
+    "users": {
+        "allowed_record_params": {"since"},
+        "allow_delete": False,
+    },
+    "orders": {
+        "allowed_record_params": {"since", "user_id", "status"},
+        "filter_params": {"user_id", "status"},
+        "allowed_deleted_params": {"since"},
+        "allow_delete": True,
+    },
+    "metrics": {
+        "allowed_record_params": {"since", "until"},
+        "allow_delete": False,
+        "hidden": True,
+    },
+}
+
+
+# Pre-compiled route patterns
+_ROUTE_TABLES = re.compile(r"^/tables/?$")
+_ROUTE_TABLE_SCHEMA = re.compile(r"^/tables/(?P<table>[^/]+)/schema/?$")
+_ROUTE_TABLE_METADATA = re.compile(r"^/tables/(?P<table>[^/]+)/metadata/?$")
+_ROUTE_TABLE_RECORDS = re.compile(r"^/tables/(?P<table>[^/]+)/records/?$")
+_ROUTE_TABLE_RECORD_PK = re.compile(r"^/tables/(?P<table>[^/]+)/records/(?P<pk>[^/]+)/?$")
+_ROUTE_TABLE_DELETED = re.compile(r"^/tables/(?P<table>[^/]+)/deleted_records/?$")
+
+
+class SimulatedSourceAPI:
+    """In-memory simulated REST API.
+
+    Usage mirrors the ``requests`` library::
+
+        api = get_api("my_user", "my_pass")
+        resp = api.get("/tables")
+        tables = resp.json()
+
+        resp = api.get("/tables/users/records", params={"since": ts})
+        records = resp.json()
+
+        resp = api.post("/tables/users/records", json={"user_id": "u1", ...})
+        created = resp.json()
+
+        resp = api.delete("/tables/orders/records/order_0001")
+        tombstone = resp.json()
+    """
+
+    def __init__(self, username: str, password: str) -> None:
+        if not username or not username.strip():
+            raise ValueError("username must be a non-empty string")
+        if not password or not password.strip():
+            raise ValueError("password must be a non-empty string")
+        self._rng = random.Random()
+        self._store = Store()
+        self._register_tables()
+        self._seed()
+
+    def _maybe_error(self) -> Optional[Response]:
+        """With probability ``API_CONFIG["error_rate"]``, return a retriable error."""
+        if self._rng.random() < API_CONFIG["error_rate"]:
+            status, body = self._rng.choice(_RETRIABLE_ERRORS)
+            return Response(status, body)
+        return None
+
+    def get(self, path: str, *, params: Optional[dict] = None) -> Response:
+        err = self._maybe_error()
+        if err:
+            return err
+        params = params or {}
+
+        m = _ROUTE_TABLES.match(path)
+        if m:
+            hidden = {t for t, c in TABLE_API_CONFIG.items() if c.get("hidden")}
+            tables = [t for t in self._store.list_tables() if t not in hidden]
+            return Response(200, {"tables": tables})
+
+        m = _ROUTE_TABLE_SCHEMA.match(path)
+        if m:
+            return self._handle_get_schema(m.group("table"))
+
+        m = _ROUTE_TABLE_METADATA.match(path)
+        if m:
+            return self._handle_get_metadata(m.group("table"))
+
+        m = _ROUTE_TABLE_DELETED.match(path)
+        if m:
+            return self._handle_get_deleted(m.group("table"), params)
+
+        m = _ROUTE_TABLE_RECORDS.match(path)
+        if m:
+            return self._handle_get_records(m.group("table"), params)
+
+        return Response(404, {"error": f"No route matches GET {path}"})
+
+    def post(self, path: str, *, json: Optional[dict] = None) -> Response:
+        err = self._maybe_error()
+        if err:
+            return err
+        json = json or {}
+
+        m = _ROUTE_TABLE_RECORDS.match(path)
+        if m:
+            return self._handle_post_record(m.group("table"), json)
+
+        return Response(404, {"error": f"No route matches POST {path}"})
+
+    def delete(self, path: str) -> Response:
+        err = self._maybe_error()
+        if err:
+            return err
+        m = _ROUTE_TABLE_RECORD_PK.match(path)
+        if m:
+            return self._handle_delete_record(m.group("table"), m.group("pk"))
+
+        return Response(404, {"error": f"No route matches DELETE {path}"})
+
+    # ── route handlers ────────────────────────────────────────────────
+
+    def _handle_get_schema(self, table: str) -> Response:
+        if TABLE_API_CONFIG.get(table, {}).get("hidden"):
+            return Response(404, {"error": f"Table '{table}' not found"})
+        try:
+            return Response(200, {"schema": self._store.get_table_schema(table)})
+        except ValueError as e:
+            return Response(404, {"error": str(e)})
+
+    def _handle_get_metadata(self, table: str) -> Response:
+        if TABLE_API_CONFIG.get(table, {}).get("hidden"):
+            return Response(404, {"error": f"Table '{table}' not found"})
+        try:
+            return Response(200, {"metadata": self._store.get_table_metadata(table)})
+        except ValueError as e:
+            return Response(404, {"error": str(e)})
+
+    def _handle_get_records(self, table: str, params: dict) -> Response:
+        try:
+            metadata = self._store.get_table_metadata(table)
+        except ValueError as e:
+            return Response(404, {"error": str(e)})
+
+        cfg = TABLE_API_CONFIG.get(table, {})
+        allowed = cfg.get("allowed_record_params", set())
+        bad = set(params.keys()) - allowed
+        if bad:
+            return Response(
+                400,
+                {"error": f"Unsupported query params for '{table}': {sorted(bad)}"},
+            )
+
+        filter_keys = cfg.get("filter_params", set())
+        filters = {k: params[k] for k in filter_keys if k in params}
+
+        cursor_field = metadata.get("cursor_field")
+        if not cursor_field:
+            records = self._store.get_all_records(table)
+            if filters:
+                for field, value in filters.items():
+                    records = [r for r in records if r.get(field) == value]
+            return Response(200, {"records": records})
+        since = params.get("since")
+        until = params.get("until")
+        limit = int(params.get("limit", 100))
+
+        try:
+            records = self._store.list_records(
+                table,
+                since=since,
+                until=until,
+                cursor_field=cursor_field,
+                filters=filters or None,
+                limit=limit,
+            )
+            return Response(200, {"records": records})
+        except ValueError as e:
+            return Response(404, {"error": str(e)})
+
+    def _handle_get_deleted(self, table: str, params: dict) -> Response:
+        try:
+            metadata = self._store.get_table_metadata(table)
+        except ValueError as e:
+            return Response(404, {"error": str(e)})
+
+        cfg = TABLE_API_CONFIG.get(table, {})
+        allowed = cfg.get("allowed_deleted_params")
+        if allowed is None:
+            return Response(
+                400,
+                {"error": f"Table '{table}' does not support the deleted_records endpoint"},
+            )
+
+        bad = set(params.keys()) - allowed
+        if bad:
+            return Response(
+                400,
+                {"error": f"Unsupported query params for '{table}' deleted_records: {sorted(bad)}"},
+            )
+
+        cursor_field = metadata.get("cursor_field")
+        since = params.get("since")
+        limit = int(params.get("limit", 100))
+
+        try:
+            records = self._store.list_deleted_records(
+                table,
+                since=since,
+                cursor_field=cursor_field,
+                limit=limit,
+            )
+            return Response(200, {"records": records})
+        except ValueError as e:
+            return Response(404, {"error": str(e)})
+
+    def _handle_post_record(self, table: str, body: dict) -> Response:
+        try:
+            metadata = self._store.get_table_metadata(table)
+        except ValueError as e:
+            return Response(404, {"error": str(e)})
+
+        cursor_field = metadata.get("cursor_field")
+
+        if not cursor_field:
+            created = self._store.insert_record(table, body)
+            return Response(201, {"record": created})
+
+        upserted = self._store.upsert_record(table, body, ts_field=cursor_field)
+        return Response(200, {"record": upserted})
+
+    def _handle_delete_record(self, table: str, pk_value: str) -> Response:
+        try:
+            metadata = self._store.get_table_metadata(table)
+        except ValueError as e:
+            return Response(404, {"error": str(e)})
+
+        cfg = TABLE_API_CONFIG.get(table, {})
+        if not cfg.get("allow_delete"):
+            return Response(
+                400,
+                {"error": f"Table '{table}' does not support the DELETE endpoint"},
+            )
+
+        cursor_field = metadata.get("cursor_field")
+        tombstone = self._store.delete_record(table, pk_value, ts_field=cursor_field)
+        if tombstone is None:
+            return Response(404, {"error": f"Record with pk '{pk_value}' not found"})
+        return Response(200, {"record": tombstone})
+
+    # ── table registration ────────────────────────────────────────────
+
+    def _register_tables(self) -> None:
+        self._store.register_table(
+            name="products",
+            schema_fields=[
+                {"name": "product_id", "type": "string", "nullable": False},
+                {"name": "name", "type": "string", "nullable": True},
+                {"name": "price", "type": "double", "nullable": True},
+                {"name": "category", "type": "string", "nullable": True},
+            ],
+            metadata={
+                "primary_keys": ["product_id"],
+            },
+            pk_field="product_id",
+        )
+
+        self._store.register_table(
+            name="events",
+            schema_fields=[
+                {"name": "event_id", "type": "string", "nullable": False},
+                {"name": "event_type", "type": "string", "nullable": True},
+                {"name": "user_id", "type": "string", "nullable": True},
+                {"name": "payload", "type": "string", "nullable": True},
+                {"name": "created_at", "type": "timestamp", "nullable": True},
+            ],
+            metadata={
+                "cursor_field": "created_at",
+            },
+            pk_field="event_id",
+        )
+
+        self._store.register_table(
+            name="users",
+            schema_fields=[
+                {"name": "user_id", "type": "string", "nullable": False},
+                {"name": "email", "type": "string", "nullable": True},
+                {"name": "display_name", "type": "string", "nullable": True},
+                {"name": "status", "type": "string", "nullable": True},
+                {"name": "updated_at", "type": "date", "nullable": True},
+            ],
+            metadata={
+                "primary_keys": ["user_id"],
+                "cursor_field": "updated_at",
+            },
+            pk_field="user_id",
+        )
+
+        self._store.register_table(
+            name="orders",
+            schema_fields=[
+                {"name": "order_id", "type": "string", "nullable": False},
+                {"name": "user_id", "type": "string", "nullable": True},
+                {"name": "amount", "type": "double", "nullable": True},
+                {"name": "status", "type": "string", "nullable": True},
+                {"name": "updated_at", "type": "timestamp", "nullable": True},
+            ],
+            metadata={
+                "primary_keys": ["order_id"],
+                "cursor_field": "updated_at",
+            },
+            pk_field="order_id",
+        )
+
+        self._store.register_table(
+            name="metrics",
+            schema_fields=[
+                {"name": "metric_id", "type": "string", "nullable": False},
+                {"name": "name", "type": "string", "nullable": True},
+                {
+                    "name": "value",
+                    "type": "struct",
+                    "nullable": True,
+                    "fields": [
+                        {"name": "count", "type": "integer", "nullable": True},
+                        {"name": "label", "type": "string", "nullable": True},
+                        {"name": "measure", "type": "double", "nullable": True},
+                    ],
+                },
+                {"name": "host", "type": "string", "nullable": True},
+                {"name": "updated_at", "type": "timestamp", "nullable": True},
+            ],
+            metadata={
+                "primary_keys": ["metric_id"],
+                "cursor_field": "updated_at",
+            },
+            pk_field="metric_id",
+        )
+
+    # ── seed data ─────────────────────────────────────────────────────
+
+    def _seed(self) -> None:
+        rng = random.Random(42)
+        null_rate = API_CONFIG["null_rate"]
+        base = _now() - timedelta(hours=1)
+
+        def _maybe(value, *, rng=rng):
+            return value if rng.random() >= null_rate else None
+
+        self._store.seed_records(
+            "products",
+            [
+                {
+                    "product_id": f"prod_{i:04d}",
+                    "name": _maybe(f"Product {i}"),
+                    "price": _maybe(round(10.0 + i * 1.5, 2)),
+                    "category": _maybe(["electronics", "books", "clothing"][i % 3]),
+                }
+                for i in range(53)
+            ],
+        )
+
+        self._store.seed_records(
+            "events",
+            [
+                {
+                    "event_id": str(uuid.UUID(int=i)),
+                    "event_type": _maybe(["click", "view", "purchase"][i % 3]),
+                    "user_id": _maybe(f"user_{i % 5:03d}"),
+                    "payload": _maybe(f"payload_{i}"),
+                    "created_at": _iso(base + timedelta(seconds=i)),
+                }
+                for i in range(101)
+            ],
+        )
+
+        self._store.seed_records(
+            "users",
+            [
+                {
+                    "user_id": f"user_{i:04d}",
+                    "email": _maybe(f"user{i}@example.com"),
+                    "display_name": _maybe(f"User {i}"),
+                    "status": _maybe("active"),
+                    "updated_at": (base + timedelta(days=i)).date().isoformat(),
+                }
+                for i in range(37)
+            ],
+        )
+
+        self._store.seed_records(
+            "orders",
+            [
+                {
+                    "order_id": f"order_{i:04d}",
+                    "user_id": _maybe(f"user_{i % 10:04d}"),
+                    "amount": _maybe(round(50.0 + i * 3.3, 2)),
+                    "status": _maybe(["pending", "shipped", "delivered"][i % 3]),
+                    "updated_at": _iso(base + timedelta(seconds=i)),
+                }
+                for i in range(103)
+            ],
+        )
+
+        self._store.seed_records(
+            "metrics",
+            [
+                {
+                    "metric_id": f"metric_{i:04d}",
+                    "name": _maybe(f"metric.{['cpu', 'mem', 'disk', 'net'][i % 4]}"),
+                    "value": _maybe(
+                        {
+                            "count": _maybe(i),
+                            "label": _maybe(["low", "medium", "high", "critical"][i % 4]),
+                            "measure": _maybe(round(i * 1.1, 2)),
+                        }
+                    ),
+                    "host": _maybe(f"host-{i % 3}"),
+                    "updated_at": _iso(base + timedelta(seconds=i * 60)),
+                }
+                for i in range(253)
+            ],
+        )
+
+
+# ── singleton management ──────────────────────────────────────────────
+
+_instance: Optional[SimulatedSourceAPI] = None
+_instance_lock = threading.Lock()
+
+
+def get_api(username: str, password: str) -> SimulatedSourceAPI:
+    global _instance  # noqa: PLW0603
+    with _instance_lock:
+        if _instance is None:
+            _instance = SimulatedSourceAPI(username, password)
+        return _instance
+
+
+def reset_api(username: str, password: str) -> SimulatedSourceAPI:
+    """Reset the singleton — call between test runs."""
+    global _instance  # noqa: PLW0603
+    with _instance_lock:
+        _instance = SimulatedSourceAPI(username, password)
+        return _instance
