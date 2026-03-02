@@ -21,7 +21,7 @@ from databricks.labs.community_connector.sources.{source_name}.{util_file_name} 
 
 The merge script (`tools/scripts/merge_python_source.py`) automatically discovers and includes all Python files in the source directory, ordering them by import dependencies.
 
-See `src/databricks/labs/community_connector/sources/github/` for an example of a multi-file connector.
+See `src/databricks/labs/community_connector/sources/example/` for an example of a connector.
 
 ## Implementation Requirements
 - Implement all methods declared in the interface.
@@ -30,7 +30,7 @@ See `src/databricks/labs/community_connector/sources/github/` for an example of 
 - Avoid flattening nested fields when parsing JSON data.
 - Prefer using `LongType` over `IntegerType` to avoid overflow.
 - If `ingestion_type` returned from `read_table_metadata` is `cdc` or `cdc_with_deletes`, then `primary_keys` and `cursor_field` are both required.
-- If `ingestion_type` is `cdc_with_deletes`, you must also implement `read_table_deletes()` to fetch deleted records. This method should return records with at minimum the primary key fields and cursor field populated. Refer to `hubspot/hubspot.py` for an example implementation.
+- If `ingestion_type` is `cdc_with_deletes`, you must also implement `read_table_deletes()` to fetch deleted records. This method should return records with at minimum the primary key fields and cursor field populated. Refer to `example/example.py` for an example implementation.
 - In logic of processing records, if a StructType field is absent in the response, assign None as the default value instead of an empty dictionary {}.
 - Avoid creating mock objects in the implementation.
 - Do not add an extra main function - only implement the defined functions within the LakeflowConnect class.

@@ -52,7 +52,7 @@ Create `src/databricks/labs/community_connector/sources/{source_name}/{source_na
 - `list_deletable_tables()`: List tables that support delete testing — only for tables with `cdc_with_deletes` ingestion type
 - `delete_rows()`: Delete records and return deleted row info for verification via `read_table_deletes`
 
-**Reference Implementation:** See `src/databricks/labs/community_connector/sources/hubspot/hubspot_test_utils.py` for a complete working example.
+**Reference Implementation:** See `src/databricks/labs/community_connector/sources/example/example_test_utils.py` for a complete working example.
 
 **Implementation Tips:**
 - Initialize API client for write operations in `__init__`
@@ -76,7 +76,7 @@ def test_{source_name}_connector():
     
     # Rest remains the same...
 ```
-**Reference Implementation:** See `tests/unit/sources/hubspot/test_hubspot_lakeflow_connect.py` for an example implementation.
+**Reference Implementation:** See `tests/unit/sources/example/test_example_lakeflow_connect.py` for an example implementation.
 
 ### Step 3: Run Tests with Write Validation
 
@@ -115,7 +115,7 @@ For connectors that support `cdc_with_deletes` ingestion type, you can also test
    ```python
    def list_deletable_tables(self) -> List[str]:
        # Only return tables with cdc_with_deletes ingestion type
-       return ["contacts"]  # Example for HubSpot
+       return ["orders"]  # Example for the example connector
    ```
 
 2. `delete_rows()`: Delete records and return info for verification

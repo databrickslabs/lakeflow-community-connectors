@@ -3,7 +3,7 @@ name: deploy-connector
 description: Guide the user through creating or updating a pipeline for a source connector — read the docs, build a pipeline spec interactively, and run create_pipeline or update_pipeline.
 args:
   - name: source_name
-    description: The name of the source connector (e.g. github, stripe, appsflyer)
+    description: The name of the source connector (e.g. example, stripe, appsflyer)
     required: true
   - name: connection_name
     description: The Unity Catalog connection name to use. If omitted, the user will be prompted for it.
@@ -63,7 +63,7 @@ If `{{connection_name}}` provided, use it. Otherwise ask if the user has one.
 
 ### 2b. Default destination catalog and schema
 
-Ask for **catalog** (e.g. `main`) and **schema** (e.g. `raw_github`). Both optional — omitted values use pipeline defaults.
+Ask for **catalog** (e.g. `main`) and **schema** (e.g. `raw_example`). Both optional — omitted values use pipeline defaults.
 
 ### 2c. Pipeline name
 
@@ -80,7 +80,7 @@ For each selected table, check the README for two categories of options:
 **Destination overrides** (`destination_catalog`, `destination_schema`, `destination_table`) — set on the `table` object. Mention these are available but don't actively prompt; only include if the user requests per-table overrides.
 
 **Source-specific and common options** (set inside `table_configuration`):
-- **Required**: list each with description, ask for values (e.g. `owner`/`repo` for GitHub)
+- **Required**: list each with description, ask for values (e.g. `category` for products, `window_seconds` for metrics)
 - **Optional**: list each with description and default, ask if the user wants to set any (includes `scd_type`, `primary_keys`, `sequence_by`, plus source-specific options e.g. `start_date` to filter, `max_records_per_batch` to control batch size)
 
 If multiple tables share options (e.g. same `owner`/`repo`), ask once and reuse — confirm with user.
