@@ -309,7 +309,10 @@ class SimulatedSourceAPI:
         if not cursor_field:
             return self._paginate_full_refresh(table, filters, page, max_page_size)
 
-        return self._paginate_cursor(table, params, cursor_field, filters, page, max_page_size)
+        return self._paginate_cursor(
+            table, params,
+            cursor_field=cursor_field, filters=filters, page=page, max_page_size=max_page_size,
+        )
 
     def _paginate_full_refresh(self, table, filters, page, max_page_size):
         """Paginate a table that has no cursor field (full-refresh semantics)."""
@@ -322,7 +325,7 @@ class SimulatedSourceAPI:
         next_page = page + 1 if start + max_page_size < len(records) else None
         return Response(200, {"records": page_records, "next_page": next_page})
 
-    def _paginate_cursor(self, table, params, cursor_field, filters, page, max_page_size):
+    def _paginate_cursor(self, table, params, *, cursor_field, filters, page, max_page_size):
         """Paginate a table using cursor-field range queries."""
         effective_size = min(int(params.get("limit", max_page_size)), max_page_size)
         try:
