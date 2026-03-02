@@ -5,6 +5,7 @@
 # Do not edit manually. Make changes to the source files instead.
 # ==============================================================================
 
+from __future__ import annotations
 from abc import ABC, abstractmethod
 from datetime import (
     date,
@@ -18,7 +19,6 @@ import json
 import pathlib
 import time
 
-from __future__ import annotations
 from pyspark.sql import Row
 from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
 from urllib.error import HTTPError
