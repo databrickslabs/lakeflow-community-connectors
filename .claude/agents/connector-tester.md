@@ -3,7 +3,7 @@ name: connector-tester
 description: "Validate a connector implementation by creating and running the test suite, diagnosing failures, and applying fixes until all tests pass."
 model: opus
 color: red
-memory: project
+memory: local 
 permissionMode: bypassPermissions
 skills:
   - test-and-fix-connector

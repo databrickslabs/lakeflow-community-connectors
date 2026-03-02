@@ -60,8 +60,3 @@ If `urllib3` logs `Starting new HTTPS connection` with no response line, the HTT
 - This step is more interactive. Based on testing results, we need to make various adjustments.
 - Remove the `dev_config.json` after this step.
 - Avoid mocking data in tests. Config files will be supplied to enable connections to an actual instance.
-
-## Git Commit on Completion
-
-After all tests pass, commit any changes to the connector implementation and test files before returning
-Only commit files that were actually modified or created. Use the exact source name in the commit message. Do not push — only commit locally.

@@ -3,7 +3,7 @@ name: connector-dev
 description: "Develop a Python community connector for a specified source system, adhering to the defined LakeflowConnect interface. The necessary API documentation for the target source must be provided by the user."
 model: opus
 color: cyan
-memory: project
+memory: local 
 permissionMode: bypassPermissions
 skills:
   - implement-connector

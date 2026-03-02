@@ -80,8 +80,3 @@ Two common patterns for paginating through API data. Choose based on the source 
 **Pattern 2 — Sliding time-window:** Query data in fixed-size time windows (e.g., 1 hour) using `since`/`until` parameters, paginate within each window, then slide forward. The window position is tracked in the offset. This adds a `window_seconds` table option but avoids unbounded queries entirely. Use this when the source API doc warns about large data volume or testing reveals timeouts on unbounded queries. See `_read_incremental_by_window` in the example connector.
 
 Start with Pattern 1. If the source API doc warns about large data volume on unbounded queries, or testing reveals timeouts on the target account (see test-and-fix-connector SKILL for diagnosis steps), switch to Pattern 2.
-
-## Git Commit on Completion
-
-After writing the initial connector implementation, commit it to git before returning.
-Use the exact source name in the commit message. Do not push — only commit locally.

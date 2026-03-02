@@ -5,7 +5,7 @@ tools: Bash, Glob, Grep, Read, Edit, Write
 model: sonnet
 color: red
 permissionMode: bypassPermissions
-memory: project
+memory: local 
 skills:
   - validate-connector-auth
 ---
