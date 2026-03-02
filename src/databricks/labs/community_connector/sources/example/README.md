@@ -16,7 +16,7 @@ To configure the connector, provide the following parameters in your connector o
 |---|---|---|---|---|
 | `username` | String | Yes | Username for authentication with the Example source | `example_user` |
 | `password` | String | Yes | Password for authentication with the Example source | `example_password` |
-| `externalOptionsAllowList` | String | Yes | Comma-separated list of table-specific options to pass through. Must be set to: `num_rows` | `num_rows` |
+| `externalOptionsAllowList` | String | Yes | Comma-separated list of table-specific options to pass through. Must be set to: `max_records_per_batch,category,user_id,status,limit,window_seconds` | `max_records_per_batch,category,user_id,status,limit,window_seconds` |
 
 ### Obtaining Credentials
 
@@ -27,7 +27,7 @@ The Example source accepts any non-empty username and password combination. No a
 A Unity Catalog connection for this connector can be created in two ways via the UI:
 1. Follow the Lakeflow Community Connector UI flow from the "Add Data" page
 2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
-3. Set `externalOptionsAllowList` to `num_rows` to enable per-table configuration of this option.
+3. Set `externalOptionsAllowList` to `max_records_per_batch,category,user_id,status,limit,window_seconds` to enable per-table configuration of these options.
 
 The connection can also be created using the standard Unity Catalog API.
 
