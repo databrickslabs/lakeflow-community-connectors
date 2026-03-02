@@ -13,7 +13,7 @@ This skill migrates an old connector implementation from the legacy `sources/` d
 ## Instructions
 
 Handle one specified source at a time.
-Refer other source (e.g. github) as an example.
+Refer other source (e.g. example) as a reference.
 Use python3.10 to replace all python command.
 When running any python test or build use virtual environment (Python 3.10+ required), run these:
 python3.10 -m venv .venv
@@ -35,7 +35,7 @@ then run other python commands or pytest.
    - Also update the test imports and code if necessary.
    - Commit the changes so far.
 
-4. If `{source_name}.py` is too large (>1000 lines), consider refactoring it into multiple files. One example to follow is `github`.
+4. If `{source_name}.py` is too large (>1000 lines), consider refactoring it into multiple files. One example to follow is `example`.
 
 5. Run the tests — they will fail but should not be syntax or import errors.
    - Add the unit test that requires credentials (the one built on top of the source test_suite) to .github/workflows/test_exclude.txt

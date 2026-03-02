@@ -58,11 +58,21 @@ class TestFailedException(Exception):
 
 
 class LakeflowConnectTester:
-    def __init__(self, init_options: dict, table_configs: Dict[str, Dict[str, Any]] = {}):
+    def __init__(
+        self,
+        init_options: dict,
+        table_configs: Dict[str, Dict[str, Any]] = {},
+        sample_records: int = 10,
+    ):
         self._init_options = init_options
         # Per-table configuration passed as table_options into connector methods.
         # Keys are table names, values are dicts of options for that table.
         self._table_configs: Dict[str, Dict[str, Any]] = table_configs
+        # Number of records to sample from iterators during read validation.
+        # Default is 10. Use a larger value only when the source API is known
+        # to be highly scalable (e.g. the simulated example source).  For real
+        # third-party APIs, keep this small to avoid rate-limiting or slow tests.
+        self._sample_records: int = sample_records
         self.test_results: List[TestResult] = []
 
     def run_all_tests(self) -> TestReport:
@@ -553,7 +563,7 @@ class LakeflowConnectTester:
 
                 # Try to read a few records to validate iterator works
                 record_count = 0
-                sample_count = 3
+                sample_count = self._sample_records
                 sample_records = []
                 try:
                     for i, record in enumerate(iterator):

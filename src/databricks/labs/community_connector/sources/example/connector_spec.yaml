@@ -1,4 +1,4 @@
-# example Community Connector Spec
+# Example Community Connector Spec
 # This file defines the specification for the connector including
 # connection parameters and allowlist options.
 
@@ -9,8 +9,16 @@
 display_name: Example
 connection:
   parameters:
-    # The example connector does not require any specific connection parameters.
-    # It accepts an options dict but does not extract or validate any specific keys.
+    - name: username
+      type: string
+      required: true
+      description: >
+        Username for authentication with the Example source.
+    - name: password
+      type: string
+      required: true
+      description: >
+        Password for authentication with the Example source.
 
 # ============================================================================
 # External Options Allowlist
@@ -19,4 +27,4 @@ connection:
 # Use a comma-separated string of option names.
 # If no table-specific options are needed, set to empty string or omit.
 # ============================================================================
-external_options_allowlist: "num_rows"
+external_options_allowlist: "max_records_per_batch,category,user_id,status,limit,window_seconds"

@@ -20,4 +20,4 @@ Follow the instructions and methodology from the **create-connector-document ski
 
 - **Skill**: create-connector-document (loaded above)
 - **Template**: `templates/community_connector_doc_template.md`
-- **Style reference**: `src/databricks/labs/community_connector/sources/zendesk/README.md`
+- **Style reference**: `src/databricks/labs/community_connector/sources/github/README.md`

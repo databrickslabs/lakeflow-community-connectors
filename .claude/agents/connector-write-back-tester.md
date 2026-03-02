@@ -19,6 +19,6 @@ Follow the instructions and methodology from the **write-back-testing skill** th
 
 - **Skill**: write-back-testing (loaded above)
 - **Interface**: `tests/unit/sources/lakeflow_connect_test_utils.py`
-- **Reference implementation**: `src/databricks/labs/community_connector/sources/hubspot/hubspot_test_utils.py`
-- **Reference test**: `tests/unit/sources/hubspot/test_hubspot_lakeflow_connect.py`
+- **Reference implementation**: `src/databricks/labs/community_connector/sources/example/example_test_utils.py`
+- **Reference test**: `tests/unit/sources/example/test_example_lakeflow_connect.py`
 - **Write-back API doc**: `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md`
