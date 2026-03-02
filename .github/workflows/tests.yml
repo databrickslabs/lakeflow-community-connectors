@@ -62,8 +62,8 @@ jobs:
             echo "pipeline=false" >> $GITHUB_OUTPUT
           fi
 
-          # Check example (also triggers on interface changes)
-          if echo "$CHANGED_FILES" | grep -qE '^(src/databricks/labs/community_connector/sources/(example|interface)/|tests/unit/sources/(example/|test_suite\.py|test_utils\.py|lakeflow_connect_test_utils\.py))'; then
+          # Check example (also triggers on interface or simulated_source changes)
+          if echo "$CHANGED_FILES" | grep -qE '^(src/databricks/labs/community_connector/(sources/(example|interface)/|libs/simulated_source/)|tests/unit/sources/(example/|test_suite\.py|test_utils\.py|lakeflow_connect_test_utils\.py))'; then
             echo "example=true" >> $GITHUB_OUTPUT
           else
             echo "example=false" >> $GITHUB_OUTPUT

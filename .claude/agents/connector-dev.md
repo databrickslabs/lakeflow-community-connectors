@@ -28,5 +28,5 @@ If all tables share similar API patterns, implement them all in a single pass.
 ## Key References
 
 - **Skill**: implement-connector (loaded above)
-- **Reference implementation**: `src/databricks/labs/community_connector/sources/zendesk/zendesk.py`
+- **Reference implementation**: `src/databricks/labs/community_connector/sources/example/example.py`
 - **More references**: `src/databricks/labs/community_connector/sources/{other_sources}`
