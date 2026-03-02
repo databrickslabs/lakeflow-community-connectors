@@ -87,7 +87,7 @@ from typing import Optional
 from databricks.labs.community_connector.libs.simulated_source.store import Store, _iso, _now
 
 
-class Response:
+class Response:  # pylint: disable=too-few-public-methods
     """Mimics a ``requests.Response`` with ``.status_code`` and ``.json()``."""
 
     __slots__ = ("status_code", "_body")
@@ -97,6 +97,7 @@ class Response:
         self._body = body
 
     def json(self):
+        """Return the parsed JSON body."""
         return self._body
 
 
@@ -215,36 +216,28 @@ class SimulatedSourceAPI:
         return None
 
     def get(self, path: str, *, params: Optional[dict] = None) -> Response:
+        """Dispatch a GET request to the matching route handler."""
         err = self._maybe_error()
         if err:
             return err
         params = params or {}
 
-        m = _ROUTE_TABLES.match(path)
-        if m:
-            hidden = {t for t, c in TABLE_API_CONFIG.items() if c.get("hidden")}
-            tables = [t for t in self._store.list_tables() if t not in hidden]
-            return Response(200, {"tables": tables})
-
-        m = _ROUTE_TABLE_SCHEMA.match(path)
-        if m:
-            return self._handle_get_schema(m.group("table"))
-
-        m = _ROUTE_TABLE_METADATA.match(path)
-        if m:
-            return self._handle_get_metadata(m.group("table"))
-
-        m = _ROUTE_TABLE_DELETED.match(path)
-        if m:
-            return self._handle_get_deleted(m.group("table"), params)
-
-        m = _ROUTE_TABLE_RECORDS.match(path)
-        if m:
-            return self._handle_get_records(m.group("table"), params)
+        _routes = [
+            (_ROUTE_TABLES, self._handle_list_tables),
+            (_ROUTE_TABLE_SCHEMA, lambda m: self._handle_get_schema(m.group("table"))),
+            (_ROUTE_TABLE_METADATA, lambda m: self._handle_get_metadata(m.group("table"))),
+            (_ROUTE_TABLE_DELETED, lambda m: self._handle_get_deleted(m.group("table"), params)),
+            (_ROUTE_TABLE_RECORDS, lambda m: self._handle_get_records(m.group("table"), params)),
+        ]
+        for pattern, handler in _routes:
+            m = pattern.match(path)
+            if m:
+                return handler(m)
 
         return Response(404, {"error": f"No route matches GET {path}"})
 
     def post(self, path: str, *, json: Optional[dict] = None) -> Response:
+        """Dispatch a POST request to the matching route handler."""
         err = self._maybe_error()
         if err:
             return err
@@ -257,6 +250,7 @@ class SimulatedSourceAPI:
         return Response(404, {"error": f"No route matches POST {path}"})
 
     def delete(self, path: str) -> Response:
+        """Dispatch a DELETE request to the matching route handler."""
         err = self._maybe_error()
         if err:
             return err
@@ -267,6 +261,12 @@ class SimulatedSourceAPI:
         return Response(404, {"error": f"No route matches DELETE {path}"})
 
     # ── route handlers ────────────────────────────────────────────────
+
+    def _handle_list_tables(self, _match) -> Response:
+        """Return the list of non-hidden tables."""
+        hidden = {t for t, c in TABLE_API_CONFIG.items() if c.get("hidden")}
+        tables = [t for t in self._store.list_tables() if t not in hidden]
+        return Response(200, {"tables": tables})
 
     def _handle_get_schema(self, table: str) -> Response:
         if TABLE_API_CONFIG.get(table, {}).get("hidden"):
@@ -291,8 +291,7 @@ class SimulatedSourceAPI:
             return Response(404, {"error": str(e)})
 
         cfg = TABLE_API_CONFIG.get(table, {})
-        allowed = cfg.get("allowed_record_params", set())
-        bad = set(params.keys()) - allowed
+        bad = set(params.keys()) - cfg.get("allowed_record_params", set())
         if bad:
             return Response(
                 400,
@@ -304,36 +303,38 @@ class SimulatedSourceAPI:
         if page < 1:
             return Response(400, {"error": "page must be >= 1"})
 
-        filter_keys = cfg.get("filter_params", set())
-        filters = {k: params[k] for k in filter_keys if k in params}
-
+        filters = {k: params[k] for k in cfg.get("filter_params", set()) if k in params}
         cursor_field = metadata.get("cursor_field")
+
         if not cursor_field:
-            records = self._store.get_all_records(table)
-            if filters:
-                for field, value in filters.items():
-                    records = [r for r in records if r.get(field) == value]
-            records.sort(key=lambda r: r.get(self._store.get_table_pk(table), ""))
-            start = (page - 1) * max_page_size
-            page_records = records[start : start + max_page_size]
-            next_page = page + 1 if start + max_page_size < len(records) else None
-            return Response(200, {"records": page_records, "next_page": next_page})
+            return self._paginate_full_refresh(table, filters, page, max_page_size)
 
-        since = params.get("since")
-        until = params.get("until")
-        limit = int(params.get("limit", max_page_size))
+        return self._paginate_cursor(table, params, cursor_field, filters, page, max_page_size)
 
+    def _paginate_full_refresh(self, table, filters, page, max_page_size):
+        """Paginate a table that has no cursor field (full-refresh semantics)."""
+        records = self._store.get_all_records(table)
+        for field, value in filters.items():
+            records = [r for r in records if r.get(field) == value]
+        records.sort(key=lambda r: r.get(self._store.get_table_pk(table), ""))
+        start = (page - 1) * max_page_size
+        page_records = records[start : start + max_page_size]
+        next_page = page + 1 if start + max_page_size < len(records) else None
+        return Response(200, {"records": page_records, "next_page": next_page})
+
+    def _paginate_cursor(self, table, params, cursor_field, filters, page, max_page_size):
+        """Paginate a table using cursor-field range queries."""
+        effective_size = min(int(params.get("limit", max_page_size)), max_page_size)
         try:
             all_records = self._store.list_records(
                 table,
-                since=since,
-                until=until,
+                since=params.get("since"),
+                until=params.get("until"),
                 cursor_field=cursor_field,
                 filters=filters or None,
                 limit=None,
             )
-            start = (page - 1) * min(limit, max_page_size)
-            effective_size = min(limit, max_page_size)
+            start = (page - 1) * effective_size
             page_records = all_records[start : start + effective_size]
             next_page = page + 1 if start + effective_size < len(all_records) else None
             return Response(200, {"records": page_records, "next_page": next_page})
@@ -594,21 +595,22 @@ class SimulatedSourceAPI:
 
 # ── singleton management ──────────────────────────────────────────────
 
-_instance: Optional[SimulatedSourceAPI] = None
-_instance_lock = threading.Lock()
+_INSTANCE: Optional[SimulatedSourceAPI] = None
+_INSTANCE_LOCK = threading.Lock()
 
 
 def get_api(username: str, password: str) -> SimulatedSourceAPI:
-    global _instance  # noqa: PLW0603
-    with _instance_lock:
-        if _instance is None:
-            _instance = SimulatedSourceAPI(username, password)
-        return _instance
+    """Return the singleton API instance, creating it on first call."""
+    global _INSTANCE  # noqa: PLW0603
+    with _INSTANCE_LOCK:
+        if _INSTANCE is None:
+            _INSTANCE = SimulatedSourceAPI(username, password)
+        return _INSTANCE
 
 
 def reset_api(username: str, password: str) -> SimulatedSourceAPI:
     """Reset the singleton — call between test runs."""
-    global _instance  # noqa: PLW0603
-    with _instance_lock:
-        _instance = SimulatedSourceAPI(username, password)
-        return _instance
+    global _INSTANCE  # noqa: PLW0603
+    with _INSTANCE_LOCK:
+        _INSTANCE = SimulatedSourceAPI(username, password)
+        return _INSTANCE

@@ -24,7 +24,7 @@ def _iso(dt: datetime) -> str:
     return dt.isoformat()
 
 
-class TableDef:
+class TableDef:  # pylint: disable=too-few-public-methods
     """Holds the definition and live data for a single table."""
 
     __slots__ = (
@@ -67,30 +67,35 @@ class Store:
         metadata: dict,
         pk_field: str,
     ) -> None:
+        """Register a new table with its schema, metadata, and primary key."""
         with self._lock:
             self._tables[name] = TableDef(name, schema_fields, metadata, pk_field)
 
     # ── table introspection ───────────────────────────────────────────
 
     def list_tables(self) -> list[str]:
+        """Return the names of all registered tables."""
         with self._lock:
             return list(self._tables.keys())
 
     def get_table_schema(self, table_name: str) -> list[dict]:
+        """Return the schema field descriptors for a table."""
         with self._lock:
             return list(self._get_table(table_name).schema_fields)
 
     def get_table_metadata(self, table_name: str) -> dict:
+        """Return the metadata dict for a table."""
         with self._lock:
             return dict(self._get_table(table_name).metadata)
 
     def get_table_pk(self, table_name: str) -> str:
+        """Return the primary key field name for a table."""
         with self._lock:
             return self._get_table(table_name).pk_field
 
     # ── record reads ──────────────────────────────────────────────────
 
-    def list_records(
+    def list_records(  # pylint: disable=too-many-arguments
         self,
         table_name: str,
         *,
@@ -136,6 +141,7 @@ class Store:
         cursor_field: Optional[str] = None,
         limit: Optional[int] = 100,
     ) -> list[dict]:
+        """Return tombstone records for deleted rows, with optional cursor filtering."""
         with self._lock:
             tbl = self._get_table(table_name)
             records = list(tbl._deleted_records)
@@ -148,6 +154,7 @@ class Store:
             return records[:limit] if limit is not None else records
 
     def get_all_records(self, table_name: str) -> list[dict]:
+        """Return all records for a table without any filtering."""
         with self._lock:
             tbl = self._get_table(table_name)
             return list(tbl._records.values())
@@ -155,6 +162,7 @@ class Store:
     # ── record writes ─────────────────────────────────────────────────
 
     def insert_record(self, table_name: str, record: dict, ts_field: Optional[str] = None) -> dict:
+        """Insert a new record, optionally setting a default timestamp field."""
         with self._lock:
             tbl = self._get_table(table_name)
             if ts_field:
@@ -164,6 +172,7 @@ class Store:
             return record
 
     def upsert_record(self, table_name: str, record: dict, ts_field: Optional[str] = None) -> dict:
+        """Insert or update a record, advancing the timestamp field."""
         with self._lock:
             tbl = self._get_table(table_name)
             if ts_field:
@@ -233,6 +242,7 @@ class Store:
         table_name: str,
         records: list[dict],
     ) -> None:
+        """Bulk-load initial records into a table, keyed by primary key."""
         with self._lock:
             tbl = self._get_table(table_name)
             for rec in records:
