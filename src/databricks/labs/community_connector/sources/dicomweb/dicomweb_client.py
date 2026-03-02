@@ -121,7 +121,7 @@ class DICOMwebClient:
         Required by S3 Static WADO Server and recommended by the DICOMweb standard.
 
         Args:
-            study_uid: DICOM StudyInstanceUID.
+            study_uid: DICOM study UID.
 
         Returns:
             List of DICOM JSON objects (dicts keyed by 8-char hex tag strings).
@@ -135,8 +135,8 @@ class DICOMwebClient:
         Hierarchical endpoint returning all instances belonging to a single series.
 
         Args:
-            study_uid:  DICOM StudyInstanceUID.
-            series_uid: DICOM SeriesInstanceUID.
+            study_uid:  DICOM study UID.
+            series_uid: DICOM series UID.
 
         Returns:
             List of DICOM JSON objects (dicts keyed by 8-char hex tag strings).
@@ -188,9 +188,9 @@ class DICOMwebClient:
         GET {base_url}/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/frames/{n}
 
         Args:
-            study_uid:    DICOM StudyInstanceUID.
-            series_uid:   DICOM SeriesInstanceUID.
-            sop_uid:      DICOM SOPInstanceUID.
+            study_uid:    DICOM study UID.
+            series_uid:   DICOM series UID.
+            sop_uid:      DICOM SOP instance UID.
             frame_number: 1-based frame index (default: 1).
 
         Returns:
@@ -222,9 +222,9 @@ class DICOMwebClient:
         is needed — avoids downloading metadata for all siblings in the series.
 
         Args:
-            study_uid:  DICOM StudyInstanceUID.
-            series_uid: DICOM SeriesInstanceUID.
-            sop_uid:    DICOM SOPInstanceUID.
+            study_uid:  DICOM study UID.
+            series_uid: DICOM series UID.
+            sop_uid:    DICOM SOP instance UID.
 
         Returns:
             Single full DICOM JSON object (dict keyed by 8-char hex tag strings).
@@ -261,8 +261,8 @@ class DICOMwebClient:
         serve instance data via this endpoint rather than via QIDO-RS /instances.
 
         Args:
-            study_uid:  DICOM StudyInstanceUID.
-            series_uid: DICOM SeriesInstanceUID.
+            study_uid:  DICOM study UID.
+            series_uid: DICOM series UID.
 
         Returns:
             List of full DICOM JSON objects (one per SOP instance).

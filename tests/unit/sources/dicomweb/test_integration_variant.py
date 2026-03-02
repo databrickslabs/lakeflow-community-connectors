@@ -119,20 +119,20 @@ class TestOrthanc:
         records_iter, next_offset = orthanc_connector.read_table("studies", {}, {"page_size": "5"})
         records = list(records_iter)
         assert len(records) > 0, "Expected at least one study from Orthanc demo"
-        assert all("StudyInstanceUID" in r for r in records)
+        assert all("study_instance_uid" in r for r in records)
         assert "study_date" in next_offset
 
     def test_reads_series(self, orthanc_connector):
         records_iter, _ = orthanc_connector.read_table("series", {}, {"page_size": "3"})
         records = list(records_iter)
         assert len(records) > 0, "Expected at least one series from Orthanc demo"
-        assert all("SeriesInstanceUID" in r for r in records)
+        assert all("series_instance_uid" in r for r in records)
 
     def test_reads_instances(self, orthanc_connector):
         records_iter, _ = orthanc_connector.read_table("instances", {}, {"page_size": "3"})
         records = list(records_iter)
         assert len(records) > 0, "Expected at least one instance from Orthanc demo"
-        assert all("SOPInstanceUID" in r for r in records)
+        assert all("sop_instance_uid" in r for r in records)
 
     def test_reads_instances_with_metadata(self, orthanc_connector):
         """fetch_metadata=true populates the metadata column as a JSON string in the raw dict."""
@@ -203,7 +203,7 @@ class TestParseJsonTransformation:
 
         schema = StructType(
             [
-                StructField("SOPInstanceUID", StringType(), False),
+                StructField("sop_instance_uid", StringType(), False),
                 StructField("metadata", StringType(), True),
                 StructField("connection_name", StringType(), True),
             ]
@@ -212,9 +212,9 @@ class TestParseJsonTransformation:
         result = _apply_column_expressions(df, {"metadata": "parse_json(metadata)"})
 
         # Column order preserved
-        assert [f.name for f in result.schema.fields] == ["SOPInstanceUID", "metadata", "connection_name"]
+        assert [f.name for f in result.schema.fields] == ["sop_instance_uid", "metadata", "connection_name"]
 
-        sop_field = next(f for f in result.schema.fields if f.name == "SOPInstanceUID")
+        sop_field = next(f for f in result.schema.fields if f.name == "sop_instance_uid")
         conn_field = next(f for f in result.schema.fields if f.name == "connection_name")
         meta_field = next(f for f in result.schema.fields if f.name == "metadata")
 
@@ -329,7 +329,7 @@ class TestEndToEndVariantPipeline:
         assert len(collected) == len(records)
 
         # Spot-check: non-metadata columns are still readable
-        assert all(r["SOPInstanceUID"] is not None for r in collected)
+        assert all(r["sop_instance_uid"] is not None for r in collected)
 
 
 # ---------------------------------------------------------------------------
@@ -507,7 +507,7 @@ class TestDeclarativePipeline:
 
         collected = result_df.collect()
         assert len(collected) > 0
-        assert all(r["SOPInstanceUID"] is not None for r in collected)
+        assert all(r["sop_instance_uid"] is not None for r in collected)
 
     def test_sdp_append_flow_body_produces_variant(self, spark, orthanc_connector):
         """

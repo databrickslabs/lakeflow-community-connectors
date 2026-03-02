@@ -314,7 +314,7 @@ class TestConnector:
         connector._client.query_series_for_study = MagicMock(return_value=series_response[:1])
         connector._client.query_instances_for_series = MagicMock(return_value=instances_response)
 
-        # Build metadata response keyed by SOPInstanceUID from instances fixture
+        # Build metadata response keyed by sop_instance_uid from instances fixture
         sop_uid = instances_response[0]["00080018"]["Value"][0]
         meta_obj = {"00080018": {"vr": "UI", "Value": [sop_uid]}, "00080060": {"vr": "CS", "Value": ["CT"]}}
         connector._client.retrieve_series_metadata = MagicMock(return_value=[meta_obj])

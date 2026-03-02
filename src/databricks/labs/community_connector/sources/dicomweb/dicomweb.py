@@ -8,7 +8,7 @@ Exposes three tables from any DICOMweb-compliant VNA/PACS system:
 
 Incremental strategy
 --------------------
-Cursor = ISO date string YYYYMMDD tracking the max StudyDate seen.
+Cursor = ISO date string YYYYMMDD tracking the max study_date seen.
 QIDO-RS filter: StudyDate={cursor_date minus lookback_days}-{today}
 Offset format:  {"study_date": "20231215", "page_offset": 0}
 
@@ -439,7 +439,7 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
 
     def _build_metadata_map(self, study_uid: str, series_uid: str) -> dict[str, str]:
         """
-        Fetch WADO-RS series metadata and return a {SOPInstanceUID: value} map.
+        Fetch WADO-RS series metadata and return a {sop_instance_uid: value} map.
 
         On DBR 15.x+ (METADATA_IS_VARIANT=True) values are VariantVal objects;
         on older runtimes they are JSON strings.  Returns an empty dict on any
@@ -449,7 +449,7 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
             meta_list = self._client.retrieve_series_metadata(study_uid, series_uid)
             sop_to_meta: dict[str, str] = {}
             for meta_obj in meta_list:
-                tag_obj = meta_obj.get("00080018")  # SOPInstanceUID tag
+                tag_obj = meta_obj.get("00080018")  # sop_instance_uid tag
                 if tag_obj and tag_obj.get("Value"):
                     sop_uid = str(tag_obj["Value"][0])
                     # VariantType: pass the Python dict — Spark's convert_variant

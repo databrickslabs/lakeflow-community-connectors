@@ -71,8 +71,8 @@ def test_auth_read_studies():
     if records:
         sample_keys = list(records[0].keys())
         print(f"[auth-check] Sample record keys: {sample_keys}")
-        print(f"[auth-check] StudyInstanceUID: {records[0].get('StudyInstanceUID')}")
-        print(f"[auth-check] StudyDate:        {records[0].get('StudyDate')}")
+        print(f"[auth-check] study_instance_uid: {records[0].get('study_instance_uid')}")
+        print(f"[auth-check] study_date:        {records[0].get('study_date')}")
         print(f"[auth-check] connection_name:  {records[0].get('connection_name')}")
 
     assert len(records) > 0, (
@@ -80,10 +80,10 @@ def test_auth_read_studies():
         "Check that the DICOMweb server is reachable and the credentials in dev_config.json are correct."
     )
 
-    # Every record must carry a StudyInstanceUID (the primary key)
+    # Every record must carry a study_instance_uid (the primary key)
     for rec in records:
-        assert rec.get("StudyInstanceUID"), (
-            f"Record is missing StudyInstanceUID: {rec}"
+        assert rec.get("study_instance_uid"), (
+            f"Record is missing study_instance_uid: {rec}"
         )
 
     # next_offset must be a dict with at least a study_date key

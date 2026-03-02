@@ -5,62 +5,47 @@
 # Do not edit manually. Make changes to the source files instead.
 # ==============================================================================
 
-import json
-import logging
-import pathlib
-import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import (
+    date,
+    datetime,
+    timedelta,
+    timezone,
+)
 from decimal import Decimal
 from typing import Any, Iterator
+import json
+import pathlib
+import time
 
-import requests
+from __future__ import annotations
 from pyspark.sql import Row
-from pyspark.sql.datasource import (
-    DataSource,
-    DataSourceReader,
-    DataSourceStreamReader,
-    InputPartition,
-    SimpleDataSourceStreamReader,
-)
-from pyspark.sql.types import (
-    ArrayType,
-    BinaryType,
-    BooleanType,
-    ByteType,
-    DataType,
-    DateType,
-    DecimalType,
-    DoubleType,
-    FloatType,
-    IntegerType,
-    LongType,
-    MapType,
-    ShortType,
-    StringType,
-    StructField,
-    StructType,
-    TimestampType,
-    VariantType,
-    VariantVal,
-)
-from requests.auth import HTTPBasicAuth
+from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
+from urllib.error import HTTPError
+from pyspark.sql.types import *
+import base64
+import logging
+import urllib.error
+import urllib.parse
+import urllib.request
 
 
 def register_lakeflow_source(spark):
-    """Register the DICOMweb Lakeflow Python source with Spark."""
+    """Register the Lakeflow Python source with Spark."""
 
     ########################################################
     # src/databricks/labs/community_connector/libs/utils.py
     ########################################################
 
     def _parse_struct(value: Any, field_type: StructType) -> Row:
+        """Parse a dictionary into a PySpark Row based on StructType schema."""
         if not isinstance(value, dict):
             raise ValueError(f"Expected a dictionary for StructType, got {type(value)}")
+        # Spark Python -> Arrow conversion require missing StructType fields to be assigned None.
         if value == {}:
             raise ValueError(
-                "field in StructType cannot be an empty dict. Please assign None as the default value instead."
+                "field in StructType cannot be an empty dict. "
+                "Please assign None as the default value instead."
             )
         field_dict = {}
         for field in field_type.fields:
@@ -72,35 +57,52 @@ def register_lakeflow_source(spark):
                 raise ValueError(f"Field {field.name} is not nullable but not found in the input")
         return Row(**field_dict)
 
+
     def _parse_array(value: Any, field_type: ArrayType) -> list:
+        """Parse a list into a PySpark array based on ArrayType schema."""
         if not isinstance(value, list):
             if field_type.containsNull:
                 return [parse_value(value, field_type.elementType)]
             raise ValueError(f"Expected a list for ArrayType, got {type(value)}")
         return [parse_value(v, field_type.elementType) for v in value]
 
+
     def _parse_map(value: Any, field_type: MapType) -> dict:
+        """Parse a dictionary into a PySpark map based on MapType schema."""
         if not isinstance(value, dict):
             raise ValueError(f"Expected a dictionary for MapType, got {type(value)}")
-        return {parse_value(k, field_type.keyType): parse_value(v, field_type.valueType) for k, v in value.items()}
+        return {
+            parse_value(k, field_type.keyType): parse_value(v, field_type.valueType)
+            for k, v in value.items()
+        }
+
 
     def _parse_string(value: Any) -> str:
+        """Convert value to string."""
         return str(value)
 
+
     def _parse_integer(value: Any) -> int:
+        """Convert value to integer."""
         if isinstance(value, str) and value.strip():
             return int(float(value)) if "." in value else int(value)
         if isinstance(value, (int, float)):
             return int(value)
         raise ValueError(f"Cannot convert {value} to integer")
 
+
     def _parse_float(value: Any) -> float:
+        """Convert value to float."""
         return float(value)
 
+
     def _parse_decimal(value: Any) -> Decimal:
+        """Convert value to Decimal."""
         return Decimal(value) if isinstance(value, str) and value.strip() else Decimal(str(value))
 
+
     def _parse_boolean(value: Any) -> bool:
+        """Convert value to boolean."""
         if isinstance(value, str):
             lowered = value.lower()
             if lowered in ("true", "t", "yes", "y", "1"):
@@ -109,241 +111,270 @@ def register_lakeflow_source(spark):
                 return False
         return bool(value)
 
+
+    def _parse_date(value: Any) -> datetime.date:
+        """Convert value to date."""
+        if isinstance(value, str):
+            for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+                try:
+                    return datetime.strptime(value, fmt).date()
+                except ValueError:
+                    continue
+            return datetime.fromisoformat(value).date()
+        if isinstance(value, datetime):
+            return value.date()
+        raise ValueError(f"Cannot convert {value} to date")
+
+
+    def _parse_timestamp(value: Any) -> datetime:
+        """Convert value to timestamp."""
+        if isinstance(value, str):
+            ts_value = value.replace("Z", "+00:00") if value.endswith("Z") else value
+            try:
+                return datetime.fromisoformat(ts_value)
+            except ValueError:
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
+                    try:
+                        return datetime.strptime(ts_value, fmt)
+                    except ValueError:
+                        continue
+        elif isinstance(value, (int, float)):
+            return datetime.fromtimestamp(value)
+        elif isinstance(value, datetime):
+            return value
+        raise ValueError(f"Cannot convert {value} to timestamp")
+
+
+    def _decode_string_to_bytes(value: str) -> bytes:
+        """Try to decode a string as base64, then hex, then UTF-8."""
+        try:
+            return base64.b64decode(value)
+        except Exception:
+            pass
+        try:
+            return bytes.fromhex(value)
+        except Exception:
+            pass
+        return value.encode("utf-8")
+
+
     def _parse_binary(value: Any) -> bytes:
+        """Convert value to bytes. Tries base64, then hex, then UTF-8 for strings."""
         if isinstance(value, bytes):
             return value
         if isinstance(value, bytearray):
             return bytes(value)
         if isinstance(value, str):
-            import base64
-
-            try:
-                return base64.b64decode(value)
-            except Exception:
-                return value.encode("utf-8")
+            return _decode_string_to_bytes(value)
+        if isinstance(value, list):
+            return bytes(value)
         return str(value).encode("utf-8")
 
+
+    # Mapping of primitive types to their parser functions
     _PRIMITIVE_PARSERS = {
         StringType: _parse_string,
         IntegerType: _parse_integer,
         LongType: _parse_integer,
-        ShortType: _parse_integer,
-        ByteType: _parse_integer,
         FloatType: _parse_float,
         DoubleType: _parse_float,
         DecimalType: _parse_decimal,
         BooleanType: _parse_boolean,
+        DateType: _parse_date,
+        TimestampType: _parse_timestamp,
         BinaryType: _parse_binary,
     }
 
+
     def parse_value(value: Any, field_type: DataType) -> Any:
+        """
+        Converts a JSON value into a PySpark-compatible data type based on the provided field type.
+        """
         if value is None:
             return None
+
+        # Handle complex types
         if isinstance(field_type, StructType):
             return _parse_struct(value, field_type)
         if isinstance(field_type, ArrayType):
             return _parse_array(value, field_type)
         if isinstance(field_type, MapType):
             return _parse_map(value, field_type)
-        if isinstance(field_type, VariantType):
-            if isinstance(value, str):
-                return VariantVal.parseJson(value)
-            return value  # already a VariantVal
-        field_type_class = type(field_type)
-        if field_type_class in _PRIMITIVE_PARSERS:
-            return _PRIMITIVE_PARSERS[field_type_class](value)
-        return value
+
+        # Handle primitive types via type-based lookup
+        try:
+            field_type_class = type(field_type)
+            if field_type_class in _PRIMITIVE_PARSERS:
+                return _PRIMITIVE_PARSERS[field_type_class](value)
+
+            # Check for custom UDT handling
+            if hasattr(field_type, "fromJson"):
+                return field_type.fromJson(value)
+
+            raise TypeError(f"Unsupported field type: {field_type}")
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}")
+
 
     ########################################################
     # src/databricks/labs/community_connector/interface/lakeflow_connect.py
     ########################################################
 
     class LakeflowConnect(ABC):
+        """Base interface that each source connector must implement.
+
+        Subclass this and implement all abstract methods to create a connector that
+        integrates with the community connector library and ingestion pipeline.
+        """
+
         def __init__(self, options: dict[str, str]) -> None:
+            """
+            Initialize the source connector with parameters needed to connect to the source.
+            Args:
+                options: A dictionary of parameters like authentication tokens, table names,
+                    and other configurations.
+            """
             self.options = options
 
         @abstractmethod
-        def list_tables(self) -> list[str]: ...
+        def list_tables(self) -> list[str]:
+            """
+            List names of all the tables supported by the source connector.
+            The list could either be a static list or retrieved from the source via API.
+            Returns:
+                A list of table names.
+            """
 
         @abstractmethod
-        def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType: ...
+        def get_table_schema(
+            self, table_name: str, table_options: dict[str, str]
+        ) -> StructType:
+            """
+            Fetch the schema of a table.
+            Args:
+                table_name: The name of the table to fetch the schema for.
+                table_options: A dictionary of options for accessing the table. For example,
+                    the source API may require extra parameters needed to fetch the schema.
+                    If there are no additional options required, you can ignore this
+                    parameter, and no options will be provided during execution.
+                    Only add parameters to table_options if they are essential for accessing
+                    or retrieving the data (such as specifying table namespaces).
+            Returns:
+                A StructType object representing the schema of the table.
+            """
 
         @abstractmethod
-        def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict: ...
+        def read_table_metadata(
+            self, table_name: str, table_options: dict[str, str]
+        ) -> dict:
+            """
+            Fetch the metadata of a table.
+            Args:
+                table_name: The name of the table to fetch the metadata for.
+                table_options: A dictionary of options for accessing the table. For example,
+                    the source API may require extra parameters needed to fetch the metadata.
+                    If there are no additional options required, you can ignore this
+                    parameter, and no options will be provided during execution.
+                    Only add parameters to table_options if they are essential for accessing
+                    or retrieving the data (such as specifying table namespaces).
+            Returns:
+                A dictionary containing the metadata of the table. It should include the
+                following keys:
+                    - primary_keys: List of string names of the primary key columns of
+                        the table.
+                    - cursor_field: The name of the field to use as a cursor for
+                        incremental loading.
+                    - ingestion_type: The type of ingestion to use for the table. It
+                        should be one of the following values:
+                        - "snapshot": For snapshot loading.
+                        - "cdc": Capture incremental changes (no delete support).
+                        - "cdc_with_deletes": Capture incremental changes with delete
+                            support. Requires implementing read_table_deletes().
+                        - "append": Incremental append.
+            """
 
         @abstractmethod
         def read_table(
             self, table_name: str, start_offset: dict, table_options: dict[str, str]
-        ) -> tuple[Iterator[dict], dict]: ...
+        ) -> tuple[Iterator[dict], dict]:
+            """
+            Read the records of a table and return an iterator of records and an offset.
+
+            The framework calls this method repeatedly to paginate through data.
+            start_offset is None only on the very first call of the very first run
+            of a connector. On subsequent runs the framework resumes from the last
+            checkpointed offset, so start_offset will already be populated. Each
+            call returns (records, end_offset). The framework passes end_offset as
+            start_offset to the next call. Pagination stops when the returned
+            offset equals start_offset (i.e., no more data).
+
+            For tables that cannot be incrementally read, return None as the offset to
+            read the entire table in one batch. Non-checkpointable synthetic offsets can
+            be used to split the data into multiple batches.
+
+            Args:
+                table_name: The name of the table to read.
+                start_offset: The offset to start reading from. None only on the
+                    first call of the first run; on subsequent runs it carries the
+                    checkpointed offset from the previous run.
+                table_options: A dictionary of options for accessing the table. For example,
+                    the source API may require extra parameters needed to read the table.
+                    If there are no additional options required, you can ignore this
+                    parameter, and no options will be provided during execution.
+                    Only add parameters to table_options if they are essential for accessing
+                    or retrieving the data (such as specifying table namespaces).
+            Returns:
+                A two-element tuple of (records, offset).
+                records: An iterator of records as JSON-compatible dicts. Do NOT convert
+                    values according to get_table_schema(); the framework handles that.
+                offset: A dict representing the position after this batch.
+            """
 
         def read_table_deletes(
             self, table_name: str, start_offset: dict, table_options: dict[str, str]
         ) -> tuple[Iterator[dict], dict]:
-            raise NotImplementedError
+            """
+            Read deleted records from a table for CDC delete synchronization.
+            This method is called when ingestion_type is "cdc_with_deletes" to fetch
+            records that have been deleted from the source system.
+
+            This method follows the same pagination and offset protocol as read_table:
+            the framework calls it repeatedly, passing the previous end_offset as
+            start_offset, until the returned offset equals start_offset.
+
+            Override this method if any of your tables use ingestion_type
+            "cdc_with_deletes". The default implementation raises NotImplementedError.
+
+            The returned records should have at minimum the primary key fields and
+            cursor field populated. Other fields can be null.
+
+            Args:
+                table_name: The name of the table to read deleted records from.
+                start_offset: The offset to start reading from (same format as read_table).
+                table_options: A dictionary of options for accessing the table.
+            Returns:
+                A two-element tuple of (records, offset).
+                records: An iterator of deleted records (must include primary keys and cursor).
+                offset: A dict (same format as read_table).
+            """
+            raise NotImplementedError(
+                "read_table_deletes() must be implemented when ingestion_type is 'cdc_with_deletes'"
+            )
+
 
     ########################################################
-    # sources/dicomweb/dicomweb_parser.py
+    # src/databricks/labs/community_connector/sources/dicomweb/dicomweb_client.py
     ########################################################
 
-    STUDY_TAG_MAP = {
-        "0020000D": "StudyInstanceUID",
-        "00080020": "StudyDate",
-        "00080030": "StudyTime",
-        "00080050": "AccessionNumber",
-        "00100010": "PatientName",
-        "00100020": "PatientID",
-        "00081030": "StudyDescription",
-        "00080061": "ModalitiesInStudy",
-        "00201206": "NumberOfStudyRelatedSeries",
-        "00201208": "NumberOfStudyRelatedInstances",
-    }
+    logger = logging.getLogger(__name__)
 
-    SERIES_TAG_MAP = {
-        "0020000E": "SeriesInstanceUID",
-        "0020000D": "StudyInstanceUID",
-        "00080020": "StudyDate",
-        "00200011": "SeriesNumber",
-        "0008103E": "SeriesDescription",
-        "00080060": "Modality",
-        "00180015": "BodyPartExamined",
-        "00080021": "SeriesDate",
-    }
+    # Default socket timeout (seconds) — used for connect + read
+    _DEFAULT_TIMEOUT = 60
 
-    INSTANCE_TAG_MAP = {
-        "00080018": "SOPInstanceUID",
-        "0020000E": "SeriesInstanceUID",
-        "0020000D": "StudyInstanceUID",
-        "00080016": "SOPClassUID",
-        "00200013": "InstanceNumber",
-        "00080020": "StudyDate",
-        "00080023": "ContentDate",
-        "00080033": "ContentTime",
-    }
-
-    _STRING_VRS = {"DA", "TM", "CS", "LO", "UI", "SH", "LT", "ST", "UT", "AE", "AS", "DT", "UC", "UR"}
-    _NUMERIC_VRS = {"IS", "DS", "FL", "FD", "SL", "SS", "UL", "US"}
-
-    def _extract_dicom_value(tag_obj: dict, field_name: str) -> object:
-        vr = tag_obj.get("vr", "")
-        values = tag_obj.get("Value", [])
-        if not values:
-            return None
-        if vr == "PN":
-            first = values[0]
-            if isinstance(first, dict):
-                return first.get("Alphabetic") or first.get("Ideographic") or first.get("Phonetic")
-            return str(first)
-        if vr in _STRING_VRS:
-            if field_name == "ModalitiesInStudy":
-                return [str(v) for v in values]
-            return str(values[0])
-        if vr in _NUMERIC_VRS:
-            first = values[0]
-            try:
-                return int(first) if vr in {"IS", "US", "UL", "SS", "SL"} else float(first)
-            except (TypeError, ValueError):
-                return None
-        first = values[0]
-        return first if isinstance(first, (str, int, float, bool)) else str(first)
-
-    def _parse_dicom_json(dicom_obj: dict, tag_map: dict) -> dict:
-        result = {}
-        for tag, field_name in tag_map.items():
-            tag_obj = dicom_obj.get(tag.upper()) or dicom_obj.get(tag.lower())
-            result[field_name] = _extract_dicom_value(tag_obj, field_name) if tag_obj else None
-        return result
-
-    def _parse_study(dicom_obj: dict) -> dict:
-        return _parse_dicom_json(dicom_obj, STUDY_TAG_MAP)
-
-    def _parse_series(dicom_obj: dict) -> dict:
-        return _parse_dicom_json(dicom_obj, SERIES_TAG_MAP)
-
-    def _parse_instance(dicom_obj: dict) -> dict:
-        record = _parse_dicom_json(dicom_obj, INSTANCE_TAG_MAP)
-        record.setdefault("dicom_file_path", None)
-        record.setdefault("metadata", None)
-        return record
-
-    ########################################################
-    # sources/dicomweb/dicomweb_schemas.py
-    ########################################################
-
-    STUDIES_SCHEMA = StructType(
-        [
-            StructField("StudyInstanceUID", StringType(), nullable=False),
-            StructField("PatientID", StringType(), nullable=True),
-            StructField("PatientName", StringType(), nullable=True),
-            StructField("StudyDate", StringType(), nullable=True),
-            StructField("StudyTime", StringType(), nullable=True),
-            StructField("AccessionNumber", StringType(), nullable=True),
-            StructField("StudyDescription", StringType(), nullable=True),
-            StructField("ModalitiesInStudy", ArrayType(StringType()), nullable=True),
-            StructField("NumberOfStudyRelatedSeries", IntegerType(), nullable=True),
-            StructField("NumberOfStudyRelatedInstances", IntegerType(), nullable=True),
-            StructField("connection_name", StringType(), nullable=True),
-        ]
-    )
-
-    SERIES_SCHEMA = StructType(
-        [
-            StructField("SeriesInstanceUID", StringType(), nullable=False),
-            StructField("StudyInstanceUID", StringType(), nullable=True),
-            StructField("StudyDate", StringType(), nullable=True),
-            StructField("SeriesNumber", IntegerType(), nullable=True),
-            StructField("SeriesDescription", StringType(), nullable=True),
-            StructField("Modality", StringType(), nullable=True),
-            StructField("BodyPartExamined", StringType(), nullable=True),
-            StructField("SeriesDate", StringType(), nullable=True),
-            StructField("connection_name", StringType(), nullable=True),
-        ]
-    )
-
-    INSTANCES_SCHEMA = StructType(
-        [
-            StructField("SOPInstanceUID", StringType(), nullable=False),
-            StructField("SeriesInstanceUID", StringType(), nullable=True),
-            StructField("StudyInstanceUID", StringType(), nullable=True),
-            StructField("SOPClassUID", StringType(), nullable=True),
-            StructField("InstanceNumber", IntegerType(), nullable=True),
-            StructField("StudyDate", StringType(), nullable=True),
-            StructField("ContentDate", StringType(), nullable=True),
-            StructField("ContentTime", StringType(), nullable=True),
-            StructField("dicom_file_path", StringType(), nullable=True),
-            StructField("metadata", VariantType(), nullable=True),
-            StructField("connection_name", StringType(), nullable=True),
-        ]
-    )
-
-    DIAGNOSTICS_SCHEMA = StructType(
-        [
-            StructField("endpoint", StringType(), nullable=False),
-            StructField("category", StringType(), nullable=True),
-            StructField("description", StringType(), nullable=True),
-            StructField("supported", StringType(), nullable=False),
-            StructField("status_code", IntegerType(), nullable=True),
-            StructField("content_type", StringType(), nullable=True),
-            StructField("latency_ms", IntegerType(), nullable=True),
-            StructField("notes", StringType(), nullable=True),
-            StructField("probe_timestamp", StringType(), nullable=False),
-            StructField("connection_name", StringType(), nullable=True),
-        ]
-    )
-
-    _TABLE_SCHEMAS = {
-        "studies": STUDIES_SCHEMA,
-        "series": SERIES_SCHEMA,
-        "instances": INSTANCES_SCHEMA,
-        "diagnostics": DIAGNOSTICS_SCHEMA,
-    }
-
-    ########################################################
-    # sources/dicomweb/dicomweb_client.py
-    ########################################################
-
-    _DEFAULT_TIMEOUT = (10, 60)
 
     class DICOMwebClient:
+        """Thin HTTP wrapper around a DICOMweb endpoint (QIDO-RS + WADO-RS)."""
+
         def __init__(
             self,
             base_url: str,
@@ -351,136 +382,320 @@ def register_lakeflow_source(spark):
             username: str | None = None,
             password: str | None = None,
             token: str | None = None,
-            timeout: tuple = _DEFAULT_TIMEOUT,
+            timeout: int = _DEFAULT_TIMEOUT,
         ) -> None:
             self.base_url = base_url.rstrip("/")
-            self.timeout = timeout
-            self._session = requests.Session()
-            self._session.headers.update({"Accept": "application/dicom+json"})
+            # Accept both a plain int and the legacy (connect, read) tuple
+            self.timeout = max(timeout) if isinstance(timeout, tuple) else timeout
+            self._default_headers: dict[str, str] = {"Accept": "application/dicom+json"}
+
             auth_type = (auth_type or "none").lower()
             if auth_type == "basic":
                 if not username or not password:
                     raise ValueError("auth_type=basic requires username and password")
-                self._session.auth = HTTPBasicAuth(username, password)
+                credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
+                self._default_headers["Authorization"] = f"Basic {credentials}"
             elif auth_type == "bearer":
                 if not token:
                     raise ValueError("auth_type=bearer requires token")
-                self._session.headers["Authorization"] = f"Bearer {token}"
+                self._default_headers["Authorization"] = f"Bearer {token}"
             elif auth_type != "none":
                 raise ValueError(f"Unsupported auth_type '{auth_type}'. Use: none, basic, bearer")
 
-        def _qido_get(self, path: str, params: dict) -> list:
+        # ------------------------------------------------------------------
+        # Internal HTTP helper
+        # ------------------------------------------------------------------
+
+        def _get(
+            self,
+            url: str,
+            extra_headers: dict[str, str] | None = None,
+            params: dict[str, Any] | None = None,
+        ):
+            """Execute a GET request and return an http.client.HTTPResponse."""
+            if params:
+                url = f"{url}?{urllib.parse.urlencode(params)}"
+            headers = {**self._default_headers, **(extra_headers or {})}
+            req = urllib.request.Request(url, headers=headers)
+            return urllib.request.urlopen(req, timeout=self.timeout)
+
+        # ------------------------------------------------------------------
+        # QIDO-RS helpers
+        # ------------------------------------------------------------------
+
+        def _qido_get(self, path: str, params: dict[str, Any]) -> list[dict]:
+            """Execute a QIDO-RS GET and return the parsed JSON list."""
             url = f"{self.base_url}{path}"
-            resp = self._session.get(url, params=params, timeout=self.timeout)
-            if resp.status_code == 204:
+            logger.debug("QIDO-RS GET %s params=%s", url, params)
+            resp = self._get(url, params=params)
+            if resp.status == 204:
+                # No content — valid empty response
                 return []
-            resp.raise_for_status()
-            if not resp.content:
+            body = resp.read()
+            # Some servers return empty body instead of 204
+            if not body:
                 return []
-            return resp.json()
+            return json.loads(body)
 
-        def query_studies(self, study_date_range: str, limit: int = 100, offset: int = 0) -> list:
-            return self._qido_get("/studies", {"StudyDate": study_date_range, "limit": limit, "offset": offset})
+        def query_studies(
+            self,
+            study_date_range: str,
+            limit: int = 100,
+            offset: int = 0,
+        ) -> list[dict]:
+            """
+            QIDO-RS: GET /studies?StudyDate={range}&limit={n}&offset={n}
 
-        def query_series_for_study(self, study_uid: str) -> list:
-            """QIDO-RS: GET /studies/{study_uid}/series — hierarchical series endpoint."""
+            Args:
+                study_date_range: DICOMweb date range string, e.g. "20231201-20231215".
+                limit:            Max records per page.
+                offset:           Zero-based record offset for pagination.
+
+            Returns:
+                List of DICOM JSON objects (dicts keyed by 8-char hex tag strings).
+            """
+            params: dict[str, Any] = {
+                "StudyDate": study_date_range,
+                "limit": limit,
+                "offset": offset,
+            }
+            return self._qido_get("/studies", params)
+
+        def query_series_for_study(self, study_uid: str) -> list[dict]:
+            """
+            QIDO-RS: GET /studies/{study_uid}/series
+
+            Hierarchical endpoint returning all series belonging to a single study.
+            Required by S3 Static WADO Server and recommended by the DICOMweb standard.
+
+            Args:
+                study_uid: DICOM study UID.
+
+            Returns:
+                List of DICOM JSON objects (dicts keyed by 8-char hex tag strings).
+            """
             return self._qido_get(f"/studies/{study_uid}/series", {})
 
-        def query_instances_for_series(self, study_uid: str, series_uid: str) -> list:
-            """QIDO-RS: GET /studies/{study_uid}/series/{series_uid}/instances — hierarchical instances endpoint."""
+        def query_instances_for_series(self, study_uid: str, series_uid: str) -> list[dict]:
+            """
+            QIDO-RS: GET /studies/{study_uid}/series/{series_uid}/instances
+
+            Hierarchical endpoint returning all instances belonging to a single series.
+
+            Args:
+                study_uid:  DICOM study UID.
+                series_uid: DICOM series UID.
+
+            Returns:
+                List of DICOM JSON objects (dicts keyed by 8-char hex tag strings).
+            """
             return self._qido_get(f"/studies/{study_uid}/series/{series_uid}/instances", {})
 
-        def retrieve_instance(self, study_uid: str, series_uid: str, sop_uid: str) -> bytes:
+        # ------------------------------------------------------------------
+        # WADO-RS
+        # ------------------------------------------------------------------
+
+        def retrieve_instance(
+            self,
+            study_uid: str,
+            series_uid: str,
+            sop_uid: str,
+        ) -> bytes:
+            """
+            WADO-RS: retrieve a raw DICOM file.
+
+            GET {base_url}/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}
+            Accept: multipart/related; type="application/dicom"
+
+            Returns:
+                Raw bytes of the .dcm file (multipart/related — first part extracted).
+            """
             url = f"{self.base_url}/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}"
-            resp = self._session.get(
-                url,
-                headers={"Accept": 'multipart/related; type="application/dicom"'},
-                timeout=self.timeout,
-            )
-            resp.raise_for_status()
+            logger.debug("WADO-RS GET %s", url)
+            resp = self._get(url, extra_headers={"Accept": 'multipart/related; type="application/dicom"'})
             content_type = resp.headers.get("Content-Type", "")
+            body = resp.read()
             if "multipart/related" in content_type:
-                return _extract_first_multipart_part(resp.content, content_type)
-            return resp.content
+                return _extract_first_multipart_part(body, content_type)
+            # Some servers return raw DICOM directly
+            return body
 
         def retrieve_instance_frames(
-            self, study_uid: str, series_uid: str, sop_uid: str, frame_number: int = 1
+            self,
+            study_uid: str,
+            series_uid: str,
+            sop_uid: str,
+            frame_number: int = 1,
         ) -> bytes:
-            """WADO-RS: GET .../instances/{sop_uid}/frames/{n} — frame-based retrieval for S3 Static WADO."""
-            url = f"{self.base_url}/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/frames/{frame_number}"
-            resp = self._session.get(
-                url,
-                headers={"Accept": "image/jpeg, image/png, application/octet-stream"},
-                timeout=self.timeout,
-            )
-            resp.raise_for_status()
-            content_type = resp.headers.get("Content-Type", "")
-            if "multipart/related" in content_type:
-                return _extract_first_multipart_part(resp.content, content_type)
-            return resp.content
+            """
+            WADO-RS: retrieve a specific frame from a DICOM instance.
 
-        def retrieve_instance_metadata(self, study_uid: str, series_uid: str, sop_uid: str) -> dict:
-            """WADO-RS: GET .../instances/{uid}/metadata — full DICOM JSON for a single instance."""
+            Used by S3 Static WADO Server and other frame-based servers that do not
+            support full DICOM file retrieval via the standard WADO-RS instance endpoint.
+
+            GET {base_url}/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/frames/{n}
+
+            Args:
+                study_uid:    DICOM study UID.
+                series_uid:   DICOM series UID.
+                sop_uid:      DICOM SOP instance UID.
+                frame_number: 1-based frame index (default: 1).
+
+            Returns:
+                Raw bytes of the frame image (JPEG, PNG, or similar).
+            """
+            url = f"{self.base_url}/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/frames/{frame_number}"
+            logger.debug("WADO-RS frames GET %s", url)
+            resp = self._get(url, extra_headers={"Accept": "image/jpeg, image/png, application/octet-stream"})
+            content_type = resp.headers.get("Content-Type", "")
+            body = resp.read()
+            if "multipart/related" in content_type:
+                return _extract_first_multipart_part(body, content_type)
+            return body
+
+        def retrieve_instance_metadata(
+            self,
+            study_uid: str,
+            series_uid: str,
+            sop_uid: str,
+        ) -> dict:
+            """
+            WADO-RS: retrieve full DICOM JSON metadata for a single instance.
+
+            GET {base_url}/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/metadata
+            Accept: application/dicom+json
+
+            Returns the complete DICOM JSON object for this SOP instance (all tags).
+            More targeted than retrieve_series_metadata() when only one instance
+            is needed — avoids downloading metadata for all siblings in the series.
+
+            Args:
+                study_uid:  DICOM study UID.
+                series_uid: DICOM series UID.
+                sop_uid:    DICOM SOP instance UID.
+
+            Returns:
+                Single full DICOM JSON object (dict keyed by 8-char hex tag strings).
+                Returns an empty dict if the server returns 204 or an empty body.
+            """
             url = f"{self.base_url}/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/metadata"
-            resp = self._session.get(url, headers={"Accept": "application/dicom+json"}, timeout=self.timeout)
-            if resp.status_code == 204:
+            logger.debug("WADO-RS instance metadata GET %s", url)
+            resp = self._get(url, extra_headers={"Accept": "application/dicom+json"})
+            if resp.status == 204:
                 return {}
-            resp.raise_for_status()
-            if not resp.content:
+            body = resp.read()
+            if not body:
                 return {}
-            data = resp.json()
+            data = json.loads(body)
+            # Some servers return a list with one element, others return the object directly
             if isinstance(data, list):
                 return data[0] if data else {}
             return data
 
-        def retrieve_series_metadata(self, study_uid: str, series_uid: str) -> list:
-            """WADO-RS: GET .../series/{uid}/metadata — full DICOM JSON for all instances in a series."""
-            url = f"{self.base_url}/studies/{study_uid}/series/{series_uid}/metadata"
-            resp = self._session.get(url, headers={"Accept": "application/dicom+json"}, timeout=self.timeout)
-            if resp.status_code == 204:
-                return []
-            resp.raise_for_status()
-            if not resp.content:
-                return []
-            return resp.json()
+        def retrieve_series_metadata(
+            self,
+            study_uid: str,
+            series_uid: str,
+        ) -> list[dict]:
+            """
+            WADO-RS: retrieve full DICOM JSON metadata for all instances in a series.
 
-        def probe_endpoint(self, path: str, accept=None) -> dict:
-            """Probe a DICOMweb endpoint and return capability information without raising exceptions."""
+            GET {base_url}/studies/{study_uid}/series/{series_uid}/metadata
+            Accept: application/dicom+json
+
+            Returns a list of complete DICOM JSON objects — one per instance — with
+            all tags (not just the subset returned by QIDO-RS).  Useful for populating
+            the `metadata` variant column or for servers (e.g. S3 Static WADO) that
+            serve instance data via this endpoint rather than via QIDO-RS /instances.
+
+            Args:
+                study_uid:  DICOM study UID.
+                series_uid: DICOM series UID.
+
+            Returns:
+                List of full DICOM JSON objects (one per SOP instance).
+            """
+            url = f"{self.base_url}/studies/{study_uid}/series/{series_uid}/metadata"
+            logger.debug("WADO-RS metadata GET %s", url)
+            resp = self._get(url, extra_headers={"Accept": "application/dicom+json"})
+            if resp.status == 204:
+                return []
+            body = resp.read()
+            if not body:
+                return []
+            return json.loads(body)
+
+        def probe_endpoint(self, path: str, accept: str | None = None) -> dict:
+            """
+            Make a lightweight probe request and return capability information.
+
+            Used by the `diagnostics` table to test which DICOMweb endpoints are
+            available on the target server without raising exceptions.
+
+            Args:
+                path:   URL path relative to base_url (already includes query string
+                        if needed, e.g. "/studies?limit=1").
+                accept: Optional Accept header override.
+
+            Returns:
+                dict with keys: status_code (int|None), content_type (str|None),
+                latency_ms (int), error (str|None).
+            """
             url = f"{self.base_url}{path}"
-            headers = {"Accept": accept} if accept else {}
+            extra_headers = {"Accept": accept} if accept else None
             t0 = time.monotonic()
             try:
-                resp = self._session.get(url, headers=headers or None, timeout=self.timeout)
+                resp = self._get(url, extra_headers=extra_headers)
+                latency_ms = int((time.monotonic() - t0) * 1000)
                 return {
-                    "status_code": resp.status_code,
+                    "status_code": resp.status,
                     "content_type": resp.headers.get("Content-Type", ""),
-                    "latency_ms": int((time.monotonic() - t0) * 1000),
+                    "latency_ms": latency_ms,
+                    "error": None,
+                }
+            except urllib.error.HTTPError as exc:
+                # HTTP error responses (4xx/5xx) are valid probe results, not failures
+                latency_ms = int((time.monotonic() - t0) * 1000)
+                return {
+                    "status_code": exc.code,
+                    "content_type": exc.headers.get("Content-Type", ""),
+                    "latency_ms": latency_ms,
                     "error": None,
                 }
             except Exception as exc:
+                latency_ms = int((time.monotonic() - t0) * 1000)
                 return {
                     "status_code": None,
                     "content_type": None,
-                    "latency_ms": int((time.monotonic() - t0) * 1000),
+                    "latency_ms": latency_ms,
                     "error": str(exc),
                 }
 
-    def _parse_boundary(content_type: str) -> str | None:
-        for segment in content_type.split(";"):
-            segment = segment.strip()
-            if segment.lower().startswith("boundary="):
-                return segment[len("boundary=") :].strip().strip('"')
-        return None
+
+    # ---------------------------------------------------------------------------
+    # Multipart helpers
+    # ---------------------------------------------------------------------------
+
 
     def _extract_first_multipart_part(body: bytes, content_type: str) -> bytes:
+        """
+        Extract the raw bytes of the first part from a MIME multipart body.
+
+        The boundary is parsed from the Content-Type header, e.g.:
+            multipart/related; type="application/dicom"; boundary="myboundary"
+        """
         boundary = _parse_boundary(content_type)
         if not boundary:
+            # Can't parse boundary — return whole body and hope for the best
             return body
+
         sep = f"--{boundary}".encode()
         parts = body.split(sep)
+        # parts[0] is preamble (empty), parts[1] is first part, parts[-1] is "--\r\n"
         for part in parts[1:]:
             if part.strip() in (b"", b"--", b"--\r\n", b"--\n"):
                 continue
+            # Strip part headers (blank line separates headers from body)
             if b"\r\n\r\n" in part:
                 return part.split(b"\r\n\r\n", 1)[1].rstrip(b"\r\n")
             if b"\n\n" in part:
@@ -488,33 +703,306 @@ def register_lakeflow_source(spark):
             return part
         return body
 
+
+    def _parse_boundary(content_type: str) -> str | None:
+        """Extract the multipart boundary from a Content-Type header value."""
+        for segment in content_type.split(";"):
+            segment = segment.strip()
+            if segment.lower().startswith("boundary="):
+                boundary = segment[len("boundary="):].strip().strip('"')
+                return boundary
+        return None
+
+
     ########################################################
-    # sources/dicomweb/dicomweb.py
+    # src/databricks/labs/community_connector/sources/dicomweb/dicomweb_parser.py
     ########################################################
 
-    _SUPPORTED_TABLES = ("studies", "series", "instances", "diagnostics")
-    _DEFAULT_START_DATE = "19000101"
-    _DEFAULT_PAGE_SIZE = 100
-    _DEFAULT_LOOKBACK_DAYS = 1
-    _WADO_MODE_AUTO = "auto"
-    _WADO_MODE_FULL = "full"
-    _WADO_MODE_FRAMES = "frames"
+    STUDY_TAG_MAP: dict[str, str] = {
+        "0020000D": "study_instance_uid",
+        "00080020": "study_date",
+        "00080030": "study_time",
+        "00080050": "accession_number",
+        "00100010": "patient_name",
+        "00100020": "patient_id",
+        "00081030": "study_description",
+        "00080061": "modalities_in_study",
+        "00201206": "number_of_study_related_series",
+        "00201208": "number_of_study_related_instances",
+    }
 
-    def _subtract_days(date_str: str, days: int) -> str:
-        if date_str == _DEFAULT_START_DATE or days == 0:
-            return date_str
+    SERIES_TAG_MAP: dict[str, str] = {
+        "0020000E": "series_instance_uid",
+        "0020000D": "study_instance_uid",
+        "00080020": "study_date",
+        "00200011": "series_number",
+        "0008103E": "series_description",
+        "00080060": "modality",
+        "00180015": "body_part_examined",
+        "00080021": "series_date",
+    }
+
+    INSTANCE_TAG_MAP: dict[str, str] = {
+        "00080018": "sop_instance_uid",
+        "0020000E": "series_instance_uid",
+        "0020000D": "study_instance_uid",
+        "00080016": "sop_class_uid",
+        "00200013": "instance_number",
+        "00080020": "study_date",
+        "00080023": "content_date",
+        "00080033": "content_time",
+    }
+
+    # VRs that carry a single string scalar (or list → join / first element)
+    _STRING_VRS = {"DA", "TM", "CS", "LO", "UI", "SH", "LT", "ST", "UT", "AE", "AS", "DT", "UC", "UR"}
+    # VRs that carry numeric values
+    _NUMERIC_VRS = {"IS", "DS", "FL", "FD", "SL", "SS", "UL", "US", "AT", "OB", "OW", "OF", "OD", "OL", "OV"}
+    # Multi-valued string VRs (arrays stay as lists)
+    _MULTI_STRING_VRS = {"CS"}  # modalities_in_study uses CS and can be multi-valued
+
+
+    # ---------------------------------------------------------------------------
+    # Low-level value extraction
+    # ---------------------------------------------------------------------------
+
+
+    def _extract_value(tag_obj: dict, field_name: str) -> object:
+        """Extract a Python value from a DICOM JSON tag object."""
+        vr = tag_obj.get("vr", "")
+        values = tag_obj.get("Value", [])
+
+        if not values:
+            return None
+
+        if vr == "PN":
+            # Person Name — take Alphabetic component of the first element
+            first = values[0]
+            if isinstance(first, dict):
+                return first.get("Alphabetic") or first.get("Ideographic") or first.get("Phonetic")
+            return str(first)
+
+        if vr in _STRING_VRS:
+            # modalities_in_study (CS, multi-valued) → return as list
+            if field_name == "modalities_in_study":
+                return [str(v) for v in values]
+            return str(values[0]) if len(values) == 1 else str(values[0])
+
+        if vr in _NUMERIC_VRS:
+            first = values[0]
+            try:
+                if vr in {"IS", "US", "UL", "SS", "SL"}:
+                    return int(first)
+                return float(first)
+            except (TypeError, ValueError):
+                return None
+
+        # Fallback: return first value as-is or stringified
+        first = values[0]
+        if isinstance(first, (str, int, float, bool)):
+            return first
+        return str(first)
+
+
+    # ---------------------------------------------------------------------------
+    # Public parse functions
+    # ---------------------------------------------------------------------------
+
+
+    def parse_dicom_json(dicom_obj: dict, tag_map: dict[str, str]) -> dict:
+        """
+        Convert a single DICOM JSON object to a Python dict using the given tag map.
+
+        Args:
+            dicom_obj: Dict keyed by 8-character uppercase hex tags.
+            tag_map:   Mapping of hex tag → field name.
+
+        Returns:
+            Dict of {field_name: value} for all recognised tags that have a value.
+        """
+        result: dict = {}
+        for tag, field_name in tag_map.items():
+            tag_upper = tag.upper()
+            tag_obj = dicom_obj.get(tag_upper) or dicom_obj.get(tag.lower())
+            if tag_obj is None:
+                result[field_name] = None
+                continue
+            result[field_name] = _extract_value(tag_obj, field_name)
+        return result
+
+
+    def parse_study(dicom_obj: dict) -> dict:
+        """Parse a QIDO-RS study-level DICOM JSON object."""
+        return parse_dicom_json(dicom_obj, STUDY_TAG_MAP)
+
+
+    def parse_series(dicom_obj: dict) -> dict:
+        """Parse a QIDO-RS series-level DICOM JSON object."""
+        return parse_dicom_json(dicom_obj, SERIES_TAG_MAP)
+
+
+    def parse_instance(dicom_obj: dict) -> dict:
+        """Parse a QIDO-RS instance-level DICOM JSON object."""
+        record = parse_dicom_json(dicom_obj, INSTANCE_TAG_MAP)
+        # dicom_file_path is filled in later by the connector when WADO-RS retrieval is enabled
+        record.setdefault("dicom_file_path", None)
+        # metadata is filled in later when fetch_metadata=true
+        record.setdefault("metadata", None)
+        return record
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/sources/dicomweb/dicomweb_schemas.py
+    ########################################################
+
+    STUDIES_SCHEMA = StructType(
+        [
+            StructField("study_instance_uid", StringType(), nullable=False),
+            StructField("patient_id", StringType(), nullable=True),
+            StructField("patient_name", StringType(), nullable=True),
+            StructField("study_date", StringType(), nullable=True),
+            StructField("study_time", StringType(), nullable=True),
+            StructField("accession_number", StringType(), nullable=True),
+            StructField("study_description", StringType(), nullable=True),
+            # CS VR — can contain multiple modalities, e.g. ["CT", "SR"]
+            StructField("modalities_in_study", ArrayType(StringType()), nullable=True),
+            StructField("number_of_study_related_series", LongType(), nullable=True),
+            StructField("number_of_study_related_instances", LongType(), nullable=True),
+            # Lineage: UC connection name that produced this record
+            StructField("connection_name", StringType(), nullable=True),
+        ]
+    )
+
+    # ---------------------------------------------------------------------------
+    # Series-level schema
+    # QIDO-RS /series
+    # ---------------------------------------------------------------------------
+
+    SERIES_SCHEMA = StructType(
+        [
+            StructField("series_instance_uid", StringType(), nullable=False),
+            StructField("study_instance_uid", StringType(), nullable=True),
+            StructField("study_date", StringType(), nullable=True),
+            StructField("series_number", LongType(), nullable=True),
+            StructField("series_description", StringType(), nullable=True),
+            StructField("modality", StringType(), nullable=True),
+            StructField("body_part_examined", StringType(), nullable=True),
+            StructField("series_date", StringType(), nullable=True),
+            # Lineage: UC connection name that produced this record
+            StructField("connection_name", StringType(), nullable=True),
+        ]
+    )
+
+    # ---------------------------------------------------------------------------
+    # Instance (SOP) level schema
+    # QIDO-RS /instances
+    # ---------------------------------------------------------------------------
+
+    INSTANCES_SCHEMA = StructType(
+        [
+            StructField("sop_instance_uid", StringType(), nullable=False),
+            StructField("series_instance_uid", StringType(), nullable=True),
+            StructField("study_instance_uid", StringType(), nullable=True),
+            StructField("sop_class_uid", StringType(), nullable=True),
+            StructField("instance_number", LongType(), nullable=True),
+            StructField("study_date", StringType(), nullable=True),
+            StructField("content_date", StringType(), nullable=True),
+            StructField("content_time", StringType(), nullable=True),
+            # Populated when fetch_dicom_files=true; path inside Unity Catalog Volume
+            StructField("dicom_file_path", StringType(), nullable=True),
+            # Full DICOM JSON for this instance; populated when fetch_metadata=true.
+            StructField("metadata", VariantType(), nullable=True),
+            # Lineage: UC connection name that produced this record
+            StructField("connection_name", StringType(), nullable=True),
+        ]
+    )
+
+    # ---------------------------------------------------------------------------
+    # Diagnostics schema
+    # WADO-RS / QIDO-RS capability probe results
+    # ---------------------------------------------------------------------------
+
+    DIAGNOSTICS_SCHEMA = StructType(
+        [
+            # Endpoint pattern, e.g. "/studies/{uid}/series/{uid}/instances/{uid}/frames/{n}"
+            StructField("endpoint", StringType(), nullable=False),
+            # Service category: QIDO-RS or WADO-RS
+            StructField("category", StringType(), nullable=True),
+            # Human-readable description of what the endpoint does
+            StructField("description", StringType(), nullable=True),
+            # "yes", "no", "unknown", or "error"
+            StructField("supported", StringType(), nullable=False),
+            # HTTP status code returned by the probe request (null on network error)
+            StructField("status_code", LongType(), nullable=True),
+            # Content-Type header from the response
+            StructField("content_type", StringType(), nullable=True),
+            # Round-trip latency in milliseconds
+            StructField("latency_ms", LongType(), nullable=True),
+            # Additional context: error message, Access Denied reason, etc.
+            StructField("notes", StringType(), nullable=True),
+            # ISO-8601 timestamp of this probe run (UTC)
+            StructField("probe_timestamp", StringType(), nullable=False),
+            # Lineage: UC connection name that produced this record
+            StructField("connection_name", StringType(), nullable=True),
+        ]
+    )
+
+    # ---------------------------------------------------------------------------
+    # Lookup helpers
+    # ---------------------------------------------------------------------------
+
+    TABLE_SCHEMAS: dict[str, StructType] = {
+        "studies": STUDIES_SCHEMA,
+        "series": SERIES_SCHEMA,
+        "instances": INSTANCES_SCHEMA,
+        "diagnostics": DIAGNOSTICS_SCHEMA,
+    }
+
+
+    def get_schema(table_name: str) -> StructType:
+        """Return the PySpark StructType for the given table name."""
         try:
-            d = date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]))
-            return (d - timedelta(days=days)).strftime("%Y%m%d")
-        except (ValueError, IndexError):
-            return date_str
+            return TABLE_SCHEMAS[table_name]
+        except KeyError:
+            raise ValueError(f"Unknown table '{table_name}'. Valid tables: {list(TABLE_SCHEMAS)}")
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/sources/dicomweb/dicomweb.py
+    ########################################################
+
+    logger = logging.getLogger(__name__)
+
+    # ---------------------------------------------------------------------------
+    # Constants
+    # ---------------------------------------------------------------------------
+
+    SUPPORTED_TABLES = ("studies", "series", "instances", "diagnostics")
+    DEFAULT_START_DATE = "19000101"  # Effectively "all history" on first run
+    DEFAULT_PAGE_SIZE = 100
+    DEFAULT_LOOKBACK_DAYS = 1
+    DEFAULT_MAX_RECORDS_PER_BATCH = 500
+
+    # WADO-RS retrieval mode
+    WADO_MODE_AUTO = "auto"
+    WADO_MODE_FULL = "full"
+    WADO_MODE_FRAMES = "frames"
+
+
+    # ---------------------------------------------------------------------------
+    # Main connector
+    # ---------------------------------------------------------------------------
+
 
     class DICOMwebLakeflowConnect(LakeflowConnect):
+        """Lakeflow connector for DICOMweb VNA/PACS systems."""
+
         def __init__(self, options: dict[str, str]) -> None:
             super().__init__(options)
+
             base_url = options.get("base_url")
             if not base_url:
                 raise ValueError("Connection option 'base_url' is required")
+
             self._client = DICOMwebClient(
                 base_url=base_url,
                 auth_type=options.get("auth_type", "none"),
@@ -522,192 +1010,398 @@ def register_lakeflow_source(spark):
                 password=options.get("password"),
                 token=options.get("token"),
             )
-            self._connection_name = options.get("connection_name") or base_url
-            self._wado_mode_detected = None
+
+            # Lineage identifier injected into every record.
+            # Defaults to base_url so records are always traceable even when
+            # the connection_name option is not explicitly set.
+            self._connection_name: str = options.get("connection_name") or base_url
+
+            # Cached WADO-RS mode detected at runtime (only used when wado_mode=auto)
+            self._wado_mode_detected: str | None = None
+
+            # Cap cursors at init time so a trigger never chases new data.
+            # The next trigger creates a fresh instance and picks up from here.
+            self._init_ts: str = date.today().strftime("%Y%m%d")
+
+        # ------------------------------------------------------------------
+        # Schema / metadata
+        # ------------------------------------------------------------------
 
         def list_tables(self) -> list[str]:
-            return list(_SUPPORTED_TABLES)
+            return list(SUPPORTED_TABLES)
 
         def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
-            if table_name not in _TABLE_SCHEMAS:
-                raise ValueError(f"Unknown table '{table_name}'")
-            return _TABLE_SCHEMAS[table_name]
+            return get_schema(table_name)  # raises ValueError for unknown tables
 
         def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
+            if table_name not in SUPPORTED_TABLES:
+                raise ValueError(f"Unknown table '{table_name}'. Valid: {SUPPORTED_TABLES}")
             if table_name == "diagnostics":
-                return {"primary_keys": ["endpoint"], "cursor_field": "probe_timestamp", "ingestion_type": "cdc"}
-            pk_map = {
-                "studies": "StudyInstanceUID",
-                "series": "SeriesInstanceUID",
-                "instances": "SOPInstanceUID",
+                return {
+                    "primary_keys": ["endpoint"],
+                    "cursor_field": "probe_timestamp",
+                    "ingestion_type": "cdc",
+                }
+            return {
+                "primary_keys": [_primary_key(table_name)],
+                "cursor_field": "study_date",
+                "ingestion_type": "cdc",
             }
-            return {"primary_keys": [pk_map[table_name]], "cursor_field": "StudyDate", "ingestion_type": "cdc"}
+
+        # ------------------------------------------------------------------
+        # Data reading
+        # ------------------------------------------------------------------
 
         def read_table(
-            self, table_name: str, start_offset: dict, table_options: dict[str, str]
+            self,
+            table_name: str,
+            start_offset: dict,
+            table_options: dict[str, str],
         ) -> tuple[Iterator[dict], dict]:
-            if table_name not in _SUPPORTED_TABLES:
-                raise ValueError(f"Unknown table '{table_name}'")
+            """
+            Incrementally read records from the given table.
 
+            Args:
+                table_name:   One of "studies", "series", "instances", "diagnostics".
+                start_offset: Previous offset dict, or {} for first run.
+                table_options: Per-table options from the pipeline spec.
+
+            Returns:
+                (record_iterator, next_offset_dict)
+            """
+            if table_name not in SUPPORTED_TABLES:
+                raise ValueError(f"Unknown table '{table_name}'. Valid: {SUPPORTED_TABLES}")
+
+            # Diagnostics table: runs a capability probe on every trigger, no cursor
             if table_name == "diagnostics":
-                return self._run_diagnostics_probe(), {"probe_timestamp": datetime.now(tz=timezone.utc).isoformat()}
+                probe_iter = self._run_diagnostics_probe()
+                next_offset = {"probe_timestamp": datetime.now(tz=timezone.utc).isoformat()}
+                return probe_iter, next_offset
 
             start_offset = start_offset or {}
-            page_size = int(table_options.get("page_size", _DEFAULT_PAGE_SIZE))
-            lookback_days = int(table_options.get("lookback_days", _DEFAULT_LOOKBACK_DAYS))
-            date_cursor = start_offset.get("study_date", _DEFAULT_START_DATE)
+            date_cursor = start_offset.get("study_date", DEFAULT_START_DATE)
             page_offset = start_offset.get("page_offset", 0)
+
+            # Short-circuit: cursor is at or past today — stream has caught up to init time.
+            # The next trigger will create a fresh instance with a new _init_ts.
+            if start_offset and date_cursor >= self._init_ts:
+                return iter([]), start_offset
+
+            page_size = int(table_options.get("page_size", DEFAULT_PAGE_SIZE))
+            max_records = int(table_options.get("max_records_per_batch", str(DEFAULT_MAX_RECORDS_PER_BATCH)))
+            lookback_days = int(table_options.get("lookback_days", DEFAULT_LOOKBACK_DAYS))
+
             today_str = date.today().strftime("%Y%m%d")
             effective_start = _subtract_days(date_cursor, lookback_days)
             date_range = f"{effective_start}-{today_str}"
 
+            logger.info(
+                "read_table table=%s date_range=%s page_offset=%d page_size=%d max_records=%d",
+                table_name,
+                date_range,
+                page_offset,
+                page_size,
+                max_records,
+            )
+
             fetch_files = table_options.get("fetch_dicom_files", "false").lower() == "true"
             volume_path = table_options.get("dicom_volume_path", "")
             fetch_metadata = table_options.get("fetch_metadata", "false").lower() == "true"
-            wado_mode = table_options.get("wado_mode", _WADO_MODE_AUTO).lower()
+            wado_mode = table_options.get("wado_mode", WADO_MODE_AUTO).lower()
+
             if fetch_files and not volume_path and table_name == "instances":
                 raise ValueError("fetch_dicom_files=true requires dicom_volume_path to be set")
 
-            records_iter = self._paginate(
-                table_name, date_range, page_size, page_offset, fetch_files, volume_path, fetch_metadata, wado_mode
-            )
-            next_offset = {"study_date": today_str, "page_offset": 0}
-            return records_iter, next_offset
-
-        def _paginate(
-            self, table_name, date_range, page_size, start_offset, fetch_files, volume_path, fetch_metadata, wado_mode
-        ):
             if table_name == "studies":
-                yield from self._paginate_studies(date_range, page_size, start_offset)
+                records, next_page_offset = self._collect_studies(date_range, page_size, page_offset, max_records)
             elif table_name == "series":
-                yield from self._paginate_series(date_range, page_size, start_offset)
+                records, next_page_offset = self._collect_series(date_range, page_size, page_offset, max_records)
             else:
-                yield from self._paginate_instances(
-                    date_range, page_size, start_offset, fetch_files, volume_path, fetch_metadata, wado_mode
+                records, next_page_offset = self._collect_instances(
+                    date_range, page_size, page_offset, max_records,
+                    fetch_files, volume_path, fetch_metadata, wado_mode,
                 )
 
-        def _paginate_studies(self, date_range, page_size, start_offset):
+            if not records:
+                end_offset = {"study_date": today_str, "page_offset": 0}
+                if start_offset == end_offset:
+                    return iter([]), start_offset
+                return iter([]), end_offset
+
+            end_offset = {"study_date": today_str, "page_offset": next_page_offset}
+            if start_offset == end_offset:
+                return iter([]), start_offset
+            return iter(records), end_offset
+
+        # ------------------------------------------------------------------
+        # Eager record collection (supports max_records_per_batch)
+        # ------------------------------------------------------------------
+
+        def _collect_studies(
+            self, date_range: str, page_size: int, start_offset: int, max_records: int
+        ) -> tuple[list[dict], int]:
+            """Collect up to max_records studies via flat QIDO-RS pagination.
+
+            Returns (records, next_page_offset) where next_page_offset is 0 when
+            all pages are exhausted, or the study-level offset to resume from when
+            the batch limit is hit mid-scan.
+            """
+            records: list[dict] = []
             offset = start_offset
-            while True:
-                raw_records = self._client.query_studies(date_range, limit=page_size, offset=offset)
-                if not raw_records:
-                    break
-                for raw in raw_records:
-                    record = _parse_study(raw)
+            while len(records) < max_records:
+                batch = self._client.query_studies(date_range, limit=page_size, offset=offset)
+                if not batch:
+                    return records, 0
+                for raw in batch:
+                    record = parse_study(raw)
                     record["connection_name"] = self._connection_name
-                    yield record
-                if len(raw_records) < page_size:
-                    break
+                    records.append(record)
+                if len(batch) < page_size:
+                    return records, 0  # last partial page — all data consumed
                 offset += page_size
+            return records, offset  # hit batch limit; next call resumes from this offset
 
-        def _paginate_series(self, date_range, page_size, start_offset):
+        def _collect_series(
+            self, date_range: str, page_size: int, start_offset: int, max_records: int
+        ) -> tuple[list[dict], int]:
+            """Hierarchical series collection: enumerate studies, then fetch series per study.
+
+            Returns (records, next_study_page_offset).
+            """
+            records: list[dict] = []
             study_offset = start_offset
-            while True:
+            while len(records) < max_records:
                 studies = self._client.query_studies(date_range, limit=page_size, offset=study_offset)
                 if not studies:
-                    break
+                    return records, 0
                 for study_raw in studies:
-                    study = _parse_study(study_raw)
-                    study_uid = study.get("StudyInstanceUID")
+                    study = parse_study(study_raw)
+                    study_uid = study.get("study_instance_uid")
                     if not study_uid:
                         continue
                     for series_raw in self._client.query_series_for_study(study_uid):
-                        record = _parse_series(series_raw)
-                        if not record.get("StudyDate"):
-                            record["StudyDate"] = study.get("StudyDate")
-                        if not record.get("StudyInstanceUID"):
-                            record["StudyInstanceUID"] = study_uid
+                        record = parse_series(series_raw)
+                        # Propagate study_date / study_instance_uid from parent if missing
+                        if not record.get("study_date"):
+                            record["study_date"] = study.get("study_date")
+                        if not record.get("study_instance_uid"):
+                            record["study_instance_uid"] = study_uid
                         record["connection_name"] = self._connection_name
-                        yield record
+                        records.append(record)
                 if len(studies) < page_size:
-                    break
+                    return records, 0
                 study_offset += page_size
+            return records, study_offset
 
-        def _paginate_instances(
-            self, date_range, page_size, start_offset, fetch_files, volume_path, fetch_metadata, wado_mode
-        ):
+        def _collect_instances(
+            self,
+            date_range: str,
+            page_size: int,
+            start_offset: int,
+            max_records: int,
+            fetch_files: bool,
+            volume_path: str,
+            fetch_metadata: bool,
+            wado_mode: str,
+        ) -> tuple[list[dict], int]:
+            """Hierarchical instances collection: enumerate studies → series → instances.
+
+            Optionally fetches DICOM JSON metadata (fetch_metadata=true) and writes
+            DICOM files to a UC Volume (fetch_dicom_files=true).
+
+            Returns (records, next_study_page_offset).
+            """
+            records: list[dict] = []
             study_offset = start_offset
-            while True:
+            while len(records) < max_records:
                 studies = self._client.query_studies(date_range, limit=page_size, offset=study_offset)
                 if not studies:
-                    break
+                    return records, 0
                 for study_raw in studies:
-                    study = _parse_study(study_raw)
-                    study_uid = study.get("StudyInstanceUID")
+                    study = parse_study(study_raw)
+                    study_uid = study.get("study_instance_uid")
                     if not study_uid:
                         continue
                     for series_raw in self._client.query_series_for_study(study_uid):
-                        series = _parse_series(series_raw)
-                        series_uid = series.get("SeriesInstanceUID")
+                        series = parse_series(series_raw)
+                        series_uid = series.get("series_instance_uid")
                         if not series_uid:
                             continue
-                        sop_to_meta = self._build_metadata_map(study_uid, series_uid) if fetch_metadata else {}
-                        for inst_raw in self._client.query_instances_for_series(study_uid, series_uid):
-                            record = _parse_instance(inst_raw)
-                            if not record.get("StudyDate"):
-                                record["StudyDate"] = study.get("StudyDate")
-                            if not record.get("StudyInstanceUID"):
-                                record["StudyInstanceUID"] = study_uid
-                            if not record.get("SeriesInstanceUID"):
-                                record["SeriesInstanceUID"] = series_uid
+
+                        instances_raw = self._client.query_instances_for_series(study_uid, series_uid)
+
+                        # Optionally fetch full DICOM JSON for all instances in this series
+                        sop_to_meta: dict[str, str] = {}
+                        if fetch_metadata:
+                            sop_to_meta = self._build_metadata_map(study_uid, series_uid)
+
+                        for inst_raw in instances_raw:
+                            record = parse_instance(inst_raw)
+                            # Propagate parent UIDs / dates if missing in the response
+                            if not record.get("study_date"):
+                                record["study_date"] = study.get("study_date")
+                            if not record.get("study_instance_uid"):
+                                record["study_instance_uid"] = study_uid
+                            if not record.get("series_instance_uid"):
+                                record["series_instance_uid"] = series_uid
+                            # Attach full DICOM JSON metadata
                             if fetch_metadata:
-                                sop_uid = record.get("SOPInstanceUID")
+                                sop_uid = record.get("sop_instance_uid")
                                 record["metadata"] = sop_to_meta.get(sop_uid) if sop_uid else None
+                            # Attach DICOM file or frame
                             if fetch_files:
                                 record = self._attach_dicom_file(record, volume_path, wado_mode)
                             record["connection_name"] = self._connection_name
-                            yield record
+                            records.append(record)
                 if len(studies) < page_size:
-                    break
+                    return records, 0
                 study_offset += page_size
+            return records, study_offset
 
-        def _resolve_wado_mode(self, wado_mode):
-            if wado_mode == _WADO_MODE_AUTO:
-                return self._wado_mode_detected or _WADO_MODE_FULL
+        # ------------------------------------------------------------------
+        # WADO-RS helpers
+        # ------------------------------------------------------------------
+
+        def _attach_dicom_file(self, record: dict, volume_path: str, wado_mode: str) -> dict:
+            """
+            Retrieve the DICOM content via WADO-RS and write it to the Volume.
+
+            Supports two retrieval modes:
+            - full  (wado_mode=full):   GET .../instances/{uid}        → .dcm
+            - frames (wado_mode=frames): GET .../instances/{uid}/frames/1 → .jpg
+
+            When wado_mode=auto (default), the connector tries the full endpoint
+            first.  If the server responds with 404/406/415 it switches to frame
+            retrieval and caches the detected mode for the rest of the run.
+            """
+            study_uid = record.get("study_instance_uid")
+            series_uid = record.get("series_instance_uid")
+            sop_uid = record.get("sop_instance_uid")
+
+            if not all([study_uid, series_uid, sop_uid]):
+                logger.warning("Skipping WADO-RS: missing UIDs in record %s", record)
+                return record
+
+            try:
+                effective_mode = self._resolve_wado_mode(wado_mode)
+                if effective_mode == WADO_MODE_FRAMES:
+                    file_bytes = self._client.retrieve_instance_frames(study_uid, series_uid, sop_uid)
+                    ext = ".jpg"
+                else:
+                    # Try full DICOM retrieval; auto-detect fallback to frames on error
+                    try:
+                        file_bytes = self._client.retrieve_instance(study_uid, series_uid, sop_uid)
+                        ext = ".dcm"
+                        if wado_mode == WADO_MODE_AUTO and self._wado_mode_detected is None:
+                            self._wado_mode_detected = WADO_MODE_FULL
+                            logger.info("WADO-RS auto-detected: full DICOM retrieval")
+                    except HTTPError as exc:
+                        if (
+                            wado_mode == WADO_MODE_AUTO
+                            and exc.code in (404, 406, 415)
+                        ):
+                            logger.info(
+                                "WADO-RS full instance returned HTTP %d — auto-switching to frame retrieval",
+                                exc.code,
+                            )
+                            self._wado_mode_detected = WADO_MODE_FRAMES
+                            file_bytes = self._client.retrieve_instance_frames(study_uid, series_uid, sop_uid)
+                            ext = ".jpg"
+                        else:
+                            raise
+
+                dest_path = pathlib.Path(volume_path) / study_uid / series_uid / f"{sop_uid}{ext}"
+                try:
+                    dest_path.parent.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    # UC Volume FUSE mounts do not support mkdir via POSIX syscalls;
+                    # the write_bytes() call below works regardless.
+                    pass
+                dest_path.write_bytes(file_bytes)
+                record["dicom_file_path"] = str(dest_path)
+                logger.debug("Wrote %d bytes → %s", len(file_bytes), dest_path)
+            except Exception as exc:
+                logger.error("WADO-RS retrieval failed for %s: %s", sop_uid, exc)
+                record["dicom_file_path"] = None
+
+            return record
+
+        def _resolve_wado_mode(self, wado_mode: str) -> str:
+            """Return the effective WADO mode, consulting the cached detection result."""
+            if wado_mode == WADO_MODE_AUTO:
+                return self._wado_mode_detected or WADO_MODE_FULL
             return wado_mode
 
-        def _build_metadata_map(self, study_uid, series_uid):
+        def _build_metadata_map(self, study_uid: str, series_uid: str) -> dict[str, str]:
+            """
+            Fetch WADO-RS series metadata and return a {sop_instance_uid: value} map.
+
+            On DBR 15.x+ (METADATA_IS_VARIANT=True) values are VariantVal objects;
+            on older runtimes they are JSON strings.  Returns an empty dict on any
+            error so the instance record is still yielded without metadata.
+            """
             try:
                 meta_list = self._client.retrieve_series_metadata(study_uid, series_uid)
-                sop_to_meta = {}
+                sop_to_meta: dict[str, str] = {}
                 for meta_obj in meta_list:
-                    tag_obj = meta_obj.get("00080018")
+                    tag_obj = meta_obj.get("00080018")  # sop_instance_uid tag
                     if tag_obj and tag_obj.get("Value"):
                         sop_uid = str(tag_obj["Value"][0])
+                        # VariantType: pass the Python dict — Spark's convert_variant
+                        # handles dict → VARIANT binary encoding internally.
+                        # StringType fallback: pass a JSON string for older runtimes.
                         sop_to_meta[sop_uid] = json.dumps(meta_obj)
                 return sop_to_meta
-            except Exception:
+            except Exception as exc:
+                logger.warning("Failed to fetch series metadata %s/%s: %s", study_uid, series_uid, exc)
                 return {}
 
-        def _run_diagnostics_probe(self):
+        def _run_diagnostics_probe(self) -> Iterator[dict]:
+            """
+            Probe all standard DICOMweb endpoints and yield one record per endpoint.
+
+            Automatically discovers sample UIDs (study → series → instance) from the
+            server so that hierarchical endpoints can be tested with real paths.
+            Endpoints are never mutated — only GET requests are issued.
+            """
             probe_timestamp = datetime.now(tz=timezone.utc).isoformat()
+
+            # ---- Discover sample UIDs for hierarchical probes -----------------
             study_uid = series_uid = sop_uid = None
             try:
                 studies = self._client.query_studies("19000101-99991231", limit=1, offset=0)
                 if studies:
-                    tag = studies[0].get("0020000D")
-                    study_uid = str(tag["Value"][0]) if tag and tag.get("Value") else None
-            except Exception:
-                pass
+                    study_uid = parse_study(studies[0]).get("study_instance_uid")
+            except Exception as exc:
+                logger.warning("Diagnostics: could not fetch a study UID: %s", exc)
+
             if study_uid:
                 try:
-                    sl = self._client.query_series_for_study(study_uid)
-                    if sl:
-                        tag = sl[0].get("0020000E")
-                        series_uid = str(tag["Value"][0]) if tag and tag.get("Value") else None
-                except Exception:
-                    pass
+                    series_list = self._client.query_series_for_study(study_uid)
+                    if series_list:
+                        series_uid = parse_series(series_list[0]).get("series_instance_uid")
+                except Exception as exc:
+                    logger.warning("Diagnostics: could not fetch a series UID: %s", exc)
+
             if study_uid and series_uid:
                 try:
-                    il = self._client.query_instances_for_series(study_uid, series_uid)
-                    if il:
-                        tag = il[0].get("00080018")
-                        sop_uid = str(tag["Value"][0]) if tag and tag.get("Value") else None
-                except Exception:
-                    pass
+                    instances = self._client.query_instances_for_series(study_uid, series_uid)
+                    if instances:
+                        sop_uid = parse_instance(instances[0]).get("sop_instance_uid")
+                except Exception as exc:
+                    logger.warning("Diagnostics: could not fetch a SOP UID: %s", exc)
 
-            probes = [
-                ("/studies", "/studies?limit=1", "QIDO-RS", "Search studies (flat pagination)", None),
+            # ---- Probe definitions --------------------------------------------
+            # Each entry: (endpoint_pattern, resolved_path_or_None, category, description, accept)
+            _probes: list[tuple[str, str | None, str, str, str | None]] = [
+                # QIDO-RS — query
+                (
+                    "/studies",
+                    "/studies?limit=1",
+                    "QIDO-RS",
+                    "Search studies (flat pagination)",
+                    None,
+                ),
                 (
                     "/studies/{uid}/series",
                     f"/studies/{study_uid}/series" if study_uid else None,
@@ -722,54 +1416,64 @@ def register_lakeflow_source(spark):
                     "Search instances for a series (hierarchical)",
                     None,
                 ),
+                # WADO-RS — metadata
                 (
                     "/studies/{uid}/series/{uid}/metadata",
                     f"/studies/{study_uid}/series/{series_uid}/metadata" if study_uid and series_uid else None,
                     "WADO-RS",
-                    "Series metadata — full DICOM JSON for all instances",
+                    "Series metadata — full DICOM JSON for all instances in a series",
                     "application/dicom+json",
                 ),
                 (
                     "/studies/{uid}/series/{uid}/instances/{uid}/metadata",
-                    f"/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/metadata"
-                    if study_uid and series_uid and sop_uid
-                    else None,
+                    (
+                        f"/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/metadata"
+                        if study_uid and series_uid and sop_uid
+                        else None
+                    ),
                     "WADO-RS",
                     "Instance metadata — full DICOM JSON for a single instance",
                     "application/dicom+json",
                 ),
+                # WADO-RS — retrieve
                 (
                     "/studies/{uid}/series/{uid}/instances/{uid}",
-                    f"/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}"
-                    if study_uid and series_uid and sop_uid
-                    else None,
+                    (
+                        f"/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}"
+                        if study_uid and series_uid and sop_uid
+                        else None
+                    ),
                     "WADO-RS",
-                    "Retrieve full DICOM instance (.dcm)",
+                    "Retrieve full DICOM instance (.dcm, multipart/related)",
                     'multipart/related; type="application/dicom"',
                 ),
                 (
                     "/studies/{uid}/series/{uid}/instances/{uid}/frames/{n}",
-                    f"/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/frames/1"
-                    if study_uid and series_uid and sop_uid
-                    else None,
+                    (
+                        f"/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/frames/1"
+                        if study_uid and series_uid and sop_uid
+                        else None
+                    ),
                     "WADO-RS",
                     "Retrieve pixel frame (image/jpeg or image/jls)",
                     "image/jpeg, image/jls, application/octet-stream",
                 ),
                 (
                     "/studies/{uid}/series/{uid}/instances/{uid}/rendered",
-                    f"/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/rendered"
-                    if study_uid and series_uid and sop_uid
-                    else None,
+                    (
+                        f"/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/rendered"
+                        if study_uid and series_uid and sop_uid
+                        else None
+                    ),
                     "WADO-RS",
-                    "Retrieve rendered instance (PNG/JPEG)",
+                    "Retrieve rendered instance (viewport-ready PNG/JPEG)",
                     "image/jpeg, image/png",
                 ),
                 (
                     "/studies/{uid}/series/{uid}/rendered",
                     f"/studies/{study_uid}/series/{series_uid}/rendered" if study_uid and series_uid else None,
                     "WADO-RS",
-                    "Retrieve rendered series",
+                    "Retrieve rendered series (all frames as viewport-ready images)",
                     "image/jpeg, image/png",
                 ),
                 (
@@ -781,7 +1485,7 @@ def register_lakeflow_source(spark):
                 ),
             ]
 
-            for endpoint_pattern, path, category, description, accept in probes:
+            for endpoint_pattern, path, category, description, accept in _probes:
                 if path is None:
                     yield {
                         "endpoint": endpoint_pattern,
@@ -796,22 +1500,32 @@ def register_lakeflow_source(spark):
                         "connection_name": self._connection_name,
                     }
                     continue
+
                 result = self._client.probe_endpoint(path, accept=accept)
                 status = result["status_code"]
+
                 if result["error"]:
-                    supported, notes = "error", result["error"]
+                    supported = "error"
+                    notes = result["error"]
                 elif status in (200, 204, 206):
-                    supported, notes = "yes", f"Content-Type: {result['content_type']}"
+                    supported = "yes"
+                    notes = f"Content-Type: {result['content_type']}"
                 elif status == 400:
-                    supported, notes = "partial", "Bad Request (400) — endpoint exists but may require query parameters"
+                    supported = "partial"
+                    notes = "Bad Request (400) — endpoint exists but query parameters may be required"
                 elif status == 403:
-                    supported, notes = "no", "Access Denied (403) — endpoint blocked by server or CDN policy"
+                    supported = "no"
+                    notes = "Access Denied (403) — endpoint blocked by server or CDN policy"
                 elif status == 404:
-                    supported, notes = "no", "Not Found (404) — endpoint not implemented on this server"
+                    supported = "no"
+                    notes = "Not Found (404) — endpoint not implemented on this server"
                 elif status == 406:
-                    supported, notes = "no", "Not Acceptable (406) — requested media type not supported"
+                    supported = "no"
+                    notes = "Not Acceptable (406) — requested media type not supported"
                 else:
-                    supported, notes = "no", f"HTTP {status}"
+                    supported = "no"
+                    notes = f"HTTP {status}"
+
                 yield {
                     "endpoint": endpoint_pattern,
                     "category": category,
@@ -825,236 +1539,61 @@ def register_lakeflow_source(spark):
                     "connection_name": self._connection_name,
                 }
 
-        def _attach_dicom_file(self, record: dict, volume_path: str, wado_mode: str) -> dict:
-            study_uid = record.get("StudyInstanceUID")
-            series_uid = record.get("SeriesInstanceUID")
-            sop_uid = record.get("SOPInstanceUID")
-            if not all([study_uid, series_uid, sop_uid]):
-                return record
-            try:
-                effective_mode = self._resolve_wado_mode(wado_mode)
-                if effective_mode == _WADO_MODE_FRAMES:
-                    file_bytes = self._client.retrieve_instance_frames(study_uid, series_uid, sop_uid)
-                    ext = ".jpg"
-                else:
-                    try:
-                        file_bytes = self._client.retrieve_instance(study_uid, series_uid, sop_uid)
-                        ext = ".dcm"
-                        if wado_mode == _WADO_MODE_AUTO and self._wado_mode_detected is None:
-                            self._wado_mode_detected = _WADO_MODE_FULL
-                    except Exception as exc:
-                        status = getattr(getattr(exc, "response", None), "status_code", None)
-                        if wado_mode == _WADO_MODE_AUTO and status in (404, 406, 415):
-                            self._wado_mode_detected = _WADO_MODE_FRAMES
-                            file_bytes = self._client.retrieve_instance_frames(study_uid, series_uid, sop_uid)
-                            ext = ".jpg"
-                        else:
-                            raise
-                dest_path = pathlib.Path(volume_path) / study_uid / series_uid / f"{sop_uid}{ext}"
-                try:
-                    dest_path.parent.mkdir(parents=True, exist_ok=True)
-                except OSError:
-                    pass
-                dest_path.write_bytes(file_bytes)
-                record["dicom_file_path"] = str(dest_path)
-            except Exception as exc:
-                logging.getLogger(__name__).error("WADO-RS retrieval failed for %s: %s", sop_uid, exc)
-                record["dicom_file_path"] = None
-            return record
+
+    # ---------------------------------------------------------------------------
+    # Helpers
+    # ---------------------------------------------------------------------------
+
+
+    def _primary_key(table_name: str) -> str:
+        pk_map = {
+            "studies": "study_instance_uid",
+            "series": "series_instance_uid",
+            "instances": "sop_instance_uid",
+            "diagnostics": "endpoint",
+        }
+        return pk_map[table_name]
+
+
+    def _subtract_days(date_str: str, days: int) -> str:
+        """Subtract `days` from a YYYYMMDD date string; clamp at DEFAULT_START_DATE."""
+        if date_str == DEFAULT_START_DATE or days == 0:
+            return date_str
+        try:
+            d = date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]))
+            d = d - timedelta(days=days)
+            return d.strftime("%Y%m%d")
+        except (ValueError, IndexError):
+            return date_str
+
 
     ########################################################
     # src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py
     ########################################################
 
     LakeflowConnectImpl = DICOMwebLakeflowConnect
+    # Constant option or column names
     METADATA_TABLE = "_lakeflow_metadata"
     TABLE_NAME = "tableName"
     TABLE_NAME_LIST = "tableNameList"
     TABLE_CONFIGS = "tableConfigs"
     IS_DELETE_FLOW = "isDeleteFlow"
-    FETCH_DICOM_FILES = "fetch_dicom_files"
-    DICOM_VOLUME_PATH = "dicom_volume_path"
-    MAX_CONCURRENT_REQUESTS = "max_concurrent_requests"
-    WADO_MODE = "wado_mode"
-    _DEFAULT_MAX_CONCURRENT_REQUESTS = 16
 
-    @dataclass
-    class SimplePartition(InputPartition):
-        """Single-partition descriptor for metadata-only tables."""
-
-        start_json: str
-
-    @dataclass
-    class DicomBatchPartition(InputPartition):
-        """
-        A batch of DICOM instances for one Spark task.
-
-        Grouping multiple instances per partition bounds the total number of
-        simultaneous Spark tasks (= concurrent WADO-RS connections to the PACS)
-        to max_concurrent_requests, regardless of cluster size.
-        Each worker downloads its batch sequentially.
-        """
-
-        instances_json: str  # JSON array of {record, dest_path, study_uid, series_uid, sop_uid}
-
-    class DicomStreamReader(DataSourceStreamReader):
-        """
-        Multi-partition streaming reader.
-
-        For instances + fetch_dicom_files=true:
-            partitions() runs on the driver — queries QIDO-RS, groups results
-            into at most max_concurrent_requests batches, and returns one
-            DicomBatchPartition per batch.  Spark schedules each batch as a
-            separate task on a worker node, so at most max_concurrent_requests
-            WADO-RS connections are open against the PACS simultaneously.
-            read(partition) runs on each worker — recreates the HTTP client
-            and downloads the files in its batch sequentially.
-
-        For all other cases:
-            Returns a single SimplePartition so all records are streamed on
-            one worker (same behaviour as SimpleDataSourceStreamReader).
-        """
-
-        def __init__(self, options, schema):
-            self.options = options
-            self.schema = schema
-
-        def _make_connector(self):
-            return DICOMwebLakeflowConnect(self.options)
-
-        def initialOffset(self):
-            return {}
-
-        def latestOffset(self):
-            return {"study_date": date.today().strftime("%Y%m%d"), "page_offset": 0}
-
-        def partitions(self, start, end):
-            import math
-
-            table = self.options.get(TABLE_NAME, "")
-            fetch_files = self.options.get(FETCH_DICOM_FILES, "false").lower() == "true"
-            volume_path = self.options.get(DICOM_VOLUME_PATH, "")
-            wado_mode = self.options.get(WADO_MODE, _WADO_MODE_AUTO).lower()
-            max_concurrent = int(self.options.get(MAX_CONCURRENT_REQUESTS, _DEFAULT_MAX_CONCURRENT_REQUESTS))
-
-            if table == "instances" and fetch_files:
-                # Driver: collect metadata without WADO-RS, then group instances
-                # into at most max_concurrent batches.
-                metadata_options = {**self.options, FETCH_DICOM_FILES: "false"}
-                connector = self._make_connector()
-                records, _ = connector.read_table(table, start or {}, metadata_options)
-
-                instances = []
-                for record in records:
-                    study_uid = record.get("StudyInstanceUID") or ""
-                    series_uid = record.get("SeriesInstanceUID") or ""
-                    sop_uid = record.get("SOPInstanceUID") or ""
-                    # Placeholder extension — worker will determine actual ext based on wado_mode
-                    ext = ".dcm" if wado_mode != _WADO_MODE_FRAMES else ".jpg"
-                    dest = (
-                        str(pathlib.Path(volume_path) / study_uid / series_uid / f"{sop_uid}{ext}")
-                        if volume_path and study_uid and series_uid and sop_uid
-                        else ""
-                    )
-                    instances.append(
-                        {
-                            "record": record,
-                            "dest_path": dest,
-                            "study_uid": study_uid,
-                            "series_uid": series_uid,
-                            "sop_uid": sop_uid,
-                        }
-                    )
-
-                if not instances:
-                    return []
-
-                # Divide into at most max_concurrent batches so the number of
-                # simultaneous Spark tasks (= simultaneous PACS connections) is
-                # bounded by max_concurrent_requests.
-                batch_size = max(1, math.ceil(len(instances) / max_concurrent))
-                batches = [instances[i : i + batch_size] for i in range(0, len(instances), batch_size)]
-                return [DicomBatchPartition(instances_json=json.dumps(batch, default=str)) for batch in batches]
-            else:
-                # Single partition: stream all records on one worker.
-                return [SimplePartition(start_json=json.dumps(start or {}))]
-
-        def read(self, partition):
-            if isinstance(partition, DicomBatchPartition):
-                # Worker: download each file in the batch sequentially and yield rows.
-                instances = json.loads(partition.instances_json)
-                wado_mode = self.options.get(WADO_MODE, _WADO_MODE_AUTO).lower()
-                client = DICOMwebClient(
-                    base_url=self.options.get("base_url", ""),
-                    auth_type=self.options.get("auth_type", "none"),
-                    username=self.options.get("username"),
-                    password=self.options.get("password"),
-                    token=self.options.get("token"),
-                )
-                # Per-worker wado_mode detection cache
-                detected_mode = None
-                rows = []
-                for inst in instances:
-                    record = inst["record"]
-                    if inst.get("study_uid") and inst.get("sop_uid"):
-                        try:
-                            effective = detected_mode or (
-                                wado_mode if wado_mode != _WADO_MODE_AUTO else _WADO_MODE_FULL
-                            )
-                            if effective == _WADO_MODE_FRAMES:
-                                file_bytes = client.retrieve_instance_frames(
-                                    inst["study_uid"], inst["series_uid"], inst["sop_uid"]
-                                )
-                                ext = ".jpg"
-                            else:
-                                try:
-                                    file_bytes = client.retrieve_instance(
-                                        inst["study_uid"], inst["series_uid"], inst["sop_uid"]
-                                    )
-                                    ext = ".dcm"
-                                    if wado_mode == _WADO_MODE_AUTO and detected_mode is None:
-                                        detected_mode = _WADO_MODE_FULL
-                                except Exception as exc:
-                                    status = getattr(getattr(exc, "response", None), "status_code", None)
-                                    if wado_mode == _WADO_MODE_AUTO and status in (404, 406, 415):
-                                        detected_mode = _WADO_MODE_FRAMES
-                                        file_bytes = client.retrieve_instance_frames(
-                                            inst["study_uid"], inst["series_uid"], inst["sop_uid"]
-                                        )
-                                        ext = ".jpg"
-                                    else:
-                                        raise
-                            volume_path = self.options.get(DICOM_VOLUME_PATH, "")
-                            dest = (
-                                pathlib.Path(volume_path)
-                                / inst["study_uid"]
-                                / inst["series_uid"]
-                                / f"{inst['sop_uid']}{ext}"
-                            )
-                            try:
-                                dest.parent.mkdir(parents=True, exist_ok=True)
-                            except OSError:
-                                pass
-                            dest.write_bytes(file_bytes)
-                            record["dicom_file_path"] = str(dest)
-                        except Exception as exc:
-                            logging.getLogger(__name__).error("WADO-RS failed for %s: %s", inst.get("sop_uid"), exc)
-                            record["dicom_file_path"] = None
-                    rows.append(parse_value(record, self.schema))
-                return iter(rows)
-            else:
-                # Single partition: stream all records for the table.
-                start = json.loads(partition.start_json)
-                table_options = {k: v for k, v in self.options.items() if k != IS_DELETE_FLOW}
-                connector = self._make_connector()
-                records, _ = connector.read_table(self.options[TABLE_NAME], start, table_options)
-                return map(lambda x: parse_value(x, self.schema), records)
-
-        def commit(self, end):
-            pass
 
     class LakeflowStreamReader(SimpleDataSourceStreamReader):
-        def __init__(self, options, schema, lakeflow_connect):
+        """
+        Implements a data source stream reader for Lakeflow Connect.
+        Currently, only the simpleStreamReader is implemented, which uses a
+        more generic protocol suitable for most data sources that support
+        incremental loading.
+        """
+
+        def __init__(
+            self,
+            options: dict[str, str],
+            schema: StructType,
+            lakeflow_connect: LakeflowConnect,
+        ):
             self.options = options
             self.lakeflow_connect = lakeflow_connect
             self.schema = schema
@@ -1062,47 +1601,80 @@ def register_lakeflow_source(spark):
         def initialOffset(self):
             return {}
 
-        def read(self, start: dict) -> tuple:
+        def read(self, start: dict) -> (Iterator[tuple], dict):
             is_delete_flow = self.options.get(IS_DELETE_FLOW) == "true"
-            table_options = {k: v for k, v in self.options.items() if k != IS_DELETE_FLOW}
+            # Strip delete flow options before passing to connector
+            table_options = {
+                k: v for k, v in self.options.items() if k != IS_DELETE_FLOW
+            }
+
             if is_delete_flow:
                 records, offset = self.lakeflow_connect.read_table_deletes(
                     self.options[TABLE_NAME], start, table_options
                 )
             else:
-                records, offset = self.lakeflow_connect.read_table(self.options[TABLE_NAME], start, table_options)
+                records, offset = self.lakeflow_connect.read_table(
+                    self.options[TABLE_NAME], start, table_options
+                )
             rows = map(lambda x: parse_value(x, self.schema), records)
             return rows, offset
 
-        def readBetweenOffsets(self, start: dict, end: dict) -> Iterator:
+        def readBetweenOffsets(self, start: dict, end: dict) -> Iterator[tuple]:
+            # TODO: This does not ensure the records returned are identical across repeated calls.
+            # For append-only tables, the data source must guarantee that reading from the same
+            # start offset will always yield the same set of records.
+            # For tables ingested as incremental CDC, it is only necessary that no new changes
+            # are missed in the returned records.
             return self.read(start)[0]
 
+
     class LakeflowBatchReader(DataSourceReader):
-        def __init__(self, options, schema, lakeflow_connect):
+        def __init__(
+            self,
+            options: dict[str, str],
+            schema: StructType,
+            lakeflow_connect: LakeflowConnect,
+        ):
             self.options = options
             self.schema = schema
             self.lakeflow_connect = lakeflow_connect
             self.table_name = options[TABLE_NAME]
 
         def read(self, partition):
+            all_records = []
             if self.table_name == METADATA_TABLE:
                 all_records = self._read_table_metadata()
             else:
-                all_records, _ = self.lakeflow_connect.read_table(self.table_name, None, self.options)
-            return iter(map(lambda x: parse_value(x, self.schema), all_records))
+                all_records, _ = self.lakeflow_connect.read_table(
+                    self.table_name, None, self.options
+                )
+
+            rows = map(lambda x: parse_value(x, self.schema), all_records)
+            return iter(rows)
 
         def _read_table_metadata(self):
-            table_names = [o.strip() for o in self.options.get(TABLE_NAME_LIST, "").split(",") if o.strip()]
+            table_name_list = self.options.get(TABLE_NAME_LIST, "")
+            table_names = [o.strip() for o in table_name_list.split(",") if o.strip()]
+            all_records = []
             table_configs = json.loads(self.options.get(TABLE_CONFIGS, "{}"))
-            return [
-                {TABLE_NAME: t, **self.lakeflow_connect.read_table_metadata(t, table_configs.get(t, {}))}
-                for t in table_names
-            ]
+            for table in table_names:
+                metadata = self.lakeflow_connect.read_table_metadata(
+                    table, table_configs.get(table, {})
+                )
+                all_records.append({TABLE_NAME: table, **metadata})
+            return all_records
+
 
     class LakeflowSource(DataSource):
+        """
+        PySpark DataSource implementation for Lakeflow Connect.
+        """
+
         def __init__(self, options):
             self.options = options
-            self.lakeflow_connect = LakeflowConnectImpl(options)
+            # TEMPORARY: LakeflowConnectImpl is replaced with the actual implementation
+            # class during merge. See the placeholder comment at the top of this file.
+            self.lakeflow_connect = LakeflowConnectImpl(options)  # pylint: disable=abstract-class-instantiated
 
         @classmethod
         def name(cls):
@@ -1119,12 +1691,14 @@ def register_lakeflow_source(spark):
                         StructField("ingestion_type", StringType(), True),
                     ]
                 )
-            return self.lakeflow_connect.get_table_schema(table, self.options)
+            else:
+                return self.lakeflow_connect.get_table_schema(table, self.options)
 
         def reader(self, schema: StructType):
             return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)
 
-        def streamReader(self, schema: StructType):
-            return DicomStreamReader(self.options, schema)
+        def simpleStreamReader(self, schema: StructType):
+            return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
+
 
     spark.dataSource.register(LakeflowSource)
