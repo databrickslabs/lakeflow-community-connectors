@@ -3,9 +3,6 @@ from pathlib import Path
 from databricks.labs.community_connector.libs.simulated_source.api import reset_api
 from databricks.labs.community_connector.sources.example.example import ExampleLakeflowConnect
 from tests.unit.sources import test_suite
-from tests.unit.sources.example.example_test_utils import (
-    LakeflowConnectTestUtils,
-)
 from tests.unit.sources.test_suite import LakeflowConnectTester
 from tests.unit.sources.test_utils import load_config
 
@@ -26,7 +23,6 @@ def test_example_connector():
     reset_api(config["username"], config["password"])
 
     test_suite.LakeflowConnect = ExampleLakeflowConnect
-    test_suite.LakeflowConnectTestUtils = LakeflowConnectTestUtils
 
     tester = LakeflowConnectTester(config, table_config, sample_records=100)
     report = tester.run_all_tests()

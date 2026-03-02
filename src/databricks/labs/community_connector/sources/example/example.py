@@ -28,6 +28,10 @@ class ExampleLakeflowConnect(LakeflowConnect):
         password = options.get("password", "default_pass")
         self._api = get_api(username, password)
 
+        # Cap cursors at init time so a trigger never chases new data.
+        # The next trigger creates a fresh instance and picks up from here.
+        self._init_ts = datetime.now(timezone.utc).isoformat()
+
     def _request_with_retry(self, method: str, path: str, **kwargs):
         """Issue an API request, retrying on 429/500/503 with exponential backoff."""
         backoff = INITIAL_BACKOFF
@@ -117,6 +121,10 @@ class ExampleLakeflowConnect(LakeflowConnect):
             raise ValueError(f"Table '{table_name}' does not support deleted records")
 
         since = start_offset.get("cursor") if start_offset else None
+        # Already caught up to init time — skip the API call entirely.
+        if since and since >= self._init_ts:
+            return iter([]), start_offset
+
         max_records = int(table_options.get("max_records_per_batch", "200"))
 
         records = []
@@ -183,7 +191,7 @@ class ExampleLakeflowConnect(LakeflowConnect):
                 break
             page = body["next_page"]
 
-        return iter(records), {} 
+        return iter(records), {}  # no offset for snapshot reads
 
     def _read_incremental(
         self,
@@ -199,6 +207,10 @@ class ExampleLakeflowConnect(LakeflowConnect):
         semantics tolerate duplicate deliveries.
         """
         since = start_offset.get("cursor") if start_offset else None
+        # Already caught up to init time — skip the API call entirely.
+        if since and since >= self._init_ts:
+            return iter([]), start_offset
+
         max_records = int(table_options.get("max_records_per_batch", "200"))
 
         params = {}
@@ -232,6 +244,7 @@ class ExampleLakeflowConnect(LakeflowConnect):
         if not records:
             return iter([]), start_offset or {}
 
+        # Records are sorted by cursor — last record has the max.
         last_cursor = records[-1][cursor_field]
         end_offset = {"cursor": last_cursor}
         if start_offset and start_offset == end_offset:
@@ -246,13 +259,19 @@ class ExampleLakeflowConnect(LakeflowConnect):
         table_options: dict[str, str],
         cursor_field: str,
     ) -> tuple[Iterator[dict], dict]:
-        """Limit-before-fetch incremental read for append-only tables.
+        """Limit-before-fetch incremental read for append_only tables.
 
         Each API call receives a small ``limit`` so the server controls
         the batch boundary — no client-side truncation.  Calls repeat
-        until ``max_records_per_batch`` is reached or no more pages.
+        until ``max_records_per_batch`` is reached or the last record
+        reaches ``_init_ts``.  The actual total may be approximate since
+        we never cut within a server response.
         """
         since = start_offset.get("cursor") if start_offset else None
+        # Already caught up to init time — skip the API call entirely.
+        if since and since >= self._init_ts:
+            return iter([]), start_offset
+
         limit = int(table_options.get("limit", "50"))
         max_records = int(table_options.get("max_records_per_batch", "200"))
 
@@ -274,6 +293,10 @@ class ExampleLakeflowConnect(LakeflowConnect):
                 break
 
             records.extend(batch)
+
+            # Stop when the last record reached init time — stream caught up.
+            if batch[-1].get(cursor_field, "") >= self._init_ts:
+                break
 
             if body["next_page"] is None:
                 break
@@ -307,6 +330,10 @@ class ExampleLakeflowConnect(LakeflowConnect):
         bound in case the window contains more data than expected.
         """
         since = start_offset.get("cursor") if start_offset else None
+        # Already caught up to init time — skip the API call entirely.
+        if since and since >= self._init_ts:
+            return iter([]), start_offset
+
         window_seconds = int(table_options.get("window_seconds", "3600"))
         max_records = int(table_options.get("max_records_per_batch", "200"))
 
@@ -315,7 +342,8 @@ class ExampleLakeflowConnect(LakeflowConnect):
         else:
             window_end_dt = datetime.now(timezone.utc)
 
-        window_end = window_end_dt.isoformat()
+        # Cap window end at init time.
+        window_end = min(window_end_dt.isoformat(), self._init_ts)
 
         params = {"until": window_end}
         if since:
