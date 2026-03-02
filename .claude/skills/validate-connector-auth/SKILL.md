@@ -142,11 +142,5 @@ Debug if authentication fails and report the issue clearly.
 
 ## Git Commit on Completion
 
-After creating the auth verification test, commit it to git before returning:
-
-```bash
-git add tests/unit/sources/{source_name}/auth_test.py
-git commit -m "Add {source_name} auth test"
-```
-
+After creating the auth verification test, commit it to git before returning.
 Use the exact source name in the commit message. Do not push — only commit locally.
