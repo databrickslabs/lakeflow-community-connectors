@@ -18,5 +18,18 @@
     "deny": [
       "Read(tests/unit/sources/**/configs/dev_config.json)"
     ]
+  },
+  "hooks": {
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osascript -e 'display notification \\\"Claude Code needs your attention\\\" with title \\\"Claude Code\\\"'"
+          }
+        ]
+      }
+    ]
   }
 }
