@@ -1,8 +1,16 @@
 {
-    "my_table": {
-        "num_rows": 1000
+    "orders": {
+        "max_records_per_batch": "500"
     },
-    "your_table": {
-        "num_rows": 1000
+    "users": {
+        "max_records_per_batch": "500"
+    },
+    "events": {
+        "max_records_per_batch": "500",
+        "limit": "50"
+    },
+    "metrics": {
+        "max_records_per_batch": "500",
+        "window_seconds": "7200"
     }
 }

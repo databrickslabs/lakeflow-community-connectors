@@ -31,7 +31,7 @@ SPARK_TYPE_MAP = {
 # applied before the fallback logic (cursor_field present → cdc, absent → snapshot).
 INGESTION_TYPE_OVERRIDES = {
     "metrics": "cdc",
-    "events": "append_only",
+    "events": "append",
     "orders": "cdc_with_deletes",
 }
 

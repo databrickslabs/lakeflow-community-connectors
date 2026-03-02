@@ -456,7 +456,7 @@ class SimulatedSourceAPI:
                 {"name": "email", "type": "string", "nullable": True},
                 {"name": "display_name", "type": "string", "nullable": True},
                 {"name": "status", "type": "string", "nullable": True},
-                {"name": "updated_at", "type": "date", "nullable": True},
+                {"name": "updated_at", "type": "timestamp", "nullable": True},
             ],
             metadata={
                 "primary_keys": ["user_id"],
@@ -551,7 +551,7 @@ class SimulatedSourceAPI:
                     "email": _maybe(f"user{i}@example.com"),
                     "display_name": _maybe(f"User {i}"),
                     "status": _maybe("active"),
-                    "updated_at": (base + timedelta(days=i)).date().isoformat(),
+                    "updated_at": _iso(base + timedelta(seconds=i * 60)),
                 }
                 for i in range(37)
             ],

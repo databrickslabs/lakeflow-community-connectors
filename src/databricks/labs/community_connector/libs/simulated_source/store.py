@@ -167,7 +167,7 @@ class Store:
         with self._lock:
             tbl = self._get_table(table_name)
             if ts_field:
-                record[ts_field] = _iso(_now())
+                record[ts_field] = self._make_ts(tbl, ts_field)
             pk_val = record[tbl.pk_field]
             tbl._records[pk_val] = record
             return record
@@ -190,7 +190,7 @@ class Store:
             if tombstone_fields:
                 tombstone.update(tombstone_fields)
             if ts_field:
-                tombstone[ts_field] = _iso(_now())
+                tombstone[ts_field] = self._make_ts(tbl, ts_field)
 
             for field in tbl.schema_fields:
                 fname = field["name"]
@@ -201,6 +201,24 @@ class Store:
             return tombstone
 
     # ── internal ──────────────────────────────────────────────────────
+
+    @staticmethod
+    def _make_ts(tbl: TableDef, ts_field: str) -> str:
+        """Return a timestamp string matching the declared type of *ts_field*.
+
+        ``date`` fields get an ISO date (``YYYY-MM-DD``); everything else
+        gets a full ISO timestamp so cursor comparisons remain consistent
+        with the format used in seed data.
+        """
+        field_type = None
+        for f in tbl.schema_fields:
+            if f["name"] == ts_field:
+                field_type = f.get("type")
+                break
+        now = _now()
+        if field_type == "date":
+            return now.date().isoformat()
+        return _iso(now)
 
     def _get_table(self, table_name: str) -> TableDef:
         tbl = self._tables.get(table_name)

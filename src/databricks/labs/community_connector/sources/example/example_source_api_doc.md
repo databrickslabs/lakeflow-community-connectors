@@ -146,7 +146,7 @@ The API does not expose ingestion type directly. The connector must determine it
 | Table | Ingestion Type | Rule |
 |-------|---------------|------|
 | `metrics` | `cdc` | Hard-coded — hidden table, always CDC. |
-| `events` | `append_only` | Hard-coded — append-only event log, no updates or deletes. |
+| `events` | `append` | Hard-coded — append-only event log, no updates or deletes. |
 | `orders` | `cdc_with_deletes` | Hard-coded — supports `deleted_records` endpoint. |
 | *(any other)* | `cdc` | If `cursor_field` is present in metadata. |
 | *(any other)* | `snapshot` | If `cursor_field` is absent from metadata. |
