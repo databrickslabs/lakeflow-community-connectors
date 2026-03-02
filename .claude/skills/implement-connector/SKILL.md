@@ -83,11 +83,5 @@ Start with Pattern 1. If the source API doc warns about large data volume on unb
 
 ## Git Commit on Completion
 
-After writing the initial connector implementation, commit it to git before returning:
-
-```bash
-git add src/databricks/labs/community_connector/sources/{source_name}/
-git commit -m "Add initial {source_name} connector implementation"
-```
-
+After writing the initial connector implementation, commit it to git before returning.
 Use the exact source name in the commit message. Do not push — only commit locally.
