@@ -1,0 +1,20 @@
+# example pipeline_spec.yaml
+connection_name: klaviyo
+objects:
+  # Minimal config for all tables
+  - table:
+      source_table: profiles
+  - table:
+      source_table: events
+  - table:
+      source_table: lists
+  - table:
+      source_table: campaigns
+  - table:
+      source_table: metrics
+  - table:
+      source_table: flows
+  - table:
+      source_table: segments
+  - table:
+      source_table: templates
