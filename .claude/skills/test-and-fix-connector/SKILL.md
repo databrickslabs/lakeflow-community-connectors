@@ -63,12 +63,5 @@ If `urllib3` logs `Starting new HTTPS connection` with no response line, the HTT
 
 ## Git Commit on Completion
 
-After all tests pass, commit any changes to the connector implementation and test files before returning:
-
-```bash
-git add src/databricks/labs/community_connector/sources/{source_name}/
-git add tests/unit/sources/{source_name}/
-git commit -m "Fix {source_name} connector and add tests"
-```
-
+After all tests pass, commit any changes to the connector implementation and test files before returning
 Only commit files that were actually modified or created. Use the exact source name in the commit message. Do not push — only commit locally.
