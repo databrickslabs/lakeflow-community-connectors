@@ -1188,6 +1188,12 @@ def register_lakeflow_source(spark):
                             record["study_instance_uid"] = study_uid
                         record["connection_name"] = self._connection_name
                         records.append(record)
+                        if len(records) >= max_records:
+                            break  # stop mid-series list
+                    if len(records) >= max_records:
+                        break  # stop mid-study page
+                if len(records) >= max_records:
+                    return records, study_offset  # hit limit; resume from same page next call
                 if len(studies) < page_size:
                     return records, 0
                 study_offset += page_size

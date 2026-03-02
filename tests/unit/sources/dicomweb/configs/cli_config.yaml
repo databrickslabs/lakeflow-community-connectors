@@ -1,0 +1,36 @@
+workspace_path: "/Users/{CURRENT_USER}/.lakeflow_community_connectors/{PIPELINE_NAME}"
+
+connection:
+  external_options_allowlist: "tableName,tableNameList,tableConfigs,isDeleteFlow"
+
+repo:
+  url: https://github.com/erinaldidb/lakeflow-community-connectors.git
+  path: "{WORKSPACE_PATH}"
+  provider: gitHub
+  branch: master
+  sparse_checkout:
+    patterns:
+      - src/databricks/labs/community_connector/libs
+      - src/databricks/labs/community_connector/interface
+      - src/databricks/labs/community_connector/pipeline
+      - src/databricks/labs/community_connector/sparkpds
+      - "src/databricks/labs/community_connector/sources/{SOURCE_NAME}"
+  exclude_root_files:
+    - .gitignore
+    - README.md
+    - CONTRIBUTING.md
+    - CLAUDE.md
+    - NOTICE
+    - pyproject.toml
+
+pipeline:
+  root_path: "{WORKSPACE_PATH}/src"
+  libraries:
+    - glob:
+        include: "{WORKSPACE_PATH}/src/ingest.py"
+  channel: PREVIEW
+  continuous: false
+  development: true
+  serverless: true
+  catalog: ema_rina
+  schema: dicomweb_test

@@ -55,9 +55,9 @@ import json
 
 import pytest
 
-# VariantType was introduced in Apache Spark 4.0 / pyspark 4.0.
+# VariantType / VariantVal were introduced in Apache Spark 4.0 / pyspark 4.0.
 try:
-    from pyspark.sql.types import VariantType
+    from pyspark.sql.types import VariantType, VariantVal
 
     HAS_VARIANT = True
 except ImportError:
@@ -154,89 +154,83 @@ class TestOrthanc:
 
 
 # ---------------------------------------------------------------------------
-# Layer 2 — _apply_column_expressions framework utility (no HTTP)
+# Layer 2 — VariantVal conversion helper (no HTTP)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.skipif(not HAS_VARIANT, reason="pyspark >= 4.0 required for VariantType")
-class TestParseJsonTransformation:
+class TestVariantValConversion:
     """
-    Verify the generic _apply_column_expressions framework utility.
+    Verify that VariantVal.parseJson() correctly converts DICOM JSON strings to
+    VariantVal objects, which can then be used with VariantType columns in Spark.
 
-    This helper is used by connectors that declare column_expressions in
-    read_table_metadata().  DICOMweb no longer uses it for metadata (parse_value()
-    handles VariantVal conversion directly), but the utility remains in the framework
-    for other connectors.
+    In the DICOMweb connector the metadata JSON string returned by the connector
+    is converted to VariantVal before building the DataFrame. This is the
+    standard approach for populating VariantType columns from Python data.
     """
 
     def test_parse_json_produces_variant_column(self, spark):
+        from pyspark.sql import Row
         from pyspark.sql.types import StringType, StructField, StructType, VariantType
-
-        from databricks.labs.community_connector.pipeline.ingestion_pipeline import _apply_column_expressions
 
         schema = StructType(
             [
                 StructField("id", StringType(), True),
-                StructField("metadata", StringType(), True),
+                StructField("metadata", VariantType(), True),
             ]
         )
         data = [
-            ("1", '{"00080018": {"vr": "UI", "Value": ["1.2.3"]}}'),
-            ("2", '{"00080060": {"vr": "CS", "Value": ["CT"]}}'),
-            ("3", None),  # NULL values must survive the transformation
+            Row(id="1", metadata=VariantVal.parseJson('{"00080018": {"vr": "UI", "Value": ["1.2.3"]}}')),
+            Row(id="2", metadata=VariantVal.parseJson('{"00080060": {"vr": "CS", "Value": ["CT"]}}')),
+            Row(id="3", metadata=None),
         ]
         df = spark.createDataFrame(data, schema)
 
-        result = _apply_column_expressions(df, {"metadata": "parse_json(metadata)"})
-
-        meta_field = next(f for f in result.schema.fields if f.name == "metadata")
+        meta_field = next(f for f in df.schema.fields if f.name == "metadata")
         assert isinstance(meta_field.dataType, VariantType), (
-            f"Expected VariantType for 'metadata' column after parse_json(), "
-            f"got {meta_field.dataType}. Is pyspark >= 4.0 installed?"
+            f"Expected VariantType for 'metadata' column, got {meta_field.dataType}"
         )
 
-    def test_non_transformed_columns_keep_original_type(self, spark):
-        """parse_json() must only affect the declared column; all others stay unchanged."""
+    def test_non_metadata_columns_keep_original_type(self, spark):
+        """VariantType only applies to the metadata column; all others stay unchanged."""
+        from pyspark.sql import Row
         from pyspark.sql.types import StringType, StructField, StructType, VariantType
-
-        from databricks.labs.community_connector.pipeline.ingestion_pipeline import _apply_column_expressions
 
         schema = StructType(
             [
                 StructField("sop_instance_uid", StringType(), False),
-                StructField("metadata", StringType(), True),
+                StructField("metadata", VariantType(), True),
                 StructField("connection_name", StringType(), True),
             ]
         )
-        df = spark.createDataFrame([("1.2.3", '{"tag": "val"}', "my-conn")], schema)
-        result = _apply_column_expressions(df, {"metadata": "parse_json(metadata)"})
+        df = spark.createDataFrame(
+            [Row(sop_instance_uid="1.2.3", metadata=VariantVal.parseJson('{"tag": "val"}'), connection_name="my-conn")],
+            schema,
+        )
 
-        # Column order preserved
-        assert [f.name for f in result.schema.fields] == ["sop_instance_uid", "metadata", "connection_name"]
+        assert [f.name for f in df.schema.fields] == ["sop_instance_uid", "metadata", "connection_name"]
 
-        sop_field = next(f for f in result.schema.fields if f.name == "sop_instance_uid")
-        conn_field = next(f for f in result.schema.fields if f.name == "connection_name")
-        meta_field = next(f for f in result.schema.fields if f.name == "metadata")
+        sop_field = next(f for f in df.schema.fields if f.name == "sop_instance_uid")
+        conn_field = next(f for f in df.schema.fields if f.name == "connection_name")
+        meta_field = next(f for f in df.schema.fields if f.name == "metadata")
 
         assert isinstance(sop_field.dataType, StringType)
         assert isinstance(conn_field.dataType, StringType)
         assert isinstance(meta_field.dataType, VariantType)
 
-    def test_null_metadata_survives_transformation(self, spark):
-        """Rows with null metadata must not raise errors after parse_json()."""
-        from pyspark.sql.types import StringType, StructField, StructType
-
-        from databricks.labs.community_connector.pipeline.ingestion_pipeline import _apply_column_expressions
+    def test_null_metadata_survives(self, spark):
+        """Rows with null metadata must not raise errors with VariantType schema."""
+        from pyspark.sql import Row
+        from pyspark.sql.types import StringType, StructField, StructType, VariantType
 
         schema = StructType(
             [
                 StructField("id", StringType(), True),
-                StructField("metadata", StringType(), True),
+                StructField("metadata", VariantType(), True),
             ]
         )
-        df = spark.createDataFrame([("1", None), ("2", None)], schema)
-        result = _apply_column_expressions(df, {"metadata": "parse_json(metadata)"})
-        rows = result.collect()
+        df = spark.createDataFrame([Row(id="1", metadata=None), Row(id="2", metadata=None)], schema)
+        rows = df.collect()
         assert len(rows) == 2
         assert all(r["metadata"] is None for r in rows)
 
@@ -249,63 +243,64 @@ class TestParseJsonTransformation:
 @pytest.mark.skipif(not HAS_VARIANT, reason="pyspark >= 4.0 required for VariantType")
 class TestEndToEndVariantPipeline:
     """
-    Full end-to-end pipeline without _apply_column_expressions.
+    Full end-to-end pipeline with real Orthanc HTTP + VariantType metadata.
 
-    With metadata declared as VariantType in INSTANCES_SCHEMA, parse_value() converts
-    JSON strings directly to VariantVal objects.  The resulting DataFrame already has
-    VariantType for metadata — no selectExpr / parse_json() transformation needed.
+    The connector returns metadata as a JSON string in the raw dict. Before
+    creating a Spark DataFrame with INSTANCES_SCHEMA (which declares metadata as
+    VariantType), the JSON string must be converted to a VariantVal object using
+    VariantVal.parseJson().  This is exactly what the Databricks pipeline runtime
+    does when materialising Variant columns from Python data sources.
 
     Flow:
         real HTTP (JSON str in raw dict)
-          → parse_value(record, INSTANCES_SCHEMA)   (JSON str → VariantVal)
+          → _to_variant_row()  (JSON str → VariantVal)
           → spark.createDataFrame(rows, INSTANCES_SCHEMA)
           → metadata column is VariantType
     """
 
-    def test_read_table_metadata_has_no_column_expressions(self, orthanc_connector):
-        """read_table_metadata must NOT return column_expressions for any table.
+    @staticmethod
+    def _to_variant_row(record: dict):
+        """Convert a connector record dict to a Row, converting metadata JSON → VariantVal."""
+        from pyspark.sql import Row
 
-        Metadata conversion is handled by parse_value() in the connector layer,
-        not by a SQL expression in the pipeline view.
-        """
+        d = dict(record)
+        if d.get("metadata") is not None:
+            d["metadata"] = VariantVal.parseJson(d["metadata"])
+        return Row(**d)
+
+    def test_read_table_metadata_has_no_column_expressions(self, orthanc_connector):
+        """read_table_metadata must NOT return column_expressions for any table."""
         for table in ("studies", "series", "instances"):
             meta = orthanc_connector.read_table_metadata(table, {})
             assert "column_expressions" not in meta, (
-                f"read_table_metadata('{table}') must not return column_expressions; "
-                f"VariantType conversion is done by parse_value() in the connector layer"
+                f"read_table_metadata('{table}') must not return column_expressions"
             )
 
     def test_instances_metadata_is_variant_directly(self, spark, orthanc_connector):
-        """After parse_value() with VariantType schema, metadata is already VariantType."""
+        """After VariantVal.parseJson() conversion, metadata DataFrame has VariantType."""
         from pyspark.sql.types import VariantType
 
-        from databricks.labs.community_connector.libs.utils import parse_value
         from databricks.labs.community_connector.sources.dicomweb.dicomweb_schemas import INSTANCES_SCHEMA
 
         records_iter, _ = orthanc_connector.read_table("instances", {}, {"page_size": "5", "fetch_metadata": "true"})
         records = list(records_iter)
         assert len(records) > 0
 
-        rows = [parse_value(r, INSTANCES_SCHEMA) for r in records]
+        rows = [self._to_variant_row(r) for r in records]
         df = spark.createDataFrame(rows, INSTANCES_SCHEMA)
 
         meta_field = next(f for f in df.schema.fields if f.name == "metadata")
         assert isinstance(meta_field.dataType, VariantType), (
-            f"After parse_value() with VariantType schema, metadata must be VariantType already, "
-            f"got {meta_field.dataType}. parse_value() must call VariantVal.parseJson() for VariantType fields."
+            f"metadata must be VariantType after VariantVal.parseJson() conversion, got {meta_field.dataType}"
         )
 
     def test_full_chain_no_selectexpr_needed(self, spark, orthanc_connector):
         """
-        Full chain test — no _apply_column_expressions required:
-          1. Connector reads real instances with WADO-RS metadata (JSON strings in raw dict).
-          2. parse_value() converts JSON string → VariantVal for each VariantType field.
-          3. DataFrame built with INSTANCES_SCHEMA has VariantType for metadata directly.
-          4. .collect() runs — no Spark evaluation errors.
+        Full chain: real HTTP → VariantVal conversion → DataFrame with VariantType metadata.
+        No selectExpr / parse_json() transformation required.
         """
         from pyspark.sql.types import VariantType
 
-        from databricks.labs.community_connector.libs.utils import parse_value
         from databricks.labs.community_connector.sources.dicomweb.dicomweb_schemas import INSTANCES_SCHEMA
 
         records_iter, _ = orthanc_connector.read_table("instances", {}, {"page_size": "5", "fetch_metadata": "true"})
@@ -315,20 +310,16 @@ class TestEndToEndVariantPipeline:
             "At least one instance must have metadata for a meaningful test"
         )
 
-        # parse_value handles VariantType → VariantVal conversion; no selectExpr needed
-        rows = [parse_value(r, INSTANCES_SCHEMA) for r in records]
+        rows = [self._to_variant_row(r) for r in records]
         df = spark.createDataFrame(rows, INSTANCES_SCHEMA)
 
         meta_field = next(f for f in df.schema.fields if f.name == "metadata")
         assert isinstance(meta_field.dataType, VariantType), (
-            f"metadata must be VariantType directly after parse_value(), got {meta_field.dataType}"
+            f"metadata must be VariantType, got {meta_field.dataType}"
         )
 
-        # data is collectable — no Spark evaluation errors
         collected = df.collect()
         assert len(collected) == len(records)
-
-        # Spot-check: non-metadata columns are still readable
         assert all(r["sop_instance_uid"] is not None for r in collected)
 
 
@@ -442,64 +433,58 @@ class TestDeclarativePipeline:
         Simulate the pipeline scheduler: capture an @sdp.table definition then call
         flow.func() directly with the test SparkSession.
 
-        New architecture: parse_value() handles VariantVal conversion, so the
-        @sdp.temporary_view node already produces VariantType and the @sdp.table
-        node reads it directly — no _apply_column_expressions needed.
-
         Pipeline topology being tested:
           [Orthanc DICOMweb]
               ↓  (HTTP / QIDO-RS + WADO-RS)
-          @sdp.temporary_view("instances_raw")    — parse_value → VariantType DF
+          @sdp.temporary_view("instances_raw")    — VariantVal.parseJson() → VariantType DF
               ↓  (no transformation needed)
           @sdp.table("instances")                 — reads VariantType DF as-is
         """
         import pyspark.pipelines as sdp
         from pyspark.pipelines.graph_element_registry import graph_element_registration_context
+        from pyspark.sql import Row
         from pyspark.sql.types import VariantType
 
-        from databricks.labs.community_connector.libs.utils import parse_value
         from databricks.labs.community_connector.sources.dicomweb.dicomweb_schemas import (
             INSTANCES_SCHEMA,
         )
 
+        def to_variant_row(record):
+            d = dict(record)
+            if d.get("metadata") is not None:
+                d["metadata"] = VariantVal.parseJson(d["metadata"])
+            return Row(**d)
+
         registry, _, flows = self._make_capturing_registry()
 
-        # ---- Define the pipeline (registration phase) -------------------------
         with graph_element_registration_context(registry):
 
             @sdp.temporary_view(name="instances_raw")
             def instances_raw_fn():
-                """Read from DICOMweb; parse_value() converts metadata → VariantVal."""
                 records_iter, _ = orthanc_connector.read_table(
                     "instances", {}, {"page_size": "5", "fetch_metadata": "true"}
                 )
                 records = list(records_iter)
-                rows = [parse_value(r, INSTANCES_SCHEMA) for r in records]
+                rows = [to_variant_row(r) for r in records]
                 return spark.createDataFrame(rows, INSTANCES_SCHEMA)
 
             @sdp.table(name="instances")
             def instances_fn():
-                """Read the raw view; metadata is already VariantType — no transform needed."""
                 return spark.read.table("instances_raw")
 
-        # ---- Execute (simulate pipeline scheduler) ----------------------------
-        # Step 1: run the temporary_view flow — already has VariantType metadata
         raw_flow = next(f for f in flows if f.name == "instances_raw")
         raw_df = raw_flow.func()
 
         meta_raw = next(f for f in raw_df.schema.fields if f.name == "metadata")
         assert isinstance(meta_raw.dataType, VariantType), (
-            "instances_raw view must have metadata as VariantType after parse_value()"
+            f"instances_raw view must have metadata as VariantType, got {meta_raw.dataType}"
         )
 
-        # Register as a Spark temp view so the instances_fn can read it
         raw_df.createOrReplaceTempView("instances_raw")
 
-        # Step 2: run the table flow
         table_flow = next(f for f in flows if f.name == "instances")
         result_df = table_flow.func()
 
-        # ---- Assertions -------------------------------------------------------
         meta_final = next(f for f in result_df.schema.fields if f.name == "metadata")
         assert isinstance(meta_final.dataType, VariantType), (
             f"@sdp.table('instances') must have VariantType for metadata, got {meta_final.dataType}"
@@ -511,23 +496,24 @@ class TestDeclarativePipeline:
 
     def test_sdp_append_flow_body_produces_variant(self, spark, orthanc_connector):
         """
-        Same as above but using the streaming pattern:
-          sdp.create_streaming_table("instances") + @sdp.append_flow(target="instances")
-
-        This more closely mirrors what the Databricks pipeline does with streaming
-        sources (readStream.format("lakeflow_connect")) and apply_changes().
-
-        New architecture: the @sdp.append_flow body calls parse_value() which converts
-        metadata JSON strings to VariantVal directly — no _apply_column_expressions needed.
+        Streaming pattern: sdp.create_streaming_table + @sdp.append_flow.
+        Mirrors the Databricks pipeline pattern; metadata JSON → VariantVal before
+        creating the DataFrame.
         """
         import pyspark.pipelines as sdp
         from pyspark.pipelines.graph_element_registry import graph_element_registration_context
+        from pyspark.sql import Row
         from pyspark.sql.types import VariantType
 
-        from databricks.labs.community_connector.libs.utils import parse_value
         from databricks.labs.community_connector.sources.dicomweb.dicomweb_schemas import (
             INSTANCES_SCHEMA,
         )
+
+        def to_variant_row(record):
+            d = dict(record)
+            if d.get("metadata") is not None:
+                d["metadata"] = VariantVal.parseJson(d["metadata"])
+            return Row(**d)
 
         registry, _, flows = self._make_capturing_registry()
 
@@ -536,26 +522,19 @@ class TestDeclarativePipeline:
 
             @sdp.append_flow(target="instances_stream", name="instances_append")
             def instances_append_fn():
-                """
-                In the real Databricks pipeline this would be:
-                    spark.readStream.format("lakeflow_connect")...load()
-                Here we use a batch read to exercise the same transformation.
-                parse_value() converts metadata JSON → VariantVal; no selectExpr needed.
-                """
                 records_iter, _ = orthanc_connector.read_table(
                     "instances", {}, {"page_size": "5", "fetch_metadata": "true"}
                 )
                 records = list(records_iter)
-                rows = [parse_value(r, INSTANCES_SCHEMA) for r in records]
+                rows = [to_variant_row(r) for r in records]
                 return spark.createDataFrame(rows, INSTANCES_SCHEMA)
 
-        # Execute the flow function directly
         append_flow = next(f for f in flows if f.name == "instances_append")
         result_df = append_flow.func()
 
         meta_field = next(f for f in result_df.schema.fields if f.name == "metadata")
         assert isinstance(meta_field.dataType, VariantType), (
-            f"@sdp.append_flow body must produce VariantType for metadata via parse_value(), got {meta_field.dataType}"
+            f"@sdp.append_flow body must produce VariantType for metadata, got {meta_field.dataType}"
         )
 
         collected = result_df.collect()
