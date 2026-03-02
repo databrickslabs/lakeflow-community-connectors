@@ -1373,16 +1373,11 @@ def register_lakeflow_source(spark):
                 record["dicom_file_path"] = str(dest_path)
                 logger.debug("Wrote %d bytes → %s", len(file_bytes), dest_path)
             except PermissionError as exc:
-                logger.error(
-                    "WADO-RS retrieval failed for %s: cannot write to '%s'. "
+                raise PermissionError(
+                    f"Cannot write DICOM file to '{volume_path}'. "
                     "Grant WRITE VOLUME on the Unity Catalog volume to the pipeline identity. "
-                    "SQL: GRANT WRITE VOLUME ON VOLUME <catalog>.<schema>.<volume> TO `<principal>`. "
-                    "Original error: %s",
-                    sop_uid,
-                    volume_path,
-                    exc,
-                )
-                record["dicom_file_path"] = None
+                    "SQL: GRANT WRITE VOLUME ON VOLUME <catalog>.<schema>.<volume> TO `<principal>`."
+                ) from exc
             except Exception as exc:
                 logger.error("WADO-RS retrieval failed for %s: %s", sop_uid, exc)
                 record["dicom_file_path"] = None
