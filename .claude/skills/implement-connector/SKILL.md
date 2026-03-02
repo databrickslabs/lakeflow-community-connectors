@@ -12,76 +12,85 @@ Implement the Python connector for **{{source_name}}** that conforms exactly to 
 
 ## File Organization
 
-For simple connectors, keeping everything in a single `{source_name}.py` file is perfectly fine. If the main file grows beyond **1000 lines**, consider splitting into multiple files for better maintainability. 
+For simple connectors, keeping everything in a single `{source_name}.py` file is perfectly fine. If the main file grows beyond **1000 lines**, split it into multiple files for better maintainability. 
 
 When using multiple files, use absolute imports:
 ```python
 from databricks.labs.community_connector.sources.{source_name}.{util_file_name} import some_helper
 ```
 
-The merge script (`tools/scripts/merge_python_source.py`) automatically discovers and includes all Python files in the source directory, ordering them by import dependencies.
-
-See `src/databricks/labs/community_connector/sources/example/` for an example of a connector.
-
 ## Implementation Requirements
-- Implement all methods declared in the interface.
-- At the beginning of each function, check if the provided `table_name` exists in the list of supported tables. If it does not, raise an explicit exception to inform that the table is not supported.
-- When returning the schema in the `get_table_schema` function, prefer using StructType over MapType to enforce explicit typing of sub-columns.
-- Avoid flattening nested fields when parsing JSON data.
-- Prefer using `LongType` over `IntegerType` to avoid overflow.
-- If `ingestion_type` returned from `read_table_metadata` is `cdc` or `cdc_with_deletes`, then `primary_keys` and `cursor_field` are both required.
-- If `ingestion_type` is `cdc_with_deletes`, you must also implement `read_table_deletes()` to fetch deleted records. This method should return records with at minimum the primary key fields and cursor field populated. Refer to `example/example.py` for an example implementation.
-- In logic of processing records, if a StructType field is absent in the response, assign None as the default value instead of an empty dictionary {}.
-- Avoid creating mock objects in the implementation.
-- Do not add an extra main function - only implement the defined functions within the LakeflowConnect class.
-- The functions `get_table_schema`, `read_table_metadata`, and `read_table` accept a dictionary argument that may contain additional parameters for customizing how a particular table is read. Using these extra parameters is optional.
-- Do not include parameters and options required by individual tables in the connection settings; instead, assume these will be provided through the table_options.
-- Do not convert the JSON into dictionary based on the `get_table_schema` before returning in `read_table`. 
-- If a data source provides both a list API and a get API for the same object, always use the list API as the connector is expected to produce a table of objects. Only expand entries by calling the get API when the user explicitly requests this behavior and schema needs to match the read behavior.
-- Some objects exist under a parent object, treat the parent object's identifier(s) as required parameters when listing the child objects. If the user wants these parent parameters to be optional, the correct pattern is:
-  - list the parent objects
-  - for each parent object, list the child objects
-  - combine the results into a single output table with the parent object identifier as the extra field.
-- Refer to `src/databricks/labs/community_connector/sources/example/example.py` or other connectors under `src/databricks/labs/community_connector/sources` as examples
 
-## read_table Pagination and Termination
+- **Interface:** Implement all methods declared in the `LakeflowConnect` interface. Do not add an extra main function.
+- **Table Validation:** At the beginning of each function, check if the provided `table_name` exists in the list of supported tables. If it does not, raise an explicit exception (e.g., `ValueError`).
+- **Schema:** In `get_table_schema`, prefer `StructType` over `MapType` to enforce explicit typing. Avoid flattening nested fields. Prefer `LongType` over `IntegerType` to avoid overflow. Do not convert the JSON into dictionaries based on the schema before returning in `read_table`; return the raw parsed JSON and let the framework handle type coercion.
+- **Metadata:** If `ingestion_type` returned from `read_table_metadata` is `cdc` or `cdc_with_deletes`, both `primary_keys` and `cursor_field` are required.
+- **Deletes:** If `ingestion_type` is `cdc_with_deletes`, you must implement `read_table_deletes()`. This method should return records with at minimum the primary key fields and cursor field populated.
+- **Data Processing:** If a StructType field is absent in the response, assign `None` as the default value instead of an empty dictionary `{}`. Avoid creating mock objects.
+- **Table Options:** The functions `get_table_schema`, `read_table_metadata`, and `read_table` accept a `table_options` dictionary. Do not include parameters required by individual tables in the global connection options; rely on `table_options` instead.
+- **API Usage:** If a data source provides both a list API and a get API for the same object, always use the list API. Only call the get API for individual entries if explicitly requested. For child objects that require a parent identifier, list the parent objects first, then list child objects for each parent, and combine the results.
+- **Reference:** Refer to `src/databricks/labs/community_connector/sources/example/example.py` for concrete examples of all these patterns.
 
-For incremental ingestion of table (CDC and Append-only), the framework calls `read_table` repeatedly within a single trigger run. Each call produces one microbatch. Pagination stops when the returned `end_offset` equals `start_offset`.
+## Incremental read_table with offsets 
 
-**Breaking large data into multiple microbatches (CRITICAL for testing):** For any tables that support incremental read (where `read_table` returns a meaningful offset, not `None`), you **must always** support limiting the work per microbatch. Two batching strategies exist — choose based on ingestion type:
+For incremental ingestion of tables (`cdc` and `append_only`), the framework calls `read_table` repeatedly within a single trigger run. Each call produces one microbatch. Pagination stops when the returned `end_offset` equals `start_offset`.
 
-- **Limit-on-the-fly** (`max_records_per_batch`, for CDC / cdc_with_deletes tables): Paginate through the API, accumulate records, and stop when the count reaches the limit. The client decides when to stop. CDC tables have primary keys, so upsert semantics tolerate duplicate deliveries if a cut point splits records with the same cursor timestamp.
-- **Limit-before-fetch** (`limit` + `max_records_per_batch`, for append_only tables): Pass a small `limit` to each API call so the server controls the batch boundary per call. Repeat calls until the accumulated count reaches `max_records_per_batch` or the last returned record reaches `_init_ts`. Process all returned records — no client-side truncation. The actual total may be approximate since we never cut within a server response. This prevents setting the cursor to a mid-batch timestamp, which would cause duplicates or data loss on the next call (append_only tables have no primary key to deduplicate).
+### Admission Control: `max_records_per_batch` (always required)
 
-- **Sliding time-window** (`window_seconds`, for large-volume tables with `since`/`until` support): Query data in fixed-size time windows using `since`/`until` parameters, paginate all records within each window, then advance the cursor to the window end. The `window_seconds` table option (default e.g. 3600) controls the window size. If a window contains no records, still advance the cursor to `window_end` so the next call slides forward. Cap `window_end` at `_init_ts`. Use this when the source API doc warns that unbounded queries (e.g. only `since`) are slow on large datasets.
+Every incremental table **must** support a `max_records_per_batch` table option. This caps how many records a single `read_table` call returns to the framework, giving Spark a bounded microbatch to process. Without it, a single call could return millions of rows and overwhelm the Spark driver.
 
-See the example connector's `_read_incremental` (limit-on-the-fly), `_read_incremental_by_limit` (limit-before-fetch), and `_read_incremental_by_window` (sliding window) for all three patterns.
+This is **orthogonal** to the query-scoping strategies below. Regardless of whether you use a sliding window, a server-side limit, or neither, you must still respect `max_records_per_batch` by stopping record accumulation once the count is reached.
 
-*Why this is emphasized:* This limit is not just for production microbatching; it is **heavily used during testing** to sample a smaller number of rows and return early. Without this limit, tests may hang or take too long by attempting to read the entire dataset. When all API pages are consumed within a call, the cursor stabilizes and the stream stops.
+### Query-Scoping Strategies
 
-**Guaranteeing termination:** The connector must ensure `read_table` eventually returns `end_offset == start_offset`. Two approaches:
-- **Short-circuit at init time (recommended):** Record `datetime.now(UTC)` in `__init__` (`self._init_ts`). At the top of each incremental read (and `read_table_deletes`), if `start_offset` already has a cursor >= `_init_ts`, return immediately with `(iter([]), start_offset)`. Do **not** cap the cursor itself to `_init_ts` — that would cause re-fetching the same post-init records without advancing past them. Let the cursor be the last record's actual value; once it passes `_init_ts` the short-circuit fires and the stream terminates. New data arriving after init is picked up by the next trigger (which creates a fresh connector instance). See the example connector for reference.
-- **Single-batch read:** Return `start_offset` as `end_offset` after one read. Simple but prevents splitting into multiple microbatches.
+A common problem with incremental reads is that the query to the source API is too broad. For example, an API that accepts a `since` parameter but no `until` parameter forces the server to scan from `since` all the way to "now" — which can be slow or time out on large accounts. Two strategies exist to scope the query and avoid this:
 
-**Lookback window:** If the source API uses timestamp-based cursors (e.g. `since`/`updated_at`), apply a lookback window **at read time** (subtract N seconds from the cursor when building the API query), not in the stored offset. This avoids drift in the checkpointed cursor while still catching concurrently-updated records. Store the raw `max_updated_at` as the offset.
+**Strategy A — Sliding time-window** (for APIs with `since`/`until` or equivalent start/end time parameters):
+Add a bounded end-time to the query. Instead of querying from `since` to now, query from `since` to `since + window_seconds`. Paginate all records within that window, then advance the cursor to the window end. If the window is empty, still advance the cursor so the next call slides forward. The `window_seconds` table option controls the window size. Provide a sensible default (e.g. 3600), but note that the optimal value depends on the data volume and it is up to the user to adjust it for their specific use case. For testing, always start with a very small value. Use this when the API supports both start and end time filters. 
+
+**Strategy B — Server-side limit** (for APIs with `limit`/`max_results`/`page_size` parameters):
+Pass a small `limit` parameter directly to the API so the server returns a bounded page. This keeps each individual API call small. Calls repeat until `max_records_per_batch` is reached.
+
+**Choosing a strategy:** Start with the simplest approach (standard pagination + `max_records_per_batch`). If the source API doc warns about slow unbounded queries, or testing reveals timeouts/hangs, add Strategy A or B. If the API supports both time-range and limit parameters, prefer the sliding window (Strategy A) as it provides more predictable bounds.
+
+### How to Stop Accumulating Records (Handling Batch Boundaries)
+
+When accumulating records to reach `max_records_per_batch`, how you stop depends on the table's ingestion type. The issue is what happens if you stop in the middle of a set of records that all share the exact same cursor timestamp.
+
+**For CDC / `cdc_with_deletes` tables (Client-side truncation is safe):**
+- **What to do:** You can accumulate records and strictly truncate them on the client side to exactly `max_records_per_batch`. The client decides exactly when to stop, and you use the last processed record's timestamp as the offset.
+- **Why it's safe:** The next trigger will query starting from that timestamp. It might re-fetch some of the records you already processed in the previous batch. However, CDC tables have primary keys, so Databricks will perform an Upsert (Merge) and safely deduplicate them.
+
+**For Append-Only tables (NO client-side truncation):**
+- **What to do:** You **must not** truncate records on the client side. You must process every record returned in the API's page. You stop making *additional* API calls once your total accumulated count reaches or exceeds `max_records_per_batch`.
+- **Why truncation fails:** Append-only tables do not have primary keys and use Inserts instead of Upserts. If you stop halfway through a set of records with the same timestamp, the next trigger will query that timestamp again. The server will return those records again, resulting in permanent duplicate rows in Databricks (or data loss if the API uses strict greater-than `>` filtering).
+- **How to control batch size:** Because you must process full pages, you must keep the server's pages small. You must use **Strategy B** (pass a small limit parameter, e.g., `limit=50`, directly to the API) so the server controls the boundary. You accumulate these small full pages until you reach or slightly exceed `max_records_per_batch`.
+
+### Guaranteeing Termination
+
+The connector must ensure `read_table` eventually returns `end_offset == start_offset` to signal that all currently available data has been read. This happens in two cases:
+
+1. **End of data:** The API indicates there are no more pages.
+2. **Short-circuit at init time:** If a source system has continuous, high-volume updates and we do not short-circuit, the connector will keep fetching new records indefinitely and the trigger/microbatch will never finish. To prevent the connector from indefinitely chasing data that is actively being written, record `datetime.now(UTC)` in `__init__` (`self._init_ts`). At the top of each incremental read, if `start_offset` already has a cursor >= `_init_ts`, return immediately with `(iter([]), start_offset)`. Do **not** cap the cursor itself to `_init_ts` when yielding records; let the cursor be the last record's actual value so it advances naturally until it hits the short-circuit condition.
+
+### Lookback Window
+
+If the source API uses timestamp-based cursors (e.g. `since`/`updated_at`), apply a lookback window **at read time** (subtract N seconds from the cursor when building the API query), not in the stored offset. This avoids drift in the checkpointed cursor while still catching concurrently-updated records. **Important:** The lookback subtraction must only be applied once at the beginning of the trigger (e.g. tracking state on `self` during the first read), rather than re-applying the lookback on every subsequent pagination read within the same trigger. Store the raw `max_updated_at` as the offset.
+
+### Testing Implications
+
+These options are **critical for testing**. Without them, tests may hang or take forever by attempting to read the entire dataset from the source.
+
+- Always configure a **small** `max_records_per_batch` in the test's `dev_table_config.json` (e.g., 5).
+- If using a sliding window, start with a **small** `window_seconds` (e.g., 60 or 300).
+- If using a server-side limit, start with a **small** `limit` (e.g., 5).
+- Gradually increase these values only if the small values do not generate enough data for testing.
 
 ## API Call Best Practices
 
-- **Always set explicit timeouts:** Every HTTP request must include a `timeout` parameter (e.g., `timeout=30`). Without it, a slow API hangs the connector and tests indefinitely with no error output.
-- **Prefer server-side filtering:** Push filters (`since`/`until` etc.) to the API instead of fetching everything and filtering in Python. Client-side filtering still forces the server to scan the full dataset, which can cause timeouts on large accounts even with a small `limit`.
+- **Always set explicit timeouts:** Every HTTP request must include a `timeout` parameter (e.g., `timeout=20`). Without it, a slow API hangs the connector and tests indefinitely with no error output.
+- **Prefer server-side filtering:** Push filters (`since`/`until` etc.) to the API instead of fetching everything and filtering in Python. Client-side filtering still forces the server to scan the full dataset, which can cause timeouts on large accounts.
 - **Design for large accounts:** What works on a small dev account may hang on a production account with millions of records. Avoid unbounded full-history parameters like `date_range=all`. Always scope queries to a bounded range.
 
-## Pagination Patterns
-
-Two common patterns for paginating through API data. Choose based on the source API's behavior:
-
-**Pattern 1 — Cursor-based pagination (default choice):** Paginate through the API using offset or next-page tokens, stop after a batch limit, and store the last record's timestamp or page token as the cursor for the next call. This works well for most APIs and avoids needing to choose a window size upfront. However, it can fail on APIs that perform poorly with unbounded queries — if the API must scan the full dataset to sort or filter, even the first page may time out on large accounts.
-
-**Pattern 2 — Sliding time-window:** Query data in fixed-size time windows (e.g., 1 hour) using `since`/`until` parameters, paginate within each window, then slide forward. The window position is tracked in the offset. This adds a `window_seconds` table option but avoids unbounded queries entirely. Use this when the source API doc warns about large data volume or testing reveals timeouts on unbounded queries. See `_read_incremental_by_window` in the example connector.
-
-Start with Pattern 1. If the source API doc warns about large data volume on unbounded queries, or testing reveals timeouts on the target account (see test-and-fix-connector SKILL for diagnosis steps), switch to Pattern 2.
-
-## Git Commit on Completion
-
-After writing the initial connector implementation, commit it to git before returning.
-Use the exact source name in the commit message. Do not push — only commit locally.
+## Merge files
+After completion, run `python tools/scripts/merge_python_source.py {source_name}` to generate the merged connector file `_generated_{source_name}_python_source.py`. 

@@ -139,8 +139,3 @@ Debug if authentication fails and report the issue clearly.
 - **OAuth 2.0**: The `dev_config.json` may contain `refresh_token`, `client_id`, `client_secret`. The auth test may need to exchange the refresh token for an access token first.
 - **Subdomain-based URLs**: Build the base URL from the `subdomain` field in config.
 - **Multiple auth methods**: Use whichever method's credentials are present in `dev_config.json`.
-
-## Git Commit on Completion
-
-After creating the auth verification test, commit it to git before returning.
-Use the exact source name in the commit message. Do not push — only commit locally.

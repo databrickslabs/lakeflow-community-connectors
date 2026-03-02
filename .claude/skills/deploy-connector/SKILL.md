@@ -29,9 +29,17 @@ Create or update an ingestion pipeline for **{{source_name}}** by reading its do
 
 ## Step 0 — Determine operation mode
 
-If `{{mode}}` is `create` or `update`, use it. Otherwise ask via `AskQuestion`.
+If `{{mode}}` is `create` or `update`, use it. Otherwise ask via `AskUserQuestion`.
 
 If **update**, also collect the pipeline name (unless `{{pipeline_name}}` was provided).
+
+---
+
+## Step 0.5 — Check if connector is published (Create mode only)
+
+If creating a new pipeline, use `AskUserQuestion` to ask if the connector has been published to the `databrickslabs` repo.
+- **Yes**: Proceed to the next step.
+- **No**: Ask the user for their custom Git repository URL and branch name. Then, update `tools/community_connector/src/databricks/labs/community_connector_cli/default_config.yaml` to use their provided `url` and `branch` under the `repo:` section. (Reinstall the CLI later in Step 4 to ensure changes take effect).
 
 ---
 
@@ -48,7 +56,7 @@ Extract: **supported tables** (descriptions, ingestion types, primary keys), **r
 
 ## Step 2 — Collect deployment parameters
 
-Use `AskQuestion` for structured choices; text prompts otherwise.
+Use `AskUserQuestion` for structured choices; text prompts otherwise.
 
 ### 2a. UC connection name
 
@@ -63,7 +71,7 @@ If `{{connection_name}}` provided, use it. Otherwise ask if the user has one.
 
 ### 2b. Default destination catalog and schema
 
-Ask for **catalog** (e.g. `main`) and **schema** (e.g. `raw_github`). Both optional — omitted values use pipeline defaults.
+Ask for **catalog** (e.g. `main`) and **schema** (e.g. `raw_example`). Both optional — omitted values use pipeline defaults.
 
 ### 2c. Pipeline name
 
@@ -80,7 +88,7 @@ For each selected table, check the README for two categories of options:
 **Destination overrides** (`destination_catalog`, `destination_schema`, `destination_table`) — set on the `table` object. Mention these are available but don't actively prompt; only include if the user requests per-table overrides.
 
 **Source-specific and common options** (set inside `table_configuration`):
-- **Required**: list each with description, ask for values (e.g. `owner`/`repo` for GitHub)
+- **Required**: list each with description, ask for values (e.g. `category` for products, `window_seconds` for metrics)
 - **Optional**: list each with description and default, ask if the user wants to set any (includes `scd_type`, `primary_keys`, `sequence_by`, plus source-specific options e.g. `start_date` to filter, `max_records_per_batch` to control batch size)
 
 If multiple tables share options (e.g. same `owner`/`repo`), ask once and reuse — confirm with user.
