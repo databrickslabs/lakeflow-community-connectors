@@ -1,0 +1,9 @@
+{
+  "pool_price": {
+    "start_date": "2024-01-01",
+    "lookback_hours": "24",
+    "batch_size_days": "30",
+    "rate_limit_delay": "0.1"
+  }
+}
+
