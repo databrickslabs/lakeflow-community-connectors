@@ -57,7 +57,6 @@ from __future__ import annotations
 
 import json
 import logging
-import pathlib
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterator
 
@@ -437,22 +436,13 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
                     else:
                         raise
 
-            dest_path = pathlib.Path(volume_path) / study_uid / series_uid / f"{sop_uid}{ext}"
-            try:
-                dest_path.parent.mkdir(parents=True, exist_ok=True)
-            except OSError:
-                # UC Volume FUSE mounts do not support mkdir via POSIX syscalls;
-                # the write_bytes() call below works regardless.
-                pass
-            dest_path.write_bytes(file_bytes)
-            record["dicom_file_path"] = str(dest_path)
-            logger.debug("Wrote %d bytes → %s", len(file_bytes), dest_path)
-        except PermissionError as exc:
-            raise PermissionError(
-                f"Cannot write DICOM file to '{volume_path}'. "
-                "Grant WRITE VOLUME on the Unity Catalog volume to the pipeline identity. "
-                "SQL: GRANT WRITE VOLUME ON VOLUME <catalog>.<schema>.<volume> TO `<principal>`."
-            ) from exc
+            import os as _os
+            dest_path_str = _os.path.join(volume_path, study_uid, series_uid, f"{sop_uid}{ext}")
+            _os.makedirs(_os.path.dirname(dest_path_str), exist_ok=True)
+            with open(dest_path_str, "wb") as _f:
+                _f.write(file_bytes)
+            record["dicom_file_path"] = dest_path_str
+            logger.debug("Wrote %d bytes → %s", len(file_bytes), dest_path_str)
         except Exception as exc:
             logger.error("WADO-RS retrieval failed for %s: %s", sop_uid, exc)
             record["dicom_file_path"] = None
