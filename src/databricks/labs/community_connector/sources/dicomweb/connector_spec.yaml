@@ -1,0 +1,51 @@
+display_name: DICOMweb VNA/PACS
+connection:
+  parameters:
+    - name: base_url
+      type: string
+      required: true
+      description: >
+        Base URL of the DICOMweb endpoint, including any path prefix.
+        Example: https://your-pacs.example.com/dicom-web
+
+    - name: auth_type
+      type: string
+      required: false
+      description: >
+        Authentication method. One of: none, basic, bearer.
+        Defaults to none for open endpoints.
+
+    - name: username
+      type: string
+      required: false
+      description: >
+        Username for HTTP Basic authentication.
+        Required when auth_type is set to basic.
+
+    - name: password
+      type: string
+      required: false
+      secret: true
+      description: >
+        Password for HTTP Basic authentication.
+        Required when auth_type is set to basic.
+
+    - name: token
+      type: string
+      required: false
+      secret: true
+      description: >
+        Bearer token for token-based authentication.
+        Required when auth_type is set to bearer.
+
+    - name: connection_name
+      type: string
+      required: false
+      description: >
+        Human-readable name for this connection, injected as the `connection_name`
+        column in every table (studies, series, instances, diagnostics).
+        Defaults to base_url when not set.
+        Set this when ingesting from multiple DICOMweb sources into the same
+        Delta tables so records can be traced back to their origin connection.
+
+external_options_allowlist: "fetch_dicom_files,dicom_volume_path,lookback_days,page_size,max_records_per_batch,fetch_metadata,wado_mode"
