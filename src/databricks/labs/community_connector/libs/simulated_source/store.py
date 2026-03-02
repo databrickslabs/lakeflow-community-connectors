@@ -84,6 +84,10 @@ class Store:
         with self._lock:
             return dict(self._get_table(table_name).metadata)
 
+    def get_table_pk(self, table_name: str) -> str:
+        with self._lock:
+            return self._get_table(table_name).pk_field
+
     # ── record reads ──────────────────────────────────────────────────
 
     def list_records(
@@ -94,7 +98,7 @@ class Store:
         until: Optional[str] = None,
         cursor_field: Optional[str] = None,
         filters: Optional[dict[str, str]] = None,
-        limit: int = 100,
+        limit: Optional[int] = 100,
     ) -> list[dict]:
         """List records, optionally filtering by a cursor-field range.
 
@@ -106,7 +110,7 @@ class Store:
             cursor_field: The field name to filter on.  If ``since`` or
                           ``until`` is given, this must be provided.
             filters: Optional exact-match filters (field_name → value).
-            limit: Max records to return.
+            limit: Max records to return.  ``None`` means no limit.
         """
         with self._lock:
             tbl = self._get_table(table_name)
@@ -122,7 +126,7 @@ class Store:
 
             sort_key = cursor_field or tbl.pk_field
             records.sort(key=lambda r: r.get(sort_key, ""))
-            return records[:limit]
+            return records[:limit] if limit is not None else records
 
     def list_deleted_records(
         self,
@@ -130,7 +134,7 @@ class Store:
         *,
         since: Optional[str] = None,
         cursor_field: Optional[str] = None,
-        limit: int = 100,
+        limit: Optional[int] = 100,
     ) -> list[dict]:
         with self._lock:
             tbl = self._get_table(table_name)
@@ -141,7 +145,7 @@ class Store:
 
             sort_key = cursor_field or tbl.pk_field
             records.sort(key=lambda r: r.get(sort_key, ""))
-            return records[:limit]
+            return records[:limit] if limit is not None else records
 
     def get_all_records(self, table_name: str) -> list[dict]:
         with self._lock:

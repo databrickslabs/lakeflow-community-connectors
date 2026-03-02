@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.simulated_source.api import (
+from databricks.labs.community_connector.libs.simulated_source.api import (
     API_CONFIG,
     SimulatedSourceAPI,
     TABLE_API_CONFIG,
@@ -35,6 +35,23 @@ def api():
         yield SimulatedSourceAPI("test_user", "test_pass")
     finally:
         API_CONFIG["error_rate"] = saved_error_rate
+
+
+def _collect_all_pages(api, path, extra_params=None):
+    """Paginate through all pages and return concatenated records."""
+    all_records = []
+    page = 1
+    while True:
+        params = dict(extra_params or {})
+        params["page"] = str(page)
+        resp = api.get(path, params=params)
+        assert resp.status_code == 200
+        body = resp.json()
+        all_records.extend(body["records"])
+        if body["next_page"] is None:
+            break
+        page = body["next_page"]
+    return all_records
 
 
 # ── authentication ────────────────────────────────────────────────────
@@ -132,18 +149,52 @@ class TestSchemaAndMetadata:
 
 
 class TestProducts:
-    def test_returns_all_records(self, api):
+    def test_first_page_respects_max_page_size(self, api):
         resp = api.get("/tables/products/records")
         assert resp.status_code == 200
-        records = resp.json()["records"]
-        assert len(records) == 53
+        body = resp.json()
+        assert len(body["records"]) == 20
+        assert body["next_page"] == 2
+
+    def test_pagination_returns_all_records(self, api):
+        all_records = []
+        page = 1
+        while True:
+            resp = api.get("/tables/products/records", params={"page": str(page)})
+            assert resp.status_code == 200
+            body = resp.json()
+            all_records.extend(body["records"])
+            if body["next_page"] is None:
+                break
+            page = body["next_page"]
+        assert len(all_records) == 53
+
+    def test_last_page_has_null_next_page(self, api):
+        page = 1
+        while True:
+            resp = api.get("/tables/products/records", params={"page": str(page)})
+            body = resp.json()
+            if body["next_page"] is None:
+                assert len(body["records"]) <= 20
+                break
+            page = body["next_page"]
 
     def test_category_filter(self, api):
-        resp = api.get("/tables/products/records", params={"category": "electronics"})
-        assert resp.status_code == 200
-        records = resp.json()["records"]
-        assert len(records) > 0
-        assert all(r["category"] == "electronics" for r in records)
+        all_records = []
+        page = 1
+        while True:
+            resp = api.get(
+                "/tables/products/records",
+                params={"category": "electronics", "page": str(page)},
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+            all_records.extend(body["records"])
+            if body["next_page"] is None:
+                break
+            page = body["next_page"]
+        assert len(all_records) > 0
+        assert all(r["category"] == "electronics" for r in all_records)
 
     def test_unsupported_param_returns_400(self, api):
         resp = api.get("/tables/products/records", params={"since": "x"})
@@ -154,29 +205,47 @@ class TestProducts:
         metadata = api.get("/tables/products/metadata").json()["metadata"]
         assert "cursor_field" not in metadata
 
+    def test_page_is_replayable(self, api):
+        r1 = api.get("/tables/products/records", params={"page": "2"}).json()["records"]
+        r2 = api.get("/tables/products/records", params={"page": "2"}).json()["records"]
+        assert r1 == r2
+
 
 # ── events (append-only, since + limit) ──────────────────────────────
 
 
 class TestEvents:
-    def test_returns_records(self, api):
+    def test_first_page_respects_max_page_size(self, api):
         resp = api.get("/tables/events/records")
         assert resp.status_code == 200
-        records = resp.json()["records"]
-        assert len(records) > 0
+        body = resp.json()
+        assert len(body["records"]) == 50
+        assert body["next_page"] == 2
+
+    def test_pagination_returns_all_records(self, api):
+        all_records = []
+        page = 1
+        while True:
+            resp = api.get("/tables/events/records", params={"page": str(page)})
+            assert resp.status_code == 200
+            body = resp.json()
+            all_records.extend(body["records"])
+            if body["next_page"] is None:
+                break
+            page = body["next_page"]
+        assert len(all_records) == 101
 
     def test_limit(self, api):
         resp = api.get("/tables/events/records", params={"limit": "5"})
         assert resp.status_code == 200
-        records = resp.json()["records"]
-        assert len(records) == 5
+        body = resp.json()
+        assert len(body["records"]) == 5
+        assert body["next_page"] == 2
 
     def test_since_filters_records(self, api):
-        all_records = api.get("/tables/events/records", params={"limit": "200"}).json()["records"]
+        all_records = _collect_all_pages(api, "/tables/events/records")
         mid = all_records[len(all_records) // 2]["created_at"]
-        filtered = api.get("/tables/events/records", params={"since": mid, "limit": "200"}).json()[
-            "records"
-        ]
+        filtered = _collect_all_pages(api, "/tables/events/records", {"since": mid})
         assert len(filtered) < len(all_records)
         assert all(r["created_at"] > mid for r in filtered)
 
@@ -193,16 +262,21 @@ class TestEvents:
 
 
 class TestUsers:
-    def test_returns_records(self, api):
+    def test_first_page_respects_max_page_size(self, api):
         resp = api.get("/tables/users/records")
         assert resp.status_code == 200
-        records = resp.json()["records"]
-        assert len(records) == 37
+        body = resp.json()
+        assert len(body["records"]) == 15
+        assert body["next_page"] == 2
+
+    def test_pagination_returns_all_records(self, api):
+        all_records = _collect_all_pages(api, "/tables/users/records")
+        assert len(all_records) == 37
 
     def test_since_filters_records(self, api):
-        all_records = api.get("/tables/users/records").json()["records"]
+        all_records = _collect_all_pages(api, "/tables/users/records")
         mid = all_records[len(all_records) // 2]["updated_at"]
-        filtered = api.get("/tables/users/records", params={"since": mid}).json()["records"]
+        filtered = _collect_all_pages(api, "/tables/users/records", {"since": mid})
         assert len(filtered) < len(all_records)
         assert all(r["updated_at"] > mid for r in filtered)
 
@@ -238,36 +312,36 @@ class TestUsers:
 
 
 class TestOrders:
-    def test_returns_records(self, api):
+    def test_first_page_respects_max_page_size(self, api):
         resp = api.get("/tables/orders/records")
         assert resp.status_code == 200
-        records = resp.json()["records"]
-        assert len(records) > 0
+        body = resp.json()
+        assert len(body["records"]) == 40
+        assert body["next_page"] == 2
+
+    def test_pagination_returns_all_records(self, api):
+        all_records = _collect_all_pages(api, "/tables/orders/records")
+        assert len(all_records) == 103
 
     def test_since_filters_records(self, api):
-        all_records = api.get("/tables/orders/records").json()["records"]
+        all_records = _collect_all_pages(api, "/tables/orders/records")
         mid = all_records[len(all_records) // 2]["updated_at"]
-        filtered = api.get("/tables/orders/records", params={"since": mid}).json()["records"]
+        filtered = _collect_all_pages(api, "/tables/orders/records", {"since": mid})
         assert len(filtered) < len(all_records)
 
     def test_user_id_filter(self, api):
-        resp = api.get("/tables/orders/records", params={"user_id": "user_0001"})
-        assert resp.status_code == 200
-        records = resp.json()["records"]
+        records = _collect_all_pages(api, "/tables/orders/records", {"user_id": "user_0001"})
         assert all(r["user_id"] == "user_0001" for r in records)
 
     def test_status_filter(self, api):
-        resp = api.get("/tables/orders/records", params={"status": "pending"})
-        assert resp.status_code == 200
-        records = resp.json()["records"]
+        records = _collect_all_pages(api, "/tables/orders/records", {"status": "pending"})
         assert all(r["status"] == "pending" for r in records)
 
     def test_combined_filters(self, api):
-        resp = api.get(
-            "/tables/orders/records", params={"user_id": "user_0001", "status": "pending"}
+        records = _collect_all_pages(
+            api, "/tables/orders/records", {"user_id": "user_0001", "status": "pending"}
         )
-        assert resp.status_code == 200
-        for r in resp.json()["records"]:
+        for r in records:
             assert r["user_id"] == "user_0001"
             assert r["status"] == "pending"
 
@@ -289,17 +363,18 @@ class TestOrders:
         api.delete("/tables/orders/records/order_0002")
         resp = api.get("/tables/orders/deleted_records")
         assert resp.status_code == 200
-        deleted = resp.json()["records"]
-        assert any(r["order_id"] == "order_0002" for r in deleted)
+        body = resp.json()
+        assert any(r["order_id"] == "order_0002" for r in body["records"])
+        assert "next_page" in body
 
     def test_deleted_records_since_filter(self, api):
         api.delete("/tables/orders/records/order_0003")
-        all_deleted = api.get("/tables/orders/deleted_records").json()["records"]
+        all_deleted = _collect_all_pages(api, "/tables/orders/deleted_records")
         if len(all_deleted) > 1:
             mid = all_deleted[0]["updated_at"]
-            filtered = api.get("/tables/orders/deleted_records", params={"since": mid}).json()[
-                "records"
-            ]
+            filtered = _collect_all_pages(
+                api, "/tables/orders/deleted_records", {"since": mid}
+            )
             assert all(r["updated_at"] > mid for r in filtered)
 
     def test_deleted_records_unsupported_param_returns_400(self, api):
@@ -307,17 +382,7 @@ class TestOrders:
         assert resp.status_code == 400
 
     def test_post_then_since_returns_only_new_record(self, api):
-        # Paginate to find the true latest timestamp across all records.
-        all_records = []
-        since = None
-        while True:
-            params = {"since": since} if since else {}
-            page = api.get("/tables/orders/records", params=params).json()["records"]
-            if not page:
-                break
-            all_records.extend(page)
-            since = page[-1]["updated_at"]
-
+        all_records = _collect_all_pages(api, "/tables/orders/records")
         latest_ts = max(r["updated_at"] for r in all_records)
 
         resp = api.post(
@@ -331,9 +396,9 @@ class TestOrders:
         )
         assert resp.status_code == 200
 
-        new_records = api.get("/tables/orders/records", params={"since": latest_ts}).json()[
-            "records"
-        ]
+        new_records = _collect_all_pages(
+            api, "/tables/orders/records", {"since": latest_ts}
+        )
         assert len(new_records) == 1
         assert new_records[0]["order_id"] == "order_incr_test"
 
@@ -352,36 +417,41 @@ class TestMetrics:
     def test_metadata_not_accessible(self, api):
         assert api.get("/tables/metrics/metadata").status_code == 404
 
-    def test_records_accessible(self, api):
+    def test_first_page_respects_max_page_size(self, api):
         resp = api.get("/tables/metrics/records")
         assert resp.status_code == 200
-        records = resp.json()["records"]
-        assert len(records) > 0
+        body = resp.json()
+        assert len(body["records"]) == 100
+        assert body["next_page"] == 2
+
+    def test_pagination_returns_all_records(self, api):
+        all_records = _collect_all_pages(api, "/tables/metrics/records")
+        assert len(all_records) == 253
 
     def test_since_filter(self, api):
         first_page = api.get("/tables/metrics/records").json()["records"]
         early_ts = first_page[5]["updated_at"]
-        filtered = api.get("/tables/metrics/records", params={"since": early_ts}).json()["records"]
+        filtered = _collect_all_pages(api, "/tables/metrics/records", {"since": early_ts})
         assert all(r["updated_at"] > early_ts for r in filtered)
 
     def test_until_filter(self, api):
-        all_records = api.get("/tables/metrics/records").json()["records"]
+        all_records = _collect_all_pages(api, "/tables/metrics/records")
         mid = all_records[len(all_records) // 2]["updated_at"]
-        filtered = api.get("/tables/metrics/records", params={"until": mid}).json()["records"]
+        filtered = _collect_all_pages(api, "/tables/metrics/records", {"until": mid})
         assert len(filtered) < len(all_records)
         assert all(r["updated_at"] <= mid for r in filtered)
 
     def test_since_and_until_combined(self, api):
-        all_records = api.get("/tables/metrics/records").json()["records"]
+        all_records = _collect_all_pages(api, "/tables/metrics/records")
         lo = all_records[len(all_records) // 4]["updated_at"]
         hi = all_records[3 * len(all_records) // 4]["updated_at"]
-        filtered = api.get("/tables/metrics/records", params={"since": lo, "until": hi}).json()[
-            "records"
-        ]
+        filtered = _collect_all_pages(
+            api, "/tables/metrics/records", {"since": lo, "until": hi}
+        )
         assert all(lo < r["updated_at"] <= hi for r in filtered)
 
     def test_value_is_struct_or_none(self, api):
-        records = api.get("/tables/metrics/records").json()["records"]
+        records = _collect_all_pages(api, "/tables/metrics/records")
         for r in records:
             v = r["value"]
             if v is not None:
@@ -435,30 +505,26 @@ class TestPost:
 
 class TestNullableSeedData:
     def test_products_have_some_nulls(self, api):
-        records = api.get("/tables/products/records").json()["records"]
+        records = _collect_all_pages(api, "/tables/products/records")
         null_count = sum(1 for r in records if r.get("name") is None)
         assert null_count > 0, "Expected some null 'name' values in products"
 
     def test_primary_keys_never_null(self, api):
-        for table in ["products", "events", "users", "orders"]:
-            resp = api.get(f"/tables/{table}/records")
-            if resp.status_code != 200:
-                continue
-            records = resp.json()["records"]
-            pk_fields = {
-                "products": "product_id",
-                "events": "event_id",
-                "users": "user_id",
-                "orders": "order_id",
-            }
-            pk = pk_fields[table]
+        pk_fields = {
+            "products": "product_id",
+            "events": "event_id",
+            "users": "user_id",
+            "orders": "order_id",
+        }
+        for table, pk in pk_fields.items():
+            records = _collect_all_pages(api, f"/tables/{table}/records")
             assert all(r[pk] is not None for r in records)
 
     def test_cursor_fields_never_null(self, api):
-        records = api.get("/tables/events/records", params={"limit": "200"}).json()["records"]
+        records = _collect_all_pages(api, "/tables/events/records")
         assert all(r["created_at"] is not None for r in records)
 
-        records = api.get("/tables/users/records").json()["records"]
+        records = _collect_all_pages(api, "/tables/users/records")
         assert all(r["updated_at"] is not None for r in records)
 
 
@@ -525,6 +591,7 @@ class TestJsonResponseStructure:
     def test_records_response(self, api):
         body = api.get("/tables/products/records").json()
         assert "records" in body
+        assert "next_page" in body
 
     def test_post_response(self, api):
         body = api.post(
@@ -578,3 +645,56 @@ class TestRouting:
     def test_deleted_records_not_supported_on_events(self, api):
         resp = api.get("/tables/events/deleted_records")
         assert resp.status_code == 400
+
+
+# ── pagination ───────────────────────────────────────────────────────
+
+
+class TestPagination:
+    @pytest.mark.parametrize(
+        "table,expected_total,max_page_size",
+        [
+            ("products", 53, 20),
+            ("events", 101, 50),
+            ("users", 37, 15),
+            ("orders", 103, 40),
+            ("metrics", 253, 100),
+        ],
+    )
+    def test_all_pages_concatenated_equal_total(self, api, table, expected_total, max_page_size):
+        all_records = _collect_all_pages(api, f"/tables/{table}/records")
+        assert len(all_records) == expected_total
+
+    @pytest.mark.parametrize("table", ["products", "events", "users", "orders", "metrics"])
+    def test_next_page_is_int_or_none(self, api, table):
+        resp = api.get(f"/tables/{table}/records")
+        body = resp.json()
+        assert body["next_page"] is None or isinstance(body["next_page"], int)
+
+    @pytest.mark.parametrize("table", ["products", "events", "users", "orders", "metrics"])
+    def test_page_beyond_last_returns_empty(self, api, table):
+        resp = api.get(f"/tables/{table}/records", params={"page": "9999"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["records"] == []
+        assert body["next_page"] is None
+
+    @pytest.mark.parametrize("table", ["products", "events", "users", "orders", "metrics"])
+    def test_page_zero_returns_400(self, api, table):
+        resp = api.get(f"/tables/{table}/records", params={"page": "0"})
+        assert resp.status_code == 400
+
+    @pytest.mark.parametrize("table", ["products", "events", "users", "orders", "metrics"])
+    def test_negative_page_returns_400(self, api, table):
+        resp = api.get(f"/tables/{table}/records", params={"page": "-1"})
+        assert resp.status_code == 400
+
+    def test_deleted_records_pagination_has_next_page(self, api):
+        resp = api.get("/tables/orders/deleted_records")
+        body = resp.json()
+        assert "next_page" in body
+
+    def test_no_duplicate_records_across_pages(self, api):
+        all_records = _collect_all_pages(api, "/tables/products/records")
+        ids = [r["product_id"] for r in all_records]
+        assert len(ids) == len(set(ids))

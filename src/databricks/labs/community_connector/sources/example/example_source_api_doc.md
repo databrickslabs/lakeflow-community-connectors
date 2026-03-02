@@ -182,7 +182,7 @@ The `page` value is replayable — the same page number returns the same data sl
 | `events` | `since`, `limit`, `page` | Cursor-based. `since` is exclusive lower bound on `created_at`. Default `limit`=`max_page_size`. |
 | `users` | `since`, `page` | Cursor-based. `since` is exclusive lower bound on `updated_at`. |
 | `orders` | `since`, `user_id`, `status`, `page` | Cursor-based + exact-match filters. |
-| `metrics` *(hidden)* | `since`, `until`, `page` | Time-range query. `since` exclusive, `until` inclusive on `updated_at`. |
+| `metrics` *(hidden)* | `since`, `until`, `page` | Time-range query. `since` exclusive, `until` inclusive on `updated_at`. Data volume is large; querying with only `since` (unbounded upper range) may be very slow. Always query with both `since` and `until` to bound the result set. |
 
 **`since` semantics**: records with `cursor_field > since` (strictly greater than).
 **`until` semantics**: records with `cursor_field <= until` (inclusive).

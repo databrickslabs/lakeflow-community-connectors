@@ -48,6 +48,18 @@ metrics  *(hidden)*
     is a struct with subfields ``count`` (integer), ``label`` (string),
     and ``measure`` (double).
 
+Pagination
+----------
+All tables support a ``page`` query parameter (integer, 1-based).  When
+omitted the request starts from page 1.  Each table has a
+``max_page_size`` configured in ``TABLE_API_CONFIG`` that caps the
+number of records per page.  The response body always includes a
+``next_page`` field: an integer indicating the next page number when
+more records are available, or ``null`` when the current page is the
+last one.  The ``page`` value is replayable — requesting the same page
+number returns the same slice of data (assuming no mutations between
+calls).
+
 Route table
 -----------
 GET    /tables                           → list table names
@@ -72,7 +84,7 @@ import uuid
 from datetime import timedelta
 from typing import Optional
 
-from tests.simulated_source.store import Store, _iso, _now
+from databricks.labs.community_connector.libs.simulated_source.store import Store, _iso, _now
 
 
 class Response:
@@ -119,31 +131,40 @@ _RETRIABLE_ERRORS = [
 #                         exact-match filters (passed to store.list_records)
 # hidden                : if True, excluded from GET /tables, /schema,
 #                         and /metadata — but records endpoint still works
+# max_page_size         : max records returned per page.  All tables
+#                         support a ``page`` query param (int, 1-based,
+#                         defaults to 1).  The response includes a
+#                         ``next_page`` field (int or null).
 
 TABLE_API_CONFIG: dict[str, dict] = {
     "products": {
-        "allowed_record_params": {"category"},
+        "allowed_record_params": {"category", "page"},
         "filter_params": {"category"},
         "allow_delete": False,
+        "max_page_size": 20,
     },
     "events": {
-        "allowed_record_params": {"since", "limit"},
+        "allowed_record_params": {"since", "limit", "page"},
         "allow_delete": False,
+        "max_page_size": 50,
     },
     "users": {
-        "allowed_record_params": {"since"},
+        "allowed_record_params": {"since", "page"},
         "allow_delete": False,
+        "max_page_size": 15,
     },
     "orders": {
-        "allowed_record_params": {"since", "user_id", "status"},
+        "allowed_record_params": {"since", "user_id", "status", "page"},
         "filter_params": {"user_id", "status"},
-        "allowed_deleted_params": {"since"},
+        "allowed_deleted_params": {"since", "page"},
         "allow_delete": True,
+        "max_page_size": 40,
     },
     "metrics": {
-        "allowed_record_params": {"since", "until"},
+        "allowed_record_params": {"since", "until", "page"},
         "allow_delete": False,
         "hidden": True,
+        "max_page_size": 100,
     },
 }
 
@@ -278,6 +299,11 @@ class SimulatedSourceAPI:
                 {"error": f"Unsupported query params for '{table}': {sorted(bad)}"},
             )
 
+        max_page_size = cfg.get("max_page_size", 100)
+        page = int(params.get("page", 1))
+        if page < 1:
+            return Response(400, {"error": "page must be >= 1"})
+
         filter_keys = cfg.get("filter_params", set())
         filters = {k: params[k] for k in filter_keys if k in params}
 
@@ -287,21 +313,30 @@ class SimulatedSourceAPI:
             if filters:
                 for field, value in filters.items():
                     records = [r for r in records if r.get(field) == value]
-            return Response(200, {"records": records})
+            records.sort(key=lambda r: r.get(self._store.get_table_pk(table), ""))
+            start = (page - 1) * max_page_size
+            page_records = records[start : start + max_page_size]
+            next_page = page + 1 if start + max_page_size < len(records) else None
+            return Response(200, {"records": page_records, "next_page": next_page})
+
         since = params.get("since")
         until = params.get("until")
-        limit = int(params.get("limit", 100))
+        limit = int(params.get("limit", max_page_size))
 
         try:
-            records = self._store.list_records(
+            all_records = self._store.list_records(
                 table,
                 since=since,
                 until=until,
                 cursor_field=cursor_field,
                 filters=filters or None,
-                limit=limit,
+                limit=None,
             )
-            return Response(200, {"records": records})
+            start = (page - 1) * min(limit, max_page_size)
+            effective_size = min(limit, max_page_size)
+            page_records = all_records[start : start + effective_size]
+            next_page = page + 1 if start + effective_size < len(all_records) else None
+            return Response(200, {"records": page_records, "next_page": next_page})
         except ValueError as e:
             return Response(404, {"error": str(e)})
 
@@ -326,18 +361,25 @@ class SimulatedSourceAPI:
                 {"error": f"Unsupported query params for '{table}' deleted_records: {sorted(bad)}"},
             )
 
+        max_page_size = cfg.get("max_page_size", 100)
+        page = int(params.get("page", 1))
+        if page < 1:
+            return Response(400, {"error": "page must be >= 1"})
+
         cursor_field = metadata.get("cursor_field")
         since = params.get("since")
-        limit = int(params.get("limit", 100))
 
         try:
-            records = self._store.list_deleted_records(
+            all_records = self._store.list_deleted_records(
                 table,
                 since=since,
                 cursor_field=cursor_field,
-                limit=limit,
+                limit=None,
             )
-            return Response(200, {"records": records})
+            start = (page - 1) * max_page_size
+            page_records = all_records[start : start + max_page_size]
+            next_page = page + 1 if start + max_page_size < len(all_records) else None
+            return Response(200, {"records": page_records, "next_page": next_page})
         except ValueError as e:
             return Response(404, {"error": str(e)})
 
