@@ -21,17 +21,17 @@ from pyspark.sql.types import (
 
 STUDIES_SCHEMA = StructType(
     [
-        StructField("StudyInstanceUID", StringType(), nullable=False),
-        StructField("PatientID", StringType(), nullable=True),
-        StructField("PatientName", StringType(), nullable=True),
-        StructField("StudyDate", StringType(), nullable=True),
-        StructField("StudyTime", StringType(), nullable=True),
-        StructField("AccessionNumber", StringType(), nullable=True),
-        StructField("StudyDescription", StringType(), nullable=True),
+        StructField("study_instance_uid", StringType(), nullable=False),
+        StructField("patient_id", StringType(), nullable=True),
+        StructField("patient_name", StringType(), nullable=True),
+        StructField("study_date", StringType(), nullable=True),
+        StructField("study_time", StringType(), nullable=True),
+        StructField("accession_number", StringType(), nullable=True),
+        StructField("study_description", StringType(), nullable=True),
         # CS VR — can contain multiple modalities, e.g. ["CT", "SR"]
-        StructField("ModalitiesInStudy", ArrayType(StringType()), nullable=True),
-        StructField("NumberOfStudyRelatedSeries", LongType(), nullable=True),
-        StructField("NumberOfStudyRelatedInstances", LongType(), nullable=True),
+        StructField("modalities_in_study", ArrayType(StringType()), nullable=True),
+        StructField("number_of_study_related_series", LongType(), nullable=True),
+        StructField("number_of_study_related_instances", LongType(), nullable=True),
         # Lineage: UC connection name that produced this record
         StructField("connection_name", StringType(), nullable=True),
     ]
@@ -44,14 +44,14 @@ STUDIES_SCHEMA = StructType(
 
 SERIES_SCHEMA = StructType(
     [
-        StructField("SeriesInstanceUID", StringType(), nullable=False),
-        StructField("StudyInstanceUID", StringType(), nullable=True),
-        StructField("StudyDate", StringType(), nullable=True),
-        StructField("SeriesNumber", LongType(), nullable=True),
-        StructField("SeriesDescription", StringType(), nullable=True),
-        StructField("Modality", StringType(), nullable=True),
-        StructField("BodyPartExamined", StringType(), nullable=True),
-        StructField("SeriesDate", StringType(), nullable=True),
+        StructField("series_instance_uid", StringType(), nullable=False),
+        StructField("study_instance_uid", StringType(), nullable=True),
+        StructField("study_date", StringType(), nullable=True),
+        StructField("series_number", LongType(), nullable=True),
+        StructField("series_description", StringType(), nullable=True),
+        StructField("modality", StringType(), nullable=True),
+        StructField("body_part_examined", StringType(), nullable=True),
+        StructField("series_date", StringType(), nullable=True),
         # Lineage: UC connection name that produced this record
         StructField("connection_name", StringType(), nullable=True),
     ]
@@ -64,18 +64,17 @@ SERIES_SCHEMA = StructType(
 
 INSTANCES_SCHEMA = StructType(
     [
-        StructField("SOPInstanceUID", StringType(), nullable=False),
-        StructField("SeriesInstanceUID", StringType(), nullable=True),
-        StructField("StudyInstanceUID", StringType(), nullable=True),
-        StructField("SOPClassUID", StringType(), nullable=True),
-        StructField("InstanceNumber", LongType(), nullable=True),
-        StructField("StudyDate", StringType(), nullable=True),
-        StructField("ContentDate", StringType(), nullable=True),
-        StructField("ContentTime", StringType(), nullable=True),
+        StructField("sop_instance_uid", StringType(), nullable=False),
+        StructField("series_instance_uid", StringType(), nullable=True),
+        StructField("study_instance_uid", StringType(), nullable=True),
+        StructField("sop_class_uid", StringType(), nullable=True),
+        StructField("instance_number", LongType(), nullable=True),
+        StructField("study_date", StringType(), nullable=True),
+        StructField("content_date", StringType(), nullable=True),
+        StructField("content_time", StringType(), nullable=True),
         # Populated when fetch_dicom_files=true; path inside Unity Catalog Volume
         StructField("dicom_file_path", StringType(), nullable=True),
         # Full DICOM JSON for this instance; populated when fetch_metadata=true.
-        # Stored as VariantType; parse_value() converts the JSON string → VariantVal.
         StructField("metadata", VariantType(), nullable=True),
         # Lineage: UC connection name that produced this record
         StructField("connection_name", StringType(), nullable=True),

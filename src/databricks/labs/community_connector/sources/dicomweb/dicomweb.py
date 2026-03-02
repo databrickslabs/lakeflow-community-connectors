@@ -149,7 +149,7 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
             }
         return {
             "primary_keys": [_primary_key(table_name)],
-            "cursor_field": "StudyDate",
+            "cursor_field": "study_date",
             "ingestion_type": "cdc",
         }
 
@@ -281,16 +281,16 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
                 return records, 0
             for study_raw in studies:
                 study = parse_study(study_raw)
-                study_uid = study.get("StudyInstanceUID")
+                study_uid = study.get("study_instance_uid")
                 if not study_uid:
                     continue
                 for series_raw in self._client.query_series_for_study(study_uid):
                     record = parse_series(series_raw)
-                    # Propagate StudyDate / StudyInstanceUID from parent if missing
-                    if not record.get("StudyDate"):
-                        record["StudyDate"] = study.get("StudyDate")
-                    if not record.get("StudyInstanceUID"):
-                        record["StudyInstanceUID"] = study_uid
+                    # Propagate study_date / study_instance_uid from parent if missing
+                    if not record.get("study_date"):
+                        record["study_date"] = study.get("study_date")
+                    if not record.get("study_instance_uid"):
+                        record["study_instance_uid"] = study_uid
                     record["connection_name"] = self._connection_name
                     records.append(record)
             if len(studies) < page_size:
@@ -324,12 +324,12 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
                 return records, 0
             for study_raw in studies:
                 study = parse_study(study_raw)
-                study_uid = study.get("StudyInstanceUID")
+                study_uid = study.get("study_instance_uid")
                 if not study_uid:
                     continue
                 for series_raw in self._client.query_series_for_study(study_uid):
                     series = parse_series(series_raw)
-                    series_uid = series.get("SeriesInstanceUID")
+                    series_uid = series.get("series_instance_uid")
                     if not series_uid:
                         continue
 
@@ -343,15 +343,15 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
                     for inst_raw in instances_raw:
                         record = parse_instance(inst_raw)
                         # Propagate parent UIDs / dates if missing in the response
-                        if not record.get("StudyDate"):
-                            record["StudyDate"] = study.get("StudyDate")
-                        if not record.get("StudyInstanceUID"):
-                            record["StudyInstanceUID"] = study_uid
-                        if not record.get("SeriesInstanceUID"):
-                            record["SeriesInstanceUID"] = series_uid
+                        if not record.get("study_date"):
+                            record["study_date"] = study.get("study_date")
+                        if not record.get("study_instance_uid"):
+                            record["study_instance_uid"] = study_uid
+                        if not record.get("series_instance_uid"):
+                            record["series_instance_uid"] = series_uid
                         # Attach full DICOM JSON metadata
                         if fetch_metadata:
-                            sop_uid = record.get("SOPInstanceUID")
+                            sop_uid = record.get("sop_instance_uid")
                             record["metadata"] = sop_to_meta.get(sop_uid) if sop_uid else None
                         # Attach DICOM file or frame
                         if fetch_files:
@@ -379,9 +379,9 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
         first.  If the server responds with 404/406/415 it switches to frame
         retrieval and caches the detected mode for the rest of the run.
         """
-        study_uid = record.get("StudyInstanceUID")
-        series_uid = record.get("SeriesInstanceUID")
-        sop_uid = record.get("SOPInstanceUID")
+        study_uid = record.get("study_instance_uid")
+        series_uid = record.get("series_instance_uid")
+        sop_uid = record.get("sop_instance_uid")
 
         if not all([study_uid, series_uid, sop_uid]):
             logger.warning("Skipping WADO-RS: missing UIDs in record %s", record)
@@ -476,7 +476,7 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
         try:
             studies = self._client.query_studies("19000101-99991231", limit=1, offset=0)
             if studies:
-                study_uid = parse_study(studies[0]).get("StudyInstanceUID")
+                study_uid = parse_study(studies[0]).get("study_instance_uid")
         except Exception as exc:
             logger.warning("Diagnostics: could not fetch a study UID: %s", exc)
 
@@ -484,7 +484,7 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
             try:
                 series_list = self._client.query_series_for_study(study_uid)
                 if series_list:
-                    series_uid = parse_series(series_list[0]).get("SeriesInstanceUID")
+                    series_uid = parse_series(series_list[0]).get("series_instance_uid")
             except Exception as exc:
                 logger.warning("Diagnostics: could not fetch a series UID: %s", exc)
 
@@ -492,7 +492,7 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
             try:
                 instances = self._client.query_instances_for_series(study_uid, series_uid)
                 if instances:
-                    sop_uid = parse_instance(instances[0]).get("SOPInstanceUID")
+                    sop_uid = parse_instance(instances[0]).get("sop_instance_uid")
             except Exception as exc:
                 logger.warning("Diagnostics: could not fetch a SOP UID: %s", exc)
 
@@ -652,9 +652,9 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
 
 def _primary_key(table_name: str) -> str:
     pk_map = {
-        "studies": "StudyInstanceUID",
-        "series": "SeriesInstanceUID",
-        "instances": "SOPInstanceUID",
+        "studies": "study_instance_uid",
+        "series": "series_instance_uid",
+        "instances": "sop_instance_uid",
         "diagnostics": "endpoint",
     }
     return pk_map[table_name]

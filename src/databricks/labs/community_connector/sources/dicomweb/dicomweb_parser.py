@@ -18,38 +18,38 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 
 STUDY_TAG_MAP: dict[str, str] = {
-    "0020000D": "StudyInstanceUID",
-    "00080020": "StudyDate",
-    "00080030": "StudyTime",
-    "00080050": "AccessionNumber",
-    "00100010": "PatientName",
-    "00100020": "PatientID",
-    "00081030": "StudyDescription",
-    "00080061": "ModalitiesInStudy",
-    "00201206": "NumberOfStudyRelatedSeries",
-    "00201208": "NumberOfStudyRelatedInstances",
+    "0020000D": "study_instance_uid",
+    "00080020": "study_date",
+    "00080030": "study_time",
+    "00080050": "accession_number",
+    "00100010": "patient_name",
+    "00100020": "patient_id",
+    "00081030": "study_description",
+    "00080061": "modalities_in_study",
+    "00201206": "number_of_study_related_series",
+    "00201208": "number_of_study_related_instances",
 }
 
 SERIES_TAG_MAP: dict[str, str] = {
-    "0020000E": "SeriesInstanceUID",
-    "0020000D": "StudyInstanceUID",
-    "00080020": "StudyDate",
-    "00200011": "SeriesNumber",
-    "0008103E": "SeriesDescription",
-    "00080060": "Modality",
-    "00180015": "BodyPartExamined",
-    "00080021": "SeriesDate",
+    "0020000E": "series_instance_uid",
+    "0020000D": "study_instance_uid",
+    "00080020": "study_date",
+    "00200011": "series_number",
+    "0008103E": "series_description",
+    "00080060": "modality",
+    "00180015": "body_part_examined",
+    "00080021": "series_date",
 }
 
 INSTANCE_TAG_MAP: dict[str, str] = {
-    "00080018": "SOPInstanceUID",
-    "0020000E": "SeriesInstanceUID",
-    "0020000D": "StudyInstanceUID",
-    "00080016": "SOPClassUID",
-    "00200013": "InstanceNumber",
-    "00080020": "StudyDate",
-    "00080023": "ContentDate",
-    "00080033": "ContentTime",
+    "00080018": "sop_instance_uid",
+    "0020000E": "series_instance_uid",
+    "0020000D": "study_instance_uid",
+    "00080016": "sop_class_uid",
+    "00200013": "instance_number",
+    "00080020": "study_date",
+    "00080023": "content_date",
+    "00080033": "content_time",
 }
 
 # VRs that carry a single string scalar (or list → join / first element)
@@ -57,7 +57,7 @@ _STRING_VRS = {"DA", "TM", "CS", "LO", "UI", "SH", "LT", "ST", "UT", "AE", "AS",
 # VRs that carry numeric values
 _NUMERIC_VRS = {"IS", "DS", "FL", "FD", "SL", "SS", "UL", "US", "AT", "OB", "OW", "OF", "OD", "OL", "OV"}
 # Multi-valued string VRs (arrays stay as lists)
-_MULTI_STRING_VRS = {"CS"}  # ModalitiesInStudy uses CS and can be multi-valued
+_MULTI_STRING_VRS = {"CS"}  # modalities_in_study uses CS and can be multi-valued
 
 
 # ---------------------------------------------------------------------------
@@ -81,8 +81,8 @@ def _extract_value(tag_obj: dict, field_name: str) -> object:
         return str(first)
 
     if vr in _STRING_VRS:
-        # ModalitiesInStudy (CS, multi-valued) → return as list
-        if field_name == "ModalitiesInStudy":
+        # modalities_in_study (CS, multi-valued) → return as list
+        if field_name == "modalities_in_study":
             return [str(v) for v in values]
         return str(values[0]) if len(values) == 1 else str(values[0])
 

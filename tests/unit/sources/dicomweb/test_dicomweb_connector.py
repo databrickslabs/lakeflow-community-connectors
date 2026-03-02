@@ -34,36 +34,36 @@ from databricks.labs.community_connector.sources.dicomweb.dicomweb_schemas impor
 class TestParser:
     def test_parse_study_full(self, studies_response):
         record = parse_study(studies_response[0])
-        assert record["StudyInstanceUID"] == "1.2.840.113619.2.5.1762583153.215519.978957063.78"
-        assert record["StudyDate"] == "20231215"
-        assert record["PatientName"] == "Doe^John"
-        assert record["PatientID"] == "PID-001"
-        assert record["AccessionNumber"] == "ACC123456"
-        assert record["ModalitiesInStudy"] == ["CT", "SR"]
-        assert record["NumberOfStudyRelatedSeries"] == 3
-        assert record["NumberOfStudyRelatedInstances"] == 450
+        assert record["study_instance_uid"] == "1.2.840.113619.2.5.1762583153.215519.978957063.78"
+        assert record["study_date"] == "20231215"
+        assert record["patient_name"] == "Doe^John"
+        assert record["patient_id"] == "PID-001"
+        assert record["accession_number"] == "ACC123456"
+        assert record["modalities_in_study"] == ["CT", "SR"]
+        assert record["number_of_study_related_series"] == 3
+        assert record["number_of_study_related_instances"] == 450
 
     def test_parse_study_missing_optional_fields(self):
         minimal = {
             "0020000D": {"vr": "UI", "Value": ["1.2.3"]},
         }
         record = parse_study(minimal)
-        assert record["StudyInstanceUID"] == "1.2.3"
-        assert record["PatientName"] is None
-        assert record["StudyDate"] is None
+        assert record["study_instance_uid"] == "1.2.3"
+        assert record["patient_name"] is None
+        assert record["study_date"] is None
 
     def test_parse_series(self, series_response):
         record = parse_series(series_response[0])
-        assert record["SeriesInstanceUID"] == "1.3.12.2.1107.5.2.32.35162.2013120811373024696203156"
-        assert record["Modality"] == "CT"
-        assert record["SeriesNumber"] == 1
-        assert record["BodyPartExamined"] == "CHEST"
+        assert record["series_instance_uid"] == "1.3.12.2.1107.5.2.32.35162.2013120811373024696203156"
+        assert record["modality"] == "CT"
+        assert record["series_number"] == 1
+        assert record["body_part_examined"] == "CHEST"
 
     def test_parse_instance(self, instances_response):
         record = parse_instance(instances_response[0])
-        assert record["SOPInstanceUID"] == "1.2.840.113619.2.5.1762583153.215519.978957063.78.1.1"
-        assert record["InstanceNumber"] == 1
-        assert record["ContentDate"] == "20231215"
+        assert record["sop_instance_uid"] == "1.2.840.113619.2.5.1762583153.215519.978957063.78.1.1"
+        assert record["instance_number"] == 1
+        assert record["content_date"] == "20231215"
         assert record["dicom_file_path"] is None  # not yet populated
         assert record["metadata"] is None  # not yet populated
 
@@ -74,14 +74,14 @@ class TestParser:
             "0020000D": {"vr": "UI", "Value": ["1.2.3"]},
         }
         record = parse_study(obj)
-        assert record["PatientName"] == "山田"
+        assert record["patient_name"] == "山田"
 
     def test_parse_empty_value_array(self):
         obj = {
             "0020000D": {"vr": "UI", "Value": []},
         }
         record = parse_study(obj)
-        assert record["StudyInstanceUID"] is None
+        assert record["study_instance_uid"] is None
 
     def test_tag_case_insensitive(self):
         """Tags can be lowercase in some responses."""
@@ -89,7 +89,7 @@ class TestParser:
             "0020000d": {"vr": "UI", "Value": ["1.2.3"]},
         }
         record = parse_study(obj)
-        assert record["StudyInstanceUID"] == "1.2.3"
+        assert record["study_instance_uid"] == "1.2.3"
 
 
 # ---------------------------------------------------------------------------
@@ -101,21 +101,21 @@ class TestSchemas:
     def test_get_schema_studies(self):
         schema = get_schema("studies")
         field_names = [f.name for f in schema.fields]
-        assert "StudyInstanceUID" in field_names
-        assert "ModalitiesInStudy" in field_names
+        assert "study_instance_uid" in field_names
+        assert "modalities_in_study" in field_names
 
     def test_get_schema_series(self):
         schema = get_schema("series")
         field_names = [f.name for f in schema.fields]
-        assert "SeriesInstanceUID" in field_names
-        assert "Modality" in field_names
+        assert "series_instance_uid" in field_names
+        assert "modality" in field_names
 
     def test_get_schema_instances(self):
         from pyspark.sql.types import VariantType
 
         schema = get_schema("instances")
         field_names = [f.name for f in schema.fields]
-        assert "SOPInstanceUID" in field_names
+        assert "sop_instance_uid" in field_names
         assert "dicom_file_path" in field_names
         assert "metadata" in field_names
         meta_field = next(f for f in schema.fields if f.name == "metadata")
@@ -128,7 +128,7 @@ class TestSchemas:
             get_schema("patients")
 
     def test_study_instance_uid_not_nullable(self):
-        uid_field = next(f for f in STUDIES_SCHEMA.fields if f.name == "StudyInstanceUID")
+        uid_field = next(f for f in STUDIES_SCHEMA.fields if f.name == "study_instance_uid")
         assert uid_field.nullable is False
 
     def test_dicom_file_path_nullable(self):
@@ -166,7 +166,7 @@ class TestConnector:
         for table in ("studies", "series", "instances"):
             meta = connector.read_table_metadata(table, {})
             assert "primary_keys" in meta
-            assert meta["cursor_field"] == "StudyDate"
+            assert meta["cursor_field"] == "study_date"
             assert meta["ingestion_type"] == "cdc"
             # column_expressions not needed: metadata is VariantType in the schema
             # and parse_value() handles the JSON string → VariantVal conversion
@@ -179,7 +179,7 @@ class TestConnector:
         records_iter, next_offset = connector.read_table("studies", {}, {})
         records = list(records_iter)
         assert len(records) == 2
-        assert records[0]["StudyInstanceUID"] == "1.2.840.113619.2.5.1762583153.215519.978957063.78"
+        assert records[0]["study_instance_uid"] == "1.2.840.113619.2.5.1762583153.215519.978957063.78"
         assert "study_date" in next_offset
         assert next_offset["page_offset"] == 0
         # connection_name defaults to base_url when not explicitly set
@@ -196,7 +196,7 @@ class TestConnector:
         records = list(records_iter)
         # 2 studies × 3 series = 6 total
         assert len(records) == 6
-        assert records[0]["SeriesInstanceUID"] is not None
+        assert records[0]["series_instance_uid"] is not None
         # query_series_for_study called once per study
         assert connector._client.query_series_for_study.call_count == 2
 
