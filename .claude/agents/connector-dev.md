@@ -28,5 +28,5 @@ If all tables share similar API patterns, implement them all in a single pass.
 ## Key References
 
 - **Skill**: implement-connector (loaded above)
-- **Reference implementation**: `src/databricks/labs/community_connector/sources/example/example.py`
-- **More references**: `src/databricks/labs/community_connector/sources/{other_sources}`
+- **Primary reference implementation**: `src/databricks/labs/community_connector/sources/example/example.py` — this is the best reference; always start here and prefer it over other connectors.
+- **Secondary references**: other connectors under `src/databricks/labs/community_connector/sources/` may be consulted only when `example.py` does not cover a specific pattern needed.
