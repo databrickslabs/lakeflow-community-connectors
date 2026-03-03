@@ -79,8 +79,3 @@ Before completion, verify:
 - [ ] Incremental strategy defines cursor, order, lookback, delete handling
 - [ ] Research Log completed with full URLs
 - [ ] No unverifiable claims; gaps marked `TBD:` with rationale
-
-## Git Commit on Completion
-
-After writing (or updating) the API doc, commit it to git before returning.
-Use the exact source name in the commit message. Do not push — only commit locally.

@@ -3,7 +3,7 @@ name: connector-dev
 description: "Develop a Python community connector for a specified source system, adhering to the defined LakeflowConnect interface. The necessary API documentation for the target source must be provided by the user."
 model: opus
 color: cyan
-memory: project
+memory: local 
 permissionMode: bypassPermissions
 skills:
   - implement-connector
@@ -28,5 +28,4 @@ If all tables share similar API patterns, implement them all in a single pass.
 ## Key References
 
 - **Skill**: implement-connector (loaded above)
-- **Reference implementation**: `src/databricks/labs/community_connector/sources/example/example.py`
-- **More references**: `src/databricks/labs/community_connector/sources/{other_sources}`
+- **Primary reference implementation**: `src/databricks/labs/community_connector/sources/example/example.py` — this is the best reference; always start here and prefer it over other connectors.

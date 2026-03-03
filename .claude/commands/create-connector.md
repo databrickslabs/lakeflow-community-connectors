@@ -16,7 +16,7 @@ Paths: `SRC=src/databricks/labs/community_connector/sources/{source_name}`, `TES
 
 **Task tracking**: Once confirmed, `TaskCreate` for all 6 steps. Mark `in_progress` before launching each step, `completed` after.
 
-**Confirmation gate** (steps 1–5): After each step, `AskUserQuestion` with a summary of what was produced (files created, tables found, test results). Options: "Continue" / "Review first". Do NOT proceed without confirmation. Step 6 skips the gate.
+**Confirmation gate** (steps 1–5): After each step, commit all new/modified files under `SRC` and `TESTS` with a message like `feat({source_name}): step N - <short description>`. Then `AskUserQuestion` with a summary of what was produced (files created, tables found, test results). Options: "Continue" / "Review first". Do NOT proceed without confirmation. Step 6 skips the gate.
 
 **Subagent pattern**: `Task(subagent_type=..., run_in_background=true)` → wait for automatic completion notification (do **NOT** call `TaskOutput`) → verify output files with `Glob`. Every subagent prompt must include: source name, all relevant file paths, and table scope. Subagents have no prior context.
 
