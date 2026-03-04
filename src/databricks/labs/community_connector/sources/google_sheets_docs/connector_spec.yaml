@@ -3,6 +3,11 @@
 # connection parameters and allowlist options.
 
 # ============================================================================
+# Display name (required for Databricks to show connection parameter prompts)
+# ============================================================================
+display_name: Google Sheets and Docs
+
+# ============================================================================
 # Connection Parameters
 # These are provided when creating the Unity Catalog connection.
 # ============================================================================
@@ -17,12 +22,14 @@ connection:
     - name: client_secret
       type: string
       required: true
+      secret: true
       description: >
         OAuth 2.0 client secret from Google Cloud Console.
 
     - name: refresh_token
       type: string
       required: true
+      secret: true
       description: >
         Long-lived refresh token obtained with access_type=offline during
         authorization. Used to obtain access tokens at runtime.
