@@ -37,10 +37,7 @@ connection:
   oauth:
     authorization_url: "https://accounts.google.com/o/oauth2/v2/auth"
     token_url: "https://oauth2.googleapis.com/token"
-    scopes: >
-      https://www.googleapis.com/auth/spreadsheets.readonly
-      https://www.googleapis.com/auth/documents.readonly
-      https://www.googleapis.com/auth/drive.readonly
+    scopes: "https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/documents.readonly https://www.googleapis.com/auth/drive.readonly"
     extra_auth_params:
       access_type: "offline"
       prompt: "consent"
