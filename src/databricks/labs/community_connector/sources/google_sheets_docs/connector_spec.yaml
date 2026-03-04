@@ -45,4 +45,23 @@ connection:
 # Use a comma-separated string of option names.
 # If no table-specific options are needed, set to empty string or omit.
 # ============================================================================
-external_options_allowlist: ""
+external_options_allowlist: "spreadsheet_id,spreadsheetId,sheet_name,range,include_content"
+
+# ============================================================================
+# Supported Tables
+# ============================================================================
+# - spreadsheets:  Drive file list (mimeType=spreadsheet); no table_options.
+# - sheet_values: Cell data via Sheets API; requires spreadsheet_id or spreadsheetId.
+# - documents:    Drive file list (mimeType=document); optional include_content.
+#
+# ============================================================================
+# Table Options Documentation
+# ============================================================================
+# sheet_values:
+#   spreadsheet_id / spreadsheetId:  Required. ID of the Google Spreadsheet.
+#   sheet_name:                      Optional. Sheet tab name (default: "Sheet1").
+#   range:                           Optional. A1 notation range (default: "A:Z").
+#
+# documents:
+#   include_content:                 Optional. If "true", "1", or "yes", fetches
+#                                    document body via Docs API (plain text).
