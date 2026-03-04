@@ -49,13 +49,27 @@ The full list of supported table-specific options for `externalOptionsAllowList`
 
 ### Create a Unity Catalog Connection
 
-A Unity Catalog connection for this connector can be created in two ways via the UI:
+#### Option A: UI (Lakeflow Community Connector flow)
 
-1. Follow the **Lakeflow Community Connector** UI flow from the **Add Data** page.
-2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
-3. Set `externalOptionsAllowList` to `spreadsheet_id,spreadsheetId,sheet_name,range,include_content` so that table-specific options (e.g. for `sheet_values` and `documents`) can be passed through.
+When adding this connector from **your fork** in the Databricks UI (Add Data → Lakeflow Community Connector):
 
-The connection can also be created using the standard Unity Catalog API.
+1. **Repository URL**: Your fork (e.g. `https://github.com/dgalluzzo26/lakeflow-community-connectors`).
+2. **Branch**: Use **main** (or the branch where you pushed the connector). If the UI defaults to `master` and your fork uses `main`, the UI may not find `connector_spec.yaml` and will show only a generic key-value form.
+3. **Connector / source name**: If the UI asks for a connector or source name, enter **google_sheets_docs** exactly. The UI uses this to load `sources/google_sheets_docs/connector_spec.yaml` from your repo; with it, you get the structured form (client_id, client_secret, refresh_token).
+
+If the UI still shows only key-value pairs, add these keys manually: `client_id`, `client_secret`, `refresh_token`, `externalOptionsAllowList` = `spreadsheet_id,spreadsheetId,sheet_name,range,include_content`.
+
+#### Option B: CLI (uses connector_spec.yaml)
+
+```bash
+community-connector create_connection google_sheets_docs <CONNECTION_NAME> -o '{"client_id":"YOUR_CLIENT_ID","client_secret":"YOUR_CLIENT_SECRET","refresh_token":"YOUR_REFRESH_TOKEN"}' --spec https://github.com/dgalluzzo26/lakeflow-community-connectors
+```
+
+Use `--spec` with your fork URL so the CLI fetches the spec from your repo. Add `#main` or the branch if required by your CLI. The CLI adds `externalOptionsAllowList` from the spec automatically.
+
+#### Option C: Unity Catalog API
+
+Create the connection via the Unity Catalog connections API with option keys: `client_id`, `client_secret`, `refresh_token`, `externalOptionsAllowList` = `spreadsheet_id,spreadsheetId,sheet_name,range,include_content`.
 
 
 ## Supported Objects
