@@ -10,14 +10,11 @@ disable-model-invocation: true
 Implement the Python connector for **{{source_name}}** that conforms exactly to the interface defined in  
 [lakeflow_connect.py](../src/databricks/labs/community_connector/interface/lakeflow_connect.py). The implementation should be based on the source API documentation in `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md` produced by the `research-source-api` skill.
 
+**CRITICAL REQUIREMENT:** Refer to `src/databricks/labs/community_connector/sources/example/example.py` for concrete examples of all these patterns. You should follow the patterns demonstrated in the example connector.
+
 ## File Organization
 
 For simple connectors, keeping everything in a single `{source_name}.py` file is perfectly fine. If the main file grows beyond **1000 lines**, split it into multiple files for better maintainability. 
-
-When using multiple files, use absolute imports:
-```python
-from databricks.labs.community_connector.sources.{source_name}.{util_file_name} import some_helper
-```
 
 ## Implementation Requirements
 
@@ -29,7 +26,6 @@ from databricks.labs.community_connector.sources.{source_name}.{util_file_name} 
 - **Data Processing:** If a StructType field is absent in the response, assign `None` as the default value instead of an empty dictionary `{}`. Avoid creating mock objects.
 - **Table Options:** The functions `get_table_schema`, `read_table_metadata`, and `read_table` accept a `table_options` dictionary. Do not include parameters required by individual tables in the global connection options; rely on `table_options` instead.
 - **API Usage:** If a data source provides both a list API and a get API for the same object, always use the list API. Only call the get API for individual entries if explicitly requested. For child objects that require a parent identifier, list the parent objects first, then list child objects for each parent, and combine the results.
-- **Reference:** Refer to `src/databricks/labs/community_connector/sources/example/example.py` for concrete examples of all these patterns.
 
 ## Incremental read_table with offsets 
 
@@ -82,8 +78,8 @@ If the source API uses timestamp-based cursors (e.g. `since`/`updated_at`), appl
 These options are **critical for testing**. Without them, tests may hang or take forever by attempting to read the entire dataset from the source.
 
 - Always configure a **small** `max_records_per_batch` in the test's `dev_table_config.json` (e.g., 5).
-- If using a sliding window, start with a **small** `window_seconds` (e.g., 60 or 300).
-- If using a server-side limit, start with a **small** `limit` (e.g., 5).
+- If using a sliding window, start with a **small**: for example `window_seconds` (e.g., 60 or 300).
+- If using a server-side limit, start with a **small** for example `limit` (e.g., 5), or `max_pages` (e.g. 1)
 - Gradually increase these values only if the small values do not generate enough data for testing.
 
 ## API Call Best Practices

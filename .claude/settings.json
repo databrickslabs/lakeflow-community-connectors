@@ -15,10 +15,13 @@
       "Bash(lsof:*)",
       "Bash(find:*)",
       "Bash(community-connector:*)",
-      "Bash(python3.10 -m venv:*)",
-      "Bash(python -m venv:*)",
+      "Bash(python3.10:*)",
+      "Bash(python3:*)",
+      "Bash(python:*)",
+      "Bash(.venv/bin/pip:*)",
       "Bash(python tools/scripts/authenticate.py:*)",
-      "Bash(python tools/scripts/merge_python_source.py:*)"
+      "Bash(python tools/scripts/merge_python_source.py:*)",
+      "WebSearch(*)"
     ],
     "deny": [
       "Read(tests/unit/sources/**/configs/dev_config.json)"
