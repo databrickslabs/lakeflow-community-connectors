@@ -17,6 +17,20 @@ from pathlib import Path
 
 import pytest
 
+
+def _call_drive_about_or_skip(access_token: str) -> dict:
+    """Call Drive API about; skip with message if 403 (scope/API not enabled)."""
+    try:
+        return _call_drive_about(access_token)
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            pytest.skip(
+                "Drive API returned 403. Ensure the OAuth consent includes "
+                "https://www.googleapis.com/auth/drive.readonly and the Google Cloud "
+                "project has the Drive API enabled."
+            )
+        raise
+
 from tests.unit.sources.test_utils import load_config
 
 
@@ -106,7 +120,7 @@ class TestGoogleSheetsDocsAuthVerification:
         token_data = _exchange_refresh_token(client_id, client_secret, refresh_token)
         access_token = token_data["access_token"]
 
-        about = _call_drive_about(access_token)
+        about = _call_drive_about_or_skip(access_token)
         assert "user" in about, f"Drive about response missing user: {about}"
         # user has displayName, emailAddress, etc.
         user = about["user"]

@@ -19,6 +19,14 @@ from tests.unit.sources.test_suite import LakeflowConnectTester
 from tests.unit.sources.test_utils import load_config
 
 
+def _load_table_config(config_dir: Path) -> dict:
+    """Load table config from dev_table_config.json if it exists, else return {}."""
+    path = config_dir / "dev_table_config.json"
+    if not path.exists():
+        return {}
+    return load_config(path)
+
+
 def _is_placeholder(value: str) -> bool:
     """Return True if the value looks like a placeholder or is empty."""
     if not value or not isinstance(value, str):
@@ -63,8 +71,7 @@ def test_google_sheets_docs_connector():
     """
     config_dir = Path(__file__).parent / "configs"
     config = load_config(config_dir / "dev_config.json")
-    table_config_path = config_dir / "dev_table_config.json"
-    table_config = load_config(table_config_path) if table_config_path.exists() else {}
+    table_config = _load_table_config(config_dir)
 
     if not _has_sheet_values_config(table_config):
 
