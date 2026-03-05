@@ -45,6 +45,64 @@ class PipelineClient:
         """Get the underlying WorkspaceClient."""
         return self._client
 
+    def _build_payload(
+        self,
+        config: PipelineConfig,
+        repo_path: Optional[str] = None,
+        source_name: Optional[str] = None,
+    ) -> dict:
+        """
+        Build the payload for the pipelines create/update API call.
+
+        Args:
+            config: PipelineConfig containing the pipeline configuration.
+            repo_path: Optional workspace path to prepend to relative library paths.
+            source_name: Name of the connector source (e.g., 'github', 'stripe').
+
+        Returns:
+            Dictionary of keyword arguments for the create/update API call.
+        """
+        payload = {}
+        
+        # Name is required for create, optional for update (but we usually provide it)
+        if config.name:
+            payload["name"] = config.name
+
+        # Add optional fields only if they have values
+        if config.channel is not None:
+            payload["channel"] = config.channel
+
+        if config.continuous is not None:
+            payload["continuous"] = config.continuous
+
+        if config.development is not None:
+            payload["development"] = config.development
+
+        if config.serverless is not None:
+            payload["serverless"] = config.serverless
+
+        if config.catalog:
+            payload["catalog"] = config.catalog
+
+        if config.schema:
+            payload["schema"] = config.schema
+
+        if config.root_path:
+            payload["root_path"] = config.root_path
+
+        if config.configuration:
+            payload["configuration"] = config.configuration
+            
+        if config.environment:
+            from databricks.sdk.service.pipelines import PipelinesEnvironment
+            payload["environment"] = PipelinesEnvironment(**config.environment)
+
+        # Build libraries from config (already has placeholders resolved)
+        if config.libraries:
+            payload["libraries"] = self._build_libraries(config.libraries)
+
+        return payload
+
     def create(
         self,
         config: PipelineConfig,
@@ -66,60 +124,27 @@ class PipelineClient:
 
         API Reference: https://docs.databricks.com/api/workspace/pipelines/create
         """
-        create_kwargs = self._build_create_payload(config, repo_path, source_name)
+        create_kwargs = self._build_payload(config, repo_path, source_name)
         return self._client.pipelines.create(**create_kwargs)
 
-    def _build_create_payload(
+    def update(
         self,
+        pipeline_id: str,
         config: PipelineConfig,
         repo_path: Optional[str] = None,
         source_name: Optional[str] = None,
-    ) -> dict:
+    ):
         """
-        Build the payload for the pipelines.create API call.
+        Update an existing DLT pipeline in the Databricks workspace.
 
         Args:
+            pipeline_id: The ID of the pipeline to update.
             config: PipelineConfig containing the pipeline configuration.
-            repo_path: Optional workspace path to prepend to relative library paths.
-            source_name: Name of the connector source (e.g., 'github', 'stripe').
-
-        Returns:
-            Dictionary of keyword arguments for the create API call.
+            repo_path: Optional workspace path to the repo.
+            source_name: Name of the connector source.
         """
-        payload = {
-            "name": config.name,
-        }
-
-        # Add optional fields only if they have values
-        if config.channel is not None:
-            payload["channel"] = config.channel
-
-        if config.continuous is not None:
-            payload["continuous"] = config.continuous
-
-        if config.development is not None:
-            payload["development"] = config.development
-
-        if config.serverless is not None:
-            payload["serverless"] = config.serverless
-
-        if config.catalog:
-            payload["catalog"] = config.catalog
-
-        if config.target:
-            payload["target"] = config.target
-
-        if config.root_path:
-            payload["root_path"] = config.root_path
-
-        if config.configuration:
-            payload["configuration"] = config.configuration
-
-        # Build libraries from config (already has placeholders resolved)
-        if config.libraries:
-            payload["libraries"] = self._build_libraries(config.libraries)
-
-        return payload
+        update_kwargs = self._build_payload(config, repo_path, source_name)
+        return self._client.pipelines.update(pipeline_id=pipeline_id, **update_kwargs)
 
     # pylint: disable=too-many-branches
     def _build_libraries(self, libraries: List) -> List:

@@ -47,6 +47,89 @@ _parse_connector_spec_legacy = parse_connector_spec_legacy
 _merge_external_options_allowlist = merge_external_options_allowlist
 
 
+def _find_local_source_path(source_name: str) -> Optional[Path]:
+    """Find the local source directory for a connector using the same resolution as connector_spec."""
+    candidates = []
+
+    cli_parent = Path(__file__).parent
+    candidates.append(
+        cli_parent.parent.parent.parent.parent.parent.parent.parent
+        / "src" / "databricks" / "labs" / "community_connector" / "sources" / source_name
+    )
+
+    candidates.append(
+        Path.cwd()
+        / "src" / "databricks" / "labs" / "community_connector" / "sources" / source_name
+    )
+
+    candidates.append(
+        Path.cwd().parent.parent
+        / "src" / "databricks" / "labs" / "community_connector" / "sources" / source_name
+    )
+
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate.resolve()
+
+    return None
+
+
+def _upload_source_files(
+    workspace_client, source_name: str, workspace_path: str, debug: bool
+) -> None:
+    """Upload local source files (*.py, README.md, connector_spec.yaml) to the workspace repo."""
+    source_dir = _find_local_source_path(source_name)
+    if source_dir is None:
+        raise click.ClickException(
+            f"Could not find local source directory for '{source_name}'. "
+            "Ensure you are running from the repo root or the tools/community_connector directory."
+        )
+
+    target_dir = f"{workspace_path}/src/databricks/labs/community_connector/sources/{source_name}"
+    click.echo(f"\nUploading source files from: {source_dir}")
+    click.echo(f"  Target: {target_dir}")
+
+    try:
+        workspace_client.workspace.mkdirs(target_dir)
+    except Exception as e:
+        if "RESOURCE_ALREADY_EXISTS" not in str(e):
+            raise click.ClickException(f"Failed to create workspace directory {target_dir}: {e}")
+
+    files_to_upload = []
+    for py_file in sorted(source_dir.glob("*.py")):
+        files_to_upload.append(py_file)
+
+    readme = source_dir / "README.md"
+    if readme.exists():
+        files_to_upload.append(readme)
+
+    spec_file = source_dir / "connector_spec.yaml"
+    if spec_file.exists():
+        files_to_upload.append(spec_file)
+
+    if not files_to_upload:
+        click.echo("  ⚠️  No files found to upload")
+        return
+
+    for file_path in files_to_upload:
+        dest_path = f"{target_dir}/{file_path.name}"
+        content_bytes = file_path.read_bytes()
+        content_base64 = base64.b64encode(content_bytes).decode("utf-8")
+
+        workspace_client.workspace.import_(
+            path=dest_path,
+            content=content_base64,
+            format=ImportFormat.AUTO,
+            overwrite=True,
+        )
+
+        if debug:
+            click.echo(f"    [DEBUG] Uploaded: {file_path.name} -> {dest_path}")
+
+    click.echo(f"  ✓ Uploaded {len(files_to_upload)} files: "
+               f"{', '.join(f.name for f in files_to_upload)}")
+
+
 def _get_default_repo_raw_url() -> str:
     """Get the default repository raw URL from default_config.yaml."""
     config = load_default_config()
@@ -393,6 +476,96 @@ def _ensure_parent_directory(workspace_client, workspace_path: str) -> None:
                 raise click.ClickException(f"Failed to create workspace directory: {e}")
 
 
+def _update_pipeline_from_spec(workspace_client, pipeline_id: str, spec) -> None:
+    """Call pipelines.update passing all spec attributes as SDK objects (avoids as_dict serialization issues)."""
+    import dataclasses
+    from databricks.sdk.service.pipelines import PipelineSpec
+
+    kwargs = {}
+    for f in dataclasses.fields(PipelineSpec):
+        if f.name == "id":
+            continue
+        value = getattr(spec, f.name, None)
+        if value is not None:
+            kwargs[f.name] = value
+    workspace_client.pipelines.update(pipeline_id=pipeline_id, **kwargs)
+
+
+def _ensure_package_volume(
+    workspace_client, catalog: str, schema: str, debug: bool
+) -> str:
+    """
+    Ensure the managed volume for packages exists and return the packages directory path.
+
+    Creates a managed volume 'community_connector' in the given catalog/schema
+    if it doesn't already exist.
+    """
+    from databricks.sdk.service.catalog import VolumeType
+
+    volume_name = "community_connector"
+
+    try:
+        workspace_client.volumes.read(f"{catalog}.{schema}.{volume_name}")
+        if debug:
+            click.echo(f"[DEBUG] Volume '{catalog}.{schema}.{volume_name}' already exists")
+    except Exception:
+        click.echo(f"  Creating volume '{catalog}.{schema}.{volume_name}'...")
+        try:
+            workspace_client.volumes.create(
+                catalog_name=catalog,
+                schema_name=schema,
+                name=volume_name,
+                volume_type=VolumeType.MANAGED,
+            )
+            click.echo("  ✓ Volume created")
+        except Exception as e:
+            if "ALREADY_EXISTS" in str(e):
+                if debug:
+                    click.echo(f"[DEBUG] Volume already exists (race condition): {e}")
+            else:
+                raise click.ClickException(f"Failed to create volume: {e}")
+
+    return f"/Volumes/{catalog}/{schema}/{volume_name}/packages"
+
+
+def _upload_package(
+    workspace_client, package_path: str, catalog: str, schema: str, debug: bool
+) -> str:
+    """
+    Upload a local wheel package to a UC Volume using the Files API.
+
+    Returns the full path of the uploaded file for use in pipeline dependencies.
+    """
+    packages_dir = _ensure_package_volume(workspace_client, catalog, schema, debug)
+    wheel_name = Path(package_path).name
+    dest_path = f"{packages_dir}/{wheel_name}"
+
+    click.echo(f"  Uploading package to: {dest_path}")
+    try:
+        with open(package_path, "rb") as f:
+            workspace_client.files.upload(dest_path, f, overwrite=True)
+        click.echo("  ✓ Package uploaded successfully")
+        return dest_path
+    except Exception as e:
+        raise click.ClickException(f"Failed to upload package: {e}")
+
+
+def _upload_packages(
+    workspace_client, package_paths: tuple, catalog: str, schema: str, debug: bool
+) -> List[str]:
+    """
+    Upload multiple local wheel packages to a UC Volume.
+
+    Returns list of full paths of uploaded files for use in pipeline dependencies.
+    """
+    _ensure_package_volume(workspace_client, catalog, schema, debug)
+    dest_paths = []
+    for package_path in package_paths:
+        dest_path = _upload_package(workspace_client, package_path, catalog, schema, debug)
+        dest_paths.append(dest_path)
+    return dest_paths
+
+
 def _create_repo_and_cleanup(workspace_client, repo_config, debug: bool) -> str:
     """
     Create the repo and clean up excluded files.
@@ -426,16 +599,19 @@ def _create_repo_and_cleanup(workspace_client, repo_config, debug: bool) -> str:
     except Exception as e:
         raise click.ClickException(f"Failed to create repo: {e}")
 
+    # TODO: Uncomment this when we have a way to delete the files
+    # It is currently not needed because we set the root dir for the pipline as
+    # repo_root/src.
     # Clean up excluded root files (cone mode includes all root files)
-    if repo_config.exclude_root_files:
-        click.echo("\n  Cleaning up excluded root files...")
-        _delete_workspace_files(
-            workspace_client,
-            repo_workspace_path,
-            repo_config.exclude_root_files,
-            debug=debug,
-        )
-        click.echo(f"  ✓ Cleaned up {len(repo_config.exclude_root_files)} excluded files")
+    # if repo_config.exclude_root_files:
+    #     click.echo("\n  Cleaning up excluded root files...")
+    #     _delete_workspace_files(
+    #         workspace_client,
+    #         repo_workspace_path,
+    #         repo_config.exclude_root_files,
+    #         debug=debug,
+    #     )
+    #     click.echo(f"  ✓ Cleaned up {len(repo_config.exclude_root_files)} excluded files")
 
     return repo_workspace_path
 
@@ -497,7 +673,7 @@ def _create_and_show_pipeline(
     repo_workspace_path: str,
     source_name: str,
     debug: bool,
-) -> None:
+) -> str:
     """
     Create the pipeline and display results.
 
@@ -507,6 +683,9 @@ def _create_and_show_pipeline(
         repo_workspace_path: The repo workspace path.
         source_name: The connector source name.
         debug: Whether to print debug output.
+
+    Returns:
+        The pipeline ID of the created pipeline.
 
     Raises:
         click.ClickException: If pipeline creation fails.
@@ -522,19 +701,12 @@ def _create_and_show_pipeline(
         )
         pipeline_id = pipeline_response.pipeline_id
 
-        workspace_host = workspace_client.config.host
-        if workspace_host and workspace_host.endswith("/"):
-            workspace_host = workspace_host[:-1]
-        pipeline_url = f"{workspace_host}/pipelines/{pipeline_id}"
-
         click.echo("  ✓ Pipeline created!")
-        click.echo(f"\n{'=' * 60}")
-        click.echo(f"Pipeline URL: {pipeline_url}")
-        click.echo(f"Pipeline ID:  {pipeline_id}")
-        click.echo(f"{'=' * 60}")
 
         if debug:
             click.echo(f"\n[DEBUG] Full pipeline response: {pipeline_response}")
+
+        return pipeline_id
 
     except Exception as e:
         raise click.ClickException(f"Failed to create pipeline: {e}")
@@ -579,13 +751,31 @@ def main(ctx: click.Context, debug: bool):
     help="Git repository URL",
 )
 @click.option("--catalog", "-c", help="UC target catalog for the pipeline")
-@click.option("--target", "-t", help="Target schema for the pipeline")
+@click.option("--schema", "-t", help="Target schema for the pipeline")
 @click.option(
     "--config",
     "-f",
     "config_file",
     type=click.Path(exists=True),
     help="Path to custom config file (overrides defaults)",
+)
+@click.option(
+    "--package",
+    "-p",
+    "package_paths",
+    type=click.Path(exists=True, dir_okay=False),
+    multiple=True,
+    help="Path to a local connector python wheel package. Can be specified multiple times. "
+    "If provided, packages are uploaded to the workspace and used as pipeline dependencies.",
+)
+@click.option(
+    "--use-local-source",
+    "-u",
+    "use_local_source",
+    is_flag=True,
+    default=False,
+    help="Upload local source files (*.py, README.md, connector_spec.yaml) "
+    "to sources/{source_name} in the workspace repo.",
 )
 @click.pass_context
 # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
@@ -598,7 +788,9 @@ def create_pipeline(
     config_file: Optional[str],
     repo_url: Optional[str],
     catalog: Optional[str],
-    target: Optional[str],
+    schema: Optional[str],
+    package_paths: tuple,
+    use_local_source: bool,
 ):
     """
     Create a community connector pipeline.
@@ -607,8 +799,9 @@ def create_pipeline(
 
     PIPELINE_NAME is a unique name for this pipeline instance.
 
-    This command creates a Git repo in your workspace and then creates
-    a DLT pipeline for the specified connector source.
+    When --package is provided, the pipeline uses the uploaded wheel packages
+    as dependencies and creates a workspace directory (no Git repo clone).
+    Otherwise, a Git repo is cloned into the workspace.
 
     Either --connection-name or --pipeline-spec must be provided.
     If using --pipeline-spec, it must include 'connection_name'.
@@ -616,12 +809,16 @@ def create_pipeline(
     Configuration is loaded from bundled defaults and can be overridden
     with --config file or individual CLI options.
 
+    When --use-local-source is provided, the local source files (*.py, README.md,
+    connector_spec.yaml) are uploaded to sources/{source_name} in the workspace.
+
     \b
     Example:
         community-connector create_pipeline github my_github_pipeline -n my_conn
         community-connector create_pipeline stripe my_stripe -n stripe_conn -c main
         community-connector create_pipeline github my_pipeline -ps spec.yaml
-        community-connector create_pipeline github my_pipeline -ps pipeline_spec.json
+        community-connector create_pipeline github my_pipeline -p pkg1.whl -p pkg2.whl
+        community-connector create_pipeline github my_pipeline -n my_conn --use-local-source
     """
     debug = ctx.obj.get("debug", False)
 
@@ -637,7 +834,7 @@ def create_pipeline(
         pipeline_name=pipeline_name,
         repo_url=repo_url,
         catalog=catalog,
-        target=target,
+        schema=schema,
         config_file=config_file,
     )
 
@@ -647,7 +844,8 @@ def create_pipeline(
         click.echo(f"Connection name: {connection_name}")
     elif pipeline_spec_input:
         click.echo("Connection name: (from pipeline spec)")
-    click.echo(f"Using repo: {repo_config.url}")
+    if not package_paths:
+        click.echo(f"Using repo: {repo_config.url}")
 
     if debug:
         click.echo(f"[DEBUG] workspace_path (before resolution): {workspace_path}")
@@ -672,8 +870,27 @@ def create_pipeline(
     # Ensure the parent workspace directory exists
     _ensure_parent_directory(workspace_client, workspace_path)
 
-    # Step 1: Create the repo and clean up excluded files
-    repo_workspace_path = _create_repo_and_cleanup(workspace_client, repo_config, debug)
+    if package_paths:
+        click.echo(f"Using local connector packages: {', '.join(package_paths)}")
+
+        # Step 1: Create workspace directory (no repo clone needed)
+        click.echo("\nStep 1: Creating workspace directory...")
+        src_path = f"{workspace_path}/src"
+        try:
+            workspace_client.workspace.mkdirs(src_path)
+            click.echo(f"  ✓ Directory created: {src_path}")
+        except Exception as e:
+            if "RESOURCE_ALREADY_EXISTS" in str(e):
+                click.echo(f"  ✓ Directory already exists: {src_path}")
+            else:
+                raise click.ClickException(f"Failed to create workspace directory: {e}")
+    else:
+        # Step 1: Create the repo and clean up excluded files
+        _create_repo_and_cleanup(workspace_client, repo_config, debug)
+
+    # Upload local source files if requested
+    if use_local_source:
+        _upload_source_files(workspace_client, source_name, workspace_path, debug)
 
     # Step 2: Create ingest.py in the workspace
     _create_ingest_file(
@@ -686,13 +903,61 @@ def create_pipeline(
     )
 
     # Step 3: Create the pipeline
-    _create_and_show_pipeline(
+    pipeline_id = _create_and_show_pipeline(
         workspace_client,
         pipeline_config,
-        repo_workspace_path,
+        workspace_path,
         source_name,
         debug,
     )
+
+    # Step 4: Upload packages after pipeline creation
+    if package_paths:
+        # Get catalog and schema — use user-provided values, or fetch from the
+        # pipeline spec that the service auto-assigned during creation.
+        pkg_catalog = pipeline_config.catalog
+        pkg_schema = pipeline_config.schema
+        if not pkg_catalog or not pkg_schema:
+            click.echo("\nFetching pipeline spec for catalog/schema...")
+            pipeline_info = workspace_client.pipelines.get(pipeline_id)
+            spec = pipeline_info.spec
+            pkg_catalog = pkg_catalog or spec.catalog
+            pkg_schema = pkg_schema or spec.schema
+            if debug:
+                click.echo(f"[DEBUG] Resolved catalog={pkg_catalog}, schema={pkg_schema}")
+
+        if not pkg_catalog or not pkg_schema:
+            raise click.ClickException(
+                "Cannot upload packages: catalog and schema are required. "
+                "Provide --catalog and --schema, or ensure the pipeline service assigns them."
+            )
+
+        dest_paths = _upload_packages(
+            workspace_client, package_paths, pkg_catalog, pkg_schema, debug
+        )
+
+        click.echo("\nUpdating pipeline dependencies...")
+        from databricks.sdk.service.pipelines import PipelinesEnvironment
+
+        pipeline_info = workspace_client.pipelines.get(pipeline_id)
+        spec = pipeline_info.spec
+        if not spec.environment:
+            spec.environment = PipelinesEnvironment()
+        spec.environment.dependencies = dest_paths
+
+        _update_pipeline_from_spec(workspace_client, pipeline_id, spec)
+        click.echo("  ✓ Pipeline dependencies updated")
+
+    # Print pipeline URL at the very end
+    workspace_host = workspace_client.config.host
+    if workspace_host and workspace_host.endswith("/"):
+        workspace_host = workspace_host[:-1]
+    pipeline_url = f"{workspace_host}/pipelines/{pipeline_id}"
+
+    click.echo(f"\n{'=' * 60}")
+    click.echo(f"Pipeline URL: {pipeline_url}")
+    click.echo(f"Pipeline ID:  {pipeline_id}")
+    click.echo(f"{'=' * 60}")
 
 
 def _get_ingest_path_from_pipeline(pipeline_info) -> Optional[str]:
@@ -811,27 +1076,50 @@ def _print_pipeline_success(workspace_client, pipeline_id: str) -> None:
     "--pipeline-spec",
     "-ps",
     "pipeline_spec_input",
-    required=True,
-    help="Pipeline spec as JSON string or path to .yaml/.json file (must include connection_name)",
+    default=None,
+    help="Pipeline spec as JSON string or path to .yaml/.json file (must include connection_name). "
+    "If omitted and --package is provided, only packages are updated.",
+)
+@click.option(
+    "--package",
+    "-p",
+    "package_paths",
+    type=click.Path(exists=True, dir_okay=False),
+    multiple=True,
+    help="Path to a local connector python wheel package. Can be specified multiple times. "
+    "If provided, packages are uploaded and the pipeline is updated to use them.",
 )
 @click.pass_context
-def update_pipeline(ctx: click.Context, pipeline_name: str, pipeline_spec_input: str):
+def update_pipeline(
+    ctx: click.Context,
+    pipeline_name: str,
+    pipeline_spec_input: Optional[str],
+    package_paths: tuple,
+):
     """
-    Update the ingest.py for an existing community connector pipeline.
+    Update an existing community connector pipeline.
 
     PIPELINE_NAME is the name of the pipeline to update.
 
-    This command updates the ingest.py file in the workspace with the new
-    pipeline spec. Only the ingest.py file is modified; other pipeline
-    settings remain unchanged.
+    When --pipeline-spec is provided, the ingest.py file is updated with the
+    new spec. When --package is provided, packages are uploaded and the pipeline
+    dependencies are updated. Both can be used together or independently.
+
+    At least one of --pipeline-spec or --package must be provided.
 
     \b
     Example:
         community-connector update_pipeline my_pipeline -ps spec.yaml
-        community-connector update_pipeline my_pipeline \\
-            -ps '{"connection_name": "conn", "objects": []}'
+        community-connector update_pipeline my_pipeline -p connector.whl
+        community-connector update_pipeline my_pipeline -p a.whl -p b.whl
+        community-connector update_pipeline my_pipeline -ps spec.yaml -p pkg.whl
     """
     debug = ctx.obj.get("debug", False)
+
+    if not pipeline_spec_input and not package_paths:
+        raise click.ClickException(
+            "At least one of --pipeline-spec or --package must be provided"
+        )
 
     workspace_client = WorkspaceClient()
     pipeline_client = PipelineClient(workspace_client)
@@ -842,49 +1130,80 @@ def update_pipeline(ctx: click.Context, pipeline_name: str, pipeline_spec_input:
         pipeline_id = _find_pipeline_by_name(workspace_client, pipeline_name)
         click.echo(f"  ✓ Found pipeline ID: {pipeline_id}")
 
-        # Step 2: Get pipeline info to find ingest.py path
+        # Step 2: Get pipeline info
         pipeline_info = pipeline_client.get(pipeline_id)
 
         if debug:
             click.echo(f"[DEBUG] Pipeline spec: {pipeline_info.spec}")
 
-        ingest_path = _get_ingest_path_from_pipeline(pipeline_info)
-        if not ingest_path:
-            raise click.ClickException(
-                "Could not determine ingest.py path from pipeline configuration. "
-                "Please ensure the pipeline was created with community-connector CLI."
+        # Step 3: Update ingest.py if pipeline spec is provided
+        if pipeline_spec_input:
+            ingest_path = _get_ingest_path_from_pipeline(pipeline_info)
+            if not ingest_path:
+                raise click.ClickException(
+                    "Could not determine ingest.py path from pipeline configuration. "
+                    "Please ensure the pipeline was created with community-connector CLI."
+                )
+
+            click.echo(f"  ✓ Found ingest.py at: {ingest_path}")
+
+            click.echo("\nReading existing ingest.py...")
+            existing_content = _read_workspace_file(workspace_client, ingest_path)
+            source_name = _extract_source_name_from_ingest(existing_content)
+
+            if not source_name:
+                raise click.ClickException(
+                    "Could not extract source_name from existing ingest.py. "
+                    "Please ensure the file was created with community-connector CLI."
+                )
+
+            click.echo(f"  ✓ Detected source: {source_name}")
+
+            click.echo("\nValidating pipeline spec...")
+            pipeline_spec = _parse_pipeline_spec(pipeline_spec_input)
+            click.echo("  ✓ Pipeline spec is valid")
+
+            if debug:
+                click.echo(f"[DEBUG] New pipeline spec: {pipeline_spec}")
+
+            click.echo("\nUpdating ingest.py...")
+            ingest_content = _generate_ingest_content(source_name, pipeline_spec)
+            _create_workspace_file(workspace_client, ingest_path, ingest_content)
+            click.echo(f"  ✓ Updated: {ingest_path}")
+
+        # Step 4: Handle package upload if packages are provided
+        if package_paths:
+            click.echo(f"\nUsing local connector packages: {', '.join(package_paths)}")
+
+            spec = pipeline_info.spec
+            pkg_catalog = spec.catalog
+            pkg_schema = spec.schema
+
+            if not pkg_catalog or not pkg_schema:
+                raise click.ClickException(
+                    "Cannot upload packages: pipeline has no catalog/schema assigned. "
+                    "Update the pipeline to set catalog and schema first."
+                )
+
+            if debug:
+                click.echo(f"[DEBUG] Using catalog={pkg_catalog}, schema={pkg_schema}")
+
+            dest_paths = _upload_packages(
+                workspace_client, package_paths, pkg_catalog, pkg_schema, debug
             )
 
-        click.echo(f"  ✓ Found ingest.py at: {ingest_path}")
+            click.echo("\nUpdating pipeline dependencies...")
 
-        # Step 3: Read existing ingest.py to get source_name
-        click.echo("\nReading existing ingest.py...")
-        existing_content = _read_workspace_file(workspace_client, ingest_path)
-        source_name = _extract_source_name_from_ingest(existing_content)
+            from databricks.sdk.service.pipelines import PipelinesEnvironment
 
-        if not source_name:
-            raise click.ClickException(
-                "Could not extract source_name from existing ingest.py. "
-                "Please ensure the file was created with community-connector CLI."
-            )
+            if not spec.environment:
+                spec.environment = PipelinesEnvironment()
+            spec.environment.dependencies = dest_paths
 
-        click.echo(f"  ✓ Detected source: {source_name}")
+            _update_pipeline_from_spec(workspace_client, pipeline_id, spec)
+            click.echo("  ✓ Pipeline dependencies updated")
 
-        # Step 4: Parse and validate the new pipeline spec
-        click.echo("\nValidating pipeline spec...")
-        pipeline_spec = _parse_pipeline_spec(pipeline_spec_input)
-        click.echo("  ✓ Pipeline spec is valid")
-
-        if debug:
-            click.echo(f"[DEBUG] New pipeline spec: {pipeline_spec}")
-
-        # Step 5: Generate and write new ingest.py content
-        click.echo("\nUpdating ingest.py...")
-        ingest_content = _generate_ingest_content(source_name, pipeline_spec)
-        _create_workspace_file(workspace_client, ingest_path, ingest_content)
-        click.echo(f"  ✓ Updated: {ingest_path}")
-
-        # Step 6: Print success message
+        # Print success message at the end
         _print_pipeline_success(workspace_client, pipeline_id)
 
     except click.ClickException:

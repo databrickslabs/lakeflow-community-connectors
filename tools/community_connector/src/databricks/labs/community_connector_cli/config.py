@@ -46,8 +46,8 @@ class PipelineConfig:
     name: str
     """Name of the pipeline."""
 
-    target: Optional[str] = None
-    """Target schema/database for the pipeline output."""
+    schema: Optional[str] = None
+    """Target schema for the pipeline output."""
 
     catalog: Optional[str] = None
     """Unity Catalog name for the pipeline."""
@@ -75,6 +75,9 @@ class PipelineConfig:
 
     configuration: dict = field(default_factory=dict)
     """Additional pipeline configuration key-value pairs."""
+
+    environment: dict = field(default_factory=dict)
+    """Environment configuration (e.g. dependencies)."""
 
 
 @dataclass
@@ -194,7 +197,7 @@ def build_config(
     pipeline_name: str,
     repo_url: Optional[str] = None,
     catalog: Optional[str] = None,
-    target: Optional[str] = None,
+    schema: Optional[str] = None,
     config_file: Optional[str] = None,
 ) -> tuple[str, RepoConfig, PipelineConfig]:
     """
@@ -208,7 +211,7 @@ def build_config(
         pipeline_name: Unique name for this pipeline instance.
         repo_url: Optional Git repository URL (CLI override).
         catalog: Optional Unity Catalog name (CLI override).
-        target: Optional target schema (CLI override).
+        schema: Optional target schema (CLI override).
         config_file: Optional path to user config file.
 
     Returns:
@@ -234,11 +237,8 @@ def build_config(
     if catalog is not None:
         pipeline_data["catalog"] = catalog
 
-    if target is not None:
-        pipeline_data["target"] = target
-    elif "target" not in pipeline_data or pipeline_data["target"] is None:
-        # Default target to source_name if not specified
-        pipeline_data["target"] = source_name
+    if schema is not None:
+        pipeline_data["schema"] = schema
 
     # Set pipeline name from CLI argument
     pipeline_data["name"] = pipeline_name
@@ -272,7 +272,7 @@ def build_config(
 
     pipeline_config = PipelineConfig(
         name=pipeline_name,
-        target=pipeline_data.get("target"),
+        schema=pipeline_data.get("schema"),
         catalog=pipeline_data.get("catalog"),
         root_path=pipeline_data.get("root_path"),  # Contains {WORKSPACE_PATH}
         channel=pipeline_data.get("channel"),
