@@ -10,7 +10,7 @@ from urllib.parse import quote
 from typing import Any, Iterator
 
 import requests
-from pyspark.sql.types import StructType
+from pyspark.sql.types import StructType, StructField, StringType
 
 from databricks.labs.community_connector.interface import LakeflowConnect
 from databricks.labs.community_connector.sources.google_sheets_docs.google_sheets_docs_schemas import (
@@ -105,13 +105,22 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
         self, table_name: str, table_options: dict[str, str]
     ) -> StructType:
         self._validate_table(table_name)
+        if table_name == "sheet_values" and self._sheet_values_use_headers(table_options):
+            schema = self._get_sheet_values_schema_with_headers(table_options)
+            if schema is not None:
+                return schema
         return TABLE_SCHEMAS[table_name]
 
     def read_table_metadata(
         self, table_name: str, table_options: dict[str, str]
     ) -> dict:
         self._validate_table(table_name)
-        return dict(TABLE_METADATA[table_name])
+        meta = dict(TABLE_METADATA[table_name])
+        if table_name == "sheet_values" and self._sheet_values_use_headers(table_options):
+            headers = self._fetch_sheet_first_row(table_options)
+            if headers:
+                meta["primary_keys"] = [headers[0]]
+        return meta
 
     def read_table(
         self, table_name: str, start_offset: dict, table_options: dict[str, str]
@@ -164,6 +173,39 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
             next_offset = {"pageToken": None}
         return iter(records), next_offset
 
+    def _sheet_values_use_headers(self, table_options: dict[str, str]) -> bool:
+        """True if sheet_values should use first row as column headers (default True)."""
+        v = (table_options.get("use_first_row_as_header") or "true").strip().lower()
+        return v not in ("false", "0", "no")
+
+    def _fetch_sheet_first_row(self, table_options: dict[str, str]) -> list[str] | None:
+        """Fetch first row of the sheet for header names. Returns list of strings or None."""
+        spreadsheet_id = table_options.get("spreadsheet_id") or table_options.get("spreadsheetId")
+        if not spreadsheet_id:
+            return None
+        sheet_name = table_options.get("sheet_name", "Sheet1")
+        range_a1 = f"{sheet_name}!1:1"
+        url = f"{SHEETS_BASE_URL}/{spreadsheet_id}/values/{quote(range_a1, safe='')}"
+        params = {"valueRenderOption": "UNFORMATTED_VALUE", "majorDimension": "ROWS"}
+        resp = self._request("GET", url, params=params)
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        values = data.get("values", [])
+        if not values:
+            return None
+        return [str(h).strip() or f"_col{i}" for i, h in enumerate(values[0])]
+
+    def _get_sheet_values_schema_with_headers(self, table_options: dict[str, str]) -> StructType | None:
+        """Build schema with row_index + one column per header (all string). Returns None if cannot fetch."""
+        headers = self._fetch_sheet_first_row(table_options)
+        if not headers:
+            return None
+        fields = [StructField("row_index", StringType(), nullable=True)]
+        for col in headers:
+            fields.append(StructField(col, StringType(), nullable=True))
+        return StructType(fields)
+
     def _read_sheet_values(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
@@ -185,16 +227,37 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
         resp = self._request("GET", url, params=params)
         if resp.status_code == 404:
             return iter([]), {}
+        if resp.status_code == 400:
+            try:
+                err_body = resp.json()
+                err_msg = err_body.get("error", {}).get("message", resp.text)
+            except Exception:
+                err_msg = resp.text or "Bad Request"
+            raise ValueError(
+                f"Sheets API rejected the request (400). The spreadsheet ID may point to an "
+                f"Excel (.xlsx) file instead of a native Google Sheet. Convert the file: in Drive, "
+                f"open the file with Google Sheets, then use File → Save as Google Sheets and use "
+                f"the new file's ID. API error: {err_msg}"
+            )
         resp.raise_for_status()
         data = resp.json()
         values = data.get("values", [])
 
+        use_headers = self._sheet_values_use_headers(table_options)
+        if use_headers and len(values) >= 1:
+            headers = [str(h).strip() or f"_col{i}" for i, h in enumerate(values[0])]
+            records = []
+            for i, row in enumerate(values[1:], start=2):
+                str_row = [str(c) if c is not None else "" for c in row]
+                rec = {"row_index": str(i)}
+                for j, col in enumerate(headers):
+                    rec[col] = str_row[j] if j < len(str_row) else ""
+                records.append(rec)
+            return iter(records), {}
         records = []
         for i, row in enumerate(values):
-            # Coerce cell values to string for schema compatibility
             str_row = [str(c) if c is not None else "" for c in row]
             records.append({"row_index": str(i + 1), "values": str_row})
-
         return iter(records), {}
 
     def _read_documents(
