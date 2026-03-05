@@ -13,12 +13,19 @@ from __future__ import annotations
 
 import pathlib
 
+import pytest
+
 from databricks.labs.community_connector.sources.dicomweb.dicomweb import (
     DICOMwebLakeflowConnect,
 )
 from tests.unit.sources.test_utils import load_config
 
 CONFIG_PATH = pathlib.Path(__file__).parent / "configs" / "dev_config.json"
+
+pytestmark = pytest.mark.skipif(
+    not CONFIG_PATH.exists(),
+    reason="dev_config.json not found — skipping live auth tests",
+)
 
 
 def _make_connector() -> DICOMwebLakeflowConnect:

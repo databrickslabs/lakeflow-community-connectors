@@ -7,7 +7,10 @@ from tests.unit.sources.test_suite import LakeflowConnectTester
 from tests.unit.sources.test_utils import load_config
 from databricks.labs.community_connector.sources.dicomweb.dicomweb import DICOMwebLakeflowConnect
 
+_CONFIG_PATH = Path(__file__).parent / "configs" / "dev_config.json"
 
+
+@pytest.mark.skipif(not _CONFIG_PATH.exists(), reason="dev_config.json not found")
 def test_dicomweb_connector():
     """Test the DICOMweb connector using the standard test suite."""
     config_dir = Path(__file__).parent / "configs"
