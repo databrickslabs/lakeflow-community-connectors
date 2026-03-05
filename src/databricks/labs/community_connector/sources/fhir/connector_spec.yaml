@@ -1,0 +1,122 @@
+# FHIR R4 Community Connector Spec
+# This file defines the specification for the FHIR connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: FHIR R4
+connection:
+  # ---------------------------------------------------------------------------
+  # Multiple Authentication Methods
+  # The FHIR connector supports 3 authentication methods for different FHIR servers:
+  # 1. jwt_assertion - SMART Backend Services with RSA private key (Epic, Cerner)
+  # 2. client_secret - OAuth2 client credentials with symmetric secret (SMART v1)
+  # 3. none - No authentication (open/dev servers like HAPI FHIR public)
+  # ---------------------------------------------------------------------------
+  auth_methods:
+    - name: jwt_assertion
+      description: >
+        SMART Backend Services authentication using RSA private key.
+        Use this for production FHIR servers that support SMART Backend Services
+        (e.g., Epic, Cerner). The connector will obtain a short-lived access token
+        using the JWT assertion flow.
+      parameters:
+        - name: token_url
+          type: string
+          required: true
+          description: >
+            OAuth2 token endpoint URL. Usually found at the FHIR server's
+            /.well-known/smart-configuration endpoint.
+            Example: https://ehr.example.com/oauth/token
+
+        - name: client_id
+          type: string
+          required: true
+          description: >
+            OAuth2 client ID registered with the FHIR server for Backend Services.
+
+        - name: private_key_pem
+          type: string
+          required: true
+          description: >
+            RSA private key in PEM format (multiline). This key must be registered
+            with the FHIR server. Include the key delimiters (BEGIN PRIVATE KEY
+            and END PRIVATE KEY).
+
+        - name: scope
+          type: string
+          required: true
+          description: >
+            OAuth2 scope(s) for the access token. FHIR servers typically use scopes
+            like system/*.read or system/Patient.read for Backend Services.
+            Use space-separated scopes if multiple are needed.
+            Example: system/Patient.read system/Observation.read
+
+    - name: client_secret
+      description: >
+        OAuth2 client credentials flow using a symmetric secret.
+        Use this for SMART v1 confidential clients or other OAuth2-compliant servers.
+        The connector will exchange client credentials for an access token.
+      parameters:
+        - name: token_url
+          type: string
+          required: true
+          description: >
+            OAuth2 token endpoint URL.
+            Example: https://ehr.example.com/oauth/token
+
+        - name: client_id
+          type: string
+          required: true
+          description: >
+            OAuth2 client ID registered with the FHIR server.
+
+        - name: client_secret
+          type: string
+          required: true
+          description: >
+            OAuth2 client secret associated with the client_id.
+            Keep this secure and never commit to version control.
+
+        - name: scope
+          type: string
+          required: false
+          description: >
+            OAuth2 scope(s) for the access token (optional for client credentials flow).
+            Example: system/Patient.read system/Observation.read
+
+    - name: none
+      description: >
+        No authentication. Use this for public or development FHIR servers
+        (e.g., HAPI FHIR public test server, open EHR sandboxes).
+        All parameters are optional for this method.
+      parameters: []
+
+  # Shared parameters (apply to all authentication methods)
+  parameters:
+    - name: base_url
+      type: string
+      required: true
+      description: >
+        Base URL of the FHIR R4 server. This is the root endpoint used to construct
+        all FHIR API requests (e.g., /Patient, /Observation, etc.).
+        Examples:
+          - https://ehr.example.com/fhir/r4
+          - https://hapi.fhir.org/baseR4
+          - http://localhost:8080/fhir
+
+    - name: auth_type
+      type: string
+      required: true
+      description: >
+        Authentication method to use. Must be one of: "jwt_assertion", "client_secret", or "none".
+        Select the auth_type that matches your FHIR server's capabilities.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# ============================================================================
+external_options_allowlist: "resource_types,page_size,max_records_per_batch"
