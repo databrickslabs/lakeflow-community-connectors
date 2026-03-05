@@ -49,7 +49,7 @@ connection:
 # Use a comma-separated string of option names.
 # If no table-specific options are needed, set to empty string or omit.
 # ============================================================================
-external_options_allowlist: "spreadsheet_id,spreadsheetId,sheet_name,range,include_content"
+external_options_allowlist: "spreadsheet_id,spreadsheetId,sheet_name,range,include_content,use_first_row_as_header"
 
 # ============================================================================
 # Supported Tables
@@ -65,6 +65,10 @@ external_options_allowlist: "spreadsheet_id,spreadsheetId,sheet_name,range,inclu
 #   spreadsheet_id / spreadsheetId:  Required. ID of the Google Spreadsheet.
 #   sheet_name:                      Optional. Sheet tab name (default: "Sheet1").
 #   range:                           Optional. A1 notation range (default: "A:Z").
+#   use_first_row_as_header:         Optional. If "true" (default), first row becomes
+#                                    column names and data rows have named columns (e.g. ID);
+#                                    use ID as primary key for SCD Type 2. Set "false" for
+#                                    raw row_index + values array.
 #
 # documents:
 #   include_content:                 Optional. If "true", "1", or "yes", fetches

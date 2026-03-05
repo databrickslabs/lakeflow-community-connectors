@@ -28,11 +28,11 @@ Provide the following **connection-level** options when configuring the connecto
 | `client_id` | string | yes | OAuth 2.0 client ID from Google Cloud Console | `xxx.apps.googleusercontent.com` |
 | `client_secret` | string | yes | OAuth 2.0 client secret | `GOCSPX-xxx` |
 | `refresh_token` | string | yes | Long-lived refresh token (obtained with `access_type=offline` during authorization) | `1//xxx` |
-| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names allowed to be passed through. This connector uses table-specific options for `sheet_values` and `documents`. | `spreadsheet_id,spreadsheetId,sheet_name,range,include_content` |
+| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names allowed to be passed through. This connector uses table-specific options for `sheet_values` and `documents`. | `spreadsheet_id,spreadsheetId,sheet_name,range,include_content,use_first_row_as_header` |
 
 The full list of supported table-specific options for `externalOptionsAllowList` is:
 
-`spreadsheet_id,spreadsheetId,sheet_name,range,include_content`
+`spreadsheet_id,spreadsheetId,sheet_name,range,include_content,use_first_row_as_header`
 
 > **Note**: Table-specific options such as `spreadsheet_id`, `sheet_name`, or `include_content` are **not** connection parameters. They are provided per-table via `table_configuration` in the pipeline specification. These option names must be included in `externalOptionsAllowList` for the connection to allow them.
 
@@ -57,7 +57,7 @@ When adding this connector from **your fork** in the Databricks UI (Add Data →
 2. **Branch**: Use **main** (or the branch where you pushed the connector). If the UI defaults to `master` and your fork uses `main`, the UI may not find `connector_spec.yaml` and will show only a generic key-value form.
 3. **Connector / source name**: If the UI asks for a connector or source name, enter **google_sheets_docs** exactly. The UI uses this to load `sources/google_sheets_docs/connector_spec.yaml` from your repo; with it, you get the structured form (client_id, client_secret, refresh_token).
 
-If the UI still shows only key-value pairs, add these keys manually: `client_id`, `client_secret`, `refresh_token`, `externalOptionsAllowList` = `spreadsheet_id,spreadsheetId,sheet_name,range,include_content`.
+If the UI still shows only key-value pairs, add these keys manually: `client_id`, `client_secret`, `refresh_token`, `externalOptionsAllowList` = `spreadsheet_id,spreadsheetId,sheet_name,range,include_content,use_first_row_as_header`.
 
 #### Option B: CLI (uses connector_spec.yaml)
 
@@ -69,7 +69,7 @@ Use `--spec` with your fork URL so the CLI fetches the spec from your repo. Add 
 
 #### Option C: Unity Catalog API
 
-Create the connection via the Unity Catalog connections API with option keys: `client_id`, `client_secret`, `refresh_token`, `externalOptionsAllowList` = `spreadsheet_id,spreadsheetId,sheet_name,range,include_content`.
+Create the connection via the Unity Catalog connections API with option keys: `client_id`, `client_secret`, `refresh_token`, `externalOptionsAllowList` = `spreadsheet_id,spreadsheetId,sheet_name,range,include_content,use_first_row_as_header`.
 
 
 ## Supported Objects
@@ -85,11 +85,11 @@ The connector exposes a **static list** of tables:
 | Table | Description | Ingestion Type | Primary Key | Notes |
 |-------|-------------|----------------|-------------|--------|
 | `spreadsheets` | Drive file list filtered by `mimeType=application/vnd.google-apps.spreadsheet` (metadata only) | snapshot | `id` | Paginated via Drive API; excludes trashed files. |
-| `sheet_values` | Cell data from a single range in a spreadsheet (one row per sheet row; `values` is an array of cell values) | snapshot | — | Requires `spreadsheet_id` (or `spreadsheetId`) in table options; optional `sheet_name`, `range`. |
+| `sheet_values` | Cell data from a single range. By default the first row is used as column headers, so you get named columns (e.g. `ID`, `Store Name`) and can use `ID` as primary key for SCD Type 2. | snapshot | `ID` (or first column when using headers) | Requires `spreadsheet_id` (or `spreadsheetId`); optional `sheet_name`, `range`, `use_first_row_as_header`. |
 | `documents` | Drive file list filtered by `mimeType=application/vnd.google-apps.document`; optionally includes plain-text content via Drive export | snapshot | `id` | Set `include_content=true` to fetch document body as plain text (10 MB export limit per doc). |
 
 - **spreadsheets**: Returns `id`, `name`, `mimeType`, `modifiedTime`, `createdTime`. The `id` is the spreadsheet ID used in the Sheets API.
-- **sheet_values**: Returns `row_index` (1-based row number) and `values` (array of strings). Cell values are returned as unformatted strings. You specify which spreadsheet and range via table options.
+- **sheet_values**: By default the first row of the sheet is treated as column headers. Data rows are returned with named columns (e.g. `ID`, `Store Name`, `Address`) plus `row_index`, so you can use `ID` as the primary key for SCD Type 2. Set `use_first_row_as_header` to `false` to get raw `row_index` and `values` (array of strings) instead.
 - **documents**: Returns `id`, `name`, `mimeType`, `modifiedTime`, `createdTime`, and optionally `content` (plain text when `include_content` is enabled). The `id` is the document ID used in the Docs API.
 
 
@@ -124,6 +124,7 @@ These are set inside the `table_configuration` map alongside any source-specific
 | **sheet_values** | `spreadsheet_id` or `spreadsheetId` | yes | Spreadsheet ID (same as the Drive file `id` for that spreadsheet). |
 | **sheet_values** | `sheet_name` | no | Sheet (tab) name. Default: `Sheet1`. |
 | **sheet_values** | `range` | no | A1 notation range (e.g. `A:Z`, `A1:D100`). If no `!` is present, it is combined with `sheet_name` (e.g. `Sheet1!A:Z`). Default: `A:Z`. |
+| **sheet_values** | `use_first_row_as_header` | no | If `true` (default), first row becomes column names and data rows have named columns; use the first column (e.g. `ID`) as primary key for SCD Type 2. Set to `false` for raw `row_index` + `values` array. |
 | **documents** | `include_content` | no | Set to `true`, `1`, or `yes` to fetch plain-text content for each document via Drive `files.export` (10 MB limit per document). Default: not set (metadata only). |
 
 
