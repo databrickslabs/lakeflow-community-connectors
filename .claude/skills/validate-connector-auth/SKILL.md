@@ -30,9 +30,11 @@ Check if `tests/unit/sources/{{source_name}}/auth_test.py` already exists.
 - **If it exists:** skip to Step 3 — just run the existing test to validate credentials. Do not regenerate.
 - **If it does not exist:** proceed to Step 1.
 
-### Step 1: Read the API Doc for Auth Details
+**Do NOT search for file locations** — all paths are known. Do not run Glob/Search to discover files. Do not read `dev_config.json` directly — credential field names come from `connector_spec.yaml` (connection_parameters section), not from the config file itself.
 
-Read the authentication section of `src/databricks/labs/community_connector/sources/{{source_name}}/{{source_name}}_api_doc.md` to determine:
+### Step 1: Read the API Doc and Spec for Auth Details
+
+Read `src/databricks/labs/community_connector/sources/{{source_name}}/connector_spec.yaml` to get the credential field names (connection_parameters), and read the authentication section of `src/databricks/labs/community_connector/sources/{{source_name}}/{{source_name}}_api_doc.md` to determine:
 - The auth method (API key, Bearer token, Basic auth, OAuth, etc.)
 - How credentials are passed (headers, query params, etc.)
 - The base URL
