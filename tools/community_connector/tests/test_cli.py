@@ -10,6 +10,7 @@ import base64
 import json
 import os
 import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch, create_autospec
 
 import click
@@ -273,7 +274,10 @@ class TestCreatePipelineCommand:
 
             result = runner.invoke(
                 main,
-                ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn', '--package', temp_pkg.name],
+                [
+                    'create_pipeline', 'github', 'my_pipeline',
+                    '-n', 'my_conn', '--package', temp_pkg.name,
+                ],
             )
 
             assert result.exit_code == 0, f"Exit code: {result.exit_code}\nOutput: {result.output}"
@@ -391,9 +395,7 @@ class TestFindLocalSourcePath:
         )
         source_dir.mkdir(parents=True)
 
-        from pathlib import Path as RealPath
-
-        with patch.object(RealPath, "cwd", return_value=tmp_path):
+        with patch.object(Path, "cwd", return_value=tmp_path):
             result = _find_local_source_path("github")
 
         assert result is not None
@@ -401,9 +403,7 @@ class TestFindLocalSourcePath:
 
     def test_returns_none_when_not_found(self, tmp_path):
         """Test returning None when source directory doesn't exist."""
-        from pathlib import Path as RealPath
-
-        with patch.object(RealPath, "cwd", return_value=tmp_path):
+        with patch.object(Path, "cwd", return_value=tmp_path):
             result = _find_local_source_path("nonexistent_source")
 
         assert result is None
@@ -467,6 +467,7 @@ class TestUploadSourceFiles:
         assert mock_ws.workspace.import_.call_count == 1
 
 
+# pylint: disable=too-many-arguments,too-many-positional-arguments
 class TestCreatePipelineUseLocalSource:
     """Tests for create_pipeline command with --use-local-source flag."""
 
@@ -807,7 +808,7 @@ class TestCreateConnectionCommand:
     def test_create_connection_auto_adds_external_options_allowlist(
         self, mock_workspace_client, mock_load_spec
     ):
-        """Test that externalOptionsAllowList is auto-added from spec merged with constant allowlist."""
+        """Test externalOptionsAllowList is auto-added from merged spec."""
         runner = CliRunner()
 
         mock_load_spec.return_value = {
@@ -1490,7 +1491,8 @@ class TestUpdatePipelineCommand:
                     "update_pipeline",
                     "my_pipeline",
                     "-ps",
-                    '{"connection_name": "my_conn", "objects": [{"table": {"source_table": "users"}}]}',
+                    '{"connection_name": "my_conn", '
+                    '"objects": [{"table": {"source_table": "users"}}]}',
                     "--package",
                     temp_pkg.name
                 ],

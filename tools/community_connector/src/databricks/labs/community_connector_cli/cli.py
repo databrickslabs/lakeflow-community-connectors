@@ -10,6 +10,7 @@ Configuration Precedence:
 # pylint: disable=too-many-lines
 
 import base64
+import dataclasses
 import json
 import re
 import traceback
@@ -19,6 +20,8 @@ from typing import Optional, List, Set
 import click
 import yaml
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.catalog import VolumeType
+from databricks.sdk.service.pipelines import PipelineSpec, PipelinesEnvironment
 from databricks.sdk.service.workspace import ImportFormat, Language
 
 from databricks.labs.community_connector_cli.config import build_config, load_default_config
@@ -48,7 +51,7 @@ _merge_external_options_allowlist = merge_external_options_allowlist
 
 
 def _find_local_source_path(source_name: str) -> Optional[Path]:
-    """Find the local source directory for a connector using the same resolution as connector_spec."""
+    """Find the local source directory for a connector."""
     candidates = []
 
     cli_parent = Path(__file__).parent
@@ -477,10 +480,7 @@ def _ensure_parent_directory(workspace_client, workspace_path: str) -> None:
 
 
 def _update_pipeline_from_spec(workspace_client, pipeline_id: str, spec) -> None:
-    """Call pipelines.update passing all spec attributes as SDK objects (avoids as_dict serialization issues)."""
-    import dataclasses
-    from databricks.sdk.service.pipelines import PipelineSpec
-
+    """Call pipelines.update passing all spec attributes as SDK objects."""
     kwargs = {}
     for f in dataclasses.fields(PipelineSpec):
         if f.name == "id":
@@ -500,8 +500,6 @@ def _ensure_package_volume(
     Creates a managed volume 'community_connector' in the given catalog/schema
     if it doesn't already exist.
     """
-    from databricks.sdk.service.catalog import VolumeType
-
     volume_name = "community_connector"
 
     try:
@@ -564,6 +562,84 @@ def _upload_packages(
         dest_path = _upload_package(workspace_client, package_path, catalog, schema, debug)
         dest_paths.append(dest_path)
     return dest_paths
+
+
+def _update_pipeline_with_packages(
+    workspace_client, pipeline_id: str, dest_paths: List[str]
+) -> None:
+    """Fetch pipeline spec, set package dependencies, and update the pipeline."""
+    pipeline_info = workspace_client.pipelines.get(pipeline_id)
+    spec = pipeline_info.spec
+    if not spec.environment:
+        spec.environment = PipelinesEnvironment()
+    spec.environment.dependencies = dest_paths
+    _update_pipeline_from_spec(workspace_client, pipeline_id, spec)
+
+
+def _setup_workspace_for_packages(workspace_client, workspace_path: str) -> None:
+    """Create workspace directory structure for package-based deployment (no repo clone)."""
+    click.echo("\nStep 1: Creating workspace directory...")
+    src_path = f"{workspace_path}/src"
+    try:
+        workspace_client.workspace.mkdirs(src_path)
+        click.echo(f"  ✓ Directory created: {src_path}")
+    except Exception as e:
+        if "RESOURCE_ALREADY_EXISTS" in str(e):
+            click.echo(f"  ✓ Directory already exists: {src_path}")
+        else:
+            raise click.ClickException(f"Failed to create workspace directory: {e}")
+
+
+def _resolve_package_catalog_schema(
+    workspace_client, pipeline_id: str, pipeline_config, debug: bool
+) -> tuple:
+    """Resolve catalog and schema for package upload, fetching from pipeline if needed."""
+    pkg_catalog = pipeline_config.catalog
+    pkg_schema = pipeline_config.schema
+    if not pkg_catalog or not pkg_schema:
+        click.echo("\nFetching pipeline spec for catalog/schema...")
+        pipeline_info = workspace_client.pipelines.get(pipeline_id)
+        spec = pipeline_info.spec
+        pkg_catalog = pkg_catalog or spec.catalog
+        pkg_schema = pkg_schema or spec.schema
+        if debug:
+            click.echo(f"[DEBUG] Resolved catalog={pkg_catalog}, schema={pkg_schema}")
+
+    if not pkg_catalog or not pkg_schema:
+        raise click.ClickException(
+            "Cannot upload packages: catalog and schema are required. "
+            "Provide --catalog and --schema, or ensure the pipeline service assigns them."
+        )
+    return pkg_catalog, pkg_schema
+
+
+def _upload_packages_and_update_pipeline(
+    workspace_client, pipeline_id: str, package_paths: tuple,
+    pipeline_config, debug: bool,
+) -> None:
+    """Upload packages and update pipeline dependencies."""
+    pkg_catalog, pkg_schema = _resolve_package_catalog_schema(
+        workspace_client, pipeline_id, pipeline_config, debug
+    )
+    dest_paths = _upload_packages(
+        workspace_client, package_paths, pkg_catalog, pkg_schema, debug
+    )
+    click.echo("\nUpdating pipeline dependencies...")
+    _update_pipeline_with_packages(workspace_client, pipeline_id, dest_paths)
+    click.echo("  ✓ Pipeline dependencies updated")
+
+
+def _print_pipeline_url(workspace_client, pipeline_id: str) -> None:
+    """Print the pipeline URL and ID."""
+    workspace_host = workspace_client.config.host
+    if workspace_host and workspace_host.endswith("/"):
+        workspace_host = workspace_host[:-1]
+    pipeline_url = f"{workspace_host}/pipelines/{pipeline_id}"
+
+    click.echo(f"\n{'=' * 60}")
+    click.echo(f"Pipeline URL: {pipeline_url}")
+    click.echo(f"Pipeline ID:  {pipeline_id}")
+    click.echo(f"{'=' * 60}")
 
 
 def _create_repo_and_cleanup(workspace_client, repo_config, debug: bool) -> str:
@@ -729,6 +805,21 @@ def main(ctx: click.Context, debug: bool):
     ctx.obj["debug"] = debug
 
 
+def _echo_create_pipeline_summary(
+    source_name, pipeline_name, connection_name, pipeline_spec_input,
+    package_paths, repo_config, debug,
+):
+    """Print a summary of the create_pipeline parameters."""
+    click.echo(f"Creating connector for source: {source_name}")
+    click.echo(f"Pipeline name: {pipeline_name}")
+    if connection_name:
+        click.echo(f"Connection name: {connection_name}")
+    elif pipeline_spec_input:
+        click.echo("Connection name: (from pipeline spec)")
+    if not package_paths:
+        click.echo(f"Using repo: {repo_config.url}")
+
+
 @main.command("create_pipeline")
 @click.argument("source_name")
 @click.argument("pipeline_name")
@@ -822,13 +913,11 @@ def create_pipeline(
     """
     debug = ctx.obj.get("debug", False)
 
-    # Validate: either connection_name or pipeline_spec_input must be provided
     if not connection_name and not pipeline_spec_input:
         raise click.ClickException(
             "Either --connection-name or --pipeline-spec must be provided"
         )
 
-    # Build config with precedence: CLI args > config file > defaults
     workspace_path, repo_config, pipeline_config = build_config(
         source_name=source_name,
         pipeline_name=pipeline_name,
@@ -838,24 +927,17 @@ def create_pipeline(
         config_file=config_file,
     )
 
-    click.echo(f"Creating connector for source: {source_name}")
-    click.echo(f"Pipeline name: {pipeline_name}")
-    if connection_name:
-        click.echo(f"Connection name: {connection_name}")
-    elif pipeline_spec_input:
-        click.echo("Connection name: (from pipeline spec)")
-    if not package_paths:
-        click.echo(f"Using repo: {repo_config.url}")
+    _echo_create_pipeline_summary(
+        source_name, pipeline_name, connection_name, pipeline_spec_input,
+        package_paths, repo_config, debug,
+    )
 
     if debug:
         click.echo(f"[DEBUG] workspace_path (before resolution): {workspace_path}")
         click.echo(f"[DEBUG] Repo config: {repo_config}")
         click.echo(f"[DEBUG] Pipeline config: {pipeline_config}")
 
-    # Create the workspace client
     workspace_client = WorkspaceClient()
-
-    # Get current user from workspace and resolve paths
     current_user = workspace_client.current_user.me()
     workspace_path = _resolve_workspace_paths(
         workspace_path, repo_config, pipeline_config, current_user.user_name
@@ -867,97 +949,32 @@ def create_pipeline(
         click.echo(f"[DEBUG] Resolved root_path: {pipeline_config.root_path}")
         click.echo(f"[DEBUG] Resolved libraries: {pipeline_config.libraries}")
 
-    # Ensure the parent workspace directory exists
     _ensure_parent_directory(workspace_client, workspace_path)
 
     if package_paths:
         click.echo(f"Using local connector packages: {', '.join(package_paths)}")
-
-        # Step 1: Create workspace directory (no repo clone needed)
-        click.echo("\nStep 1: Creating workspace directory...")
-        src_path = f"{workspace_path}/src"
-        try:
-            workspace_client.workspace.mkdirs(src_path)
-            click.echo(f"  ✓ Directory created: {src_path}")
-        except Exception as e:
-            if "RESOURCE_ALREADY_EXISTS" in str(e):
-                click.echo(f"  ✓ Directory already exists: {src_path}")
-            else:
-                raise click.ClickException(f"Failed to create workspace directory: {e}")
+        _setup_workspace_for_packages(workspace_client, workspace_path)
     else:
-        # Step 1: Create the repo and clean up excluded files
         _create_repo_and_cleanup(workspace_client, repo_config, debug)
 
-    # Upload local source files if requested
     if use_local_source:
         _upload_source_files(workspace_client, source_name, workspace_path, debug)
 
-    # Step 2: Create ingest.py in the workspace
     _create_ingest_file(
-        workspace_client,
-        workspace_path,
-        source_name,
-        connection_name,
-        pipeline_spec_input,
-        debug,
+        workspace_client, workspace_path, source_name,
+        connection_name, pipeline_spec_input, debug,
     )
 
-    # Step 3: Create the pipeline
     pipeline_id = _create_and_show_pipeline(
-        workspace_client,
-        pipeline_config,
-        workspace_path,
-        source_name,
-        debug,
+        workspace_client, pipeline_config, workspace_path, source_name, debug,
     )
 
-    # Step 4: Upload packages after pipeline creation
     if package_paths:
-        # Get catalog and schema — use user-provided values, or fetch from the
-        # pipeline spec that the service auto-assigned during creation.
-        pkg_catalog = pipeline_config.catalog
-        pkg_schema = pipeline_config.schema
-        if not pkg_catalog or not pkg_schema:
-            click.echo("\nFetching pipeline spec for catalog/schema...")
-            pipeline_info = workspace_client.pipelines.get(pipeline_id)
-            spec = pipeline_info.spec
-            pkg_catalog = pkg_catalog or spec.catalog
-            pkg_schema = pkg_schema or spec.schema
-            if debug:
-                click.echo(f"[DEBUG] Resolved catalog={pkg_catalog}, schema={pkg_schema}")
-
-        if not pkg_catalog or not pkg_schema:
-            raise click.ClickException(
-                "Cannot upload packages: catalog and schema are required. "
-                "Provide --catalog and --schema, or ensure the pipeline service assigns them."
-            )
-
-        dest_paths = _upload_packages(
-            workspace_client, package_paths, pkg_catalog, pkg_schema, debug
+        _upload_packages_and_update_pipeline(
+            workspace_client, pipeline_id, package_paths, pipeline_config, debug,
         )
 
-        click.echo("\nUpdating pipeline dependencies...")
-        from databricks.sdk.service.pipelines import PipelinesEnvironment
-
-        pipeline_info = workspace_client.pipelines.get(pipeline_id)
-        spec = pipeline_info.spec
-        if not spec.environment:
-            spec.environment = PipelinesEnvironment()
-        spec.environment.dependencies = dest_paths
-
-        _update_pipeline_from_spec(workspace_client, pipeline_id, spec)
-        click.echo("  ✓ Pipeline dependencies updated")
-
-    # Print pipeline URL at the very end
-    workspace_host = workspace_client.config.host
-    if workspace_host and workspace_host.endswith("/"):
-        workspace_host = workspace_host[:-1]
-    pipeline_url = f"{workspace_host}/pipelines/{pipeline_id}"
-
-    click.echo(f"\n{'=' * 60}")
-    click.echo(f"Pipeline URL: {pipeline_url}")
-    click.echo(f"Pipeline ID:  {pipeline_id}")
-    click.echo(f"{'=' * 60}")
+    _print_pipeline_url(workspace_client, pipeline_id)
 
 
 def _get_ingest_path_from_pipeline(pipeline_info) -> Optional[str]:
@@ -1070,6 +1087,73 @@ def _print_pipeline_success(workspace_client, pipeline_id: str) -> None:
     click.echo("\nNote: Run the pipeline to apply the new configuration.")
 
 
+def _update_ingest_from_spec(
+    workspace_client, pipeline_info, pipeline_spec_input: str, debug: bool,
+) -> None:
+    """Read existing ingest.py, extract source_name, validate new spec, and overwrite."""
+    ingest_path = _get_ingest_path_from_pipeline(pipeline_info)
+    if not ingest_path:
+        raise click.ClickException(
+            "Could not determine ingest.py path from pipeline configuration. "
+            "Please ensure the pipeline was created with community-connector CLI."
+        )
+
+    click.echo(f"  ✓ Found ingest.py at: {ingest_path}")
+
+    click.echo("\nReading existing ingest.py...")
+    existing_content = _read_workspace_file(workspace_client, ingest_path)
+    source_name = _extract_source_name_from_ingest(existing_content)
+
+    if not source_name:
+        raise click.ClickException(
+            "Could not extract source_name from existing ingest.py. "
+            "Please ensure the file was created with community-connector CLI."
+        )
+
+    click.echo(f"  ✓ Detected source: {source_name}")
+
+    click.echo("\nValidating pipeline spec...")
+    pipeline_spec = _parse_pipeline_spec(pipeline_spec_input)
+    click.echo("  ✓ Pipeline spec is valid")
+
+    if debug:
+        click.echo(f"[DEBUG] New pipeline spec: {pipeline_spec}")
+
+    click.echo("\nUpdating ingest.py...")
+    ingest_content = _generate_ingest_content(source_name, pipeline_spec)
+    _create_workspace_file(workspace_client, ingest_path, ingest_content)
+    click.echo(f"  ✓ Updated: {ingest_path}")
+
+
+def _upload_packages_for_update(
+    workspace_client, pipeline_id: str, pipeline_info,
+    package_paths: tuple, debug: bool,
+) -> None:
+    """Upload packages and update pipeline dependencies for an existing pipeline."""
+    click.echo(f"\nUsing local connector packages: {', '.join(package_paths)}")
+
+    spec = pipeline_info.spec
+    pkg_catalog = spec.catalog
+    pkg_schema = spec.schema
+
+    if not pkg_catalog or not pkg_schema:
+        raise click.ClickException(
+            "Cannot upload packages: pipeline has no catalog/schema assigned. "
+            "Update the pipeline to set catalog and schema first."
+        )
+
+    if debug:
+        click.echo(f"[DEBUG] Using catalog={pkg_catalog}, schema={pkg_schema}")
+
+    dest_paths = _upload_packages(
+        workspace_client, package_paths, pkg_catalog, pkg_schema, debug
+    )
+
+    click.echo("\nUpdating pipeline dependencies...")
+    _update_pipeline_with_packages(workspace_client, pipeline_id, dest_paths)
+    click.echo("  ✓ Pipeline dependencies updated")
+
+
 @main.command("update_pipeline")
 @click.argument("pipeline_name")
 @click.option(
@@ -1125,85 +1209,24 @@ def update_pipeline(
     pipeline_client = PipelineClient(workspace_client)
 
     try:
-        # Step 1: Find pipeline by name
         click.echo(f"Finding pipeline: {pipeline_name}")
         pipeline_id = _find_pipeline_by_name(workspace_client, pipeline_name)
         click.echo(f"  ✓ Found pipeline ID: {pipeline_id}")
 
-        # Step 2: Get pipeline info
         pipeline_info = pipeline_client.get(pipeline_id)
-
         if debug:
             click.echo(f"[DEBUG] Pipeline spec: {pipeline_info.spec}")
 
-        # Step 3: Update ingest.py if pipeline spec is provided
         if pipeline_spec_input:
-            ingest_path = _get_ingest_path_from_pipeline(pipeline_info)
-            if not ingest_path:
-                raise click.ClickException(
-                    "Could not determine ingest.py path from pipeline configuration. "
-                    "Please ensure the pipeline was created with community-connector CLI."
-                )
-
-            click.echo(f"  ✓ Found ingest.py at: {ingest_path}")
-
-            click.echo("\nReading existing ingest.py...")
-            existing_content = _read_workspace_file(workspace_client, ingest_path)
-            source_name = _extract_source_name_from_ingest(existing_content)
-
-            if not source_name:
-                raise click.ClickException(
-                    "Could not extract source_name from existing ingest.py. "
-                    "Please ensure the file was created with community-connector CLI."
-                )
-
-            click.echo(f"  ✓ Detected source: {source_name}")
-
-            click.echo("\nValidating pipeline spec...")
-            pipeline_spec = _parse_pipeline_spec(pipeline_spec_input)
-            click.echo("  ✓ Pipeline spec is valid")
-
-            if debug:
-                click.echo(f"[DEBUG] New pipeline spec: {pipeline_spec}")
-
-            click.echo("\nUpdating ingest.py...")
-            ingest_content = _generate_ingest_content(source_name, pipeline_spec)
-            _create_workspace_file(workspace_client, ingest_path, ingest_content)
-            click.echo(f"  ✓ Updated: {ingest_path}")
-
-        # Step 4: Handle package upload if packages are provided
-        if package_paths:
-            click.echo(f"\nUsing local connector packages: {', '.join(package_paths)}")
-
-            spec = pipeline_info.spec
-            pkg_catalog = spec.catalog
-            pkg_schema = spec.schema
-
-            if not pkg_catalog or not pkg_schema:
-                raise click.ClickException(
-                    "Cannot upload packages: pipeline has no catalog/schema assigned. "
-                    "Update the pipeline to set catalog and schema first."
-                )
-
-            if debug:
-                click.echo(f"[DEBUG] Using catalog={pkg_catalog}, schema={pkg_schema}")
-
-            dest_paths = _upload_packages(
-                workspace_client, package_paths, pkg_catalog, pkg_schema, debug
+            _update_ingest_from_spec(
+                workspace_client, pipeline_info, pipeline_spec_input, debug,
             )
 
-            click.echo("\nUpdating pipeline dependencies...")
+        if package_paths:
+            _upload_packages_for_update(
+                workspace_client, pipeline_id, pipeline_info, package_paths, debug,
+            )
 
-            from databricks.sdk.service.pipelines import PipelinesEnvironment
-
-            if not spec.environment:
-                spec.environment = PipelinesEnvironment()
-            spec.environment.dependencies = dest_paths
-
-            _update_pipeline_from_spec(workspace_client, pipeline_id, spec)
-            click.echo("  ✓ Pipeline dependencies updated")
-
-        # Print success message at the end
         _print_pipeline_success(workspace_client, pipeline_id)
 
     except click.ClickException:

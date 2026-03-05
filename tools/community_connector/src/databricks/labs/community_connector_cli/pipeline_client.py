@@ -16,6 +16,7 @@ from databricks.sdk.service.pipelines import (
     GetPipelineResponse,
     NotebookLibrary,
     PipelineLibrary,
+    PipelinesEnvironment,
     StartUpdateResponse,
 )
 
@@ -63,7 +64,7 @@ class PipelineClient:
             Dictionary of keyword arguments for the create/update API call.
         """
         payload = {}
-        
+
         # Name is required for create, optional for update (but we usually provide it)
         if config.name:
             payload["name"] = config.name
@@ -92,9 +93,8 @@ class PipelineClient:
 
         if config.configuration:
             payload["configuration"] = config.configuration
-            
+
         if config.environment:
-            from databricks.sdk.service.pipelines import PipelinesEnvironment
             payload["environment"] = PipelinesEnvironment(**config.environment)
 
         # Build libraries from config (already has placeholders resolved)
