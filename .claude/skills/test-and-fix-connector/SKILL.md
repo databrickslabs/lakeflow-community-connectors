@@ -9,9 +9,14 @@ disable-model-invocation: true
 ## Goal
 Validate the generated connector for **{{source_name}}** by executing the provided test suite, diagnosing failures, and applying minimal, targeted fixes until all tests pass.
 
+## 0. Rules
+- **Write tests first, then run.** Do NOT run exploratory scripts (e.g. `python -c "..."`, `which python`, import checks) before the test file exists. Read the implementation source and reference test — that is sufficient.
+- **Run pytest synchronously** — never in background. Do not use `sleep`, poll loops, `ps aux | grep pytest`, `wc -l`, or `tail` on output files. Run `pytest ...` directly and block until it completes.
+- Only run standalone scripts to isolate a specific failing HTTP call *after* pytest has already failed and pointed to the problem.
+
 ## 1. Setup Test Files
 Create a `test_{source_name}_lakeflow_connect.py` under the `tests/unit/sources/{source_name}/` directory.
-Use `tests/unit/sources/test_suite.py` to run tests and follow `tests/unit/sources/example/test_example_lakeflow_connect.py` or other sources as an example.
+**Always follow `tests/unit/sources/example/test_example_lakeflow_connect.py` as the primary example** — it shows the correct pattern: load both `dev_config.json` and `dev_table_config.json`, pass `table_config` and a small `sample_records` (e.g. 5) to `LakeflowConnectTester`.
 
 ## 2. Test Configuration (Credentials & Bounds)
 Use the configuration files in `tests/unit/sources/{source_name}/configs/` to initialize your tests. Do **not** mock data; tests must connect to an actual instance.
@@ -68,6 +73,8 @@ If `urllib3` logs `Starting new HTTPS connection` with no response line, the HTT
 4. **Start with the most constrained query** — small `limit`, narrow time window, status filters. Once it works, progressively relax to find the boundary.
 
 5. **Check for missing timeouts** — every `requests.get()`/`session.get()` must have a `timeout` parameter. Without it, a slow API hangs forever with no error. For testing, set a short timeout (e.g., 10 seconds) so failed requests surface quickly instead of blocking for minutes.
+
+6. **Timeout means the query bound is too wide** — if a request times out, do NOT increase the timeout. Instead, halve the window or limit in `dev_table_config.json` and retry. Keep halving until the request succeeds. For example: start at `window_hours=1`, then try `0.5` (30 min), `0.25` (15 min), etc. The right fix is always a tighter query, not a longer wait.
 
 6. **Suspect large-account behavior** — test credentials may connect to an account with millions of records. If queries time out:
    - First, check if the connector already has `table_options` (like `window_seconds`, `limit`, or `max_records_per_batch`) and ensure they are set to very small values in your `dev_table_config.json`.

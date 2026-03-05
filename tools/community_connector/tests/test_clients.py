@@ -74,7 +74,7 @@ class TestPipelineClient:
         config = PipelineConfig(
             name="Test Pipeline",
             catalog="main",
-            target="test_schema",
+            schema="test_schema",
             development=True,
         )
 
@@ -163,7 +163,7 @@ class TestConfigDefaults:
         config = PipelineConfig(name="Test")
 
         assert config.name == "Test"
-        assert config.target is None
+        assert config.schema is None
         assert config.catalog is None
         assert config.root_path is None
         assert config.channel is None

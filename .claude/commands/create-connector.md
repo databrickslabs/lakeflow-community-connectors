@@ -18,7 +18,7 @@ Paths: `SRC=src/databricks/labs/community_connector/sources/{source_name}`, `TES
 
 **Confirmation gate** (steps 1–5): After each step, commit all new/modified files under `SRC` and `TESTS` with a message like `feat({source_name}): step N - <short description>`. Then `AskUserQuestion` with a summary of what was produced (files created, tables found, test results). Options: "Continue" / "Review first". Do NOT proceed without confirmation. Step 6 skips the gate.
 
-**Subagent pattern**: `Task(subagent_type=..., run_in_background=true)` → wait for automatic completion notification (do **NOT** call `TaskOutput`) → verify output files with `Glob`. Every subagent prompt must include: source name, all relevant file paths, and table scope. Subagents have no prior context.
+**Subagent pattern**: `Task(subagent_type=..., run_in_background=true)` → wait for automatic completion notification — do **NOT** poll using `TaskOutput`, `sleep`, or `cat` on the output file. Once notified, verify output files with `Glob`. Every subagent prompt must include: source name, all relevant file paths, and table scope. Subagents have no prior context.
 
 ---
 
@@ -51,7 +51,7 @@ Gate: verify implementation file(s) exist.
 Subagent: `connector-tester` → `{TESTS}/test_{source_name}_lakeflow_connect.py` (all passing)
 
 Prompt: source name, implementation path, `dev_config.json` path.
-After subagent: run `pytest {TESTS}/ -v --tb=short` yourself. If tests fail, do NOT proceed — report failure to user.
+After subagent: run `pytest {TESTS}/ -v --tb=short` yourself using a **synchronous** Bash call with `timeout=60000` (60s). Never run pytest in background. Never use `sleep`, `tail`, `wc -l`, or `ps aux` to monitor it. If pytest times out, do NOT increase the timeout — instead tighten `dev_table_config.json` (halve `window_hours`, `lookback_days`, or `max_records_per_batch`) and retry. If tests fail, do NOT proceed — report failure to user.
 Gate: confirm all tests pass.
 
 ---
@@ -73,7 +73,7 @@ Gate: verify both files exist.
 ## Step 6 — Deployment
 
 Run the `/deploy-connector` skill. Read and follow `.claude/skills/deploy-connector/SKILL.md`.
-Pass the source name. Finish all the steps in the skill sequentially.
+Pass the source name with `use_local_source=true`. Finish all the steps in the skill sequentially.
 This is an interactive process — ask the user for input at each step rather than assuming values.
 
 ---
