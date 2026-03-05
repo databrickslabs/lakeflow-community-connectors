@@ -18,7 +18,8 @@ from pathlib import Path
 
 import pytest
 
-# Ensure project root is on path so "tests" is importable when run from CI
+# Ensure project root is on path so "tests" is importable when run from CI.
+# Test was failing because the project root was not on the path; this fix allows the test to pass.
 _ROOT = Path(__file__).resolve().parents[4]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
