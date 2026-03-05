@@ -1,4 +1,10 @@
-"""Schemas and metadata for the Google Sheets/Docs connector."""
+"""Schemas and metadata for the Google Sheets/Docs connector.
+
+Defines Spark StructTypes and table metadata (primary keys, cursor field,
+ingestion type) for the three tables: spreadsheets, sheet_values, documents.
+When sheet_values uses first-row-as-header, the connector builds a dynamic
+schema from the sheet; SHEET_VALUES_SCHEMA is the fallback (row_index + values array).
+"""
 
 from pyspark.sql.types import (
     ArrayType,
@@ -7,10 +13,17 @@ from pyspark.sql.types import (
     StringType,
 )
 
-# Tables supported by the connector
+# ---------------------------------------------------------------------------
+# Supported tables (used by list_tables and validation)
+# ---------------------------------------------------------------------------
 SUPPORTED_TABLES = ["spreadsheets", "sheet_values", "documents"]
 
-# Spreadsheets: Drive file list filtered by mimeType=spreadsheet; id = spreadsheetId
+# ---------------------------------------------------------------------------
+# Static schemas (Spark StructType) per table
+# ---------------------------------------------------------------------------
+
+# spreadsheets: Drive API files.list result for mimeType=spreadsheet.
+# id is the Drive file id (same as spreadsheetId for Sheets API).
 SPREADSHEETS_SCHEMA = StructType(
     [
         StructField("id", StringType(), nullable=False),
@@ -21,7 +34,10 @@ SPREADSHEETS_SCHEMA = StructType(
     ]
 )
 
-# Sheet values: one row per sheet row; values = array of cell values (dynamic columns as single array)
+# sheet_values: Default schema when not using first-row-as-header.
+# One row per sheet row; values is an array of cell strings. When
+# use_first_row_as_header is true, the connector returns a dynamic
+# schema (row_index + named columns) instead.
 SHEET_VALUES_SCHEMA = StructType(
     [
         StructField("row_index", StringType(), nullable=True),
@@ -29,7 +45,8 @@ SHEET_VALUES_SCHEMA = StructType(
     ]
 )
 
-# Documents: Drive file list filtered by mimeType=document + optional content
+# documents: Drive file list for mimeType=document; content is populated
+# when include_content is true (plain text via Drive export).
 DOCUMENTS_SCHEMA = StructType(
     [
         StructField("id", StringType(), nullable=False),
@@ -47,6 +64,11 @@ TABLE_SCHEMAS = {
     "documents": DOCUMENTS_SCHEMA,
 }
 
+# ---------------------------------------------------------------------------
+# Table metadata for Lakeflow pipeline (primary keys, cursor, ingestion type)
+# ---------------------------------------------------------------------------
+# sheet_values primary_keys are set dynamically to [first_column] when
+# use_first_row_as_header is true and the first row can be fetched.
 TABLE_METADATA = {
     "spreadsheets": {
         "primary_keys": ["id"],
