@@ -11,7 +11,6 @@ Validate the generated connector for **{{source_name}}** by executing the provid
 
 ## 0. Rules
 - **Write tests first, then run.** Do NOT run exploratory scripts (e.g. `python -c "..."`, `which python`, import checks) before the test file exists. Read the implementation source and reference test — that is sufficient.
-- **Do NOT probe the environment.** Assume `.venv` is correctly set up. Never run `which python`, `python -c "import ..."`, or any import validation before pytest.
 - **Run pytest synchronously** — never in background. Do not use `sleep`, poll loops, `ps aux | grep pytest`, `wc -l`, or `tail` on output files. Run `pytest ...` directly and block until it completes.
 - Only run standalone scripts to isolate a specific failing HTTP call *after* pytest has already failed and pointed to the problem.
 

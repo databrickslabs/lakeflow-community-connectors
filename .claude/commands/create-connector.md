@@ -73,7 +73,7 @@ Gate: verify both files exist.
 ## Step 6 — Deployment
 
 Run the `/deploy-connector` skill. Read and follow `.claude/skills/deploy-connector/SKILL.md`.
-Pass the source name. Finish all the steps in the skill sequentially.
+Pass the source name with `use_local_source=true`. Finish all the steps in the skill sequentially.
 This is an interactive process — ask the user for input at each step rather than assuming values.
 
 ---
