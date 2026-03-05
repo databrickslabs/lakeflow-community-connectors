@@ -21,11 +21,13 @@ import requests
 from pyspark.sql.types import StructType, StructField, StringType
 
 from databricks.labs.community_connector.interface import LakeflowConnect
-from databricks.labs.community_connector.sources.google_sheets_docs.google_sheets_docs_schemas import (
-    SUPPORTED_TABLES,
-    TABLE_METADATA,
-    TABLE_SCHEMAS,
+from databricks.labs.community_connector.sources.google_sheets_docs import (
+    google_sheets_docs_schemas,
 )
+
+SUPPORTED_TABLES = google_sheets_docs_schemas.SUPPORTED_TABLES
+TABLE_METADATA = google_sheets_docs_schemas.TABLE_METADATA
+TABLE_SCHEMAS = google_sheets_docs_schemas.TABLE_SCHEMAS
 
 # Google API base URLs
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -65,7 +67,8 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
         self._refresh_token = options.get("refresh_token")
         if not self._client_id or not self._client_secret or not self._refresh_token:
             raise ValueError(
-                "Google Sheets/Docs connector requires 'client_id', 'client_secret', and 'refresh_token' in options"
+                "Google Sheets/Docs connector requires 'client_id', 'client_secret', "
+                "and 'refresh_token' in options"
             )
         # Cached access token; refreshed when near expiry
         self._access_token: str | None = None
@@ -107,9 +110,10 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
                 hint = resp.text or "Unauthorized"
             raise ValueError(
                 "Google OAuth returned 401 Unauthorized when refreshing the access token. "
-                "Check that the connection's client_id, client_secret, and refresh_token are correct, "
-                "that the refresh_token was obtained with the same OAuth client (same client_id), "
-                "and that it has not been revoked. Re-run the OAuth flow if needed to get a new refresh_token. "
+                "Check that the connection's client_id, client_secret, and refresh_token "
+                "are correct, that the refresh_token was obtained with the same OAuth "
+                "client (same client_id), and that it has not been revoked. Re-run the "
+                "OAuth flow if needed to get a new refresh_token. "
                 f"Google response: {hint}"
             ) from None
         resp.raise_for_status()
@@ -324,7 +328,9 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
             self._sanitize_column_name(str(h), i) for i, h in enumerate(values[0])
         ]
 
-    def _get_sheet_values_schema_with_headers(self, table_options: dict[str, str]) -> StructType | None:
+    def _get_sheet_values_schema_with_headers(
+        self, table_options: dict[str, str]
+    ) -> StructType | None:
         """Build a StructType with row_index plus one string column per header.
 
         Used when use_first_row_as_header is true so that get_table_schema
@@ -339,7 +345,7 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
             fields.append(StructField(col, StringType(), nullable=True))
         return StructType(fields)
 
-    def _read_sheet_values(
+    def _read_sheet_values(  # pylint: disable=too-many-locals
         self, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
         """Read cell data via Sheets API values.get.
@@ -381,10 +387,10 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
             except ValueError:
                 err_msg = resp.text or "Bad Request"
             raise ValueError(
-                f"Sheets API rejected the request (400). The spreadsheet ID may point to an "
-                f"Excel (.xlsx) file instead of a native Google Sheet. Convert the file: in Drive, "
-                f"open the file with Google Sheets, then use File → Save as Google Sheets and use "
-                f"the new file's ID. API error: {err_msg}"
+                f"Sheets API rejected the request (400). The spreadsheet ID may point "
+                f"to an Excel (.xlsx) file instead of a native Google Sheet. In Drive, "
+                f"open the file with Google Sheets, then File → Save as Google Sheets "
+                f"and use the new file's ID. API error: {err_msg}"
             )
         resp.raise_for_status()
         try:
