@@ -1116,31 +1116,31 @@ def register_lakeflow_source(spark):
 
 
     # ---------------------------------------------------------------------------
-    # Merge-script workaround
+    # Merge-script workaround: __init_subclass__ hook
     # ---------------------------------------------------------------------------
-    # The merge script (merge_python_source.py) places source connector code
-    # BEFORE lakeflow_datasource.py in the generated file, and we cannot modify
-    # lakeflow_datasource.py.  lakeflow_datasource.py defines LakeflowSource
-    # with simpleStreamReader → LakeflowStreamReader (driver-only).
+    # The merge script places source connector code BEFORE lakeflow_datasource.py
+    # in the generated file. lakeflow_datasource.py defines LakeflowSource(DataSource)
+    # with simpleStreamReader only (driver-only).
     #
-    # PySpark's DataSource dispatch prefers streamReader() over simpleStreamReader()
-    # when both are available.  By shadowing the DataSource base class here with a
-    # subclass that defines streamReader → DicomStreamReader, any DataSource
-    # subclass defined later (i.e. LakeflowSource) inherits the streamReader
-    # method, enabling executor-side WADO-RS file downloads and metadata fetching.
+    # PySpark prefers streamReader() over simpleStreamReader() when both exist.
+    #
+    # Previous approach: shadow DataSource with `global DataSource` to add
+    # streamReader. This broke executor serialization because `global` makes the
+    # class a module-level attribute and cloudpickle pickles it by reference,
+    # causing ModuleNotFoundError on executors.
+    #
+    # New approach: monkey-patch DataSource.__init_subclass__ so that when
+    # LakeflowSource is later defined as a subclass, streamReader is injected
+    # directly onto it. No new class is created, no global shadowing, and
+    # cloudpickle doesn't encounter a databricks.labs module reference.
     # ---------------------------------------------------------------------------
-    global DataSource  # noqa: E261 — required so the class statement below
-                       # assigns to the module-level name (imported from pyspark)
-                       # rather than creating a function-local that would trigger
-                       # UnboundLocalError on earlier references.
-    _OrigDataSource = DataSource
-
-
-    class DataSource(_OrigDataSource):
-        """DataSource with DICOMweb streamReader support."""
-
-        def streamReader(self, schema):
+    @classmethod
+    def _dicom_init_subclass(cls, **kwargs):
+        def _stream_reader(self, schema):
             return DicomStreamReader(self.options, schema, self.lakeflow_connect)
+        cls.streamReader = _stream_reader
+
+    DataSource.__init_subclass__ = _dicom_init_subclass
 
 
     ########################################################
