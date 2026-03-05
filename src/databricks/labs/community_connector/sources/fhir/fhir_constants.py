@@ -10,8 +10,9 @@ DEFAULT_RESOURCES = [
 CURSOR_FIELD = "lastUpdated"
 
 RETRIABLE_STATUS_CODES = {429, 500, 503}
-MAX_RETRIES = 3
-INITIAL_BACKOFF = 1.0  # seconds; doubled after each retry
+MAX_RETRIES = 5
+INITIAL_BACKOFF = 5.0  # seconds; doubled after each retry (5→10→20→40→80)
+PAGE_DELAY = 1.0       # seconds to sleep between paginated requests (reduces server load)
 HTTP_TIMEOUT = 60   # seconds; timeout for FHIR API requests
 TOKEN_TIMEOUT = 30  # seconds; timeout for OAuth2 token requests
 

@@ -19,7 +19,7 @@ from urllib.parse import urljoin
 import requests
 
 from databricks.labs.community_connector.sources.fhir.fhir_constants import (
-    HTTP_TIMEOUT, INITIAL_BACKOFF, MAX_RETRIES, RETRIABLE_STATUS_CODES, TOKEN_TIMEOUT,
+    HTTP_TIMEOUT, INITIAL_BACKOFF, MAX_RETRIES, PAGE_DELAY, RETRIABLE_STATUS_CODES, TOKEN_TIMEOUT,
 )
 
 
@@ -184,6 +184,7 @@ def iter_bundle_pages(
         if not next_url:
             return
 
+        time.sleep(PAGE_DELAY)  # avoid overwhelming public FHIR servers
         resp = client._get_url(next_url)
         if resp.status_code != 200:
             raise RuntimeError(

@@ -367,8 +367,11 @@ def register_lakeflow_source(spark):
     CURSOR_FIELD = "lastUpdated"
 
     RETRIABLE_STATUS_CODES = {429, 500, 503}
-    MAX_RETRIES = 3
-    INITIAL_BACKOFF = 1.0  # seconds; doubled after each retry
+    MAX_RETRIES = 5
+    INITIAL_BACKOFF = 5.0  # seconds; doubled after each retry (5→10→20→40→80)
+    PAGE_DELAY = 1.0       # seconds to sleep between paginated requests (reduces server load)
+    HTTP_TIMEOUT = 60   # seconds; timeout for FHIR API requests
+    TOKEN_TIMEOUT = 30  # seconds; timeout for OAuth2 token requests
 
     DEFAULT_PAGE_SIZE = 100   # _count parameter sent to FHIR server
     DEFAULT_MAX_RECORDS = 1000  # max records per read_table() call
@@ -514,7 +517,7 @@ def register_lakeflow_source(spark):
             resp = requests.post(
                 self._token_url, data=data,
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
-                timeout=30,
+                timeout=TOKEN_TIMEOUT,
             )
             if resp.status_code != 200:
                 raise RuntimeError(f"SMART token request failed (HTTP {resp.status_code}): {resp.text}")
@@ -575,18 +578,22 @@ def register_lakeflow_source(spark):
             url = urljoin(self._base_url, resource_type)
             return self._get_url(url, params=params)
 
-        def get_url(self, url: str) -> requests.Response:
-            return self._get_url(url)
-
         def _get_url(self, url: str, params: Optional[dict] = None) -> requests.Response:
             backoff = INITIAL_BACKOFF
             for attempt in range(MAX_RETRIES):
-                resp = self._session.get(url, params=params, headers=self._headers(), timeout=60)
+                resp = self._session.get(url, params=params, headers=self._headers(), timeout=HTTP_TIMEOUT)
                 if resp.status_code not in RETRIABLE_STATUS_CODES:
                     return resp
                 if attempt < MAX_RETRIES - 1:
                     retry_after = resp.headers.get("Retry-After")
-                    time.sleep(float(retry_after) if retry_after else backoff)
+                    if retry_after:
+                        try:
+                            sleep_seconds = float(retry_after)
+                        except ValueError:
+                            sleep_seconds = backoff  # Retry-After is an HTTP-date; fall back to backoff
+                    else:
+                        sleep_seconds = backoff
+                    time.sleep(sleep_seconds)
                     backoff *= 2
             return resp
 
@@ -630,7 +637,8 @@ def register_lakeflow_source(spark):
             if not next_url:
                 return
 
-            resp = client.get_url(next_url)
+            time.sleep(PAGE_DELAY)  # avoid overwhelming public FHIR servers
+            resp = client._get_url(next_url)
             if resp.status_code != 200:
                 raise RuntimeError(
                     f"FHIR pagination failed for {resource_type} (HTTP {resp.status_code}): {resp.text}"
@@ -812,7 +820,7 @@ def register_lakeflow_source(spark):
         names = r.get("deviceName") or [{}]
         return {
             "status": r.get("status"),
-            "device_name": ((names[0] if names else None) or {}).get("name"),
+            "device_name": (names[0] or {}).get("name"),
             "type_text": _safe(r, "type", "text"),
             "patient_reference": _safe(r, "patient", "reference"),
         }
@@ -917,6 +925,21 @@ def register_lakeflow_source(spark):
 
             if not records:
                 return iter([]), start_offset or {}
+
+            # Detect if server ignored the _lastUpdated filter.
+            # If since was set but no records have lastUpdated > since, the server likely
+            # doesn't support _lastUpdated filtering. Raise to surface this early.
+            if since:
+                # Exclude records missing lastUpdated — they can't be used to verify filtering.
+                newer = [r for r in records if r.get(CURSOR_FIELD) and r[CURSOR_FIELD] > since]
+                if not newer:
+                    raise RuntimeError(
+                        f"FHIR server appears to have ignored the '_lastUpdated=gt{since}' filter — "
+                        f"all {len(records)} returned records for '{table_name}' have "
+                        f"lastUpdated <= '{since}'. "
+                        f"This server may not support the _lastUpdated search parameter. "
+                        f"See README.md for server requirements."
+                    )
 
             # Advance cursor to max lastUpdated across batch.
             # ISO8601 string comparison is correct for FHIR instants (always timezone-qualified).
