@@ -10,12 +10,20 @@ Run with: pytest tests/unit/sources/google_sheets_docs/test_auth_verification.py
 """
 
 import json
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
 import pytest
+
+# Ensure project root is on path so "tests" is importable when run from CI
+_ROOT = Path(__file__).resolve().parents[4]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from tests.unit.sources.test_utils import load_config
 
 
 def _call_drive_about_or_skip(access_token: str) -> dict:
@@ -30,8 +38,6 @@ def _call_drive_about_or_skip(access_token: str) -> dict:
                 "project has the Drive API enabled."
             )
         raise
-
-from tests.unit.sources.test_utils import load_config
 
 
 # Google OAuth2 token endpoint (from connector_spec)
