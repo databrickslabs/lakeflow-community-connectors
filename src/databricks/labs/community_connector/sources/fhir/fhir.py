@@ -93,7 +93,8 @@ class FhirLakeflowConnect(LakeflowConnect):
         # Detect if server ignored the _lastUpdated filter.
         # If since was set but no records have lastUpdated > since, the server likely
         # doesn't support _lastUpdated filtering. Raise to surface this early.
-        if since and records:
+        if since:
+            # Exclude records missing lastUpdated — they can't be used to verify filtering.
             newer = [r for r in records if r.get(CURSOR_FIELD) and r[CURSOR_FIELD] > since]
             if not newer:
                 raise RuntimeError(

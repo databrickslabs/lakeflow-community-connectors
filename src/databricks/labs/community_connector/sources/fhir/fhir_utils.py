@@ -19,7 +19,7 @@ from urllib.parse import urljoin
 import requests
 
 from databricks.labs.community_connector.sources.fhir.fhir_constants import (
-    INITIAL_BACKOFF, MAX_RETRIES, RETRIABLE_STATUS_CODES,
+    HTTP_TIMEOUT, INITIAL_BACKOFF, MAX_RETRIES, RETRIABLE_STATUS_CODES, TOKEN_TIMEOUT,
 )
 
 
@@ -64,7 +64,7 @@ class SmartAuthClient:
         resp = requests.post(
             self._token_url, data=data,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=30,
+            timeout=TOKEN_TIMEOUT,
         )
         if resp.status_code != 200:
             raise RuntimeError(f"SMART token request failed (HTTP {resp.status_code}): {resp.text}")
@@ -125,18 +125,22 @@ class FhirHttpClient:
         url = urljoin(self._base_url, resource_type)
         return self._get_url(url, params=params)
 
-    def get_url(self, url: str) -> requests.Response:
-        return self._get_url(url)
-
     def _get_url(self, url: str, params: Optional[dict] = None) -> requests.Response:
         backoff = INITIAL_BACKOFF
         for attempt in range(MAX_RETRIES):
-            resp = self._session.get(url, params=params, headers=self._headers(), timeout=60)
+            resp = self._session.get(url, params=params, headers=self._headers(), timeout=HTTP_TIMEOUT)
             if resp.status_code not in RETRIABLE_STATUS_CODES:
                 return resp
             if attempt < MAX_RETRIES - 1:
                 retry_after = resp.headers.get("Retry-After")
-                time.sleep(float(retry_after) if retry_after else backoff)
+                if retry_after:
+                    try:
+                        sleep_seconds = float(retry_after)
+                    except ValueError:
+                        sleep_seconds = backoff  # Retry-After is an HTTP-date; fall back to backoff
+                else:
+                    sleep_seconds = backoff
+                time.sleep(sleep_seconds)
                 backoff *= 2
         return resp
 
@@ -180,7 +184,7 @@ def iter_bundle_pages(
         if not next_url:
             return
 
-        resp = client.get_url(next_url)
+        resp = client._get_url(next_url)
         if resp.status_code != 200:
             raise RuntimeError(
                 f"FHIR pagination failed for {resource_type} (HTTP {resp.status_code}): {resp.text}"
@@ -362,7 +366,7 @@ def _device(r):
     names = r.get("deviceName") or [{}]
     return {
         "status": r.get("status"),
-        "device_name": ((names[0] if names else None) or {}).get("name"),
+        "device_name": (names[0] or {}).get("name"),
         "type_text": _safe(r, "type", "text"),
         "patient_reference": _safe(r, "patient", "reference"),
     }
