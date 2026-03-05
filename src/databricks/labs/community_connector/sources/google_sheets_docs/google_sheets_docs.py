@@ -5,6 +5,7 @@ and Docs APIs. Tables: spreadsheets (Drive file list), sheet_values (cell data),
 documents (Drive file list + optional content).
 """
 
+import re
 import time
 from urllib.parse import quote
 from typing import Any, Iterator
@@ -178,8 +179,19 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
         v = (table_options.get("use_first_row_as_header") or "true").strip().lower()
         return v not in ("false", "0", "no")
 
+    @staticmethod
+    def _sanitize_column_name(raw: str, index: int) -> str:
+        """Convert a sheet header to a Spark-safe column name (alphanumeric + underscore)."""
+        s = (raw or "").strip()
+        if not s:
+            return f"_col{index}"
+        # Replace non-alphanumeric (and non-underscore) with underscore, collapse underscores
+        s = re.sub(r"[^a-zA-Z0-9_]+", "_", s)
+        s = re.sub(r"_+", "_", s).strip("_")
+        return s or f"_col{index}"
+
     def _fetch_sheet_first_row(self, table_options: dict[str, str]) -> list[str] | None:
-        """Fetch first row of the sheet for header names. Returns list of strings or None."""
+        """Fetch first row of the sheet; return Spark-safe column names (alphanumeric + underscore)."""
         spreadsheet_id = table_options.get("spreadsheet_id") or table_options.get("spreadsheetId")
         if not spreadsheet_id:
             return None
@@ -194,7 +206,9 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
         values = data.get("values", [])
         if not values:
             return None
-        return [str(h).strip() or f"_col{i}" for i, h in enumerate(values[0])]
+        return [
+            self._sanitize_column_name(str(h), i) for i, h in enumerate(values[0])
+        ]
 
     def _get_sheet_values_schema_with_headers(self, table_options: dict[str, str]) -> StructType | None:
         """Build schema with row_index + one column per header (all string). Returns None if cannot fetch."""
@@ -245,7 +259,9 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
 
         use_headers = self._sheet_values_use_headers(table_options)
         if use_headers and len(values) >= 1:
-            headers = [str(h).strip() or f"_col{i}" for i, h in enumerate(values[0])]
+            headers = [
+                self._sanitize_column_name(str(h), i) for i, h in enumerate(values[0])
+            ]
             records = []
             for i, row in enumerate(values[1:], start=2):
                 str_row = [str(c) if c is not None else "" for c in row]
