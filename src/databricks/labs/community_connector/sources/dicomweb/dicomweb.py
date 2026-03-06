@@ -418,7 +418,8 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
                 except HTTPError as exc:
                     if wado_mode == WADO_MODE_AUTO and exc.code in (404, 406, 415):
                         logger.info(
-                            "WADO-RS full instance returned HTTP %d — auto-switching to frame retrieval",
+                            "WADO-RS full instance returned HTTP %d "
+                            "— auto-switching to frame retrieval",
                             exc.code,
                         )
                         self._wado_mode_detected = WADO_MODE_FRAMES
