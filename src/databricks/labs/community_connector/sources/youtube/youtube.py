@@ -130,10 +130,11 @@ def _flatten_video(item: dict) -> dict:
     }
 
 
-def _flatten_search_result(item: dict) -> dict:
-    """Flatten a search result to schema fields."""
+def _flatten_search_result(item: dict, result_index: str) -> dict:
+    """Flatten a search result to schema fields. result_index is unique per row (same video can repeat)."""
     id_obj = item.get("id") or {}
     return {
+        "result_index": result_index,
         "kind": item.get("kind"),
         "id_videoId": id_obj.get("videoId") if isinstance(id_obj, dict) else None,
         "id_channelId": id_obj.get("channelId") if isinstance(id_obj, dict) else None,
@@ -482,7 +483,9 @@ class YouTubeLakeflowConnect(LakeflowConnect):
             resp.raise_for_status()
             data = resp.json()
             items = data.get("items") or []
-            all_records.extend([_flatten_search_result(i) for i in items])
+            for i, it in enumerate(items):
+                idx = str(len(all_records) + i)
+                all_records.append(_flatten_search_result(it, idx))
             page_token = data.get("nextPageToken")
             if not page_token:
                 break

@@ -88,7 +88,7 @@ The YouTube connector exposes **nine** tables from the YouTube Data API v3:
 | `playlists` | Playlist metadata per channel or by ID | snapshot | `id` |
 | `playlist_items` | Items in a playlist (videos) | snapshot | `id` |
 | `videos` | Video metadata by ID or chart (e.g. mostPopular) | snapshot | `id` |
-| `search` | Search results (videos, channels, playlists) | snapshot | composite (`id_videoId`, `id_channelId`, `id_playlistId`) |
+| `search` | Search results (videos, channels, playlists) | snapshot | `result_index` (unique per row; same video can appear in multiple positions) |
 | `activities` | Channel activities (uploads, likes, etc.) | snapshot | `id` |
 | `comment_threads` | Top-level comments on a video or channel | snapshot | `id` |
 | `subscriptions` | Channel subscriptions (who subscribes or mine) | snapshot | `id` |

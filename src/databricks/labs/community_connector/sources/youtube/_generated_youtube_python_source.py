@@ -440,8 +440,10 @@ def register_lakeflow_source(spark):
     # ---------------------------------------------------------------------------
 
     # search: GET /search (returns id.videoId, id.channelId, id.playlistId + snippet)
+    # result_index: unique per row (same video can appear in multiple result positions)
     SEARCH_SCHEMA = StructType(
         [
+            StructField("result_index", StringType(), nullable=False),
             StructField("kind", StringType(), nullable=True),
             StructField("id_videoId", StringType(), nullable=True),
             StructField("id_channelId", StringType(), nullable=True),
@@ -546,7 +548,7 @@ def register_lakeflow_source(spark):
             "ingestion_type": "snapshot",
         },
         "search": {
-            "primary_keys": ["id_videoId", "id_channelId", "id_playlistId"],
+            "primary_keys": ["result_index"],
             "cursor_field": None,
             "ingestion_type": "snapshot",
         },
@@ -688,10 +690,11 @@ def register_lakeflow_source(spark):
         }
 
 
-    def _flatten_search_result(item: dict) -> dict:
-        """Flatten a search result to schema fields."""
+    def _flatten_search_result(item: dict, result_index: str) -> dict:
+        """Flatten a search result to schema fields. result_index is unique per row (same video can repeat)."""
         id_obj = item.get("id") or {}
         return {
+            "result_index": result_index,
             "kind": item.get("kind"),
             "id_videoId": id_obj.get("videoId") if isinstance(id_obj, dict) else None,
             "id_channelId": id_obj.get("channelId") if isinstance(id_obj, dict) else None,
@@ -1040,7 +1043,9 @@ def register_lakeflow_source(spark):
                 resp.raise_for_status()
                 data = resp.json()
                 items = data.get("items") or []
-                all_records.extend([_flatten_search_result(i) for i in items])
+                for i, it in enumerate(items):
+                    idx = str(len(all_records) + i)
+                    all_records.append(_flatten_search_result(it, idx))
                 page_token = data.get("nextPageToken")
                 if not page_token:
                     break

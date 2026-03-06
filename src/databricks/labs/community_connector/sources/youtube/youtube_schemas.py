@@ -100,8 +100,10 @@ VIDEOS_SCHEMA = StructType(
 # ---------------------------------------------------------------------------
 
 # search: GET /search (returns id.videoId, id.channelId, id.playlistId + snippet)
+# result_index: unique per row (same video can appear in multiple result positions)
 SEARCH_SCHEMA = StructType(
     [
+        StructField("result_index", StringType(), nullable=False),
         StructField("kind", StringType(), nullable=True),
         StructField("id_videoId", StringType(), nullable=True),
         StructField("id_channelId", StringType(), nullable=True),
@@ -206,7 +208,7 @@ TABLE_METADATA = {
         "ingestion_type": "snapshot",
     },
     "search": {
-        "primary_keys": ["id_videoId", "id_channelId", "id_playlistId"],
+        "primary_keys": ["result_index"],
         "cursor_field": None,
         "ingestion_type": "snapshot",
     },
