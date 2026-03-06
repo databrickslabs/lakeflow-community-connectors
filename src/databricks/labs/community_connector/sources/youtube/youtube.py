@@ -388,35 +388,32 @@ class YouTubeLakeflowConnect(LakeflowConnect):
     def _read_playlist_items(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
+        """Fetch all playlist item pages in one call so pipeline gets full result."""
         playlist_id = (table_options.get("playlist_id") or "").strip()
         if not playlist_id:
             raise ValueError("playlist_items requires playlist_id in table_options")
-        params = {
-            "part": "snippet,contentDetails",
-            "playlistId": playlist_id,
-            "maxResults": _max_results(table_options, cap=50),
-        }
-        soff = start_offset or {}
-        page_token = soff.get("pageToken")
-        current_page = int(soff.get("_page") or 1)
-        if page_token:
-            params["pageToken"] = page_token
-        resp = self._request("GET", "playlistItems", params=params)
-        resp.raise_for_status()
-        data = resp.json()
-        items = data.get("items") or []
-        records = [_flatten_playlist_item(i) for i in items]
-        next_token = data.get("nextPageToken")
         max_pages_raw = (table_options.get("max_pages") or "").strip()
-        max_pages = int(max_pages_raw) if max_pages_raw.isdigit() else None
-        if next_token and max_pages is not None and current_page >= max_pages:
-            next_token = None
-        next_offset = (
-            {"pageToken": next_token, "_page": current_page + 1}
-            if next_token
-            else {"pageToken": None, "_page": current_page}
-        )
-        return iter(records), next_offset
+        max_pages = int(max_pages_raw) if max_pages_raw.isdigit() else 100
+        max_pages = max(1, min(max_pages, 1000))
+        all_records: list[dict] = []
+        page_token: str | None = None
+        for _ in range(max_pages):
+            params = {
+                "part": "snippet,contentDetails",
+                "playlistId": playlist_id,
+                "maxResults": _max_results(table_options, cap=50),
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            resp = self._request("GET", "playlistItems", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            items = data.get("items") or []
+            all_records.extend([_flatten_playlist_item(i) for i in items])
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+        return iter(all_records), {"pageToken": None}
 
     def _read_videos(
         self, start_offset: dict, table_options: dict[str, str]
@@ -426,70 +423,70 @@ class YouTubeLakeflowConnect(LakeflowConnect):
         use_chart = (table_options.get("chart") or "").lower() == "mostpopular"
         if video_ids:
             params["id"] = video_ids
-        elif use_chart:
-            params["chart"] = "mostPopular"
-            if table_options.get("region_code"):
-                params["regionCode"] = table_options["region_code"]
-            if table_options.get("video_category_id"):
-                params["videoCategoryId"] = table_options["video_category_id"]
-            soff = start_offset or {}
-            page_token = soff.get("pageToken")
-            if page_token:
-                params["pageToken"] = page_token
-        else:
-            raise ValueError("videos requires video_ids or chart=mostPopular")
-        resp = self._request("GET", "videos", params=params)
-        resp.raise_for_status()
-        data = resp.json()
-        items = data.get("items") or []
-        records = [_flatten_video(i) for i in items]
-        next_token = data.get("nextPageToken")
-        if use_chart and next_token:
-            current_page = int((start_offset or {}).get("_page") or 1)
+            resp = self._request("GET", "videos", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            items = data.get("items") or []
+            records = [_flatten_video(i) for i in items]
+            return iter(records), {"pageToken": None}
+        if use_chart:
             max_pages_raw = (table_options.get("max_pages") or "").strip()
-            max_pages = int(max_pages_raw) if max_pages_raw.isdigit() else None
-            if max_pages is not None and current_page >= max_pages:
-                next_token = None
-            next_offset = (
-                {"pageToken": next_token, "_page": current_page + 1}
-                if next_token
-                else {"pageToken": None, "_page": current_page}
-            )
-        else:
-            next_offset = {"pageToken": next_token} if next_token else {"pageToken": None}
-        return iter(records), next_offset
+            max_pages = int(max_pages_raw) if max_pages_raw.isdigit() else 20
+            max_pages = max(1, min(max_pages, 100))
+            all_records: list[dict] = []
+            page_token: str | None = None
+            for _ in range(max_pages):
+                p = {"part": "snippet,statistics,contentDetails", "maxResults": _max_results(table_options, cap=50), "chart": "mostPopular"}
+                if table_options.get("region_code"):
+                    p["regionCode"] = table_options["region_code"]
+                if table_options.get("video_category_id"):
+                    p["videoCategoryId"] = table_options["video_category_id"]
+                if page_token:
+                    p["pageToken"] = page_token
+                resp = self._request("GET", "videos", params=p)
+                resp.raise_for_status()
+                data = resp.json()
+                items = data.get("items") or []
+                all_records.extend([_flatten_video(i) for i in items])
+                page_token = data.get("nextPageToken")
+                if not page_token:
+                    break
+            return iter(all_records), {"pageToken": None}
+        raise ValueError("videos requires video_ids or chart=mostPopular")
 
     def _read_search(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
+        """Fetch all search pages in one call (like Zendesk/SurveyMonkey) so pipeline gets full result."""
         q = (table_options.get("q") or "").strip()
         if not q:
             raise ValueError("search requires q (query) in table_options")
-        params = {"part": "snippet", "q": q, "maxResults": _max_results(table_options, cap=50)}
-        if table_options.get("type"):
-            params["type"] = table_options["type"]
-        if table_options.get("channel_id"):
-            params["channelId"] = table_options["channel_id"]
-        if table_options.get("published_after"):
-            params["publishedAfter"] = table_options["published_after"]
-        if table_options.get("order"):
-            params["order"] = table_options["order"]
-        page_token = (start_offset or {}).get("pageToken")
-        current_page = int((start_offset or {}).get("_page") or 1)
-        if page_token:
-            params["pageToken"] = page_token
-        resp = self._request("GET", "search", params=params)
-        resp.raise_for_status()
-        data = resp.json()
-        items = data.get("items") or []
-        records = [_flatten_search_result(i) for i in items]
-        next_token = data.get("nextPageToken")
         max_pages_raw = (table_options.get("max_pages") or "").strip()
-        max_pages = int(max_pages_raw) if max_pages_raw.isdigit() else None
-        if next_token and max_pages is not None and current_page >= max_pages:
-            next_token = None
-        next_offset = {"pageToken": next_token, "_page": current_page + 1} if next_token else {"pageToken": None, "_page": current_page}
-        return iter(records), next_offset
+        max_pages = int(max_pages_raw) if max_pages_raw.isdigit() else 10
+        max_pages = max(1, min(max_pages, 100))
+        all_records: list[dict] = []
+        page_token: str | None = None
+        for _ in range(max_pages):
+            params = {"part": "snippet", "q": q, "maxResults": _max_results(table_options, cap=50)}
+            if table_options.get("type"):
+                params["type"] = table_options["type"]
+            if table_options.get("channel_id"):
+                params["channelId"] = table_options["channel_id"]
+            if table_options.get("published_after"):
+                params["publishedAfter"] = table_options["published_after"]
+            if table_options.get("order"):
+                params["order"] = table_options["order"]
+            if page_token:
+                params["pageToken"] = page_token
+            resp = self._request("GET", "search", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            items = data.get("items") or []
+            all_records.extend([_flatten_search_result(i) for i in items])
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+        return iter(all_records), {"pageToken": None}
 
     def _read_activities(
         self, start_offset: dict, table_options: dict[str, str]
