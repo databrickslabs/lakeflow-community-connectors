@@ -21,7 +21,8 @@
       "table": {
         "source_table": "playlist_items",
         "table_configuration": {
-          "playlist_id": "UU_x5XG1OV2P6uZZ5FSM9Ttw"
+          "playlist_id": "UU_x5XG1OV2P6uZZ5FSM9Ttw",
+          "max_pages": "20"
         }
       }
     },
@@ -30,7 +31,8 @@
         "source_table": "videos",
         "table_configuration": {
           "chart": "mostPopular",
-          "region_code": "US"
+          "region_code": "US",
+          "max_pages": "10"
         }
       }
     },
@@ -39,7 +41,8 @@
         "source_table": "search",
         "table_configuration": {
           "q": "databricks",
-          "type": "video"
+          "type": "video",
+          "max_pages": "10"
         }
       }
     },
@@ -55,7 +58,7 @@
       "table": {
         "source_table": "comment_threads",
         "table_configuration": {
-          "channel_id": "UC_x5XG1OV2P6uZZ5FSM9Ttw"
+          "video_id": "dQw4w9WgXcQ"
         }
       }
     },
