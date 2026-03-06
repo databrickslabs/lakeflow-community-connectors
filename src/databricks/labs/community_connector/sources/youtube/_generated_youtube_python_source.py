@@ -17,6 +17,7 @@ from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourc
 from pyspark.sql.types import *
 import base64
 import requests
+import uuid
 
 
 def register_lakeflow_source(spark):
@@ -1037,6 +1038,7 @@ def register_lakeflow_source(spark):
             max_pages = max(1, min(max_pages, 100))
             all_records: list[dict] = []
             page_token: str | None = None
+            batch_id = str(uuid.uuid4())
             for _ in range(max_pages):
                 params = {"part": "snippet", "q": q, "maxResults": _max_results(table_options, cap=50)}
                 if table_options.get("type"):
@@ -1054,12 +1056,12 @@ def register_lakeflow_source(spark):
                 data = resp.json()
                 items = data.get("items") or []
                 for i, it in enumerate(items):
-                    idx = str(len(all_records) + i)
+                    idx = f"{batch_id}_{len(all_records) + i}"
                     all_records.append(_flatten_search_result(it, idx, q))
                 page_token = data.get("nextPageToken")
                 if not page_token:
                     break
-            return iter(all_records), {"pageToken": None}
+            return iter(all_records), None
 
         def _read_activities(
             self, start_offset: dict, table_options: dict[str, str]
