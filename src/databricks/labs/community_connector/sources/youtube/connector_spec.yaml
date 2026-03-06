@@ -1,0 +1,61 @@
+# youtube Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Display name (required for Databricks to show connection parameter prompts)
+# ============================================================================
+display_name: YouTube
+
+# ============================================================================
+# Connection Parameters
+# Provide EITHER api_key (for public data) OR OAuth (client_id, client_secret,
+# refresh_token) for private/mine data. API key is simpler; OAuth needed for
+# mine=true, subscriptions, etc.
+# ============================================================================
+connection:
+  parameters:
+    - name: api_key
+      type: string
+      required: false
+      secret: true
+      description: >
+        YouTube Data API v3 key from Google Cloud Console. Use for public data
+        (channels by id, playlists, videos, search). OAuth required for mine=true.
+
+    - name: client_id
+      type: string
+      required: false
+      description: >
+        OAuth 2.0 client ID (required if not using api_key).
+
+    - name: client_secret
+      type: string
+      required: false
+      secret: true
+      description: >
+        OAuth 2.0 client secret (required if not using api_key).
+
+    - name: refresh_token
+      type: string
+      required: false
+      secret: true
+      description: >
+        Long-lived refresh token with access_type=offline (required if not using api_key).
+
+  oauth:
+    authorization_url: "https://accounts.google.com/o/oauth2/v2/auth"
+    token_url: "https://oauth2.googleapis.com/token"
+    scopes: "https://www.googleapis.com/auth/youtube.readonly"
+    extra_auth_params:
+      access_type: "offline"
+      prompt: "consent"
+
+# ============================================================================
+# External Options Allowlist
+# Table-specific options read by the connector (channels, playlists, playlist_items,
+# videos, search, activities, comment_threads, subscriptions, video_categories). Include this
+# comma-separated list in the UC connection's externalOptionsAllowList so
+# Databricks can pass them through to the connector.
+# ============================================================================
+external_options_allowlist: "channel_id,channel_ids,chart,for_username,max_pages,max_results,mine,order,playlist_id,playlist_ids,published_after,q,region_code,type,video_category_id,video_id,video_ids"
