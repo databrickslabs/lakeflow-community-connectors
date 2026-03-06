@@ -9,32 +9,39 @@ display_name: YouTube
 
 # ============================================================================
 # Connection Parameters
-# These are provided when creating the Unity Catalog connection.
-# OAuth 2.0 with client_id, client_secret, refresh_token for YouTube Data API v3.
+# Provide EITHER api_key (for public data) OR OAuth (client_id, client_secret,
+# refresh_token) for private/mine data. API key is simpler; OAuth needed for
+# mine=true, subscriptions, etc.
 # ============================================================================
 connection:
   parameters:
+    - name: api_key
+      type: string
+      required: false
+      secret: true
+      description: >
+        YouTube Data API v3 key from Google Cloud Console. Use for public data
+        (channels by id, playlists, videos, search). OAuth required for mine=true.
+
     - name: client_id
       type: string
-      required: true
+      required: false
       description: >
-        OAuth 2.0 client ID from Google Cloud Console.
+        OAuth 2.0 client ID (required if not using api_key).
 
     - name: client_secret
       type: string
-      required: true
+      required: false
       secret: true
       description: >
-        OAuth 2.0 client secret from Google Cloud Console.
+        OAuth 2.0 client secret (required if not using api_key).
 
     - name: refresh_token
       type: string
-      required: true
+      required: false
       secret: true
       description: >
-        Long-lived refresh token obtained with access_type=offline during
-        authorization. Used to obtain access tokens at runtime for the
-        YouTube Data API v3.
+        Long-lived refresh token with access_type=offline (required if not using api_key).
 
   oauth:
     authorization_url: "https://accounts.google.com/o/oauth2/v2/auth"
@@ -46,9 +53,9 @@ connection:
 
 # ============================================================================
 # External Options Allowlist
-# These table-specific options must be included in the externalOptionsAllowList
-# parameter of the UC connection to allow them to be passed through.
-# Use a comma-separated string of option names.
-# If no table-specific options are needed, set to empty string or omit.
+# Table-specific options read by the connector (channels, playlists, playlist_items,
+# videos, search, activities, comment_threads, subscriptions, video_categories). Include this
+# comma-separated list in the UC connection's externalOptionsAllowList so
+# Databricks can pass them through to the connector.
 # ============================================================================
-external_options_allowlist: ""
+external_options_allowlist: "channel_id,channel_ids,chart,for_username,mine,order,playlist_id,playlist_ids,published_after,q,region_code,type,video_category_id,video_id,video_ids"

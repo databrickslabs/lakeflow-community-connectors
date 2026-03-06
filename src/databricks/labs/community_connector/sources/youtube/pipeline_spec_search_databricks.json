@@ -1,0 +1,79 @@
+{
+  "connection_name": "youtube_connection",
+  "objects": [
+    {
+      "table": {
+        "source_table": "channels",
+        "table_configuration": {
+          "mine": "true"
+        }
+      }
+    },
+    {
+      "table": {
+        "source_table": "playlists",
+        "table_configuration": {
+          "mine": "true"
+        }
+      }
+    },
+    {
+      "table": {
+        "source_table": "playlist_items",
+        "table_configuration": {
+          "playlist_id": "UU_x5XG1OV2P6uZZ5FSM9Ttw"
+        }
+      }
+    },
+    {
+      "table": {
+        "source_table": "videos",
+        "table_configuration": {
+          "chart": "mostPopular",
+          "region_code": "US"
+        }
+      }
+    },
+    {
+      "table": {
+        "source_table": "search",
+        "table_configuration": {
+          "q": "databricks",
+          "type": "video"
+        }
+      }
+    },
+    {
+      "table": {
+        "source_table": "activities",
+        "table_configuration": {
+          "mine": "true"
+        }
+      }
+    },
+    {
+      "table": {
+        "source_table": "comment_threads",
+        "table_configuration": {
+          "channel_id": "UC_x5XG1OV2P6uZZ5FSM9Ttw"
+        }
+      }
+    },
+    {
+      "table": {
+        "source_table": "subscriptions",
+        "table_configuration": {
+          "mine": "true"
+        }
+      }
+    },
+    {
+      "table": {
+        "source_table": "video_categories",
+        "table_configuration": {
+          "region_code": "US"
+        }
+      }
+    }
+  ]
+}
