@@ -1,3 +1,4 @@
+# pylint: disable=undefined-variable
 """DICOMweb-specific extension to parse_value that adds VariantType support.
 
 This module is merged AFTER utils.py by merge_python_source.py, so the

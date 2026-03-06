@@ -1,3 +1,4 @@
+# pylint: disable=undefined-variable
 """Direct Python Data Source API implementation for DICOMweb.
 
 Follows the "Direct Implementation of Python Data Source API" strategy
@@ -29,7 +30,7 @@ from dataclasses import dataclass
 from datetime import date
 import json
 
-from pyspark.sql.datasource import DataSourceStreamReader, InputPartition
+from pyspark.sql.datasource import DataSource, DataSourceStreamReader, InputPartition
 
 
 # ---------------------------------------------------------------------------
