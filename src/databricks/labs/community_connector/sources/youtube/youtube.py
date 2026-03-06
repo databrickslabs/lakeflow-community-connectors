@@ -478,6 +478,7 @@ class YouTubeLakeflowConnect(LakeflowConnect):
         all_records: list[dict] = []
         page_token: str | None = None
         batch_id = str(uuid.uuid4())
+        position = 0
         for _ in range(max_pages):
             params = {"part": "snippet", "q": q, "maxResults": _max_results(table_options, cap=50)}
             if table_options.get("type"):
@@ -494,13 +495,14 @@ class YouTubeLakeflowConnect(LakeflowConnect):
             resp.raise_for_status()
             data = resp.json()
             items = data.get("items") or []
-            for i, it in enumerate(items):
-                idx = f"{batch_id}_{len(all_records) + i}"
+            for it in items:
+                idx = f"{batch_id}_{position}"
                 all_records.append(_flatten_search_result(it, idx, q))
+                position += 1
             page_token = data.get("nextPageToken")
             if not page_token:
                 break
-        return iter(all_records), None
+        return iter(all_records), {"pageToken": None}
 
     def _read_activities(
         self, start_offset: dict, table_options: dict[str, str]
