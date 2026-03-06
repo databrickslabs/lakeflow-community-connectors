@@ -251,7 +251,9 @@ def register_lakeflow_source(spark):
             """
 
         @abstractmethod
-        def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
+        def get_table_schema(
+            self, table_name: str, table_options: dict[str, str]
+        ) -> StructType:
             """
             Fetch the schema of a table.
             Args:
@@ -267,7 +269,9 @@ def register_lakeflow_source(spark):
             """
 
         @abstractmethod
-        def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
+        def read_table_metadata(
+            self, table_name: str, table_options: dict[str, str]
+        ) -> dict:
             """
             Fetch the metadata of a table.
             Args:
@@ -1874,7 +1878,9 @@ def register_lakeflow_source(spark):
         def read(self, start: dict) -> (Iterator[tuple], dict):
             is_delete_flow = self.options.get(IS_DELETE_FLOW) == "true"
             # Strip delete flow options before passing to connector
-            table_options = {k: v for k, v in self.options.items() if k != IS_DELETE_FLOW}
+            table_options = {
+                k: v for k, v in self.options.items() if k != IS_DELETE_FLOW
+            }
 
             if is_delete_flow:
                 records, offset = self.lakeflow_connect.read_table_deletes(
@@ -1913,7 +1919,9 @@ def register_lakeflow_source(spark):
             if self.table_name == METADATA_TABLE:
                 all_records = self._read_table_metadata()
             else:
-                all_records, _ = self.lakeflow_connect.read_table(self.table_name, None, self.options)
+                all_records, _ = self.lakeflow_connect.read_table(
+                    self.table_name, None, self.options
+                )
 
             rows = map(lambda x: parse_value(x, self.schema), all_records)
             return iter(rows)
