@@ -390,7 +390,9 @@ class YouTubeLakeflowConnect(LakeflowConnect):
     def _read_playlist_items(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
-        """Fetch all playlist item pages in one call so pipeline gets full result."""
+        """Fetch all playlist item pages in one call. Return empty if already done (no duplicates)."""
+        if start_offset and "pageToken" in start_offset and start_offset.get("pageToken") is None:
+            return iter([]), {"pageToken": None}
         playlist_id = (table_options.get("playlist_id") or "").strip()
         if not playlist_id:
             raise ValueError("playlist_items requires playlist_id in table_options")
@@ -420,6 +422,9 @@ class YouTubeLakeflowConnect(LakeflowConnect):
     def _read_videos(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
+        """Return empty if pipeline is requesting next batch after we already returned (no duplicates)."""
+        if start_offset and "pageToken" in start_offset and start_offset.get("pageToken") is None:
+            return iter([]), {"pageToken": None}
         params = {"part": "snippet,statistics,contentDetails", "maxResults": _max_results(table_options, cap=50)}
         video_ids = (table_options.get("video_ids") or "").strip()
         use_chart = (table_options.get("chart") or "").lower() == "mostpopular"
@@ -459,7 +464,10 @@ class YouTubeLakeflowConnect(LakeflowConnect):
     def _read_search(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
-        """Fetch all search pages in one call (like Zendesk/SurveyMonkey) so pipeline gets full result."""
+        """Fetch all search pages in one call. If start_offset has pageToken=None we already
+        returned everything; return empty so the pipeline does not get duplicate rows."""
+        if start_offset and "pageToken" in start_offset and start_offset.get("pageToken") is None:
+            return iter([]), {"pageToken": None}
         q = (table_options.get("q") or "").strip()
         if not q:
             raise ValueError("search requires q (query) in table_options")
