@@ -577,10 +577,6 @@ def register_lakeflow_source(spark):
     # src/databricks/labs/community_connector/sources/youtube/youtube.py
     ########################################################
 
-    SUPPORTED_TABLES = youtube_schemas.SUPPORTED_TABLES
-    TABLE_SCHEMAS = youtube_schemas.TABLE_SCHEMAS
-    TABLE_METADATA = youtube_schemas.TABLE_METADATA
-
     BASE_URL = "https://www.googleapis.com/youtube/v3"
     TOKEN_URL = "https://oauth2.googleapis.com/token"
     INITIAL_BACKOFF = 1.0
