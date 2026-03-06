@@ -221,15 +221,17 @@ class TestConnector:
         assert all(r["metadata"] is None for r in records)
         assert all(r["connection_name"] == dicomweb_options["base_url"] for r in records)
 
-    def test_read_table_instances_fetch_files_missing_volume_raises(self, dicomweb_options):
+    def test_read_table_instances_fetch_files_missing_volume_raises(
+        self, dicomweb_options, studies_response
+    ):
         connector = DICOMwebLakeflowConnect(dicomweb_options)
+        connector._client.query_studies = MagicMock(return_value=studies_response[:1])
         with pytest.raises(ValueError, match="dicom_volume_path"):
-            records_iter, _ = connector.read_table(
+            connector.read_table(
                 "instances",
                 {},
                 {"fetch_dicom_files": "true"},
             )
-            list(records_iter)  # iterator must be consumed to trigger
 
     def test_read_table_instances_fetch_files_full_mode(
         self, dicomweb_options, studies_response, series_response, instances_response, tmp_path

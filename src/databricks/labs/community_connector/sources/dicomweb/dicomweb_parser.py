@@ -79,6 +79,30 @@ _MULTI_STRING_VRS = {"CS"}  # modalities_in_study uses CS and can be multi-value
 # ---------------------------------------------------------------------------
 
 
+def _extract_pn_value(first: object) -> object:
+    """Extract a Person Name value from the first element."""
+    if isinstance(first, dict):
+        return first.get("Alphabetic") or first.get("Ideographic") or first.get("Phonetic")
+    return str(first)
+
+
+def _extract_string_value(values: list, field_name: str) -> object:
+    """Extract a string-type value, handling multi-valued fields."""
+    if field_name == "modalities_in_study":
+        return [str(v) for v in values]
+    return str(values[0])
+
+
+def _extract_numeric_value(first: object, vr: str) -> object:
+    """Extract a numeric value with appropriate int/float conversion."""
+    try:
+        if vr in {"IS", "US", "UL", "SS", "SL"}:
+            return int(first)
+        return float(first)
+    except (TypeError, ValueError):
+        return None
+
+
 def _extract_value(tag_obj: dict, field_name: str) -> object:
     """Extract a Python value from a DICOM JSON tag object."""
     vr = tag_obj.get("vr", "")
@@ -86,34 +110,15 @@ def _extract_value(tag_obj: dict, field_name: str) -> object:
 
     if not values:
         return None
-
     if vr == "PN":
-        # Person Name — take Alphabetic component of the first element
-        first = values[0]
-        if isinstance(first, dict):
-            return first.get("Alphabetic") or first.get("Ideographic") or first.get("Phonetic")
-        return str(first)
-
+        return _extract_pn_value(values[0])
     if vr in _STRING_VRS:
-        # modalities_in_study (CS, multi-valued) → return as list
-        if field_name == "modalities_in_study":
-            return [str(v) for v in values]
-        return str(values[0]) if len(values) == 1 else str(values[0])
-
+        return _extract_string_value(values, field_name)
     if vr in _NUMERIC_VRS:
-        first = values[0]
-        try:
-            if vr in {"IS", "US", "UL", "SS", "SL"}:
-                return int(first)
-            return float(first)
-        except (TypeError, ValueError):
-            return None
-
+        return _extract_numeric_value(values[0], vr)
     # Fallback: return first value as-is or stringified
     first = values[0]
-    if isinstance(first, (str, int, float, bool)):
-        return first
-    return str(first)
+    return first if isinstance(first, (str, int, float, bool)) else str(first)
 
 
 # ---------------------------------------------------------------------------

@@ -55,11 +55,12 @@ Usage (Databricks notebook)
 
 import json
 import logging
+import os
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterator
+from urllib.error import HTTPError
 
 from pyspark.sql.types import StructType
-from urllib.error import HTTPError
 
 from databricks.labs.community_connector.interface.lakeflow_connect import LakeflowConnect
 from databricks.labs.community_connector.sources.dicomweb.dicomweb_client import DICOMwebClient
@@ -107,10 +108,12 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
 
         self._client = DICOMwebClient(
             base_url=base_url,
-            auth_type=options.get("auth_type", "none"),
-            username=options.get("username"),
-            password=options.get("password"),
-            token=options.get("token"),
+            auth={
+                "type": options.get("auth_type", "none"),
+                "username": options.get("username"),
+                "password": options.get("password"),
+                "token": options.get("token"),
+            },
         )
 
         # Lineage identifier injected into every record.
@@ -185,7 +188,6 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
         page_offset = start_offset.get("page_offset", 0)
 
         # Short-circuit: cursor is at or past today — stream has caught up to init time.
-        # The next trigger will create a fresh instance with a new _init_ts.
         if start_offset and date_cursor >= self._init_ts:
             return iter([]), start_offset
 
@@ -196,8 +198,7 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
         lookback_days = int(table_options.get("lookback_days", DEFAULT_LOOKBACK_DAYS))
 
         today_str = date.today().strftime("%Y%m%d")
-        effective_start = _subtract_days(date_cursor, lookback_days)
-        date_range = f"{effective_start}-{today_str}"
+        date_range = f"{_subtract_days(date_cursor, lookback_days)}-{today_str}"
 
         logger.info(
             "read_table table=%s date_range=%s page_offset=%d page_size=%d max_records=%d",
@@ -207,14 +208,6 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
             page_size,
             max_records,
         )
-
-        fetch_files = table_options.get("fetch_dicom_files", "false").lower() == "true"
-        volume_path = table_options.get("dicom_volume_path", "")
-        fetch_metadata = table_options.get("fetch_metadata", "false").lower() == "true"
-        wado_mode = table_options.get("wado_mode", WADO_MODE_AUTO).lower()
-
-        if fetch_files and not volume_path and table_name == "instances":
-            raise ValueError("fetch_dicom_files=true requires dicom_volume_path to be set")
 
         if table_name == "studies":
             records, next_page_offset = self._collect_studies(
@@ -226,14 +219,7 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
             )
         else:
             records, next_page_offset = self._collect_instances(
-                date_range,
-                page_size,
-                page_offset,
-                max_records,
-                fetch_files,
-                volume_path,
-                fetch_metadata,
-                wado_mode,
+                date_range, page_offset, table_options
             )
 
         if not records:
@@ -316,13 +302,8 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
     def _collect_instances(
         self,
         date_range: str,
-        page_size: int,
         start_offset: int,
-        max_records: int,
-        fetch_files: bool,
-        volume_path: str,
-        fetch_metadata: bool,
-        wado_mode: str,
+        table_options: dict[str, str],
     ) -> tuple[list[dict], int]:
         """Hierarchical instances collection: enumerate studies → series → instances.
 
@@ -331,6 +312,10 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
 
         Returns (records, next_study_page_offset).
         """
+        page_size = int(table_options.get("page_size", DEFAULT_PAGE_SIZE))
+        max_records = int(
+            table_options.get("max_records_per_batch", str(DEFAULT_MAX_RECORDS_PER_BATCH))
+        )
         records: list[dict] = []
         study_offset = start_offset
         while len(records) < max_records:
@@ -338,53 +323,60 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
             if not studies:
                 return records, 0
             for study_raw in studies:
-                study = parse_study(study_raw)
-                study_uid = study.get("study_instance_uid")
-                if not study_uid:
-                    continue
-                for series_raw in self._client.query_series_for_study(study_uid):
-                    series = parse_series(series_raw)
-                    series_uid = series.get("series_instance_uid")
-                    if not series_uid:
-                        continue
-
-                    instances_raw = self._client.query_instances_for_series(study_uid, series_uid)
-
-                    # Optionally fetch full DICOM JSON for all instances in this series
-                    sop_to_meta: dict[str, str] = {}
-                    if fetch_metadata:
-                        sop_to_meta = self._build_metadata_map(study_uid, series_uid)
-
-                    for inst_raw in instances_raw:
-                        record = parse_instance(inst_raw)
-                        # Propagate parent UIDs / dates if missing in the response
-                        if not record.get("study_date"):
-                            record["study_date"] = study.get("study_date")
-                        if not record.get("study_instance_uid"):
-                            record["study_instance_uid"] = study_uid
-                        if not record.get("series_instance_uid"):
-                            record["series_instance_uid"] = series_uid
-                        # Attach full DICOM JSON metadata
-                        if fetch_metadata:
-                            sop_uid = record.get("sop_instance_uid")
-                            record["metadata"] = sop_to_meta.get(sop_uid) if sop_uid else None
-                        # Attach DICOM file or frame
-                        if fetch_files:
-                            record = self._attach_dicom_file(record, volume_path, wado_mode)
-                        record["connection_name"] = self._connection_name
-                        records.append(record)
-                        if len(records) >= max_records:
-                            break  # stop mid-instance list
-                    if len(records) >= max_records:
-                        break  # stop mid-series list
+                study_records = self._collect_instances_for_study(study_raw, table_options)
+                records.extend(study_records)
                 if len(records) >= max_records:
-                    break  # stop mid-study page
-            if len(records) >= max_records:
-                return records, study_offset  # hit limit; resume from same page next call
+                    return records[:max_records], study_offset
             if len(studies) < page_size:
                 return records, 0
             study_offset += page_size
         return records, study_offset
+
+    def _collect_instances_for_study(
+        self, study_raw: dict, table_options: dict[str, str]
+    ) -> list[dict]:
+        """Collect all instance records for a single study."""
+        study = parse_study(study_raw)
+        study_uid = study.get("study_instance_uid")
+        if not study_uid:
+            return []
+
+        fetch_files = table_options.get("fetch_dicom_files", "false").lower() == "true"
+        volume_path = table_options.get("dicom_volume_path", "")
+        fetch_metadata = table_options.get("fetch_metadata", "false").lower() == "true"
+        wado_mode = table_options.get("wado_mode", WADO_MODE_AUTO).lower()
+
+        if fetch_files and not volume_path:
+            raise ValueError("fetch_dicom_files=true requires dicom_volume_path to be set")
+
+        records: list[dict] = []
+        for series_raw in self._client.query_series_for_study(study_uid):
+            series = parse_series(series_raw)
+            series_uid = series.get("series_instance_uid")
+            if not series_uid:
+                continue
+
+            instances_raw = self._client.query_instances_for_series(study_uid, series_uid)
+            sop_to_meta: dict[str, str] = {}
+            if fetch_metadata:
+                sop_to_meta = self._build_metadata_map(study_uid, series_uid)
+
+            for inst_raw in instances_raw:
+                record = parse_instance(inst_raw)
+                if not record.get("study_date"):
+                    record["study_date"] = study.get("study_date")
+                if not record.get("study_instance_uid"):
+                    record["study_instance_uid"] = study_uid
+                if not record.get("series_instance_uid"):
+                    record["series_instance_uid"] = series_uid
+                if fetch_metadata:
+                    sop_uid = record.get("sop_instance_uid")
+                    record["metadata"] = sop_to_meta.get(sop_uid) if sop_uid else None
+                if fetch_files:
+                    record = self._attach_dicom_file(record, volume_path, wado_mode)
+                record["connection_name"] = self._connection_name
+                records.append(record)
+        return records
 
     # ------------------------------------------------------------------
     # WADO-RS helpers
@@ -441,10 +433,8 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
             record["dicom_file_path"] = None
             return record
 
-        import os as _os
-
-        dest_path_str = _os.path.join(volume_path, study_uid, series_uid, f"{sop_uid}{ext}")
-        _os.makedirs(_os.path.dirname(dest_path_str), exist_ok=True)
+        dest_path_str = os.path.join(volume_path, study_uid, series_uid, f"{sop_uid}{ext}")
+        os.makedirs(os.path.dirname(dest_path_str), exist_ok=True)
         with open(dest_path_str, "wb") as _f:
             _f.write(file_bytes)
         record["dicom_file_path"] = dest_path_str
@@ -482,17 +472,8 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
             logger.warning("Failed to fetch series metadata %s/%s: %s", study_uid, series_uid, exc)
             return {}
 
-    def _run_diagnostics_probe(self) -> Iterator[dict]:
-        """
-        Probe all standard DICOMweb endpoints and yield one record per endpoint.
-
-        Automatically discovers sample UIDs (study → series → instance) from the
-        server so that hierarchical endpoints can be tested with real paths.
-        Endpoints are never mutated — only GET requests are issued.
-        """
-        probe_timestamp = datetime.now(tz=timezone.utc).isoformat()
-
-        # ---- Discover sample UIDs for hierarchical probes -----------------
+    def _discover_sample_uids(self) -> tuple:
+        """Discover sample study/series/instance UIDs for diagnostic probes."""
         study_uid = series_uid = sop_uid = None
         try:
             studies = self._client.query_studies("19000101-99991231", limit=1, offset=0)
@@ -517,107 +498,21 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
             except Exception as exc:
                 logger.warning("Diagnostics: could not fetch a SOP UID: %s", exc)
 
-        # ---- Probe definitions --------------------------------------------
-        # Each entry: (endpoint_pattern, resolved_path_or_None, category, description, accept)
-        _probes: list[tuple[str, str | None, str, str, str | None]] = [
-            # QIDO-RS — query
-            (
-                "/studies",
-                "/studies?limit=1",
-                "QIDO-RS",
-                "Search studies (flat pagination)",
-                None,
-            ),
-            (
-                "/studies/{uid}/series",
-                f"/studies/{study_uid}/series" if study_uid else None,
-                "QIDO-RS",
-                "Search series for a study (hierarchical)",
-                None,
-            ),
-            (
-                "/studies/{uid}/series/{uid}/instances",
-                f"/studies/{study_uid}/series/{series_uid}/instances"
-                if study_uid and series_uid
-                else None,
-                "QIDO-RS",
-                "Search instances for a series (hierarchical)",
-                None,
-            ),
-            # WADO-RS — metadata
-            (
-                "/studies/{uid}/series/{uid}/metadata",
-                f"/studies/{study_uid}/series/{series_uid}/metadata"
-                if study_uid and series_uid
-                else None,
-                "WADO-RS",
-                "Series metadata — full DICOM JSON for all instances in a series",
-                "application/dicom+json",
-            ),
-            (
-                "/studies/{uid}/series/{uid}/instances/{uid}/metadata",
-                (
-                    f"/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/metadata"
-                    if study_uid and series_uid and sop_uid
-                    else None
-                ),
-                "WADO-RS",
-                "Instance metadata — full DICOM JSON for a single instance",
-                "application/dicom+json",
-            ),
-            # WADO-RS — retrieve
-            (
-                "/studies/{uid}/series/{uid}/instances/{uid}",
-                (
-                    f"/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}"
-                    if study_uid and series_uid and sop_uid
-                    else None
-                ),
-                "WADO-RS",
-                "Retrieve full DICOM instance (.dcm, multipart/related)",
-                'multipart/related; type="application/dicom"',
-            ),
-            (
-                "/studies/{uid}/series/{uid}/instances/{uid}/frames/{n}",
-                (
-                    f"/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/frames/1"
-                    if study_uid and series_uid and sop_uid
-                    else None
-                ),
-                "WADO-RS",
-                "Retrieve pixel frame (image/jpeg or image/jls)",
-                "image/jpeg, image/jls, application/octet-stream",
-            ),
-            (
-                "/studies/{uid}/series/{uid}/instances/{uid}/rendered",
-                (
-                    f"/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/rendered"
-                    if study_uid and series_uid and sop_uid
-                    else None
-                ),
-                "WADO-RS",
-                "Retrieve rendered instance (viewport-ready PNG/JPEG)",
-                "image/jpeg, image/png",
-            ),
-            (
-                "/studies/{uid}/series/{uid}/rendered",
-                f"/studies/{study_uid}/series/{series_uid}/rendered"
-                if study_uid and series_uid
-                else None,
-                "WADO-RS",
-                "Retrieve rendered series (all frames as viewport-ready images)",
-                "image/jpeg, image/png",
-            ),
-            (
-                "/studies/{uid}",
-                f"/studies/{study_uid}" if study_uid else None,
-                "WADO-RS",
-                "Retrieve entire study (all instances, multipart/related)",
-                'multipart/related; type="application/dicom"',
-            ),
-        ]
+        return study_uid, series_uid, sop_uid
 
-        for endpoint_pattern, path, category, description, accept in _probes:
+    def _run_diagnostics_probe(self) -> Iterator[dict]:
+        """
+        Probe all standard DICOMweb endpoints and yield one record per endpoint.
+
+        Automatically discovers sample UIDs (study → series → instance) from the
+        server so that hierarchical endpoints can be tested with real paths.
+        Endpoints are never mutated — only GET requests are issued.
+        """
+        probe_timestamp = datetime.now(tz=timezone.utc).isoformat()
+        study_uid, series_uid, sop_uid = self._discover_sample_uids()
+        probes = _build_probe_definitions(study_uid, series_uid, sop_uid)
+
+        for endpoint_pattern, path, category, description, accept in probes:
             if path is None:
                 yield {
                     "endpoint": endpoint_pattern,
@@ -634,36 +529,13 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
                 continue
 
             result = self._client.probe_endpoint(path, accept=accept)
-            status = result["status_code"]
-
-            if result["error"]:
-                supported = "error"
-                notes = result["error"]
-            elif status in (200, 204, 206):
-                supported = "yes"
-                notes = f"Content-Type: {result['content_type']}"
-            elif status == 400:
-                supported = "partial"
-                notes = "Bad Request (400) — endpoint exists but query parameters may be required"
-            elif status == 403:
-                supported = "no"
-                notes = "Access Denied (403) — endpoint blocked by server or CDN policy"
-            elif status == 404:
-                supported = "no"
-                notes = "Not Found (404) — endpoint not implemented on this server"
-            elif status == 406:
-                supported = "no"
-                notes = "Not Acceptable (406) — requested media type not supported"
-            else:
-                supported = "no"
-                notes = f"HTTP {status}"
-
+            supported, notes = _interpret_probe_status(result)
             yield {
                 "endpoint": endpoint_pattern,
                 "category": category,
                 "description": description,
                 "supported": supported,
-                "status_code": status,
+                "status_code": result["status_code"],
                 "content_type": result["content_type"],
                 "latency_ms": result["latency_ms"],
                 "notes": notes,
@@ -675,6 +547,121 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _build_probe_definitions(
+    study_uid: str | None, series_uid: str | None, sop_uid: str | None
+) -> list[tuple[str, str | None, str, str, str | None]]:
+    """Build the list of DICOMweb probe endpoint definitions."""
+    has_study = study_uid is not None
+    has_series = has_study and series_uid is not None
+    has_instance = has_series and sop_uid is not None
+    return [
+        (
+            "/studies",
+            "/studies?limit=1",
+            "QIDO-RS",
+            "Search studies (flat pagination)",
+            None,
+        ),
+        (
+            "/studies/{uid}/series",
+            f"/studies/{study_uid}/series" if has_study else None,
+            "QIDO-RS",
+            "Search series for a study (hierarchical)",
+            None,
+        ),
+        (
+            "/studies/{uid}/series/{uid}/instances",
+            f"/studies/{study_uid}/series/{series_uid}/instances" if has_series else None,
+            "QIDO-RS",
+            "Search instances for a series (hierarchical)",
+            None,
+        ),
+        (
+            "/studies/{uid}/series/{uid}/metadata",
+            f"/studies/{study_uid}/series/{series_uid}/metadata" if has_series else None,
+            "WADO-RS",
+            "Series metadata — full DICOM JSON for all instances in a series",
+            "application/dicom+json",
+        ),
+        (
+            "/studies/{uid}/series/{uid}/instances/{uid}/metadata",
+            (
+                f"/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/metadata"
+                if has_instance
+                else None
+            ),
+            "WADO-RS",
+            "Instance metadata — full DICOM JSON for a single instance",
+            "application/dicom+json",
+        ),
+        (
+            "/studies/{uid}/series/{uid}/instances/{uid}",
+            (
+                f"/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}"
+                if has_instance
+                else None
+            ),
+            "WADO-RS",
+            "Retrieve full DICOM instance (.dcm, multipart/related)",
+            'multipart/related; type="application/dicom"',
+        ),
+        (
+            "/studies/{uid}/series/{uid}/instances/{uid}/frames/{n}",
+            (
+                f"/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/frames/1"
+                if has_instance
+                else None
+            ),
+            "WADO-RS",
+            "Retrieve pixel frame (image/jpeg or image/jls)",
+            "image/jpeg, image/jls, application/octet-stream",
+        ),
+        (
+            "/studies/{uid}/series/{uid}/instances/{uid}/rendered",
+            (
+                f"/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/rendered"
+                if has_instance
+                else None
+            ),
+            "WADO-RS",
+            "Retrieve rendered instance (viewport-ready PNG/JPEG)",
+            "image/jpeg, image/png",
+        ),
+        (
+            "/studies/{uid}/series/{uid}/rendered",
+            f"/studies/{study_uid}/series/{series_uid}/rendered" if has_series else None,
+            "WADO-RS",
+            "Retrieve rendered series (all frames as viewport-ready images)",
+            "image/jpeg, image/png",
+        ),
+        (
+            "/studies/{uid}",
+            f"/studies/{study_uid}" if has_study else None,
+            "WADO-RS",
+            "Retrieve entire study (all instances, multipart/related)",
+            'multipart/related; type="application/dicom"',
+        ),
+    ]
+
+
+_STATUS_NOTES = {
+    400: ("partial", "Bad Request (400) — endpoint exists but query parameters may be required"),
+    403: ("no", "Access Denied (403) — endpoint blocked by server or CDN policy"),
+    404: ("no", "Not Found (404) — endpoint not implemented on this server"),
+    406: ("no", "Not Acceptable (406) — requested media type not supported"),
+}
+
+
+def _interpret_probe_status(result: dict) -> tuple[str, str]:
+    """Interpret a probe result into (supported, notes)."""
+    if result["error"]:
+        return "error", result["error"]
+    status = result["status_code"]
+    if status in (200, 204, 206):
+        return "yes", f"Content-Type: {result['content_type']}"
+    return _STATUS_NOTES.get(status, ("no", f"HTTP {status}"))
 
 
 def _primary_key(table_name: str) -> str:

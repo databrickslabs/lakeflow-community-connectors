@@ -15,6 +15,7 @@ from pyspark.sql.types import (
     MapType,
     StructType,
     VariantType,
+    VariantVal,
 )
 
 
@@ -29,24 +30,24 @@ def parse_value(value: Any, field_type: DataType) -> Any:
     """
     if value is None:
         return None
-    if isinstance(field_type, StructType):
-        return _parse_struct(value, field_type)
-    if isinstance(field_type, ArrayType):
-        return _parse_array(value, field_type)
-    if isinstance(field_type, MapType):
-        return _parse_map(value, field_type)
-    if isinstance(field_type, VariantType):
-        from pyspark.sql.types import VariantVal
 
-        if isinstance(value, str):
-            return VariantVal.parseJson(value)
-        return value  # already a VariantVal
-    field_type_class = type(field_type)
-    if field_type_class in _PRIMITIVE_PARSERS:
-        return _PRIMITIVE_PARSERS[field_type_class](value)
-    try:
-        if hasattr(field_type, "fromJson"):
-            return field_type.fromJson(value)
+    if isinstance(field_type, StructType):
+        result = _parse_struct(value, field_type)
+    elif isinstance(field_type, ArrayType):
+        result = _parse_array(value, field_type)
+    elif isinstance(field_type, MapType):
+        result = _parse_map(value, field_type)
+    elif isinstance(field_type, VariantType):
+        result = VariantVal.parseJson(value) if isinstance(value, str) else value
+    elif type(field_type) in _PRIMITIVE_PARSERS:
+        result = _PRIMITIVE_PARSERS[type(field_type)](value)
+    elif hasattr(field_type, "fromJson"):
+        try:
+            result = field_type.fromJson(value)
+        except (ValueError, TypeError) as e:
+            raise ValueError(
+                f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}"
+            ) from e
+    else:
         raise TypeError(f"Unsupported field type: {field_type}")
-    except (ValueError, TypeError) as e:
-        raise ValueError(f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}")
+    return result

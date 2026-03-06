@@ -28,10 +28,7 @@ class DICOMwebClient:
     def __init__(
         self,
         base_url: str,
-        auth_type: str = "none",
-        username: str | None = None,
-        password: str | None = None,
-        token: str | None = None,
+        auth: dict[str, str] | None = None,
         timeout: int = _DEFAULT_TIMEOUT,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -39,13 +36,17 @@ class DICOMwebClient:
         self.timeout = max(timeout) if isinstance(timeout, tuple) else timeout
         self._default_headers: dict[str, str] = {"Accept": "application/dicom+json"}
 
-        auth_type = (auth_type or "none").lower()
+        auth = auth or {}
+        auth_type = (auth.get("type") or "none").lower()
         if auth_type == "basic":
+            username = auth.get("username")
+            password = auth.get("password")
             if not username or not password:
                 raise ValueError("auth_type=basic requires username and password")
             credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
             self._default_headers["Authorization"] = f"Basic {credentials}"
         elif auth_type == "bearer":
+            token = auth.get("token")
             if not token:
                 raise ValueError("auth_type=bearer requires token")
             self._default_headers["Authorization"] = f"Bearer {token}"
@@ -196,7 +197,10 @@ class DICOMwebClient:
         Returns:
             Raw bytes of the frame image (JPEG, PNG, or similar).
         """
-        url = f"{self.base_url}/studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/frames/{frame_number}"
+        url = (
+            f"{self.base_url}/studies/{study_uid}/series/{series_uid}"
+            f"/instances/{sop_uid}/frames/{frame_number}"
+        )
         logger.debug("WADO-RS frames GET %s", url)
         resp = self._get(
             url, extra_headers={"Accept": "image/jpeg, image/png, application/octet-stream"}
