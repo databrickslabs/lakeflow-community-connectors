@@ -29,7 +29,7 @@ Provide the following **connection-level** options when configuring the connecto
 
 The full list of supported table-specific options for `externalOptionsAllowList` is:
 
-`channel_ids,for_username,mine,channel_id,playlist_ids,playlist_id,video_ids,chart,region_code,video_category_id,q,type,published_after,order,video_id`
+`channel_id,channel_ids,chart,for_username,max_pages,max_results,mine,order,playlist_id,playlist_ids,published_after,q,region_code,type,video_category_id,video_id,video_ids`
 
 > **Note**: Table-specific options such as `channel_ids`, `playlist_id`, or `q` are **not** connection parameters. They are provided per table via `table_configuration` in the pipeline specification. These option names must be included in `externalOptionsAllowList` for the connection to allow them.
 
@@ -65,7 +65,7 @@ A Unity Catalog connection for this connector can be created in two ways via the
 1. Follow the **Lakeflow Community Connector** UI flow from the **Add Data** page.
 2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
 3. Set `externalOptionsAllowList` to:  
-   `channel_ids,for_username,mine,channel_id,playlist_ids,playlist_id,video_ids,chart,region_code,video_category_id,q,type,published_after,order,video_id`  
+   `channel_id,channel_ids,chart,for_username,max_pages,max_results,mine,order,playlist_id,playlist_ids,published_after,q,region_code,type,video_category_id,video_id,video_ids`  
    (required for this connector to pass table-specific options).
 
 The connection can also be created using the standard Unity Catalog API.
@@ -125,13 +125,15 @@ Table-specific options are passed via the pipeline spec under `table_configurati
 |-------|-----------------------------|-------------|
 | **channels** | **Exactly one of:** `channel_ids`, `for_username`, or `mine=true` | `channel_ids`: comma-separated channel IDs. `for_username`: YouTube username. `mine=true`: authenticated user's channel (OAuth). |
 | **playlists** | **Exactly one of:** `playlist_ids`, `channel_id`, or `mine=true` | `playlist_ids`: comma-separated playlist IDs. `channel_id`: list playlists for this channel. `mine=true`: authenticated user's playlists (OAuth). |
-| **playlist_items** | `playlist_id` (required) | The playlist ID whose items to list. |
-| **videos** | **Exactly one of:** `video_ids` or `chart=mostPopular` | `video_ids`: comma-separated video IDs. `chart=mostPopular`: popular videos. Optional: `region_code`, `video_category_id` (with chart). |
-| **search** | `q` (required) | Search query string. Optional: `type`, `channel_id`, `published_after`, `order`. |
+| **playlist_items** | `playlist_id` (required) | The playlist ID whose items to list. Optional: **`max_pages`** (cap pages, e.g. `"20"` = at most 1,000 items). |
+| **videos** | **Exactly one of:** `video_ids` or `chart=mostPopular` | `video_ids`: comma-separated video IDs. `chart=mostPopular`: popular videos. Optional: `region_code`, `video_category_id` (with chart), **`max_pages`** (cap pages when using chart, e.g. `"10"` = at most 500 results). |
+| **search** | `q` (required) | Search query string. Optional: `type`, `channel_id`, `published_after`, `order`, **`max_pages`** (cap total pages, e.g. `"10"` = at most 10×50 = 500 results). |
 | **activities** | **Exactly one of:** `channel_id` or `mine=true` | `channel_id`: list activities for this channel. `mine=true`: authenticated user's activities (OAuth). Optional: `published_after`. |
-| **comment_threads** | **Exactly one of:** `video_id` or `channel_id` | `video_id`: comments for this video. `channel_id`: threads related to this channel. |
+| **comment_threads** | **Exactly one of:** `video_id` or `channel_id` | `video_id`: comments for this video (recommended). If you get 403 Forbidden, that video may have comments disabled—try another `video_id`. `channel_id`: often returns 403; prefer `video_id`. |
 | **subscriptions** | **Exactly one of:** `channel_id` or `mine=true` | `channel_id`: list subscribers of this channel. `mine=true`: channels the authenticated user subscribes to (OAuth). |
 | **video_categories** | Optional: `region_code` | ISO 3166-1 alpha-2 region code. If omitted, categories are not filtered by region. |
+
+**Pagination, `max_pages` (search), and `max_results`:** Each API request returns at most 50 items (100 for `comment_threads`). The connector returns a `pageToken` cursor so the pipeline can request the next page. You control how many results search returns by setting **`max_pages`** in that table’s `table_configuration` in your pipeline spec (e.g. `"max_pages": "10"` = at most 10 pages = 500 results). The pipeline will keep requesting pages until the connector returns no more cursor or the cap is reached. If your pipeline still stops at 50 results, the **pipeline runtime** (Databricks/Lakeflow) may be limiting to one batch per run; that limit is configured in the pipeline or job in Databricks, not in the pipeline_spec JSON (the spec only lists tables and their options). Optionally set **`max_results`** to control page size (1–50 for most tables, 1–100 for `comment_threads`).
 
 ## Data Type Mapping
 
