@@ -1,61 +1,43 @@
 """
-Integration test: end-to-end pipeline with real Orthanc demo endpoint.
+Integration test: end-to-end pipeline with mocked Orthanc responses.
 
-Tests the full metadata → VARIANT transformation chain across four layers:
+Tests the full metadata -> VARIANT transformation chain across four layers,
+using real DICOM JSON fixture data captured from the Orthanc public demo
+(https://orthanc.uclouvain.be/demo/dicom-web) so tests run without network.
 
-Layer 1 — Real HTTP
-  DICOMwebClient hits the public Orthanc demo and returns raw records.
-  Connector yields metadata as JSON strings in raw Python dicts.
+Layer 1 -- Mocked HTTP
+  DICOMwebClient is patched so the connector processes real DICOM JSON
+  objects without network access.
 
-Layer 2 — _apply_column_expressions framework utility (no HTTP)
+Layer 2 -- _apply_column_expressions framework utility (no HTTP)
   Verifies the generic _apply_column_expressions helper still works for
   connectors that declare column_expressions (other connectors, not DICOMweb).
   selectExpr('parse_json(metadata)') produces a VariantType column.
 
-Layer 3 — Full e2e: real HTTP + parse_value() + VariantType directly
+Layer 3 -- Full e2e: mocked HTTP + parse_value() + VariantType directly
   With metadata declared as VariantType in INSTANCES_SCHEMA, parse_value()
-  converts JSON strings to VariantVal objects — no selectExpr/parse_json()
-  step needed.  The simplified flow:
+  converts JSON strings to VariantVal objects -- no selectExpr/parse_json()
+  step needed.
 
-      DICOMweb HTTP → connector records (metadata as JSON str in raw dict)
-        → parse_value(record, INSTANCES_SCHEMA) → Row with metadata as VariantVal
-        → spark.createDataFrame(rows, INSTANCES_SCHEMA) → VariantType column directly
-
-Layer 4 — OSS Declarative Pipeline (pyspark.pipelines)
+Layer 4 -- OSS Declarative Pipeline (pyspark.pipelines)
   Apache Spark 4.0 ships @sdp.table, @sdp.temporary_view, sdp.create_streaming_table,
-  and @sdp.append_flow as OSS APIs (pyspark.pipelines).  Note: apply_changes() is
-  a Databricks extension and is NOT available in OSS Spark.
-
-  The pipeline execution engine (start_run) uses Spark Connect and requires a running
-  server.  For testing purposes we use the graph_element_registration_context directly:
-    1. Register pipeline elements with @sdp.table / @sdp.temporary_view using a
-       capturing GraphElementRegistry.
-    2. Extract the Flow objects and call flow.func() directly — this is exactly what
-       the pipeline scheduler does at execution time.
-    3. Verify that the resulting DataFrames have the correct schema and data.
-
-  The new architecture: parse_value() handles VariantVal conversion, so @sdp.table
-  bodies produce VariantType DataFrames directly without _apply_column_expressions.
+  and @sdp.append_flow as OSS APIs (pyspark.pipelines).
 
 Requirements
 ------------
-  - pyspark >= 4.0  (VariantType + parse_json() + pyspark.pipelines; 4.1.1 is in .venv)
-  - Network access to https://orthanc.uclouvain.be/demo/dicom-web
+  - pyspark >= 4.0  (VariantType + parse_json() + pyspark.pipelines)
 
 Run only integration tests:
-  pytest tests/test_integration_variant.py -v -m integration
-
-Run all tests (including integration):
-  pytest tests/ -v
+  pytest tests/unit/sources/dicomweb/test_integration_variant.py -v -m integration
 """
 
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 import pytest
 
-# VariantType / VariantVal were introduced in Apache Spark 4.0 / pyspark 4.0.
 try:
     from pyspark.sql.types import VariantType, VariantVal
 
@@ -65,7 +47,92 @@ except ImportError:
 
 pytestmark = pytest.mark.integration
 
+# ---------------------------------------------------------------------------
+# Fixture data captured from the Orthanc public demo server
+# ---------------------------------------------------------------------------
+
+STUDY_UID = "2.16.840.1.113669.632.20.1211.10000315526"
+SERIES_UID = "1.3.12.2.1107.5.1.4.54693.30000006100507010800000005268"
+SOP_UID_1 = "1.3.12.2.1107.5.1.4.54693.30000006100507010800000005328"
+SOP_UID_2 = "1.3.12.2.1107.5.1.4.54693.30000006100507010800000005435"
+SOP_UID_3 = "1.3.12.2.1107.5.1.4.54693.30000006100507010800000005359"
+
+# Minimal QIDO-RS study response (real data from Orthanc)
+FIXTURE_STUDIES = [
+    {
+        "00080005": {"Value": ["ISO_IR 192"], "vr": "CS"},
+        "00080020": {"Value": ["20061005"], "vr": "DA"},
+        "00080030": {"Value": ["101556.921000"], "vr": "TM"},
+        "00080050": {"Value": ["0"], "vr": "SH"},
+        "00080061": {"Value": ["CT"], "vr": "CS"},
+        "00100010": {"Value": [{"Alphabetic": "VIX"}], "vr": "PN"},
+        "00100020": {"Value": ["vAD7q3"], "vr": "LO"},
+        "0020000D": {"Value": [STUDY_UID], "vr": "UI"},
+        "00200010": {"Value": ["A10025547593"], "vr": "SH"},
+        "00201206": {"Value": [1], "vr": "IS"},
+        "00201208": {"Value": [250], "vr": "IS"},
+    }
+]
+
+FIXTURE_SERIES = [
+    {
+        "00080005": {"Value": ["ISO_IR 192"], "vr": "CS"},
+        "00080020": {"Value": ["20061005"], "vr": "DA"},
+        "00080060": {"Value": ["CT"], "vr": "CS"},
+        "0008103E": {"Value": ["Pied/cheville  1.0mm std"], "vr": "LO"},
+        "0020000D": {"Value": [STUDY_UID], "vr": "UI"},
+        "0020000E": {"Value": [SERIES_UID], "vr": "UI"},
+        "00200011": {"Value": [5], "vr": "IS"},
+    }
+]
+
+
+def _make_instance_raw(sop_uid, instance_number):
+    return {
+        "00080005": {"Value": ["ISO_IR 192"], "vr": "CS"},
+        "00080016": {"Value": ["1.2.840.10008.5.1.4.1.1.2"], "vr": "UI"},
+        "00080018": {"Value": [sop_uid], "vr": "UI"},
+        "00080020": {"Value": ["20061005"], "vr": "DA"},
+        "00080060": {"Value": ["CT"], "vr": "CS"},
+        "0020000D": {"Value": [STUDY_UID], "vr": "UI"},
+        "0020000E": {"Value": [SERIES_UID], "vr": "UI"},
+        "00200013": {"Value": [instance_number], "vr": "IS"},
+    }
+
+
+FIXTURE_INSTANCES = [
+    _make_instance_raw(SOP_UID_1, 60),
+    _make_instance_raw(SOP_UID_2, 167),
+    _make_instance_raw(SOP_UID_3, 91),
+]
+
+
+def _make_metadata_entry(sop_uid):
+    return {
+        "00080005": {"Value": ["ISO_IR 100"], "vr": "CS"},
+        "00080016": {"Value": ["1.2.840.10008.5.1.4.1.1.2"], "vr": "UI"},
+        "00080018": {"Value": [sop_uid], "vr": "UI"},
+        "00080020": {"Value": ["20061005"], "vr": "DA"},
+        "00080060": {"Value": ["CT"], "vr": "CS"},
+        "00080070": {"Value": ["SIEMENS"], "vr": "LO"},
+        "0020000D": {"Value": [STUDY_UID], "vr": "UI"},
+        "0020000E": {"Value": [SERIES_UID], "vr": "UI"},
+        "00280010": {"Value": [512], "vr": "US"},
+        "00280011": {"Value": [512], "vr": "US"},
+    }
+
+
+FIXTURE_METADATA = [
+    _make_metadata_entry(SOP_UID_1),
+    _make_metadata_entry(SOP_UID_2),
+    _make_metadata_entry(SOP_UID_3),
+]
+
 ORTHANC_BASE_URL = "https://orthanc.uclouvain.be/demo/dicom-web"
+
+CLIENT_PATH = (
+    "databricks.labs.community_connector.sources.dicomweb.dicomweb_client.DICOMwebClient"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -81,9 +148,6 @@ def spark():
 
     from pyspark.sql import SparkSession
 
-    # Pin worker Python to the same executable as the driver (the venv's Python).
-    # Without this, Spark may spawn workers with the system Python, causing a
-    # PYTHON_VERSION_MISMATCH error when driver and workers differ.
     os.environ["PYSPARK_PYTHON"] = sys.executable
     os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 
@@ -101,7 +165,7 @@ def spark():
 
 @pytest.fixture(scope="module")
 def orthanc_connector():
-    """DICOMwebLakeflowConnect pointed at the public Orthanc demo."""
+    """DICOMwebLakeflowConnect pointed at Orthanc URL (client methods will be mocked)."""
     from databricks.labs.community_connector.sources.dicomweb.dicomweb import (
         DICOMwebLakeflowConnect,
     )
@@ -110,46 +174,82 @@ def orthanc_connector():
 
 
 # ---------------------------------------------------------------------------
-# Layer 1 — Real HTTP connectivity
+# Layer 1 -- Mocked HTTP connectivity
 # ---------------------------------------------------------------------------
 
 
 class TestOrthanc:
-    """Verify the public Orthanc demo endpoint returns valid DICOM data."""
+    """Verify the connector returns valid DICOM data (mocked HTTP)."""
 
     def test_reads_studies(self, orthanc_connector):
-        records_iter, next_offset = orthanc_connector.read_table("studies", {}, {"page_size": "5"})
-        records = list(records_iter)
-        assert len(records) > 0, "Expected at least one study from Orthanc demo"
+        with (
+            patch.object(orthanc_connector._client, "query_studies", return_value=FIXTURE_STUDIES),
+        ):
+            records_iter, next_offset = orthanc_connector.read_table(
+                "studies", {}, {"page_size": "5"}
+            )
+            records = list(records_iter)
+        assert len(records) > 0, "Expected at least one study"
         assert all("study_instance_uid" in r for r in records)
         assert "study_date" in next_offset
 
     def test_reads_series(self, orthanc_connector):
-        records_iter, _ = orthanc_connector.read_table("series", {}, {"page_size": "3"})
-        records = list(records_iter)
-        assert len(records) > 0, "Expected at least one series from Orthanc demo"
+        with (
+            patch.object(orthanc_connector._client, "query_studies", return_value=FIXTURE_STUDIES),
+            patch.object(
+                orthanc_connector._client, "query_series_for_study", return_value=FIXTURE_SERIES
+            ),
+        ):
+            records_iter, _ = orthanc_connector.read_table("series", {}, {"page_size": "3"})
+            records = list(records_iter)
+        assert len(records) > 0, "Expected at least one series"
         assert all("series_instance_uid" in r for r in records)
 
     def test_reads_instances(self, orthanc_connector):
-        records_iter, _ = orthanc_connector.read_table("instances", {}, {"page_size": "3"})
-        records = list(records_iter)
-        assert len(records) > 0, "Expected at least one instance from Orthanc demo"
+        with (
+            patch.object(orthanc_connector._client, "query_studies", return_value=FIXTURE_STUDIES),
+            patch.object(
+                orthanc_connector._client, "query_series_for_study", return_value=FIXTURE_SERIES
+            ),
+            patch.object(
+                orthanc_connector._client,
+                "query_instances_for_series",
+                return_value=FIXTURE_INSTANCES,
+            ),
+        ):
+            records_iter, _ = orthanc_connector.read_table("instances", {}, {"page_size": "3"})
+            records = list(records_iter)
+        assert len(records) > 0, "Expected at least one instance"
         assert all("sop_instance_uid" in r for r in records)
 
     def test_reads_instances_with_metadata(self, orthanc_connector):
-        """fetch_metadata=true populates the metadata column as a JSON string in the raw dict."""
-        records_iter, _ = orthanc_connector.read_table(
-            "instances", {}, {"page_size": "5", "fetch_metadata": "true"}
-        )
-        records = list(records_iter)
+        """fetch_metadata=true populates the metadata column as a JSON string."""
+        with (
+            patch.object(orthanc_connector._client, "query_studies", return_value=FIXTURE_STUDIES),
+            patch.object(
+                orthanc_connector._client, "query_series_for_study", return_value=FIXTURE_SERIES
+            ),
+            patch.object(
+                orthanc_connector._client,
+                "query_instances_for_series",
+                return_value=FIXTURE_INSTANCES,
+            ),
+            patch.object(
+                orthanc_connector._client,
+                "retrieve_series_metadata",
+                return_value=FIXTURE_METADATA,
+            ),
+        ):
+            records_iter, _ = orthanc_connector.read_table(
+                "instances", {}, {"page_size": "5", "fetch_metadata": "true"}
+            )
+            records = list(records_iter)
         assert len(records) > 0
 
         records_with_meta = [r for r in records if r.get("metadata") is not None]
         assert len(records_with_meta) > 0, "Expected at least one instance with metadata populated"
 
         for r in records_with_meta:
-            # Connector yields metadata as a plain JSON string in the raw Python dict.
-            # parse_value() converts it to VariantVal when building the DataFrame.
             assert isinstance(r["metadata"], str), (
                 f"Connector must yield metadata as str in raw dict, got {type(r['metadata']).__name__}"
             )
@@ -158,7 +258,7 @@ class TestOrthanc:
 
 
 # ---------------------------------------------------------------------------
-# Layer 2 — VariantVal conversion helper (no HTTP)
+# Layer 2 -- VariantVal conversion helper (no HTTP)
 # ---------------------------------------------------------------------------
 
 
@@ -167,10 +267,6 @@ class TestVariantValConversion:
     """
     Verify that VariantVal.parseJson() correctly converts DICOM JSON strings to
     VariantVal objects, which can then be used with VariantType columns in Spark.
-
-    In the DICOMweb connector the metadata JSON string returned by the connector
-    is converted to VariantVal before building the DataFrame. This is the
-    standard approach for populating VariantType columns from Python data.
     """
 
     def test_parse_json_produces_variant_column(self, spark):
@@ -255,31 +351,19 @@ class TestVariantValConversion:
 
 
 # ---------------------------------------------------------------------------
-# Layer 3 — Full end-to-end: real HTTP + parse_value() + VariantType directly
+# Layer 3 -- Full end-to-end: mocked HTTP + parse_value() + VariantType
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.skipif(not HAS_VARIANT, reason="pyspark >= 4.0 required for VariantType")
 class TestEndToEndVariantPipeline:
     """
-    Full end-to-end pipeline with real Orthanc HTTP + VariantType metadata.
-
-    The connector returns metadata as a JSON string in the raw dict. Before
-    creating a Spark DataFrame with INSTANCES_SCHEMA (which declares metadata as
-    VariantType), the JSON string must be converted to a VariantVal object using
-    VariantVal.parseJson().  This is exactly what the Databricks pipeline runtime
-    does when materialising Variant columns from Python data sources.
-
-    Flow:
-        real HTTP (JSON str in raw dict)
-          → _to_variant_row()  (JSON str → VariantVal)
-          → spark.createDataFrame(rows, INSTANCES_SCHEMA)
-          → metadata column is VariantType
+    Full end-to-end pipeline with mocked HTTP + VariantType metadata.
     """
 
     @staticmethod
     def _to_variant_row(record: dict):
-        """Convert a connector record dict to a Row, converting metadata JSON → VariantVal."""
+        """Convert a connector record dict to a Row, converting metadata JSON -> VariantVal."""
         from pyspark.sql import Row
 
         d = dict(record)
@@ -303,10 +387,26 @@ class TestEndToEndVariantPipeline:
             INSTANCES_SCHEMA,
         )
 
-        records_iter, _ = orthanc_connector.read_table(
-            "instances", {}, {"page_size": "5", "fetch_metadata": "true"}
-        )
-        records = list(records_iter)
+        with (
+            patch.object(orthanc_connector._client, "query_studies", return_value=FIXTURE_STUDIES),
+            patch.object(
+                orthanc_connector._client, "query_series_for_study", return_value=FIXTURE_SERIES
+            ),
+            patch.object(
+                orthanc_connector._client,
+                "query_instances_for_series",
+                return_value=FIXTURE_INSTANCES,
+            ),
+            patch.object(
+                orthanc_connector._client,
+                "retrieve_series_metadata",
+                return_value=FIXTURE_METADATA,
+            ),
+        ):
+            records_iter, _ = orthanc_connector.read_table(
+                "instances", {}, {"page_size": "5", "fetch_metadata": "true"}
+            )
+            records = list(records_iter)
         assert len(records) > 0
 
         rows = [self._to_variant_row(r) for r in records]
@@ -319,7 +419,7 @@ class TestEndToEndVariantPipeline:
 
     def test_full_chain_no_selectexpr_needed(self, spark, orthanc_connector):
         """
-        Full chain: real HTTP → VariantVal conversion → DataFrame with VariantType metadata.
+        Full chain: mocked HTTP -> VariantVal conversion -> DataFrame with VariantType metadata.
         No selectExpr / parse_json() transformation required.
         """
         from pyspark.sql.types import VariantType
@@ -328,10 +428,26 @@ class TestEndToEndVariantPipeline:
             INSTANCES_SCHEMA,
         )
 
-        records_iter, _ = orthanc_connector.read_table(
-            "instances", {}, {"page_size": "5", "fetch_metadata": "true"}
-        )
-        records = list(records_iter)
+        with (
+            patch.object(orthanc_connector._client, "query_studies", return_value=FIXTURE_STUDIES),
+            patch.object(
+                orthanc_connector._client, "query_series_for_study", return_value=FIXTURE_SERIES
+            ),
+            patch.object(
+                orthanc_connector._client,
+                "query_instances_for_series",
+                return_value=FIXTURE_INSTANCES,
+            ),
+            patch.object(
+                orthanc_connector._client,
+                "retrieve_series_metadata",
+                return_value=FIXTURE_METADATA,
+            ),
+        ):
+            records_iter, _ = orthanc_connector.read_table(
+                "instances", {}, {"page_size": "5", "fetch_metadata": "true"}
+            )
+            records = list(records_iter)
         assert len(records) > 0
         assert any(r.get("metadata") is not None for r in records), (
             "At least one instance must have metadata for a meaningful test"
@@ -351,7 +467,7 @@ class TestEndToEndVariantPipeline:
 
 
 # ---------------------------------------------------------------------------
-# Layer 4 — OSS Declarative Pipeline (pyspark.pipelines)
+# Layer 4 -- OSS Declarative Pipeline (pyspark.pipelines)
 # ---------------------------------------------------------------------------
 
 
@@ -359,23 +475,7 @@ class TestEndToEndVariantPipeline:
 class TestDeclarativePipeline:
     """
     Tests for the OSS declarative pipeline API (pyspark.pipelines, Spark 4.0+).
-
-    The pipeline execution engine (spark_connect_pipeline.start_run) uses Spark Connect
-    and requires a running server.  We test the pipeline definition and execution logic
-    directly using graph_element_registration_context + direct flow.func() invocation,
-    which is exactly what the pipeline scheduler does at runtime.
-
-    Note: apply_changes() is a Databricks extension absent from OSS Spark.  The OSS
-    equivalents used here are @sdp.table (batch replace) and @sdp.append_flow (streaming
-    append).  These are sufficient to test the VariantType metadata pipeline.
-
-    New architecture: parse_value() converts JSON → VariantVal, so @sdp.table bodies
-    produce VariantType DataFrames directly — no _apply_column_expressions needed.
     """
-
-    # ------------------------------------------------------------------
-    # Helper: minimal in-memory GraphElementRegistry
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _make_capturing_registry():
@@ -418,7 +518,7 @@ class TestDeclarativePipeline:
 
             @sdp.append_flow(target="dicom_instances", name="instances_flow")
             def instances_flow_fn():
-                return None  # body not called during registration
+                return None
 
         output_names = {o.name for o in outputs}
         flow_names = {f.name for f in flows}
@@ -459,13 +559,6 @@ class TestDeclarativePipeline:
         """
         Simulate the pipeline scheduler: capture an @sdp.table definition then call
         flow.func() directly with the test SparkSession.
-
-        Pipeline topology being tested:
-          [Orthanc DICOMweb]
-              ↓  (HTTP / QIDO-RS + WADO-RS)
-          @sdp.temporary_view("instances_raw")    — VariantVal.parseJson() → VariantType DF
-              ↓  (no transformation needed)
-          @sdp.table("instances")                 — reads VariantType DF as-is
         """
         import pyspark.pipelines as sdp
         from pyspark.pipelines.graph_element_registry import graph_element_registration_context
@@ -488,10 +581,30 @@ class TestDeclarativePipeline:
 
             @sdp.temporary_view(name="instances_raw")
             def instances_raw_fn():
-                records_iter, _ = orthanc_connector.read_table(
-                    "instances", {}, {"page_size": "5", "fetch_metadata": "true"}
-                )
-                records = list(records_iter)
+                with (
+                    patch.object(
+                        orthanc_connector._client, "query_studies", return_value=FIXTURE_STUDIES
+                    ),
+                    patch.object(
+                        orthanc_connector._client,
+                        "query_series_for_study",
+                        return_value=FIXTURE_SERIES,
+                    ),
+                    patch.object(
+                        orthanc_connector._client,
+                        "query_instances_for_series",
+                        return_value=FIXTURE_INSTANCES,
+                    ),
+                    patch.object(
+                        orthanc_connector._client,
+                        "retrieve_series_metadata",
+                        return_value=FIXTURE_METADATA,
+                    ),
+                ):
+                    records_iter, _ = orthanc_connector.read_table(
+                        "instances", {}, {"page_size": "5", "fetch_metadata": "true"}
+                    )
+                    records = list(records_iter)
                 rows = [to_variant_row(r) for r in records]
                 return spark.createDataFrame(rows, INSTANCES_SCHEMA)
 
@@ -524,8 +637,6 @@ class TestDeclarativePipeline:
     def test_sdp_append_flow_body_produces_variant(self, spark, orthanc_connector):
         """
         Streaming pattern: sdp.create_streaming_table + @sdp.append_flow.
-        Mirrors the Databricks pipeline pattern; metadata JSON → VariantVal before
-        creating the DataFrame.
         """
         import pyspark.pipelines as sdp
         from pyspark.pipelines.graph_element_registry import graph_element_registration_context
@@ -549,10 +660,30 @@ class TestDeclarativePipeline:
 
             @sdp.append_flow(target="instances_stream", name="instances_append")
             def instances_append_fn():
-                records_iter, _ = orthanc_connector.read_table(
-                    "instances", {}, {"page_size": "5", "fetch_metadata": "true"}
-                )
-                records = list(records_iter)
+                with (
+                    patch.object(
+                        orthanc_connector._client, "query_studies", return_value=FIXTURE_STUDIES
+                    ),
+                    patch.object(
+                        orthanc_connector._client,
+                        "query_series_for_study",
+                        return_value=FIXTURE_SERIES,
+                    ),
+                    patch.object(
+                        orthanc_connector._client,
+                        "query_instances_for_series",
+                        return_value=FIXTURE_INSTANCES,
+                    ),
+                    patch.object(
+                        orthanc_connector._client,
+                        "retrieve_series_metadata",
+                        return_value=FIXTURE_METADATA,
+                    ),
+                ):
+                    records_iter, _ = orthanc_connector.read_table(
+                        "instances", {}, {"page_size": "5", "fetch_metadata": "true"}
+                    )
+                    records = list(records_iter)
                 rows = [to_variant_row(r) for r in records]
                 return spark.createDataFrame(rows, INSTANCES_SCHEMA)
 
