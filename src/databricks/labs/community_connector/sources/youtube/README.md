@@ -251,6 +251,7 @@ Run the pipeline using your usual Lakeflow or Databricks orchestration. The conn
 - **401 / 403 with OAuth**: Verify `client_id`, `client_secret`, and `refresh_token`. Re-run the authenticate script (`authenticate.py -s youtube -m browser`) to obtain a new refresh token if it was revoked or expired.
 - **403 with API key**: Check that the API key is valid and that YouTube Data API v3 is enabled in your Google Cloud project. Restrict the key to the YouTube API if you have key restrictions.
 - **Quota exceeded**: Reduce frequency of syncs, especially for `search` (100 units per request), or request a quota increase in Google Cloud Console.
+- **"Found 2 rows for key" (search `search_query` / `result_index`)**: The connector emits each `result_index` (e.g. `{uuid}_{position}`) only once per read. If the same key appears twice, the pipeline is delivering the same batch twice (e.g. duplicate task, retry, or stream replayed). **Fix**: Deduplicate the search source before merge (e.g. by `(search_query, result_index)`) in the pipeline, or ensure exactly-once processing so the same connector output is not written twice.
 - **"channels requires channel_ids, for_username, or mine=true"** (or similar): Ensure exactly one of the required table options is set for that table in `table_configuration`.
 
 ### Running Tests
