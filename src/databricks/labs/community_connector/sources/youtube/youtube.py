@@ -25,6 +25,20 @@ INITIAL_BACKOFF = 1.0
 MAX_RETRIES = 5
 RETRIABLE_STATUS_CODES = {429, 500, 503}
 MAX_RESULTS_DEFAULT = 50
+# commentThreads and comments support 1-100; other list endpoints support 1-50
+MAX_RESULTS_COMMENT_THREADS = 100
+
+
+def _max_results(table_options: dict[str, str], default: int = MAX_RESULTS_DEFAULT, cap: int = 50) -> int:
+    """Parse max_results from table_options; clamp to [1, cap]. Used for pagination page size."""
+    raw = table_options.get("max_results") or ""
+    if not raw:
+        return min(default, cap)
+    try:
+        n = int(raw.strip())
+        return max(1, min(n, cap))
+    except ValueError:
+        return min(default, cap)
 
 
 def _get_nested(d: dict, path: str, default: str | None = None) -> str | None:
@@ -323,7 +337,7 @@ class YouTubeLakeflowConnect(LakeflowConnect):
         self, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
         part = "snippet,statistics,contentDetails"
-        params = {"part": part, "maxResults": MAX_RESULTS_DEFAULT}
+        params = {"part": part, "maxResults": _max_results(table_options, cap=50)}
         channel_ids = (table_options.get("channel_ids") or "").strip()
         if channel_ids:
             params["id"] = channel_ids
@@ -348,7 +362,7 @@ class YouTubeLakeflowConnect(LakeflowConnect):
     def _read_playlists(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
-        params = {"part": "snippet,contentDetails", "maxResults": MAX_RESULTS_DEFAULT}
+        params = {"part": "snippet,contentDetails", "maxResults": _max_results(table_options, cap=50)}
         pl_ids = (table_options.get("playlist_ids") or "").strip()
         ch_id = (table_options.get("channel_id") or "").strip()
         if pl_ids:
@@ -380,9 +394,11 @@ class YouTubeLakeflowConnect(LakeflowConnect):
         params = {
             "part": "snippet,contentDetails",
             "playlistId": playlist_id,
-            "maxResults": MAX_RESULTS_DEFAULT,
+            "maxResults": _max_results(table_options, cap=50),
         }
-        page_token = start_offset.get("pageToken")
+        soff = start_offset or {}
+        page_token = soff.get("pageToken")
+        current_page = int(soff.get("_page") or 1)
         if page_token:
             params["pageToken"] = page_token
         resp = self._request("GET", "playlistItems", params=params)
@@ -391,23 +407,33 @@ class YouTubeLakeflowConnect(LakeflowConnect):
         items = data.get("items") or []
         records = [_flatten_playlist_item(i) for i in items]
         next_token = data.get("nextPageToken")
-        next_offset = {"pageToken": next_token} if next_token else {"pageToken": None}
+        max_pages_raw = (table_options.get("max_pages") or "").strip()
+        max_pages = int(max_pages_raw) if max_pages_raw.isdigit() else None
+        if next_token and max_pages is not None and current_page >= max_pages:
+            next_token = None
+        next_offset = (
+            {"pageToken": next_token, "_page": current_page + 1}
+            if next_token
+            else {"pageToken": None, "_page": current_page}
+        )
         return iter(records), next_offset
 
     def _read_videos(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
-        params = {"part": "snippet,statistics,contentDetails", "maxResults": MAX_RESULTS_DEFAULT}
+        params = {"part": "snippet,statistics,contentDetails", "maxResults": _max_results(table_options, cap=50)}
         video_ids = (table_options.get("video_ids") or "").strip()
+        use_chart = (table_options.get("chart") or "").lower() == "mostpopular"
         if video_ids:
             params["id"] = video_ids
-        elif (table_options.get("chart") or "").lower() == "mostpopular":
+        elif use_chart:
             params["chart"] = "mostPopular"
             if table_options.get("region_code"):
                 params["regionCode"] = table_options["region_code"]
             if table_options.get("video_category_id"):
                 params["videoCategoryId"] = table_options["video_category_id"]
-            page_token = start_offset.get("pageToken")
+            soff = start_offset or {}
+            page_token = soff.get("pageToken")
             if page_token:
                 params["pageToken"] = page_token
         else:
@@ -418,7 +444,19 @@ class YouTubeLakeflowConnect(LakeflowConnect):
         items = data.get("items") or []
         records = [_flatten_video(i) for i in items]
         next_token = data.get("nextPageToken")
-        next_offset = {"pageToken": next_token} if next_token else {"pageToken": None}
+        if use_chart and next_token:
+            current_page = int((start_offset or {}).get("_page") or 1)
+            max_pages_raw = (table_options.get("max_pages") or "").strip()
+            max_pages = int(max_pages_raw) if max_pages_raw.isdigit() else None
+            if max_pages is not None and current_page >= max_pages:
+                next_token = None
+            next_offset = (
+                {"pageToken": next_token, "_page": current_page + 1}
+                if next_token
+                else {"pageToken": None, "_page": current_page}
+            )
+        else:
+            next_offset = {"pageToken": next_token} if next_token else {"pageToken": None}
         return iter(records), next_offset
 
     def _read_search(
@@ -427,7 +465,7 @@ class YouTubeLakeflowConnect(LakeflowConnect):
         q = (table_options.get("q") or "").strip()
         if not q:
             raise ValueError("search requires q (query) in table_options")
-        params = {"part": "snippet", "q": q, "maxResults": MAX_RESULTS_DEFAULT}
+        params = {"part": "snippet", "q": q, "maxResults": _max_results(table_options, cap=50)}
         if table_options.get("type"):
             params["type"] = table_options["type"]
         if table_options.get("channel_id"):
@@ -436,7 +474,8 @@ class YouTubeLakeflowConnect(LakeflowConnect):
             params["publishedAfter"] = table_options["published_after"]
         if table_options.get("order"):
             params["order"] = table_options["order"]
-        page_token = start_offset.get("pageToken")
+        page_token = (start_offset or {}).get("pageToken")
+        current_page = int((start_offset or {}).get("_page") or 1)
         if page_token:
             params["pageToken"] = page_token
         resp = self._request("GET", "search", params=params)
@@ -445,13 +484,17 @@ class YouTubeLakeflowConnect(LakeflowConnect):
         items = data.get("items") or []
         records = [_flatten_search_result(i) for i in items]
         next_token = data.get("nextPageToken")
-        next_offset = {"pageToken": next_token} if next_token else {"pageToken": None}
+        max_pages_raw = (table_options.get("max_pages") or "").strip()
+        max_pages = int(max_pages_raw) if max_pages_raw.isdigit() else None
+        if next_token and max_pages is not None and current_page >= max_pages:
+            next_token = None
+        next_offset = {"pageToken": next_token, "_page": current_page + 1} if next_token else {"pageToken": None, "_page": current_page}
         return iter(records), next_offset
 
     def _read_activities(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
-        params = {"part": "snippet,contentDetails", "maxResults": MAX_RESULTS_DEFAULT}
+        params = {"part": "snippet,contentDetails", "maxResults": _max_results(table_options, cap=50)}
         ch_id = (table_options.get("channel_id") or "").strip()
         if ch_id:
             params["channelId"] = ch_id
@@ -478,16 +521,29 @@ class YouTubeLakeflowConnect(LakeflowConnect):
     ) -> tuple[Iterator[dict], dict]:
         video_id = (table_options.get("video_id") or "").strip()
         channel_id = (table_options.get("channel_id") or "").strip()
+        mr = _max_results(table_options, default=MAX_RESULTS_COMMENT_THREADS, cap=100)
         if video_id:
-            params = {"part": "snippet", "videoId": video_id, "maxResults": min(100, MAX_RESULTS_DEFAULT)}
+            params = {"part": "snippet", "videoId": video_id, "maxResults": mr}
         elif channel_id:
-            params = {"part": "snippet", "allThreadsRelatedToChannelId": channel_id, "maxResults": min(100, MAX_RESULTS_DEFAULT)}
+            params = {"part": "snippet", "allThreadsRelatedToChannelId": channel_id, "maxResults": mr}
         else:
             raise ValueError("comment_threads requires video_id or channel_id")
         page_token = start_offset.get("pageToken")
         if page_token:
             params["pageToken"] = page_token
         resp = self._request("GET", "commentThreads", params=params)
+        if resp.status_code == 403:
+            try:
+                err = resp.json().get("error", {})
+                reason = err.get("errors", [{}])[0].get("reason", "") or err.get("message", "")
+            except Exception:
+                reason = resp.text or "unknown"
+            ident = f"video_id={video_id}" if video_id else f"channel_id={channel_id}"
+            raise ValueError(
+                "comment_threads returned 403 Forbidden. Comments may be disabled for this "
+                f"video or channel ({ident}), or it may be restricted. Try a different video_id, "
+                "or see README for channel_id limitations. API reason: " + str(reason)[:200]
+            )
         resp.raise_for_status()
         data = resp.json()
         items = data.get("items") or []
@@ -499,7 +555,7 @@ class YouTubeLakeflowConnect(LakeflowConnect):
     def _read_subscriptions(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
-        params = {"part": "snippet", "maxResults": MAX_RESULTS_DEFAULT}
+        params = {"part": "snippet", "maxResults": _max_results(table_options, cap=50)}
         ch_id = (table_options.get("channel_id") or "").strip()
         if ch_id:
             params["channelId"] = ch_id
@@ -522,7 +578,7 @@ class YouTubeLakeflowConnect(LakeflowConnect):
     def _read_video_categories(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
-        params = {"part": "snippet", "maxResults": MAX_RESULTS_DEFAULT}
+        params = {"part": "snippet", "maxResults": _max_results(table_options, cap=50)}
         if table_options.get("region_code"):
             params["regionCode"] = table_options["region_code"]
         page_token = start_offset.get("pageToken")

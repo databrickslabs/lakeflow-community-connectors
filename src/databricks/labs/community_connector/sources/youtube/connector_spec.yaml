@@ -58,4 +58,4 @@ connection:
 # comma-separated list in the UC connection's externalOptionsAllowList so
 # Databricks can pass them through to the connector.
 # ============================================================================
-external_options_allowlist: "channel_id,channel_ids,chart,for_username,mine,order,playlist_id,playlist_ids,published_after,q,region_code,type,video_category_id,video_id,video_ids"
+external_options_allowlist: "channel_id,channel_ids,chart,for_username,max_pages,max_results,mine,order,playlist_id,playlist_ids,published_after,q,region_code,type,video_category_id,video_id,video_ids"
