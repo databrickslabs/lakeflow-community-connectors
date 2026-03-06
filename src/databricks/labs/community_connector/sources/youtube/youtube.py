@@ -13,11 +13,11 @@ import requests
 from pyspark.sql.types import StructType
 
 from databricks.labs.community_connector.interface import LakeflowConnect
-from databricks.labs.community_connector.sources.youtube import youtube_schemas
-
-SUPPORTED_TABLES = youtube_schemas.SUPPORTED_TABLES
-TABLE_SCHEMAS = youtube_schemas.TABLE_SCHEMAS
-TABLE_METADATA = youtube_schemas.TABLE_METADATA
+from databricks.labs.community_connector.sources.youtube.youtube_schemas import (
+    SUPPORTED_TABLES,
+    TABLE_SCHEMAS,
+    TABLE_METADATA,
+)
 
 BASE_URL = "https://www.googleapis.com/youtube/v3"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
