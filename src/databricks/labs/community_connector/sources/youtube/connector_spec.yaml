@@ -1,0 +1,54 @@
+# youtube Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Display name (required for Databricks to show connection parameter prompts)
+# ============================================================================
+display_name: YouTube
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# OAuth 2.0 with client_id, client_secret, refresh_token for YouTube Data API v3.
+# ============================================================================
+connection:
+  parameters:
+    - name: client_id
+      type: string
+      required: true
+      description: >
+        OAuth 2.0 client ID from Google Cloud Console.
+
+    - name: client_secret
+      type: string
+      required: true
+      secret: true
+      description: >
+        OAuth 2.0 client secret from Google Cloud Console.
+
+    - name: refresh_token
+      type: string
+      required: true
+      secret: true
+      description: >
+        Long-lived refresh token obtained with access_type=offline during
+        authorization. Used to obtain access tokens at runtime for the
+        YouTube Data API v3.
+
+  oauth:
+    authorization_url: "https://accounts.google.com/o/oauth2/v2/auth"
+    token_url: "https://oauth2.googleapis.com/token"
+    scopes: "https://www.googleapis.com/auth/youtube.readonly"
+    extra_auth_params:
+      access_type: "offline"
+      prompt: "consent"
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# If no table-specific options are needed, set to empty string or omit.
+# ============================================================================
+external_options_allowlist: ""
