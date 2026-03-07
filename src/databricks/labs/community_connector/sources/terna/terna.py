@@ -276,7 +276,8 @@ class TernaLakeflowConnect(LakeflowConnect):
             return (from_date, to_date), range_end_str
 
         # First run: use table_options or default range
-        # Accept date_from/date_to (spec), dateFrom/dateTo (camelCase), datefrom/dateto (platform-normalized)
+        # Accept date_from (required), date_to (optional; default = current date / end_cap).
+        # Also accept dateFrom/dateTo (camelCase), datefrom/dateto (platform-normalized)
         date_from_opt = (
             table_options.get("date_from")
             or table_options.get("dateFrom")
@@ -287,14 +288,17 @@ class TernaLakeflowConnect(LakeflowConnect):
             or table_options.get("dateTo")
             or table_options.get("dateto")
         )
-        if date_from_opt and date_to_opt:
+        if date_from_opt:
             try:
                 from_date = datetime.strptime(
                     date_from_opt.strip(), "%d/%m/%Y"
                 ).replace(tzinfo=timezone.utc)
-                to_date_requested = datetime.strptime(
-                    date_to_opt.strip(), "%d/%m/%Y"
-                ).replace(tzinfo=timezone.utc)
+                if date_to_opt:
+                    to_date_requested = datetime.strptime(
+                        date_to_opt.strip(), "%d/%m/%Y"
+                    ).replace(tzinfo=timezone.utc)
+                else:
+                    to_date_requested = end_cap
                 self._check_history_limit(from_date)
                 if from_date > end_cap:
                     return None, None
