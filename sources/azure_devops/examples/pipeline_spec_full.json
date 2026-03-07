@@ -1,0 +1,114 @@
+{
+  "connection_name": "azure_devops_connection",
+  "objects": [
+    {
+      "table": {
+        "source_table": "projects",
+        "destination_catalog": "main",
+        "destination_schema": "azure_devops_raw",
+        "destination_table": "projects",
+        "table_configuration": {
+          "scd_type": "SCD_TYPE_1",
+          "primary_keys": ["id"]
+        }
+      }
+    },
+    {
+      "table": {
+        "source_table": "repositories",
+        "destination_catalog": "main",
+        "destination_schema": "azure_devops_raw",
+        "destination_table": "repositories",
+        "table_configuration": {
+          "scd_type": "SCD_TYPE_1",
+          "primary_keys": ["id"],
+          "project": "MyProject"
+        }
+      }
+    },
+    {
+      "table": {
+        "source_table": "commits",
+        "destination_catalog": "main",
+        "destination_schema": "azure_devops_raw",
+        "destination_table": "commits",
+        "table_configuration": {
+          "scd_type": "APPEND_ONLY",
+          "primary_keys": ["commitId", "repository_id"],
+          "project": "MyProject",
+          "repository_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        }
+      }
+    },
+    {
+      "table": {
+        "source_table": "pullrequests",
+        "destination_catalog": "main",
+        "destination_schema": "azure_devops_raw",
+        "destination_table": "pullrequests",
+        "table_configuration": {
+          "scd_type": "SCD_TYPE_2",
+          "primary_keys": ["pullRequestId", "repository_id"],
+          "project": "MyProject",
+          "repository_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+          "status_filter": "all"
+        }
+      }
+    },
+    {
+      "table": {
+        "source_table": "pullrequest_threads",
+        "destination_catalog": "main",
+        "destination_schema": "azure_devops_raw",
+        "destination_table": "pullrequest_threads",
+        "table_configuration": {
+          "scd_type": "APPEND_ONLY",
+          "primary_keys": ["id", "pullrequest_id", "repository_id"],
+          "project": "MyProject",
+          "repository_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+          "pullrequest_id": "123"
+        }
+      }
+    },
+    {
+      "table": {
+        "source_table": "users",
+        "destination_catalog": "main",
+        "destination_schema": "azure_devops_raw",
+        "destination_table": "users",
+        "table_configuration": {
+          "scd_type": "SCD_TYPE_1",
+          "primary_keys": ["descriptor"]
+        }
+      }
+    },
+    {
+      "table": {
+        "source_table": "workitems",
+        "destination_catalog": "main",
+        "destination_schema": "azure_devops_raw",
+        "destination_table": "workitems",
+        "table_configuration": {
+          "scd_type": "SCD_TYPE_2",
+          "primary_keys": ["id"],
+          "project": "MyProject",
+          "ids": "1,2,3,4,5"
+        }
+      }
+    },
+    {
+      "table": {
+        "source_table": "workitem_revisions",
+        "destination_catalog": "main",
+        "destination_schema": "azure_devops_raw",
+        "destination_table": "workitem_revisions",
+        "table_configuration": {
+          "scd_type": "APPEND_ONLY",
+          "primary_keys": ["id", "rev"],
+          "project": "MyProject"
+        }
+      }
+    }
+  ]
+}
+

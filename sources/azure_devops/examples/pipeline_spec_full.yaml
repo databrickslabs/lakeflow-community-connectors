@@ -1,0 +1,203 @@
+# Full Pipeline Spec for Azure DevOps Connector
+# Shows all 14 tables with complete configuration options
+
+connection_name: azure_devops_connection
+
+objects:
+  # ========================================
+  # Organization Tables
+  # ========================================
+  
+  - table:
+      source_table: projects
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      destination_table: projects
+      table_configuration:
+        scd_type: SCD_TYPE_1  # Snapshot ingestion
+        primary_keys:
+          - id
+
+  - table:
+      source_table: users
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      destination_table: users
+      table_configuration:
+        scd_type: SCD_TYPE_1  # Snapshot ingestion
+        primary_keys:
+          - descriptor
+
+  # ========================================
+  # Git Tables - Targeted Mode (Specific Project & Repo)
+  # ========================================
+  
+  - table:
+      source_table: repositories
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      destination_table: repositories
+      table_configuration:
+        scd_type: SCD_TYPE_1  # Snapshot ingestion
+        primary_keys:
+          - id
+        project: MyProject  # Optional: specify project
+
+  - table:
+      source_table: commits
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      destination_table: commits
+      table_configuration:
+        scd_type: APPEND_ONLY  # Append ingestion
+        primary_keys:
+          - commitId
+          - repository_id
+        project: MyProject  # Optional: specify project
+        repository_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890  # Optional: specific repo
+
+  - table:
+      source_table: pullrequests
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      destination_table: pullrequests
+      table_configuration:
+        scd_type: SCD_TYPE_2  # CDC ingestion
+        primary_keys:
+          - pullRequestId
+          - repository_id
+        project: MyProject  # Optional: specify project
+        repository_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890  # Optional: specific repo
+        status_filter: all  # Options: active, completed, abandoned, all
+
+  - table:
+      source_table: refs
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      destination_table: refs
+      table_configuration:
+        scd_type: SCD_TYPE_1  # Snapshot ingestion
+        primary_keys:
+          - name
+          - repository_id
+        project: MyProject  # Optional: specify project
+        repository_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890  # Optional: specific repo
+        filter: heads/  # Optional: filter for branches (use 'tags/' for tags)
+
+  - table:
+      source_table: pushes
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      destination_table: pushes
+      table_configuration:
+        scd_type: APPEND_ONLY  # Append ingestion
+        primary_keys:
+          - pushId
+          - repository_id
+        project: MyProject  # Optional: specify project
+        repository_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890  # Optional: specific repo
+
+  # ========================================
+  # Pull Request Detail Tables - Targeted Mode
+  # ========================================
+  
+  - table:
+      source_table: pullrequest_threads
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      destination_table: pullrequest_threads
+      table_configuration:
+        scd_type: APPEND_ONLY  # Append ingestion
+        primary_keys:
+          - id
+          - pullrequest_id
+          - repository_id
+        project: MyProject  # Optional: specify project
+        repository_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890  # Optional: specific repo
+        pullrequest_id: "123"  # Optional: specific PR
+
+  - table:
+      source_table: pullrequest_workitems
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      destination_table: pullrequest_workitems
+      table_configuration:
+        scd_type: SCD_TYPE_1  # Snapshot ingestion
+        primary_keys:
+          - id
+          - pullrequest_id
+          - repository_id
+        project: MyProject  # Optional: specify project
+        repository_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890  # Optional: specific repo
+        pullrequest_id: "123"  # Optional: specific PR
+
+  - table:
+      source_table: pullrequest_commits
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      destination_table: pullrequest_commits
+      table_configuration:
+        scd_type: SCD_TYPE_1  # Snapshot ingestion
+        primary_keys:
+          - commitId
+          - pullrequest_id
+          - repository_id
+        project: MyProject  # Optional: specify project
+        repository_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890  # Optional: specific repo
+        pullrequest_id: "123"  # Optional: specific PR
+
+  - table:
+      source_table: pullrequest_reviewers
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      destination_table: pullrequest_reviewers
+      table_configuration:
+        scd_type: SCD_TYPE_1  # Snapshot ingestion
+        primary_keys:
+          - id
+          - pullrequest_id
+          - repository_id
+        project: MyProject  # Optional: specify project
+        repository_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890  # Optional: specific repo
+        pullrequest_id: "123"  # Optional: specific PR
+
+  # ========================================
+  # Work Item Tracking Tables
+  # ========================================
+  
+  - table:
+      source_table: workitems
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      destination_table: workitems
+      table_configuration:
+        scd_type: SCD_TYPE_2  # CDC ingestion
+        primary_keys:
+          - id
+        project: MyProject  # Optional: specify project
+        ids: "1,2,3,4,5"  # Required: comma-separated work item IDs
+
+  - table:
+      source_table: workitem_revisions
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      destination_table: workitem_revisions
+      table_configuration:
+        scd_type: APPEND_ONLY  # Append ingestion
+        primary_keys:
+          - id
+          - rev
+        project: MyProject  # Optional: specify project
+
+  - table:
+      source_table: workitem_types
+      destination_catalog: main
+      destination_schema: azure_devops_raw
+      destination_table: workitem_types
+      table_configuration:
+        scd_type: SCD_TYPE_1  # Snapshot ingestion
+        primary_keys:
+          - referenceName
+          - project_name
+        project: MyProject  # Optional: specify project
+

@@ -1,0 +1,29 @@
+# Minimal Pipeline Spec for Azure DevOps Connector
+# Ingests core tables with default settings
+
+connection_name: azure_devops_connection
+
+objects:
+  # Organization-level tables
+  - table:
+      source_table: projects
+  
+  - table:
+      source_table: users
+
+  # Git tables (auto-discovery mode - fetches from all projects/repos)
+  - table:
+      source_table: repositories
+  
+  - table:
+      source_table: commits
+  
+  - table:
+      source_table: pullrequests
+  
+  - table:
+      source_table: refs
+  
+  - table:
+      source_table: pushes
+
