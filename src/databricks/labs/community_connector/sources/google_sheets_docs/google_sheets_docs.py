@@ -280,9 +280,14 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
     def _sheet_values_use_headers(self, table_options: dict[str, str]) -> bool:
         """Return True if sheet_values should treat the first row as column headers.
 
-        Default is True unless use_first_row_as_header is 'false', '0', or 'no'.
+        Default is True unless use_first_row_as_header (or useFirstRowAsHeader) is
+        'false', '0', or 'no'. Accepts both snake_case and camelCase for compatibility.
         """
-        v = (table_options.get("use_first_row_as_header") or "true").strip().lower()
+        v = (
+            table_options.get("use_first_row_as_header")
+            or table_options.get("useFirstRowAsHeader")
+            or "true"
+        ).strip().lower()
         return v not in ("false", "0", "no")
 
     @staticmethod
