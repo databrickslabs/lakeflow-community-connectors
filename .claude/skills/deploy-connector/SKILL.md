@@ -15,7 +15,7 @@ args:
     description: The name of the existing pipeline to update. Only used when mode is 'update'. If omitted in update mode, the user will be prompted.
     required: false
   - name: use_local_source
-    description: Whether to upload local source files directly to the workspace. If true, passes --use-local-source to the CLI, which uploads *.py, README.md, and connector_spec.yaml to the workspace repo. No wheel build is needed.
+    description: "Defaults to false. When true, uploads local source files to overwrite the source directory in the cloned workspace repo. Use when the connector has not been published to the remote repo yet. The CLI still clones the repo (for framework/interface code), then uploads local *.py, README.md, and connector_spec.yaml on top. Do not prompt the user for this — only set to true if the user explicitly requests it."
     required: false
 ---
 
@@ -47,9 +47,9 @@ If `{{use_local_source}}` is true:
    ```bash
    python tools/scripts/merge_python_source.py {{source_name}}
    ```
-3. You will pass `--use-local-source` to the CLI in Step 5. No wheel build is needed.
+3. You will pass `--use-local-source` to the CLI in Step 5. The CLI still clones the Git repo (for framework/interface code), then uploads the local source files on top — overwriting the source directory in the workspace repo. This is used when the connector has not been published to the remote repo yet.
 
-If `{{use_local_source}}` is not true, skip this step — the default deployment uses a Git repo clone.
+If `{{use_local_source}}` is not true, skip this step — the default deployment assumes the connector source is already in the remote Git repo.
 
 ---
 
