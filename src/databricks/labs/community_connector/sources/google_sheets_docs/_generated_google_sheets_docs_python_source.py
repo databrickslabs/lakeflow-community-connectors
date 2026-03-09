@@ -432,10 +432,7 @@ def register_lakeflow_source(spark):
     ########################################################
     # src/databricks/labs/community_connector/sources/google_sheets_docs/google_sheets_docs.py
     ########################################################
-
-    SUPPORTED_TABLES = google_sheets_docs_schemas.SUPPORTED_TABLES
-    TABLE_METADATA = google_sheets_docs_schemas.TABLE_METADATA
-    TABLE_SCHEMAS = google_sheets_docs_schemas.TABLE_SCHEMAS
+    # SUPPORTED_TABLES, TABLE_METADATA, TABLE_SCHEMAS already defined above from schema inlining.
 
     # Google API base URLs
     TOKEN_URL = "https://oauth2.googleapis.com/token"

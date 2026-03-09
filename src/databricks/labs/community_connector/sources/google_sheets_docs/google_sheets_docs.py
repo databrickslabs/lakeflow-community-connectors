@@ -21,9 +21,8 @@ import requests
 from pyspark.sql.types import StructType, StructField, StringType
 
 from databricks.labs.community_connector.interface import LakeflowConnect
-from databricks.labs.community_connector.sources.google_sheets_docs import (
-    google_sheets_docs_schemas,
-)
+
+from . import google_sheets_docs_schemas
 
 SUPPORTED_TABLES = google_sheets_docs_schemas.SUPPORTED_TABLES
 TABLE_METADATA = google_sheets_docs_schemas.TABLE_METADATA
