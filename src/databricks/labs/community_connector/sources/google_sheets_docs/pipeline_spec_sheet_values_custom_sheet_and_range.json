@@ -1,0 +1,16 @@
+{
+  "connection_name": "google_sheets_docs_connection",
+  "objects": [
+    {
+      "table": {
+        "source_table": "sheet_values",
+        "table_configuration": {
+          "spreadsheet_id": "YOUR_SPREADSHEET_ID",
+          "sheet_name": "Data",
+          "range": "A1:D100",
+          "use_first_row_as_header": "true"
+        }
+      }
+    }
+  ]
+}

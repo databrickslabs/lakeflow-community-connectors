@@ -1,0 +1,10 @@
+{
+  "connection_name": "google_sheets_docs_connection",
+  "objects": [
+    {
+      "table": {
+        "source_table": "spreadsheets"
+      }
+    }
+  ]
+}

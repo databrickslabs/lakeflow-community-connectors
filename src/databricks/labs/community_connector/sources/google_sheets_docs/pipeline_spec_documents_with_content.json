@@ -1,0 +1,13 @@
+{
+  "connection_name": "google_sheets_docs_connection",
+  "objects": [
+    {
+      "table": {
+        "source_table": "documents",
+        "table_configuration": {
+          "include_content": "true"
+        }
+      }
+    }
+  ]
+}
