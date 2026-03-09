@@ -639,17 +639,34 @@ def _build_success_html(display_name: str, output_file: Path) -> str:
 def _build_oauth_popup_html(
     refresh_token: str | None = None, error: str | None = None,
 ) -> str:
-    """HTML for the OAuth popup that sends the result back to the opener via postMessage."""
+    """HTML for the OAuth popup; sends result to opener via postMessage and shows token for copy."""
     if refresh_token:
         title = "Authorization Successful"
-        message = "Token obtained! This window will close automatically."
+        # Show token first so it's impossible to miss; user can copy and paste into main form
+        token_block = (
+            f'<p style="text-align:left;font-size:13px;margin-bottom:8px">'
+            f'<strong>Refresh token</strong> — copy this entire value:</p>'
+            f'<textarea readonly style="width:100%;min-height:100px;font-size:12px;'
+            f'font-family:monospace;padding:12px;border:2px solid #059669;border-radius:8px;'
+            f'background:#f0fdf4;margin-bottom:12px" id="rt">{(html.escape(refresh_token))}</textarea>'
+            f'<p style="text-align:left;font-size:12px;color:#666">'
+            f'Paste it into the main tab\'s <strong>refresh_token</strong> field, then click Save. '
+            f'This window will close in 15 seconds.</p>'
+        )
         payload = json.dumps({"type": "oauth_complete", "refresh_token": refresh_token})
-        auto_close = "setTimeout(function(){window.close()},1500);"
+        auto_close = (
+            "setTimeout(function(){"
+            "if(window.opener){try{window.opener.focus();}catch(e){}}"
+            "window.close();"
+            "},15000);"
+        )
+        body_content = f"<h2>{_esc(title)}</h2>{token_block}"
     else:
         title = "Authorization Failed"
         message = f"Error: {error or 'unknown'}"
         payload = json.dumps({"type": "oauth_error", "error": error or "unknown"})
         auto_close = ""
+        body_content = f"<h2>{_esc(title)}</h2><p>{_esc(message)}</p>"
 
     return (
         f'<!DOCTYPE html><html><head><meta charset="utf-8">'
@@ -657,8 +674,8 @@ def _build_oauth_popup_html(
         f'<style>body{{font-family:sans-serif;display:flex;justify-content:center;'
         f'align-items:center;min-height:100vh;background:#f5f7fa}}'
         f'.b{{background:#fff;border-radius:12px;padding:48px;text-align:center;'
-        f'box-shadow:0 4px 24px rgba(0,0,0,.08);max-width:420px}}</style></head>'
-        f'<body><div class="b"><h2>{_esc(title)}</h2><p>{_esc(message)}</p></div>'
+        f'box-shadow:0 4px 24px rgba(0,0,0,.08);max-width:520px}}</style></head>'
+        f'<body><div class="b">{body_content}</div>'
         f'<script>if(window.opener){{window.opener.postMessage({payload},"*");}}'
         f'{auto_close}</script></body></html>'
     )
@@ -770,6 +787,9 @@ def run_browser(  # pylint: disable=too-many-statements,too-many-locals
 
             rt = token_data.get("refresh_token")
             if rt:
+                print("\n--- Refresh token (copy if needed) ---")
+                print(rt)
+                print("--- Paste into main form refresh_token field, then Save ---\n")
                 self._send_html(_build_oauth_popup_html(refresh_token=rt))
             else:
                 err = "No refresh token in provider response."
