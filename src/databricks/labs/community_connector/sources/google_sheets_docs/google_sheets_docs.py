@@ -12,6 +12,7 @@ Tables exposed:
     plain-text content via Drive export or Docs API.
 """
 
+import json
 import re
 import time
 from urllib.parse import quote
@@ -170,6 +171,30 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
                 f"Table '{table_name}' is not supported. Supported: {SUPPORTED_TABLES}"
             )
 
+    @staticmethod
+    def _resolve_table_options(table_name: str, table_options: dict[str, str]) -> dict[str, str]:
+        """Resolve per-table config when options are the full data source options.
+
+        When the pipeline passes options that include 'tableConfigs' (JSON map of
+        table name -> config), extract the config for this table so that
+        spreadsheet_id, use_first_row_as_header, etc. are available. Otherwise
+        return table_options as-is (caller already passed per-table config).
+        """
+        raw = table_options.get("tableConfigs")
+        if not raw:
+            return table_options
+        try:
+            table_configs = json.loads(raw)
+        except (TypeError, ValueError):
+            return table_options
+        if not isinstance(table_configs, dict):
+            return table_options
+        # Values from spec are already string; ensure we have a dict of str -> str
+        config = table_configs.get(table_name)
+        if config is None:
+            return table_options
+        return {k: str(v) for k, v in config.items()} if isinstance(config, dict) else table_options
+
     def list_tables(self) -> list[str]:
         """Return the list of supported table names (spreadsheets, sheet_values, documents)."""
         return list(SUPPORTED_TABLES)
@@ -185,8 +210,9 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
         returns the static schema (e.g. row_index + values array).
         """
         self._validate_table(table_name)
-        if table_name == "sheet_values" and self._sheet_values_use_headers(table_options):
-            schema = self._get_sheet_values_schema_with_headers(table_options)
+        opts = self._resolve_table_options(table_name, table_options)
+        if table_name == "sheet_values" and self._sheet_values_use_headers(opts):
+            schema = self._get_sheet_values_schema_with_headers(opts)
             if schema is not None:
                 return schema
         return TABLE_SCHEMAS[table_name]
@@ -200,9 +226,10 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
         first column name (e.g. ID) when the first row can be fetched.
         """
         self._validate_table(table_name)
+        opts = self._resolve_table_options(table_name, table_options)
         meta = dict(TABLE_METADATA[table_name])
-        if table_name == "sheet_values" and self._sheet_values_use_headers(table_options):
-            headers = self._fetch_sheet_first_row(table_options)
+        if table_name == "sheet_values" and self._sheet_values_use_headers(opts):
+            headers = self._fetch_sheet_first_row(opts)
             if headers:
                 meta["primary_keys"] = [headers[0]]
         return meta
@@ -216,12 +243,13 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
         or documents. Offsets are used for Drive list pagination (pageToken).
         """
         self._validate_table(table_name)
+        opts = self._resolve_table_options(table_name, table_options)
         if table_name == "spreadsheets":
-            return self._read_spreadsheets(start_offset, table_options)
+            return self._read_spreadsheets(start_offset, opts)
         if table_name == "sheet_values":
-            return self._read_sheet_values(start_offset, table_options)
+            return self._read_sheet_values(start_offset, opts)
         if table_name == "documents":
-            return self._read_documents(start_offset, table_options)
+            return self._read_documents(start_offset, opts)
         return iter([]), {}
 
     def _read_spreadsheets(
