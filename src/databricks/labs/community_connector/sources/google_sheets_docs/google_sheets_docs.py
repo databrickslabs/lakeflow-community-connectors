@@ -172,6 +172,25 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
             )
 
     @staticmethod
+    def _resolve_effective_table(table_name: str, table_options: dict[str, str]) -> str:
+        """Resolve the connector table type when using an alias (e.g. source_table=stores).
+
+        If table_configuration includes 'connector_table' or 'source_type' set to a
+        supported type (sheet_values, spreadsheets, documents), use that for dispatch
+        so the pipeline can use unique source_table names (stores, disasters) and
+        avoid duplicate view names while still reading sheet_values.
+        """
+        effective = (
+            table_options.get("connector_table")
+            or table_options.get("source_type")
+            or table_options.get("connectorTable")
+            or table_options.get("sourceType")
+        )
+        if effective and str(effective).strip() in SUPPORTED_TABLES:
+            return str(effective).strip()
+        return table_name
+
+    @staticmethod
     def _resolve_table_options(table_name: str, table_options: dict[str, str]) -> dict[str, str]:
         """Resolve per-table config when options are the full data source options.
 
@@ -208,14 +227,19 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
         table_options, fetches the first row and builds a dynamic schema
         (row_index + one column per header, Spark-safe names). Otherwise
         returns the static schema (e.g. row_index + values array).
+
+        When table_configuration includes connector_table (or source_type) set to
+        sheet_values, spreadsheets, or documents, that type is used so you can
+        use unique source_table names (e.g. stores, disasters) in one pipeline.
         """
-        self._validate_table(table_name)
         opts = self._resolve_table_options(table_name, table_options)
-        if table_name == "sheet_values" and self._sheet_values_use_headers(opts):
+        effective = self._resolve_effective_table(table_name, opts)
+        self._validate_table(effective)
+        if effective == "sheet_values" and self._sheet_values_use_headers(opts):
             schema = self._get_sheet_values_schema_with_headers(opts)
             if schema is not None:
                 return schema
-        return TABLE_SCHEMAS[table_name]
+        return TABLE_SCHEMAS[effective]
 
     def read_table_metadata(
         self, table_name: str, table_options: dict[str, str]
@@ -225,10 +249,11 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
         For sheet_values with headers enabled, sets primary_keys to the
         first column name (e.g. ID) when the first row can be fetched.
         """
-        self._validate_table(table_name)
         opts = self._resolve_table_options(table_name, table_options)
-        meta = dict(TABLE_METADATA[table_name])
-        if table_name == "sheet_values" and self._sheet_values_use_headers(opts):
+        effective = self._resolve_effective_table(table_name, opts)
+        self._validate_table(effective)
+        meta = dict(TABLE_METADATA[effective])
+        if effective == "sheet_values" and self._sheet_values_use_headers(opts):
             headers = self._fetch_sheet_first_row(opts)
             if headers:
                 meta["primary_keys"] = [headers[0]]
@@ -241,14 +266,17 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
 
         Dispatches to the appropriate reader for spreadsheets, sheet_values,
         or documents. Offsets are used for Drive list pagination (pageToken).
+        When connector_table (or source_type) is set in table_configuration,
+        that type is used so unique source_table names can be used per sheet.
         """
-        self._validate_table(table_name)
         opts = self._resolve_table_options(table_name, table_options)
-        if table_name == "spreadsheets":
+        effective = self._resolve_effective_table(table_name, opts)
+        self._validate_table(effective)
+        if effective == "spreadsheets":
             return self._read_spreadsheets(start_offset, opts)
-        if table_name == "sheet_values":
+        if effective == "sheet_values":
             return self._read_sheet_values(start_offset, opts)
-        if table_name == "documents":
+        if effective == "documents":
             return self._read_documents(start_offset, opts)
         return iter([]), {}
 

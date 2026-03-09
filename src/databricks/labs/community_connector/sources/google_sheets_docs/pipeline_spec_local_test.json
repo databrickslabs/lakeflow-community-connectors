@@ -1,0 +1,34 @@
+{
+  "connection_name": "google_sheets_dgalluzzo",
+  "objects": [
+    {
+      "table": {
+        "source_table": "sheet_values",
+        "destination_catalog": "users",
+        "destination_schema": "david_galluzzo",
+        "destination_table": "stores",
+        "table_configuration": {
+          "scd_type": "SCD_TYPE_2",
+          "primary_keys": ["ID"],
+          "sheet_name": "Sheet1",
+          "range": "A:E",
+          "spreadsheet_id": "11qtiCmvOPMoRUpoxaMxB5sTN8Ws1jVdQL9JoJGXnsxc",
+          "use_first_row_as_header": "true"
+        }
+      }
+    },
+    {
+      "table": {
+        "source_table": "spreadsheets"
+      }
+    },
+    {
+      "table": {
+        "source_table": "documents",
+        "table_configuration": {
+          "include_content": "false"
+        }
+      }
+    }
+  ]
+}
