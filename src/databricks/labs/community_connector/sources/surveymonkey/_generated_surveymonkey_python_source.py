@@ -1858,6 +1858,10 @@ def register_lakeflow_source(spark):
             # are missed in the returned records.
             return self.read(start)[0]
 
+        def prepareForTriggerAvailableNow(self) -> None:
+            # No need to do anything special here. Everything is handled in the __init__ method.
+            pass
+
 
     class LakeflowBatchReader(DataSourceReader):
         def __init__(
