@@ -411,24 +411,73 @@ class GithubLakeflowConnect(LakeflowConnect):
 
         return iter(records), next_offset
 
+    def _find_oldest_commit_date(self, owner: str, repo: str) -> str | None:
+        """Discover the committer date of the oldest commit in the repo.
+
+        Uses two lightweight API calls: one ``per_page=1`` request to read the
+        ``rel="last"`` Link header, then one request to fetch that last page.
+        """
+        url = f"{self.base_url}/repos/{owner}/{repo}/commits"
+        resp = self._session.get(url, params={"per_page": 1}, timeout=30)
+        if resp.status_code != 200:
+            return None
+
+        link_header = resp.headers.get("Link", "")
+        last_url = None
+        for part in link_header.split(","):
+            section = part.strip()
+            if 'rel="last"' in section:
+                start = section.find("<")
+                end = section.find(">", start + 1)
+                if start != -1 and end != -1:
+                    last_url = section[start + 1 : end]
+
+        if not last_url:
+            # Only one page — the single commit in the initial response is the oldest.
+            data = resp.json()
+            if data:
+                committer = (data[-1].get("commit") or {}).get("committer") or {}
+                return committer.get("date")
+            return None
+
+        last_resp = self._session.get(last_url, timeout=30)
+        if last_resp.status_code != 200:
+            return None
+        data = last_resp.json()
+        if data:
+            committer = (data[-1].get("commit") or {}).get("committer") or {}
+            return committer.get("date")
+        return None
+
     def _read_commits(  # pylint: disable=too-many-locals
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
-        Read the `commits` append-only table using:
+        Read the ``commits`` append-only table using:
             GET /repos/{owner}/{repo}/commits
 
-        The commits API returns results in descending order (newest first) and
-        does not support a sort/direction parameter.  A plain ``since`` cursor
-        would never advance when pagination is limited.  This method therefore
-        uses a sliding time-window (``since`` + ``until``) so that each call
-        drains a bounded window and advances the cursor to the window end.
+        The commits API returns results newest-first with no sort parameter.
+        ``since``/``until`` filter on **committer date**.  This method uses a
+        sliding time-window so each call drains a bounded window and advances
+        the cursor to the window end.
+
+        If the window contains more commits than the page budget can drain,
+        the cursor stays put and the window is halved so subsequent calls
+        converge on a drainable size.
+
+        When no ``start_date`` or prior offset is available the connector
+        auto-discovers the oldest commit date via two lightweight API calls.
         """
         owner, repo = require_owner_repo(table_options, "commits")
         pagination = parse_pagination_options(table_options)
         cursor = get_cursor_from_offset(start_offset, table_options)
 
-        if cursor and cursor >= self._init_time:
+        if not cursor:
+            cursor = self._find_oldest_commit_date(owner, repo)
+        if not cursor:
+            return iter([]), start_offset if start_offset else {}
+
+        if cursor >= self._init_time:
             return iter([]), start_offset if start_offset else {}
 
         try:
@@ -436,22 +485,28 @@ class GithubLakeflowConnect(LakeflowConnect):
         except (TypeError, ValueError):
             window_seconds = 3600
 
-        if cursor:
-            window_end_dt = datetime.strptime(cursor, "%Y-%m-%dT%H:%M:%SZ") + timedelta(
-                seconds=window_seconds
-            )
-            window_end = min(
-                window_end_dt.strftime("%Y-%m-%dT%H:%M:%SZ"), self._init_time
-            )
-        else:
-            window_end = self._init_time
+        stored_window = (
+            start_offset.get("window_seconds") if start_offset else None
+        )
+        if stored_window is not None:
+            window_seconds = stored_window
+
+        ts_fmt = "%Y-%m-%dT%H:%M:%SZ"
+        window_end_dt = datetime.strptime(cursor, ts_fmt) + timedelta(
+            seconds=window_seconds
+        )
+        window_end = min(window_end_dt.strftime(ts_fmt), self._init_time)
 
         url = f"{self.base_url}/repos/{owner}/{repo}/commits"
-        params: dict[str, Any] = {"per_page": pagination.per_page, "until": window_end}
-        if cursor:
-            params["since"] = cursor
+        params: dict[str, Any] = {
+            "per_page": pagination.per_page,
+            "since": cursor,
+            "until": window_end,
+        }
 
-        raw_commits, _ = self._paginated_fetch(url, params, pagination, "commits")
+        raw_commits, pages_exhausted = self._paginated_fetch(
+            url, params, pagination, "commits"
+        )
 
         records: list[dict[str, Any]] = []
         for commit_obj in raw_commits:
@@ -478,11 +533,25 @@ class GithubLakeflowConnect(LakeflowConnect):
             }
             records.append(record)
 
-        end_offset = {"cursor": window_end}
+        if pages_exhausted:
+            end_offset: dict[str, Any] = {"cursor": window_end}
+            # Carry the working window size forward so the next window
+            # doesn't re-inflate to the (possibly too large) user default.
+            if stored_window is not None:
+                end_offset["window_seconds"] = window_seconds
+            if start_offset and start_offset == end_offset:
+                return iter([]), start_offset
+            return iter(records), end_offset
+
+        # Window too large for the page budget — halve it and retry without
+        # emitting records to avoid duplicates (append-only table).
+        end_offset = {
+            "cursor": cursor,
+            "window_seconds": max(window_seconds // 2, 1),
+        }
         if start_offset and start_offset == end_offset:
             return iter([]), start_offset
-
-        return iter(records), end_offset
+        return iter([]), end_offset
 
     def _read_assignees(
         self, start_offset: dict, table_options: dict[str, str]

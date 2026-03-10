@@ -37,22 +37,27 @@ Every incremental table **must** support a `max_records_per_batch` table option.
 
 This is **orthogonal** to the query-scoping strategies below. Regardless of whether you use a sliding window, a server-side limit, or neither, you must still respect `max_records_per_batch` by stopping record accumulation once the count is reached.
 
+**Exception — best-effort enforcement:** When the API does not support ascending sort and a sliding time-window is used (see below), `max_records_per_batch` becomes best-effort. The window must be drained completely to avoid skipping or duplicating records, so the actual batch size is governed by `window_seconds` rather than a strict record count.
+
 ### Ascending Sort Order Requirement
 
 When a connector stops mid-way (due to `max_records_per_batch` or page limits), it checkpoints the max cursor value and resumes with `since=<that value>`. This only works if the API returns records **sorted ascending by the cursor field**. With descending order the max cursor comes from the first record, so `since` never advances — creating an infinite loop of re-fetching the same data.
 
-This can be ignored when the connector always drains all available data in a single batch (no partial reads).
-
 **When the API does not support ascending sort**, use one of:
-- **Sliding time-window (Strategy A below):** Query with both `since` and `until` so sort order within the window doesn't matter — the cursor advances to the window end regardless.
-- **Client-side sort:** Fetch, sort ascending in Python, then apply batch limits. Only viable for small result sets.
+- **Sliding time-window (Strategy A below):** Query with both `since` and `until` so sort order within the window doesn't matter — the cursor advances to the window end regardless. In this mode `max_records_per_batch` is best-effort since the entire window must be drained.
+- **Full read per batch:** Read all available data in a single batch and use the current time as the `since` filter for the next call. This avoids the sort-order problem entirely but only works for smaller datasets where fetching everything is practical.
 
 ### Query-Scoping Strategies
 
 A common problem with incremental reads is that the query to the source API is too broad. For example, an API that accepts a `since` parameter but no `until` parameter forces the server to scan from `since` all the way to "now" — which can be slow or time out on large accounts. Two strategies exist to scope the query and avoid this:
 
 **Strategy A — Sliding time-window** (for APIs with `since`/`until` or equivalent start/end time parameters):
-Add a bounded end-time to the query. Instead of querying from `since` to now, query from `since` to `since + window_seconds`. Paginate all records within that window, then advance the cursor to the window end. If the window is empty, still advance the cursor so the next call slides forward. The `window_seconds` table option controls the window size. Provide a sensible default (e.g. 3600), but note that the optimal value depends on the data volume and it is up to the user to adjust it for their specific use case. For testing, always start with a very small value. Use this when the API supports both start and end time filters. 
+Add a bounded end-time to the query. Instead of querying from `since` to now, query from `since` to `since + window_seconds`. Paginate all records within that window, then advance the cursor to the window end. If the window is empty, still advance the cursor so the next call slides forward. The `window_seconds` table option controls the window size. Provide a sensible default (e.g. 3600), but note that the optimal value depends on the data volume and it is up to the user to adjust it for their specific use case. For testing, always start with a very small value. Use this when the API supports both start and end time filters.
+
+**Critical: the first call must have a bounded `since`.** Without it, the query is unbounded (everything up to `until`), which defeats the purpose of the window on large datasets. Resolve the starting cursor in this order:
+1. **Prior offset** — `start_offset["cursor"]` from a previous read.
+2. **User-supplied start** — a `start_timestamp` table option the user provides. This is the fallback when auto-discovery is not possible.
+3. **Auto-discovery** — if the API allows it, peek at the oldest record to determine the starting point. For example: request page 1 with `per_page=1` (or equivalent small limit) and no time filters; if the API sorts ascending, the first record is the oldest. If it sorts descending, use the Link header or equivalent to find the last page, then read the last record from that page. This adds 1–2 lightweight API calls but avoids requiring the user to know when data starts.
 
 **Strategy B — Server-side limit** (for APIs with `limit`/`max_results`/`page_size` parameters):
 Pass a small `limit` parameter directly to the API so the server returns a bounded page. This keeps each individual API call small. Calls repeat until `max_records_per_batch` is reached.
