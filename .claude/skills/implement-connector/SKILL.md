@@ -37,6 +37,16 @@ Every incremental table **must** support a `max_records_per_batch` table option.
 
 This is **orthogonal** to the query-scoping strategies below. Regardless of whether you use a sliding window, a server-side limit, or neither, you must still respect `max_records_per_batch` by stopping record accumulation once the count is reached.
 
+### Ascending Sort Order Requirement
+
+When a connector stops mid-way (due to `max_records_per_batch` or page limits), it checkpoints the max cursor value and resumes with `since=<that value>`. This only works if the API returns records **sorted ascending by the cursor field**. With descending order the max cursor comes from the first record, so `since` never advances — creating an infinite loop of re-fetching the same data.
+
+This can be ignored when the connector always drains all available data in a single batch (no partial reads).
+
+**When the API does not support ascending sort**, use one of:
+- **Sliding time-window (Strategy A below):** Query with both `since` and `until` so sort order within the window doesn't matter — the cursor advances to the window end regardless.
+- **Client-side sort:** Fetch, sort ascending in Python, then apply batch limits. Only viable for small result sets.
+
 ### Query-Scoping Strategies
 
 A common problem with incremental reads is that the query to the source API is too broad. For example, an API that accepts a `since` parameter but no `until` parameter forces the server to scan from `since` all the way to "now" — which can be slow or time out on large accounts. Two strategies exist to scope the query and avoid this:

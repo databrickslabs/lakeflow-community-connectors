@@ -1398,21 +1398,43 @@ def register_lakeflow_source(spark):
             """
             Read the `commits` append-only table using:
                 GET /repos/{owner}/{repo}/commits
+
+            The commits API returns results in descending order (newest first) and
+            does not support a sort/direction parameter.  A plain ``since`` cursor
+            would never advance when pagination is limited.  This method therefore
+            uses a sliding time-window (``since`` + ``until``) so that each call
+            drains a bounded window and advances the cursor to the window end.
             """
             owner, repo = require_owner_repo(table_options, "commits")
             pagination = parse_pagination_options(table_options)
             cursor = get_cursor_from_offset(start_offset, table_options)
 
+            if cursor and cursor >= self._init_time:
+                return iter([]), start_offset if start_offset else {}
+
+            try:
+                window_seconds = int(table_options.get("window_seconds", "3600"))
+            except (TypeError, ValueError):
+                window_seconds = 3600
+
+            if cursor:
+                window_end_dt = datetime.strptime(cursor, "%Y-%m-%dT%H:%M:%SZ") + timedelta(
+                    seconds=window_seconds
+                )
+                window_end = min(
+                    window_end_dt.strftime("%Y-%m-%dT%H:%M:%SZ"), self._init_time
+                )
+            else:
+                window_end = self._init_time
+
             url = f"{self.base_url}/repos/{owner}/{repo}/commits"
-            params = {"per_page": pagination.per_page}
+            params: dict[str, Any] = {"per_page": pagination.per_page, "until": window_end}
             if cursor:
                 params["since"] = cursor
 
-            raw_commits, pages_exhausted = self._paginated_fetch(url, params, pagination, "commits")
+            raw_commits, _ = self._paginated_fetch(url, params, pagination, "commits")
 
             records: list[dict[str, Any]] = []
-            max_commit_date: str | None = None
-
             for commit_obj in raw_commits:
                 commit_info = commit_obj.get("commit", {}) or {}
                 commit_author = commit_info.get("author", {}) or {}
@@ -1437,17 +1459,11 @@ def register_lakeflow_source(spark):
                 }
                 records.append(record)
 
-                author_date = record.get("commit_author_date")
-                if isinstance(author_date, str):
-                    if max_commit_date is None or author_date > max_commit_date:
-                        max_commit_date = author_date
+            end_offset = {"cursor": window_end}
+            if start_offset and start_offset == end_offset:
+                return iter([]), start_offset
 
-            next_cursor = compute_next_cursor(max_commit_date, cursor)
-            next_offset = self._compute_next_offset(
-                next_cursor, cursor, start_offset, records, pages_exhausted
-            )
-
-            return iter(records), next_offset
+            return iter(records), end_offset
 
         def _read_assignees(
             self, start_offset: dict, table_options: dict[str, str]
