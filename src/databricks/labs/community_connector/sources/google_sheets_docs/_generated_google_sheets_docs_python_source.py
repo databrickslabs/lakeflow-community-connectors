@@ -13,6 +13,7 @@ import json
 import re
 import time
 
+from . import google_sheets_docs_schemas
 from pyspark.sql import Row
 from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
 from urllib.parse import quote
@@ -432,7 +433,10 @@ def register_lakeflow_source(spark):
     ########################################################
     # src/databricks/labs/community_connector/sources/google_sheets_docs/google_sheets_docs.py
     ########################################################
-    # SUPPORTED_TABLES, TABLE_METADATA, TABLE_SCHEMAS already defined above from schema inlining.
+
+    SUPPORTED_TABLES = google_sheets_docs_schemas.SUPPORTED_TABLES
+    TABLE_METADATA = google_sheets_docs_schemas.TABLE_METADATA
+    TABLE_SCHEMAS = google_sheets_docs_schemas.TABLE_SCHEMAS
 
     # Google API base URLs
     TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -578,7 +582,13 @@ def register_lakeflow_source(spark):
 
         @staticmethod
         def _resolve_effective_table(table_name: str, table_options: dict[str, str]) -> str:
-            """Resolve connector table type when using an alias (e.g. source_table=stores)."""
+            """Resolve the connector table type when using an alias (e.g. source_table=stores).
+
+            If table_configuration includes 'connector_table' or 'source_type' set to a
+            supported type (sheet_values, spreadsheets, documents), use that for dispatch
+            so the pipeline can use unique source_table names (stores, disasters) and
+            avoid duplicate view names while still reading sheet_values.
+            """
             effective = (
                 table_options.get("connector_table")
                 or table_options.get("source_type")
@@ -591,7 +601,13 @@ def register_lakeflow_source(spark):
 
         @staticmethod
         def _resolve_table_options(table_name: str, table_options: dict[str, str]) -> dict[str, str]:
-            """Resolve per-table config when options are the full data source options."""
+            """Resolve per-table config when options are the full data source options.
+
+            When the pipeline passes options that include 'tableConfigs' (JSON map of
+            table name -> config), extract the config for this table so that
+            spreadsheet_id, use_first_row_as_header, etc. are available. Otherwise
+            return table_options as-is (caller already passed per-table config).
+            """
             raw = table_options.get("tableConfigs")
             if not raw:
                 return table_options
@@ -601,6 +617,7 @@ def register_lakeflow_source(spark):
                 return table_options
             if not isinstance(table_configs, dict):
                 return table_options
+            # Values from spec are already string; ensure we have a dict of str -> str
             config = table_configs.get(table_name)
             if config is None:
                 return table_options
@@ -613,7 +630,17 @@ def register_lakeflow_source(spark):
         def get_table_schema(
             self, table_name: str, table_options: dict[str, str]
         ) -> StructType:
-            """Return the Spark schema for the given table."""
+            """Return the Spark schema for the given table.
+
+            For sheet_values with use_first_row_as_header and spreadsheet_id in
+            table_options, fetches the first row and builds a dynamic schema
+            (row_index + one column per header, Spark-safe names). Otherwise
+            returns the static schema (e.g. row_index + values array).
+
+            When table_configuration includes connector_table (or source_type) set to
+            sheet_values, spreadsheets, or documents, that type is used so you can
+            use unique source_table names (e.g. stores, disasters) in one pipeline.
+            """
             opts = self._resolve_table_options(table_name, table_options)
             effective = self._resolve_effective_table(table_name, opts)
             self._validate_table(effective)
@@ -626,7 +653,11 @@ def register_lakeflow_source(spark):
         def read_table_metadata(
             self, table_name: str, table_options: dict[str, str]
         ) -> dict:
-            """Return table metadata (primary_keys, cursor_field, ingestion_type)."""
+            """Return table metadata (primary_keys, cursor_field, ingestion_type).
+
+            For sheet_values with headers enabled, sets primary_keys to the
+            first column name (e.g. ID) when the first row can be fetched.
+            """
             opts = self._resolve_table_options(table_name, table_options)
             effective = self._resolve_effective_table(table_name, opts)
             self._validate_table(effective)
@@ -640,7 +671,13 @@ def register_lakeflow_source(spark):
         def read_table(
             self, table_name: str, start_offset: dict, table_options: dict[str, str]
         ) -> tuple[Iterator[dict], dict]:
-            """Read records from the given table; returns (iterator, next_offset)."""
+            """Read records from the given table; returns (iterator, next_offset).
+
+            Dispatches to the appropriate reader for spreadsheets, sheet_values,
+            or documents. Offsets are used for Drive list pagination (pageToken).
+            When connector_table (or source_type) is set in table_configuration,
+            that type is used so unique source_table names can be used per sheet.
+            """
             opts = self._resolve_table_options(table_name, table_options)
             effective = self._resolve_effective_table(table_name, opts)
             self._validate_table(effective)
@@ -737,7 +774,9 @@ def register_lakeflow_source(spark):
             """Fetch the first row of the sheet and return Spark-safe column names.
 
             Calls Sheets API values.get for range {sheet_name}!1:1. Returns None
-            if spreadsheet_id is missing, request fails, or no values returned.
+            only if spreadsheet_id is missing or first row is empty. Raises ValueError
+            on API errors (404, 403) so callers see the real reason instead of
+            silently falling back to row_index + values.
             """
             spreadsheet_id = table_options.get("spreadsheet_id") or table_options.get("spreadsheetId")
             if not spreadsheet_id:
@@ -748,7 +787,17 @@ def register_lakeflow_source(spark):
             params = {"valueRenderOption": "UNFORMATTED_VALUE", "majorDimension": "ROWS"}
             resp = self._request("GET", url, params=params)
             if resp.status_code != 200:
-                return None
+                try:
+                    err = resp.json()
+                    msg = err.get("error", {}).get("message", resp.text)
+                except (ValueError, TypeError):
+                    msg = resp.text or f"HTTP {resp.status_code}"
+                raise ValueError(
+                    f"Sheets API returned {resp.status_code} for spreadsheet {spreadsheet_id!r} "
+                    f"(range {range_a1}). Cannot use first row as headers. "
+                    f"Check that the spreadsheet exists, is shared with the connection's account, "
+                    f"and that sheet {sheet_name!r} exists. Details: {msg}"
+                )
             try:
                 data = resp.json()
             except ValueError:

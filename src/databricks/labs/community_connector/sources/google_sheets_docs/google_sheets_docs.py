@@ -365,7 +365,9 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
         """Fetch the first row of the sheet and return Spark-safe column names.
 
         Calls Sheets API values.get for range {sheet_name}!1:1. Returns None
-        if spreadsheet_id is missing, request fails, or no values returned.
+        only if spreadsheet_id is missing or first row is empty. Raises ValueError
+        on API errors (404, 403) so callers see the real reason instead of
+        silently falling back to row_index + values.
         """
         spreadsheet_id = table_options.get("spreadsheet_id") or table_options.get("spreadsheetId")
         if not spreadsheet_id:
@@ -376,7 +378,17 @@ class GoogleSheetsDocsLakeflowConnect(LakeflowConnect):
         params = {"valueRenderOption": "UNFORMATTED_VALUE", "majorDimension": "ROWS"}
         resp = self._request("GET", url, params=params)
         if resp.status_code != 200:
-            return None
+            try:
+                err = resp.json()
+                msg = err.get("error", {}).get("message", resp.text)
+            except (ValueError, TypeError):
+                msg = resp.text or f"HTTP {resp.status_code}"
+            raise ValueError(
+                f"Sheets API returned {resp.status_code} for spreadsheet {spreadsheet_id!r} "
+                f"(range {range_a1}). Cannot use first row as headers. "
+                f"Check that the spreadsheet exists, is shared with the connection's account, "
+                f"and that sheet {sheet_name!r} exists. Details: {msg}"
+            )
         try:
             data = resp.json()
         except ValueError:

@@ -146,46 +146,122 @@ Use the Lakeflow Community Connector UI to copy or reference the Google Sheets &
 
 ### Step 2: Configure Your Pipeline
 
-In your pipeline specification, reference a Unity Catalog connection that uses this connector and configure one or more tables with the required table options where applicable.
+In your pipeline specification, reference a Unity Catalog connection that uses this connector and configure one or more tables with the required table options where applicable. Set `connection_name` to your Unity Catalog connection. For **sheet_values** you must set `spreadsheet_id` (or `spreadsheetId`); for **documents**, set `include_content` to `"true"` only if you need plain-text body.
 
-Example `pipeline_spec` snippet:
+#### Pipeline spec examples
+
+**Example 1: All three tables (spreadsheets, sheet_values, documents).**  
+Replace `YOUR_SPREADSHEET_ID` with a real spreadsheet ID from Drive or the sheet URL.
 
 ```json
 {
-  "pipeline_spec": {
-    "connection_name": "google_sheets_docs_connection",
-    "object": [
-      {
-        "table": {
-          "source_table": "spreadsheets"
-        }
-      },
-      {
-        "table": {
-          "source_table": "sheet_values",
-          "table_configuration": {
-            "spreadsheet_id": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms",
-            "sheet_name": "Sheet1",
-            "range": "A:Z"
-          }
-        }
-      },
-      {
-        "table": {
-          "source_table": "documents",
-          "table_configuration": {
-            "include_content": "true"
-          }
+  "connection_name": "google_sheets_docs_connection",
+  "objects": [
+    { "table": { "source_table": "spreadsheets" } },
+    {
+      "table": {
+        "source_table": "sheet_values",
+        "table_configuration": {
+          "spreadsheet_id": "YOUR_SPREADSHEET_ID",
+          "sheet_name": "Sheet1",
+          "range": "A:Z",
+          "use_first_row_as_header": "true"
         }
       }
-    ]
-  }
+    },
+    {
+      "table": {
+        "source_table": "documents",
+        "table_configuration": { "include_content": "false" }
+      }
+    }
+  ]
 }
 ```
 
-- `connection_name` must point to a UC connection configured with `client_id`, `client_secret`, and `refresh_token` (and `externalOptionsAllowList` as above).
-- For **sheet_values**, you must set `spreadsheet_id` (or `spreadsheetId`); `sheet_name` and `range` are optional.
-- For **documents**, set `include_content` to `true` (or `1` or `yes`) only if you need the document body as plain text; otherwise omit it for metadata-only ingestion.
+**Example 2: sheet_values only, with first row as headers and SCD Type 2.**  
+Use when you want named columns (e.g. `ID`, `Name`) and the first column as primary key.
+
+```json
+{
+  "connection_name": "google_sheets_docs_connection",
+  "objects": [
+    {
+      "table": {
+        "source_table": "sheet_values",
+        "destination_catalog": "your_catalog",
+        "destination_schema": "your_schema",
+        "destination_table": "my_sheet",
+        "table_configuration": {
+          "spreadsheet_id": "YOUR_SPREADSHEET_ID",
+          "sheet_name": "Sheet1",
+          "range": "A:E",
+          "use_first_row_as_header": "true",
+          "scd_type": "SCD_TYPE_2",
+          "primary_keys": ["ID"]
+        }
+      }
+    }
+  ]
+}
+```
+
+**Example 3: documents with plain-text content.**  
+Fetches document body via Drive export (metadata + `content` field). Omit `include_content` for metadata-only.
+
+```json
+{
+  "connection_name": "google_sheets_docs_connection",
+  "objects": [
+    {
+      "table": {
+        "source_table": "documents",
+        "table_configuration": { "include_content": "true" }
+      }
+    }
+  ]
+}
+```
+
+**Example 4: Multiple spreadsheets in one pipeline.**  
+Use unique `source_table` names (e.g. `stores`, `disasters`) and set `connector_table: "sheet_values"` so each table gets its own view and destination. Avoids duplicate view names.
+
+```json
+{
+  "connection_name": "google_sheets_docs_connection",
+  "objects": [
+    {
+      "table": {
+        "source_table": "stores",
+        "destination_table": "stores",
+        "table_configuration": {
+          "connector_table": "sheet_values",
+          "spreadsheet_id": "SPREADSHEET_ID_1",
+          "sheet_name": "Sheet1",
+          "range": "A:E",
+          "use_first_row_as_header": "true",
+          "scd_type": "SCD_TYPE_2",
+          "primary_keys": ["ID"]
+        }
+      }
+    },
+    {
+      "table": {
+        "source_table": "disasters",
+        "destination_table": "disasters",
+        "table_configuration": {
+          "connector_table": "sheet_values",
+          "spreadsheet_id": "SPREADSHEET_ID_2",
+          "sheet_name": "Sheet1",
+          "range": "A:AB",
+          "use_first_row_as_header": "true",
+          "primary_keys": ["id"]
+        }
+      }
+    }
+  ]
+}
+```
 
 ### Step 3: Run and Schedule the Pipeline
 
