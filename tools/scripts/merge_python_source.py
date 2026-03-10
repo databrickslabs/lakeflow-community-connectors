@@ -797,10 +797,15 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
         "from databricks.labs.community_connector.",
         "import databricks.labs.community_connector.",
     ]
+    allowed_import_patterns = [
+        "from databricks.labs.community_connector.libs.simulated_source.",
+    ]
     leaked = []
     for line_num, line in enumerate(merged_lines, 1):
         stripped = line.strip()
         if any(stripped.startswith(p) for p in leaked_import_patterns):
+            if any(stripped.startswith(a) for a in allowed_import_patterns):
+                continue
             leaked.append((line_num, stripped))
     if leaked:
         error_lines = "\n".join(f"  line {num}: {text}" for num, text in leaked)

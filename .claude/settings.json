@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(.claude/skills/**)",
+      "Read(.claude/agents/**)",
+      "Read(src/**)",
+      "Write(src/databricks/labs/community_connector/sources/**)",
+      "Edit(src/databricks/labs/community_connector/sources/**)",
+      "Write(tests/unit/sources/**)",
+      "Edit(tests/unit/sources/**)",
+      "Bash(mkdir:*)",
+      "Read(templates/**)",
+      "Bash(source:*)",
+      "Bash(ls:*)",
+      "Bash(lsof:*)",
+      "Bash(find:*)",
+      "Bash(community-connector:*)",
+      "Bash(python3.10:*)",
+      "Bash(python3:*)",
+      "Bash(python:*)",
+      "Bash(.venv/bin/pip:*)",
+      "Bash(python tools/scripts/authenticate.py:*)",
+      "Bash(python tools/scripts/merge_python_source.py:*)",
+      "WebSearch(*)"
+    ],
+    "deny": [
+      "Read(tests/unit/sources/**/configs/dev_config.json)"
+    ]
+  },
+  "hooks": {
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osascript -e 'display notification \\\"Claude Code needs your attention\\\" with title \\\"Claude Code\\\"'"
+          }
+        ]
+      }
+    ]
+  }
+}

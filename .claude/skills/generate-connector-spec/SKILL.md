@@ -1,6 +1,7 @@
 ---
 name: generate-connector-spec
 description: Generate the connector spec YAML file defining connection parameters and external options allowlist.
+disable-model-invocation: true
 ---
 
 # Generate Connector Spec YAML
@@ -9,7 +10,7 @@ description: Generate the connector spec YAML file defining connection parameter
 Generate a **connector spec YAML file** for the **{{source_name}}** connector that defines the connector specification including connection parameters and external options allowlist.
 
 ## Output Contract
-Produce a YAML file following the template [connector_spec_template.yaml](templates/connector_spec_template.yaml) as `src/databricks/labs/community_connector/sources/{{source_name}}/connector_spec.yaml`.
+Produce a YAML file following the template at `templates/connector_spec_template.yaml` as `src/databricks/labs/community_connector/sources/{{source_name}}/connector_spec.yaml`.
 
 ## Requirements
 
@@ -96,14 +97,3 @@ For `auth_methods`, also include:
 - Use the connector implementation (`src/databricks/labs/community_connector/sources/{{source_name}}/{{source_name}}.py`) as the primary source of truth.
 - Cross-reference with the connector's README (`src/databricks/labs/community_connector/sources/{{source_name}}/README.md`) if available.
 - If inconsistency found between the 2 above, please fix the README and flag errors to user.
-
-## Git Commit on Completion
-
-After generating the connector spec, commit it to git before returning:
-
-```bash
-git add src/databricks/labs/community_connector/sources/{source_name}/{source_name}_spec.yaml
-git commit -m "Add {source_name} connector spec"
-```
-
-Use the exact source name in the commit message. Do not push — only commit locally.

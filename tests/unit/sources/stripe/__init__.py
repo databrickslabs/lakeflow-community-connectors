@@ -1,1 +1,0 @@
-"""Stripe connector tests."""

@@ -1,6 +1,7 @@
 ---
 name: research-source-api 
 description: "Single step only: research and document a source API when explicitly asked. Do NOT use for full connector creation — use the create-connector agent instead."
+disable-model-invocation: true
 ---
 
 # Research Source API
@@ -15,7 +16,7 @@ Create a comprehensive API documentation file that enables connector implementat
 
 ## Output
 
-Create `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md` following the template at [source_api_doc_template](templates/source_api_doc_template.md).
+Create `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md` following the template at `templates/source_api_doc_template.md`.
 
 ## Core Principles
 
@@ -78,14 +79,3 @@ Before completion, verify:
 - [ ] Incremental strategy defines cursor, order, lookback, delete handling
 - [ ] Research Log completed with full URLs
 - [ ] No unverifiable claims; gaps marked `TBD:` with rationale
-
-## Git Commit on Completion
-
-After writing (or updating) the API doc, commit it to git before returning:
-
-```bash
-git add src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md
-git commit -m "Add {source_name} API doc"
-```
-
-Use the exact source name in the commit message. Do not push — only commit locally.

@@ -4,7 +4,7 @@ description: "Generate public-facing end-user documentation for a completed conn
 tools: Bash, Glob, Grep, Read, Edit, Write, NotebookEdit, WebFetch, WebSearch, Skill, TaskUpdate, EnterWorktree, ToolSearch, TaskGet
 model: opus
 color: purple
-permissionMode: acceptEdits
+permissionMode: bypassPermissions
 memory: local
 skills:
   - create-connector-document
@@ -19,5 +19,5 @@ Follow the instructions and methodology from the **create-connector-document ski
 ## Key References
 
 - **Skill**: create-connector-document (loaded above)
-- **Template**: `prompts/templates/community_connector_doc_template.md`
-- **Style reference**: `src/databricks/labs/community_connector/sources/zendesk/README.md`
+- **Template**: `templates/community_connector_doc_template.md`
+- **Style reference**: `src/databricks/labs/community_connector/sources/github/README.md`

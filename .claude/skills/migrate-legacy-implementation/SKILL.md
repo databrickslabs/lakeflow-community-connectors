@@ -1,6 +1,7 @@
 ---
 name: migrate-legacy-implementation
 description: Migrate a legacy source connector from the old sources/ directory to the new package structure under src/databricks/labs/community_connector/sources/.
+disable-model-invocation: true
 ---
 
 # Migrate Legacy Source Implementation
@@ -12,7 +13,7 @@ This skill migrates an old connector implementation from the legacy `sources/` d
 ## Instructions
 
 Handle one specified source at a time.
-Refer other source (e.g. github) as an example.
+Refer other source (e.g. example) as a reference.
 Use python3.10 to replace all python command.
 When running any python test or build use virtual environment (Python 3.10+ required), run these:
 python3.10 -m venv .venv
@@ -34,7 +35,7 @@ then run other python commands or pytest.
    - Also update the test imports and code if necessary.
    - Commit the changes so far.
 
-4. If `{source_name}.py` is too large (>1000 lines), consider refactoring it into multiple files. One example to follow is `github`.
+4. If `{source_name}.py` is too large (>1000 lines), consider refactoring it into multiple files. One example to follow is `example`.
 
 5. Run the tests — they will fail but should not be syntax or import errors.
    - Add the unit test that requires credentials (the one built on top of the source test_suite) to .github/workflows/test_exclude.txt
@@ -44,7 +45,7 @@ then run other python commands or pytest.
 
 7. Use the `generate-connector-spec` skill to regenerate the spec for this connector.
 
-8. Use the `build-source-project` skill to build the `pyproject.toml` and related files.
+8. Use the `build_connector_package` skill to build the `pyproject.toml` and related files.
    - Commit the changes so far.
 
 10. If there are any .py files that should not be imported as part of {source_name}.py, exclude them in the tools/scripts/merge_exclude_config.json

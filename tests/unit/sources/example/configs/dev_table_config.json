@@ -1,10 +1,16 @@
 {
-    "my_table": {
-        "total_available_rows": 1000,
-        "num_rows_per_batch": 100
+    "orders": {
+        "max_records_per_batch": "500"
     },
-    "your_table": {
-        "total_available_rows": 1000,
-        "num_rows_per_batch": 100
+    "users": {
+        "max_records_per_batch": "500"
+    },
+    "events": {
+        "max_records_per_batch": "500",
+        "limit": "50"
+    },
+    "metrics": {
+        "max_records_per_batch": "500",
+        "window_seconds": "7200"
     }
 }

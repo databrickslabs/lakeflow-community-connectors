@@ -3,7 +3,7 @@ name: source-api-researcher
 description: Autonomous research agent that systematically researches a source system's API and produces a Source Doc Summary. Use when you need to document a new data source for connector development.
 tools: WebSearch, WebFetch, Read, Write, Grep, Glob, Bash
 model: sonnet
-permissionMode: acceptEdits
+permissionMode: bypassPermissions
 memory: local
 skills:
   - research-source-api
@@ -20,7 +20,7 @@ Follow the instructions and methodology from the **research-source-api skill** t
 ## Key Points
 
 - **Single deliverable**: `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md`
-- **Follow the template**: `prompts/templates/source_api_doc_template.md`
+- **Follow the template**: `templates/source_api_doc_template.md`
 - **Reference the skill**: `.claude/skills/research-source-api/SKILL.md`
 
 ## Before Starting Research

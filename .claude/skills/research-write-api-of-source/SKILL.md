@@ -1,6 +1,7 @@
 ---
 name: research-write-api-of-source 
 description: Research and document write/create APIs of a source system to enable write-back testing functionality.
+disable-model-invocation: true
 ---
 
 # Research Write APIs of Source System 

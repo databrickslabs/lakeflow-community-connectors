@@ -1,5 +1,4 @@
 {
-    "user": "example_user",
-    "password": "example_password",
-    "token": "example_token"
+    "username": "example_user",
+    "password": "example_password"
 }

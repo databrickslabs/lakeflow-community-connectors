@@ -1,38 +1,25 @@
 # CLAUDE.md
 
+<<<<<<< HEAD
 ## Project Overview
+=======
+Lakeflow Community Connectors — data ingestion from source systems into Databricks via Spark Python Data Source API and Spark Declarative Pipeline (SDP).
 
-Lakeflow Community Connectors enable data ingestion from various source systems into Databricks. Built on the Spark Python Data Source API and Spark Declarative Pipeline (SDP).
+## Key Constraint
+>>>>>>> origin
 
-## Project Structure
+When developing a connector, only modify files under `src/databricks/labs/community_connector/sources/{source}/`. Do **not** change library, pipeline, or interface code unless explicitly asked.
 
-```
-src/databricks/labs/community_connector/
-  interface/             # LakeflowConnect base interface
-  sources/               # Source connectors (github/, zendesk/, stripe/, etc.)
-    {source}/            # Each connector has: {source}.py, README.md
-  libs/                  # Shared utilities (spec_parser.py, utils.py, source_loader.py)
-  pipeline/              # SDP orchestration (ingestion_pipeline.py)
-  sparkpds/              # PySpark Data Source generic implementation and registry API. 
-tools/
-  community_connector/   # CLI tool to set up and run community connectors in Databricks workspace.
-  scripts/               # Build tools (merge_python_source.py)
-tests/
-  unit/
-    libs/                # Unit tests for shared libs
-    pipeline/            # Unit tests for pipeline
-    sources/             # Connector tests and test utilities
-      {source}/          # Per-connector test files
-      test_suite.py      # Shared test harness
-      test_utils.py      # Test utilities
-      lakeflow_connect_test_utils.py  # Write-back test utilities
-prompts/                 # Templates and guide for AI-assisted development
-.claude/skills/          # Claude skill files (development workflow steps)
-.claude/agents/          # Claude subagent that handles different phases of connector development
-```
+## Reference Files
 
-## Core Interface
+- **Base interface**: `src/databricks/labs/community_connector/interface/lakeflow_connect.py`
+- **Reference connector**: `src/databricks/labs/community_connector/sources/example/example.py`
+- **Reference test**: `tests/unit/sources/example/test_example_lakeflow_connect.py`
+- **Test harness**: `tests/unit/sources/test_suite.py` (`LakeflowConnectTester`)
 
+## Testing
+
+<<<<<<< HEAD
 All connectors implement the `LakeflowConnect` class in `src/databricks/labs/community_connector/interface/lakeflow_connect.py`:
 
 ## Development Workflow
@@ -58,5 +45,12 @@ Refer `.claude/agents/create-connector.md`
 - `src/databricks/labs/community_connector/sources/example/example.py` - Reference implementation
 - `tests/unit/sources/test_suite.py` - Test harness
 - `tests/unit/sources/example/test_example_lakeflow_connect.py` - Reference test implementation
+=======
+- Tests connect to real source systems — never mock data.
+- Credentials: `tests/unit/sources/{source}/configs/dev_config.json`
+- Write-back testing: `tests/unit/sources/lakeflow_connect_test_utils.py`
+>>>>>>> origin
 
+## Workflow
 
+To create a connector end-to-end, follow `.claude/commands/create-connector.md`.
