@@ -483,10 +483,11 @@ class GithubLakeflowConnect(LakeflowConnect):
         if cursor >= self._init_time:
             return iter([]), start_offset if start_offset else {}
 
+        seven_days = 7 * 24 * 60 * 60
         try:
-            window_seconds = int(table_options.get("window_seconds", "86400"))
+            window_seconds = int(table_options.get("window_seconds", str(seven_days)))
         except (TypeError, ValueError):
-            window_seconds = 3600
+            window_seconds = seven_days
 
         max_records = pagination.max_records_per_batch
         ts_fmt = "%Y-%m-%dT%H:%M:%SZ"
