@@ -698,7 +698,7 @@ def register_lakeflow_source(spark):
     ########################################################
 
     BATCH_SIZE = 50  # Gmail batch API supports up to 100, using 50 for safety
-    MAX_WORKERS = 5  # Concurrent workers for parallel fetching
+    MAX_WORKERS = 3  # Concurrent workers for parallel fetching
 
 
     class GmailApiClient:
@@ -1109,7 +1109,7 @@ def register_lakeflow_source(spark):
                         if msg_detail.get("historyId"):
                             if (
                                 not state["latest_history_id"]
-                                or msg_detail["historyId"] > state["latest_history_id"]
+                                or int(msg_detail["historyId"]) > int(state["latest_history_id"])
                             ):
                                 state["latest_history_id"] = msg_detail["historyId"]
                         all_messages.append(msg_detail)
@@ -1236,7 +1236,7 @@ def register_lakeflow_source(spark):
                         if thread_detail.get("historyId"):
                             if (
                                 not state["latest_history_id"]
-                                or thread_detail["historyId"] > state["latest_history_id"]
+                                or int(thread_detail["historyId"]) > int(state["latest_history_id"])
                             ):
                                 state["latest_history_id"] = thread_detail["historyId"]
                         all_threads.append(thread_detail)
