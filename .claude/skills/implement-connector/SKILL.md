@@ -52,7 +52,7 @@ When a connector stops mid-way (due to `max_records_per_batch` or page limits), 
 A common problem with incremental reads is that the query to the source API is too broad. For example, an API that accepts a `since` parameter but no `until` parameter forces the server to scan from `since` all the way to "now" — which can be slow or time out on large accounts. Two strategies exist to scope the query and avoid this:
 
 **Strategy A — Sliding time-window** (for APIs with `since`/`until` or equivalent start/end time parameters):
-Add a bounded end-time to the query. Instead of querying from `since` to now, query from `since` to `since + window_seconds`. Paginate all records within that window, then advance the cursor to the window end. If the window is empty, still advance the cursor so the next call slides forward. The `window_seconds` table option controls the window size. Provide a sensible default (e.g. 3600), but note that the optimal value depends on the data volume and it is up to the user to adjust it for their specific use case. For testing, always start with a very small value. Use this when the API supports both start and end time filters.
+Add a bounded end-time to the query. Instead of querying from `since` to now, query from `since` to `since + window_seconds`. Paginate all records within that window, then advance the cursor to the window end. If the window is empty, still advance the cursor so the next call slides forward. The `window_seconds` table option controls the window size. Provide a sensible default (e.g. 86400), but note that the optimal value depends on the data volume and it is up to the user to adjust it for their specific use case. For testing, always start with a very small value. Use this when the API supports both start and end time filters.
 
 **Critical: the first call must have a bounded `since`.** Without it, the query is unbounded (everything up to `until`), which defeats the purpose of the window on large datasets. Resolve the starting cursor in this order:
 1. **Prior offset** — `start_offset["cursor"]` from a previous read.
@@ -92,8 +92,8 @@ If the source API uses timestamp-based cursors (e.g. `since`/`updated_at`), appl
 
 These options are **critical for testing**. Without them, tests may hang or take forever by attempting to read the entire dataset from the source.
 
-- Always configure a **small** `max_records_per_batch` in the test's `dev_table_config.json` (e.g., 5).
-- If using a sliding window, start with a **small**: for example `window_seconds` (e.g., 60 or 300).
+- Always configure a **small** `max_records_per_batch` in the test's `dev_table_config.json` (e.g., 100).
+- If using a sliding window, start with a **small**: for example `window_seconds` (e.g., 300 or 3600).
 - If using a server-side limit, start with a **small** for example `limit` (e.g., 5), or `max_pages` (e.g. 1)
 - Gradually increase these values only if the small values do not generate enough data for testing.
 
