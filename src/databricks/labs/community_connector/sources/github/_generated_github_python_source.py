@@ -1490,7 +1490,8 @@ def register_lakeflow_source(spark):
                 raw_commits = self._paginated_fetch(url, params, pagination, "commits")
 
                 if not raw_commits:
-                    break
+                    window_cursor = window_end
+                    continue
 
                 for commit_obj in raw_commits:
                     commit_info = commit_obj.get("commit", {}) or {}
