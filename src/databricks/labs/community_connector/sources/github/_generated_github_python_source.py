@@ -1464,7 +1464,7 @@ def register_lakeflow_source(spark):
                 return iter([]), start_offset if start_offset else {}
 
             try:
-                window_seconds = int(table_options.get("window_seconds", "3600"))
+                window_seconds = int(table_options.get("window_seconds", "86400"))
             except (TypeError, ValueError):
                 window_seconds = 3600
 
