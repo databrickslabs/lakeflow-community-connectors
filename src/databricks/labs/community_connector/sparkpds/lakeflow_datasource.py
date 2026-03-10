@@ -6,6 +6,7 @@ from pyspark.sql.datasource import (
     SimpleDataSourceStreamReader,
     DataSourceReader,
 )
+from pyspark.sql.streaming.datasource import SupportsTriggerAvailableNow
 from databricks.labs.community_connector.interface import LakeflowConnect
 from databricks.labs.community_connector.libs.utils import parse_value
 
@@ -37,7 +38,7 @@ TABLE_CONFIGS = "tableConfigs"
 IS_DELETE_FLOW = "isDeleteFlow"
 
 
-class LakeflowStreamReader(SimpleDataSourceStreamReader):
+class LakeflowStreamReader(SimpleDataSourceStreamReader, SupportsTriggerAvailableNow):
     """
     Implements a data source stream reader for Lakeflow Connect.
     Currently, only the simpleStreamReader is implemented, which uses a
