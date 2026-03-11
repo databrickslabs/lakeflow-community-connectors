@@ -1,6 +1,6 @@
 import json
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Iterator, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -19,6 +19,7 @@ from databricks.labs.community_connector.sources.microsoft_teams.microsoft_teams
     fetch_all_message_ids,
     serialize_complex_fields,
     parse_int_option,
+    apply_lookback,
     compute_next_cursor,
     get_cursor_from_offset,
     resolve_team_ids,
@@ -101,6 +102,7 @@ class MicrosoftTeamsLakeflowConnect(LakeflowConnect):
             client_id=options.get("client_id"),
             client_secret=options.get("client_secret"),
         )
+        self._init_time = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     def list_tables(self) -> list[str]:
         return SUPPORTED_TABLES
@@ -157,6 +159,31 @@ class MicrosoftTeamsLakeflowConnect(LakeflowConnect):
                 f"No reader for table: {table_name}"
             )
         return reader(start_offset, table_options)
+
+    def _compute_next_offset(
+        self,
+        next_cursor: str | None,
+        current_cursor: str | None,
+        start_offset: dict | None,
+        records: list,
+    ) -> dict:
+        """Decide the offset to return from a legacy CDC read.
+
+        Caps the cursor at ``_init_time`` so a single trigger run only
+        drains data that existed when the connector was instantiated.
+        """
+        if not records and start_offset:
+            return start_offset
+
+        if not next_cursor:
+            return start_offset if start_offset else {}
+
+        next_cursor = min(next_cursor, self._init_time)
+
+        if next_cursor == current_cursor:
+            return start_offset if start_offset else {"cursor": next_cursor}
+
+        return {"cursor": next_cursor}
 
     # ================================================================
     # Table-Specific Read Methods
@@ -419,10 +446,11 @@ class MicrosoftTeamsLakeflowConnect(LakeflowConnect):
             self._client, table_options, "messages", max_pages,
         )
 
+        since = apply_lookback(cursor, lookback_seconds)
         records: list[dict[str, Any]] = []
         max_modified: str | None = None
         fetch_params = {
-            "cursor": cursor, "top": top,
+            "cursor": since, "top": top,
             "max_pages": max_pages,
         }
 
@@ -435,11 +463,9 @@ class MicrosoftTeamsLakeflowConnect(LakeflowConnect):
                 if not max_modified or ch_max > max_modified:
                     max_modified = ch_max
 
-        next_cursor = compute_next_cursor(
-            max_modified, cursor, lookback_seconds,
-        )
-        next_offset = (
-            {"cursor": next_cursor} if next_cursor else {}
+        next_cursor = compute_next_cursor(max_modified, cursor)
+        next_offset = self._compute_next_offset(
+            next_cursor, cursor, start_offset, records,
         )
         return iter(records), next_offset
 
@@ -636,8 +662,9 @@ class MicrosoftTeamsLakeflowConnect(LakeflowConnect):
         max_workers = parse_int_option(
             table_options, "max_concurrent_threads", 10,
         )
+        since = apply_lookback(cursor, lookback_seconds)
         fetch_params = {
-            "cursor": cursor, "top": top,
+            "cursor": since, "top": top,
             "max_pages": max_pages,
         }
 
@@ -668,11 +695,9 @@ class MicrosoftTeamsLakeflowConnect(LakeflowConnect):
                             and "403" not in str(e)):
                         raise
 
-        next_cursor = compute_next_cursor(
-            max_modified, cursor, lookback_seconds,
-        )
-        next_offset = (
-            {"cursor": next_cursor} if next_cursor else {}
+        next_cursor = compute_next_cursor(max_modified, cursor)
+        next_offset = self._compute_next_offset(
+            next_cursor, cursor, start_offset, records,
         )
         return iter(records), next_offset
 

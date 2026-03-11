@@ -20,6 +20,7 @@ import time
 
 from pyspark.sql import Row
 from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
+from pyspark.sql.streaming.datasource import SupportsTriggerAvailableNow
 from pyspark.sql.types import *
 import base64
 import random
@@ -1035,7 +1036,7 @@ def register_lakeflow_source(spark):
     IS_DELETE_FLOW = "isDeleteFlow"
 
 
-    class LakeflowStreamReader(SimpleDataSourceStreamReader):
+    class LakeflowStreamReader(SimpleDataSourceStreamReader, SupportsTriggerAvailableNow):
         """
         Implements a data source stream reader for Lakeflow Connect.
         Currently, only the simpleStreamReader is implemented, which uses a
@@ -1081,6 +1082,10 @@ def register_lakeflow_source(spark):
             # For tables ingested as incremental CDC, it is only necessary that no new changes
             # are missed in the returned records.
             return self.read(start)[0]
+
+        def prepareForTriggerAvailableNow(self) -> None:
+            # No need to do anything special here. Everything is handled in the __init__ method.
+            pass
 
 
     class LakeflowBatchReader(DataSourceReader):

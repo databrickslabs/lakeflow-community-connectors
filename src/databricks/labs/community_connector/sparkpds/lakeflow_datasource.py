@@ -6,6 +6,7 @@ from pyspark.sql.datasource import (
     SimpleDataSourceStreamReader,
     DataSourceReader,
 )
+from pyspark.sql.streaming.datasource import SupportsTriggerAvailableNow
 from databricks.labs.community_connector.interface import LakeflowConnect
 from databricks.labs.community_connector.libs.utils import parse_value
 
@@ -37,7 +38,7 @@ TABLE_CONFIGS = "tableConfigs"
 IS_DELETE_FLOW = "isDeleteFlow"
 
 
-class LakeflowStreamReader(SimpleDataSourceStreamReader):
+class LakeflowStreamReader(SimpleDataSourceStreamReader, SupportsTriggerAvailableNow):
     """
     Implements a data source stream reader for Lakeflow Connect.
     Currently, only the simpleStreamReader is implemented, which uses a
@@ -83,6 +84,10 @@ class LakeflowStreamReader(SimpleDataSourceStreamReader):
         # For tables ingested as incremental CDC, it is only necessary that no new changes
         # are missed in the returned records.
         return self.read(start)[0]
+
+    def prepareForTriggerAvailableNow(self) -> None:
+        # No need to do anything special here. Everything is handled in the __init__ method.
+        pass
 
 
 class LakeflowBatchReader(DataSourceReader):
