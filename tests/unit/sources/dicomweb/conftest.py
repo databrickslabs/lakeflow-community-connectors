@@ -29,5 +29,4 @@ def instances_response() -> list[dict]:
 def dicomweb_options() -> dict[str, str]:
     return {
         "base_url": "https://dicomweb.example.com",
-        "auth_type": "none",
     }

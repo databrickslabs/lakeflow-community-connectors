@@ -393,21 +393,15 @@ def register_lakeflow_source(spark):
             self._default_headers: dict[str, str] = {"Accept": "application/dicom+json"}
 
             auth = auth or {}
-            auth_type = (auth.get("type") or "none").lower()
-            if auth_type == "basic":
-                username = auth.get("username")
-                password = auth.get("password")
-                if not username or not password:
-                    raise ValueError("auth_type=basic requires username and password")
+            username = auth.get("username")
+            password = auth.get("password")
+            token = auth.get("token")
+
+            if username and password:
                 credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
                 self._default_headers["Authorization"] = f"Basic {credentials}"
-            elif auth_type == "bearer":
-                token = auth.get("token")
-                if not token:
-                    raise ValueError("auth_type=bearer requires token")
+            elif token:
                 self._default_headers["Authorization"] = f"Bearer {token}"
-            elif auth_type != "none":
-                raise ValueError(f"Unsupported auth_type '{auth_type}'. Use: none, basic, bearer")
 
         # ------------------------------------------------------------------
         # Internal HTTP helper
@@ -1260,7 +1254,6 @@ def register_lakeflow_source(spark):
             self._client = DICOMwebClient(
                 base_url=base_url,
                 auth={
-                    "type": options.get("auth_type", "none"),
                     "username": options.get("username"),
                     "password": options.get("password"),
                     "token": options.get("token"),

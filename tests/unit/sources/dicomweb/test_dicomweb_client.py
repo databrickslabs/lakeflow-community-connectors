@@ -62,34 +62,26 @@ def _mock_http_error(code: int) -> urllib.error.HTTPError:
 
 class TestClientConstruction:
     def test_no_auth(self):
-        client = DICOMwebClient(BASE_URL, auth={"type": "none"})
+        client = DICOMwebClient(BASE_URL, auth={})
         assert client.base_url == BASE_URL
         assert "Authorization" not in client._default_headers
 
+    def test_no_auth_none(self):
+        client = DICOMwebClient(BASE_URL, auth=None)
+        assert "Authorization" not in client._default_headers
+
     def test_basic_auth(self):
-        client = DICOMwebClient(BASE_URL, auth={"type": "basic", "username": "u", "password": "p"})
+        client = DICOMwebClient(BASE_URL, auth={"username": "u", "password": "p"})
         assert "Authorization" in client._default_headers
         assert client._default_headers["Authorization"].startswith("Basic ")
 
-    def test_basic_auth_missing_creds_raises(self):
-        with pytest.raises(ValueError, match="username and password"):
-            DICOMwebClient(BASE_URL, auth={"type": "basic"})
-
     def test_bearer_auth(self):
-        client = DICOMwebClient(BASE_URL, auth={"type": "bearer", "token": "tok123"})
+        client = DICOMwebClient(BASE_URL, auth={"token": "tok123"})
         assert "Authorization" in client._default_headers
         assert client._default_headers["Authorization"] == "Bearer tok123"
 
-    def test_bearer_missing_token_raises(self):
-        with pytest.raises(ValueError, match="token"):
-            DICOMwebClient(BASE_URL, auth={"type": "bearer"})
-
-    def test_unknown_auth_type_raises(self):
-        with pytest.raises(ValueError, match="Unsupported auth_type"):
-            DICOMwebClient(BASE_URL, auth={"type": "oauth2"})
-
     def test_trailing_slash_stripped(self):
-        client = DICOMwebClient(BASE_URL + "/", auth={"type": "none"})
+        client = DICOMwebClient(BASE_URL + "/", auth={})
         assert not client.base_url.endswith("/")
 
 

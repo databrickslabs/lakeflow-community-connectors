@@ -378,7 +378,6 @@ class TestConnector:
         """Explicit connection_name option overrides the base_url default."""
         opts = {
             "base_url": "https://dicomweb.example.com",
-            "auth_type": "none",
             "connection_name": "my-pacs-prod",
         }
         connector = DICOMwebLakeflowConnect(opts)

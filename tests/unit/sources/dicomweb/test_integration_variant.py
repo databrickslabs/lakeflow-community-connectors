@@ -170,7 +170,7 @@ def orthanc_connector():
         DICOMwebLakeflowConnect,
     )
 
-    return DICOMwebLakeflowConnect({"base_url": ORTHANC_BASE_URL, "auth_type": "none"})
+    return DICOMwebLakeflowConnect({"base_url": ORTHANC_BASE_URL})
 
 
 # ---------------------------------------------------------------------------

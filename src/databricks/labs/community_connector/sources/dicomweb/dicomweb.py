@@ -48,7 +48,6 @@ Usage (Databricks notebook)
     from databricks.labs.community_connector.sources.dicomweb import DICOMwebLakeflowConnect
     connector = DICOMwebLakeflowConnect({
         "base_url": "https://orthanc.uclouvain.be/demo/dicom-web",
-        "auth_type": "none",
     })
     records, next_offset = connector.read_table("studies", {}, {})
 """
@@ -109,7 +108,6 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
         self._client = DICOMwebClient(
             base_url=base_url,
             auth={
-                "type": options.get("auth_type", "none"),
                 "username": options.get("username"),
                 "password": options.get("password"),
                 "token": options.get("token"),

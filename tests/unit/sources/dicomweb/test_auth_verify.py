@@ -31,7 +31,7 @@ pytestmark = pytest.mark.skipif(
 def _make_connector() -> DICOMwebLakeflowConnect:
     """Load dev_config.json and return an instantiated connector."""
     config = load_config(CONFIG_PATH)
-    # auth_type defaults to "none" when not present in the config file
+    # Auth is inferred from credentials: username+password → basic, token → bearer, else none
     return DICOMwebLakeflowConnect(config)
 
 
