@@ -17,8 +17,7 @@
     ],
     "google_analytics_aggregated": [
       "pipeline_spec.example.py"
-    ],
-    "google_sheets_docs": []
+    ]
   },
   "_comments": {
     "zoho_crm_oauth_setup.py": "Databricks notebook to help users set up OAuth credentials for Zoho CRM. Not part of the connector runtime.",
