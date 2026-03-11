@@ -1,0 +1,13 @@
+{
+  "messages": {
+    "start_date": "2024-01-01T00:00:00Z",
+    "lookback_seconds": 120,
+    "top": 100,
+    "max_pages_per_batch": 10
+  },
+  "mailfolders": {
+    "top": 100,
+    "max_pages_per_batch": 10
+  }
+}
+
