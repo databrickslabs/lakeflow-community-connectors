@@ -23,19 +23,7 @@ To configure the connector, provide the following parameters in your connector o
 | `base_url` | string | No | Zoho accounts URL for your data center | `https://accounts.zoho.com` |
 | `initial_load_start_date` | string | No | Starting point for the first sync. If omitted, syncs all historical data. (ISO 8601 format) | `2024-01-01T00:00:00Z` |
 
-### Table-Level Options
-
-The following options can be set per table via `table_options`:
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `max_records_per_batch` | integer | `100000` | Maximum number of records per microbatch. Controls memory usage when streaming large modules. Applies to CDC and append ingestion types. |
-
-To use table-level options, include them in the `externalOptionsAllowList` connection parameter:
-
-```
-max_records_per_batch
-```
+**Note:** This connector does not require any table-specific options. The `externalOptionsAllowList` connection parameter does not need to be included.
 
 ### Obtaining OAuth Credentials
 

@@ -6,7 +6,7 @@ These modules support the standard Records API with CDC via Modified_Time.
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Iterator, Optional
 
 from pyspark.sql.types import StructType, StructField, LongType
@@ -44,7 +44,6 @@ class ModuleHandler(TableHandler):
         super().__init__(client)
         self._modules_cache: Optional[list[dict]] = None
         self._fields_cache: dict[str, list[dict]] = {}
-        self._init_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
     def get_modules(self) -> list[dict]:
         """
@@ -174,85 +173,77 @@ class ModuleHandler(TableHandler):
             "ingestion_type": "cdc",
         }
 
-    def read(  # pylint: disable=too-many-locals,too-many-branches
+    def read(
         self,
         table_name: str,
         config: dict,
         start_offset: dict,
     ) -> tuple[Iterator[dict], dict]:
         """
-        Read records from a standard CRM module with bounded batch size.
+        Read records from a standard CRM module.
 
-        Each call fetches up to ``max_records_per_batch`` records (default
-        100 000).  Records are sorted by Modified_Time ASC, so the cursor
-        naturally advances with each batch.  The cursor is capped at
-        ``_init_time`` to guarantee termination for ``availableNow`` triggers.
+        Supports incremental reads using Modified_Time cursor with a 5-minute
+        lookback window to catch late updates. For CDC modules, also fetches
+        deleted records via the Deleted Records API.
 
-        Lookback is applied at read time — the stored offset always holds the
-        raw max Modified_Time so the cursor never drifts backward.
+        Args:
+            table_name: Name of the Zoho CRM module
+            config: Table configuration with optional initial_load_start_date
+            start_offset: Dictionary with cursor_time for incremental reads
+
+        Returns:
+            Tuple of (records iterator, next offset dictionary)
         """
-        max_records = config.get("max_records_per_batch", 100_000)
-
+        # Determine cursor time for incremental reads
         cursor_time = start_offset.get("cursor_time") if start_offset else None
         initial_load_start_date = config.get("initial_load_start_date")
 
         if not cursor_time and initial_load_start_date:
             cursor_time = initial_load_start_date
 
+        # Apply 5-minute lookback window to catch late updates
+        if cursor_time:
+            cursor_dt = datetime.fromisoformat(cursor_time.replace("Z", "+00:00"))
+            lookback_dt = cursor_dt - timedelta(minutes=5)
+            cursor_time = lookback_dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
+        # Check if this is a snapshot table (no cursor support)
         metadata = self.get_metadata(table_name, config)
         if metadata.get("ingestion_type") == "snapshot":
             cursor_time = None
 
-        # Apply lookback at read time — widen the API filter without
-        # affecting the stored offset so the cursor never drifts.
-        since_time = None
-        if cursor_time:
-            cursor_dt = datetime.fromisoformat(cursor_time.replace("Z", "+00:00"))
-            lookback_dt = cursor_dt - timedelta(minutes=5)
-            since_time = lookback_dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
-
+        # Track max modified time for next offset
         max_modified_time = cursor_time
 
-        json_fields = self.get_json_fields(table_name)
-        fields = self.get_fields(table_name)
-        field_names = [f["api_name"] for f in fields] if fields else []
+        def records_generator():
+            nonlocal max_modified_time
+            json_fields = self.get_json_fields(table_name)
+            fields = self.get_fields(table_name)
+            field_names = [f["api_name"] for f in fields] if fields else []
 
-        all_records: list[dict] = []
-        main_exhausted = True
+            # Read regular records
+            for record in self._read_records(table_name, field_names, cursor_time, json_fields):
+                modified_time = record.get("Modified_Time")
+                if modified_time and (not max_modified_time or modified_time > max_modified_time):
+                    max_modified_time = modified_time
+                yield record
 
-        for record in self._read_records(table_name, field_names, since_time, json_fields):
-            modified_time = record.get("Modified_Time")
-            if modified_time and (not max_modified_time or modified_time > max_modified_time):
-                max_modified_time = modified_time
-            all_records.append(record)
-            if len(all_records) >= max_records:
-                main_exhausted = False
-                break
+            # Read deleted records for CDC
+            if metadata.get("ingestion_type") == "cdc" and cursor_time:
+                for record in self._read_deleted_records(table_name, cursor_time):
+                    deleted_time = record.get("deleted_time")
+                    if deleted_time and (not max_modified_time or deleted_time > max_modified_time):
+                        max_modified_time = deleted_time
+                    yield record
 
-        deletes_exhausted = True
-        if main_exhausted and metadata.get("ingestion_type") == "cdc" and since_time:
-            for record in self._read_deleted_records(table_name, since_time):
-                deleted_time = record.get("deleted_time")
-                if deleted_time and (not max_modified_time or deleted_time > max_modified_time):
-                    max_modified_time = deleted_time
-                all_records.append(record)
-                if len(all_records) >= max_records:
-                    deletes_exhausted = False
-                    break
-
-        if not all_records:
-            return iter([]), start_offset or {}
-
-        pages_exhausted = main_exhausted and deletes_exhausted
+        # Materialize generator to get final max_modified_time
+        records = list(records_generator())
 
         if max_modified_time:
-            if pages_exhausted and max_modified_time > self._init_time:
-                max_modified_time = self._init_time
             next_offset = {"cursor_time": max_modified_time}
         else:
             next_offset = start_offset or {}
-
-        return iter(all_records), next_offset
+        return iter(records), next_offset
 
     def _read_records(
         self,

@@ -28,21 +28,12 @@ Provide the following **connection-level** options when configuring the connecto
 |----------------|--------|----------|----------------------------------------------------------------------------------------------------------------|------------------------------------------|
 | `access_token` | string | yes      | SurveyMonkey OAuth 2.0 access token for authentication.                                                        | `SjM5Y...xxxxx`                          |
 | `base_url`     | string | no       | Base URL for the SurveyMonkey API. Defaults to `https://api.surveymonkey.com/v3`. Use `https://api.eu.surveymonkey.com/v3` for EU data center. | `https://api.surveymonkey.com/v3` |
-| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names allowed to be passed to the connector. Required for child tables. | `survey_id,page_id,group_id,max_records_per_batch` |
+| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names allowed to be passed to the connector. Required for child tables. | `survey_id,page_id,group_id` |
 
 The full list of supported table-specific options for `externalOptionsAllowList` is:
-`survey_id,page_id,group_id,max_records_per_batch`
+`survey_id,page_id,group_id`
 
 > **Note**: Table-specific options such as `survey_id`, `page_id`, and `group_id` are **not** connection parameters. They are provided per-table via table options in the pipeline specification. These option names must be included in `externalOptionsAllowList` for the connection to allow them.
-
-
-### Table-Level Options
-
-The following options can be set per-table via the pipeline specification:
-
-| Name | Type | Default | Description |
-|------|------|---------|-------------|
-| `max_records_per_batch` | string (integer) | `100000` | Maximum number of records to return in a single microbatch. Limits memory usage and ensures bounded microbatch sizes during streaming ingestion. Lower values reduce memory pressure; higher values improve throughput. |
 
 
 ### Obtaining the Access Token

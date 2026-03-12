@@ -10,7 +10,7 @@ disable-model-invocation: true
 Implement the Python connector for **{{source_name}}** that conforms exactly to the interface defined in  
 [lakeflow_connect.py](../src/databricks/labs/community_connector/interface/lakeflow_connect.py). The implementation should be based on the source API documentation in `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md` produced by the `research-source-api` skill.
 
-**CRITICAL REQUIREMENT:** Refer to `src/databricks/labs/community_connector/sources/example/example.py` for concrete examples of all these patterns. You should follow the patterns demonstrated in the example connector.
+**CRITICAL REQUIREMENT:** Refer to `src/databricks/labs/community_connector/sources/example/example.py` for concrete examples of different patterns. You should follow the patterns demonstrated in the example connector.
 
 ## File Organization
 
@@ -29,15 +29,15 @@ For simple connectors, keeping everything in a single `{source_name}.py` file is
 
 ## Incremental read_table with offsets 
 
-For incremental ingestion of tables (`cdc` and `append_only`), the framework calls `read_table` repeatedly within a single trigger run. Each call produces one microbatch. Pagination stops when the returned `end_offset` equals `start_offset`.
+For incremental ingestion of tables (`cdc` and `append_only`), the framework calls `read_table` repeatedly within a single trigger run. Each call produces one microbatch. A trigger run stops when the returned `end_offset` equals `start_offset`.
 
-### Admission Control: `max_records_per_batch` (always required)
+### Admission Control: `max_records_per_batch` 
 
 Every incremental table **must** support a `max_records_per_batch` table option. This caps how many records a single `read_table` call returns to the framework, giving Spark a bounded microbatch to process. Without it, a single call could return millions of rows and overwhelm the Spark driver.
 
 This is **orthogonal** to the query-scoping strategies below. Regardless of whether you use a sliding window, a server-side limit, or neither, you must still respect `max_records_per_batch` by stopping record accumulation once the count is reached.
 
-**Exception — best-effort enforcement:** When the API does not support ascending sort and a sliding time-window is used (see below), `max_records_per_batch` becomes best-effort. The window must be drained completely to avoid skipping or duplicating records, so the actual batch size is governed by `window_seconds` rather than a strict record count.
+**Exception — best-effort enforcement:** When the API does not support ascending sort and a sliding time-window is used (see below), `max_records_per_batch` becomes best-effort. The window must be drained completely to avoid skipping or duplicating records, so the actual batch size is governed by the window size rather than a strict record count.
 
 ### Ascending Sort Order Requirement
 

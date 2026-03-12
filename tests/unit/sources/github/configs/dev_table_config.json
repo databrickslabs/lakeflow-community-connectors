@@ -17,7 +17,6 @@
     "commits": {
         "owner": "yyoli-db",
         "repo": "lakeflow-community-connectors",
-        "max_records_per_batch": "10"
     },
     "assignees": {
         "owner": "yyoli-db",

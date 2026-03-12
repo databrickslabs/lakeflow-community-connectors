@@ -32,4 +32,4 @@ connection:
 # Use a comma-separated string of option names.
 # If no table-specific options are needed, set to empty string or omit.
 # ============================================================================
-external_options_allowlist: "survey_id,page_id,group_id,max_records_per_batch"
+external_options_allowlist: "survey_id,page_id,group_id"
