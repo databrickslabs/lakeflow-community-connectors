@@ -236,6 +236,7 @@ def test_discover_token_url_returns_token_endpoint():
     """discover_token_url must fetch .well-known/smart-configuration and return token_endpoint."""
     from unittest.mock import patch, MagicMock
     from databricks.labs.community_connector.sources.fhir.fhir_utils import discover_token_url
+    from databricks.labs.community_connector.sources.fhir.fhir_constants import TOKEN_TIMEOUT
 
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -250,7 +251,7 @@ def test_discover_token_url_returns_token_endpoint():
     mock_get.assert_called_once_with(
         "https://fhir.example.com/R4/.well-known/smart-configuration",
         headers={"Accept": "application/json"},
-        timeout=30,
+        timeout=TOKEN_TIMEOUT,
     )
     assert result == "https://auth.example.com/oauth/token"
 

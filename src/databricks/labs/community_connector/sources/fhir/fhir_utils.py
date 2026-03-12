@@ -128,7 +128,7 @@ def discover_token_url(base_url: str) -> str:
     resp = requests.get(
         discovery_url,
         headers={"Accept": "application/json"},
-        timeout=30,
+        timeout=TOKEN_TIMEOUT,
     )
     if resp.status_code != 200:
         raise RuntimeError(
