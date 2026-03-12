@@ -123,3 +123,19 @@ def test_jwt_assertion_includes_kid_header():
     assert headers_passed.get("kid") == "key-2024-01", \
         "kid header must be present in JWT assertion per SMART spec"
     assert data["client_assertion"] == "header.payload.sig"
+
+
+def test_jwt_assertion_raises_if_kid_missing():
+    """kid is required for jwt_assertion per SMART spec — must raise if omitted."""
+    from unittest.mock import patch
+    auth = SmartAuthClient(
+        token_url="https://auth.example.com/token",
+        client_id="my-client",
+        auth_type="jwt_assertion",
+        # kid intentionally omitted
+    )
+    try:
+        auth._jwt_assertion_data()
+        assert False, "Should have raised ValueError"
+    except ValueError as e:
+        assert "kid" in str(e).lower()

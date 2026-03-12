@@ -82,9 +82,13 @@ class SmartAuthClient:
             "iss": self._client_id, "sub": self._client_id, "aud": self._token_url,
             "jti": str(uuid.uuid4()), "iat": now, "exp": now + timedelta(minutes=5),
         }
-        jwt_headers = {"typ": "JWT"}
-        if self._kid:
-            jwt_headers["kid"] = self._kid
+        if not self._kid:
+            raise ValueError(
+                "kid is required for jwt_assertion auth. "
+                "Provide the key ID (kid) that identifies the private key "
+                "registered with the FHIR server's JWK Set."
+            )
+        jwt_headers = {"kid": self._kid, "typ": "JWT"}
         assertion = jwt.encode(payload, self._private_key_pem, algorithm="RS256", headers=jwt_headers)
         data = {
             "grant_type": "client_credentials",
