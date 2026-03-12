@@ -204,3 +204,29 @@ def test_client_secret_uses_http_basic_auth():
     post_data = call_kwargs.get("data", {})
     assert "client_id" not in post_data, "client_id must not be in POST body"
     assert "client_secret" not in post_data, "client_secret must not be in POST body"
+
+
+def test_jwt_assertion_does_not_use_http_basic_auth():
+    """jwt_assertion authenticates via client_assertion body param, not HTTP Basic."""
+    from unittest.mock import patch, MagicMock
+    auth = SmartAuthClient(
+        token_url="https://auth.example.com/token",
+        client_id="my-client",
+        auth_type="jwt_assertion",
+        kid="k1",
+        private_key_pem="",
+        client_secret="should-not-appear",
+    )
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"access_token": "tok", "expires_in": 300}
+
+    with patch("databricks.labs.community_connector.sources.fhir.fhir_utils.jwt") as mock_jwt, \
+         patch("databricks.labs.community_connector.sources.fhir.fhir_utils.requests.post",
+               return_value=mock_response) as mock_post:
+        mock_jwt.encode.return_value = "h.p.s"
+        auth._refresh_token()
+
+    call_kwargs = mock_post.call_args.kwargs
+    assert "auth" not in call_kwargs, \
+        "jwt_assertion must not use HTTP Basic auth — credentials are in client_assertion body"

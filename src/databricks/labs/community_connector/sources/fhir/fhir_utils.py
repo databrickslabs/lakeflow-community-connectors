@@ -106,9 +106,10 @@ class SmartAuthClient:
         return data
 
     def _client_secret_data(self) -> dict:
-        data = {
-            "grant_type": "client_credentials",
-        }
+        # client_id and client_secret are NOT included in the POST body.
+        # Per SMART client-confidential-symmetric spec, they are passed via
+        # HTTP Basic auth (Authorization: Basic B64(client_id:client_secret)).
+        data = {"grant_type": "client_credentials"}
         if self._scope:
             data["scope"] = self._scope
         return data
