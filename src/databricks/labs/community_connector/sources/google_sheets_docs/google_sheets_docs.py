@@ -23,11 +23,11 @@ from pyspark.sql.types import StructType, StructField, StringType
 
 from databricks.labs.community_connector.interface import LakeflowConnect
 
-from . import google_sheets_docs_schemas
-
-SUPPORTED_TABLES = google_sheets_docs_schemas.SUPPORTED_TABLES
-TABLE_METADATA = google_sheets_docs_schemas.TABLE_METADATA
-TABLE_SCHEMAS = google_sheets_docs_schemas.TABLE_SCHEMAS
+from databricks.labs.community_connector.sources.google_sheets_docs.google_sheets_docs_schemas import (
+    SUPPORTED_TABLES,
+    TABLE_METADATA,
+    TABLE_SCHEMAS,
+)
 
 # Google API base URLs
 TOKEN_URL = "https://oauth2.googleapis.com/token"

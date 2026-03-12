@@ -98,7 +98,12 @@ def test_google_sheets_docs_connector():
     Drive scope (e.g. drive.readonly) and the project has the Drive API enabled.
     """
     config_dir = Path(__file__).parent / "configs"
-    config = load_config(config_dir / "dev_config.json")
+    dev_config_path = config_dir / "dev_config.json"
+    if not dev_config_path.exists():
+        pytest.skip(
+            "dev_config.json not found; add it locally with OAuth2 credentials to run this test"
+        )
+    config = load_config(dev_config_path)
     table_config_path = config_dir / "dev_table_config.json"
     table_config = load_config(table_config_path) if table_config_path.exists() else {}
 

@@ -13,7 +13,6 @@ import json
 import re
 import time
 
-from . import google_sheets_docs_schemas
 from pyspark.sql import Row
 from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
 from urllib.parse import quote
@@ -434,11 +433,6 @@ def register_lakeflow_source(spark):
     # src/databricks/labs/community_connector/sources/google_sheets_docs/google_sheets_docs.py
     ########################################################
 
-    SUPPORTED_TABLES = google_sheets_docs_schemas.SUPPORTED_TABLES
-    TABLE_METADATA = google_sheets_docs_schemas.TABLE_METADATA
-    TABLE_SCHEMAS = google_sheets_docs_schemas.TABLE_SCHEMAS
-
-    # Google API base URLs
     TOKEN_URL = "https://oauth2.googleapis.com/token"
     DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files"
     SHEETS_BASE_URL = "https://sheets.googleapis.com/v4/spreadsheets"
