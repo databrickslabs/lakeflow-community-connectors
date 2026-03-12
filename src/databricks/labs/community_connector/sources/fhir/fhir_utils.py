@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterator, Optional
 from urllib.parse import urljoin
 
+import jwt
 import requests
 
 from databricks.labs.community_connector.sources.fhir.fhir_constants import (
@@ -33,13 +34,15 @@ class SmartAuthClient:
     """
 
     def __init__(self, token_url: str, client_id: str, auth_type: str,
-                 private_key_pem: str = "", client_secret: str = "", scope: str = "") -> None:
+                 private_key_pem: str = "", client_secret: str = "", scope: str = "",
+                 kid: str = "") -> None:
         self._token_url = token_url
         self._client_id = client_id
         self._auth_type = auth_type
         self._private_key_pem = private_key_pem
         self._client_secret = client_secret
         self._scope = scope
+        self._kid = kid
         self._access_token: Optional[str] = None
         self._expires_at: Optional[datetime] = None
 
@@ -74,14 +77,15 @@ class SmartAuthClient:
         self._expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in - 30)
 
     def _jwt_assertion_data(self) -> dict:
-        import jwt  # PyJWT
-
         now = datetime.now(timezone.utc)
         payload = {
             "iss": self._client_id, "sub": self._client_id, "aud": self._token_url,
             "jti": str(uuid.uuid4()), "iat": now, "exp": now + timedelta(minutes=5),
         }
-        assertion = jwt.encode(payload, self._private_key_pem, algorithm="RS256")
+        jwt_headers = {"typ": "JWT"}
+        if self._kid:
+            jwt_headers["kid"] = self._kid
+        assertion = jwt.encode(payload, self._private_key_pem, algorithm="RS256", headers=jwt_headers)
         data = {
             "grant_type": "client_credentials",
             "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",

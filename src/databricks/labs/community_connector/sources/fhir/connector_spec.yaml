@@ -45,6 +45,15 @@ connection:
             with the FHIR server. Include the key delimiters (BEGIN PRIVATE KEY
             and END PRIVATE KEY).
 
+        - name: kid
+          type: string
+          required: true
+          description: >
+            The identifier of the key-pair used to sign the JWT assertion. This
+            identifier SHALL be unique within the client's JWK Set and must match
+            the key registered with the FHIR server. Required by the SMART on FHIR
+            Backend Services specification.
+
         - name: scope
           type: string
           required: true

@@ -34,6 +34,7 @@ class FhirLakeflowConnect(LakeflowConnect):
             private_key_pem=options.get("private_key_pem", ""),
             client_secret=options.get("client_secret", ""),
             scope=options.get("scope", ""),
+            kid=options.get("kid", ""),
         )
         self._client = FhirHttpClient(base_url=options["base_url"], auth_client=auth_client)
 

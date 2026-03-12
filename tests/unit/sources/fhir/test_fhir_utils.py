@@ -103,3 +103,23 @@ def test_iter_bundle_pages_respects_max_records():
     client = make_client()
     resources = list(iter_bundle_pages(client, "Patient", {"_count": "10"}, max_records=3))
     assert len(resources) <= 3
+
+
+def test_jwt_assertion_includes_kid_header():
+    """kid header is required by SMART on FHIR Backend Services spec."""
+    from unittest.mock import patch
+    auth = SmartAuthClient(
+        token_url="https://auth.example.com/token",
+        client_id="my-client",
+        auth_type="jwt_assertion",
+        kid="key-2024-01",
+    )
+    with patch("databricks.labs.community_connector.sources.fhir.fhir_utils.jwt") as mock_jwt:
+        mock_jwt.encode.return_value = "header.payload.sig"
+        data = auth._jwt_assertion_data()
+
+    call_kwargs = mock_jwt.encode.call_args
+    headers_passed = call_kwargs.kwargs.get("headers") or {}
+    assert headers_passed.get("kid") == "key-2024-01", \
+        "kid header must be present in JWT assertion per SMART spec"
+    assert data["client_assertion"] == "header.payload.sig"
