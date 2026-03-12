@@ -4,28 +4,53 @@
 
 Three supported auth methods (connector selects at runtime via `auth_type` option):
 
+### Token Discovery
+
+`token_url` is optional for `jwt_assertion` and `client_secret` auth types. If omitted, the connector
+auto-discovers the token endpoint from the FHIR server's SMART configuration:
+
+```
+GET {base_url}/.well-known/smart-configuration
+Accept: application/json
+```
+
+The connector reads `token_endpoint` from the response. Raises `RuntimeError` if discovery fails or
+`token_endpoint` is absent. Provide `token_url` explicitly to skip discovery.
+
 ### Method A: SMART Backend Services — JWT Assertion (`auth_type: jwt_assertion`)
-Per official SMART on FHIR Backend Services spec. Uses asymmetric key JWT.
+Per official SMART on FHIR Backend Services spec. Uses asymmetric key JWT (RFC 7523).
 
 Token request (POST to token_url, `Content-Type: application/x-www-form-urlencoded`):
 - `grant_type=client_credentials`
 - `client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer`
 - `client_assertion=<signed one-time JWT>`
-- `scope=system/*.rs`
+- `scope=<scope>` (if provided)
 
+JWT header fields: `alg`=`private_key_algorithm` (default `RS384`), `kid`=user-provided key ID (required), `typ`=`JWT`.
 JWT payload claims: `iss`=client_id, `sub`=client_id, `aud`=token_url, `jti`=uuid4(), `iat`=now, `exp`=now+5min.
-Sign with RS256 using PEM private key.
+Sign with PEM private key using `private_key_algorithm` (`RS384` default; `ES384` also supported; RS256 not recommended).
+
+If `kid` is not provided, a `ValueError` is raised — `kid` must match the key registered in the FHIR server's JWK Set.
+
+Required connection parameters: `base_url`, `client_id`, `private_key_pem`, `kid`, `scope`
+(plus `token_url` or auto-discovery).
+
+Optional connection parameters: `private_key_algorithm` (default: `RS384`).
 
 Token response: `{"access_token": "...", "token_type": "bearer", "expires_in": 300}`
 
 ### Method B: Client Secret (`auth_type: client_secret`)
-For servers supporting symmetric client credentials (SMART v1 confidential clients).
+For servers supporting symmetric client credentials (SMART v1 confidential-symmetric clients).
 
-Token request:
-- `grant_type=client_credentials`
-- `client_id=<id>`
-- `client_secret=<secret>`
-- `scope=system/*.rs`
+Token request (POST to token_url, `Content-Type: application/x-www-form-urlencoded`):
+- POST body: `grant_type=client_credentials` (and `scope=<scope>` if provided)
+- HTTP Basic auth header: `Authorization: Basic B64Encode(client_id:client_secret)`
+
+`client_id` and `client_secret` are NOT sent in the POST body — they are passed exclusively via
+HTTP Basic authentication, per the SMART client-confidential-symmetric spec.
+
+Required connection parameters: `base_url`, `client_id`, `client_secret`
+(plus `token_url` or auto-discovery).
 
 ### Method C: No Auth (`auth_type: none`)
 For open/dev FHIR servers (e.g. HAPI FHIR public server). No Authorization header sent.
