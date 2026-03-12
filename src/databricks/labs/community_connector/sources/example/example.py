@@ -313,6 +313,24 @@ class ExampleLakeflowConnect(LakeflowConnect):
 
         return iter(records), end_offset
 
+    def _peek_oldest_cursor(
+        self, table_name: str, cursor_field: str
+    ) -> str | None:
+        """Discover the oldest cursor value by fetching page 1 with no filters.
+
+        The API returns records sorted ascending by cursor field, so the
+        first record on the first page is the oldest.
+        """
+        resp = self._request_with_retry(
+            "GET", f"/tables/{table_name}/records", params={"page": "1"}
+        )
+        if resp.status_code != 200:
+            return None
+        batch = resp.json().get("records", [])
+        if batch:
+            return batch[0].get(cursor_field)
+        return None
+
     def _read_incremental_by_window(
         self,
         table_name: str,
@@ -328,26 +346,34 @@ class ExampleLakeflowConnect(LakeflowConnect):
         ``window_seconds`` in *table_options* (default 3600).
         ``max_records_per_batch`` caps the records per call as a safety
         bound in case the window contains more data than expected.
+
+        When no cursor is available, the method first checks
+        ``start_timestamp`` in *table_options* (user-supplied lower
+        bound).  If that is also absent, it peeks at page 1 of the
+        API to discover the oldest record's cursor value.  This
+        ensures the first call always has a bounded ``since``.
         """
         since = start_offset.get("cursor") if start_offset else None
-        # Already caught up to init time — skip the API call entirely.
-        if since and since >= self._init_ts:
-            return iter([]), start_offset
+        if not since:
+            since = table_options.get("start_timestamp")
+        if not since:
+            since = self._peek_oldest_cursor(table_name, cursor_field)
+        if not since:
+            raise ValueError(
+                f"Cannot determine starting cursor for '{table_name}'. "
+                f"Provide 'start_timestamp' in table_options."
+            )
+
+        if since >= self._init_ts:
+            return iter([]), start_offset if start_offset else {}
 
         window_seconds = int(table_options.get("window_seconds", "3600"))
         max_records = int(table_options.get("max_records_per_batch", "200"))
 
-        if since:
-            window_end_dt = datetime.fromisoformat(since) + timedelta(seconds=window_seconds)
-        else:
-            window_end_dt = datetime.now(timezone.utc)
-
-        # Cap window end at init time.
+        window_end_dt = datetime.fromisoformat(since) + timedelta(seconds=window_seconds)
         window_end = min(window_end_dt.isoformat(), self._init_ts)
 
-        params = {"until": window_end}
-        if since:
-            params["since"] = since
+        params = {"since": since, "until": window_end}
 
         records = []
         page = 1
@@ -369,14 +395,12 @@ class ExampleLakeflowConnect(LakeflowConnect):
             page = body["next_page"]
 
         if not records:
-            # No records in this window — advance cursor to window end
-            # so the next call slides forward.
             end_offset = {"cursor": window_end}
             if start_offset and start_offset == end_offset:
                 return iter([]), start_offset
             return iter([]), end_offset
 
-        # Records are sorted by cursor — last record has the max.
+        # Records are sorted ascending by cursor — last record has the max.
         last_cursor = records[-1][cursor_field]
         end_offset = {"cursor": last_cursor}
         if start_offset and start_offset == end_offset:

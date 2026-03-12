@@ -24,10 +24,10 @@ Provide the following **connection-level** options when configuring the connecto
 |-----------|--------|----------|---------------------------------------------------------------------------------------------|------------------------------------|
 | `token`   | string | yes      | GitHub Personal Access Token used for authentication.                                       | `ghp_xxx...`                       |
 | `base_url`| string | no       | Base URL for the GitHub API. Override for GitHub Enterprise Server if needed; otherwise defaults to `https://api.github.com`. | `https://github.mycompany.com/api/v3` |
-| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names that are allowed to be passed through to the connector. This connector requires table-specific options, so this parameter must be set. | `owner,repo,state,start_date,per_page,max_pages_per_batch,lookback_seconds,org,pull_number` |
+| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names that are allowed to be passed through to the connector. This connector requires table-specific options, so this parameter must be set. | `owner,repo,state,start_date,per_page,lookback_seconds,org,pull_number,max_records_per_batch,window_seconds` |
 
 The full list of supported table-specific options for `externalOptionsAllowList` is:
-`owner,repo,state,start_date,per_page,max_pages_per_batch,lookback_seconds,org,pull_number`
+`owner,repo,state,start_date,per_page,lookback_seconds,org,pull_number,max_records_per_batch,window_seconds`
 
 > **Note**: Table-specific options such as `owner`, `repo`, or `org` are **not** connection parameters. They are provided per-table via table options in the pipeline specification. These option names must be included in `externalOptionsAllowList` for the connection to allow them.
 
@@ -50,7 +50,7 @@ A Unity Catalog connection for this connector can be created in two ways via the
 
 1. Follow the **Lakeflow Community Connector** UI flow from the **Add Data** page.
 2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
-3. Set `externalOptionsAllowList` to `owner,repo,state,start_date,per_page,max_pages_per_batch,lookback_seconds,org,pull_number` (required for this connector to pass table-specific options).
+3. Set `externalOptionsAllowList` to `owner,repo,state,start_date,per_page,lookback_seconds,org,pull_number,max_records_per_batch,window_seconds` (required for this connector to pass table-specific options).
 
 The connection can also be created using the standard Unity Catalog API.
 
@@ -122,9 +122,10 @@ Table-specific options are passed via the pipeline spec under `table_configurati
   - `repo` (string, required): Repository name.
   - `state` (string, optional, where applicable): e.g. `"open"`, `"closed"`, or `"all"` for issues/PRs. Defaults to `"all"` in the implementation.
   - `per_page` (integer, optional): Page size for GitHub pagination. Defaults to `100` (max).
-  - `max_pages_per_batch` (integer, optional): Safety limit on pages per `read_table` call. Defaults to `50`.
   - `start_date` (ISO 8601 string, optional; for `cdc` tables): Initial cursor used when there is no stored offset yet.
   - `lookback_seconds` (integer, optional; for `cdc` tables): Lookback window when computing the next cursor to handle late updates. Defaults to `300`.
+  - `max_records_per_batch` (integer, optional; for incremental tables): Caps the number of records per `read_table` call. For CDC tables, records are strictly truncated. For append-only tables using a sliding window (`commits`), this is best-effort. Does not apply to snapshot tables.
+  - `window_seconds` (integer, optional; for `commits`): Size of the sliding time-window in seconds. Defaults to `86400` (1 day).
 - **`repositories`**:
   - `owner` (string, optional): User/organization login.
   - `org` (string, optional): Organization login.
@@ -229,7 +230,7 @@ Example `pipeline_spec` snippet for a single repository:
 - `connection_name` must point to the UC connection configured with your GitHub `token` (and optional `base_url`).
 - For each `table`:
   - `source_table` must be one of the supported table names listed above.
-  - Table options such as `owner`, `repo`, `state`, `start_date`, `per_page`, and `max_pages_per_batch` are placed under `table_configuration` and used to control how data is read.
+  - Table options such as `owner`, `repo`, `state`, `start_date`, `per_page`, and `max_records_per_batch` are placed under `table_configuration` and used to control how data is read.
 
 You can ingest additional tables (e.g. `pull_requests`, `comments`, `assignees`, `branches`, `collaborators`, `reviews`) by adding more `table` entries with the appropriate options.
 
@@ -249,7 +250,7 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g., 
 - **Use incremental sync where possible**:
   - For `issues`, `pull_requests`, and `comments`, rely on the `cdc` pattern with `updated_at` as the cursor to minimize API calls.
 - **Tune page size and batch limits**:
-  - Use `per_page=100` (the default) for efficiency, and adjust `max_pages_per_batch` if you need to limit runtime or API usage.
+  - Use `per_page=100` (the default) for efficiency, and set `max_records_per_batch` to limit batch sizes for incremental tables.
 - **Respect rate limits**:
   - GitHub enforces rate limits per token; consider staggering syncs or splitting repositories across tokens if you encounter rate limiting.
 

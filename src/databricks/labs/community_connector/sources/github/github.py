@@ -1,4 +1,5 @@
 # pylint: disable=too-many-lines
+from datetime import datetime, timedelta, timezone
 from typing import Iterator, Any
 
 import requests
@@ -14,6 +15,7 @@ from databricks.labs.community_connector.sources.github.github_utils import (
     PaginationOptions,
     parse_pagination_options,
     extract_next_link,
+    apply_lookback,
     compute_next_cursor,
     get_cursor_from_offset,
     require_owner_repo,
@@ -35,6 +37,7 @@ class GithubLakeflowConnect(LakeflowConnect):
             raise ValueError("GitHub connector requires 'token' in options")
 
         self.base_url = options.get("base_url", "https://api.github.com").rstrip("/")
+        self._init_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         # Configure a session with proper headers for GitHub REST API v3
         self._session = requests.Session()
@@ -98,8 +101,12 @@ class GithubLakeflowConnect(LakeflowConnect):
             - state: Issue state filter (default: "all").
             - per_page: Page size (max 100, default 100).
             - start_date: Initial ISO 8601 timestamp for first run if no start_offset is provided.
-            - lookback_seconds: Lookback window applied when computing next cursor (default: 300).
-            - max_pages_per_batch: Optional safety limit on pages per read_table call.
+            - lookback_seconds: Lookback window applied to the cursor at read time (default: 300).
+            - max_records_per_batch: Optional cap on the number of records returned per
+              read_table call for incremental tables (cdc, append). For CDC tables,
+              records are truncated to this limit. For append-only tables using a
+              sliding window (commits), this is best-effort. Does not apply to
+              snapshot tables.
         """
         reader_map = {
             "issues": self._read_issues,
@@ -120,6 +127,41 @@ class GithubLakeflowConnect(LakeflowConnect):
             raise ValueError(f"Unsupported table: {table_name!r}")
         return reader_map[table_name](start_offset, table_options)
 
+    def _compute_next_offset(
+        self,
+        next_cursor: str | None,
+        current_cursor: str | None,
+        start_offset: dict | None,
+        records: list,
+    ) -> dict:
+        """
+        Decide the offset to return from a CDC read.
+
+        The cursor is capped at ``_init_time`` (set once in ``__init__``) so
+        that a single trigger run only drains data that existed when the
+        connector was instantiated.  Any records arriving after that point
+        are still emitted (the API has no upper-bound filter) but the
+        checkpoint will not advance past ``_init_time``, guaranteeing
+        termination.  The next trigger creates a fresh connector with a
+        new ``_init_time``.
+
+        Returns start_offset (signalling "no more data") when either:
+        - No records were produced, or
+        - The (capped) cursor has not advanced beyond current_cursor.
+        """
+        if not records and start_offset:
+            return start_offset
+
+        if not next_cursor:
+            return start_offset if start_offset else {}
+
+        next_cursor = min(next_cursor, self._init_time)
+
+        if next_cursor == current_cursor:
+            return start_offset if start_offset else {"cursor": next_cursor}
+
+        return {"cursor": next_cursor}
+
     def _paginated_fetch(
         self,
         url: str,
@@ -130,21 +172,22 @@ class GithubLakeflowConnect(LakeflowConnect):
         """
         Generic paginated fetch from GitHub API.
 
+        Follows ``rel="next"`` Link headers until all pages are consumed.
+
         Args:
             url: The API endpoint URL.
             params: Query parameters for the request.
-            pagination: Pagination configuration.
+            pagination: Pagination configuration (used for per_page).
             entity_name: Name of the entity being fetched (for error messages).
 
         Returns:
             List of raw JSON objects from all fetched pages.
         """
         results: list[dict] = []
-        pages_fetched = 0
         next_url: str | None = url
         next_params: dict | None = params
 
-        while next_url and pages_fetched < pagination.max_pages_per_batch:
+        while next_url:
             response = self._session.get(next_url, params=next_params, timeout=30)
             if response.status_code != 200:
                 raise RuntimeError(
@@ -159,16 +202,9 @@ class GithubLakeflowConnect(LakeflowConnect):
 
             results.extend(data)
 
-            # Handle pagination via Link header
             link_header = response.headers.get("Link", "")
-            next_link = extract_next_link(link_header)
-            if not next_link:
-                break
-
-            # Subsequent requests follow the next URL as provided (no extra params)
-            next_url = next_link
+            next_url = extract_next_link(link_header)
             next_params = None
-            pages_fetched += 1
 
         return results
 
@@ -181,7 +217,6 @@ class GithubLakeflowConnect(LakeflowConnect):
         state = table_options.get("state", "all")
         cursor = get_cursor_from_offset(start_offset, table_options)
 
-        # Build initial request
         url = f"{self.base_url}/repos/{owner}/{repo}/issues"
         params = {
             "state": state,
@@ -189,12 +224,13 @@ class GithubLakeflowConnect(LakeflowConnect):
             "sort": "updated",
             "direction": "asc",
         }
-        if cursor:
-            params["since"] = cursor
+        since = apply_lookback(cursor, pagination.lookback_seconds)
+        if since:
+            params["since"] = since
 
         raw_issues = self._paginated_fetch(url, params, pagination, "issues")
 
-        # Process records and track max updated_at
+        max_records = pagination.max_records_per_batch
         records: list[dict[str, Any]] = []
         max_updated_at: str | None = None
 
@@ -209,14 +245,13 @@ class GithubLakeflowConnect(LakeflowConnect):
                 if max_updated_at is None or updated_at > max_updated_at:
                     max_updated_at = updated_at
 
-        # Compute next cursor with lookback
-        next_cursor = compute_next_cursor(max_updated_at, cursor, pagination.lookback_seconds)
+            if max_records is not None and len(records) >= max_records:
+                break
 
-        # If no new records, return the same offset to indicate end of stream
-        if not records and start_offset:
-            next_offset = start_offset
-        else:
-            next_offset = {"cursor": next_cursor} if next_cursor else {}
+        next_cursor = compute_next_cursor(max_updated_at, cursor)
+        next_offset = self._compute_next_offset(
+            next_cursor, cursor, start_offset, records
+        )
 
         return iter(records), next_offset
 
@@ -244,7 +279,6 @@ class GithubLakeflowConnect(LakeflowConnect):
 
         Optional table_options:
             - per_page: Page size (max 100, default 100).
-            - max_pages_per_batch: Optional safety limit on pages per read_table call.
         """
         owner = table_options.get("owner")
         org = table_options.get("org")
@@ -304,11 +338,13 @@ class GithubLakeflowConnect(LakeflowConnect):
             "sort": "updated",
             "direction": "asc",
         }
-        if cursor:
-            params["since"] = cursor
+        since = apply_lookback(cursor, pagination.lookback_seconds)
+        if since:
+            params["since"] = since
 
         raw_prs = self._paginated_fetch(url, params, pagination, "pull_requests")
 
+        max_records = pagination.max_records_per_batch
         records: list[dict[str, Any]] = []
         max_updated_at: str | None = None
 
@@ -323,12 +359,13 @@ class GithubLakeflowConnect(LakeflowConnect):
                 if max_updated_at is None or updated_at > max_updated_at:
                     max_updated_at = updated_at
 
-        next_cursor = compute_next_cursor(max_updated_at, cursor, pagination.lookback_seconds)
+            if max_records is not None and len(records) >= max_records:
+                break
 
-        if not records and start_offset:
-            next_offset = start_offset
-        else:
-            next_offset = {"cursor": next_cursor} if next_cursor else {}
+        next_cursor = compute_next_cursor(max_updated_at, cursor)
+        next_offset = self._compute_next_offset(
+            next_cursor, cursor, start_offset, records
+        )
 
         return iter(records), next_offset
 
@@ -349,11 +386,13 @@ class GithubLakeflowConnect(LakeflowConnect):
             "sort": "updated",
             "direction": "asc",
         }
-        if cursor:
-            params["since"] = cursor
+        since = apply_lookback(cursor, pagination.lookback_seconds)
+        if since:
+            params["since"] = since
 
         raw_comments = self._paginated_fetch(url, params, pagination, "comments")
 
+        max_records = pagination.max_records_per_batch
         records: list[dict[str, Any]] = []
         max_updated_at: str | None = None
 
@@ -368,74 +407,149 @@ class GithubLakeflowConnect(LakeflowConnect):
                 if max_updated_at is None or updated_at > max_updated_at:
                     max_updated_at = updated_at
 
-        next_cursor = compute_next_cursor(max_updated_at, cursor, pagination.lookback_seconds)
+            if max_records is not None and len(records) >= max_records:
+                break
 
-        if not records and start_offset:
-            next_offset = start_offset
-        else:
-            next_offset = {"cursor": next_cursor} if next_cursor else {}
+        next_cursor = compute_next_cursor(max_updated_at, cursor)
+        next_offset = self._compute_next_offset(
+            next_cursor, cursor, start_offset, records
+        )
 
         return iter(records), next_offset
 
-    def _read_commits(
+    def _find_oldest_commit_date(self, owner: str, repo: str) -> str | None:
+        """Discover the committer date of the oldest commit in the repo.
+
+        Uses two lightweight API calls: one ``per_page=1`` request to read the
+        ``rel="last"`` Link header, then one request to fetch that last page.
+        """
+        url = f"{self.base_url}/repos/{owner}/{repo}/commits"
+        resp = self._session.get(url, params={"per_page": 1}, timeout=30)
+        if resp.status_code != 200:
+            return None
+
+        link_header = resp.headers.get("Link", "")
+        last_url = None
+        for part in link_header.split(","):
+            section = part.strip()
+            if 'rel="last"' in section:
+                start = section.find("<")
+                end = section.find(">", start + 1)
+                if start != -1 and end != -1:
+                    last_url = section[start + 1 : end]
+
+        if not last_url:
+            # Only one page — the single commit in the initial response is the oldest.
+            data = resp.json()
+            if data:
+                committer = (data[-1].get("commit") or {}).get("committer") or {}
+                return committer.get("date")
+            return None
+
+        last_resp = self._session.get(last_url, timeout=30)
+        if last_resp.status_code != 200:
+            return None
+        data = last_resp.json()
+        if data:
+            committer = (data[-1].get("commit") or {}).get("committer") or {}
+            return committer.get("date")
+        return None
+
+    def _read_commits(  # pylint: disable=too-many-locals
         self, start_offset: dict, table_options: dict[str, str]
     ) -> (Iterator[dict], dict):
         """
-        Read the `commits` append-only table using:
+        Read the ``commits`` append-only table using:
             GET /repos/{owner}/{repo}/commits
+
+        The commits API returns results newest-first with no sort parameter.
+        ``since``/``until`` filter on **committer date**.  This method uses a
+        sliding time-window to scope each API query, but compacts multiple
+        consecutive windows into a single batch until ``max_records_per_batch``
+        is reached, the cursor hits ``_init_time``, or a window returns empty.
+
+        When no ``start_date`` or prior offset is available the connector
+        auto-discovers the oldest commit date via two lightweight API calls.
         """
         owner, repo = require_owner_repo(table_options, "commits")
         pagination = parse_pagination_options(table_options)
         cursor = get_cursor_from_offset(start_offset, table_options)
 
-        url = f"{self.base_url}/repos/{owner}/{repo}/commits"
-        params = {"per_page": pagination.per_page}
-        if cursor:
-            params["since"] = cursor
+        if not cursor:
+            cursor = self._find_oldest_commit_date(owner, repo)
+        if not cursor:
+            return iter([]), start_offset if start_offset else {}
 
-        raw_commits = self._paginated_fetch(url, params, pagination, "commits")
+        if cursor >= self._init_time:
+            return iter([]), start_offset if start_offset else {}
+
+        seven_days = 7 * 24 * 60 * 60
+        try:
+            window_seconds = int(table_options.get("window_seconds", str(seven_days)))
+        except (TypeError, ValueError):
+            window_seconds = seven_days
+
+        max_records = pagination.max_records_per_batch
+        ts_fmt = "%Y-%m-%dT%H:%M:%SZ"
+        url = f"{self.base_url}/repos/{owner}/{repo}/commits"
 
         records: list[dict[str, Any]] = []
-        max_commit_date: str | None = None
+        window_cursor = cursor
 
-        for commit_obj in raw_commits:
-            commit_info = commit_obj.get("commit", {}) or {}
-            commit_author = commit_info.get("author", {}) or {}
-            commit_committer = commit_info.get("committer", {}) or {}
+        while window_cursor < self._init_time:
+            window_end_dt = datetime.strptime(window_cursor, ts_fmt) + timedelta(
+                seconds=window_seconds
+            )
+            window_end = min(window_end_dt.strftime(ts_fmt), self._init_time)
 
-            record: dict[str, Any] = {
-                "sha": commit_obj.get("sha"),
-                "node_id": commit_obj.get("node_id"),
-                "repository_owner": owner,
-                "repository_name": repo,
-                "commit_message": commit_info.get("message"),
-                "commit_author_name": commit_author.get("name"),
-                "commit_author_email": commit_author.get("email"),
-                "commit_author_date": commit_author.get("date"),
-                "commit_committer_name": commit_committer.get("name"),
-                "commit_committer_email": commit_committer.get("email"),
-                "commit_committer_date": commit_committer.get("date"),
-                "html_url": commit_obj.get("html_url"),
-                "url": commit_obj.get("url"),
-                "author": commit_obj.get("author"),
-                "committer": commit_obj.get("committer"),
+            params: dict[str, Any] = {
+                "per_page": pagination.per_page,
+                "since": window_cursor,
+                "until": window_end,
             }
-            records.append(record)
 
-            author_date = record.get("commit_author_date")
-            if isinstance(author_date, str):
-                if max_commit_date is None or author_date > max_commit_date:
-                    max_commit_date = author_date
+            raw_commits = self._paginated_fetch(url, params, pagination, "commits")
 
-        # For commits we simply reuse the max commit author date as the next cursor.
-        next_cursor = max_commit_date if max_commit_date else cursor
+            if not raw_commits:
+                window_cursor = window_end
+                continue
 
-        if not records and start_offset:
-            next_offset = start_offset
-        else:
-            next_offset = {"cursor": next_cursor} if next_cursor else {}
+            for commit_obj in raw_commits:
+                commit_info = commit_obj.get("commit", {}) or {}
+                commit_author = commit_info.get("author", {}) or {}
+                commit_committer = commit_info.get("committer", {}) or {}
 
-        return iter(records), next_offset
+                record: dict[str, Any] = {
+                    "sha": commit_obj.get("sha"),
+                    "node_id": commit_obj.get("node_id"),
+                    "repository_owner": owner,
+                    "repository_name": repo,
+                    "commit_message": commit_info.get("message"),
+                    "commit_author_name": commit_author.get("name"),
+                    "commit_author_email": commit_author.get("email"),
+                    "commit_author_date": commit_author.get("date"),
+                    "commit_committer_name": commit_committer.get("name"),
+                    "commit_committer_email": commit_committer.get("email"),
+                    "commit_committer_date": commit_committer.get("date"),
+                    "html_url": commit_obj.get("html_url"),
+                    "url": commit_obj.get("url"),
+                    "author": commit_obj.get("author"),
+                    "committer": commit_obj.get("committer"),
+                }
+                records.append(record)
+
+            window_cursor = window_end
+
+            if max_records is not None and len(records) >= max_records:
+                break
+
+        if not records:
+            return iter([]), start_offset if start_offset else {"cursor": cursor}
+
+        end_offset: dict[str, Any] = {"cursor": window_cursor}
+        if start_offset and start_offset == end_offset:
+            return iter([]), start_offset
+        return iter(records), end_offset
 
     def _read_assignees(
         self, start_offset: dict, table_options: dict[str, str]
@@ -669,6 +783,7 @@ class GithubLakeflowConnect(LakeflowConnect):
         pagination = parse_pagination_options(table_options)
         pull_number_opt = table_options.get("pull_number")
 
+        max_records = pagination.max_records_per_batch
         records: list[dict[str, Any]] = []
 
         def _fetch_reviews_for_pull(pull_number: int) -> None:
@@ -687,7 +802,6 @@ class GithubLakeflowConnect(LakeflowConnect):
                 record["pull_number"] = int(pull_number)
                 records.append(record)
 
-        # If a specific pull_number is provided, fetch reviews for that PR only
         if pull_number_opt is not None:
             try:
                 pull_number_int = int(pull_number_opt)
@@ -700,7 +814,6 @@ class GithubLakeflowConnect(LakeflowConnect):
             _fetch_reviews_for_pull(pull_number_int)
             return iter(records), {}
 
-        # Otherwise, list all pull requests and fetch reviews for each
         pr_state = table_options.get("state", "all")
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls"
         params = {"state": pr_state, "per_page": pagination.per_page}
@@ -708,6 +821,8 @@ class GithubLakeflowConnect(LakeflowConnect):
         raw_prs = self._paginated_fetch(url, params, pagination, "pull_requests")
 
         for pr in raw_prs:
+            if max_records is not None and len(records) >= max_records:
+                break
             number = pr.get("number")
             if isinstance(number, int):
                 _fetch_reviews_for_pull(number)

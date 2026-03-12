@@ -13,14 +13,13 @@ class PaginationOptions:
     """Configuration options for GitHub API pagination."""
 
     per_page: int
-    max_pages_per_batch: int
     lookback_seconds: int
+    max_records_per_batch: int | None
 
 
 def parse_pagination_options(
     table_options: dict[str, str],
     default_per_page: int = 100,
-    default_max_pages: int = 50,
     default_lookback: int = 300,
 ) -> PaginationOptions:
     """
@@ -29,7 +28,6 @@ def parse_pagination_options(
     Args:
         table_options: Dictionary of table-level configuration options.
         default_per_page: Default page size (max 100 for GitHub API).
-        default_max_pages: Default maximum pages per batch.
         default_lookback: Default lookback window in seconds.
 
     Returns:
@@ -42,21 +40,22 @@ def parse_pagination_options(
     per_page = max(1, min(per_page, 100))
 
     try:
-        max_pages_per_batch = int(
-            table_options.get("max_pages_per_batch", default_max_pages)
-        )
-    except (TypeError, ValueError):
-        max_pages_per_batch = default_max_pages
-
-    try:
         lookback_seconds = int(table_options.get("lookback_seconds", default_lookback))
     except (TypeError, ValueError):
         lookback_seconds = default_lookback
 
+    max_records_per_batch: int | None = None
+    raw_max_records = table_options.get("max_records_per_batch")
+    if raw_max_records is not None:
+        try:
+            max_records_per_batch = int(raw_max_records)
+        except (TypeError, ValueError):
+            pass
+
     return PaginationOptions(
         per_page=per_page,
-        max_pages_per_batch=max_pages_per_batch,
         lookback_seconds=lookback_seconds,
+        max_records_per_batch=max_records_per_batch,
     )
 
 
@@ -91,34 +90,51 @@ def extract_next_link(link_header: str | None) -> str | None:
 def compute_next_cursor(
     max_timestamp: str | None,
     current_cursor: str | None,
+) -> str | None:
+    """
+    Return the next cursor value to checkpoint.
+
+    The offset stores the raw max observed timestamp so that progress is never
+    lost. Lookback is applied separately at read time via ``apply_lookback``.
+
+    Args:
+        max_timestamp: The maximum observed timestamp in ISO 8601 format.
+        current_cursor: The current cursor value (fallback when no data found).
+
+    Returns:
+        max_timestamp if available, otherwise current_cursor.
+    """
+    return max_timestamp if max_timestamp else current_cursor
+
+
+def apply_lookback(
+    cursor: str | None,
     lookback_seconds: int,
     timestamp_format: str = "%Y-%m-%dT%H:%M:%SZ",
 ) -> str | None:
     """
-    Compute the next cursor value with a lookback window.
+    Subtract a lookback window from a cursor timestamp.
 
-    This function takes the maximum observed timestamp and applies a lookback
-    window to avoid missing records that may have been updated concurrently.
+    Used at read time to widen the ``since`` filter so that records updated
+    concurrently during the previous batch are not missed.
 
     Args:
-        max_timestamp: The maximum observed timestamp in ISO 8601 format.
-        current_cursor: The current cursor value (fallback if parsing fails).
-        lookback_seconds: Number of seconds to look back from the max timestamp.
+        cursor: ISO 8601 timestamp string to adjust.
+        lookback_seconds: Seconds to subtract from cursor.
         timestamp_format: The format of the timestamp string.
 
     Returns:
-        The computed next cursor value, or current_cursor if computation fails.
+        The adjusted timestamp, or the original cursor if parsing fails or
+        cursor is None.
     """
-    if not max_timestamp:
-        return current_cursor
+    if not cursor or lookback_seconds <= 0:
+        return cursor
 
     try:
-        dt = datetime.strptime(max_timestamp, timestamp_format)
-        dt_with_lookback = dt - timedelta(seconds=lookback_seconds)
-        return dt_with_lookback.strftime(timestamp_format)
+        dt = datetime.strptime(cursor, timestamp_format)
+        return (dt - timedelta(seconds=lookback_seconds)).strftime(timestamp_format)
     except (ValueError, TypeError):
-        # Fallback: if parsing fails, return the raw max_timestamp
-        return max_timestamp
+        return cursor
 
 
 def get_cursor_from_offset(

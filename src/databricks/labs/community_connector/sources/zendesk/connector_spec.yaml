@@ -38,7 +38,6 @@ connection:
 # These table-specific options must be included in the externalOptionsAllowList
 # parameter of the UC connection to allow them to be passed through.
 # Use a comma-separated string of option names.
-# If no table-specific options are needed, set to empty string or omit.
 # ============================================================================
-external_options_allowlist: ""
+external_options_allowlist: "max_records_per_batch"
 
