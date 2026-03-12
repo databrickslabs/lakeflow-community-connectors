@@ -115,6 +115,36 @@ class SmartAuthClient:
         return data
 
 
+def discover_token_url(base_url: str) -> str:
+    """Fetch the OAuth2 token endpoint from the FHIR server's SMART configuration.
+
+    Per SMART on FHIR Backend Services spec, servers publish their OAuth endpoints at:
+    {base_url}/.well-known/smart-configuration
+
+    Returns the token_endpoint URL.
+    Raises RuntimeError if discovery fails or token_endpoint is absent.
+    """
+    discovery_url = base_url.rstrip("/") + "/.well-known/smart-configuration"
+    resp = requests.get(
+        discovery_url,
+        headers={"Accept": "application/json"},
+        timeout=30,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(
+            f"SMART configuration discovery failed (HTTP {resp.status_code}) at {discovery_url}: "
+            f"{resp.text}"
+        )
+    config = resp.json()
+    token_endpoint = config.get("token_endpoint")
+    if not token_endpoint:
+        raise RuntimeError(
+            f"SMART configuration at {discovery_url} does not contain 'token_endpoint'. "
+            f"Keys present: {list(config.keys())}"
+        )
+    return token_endpoint
+
+
 class FhirHttpClient:
     """HTTP client for FHIR R4 REST API with auth injection and retry logic.
 

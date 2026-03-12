@@ -17,7 +17,7 @@ from databricks.labs.community_connector.sources.fhir.fhir_constants import (
 )
 from databricks.labs.community_connector.sources.fhir.fhir_schemas import get_schema
 from databricks.labs.community_connector.sources.fhir.fhir_utils import (
-    FhirHttpClient, SmartAuthClient, extract_record, iter_bundle_pages,
+    FhirHttpClient, SmartAuthClient, discover_token_url, extract_record, iter_bundle_pages,
 )
 
 
@@ -27,10 +27,16 @@ class FhirLakeflowConnect(LakeflowConnect):
     def __init__(self, options: dict[str, str]) -> None:
         super().__init__(options)
 
+        auth_type = options.get("auth_type", "none")
+        token_url = options.get("token_url", "").strip()
+
+        if not token_url and auth_type != "none":
+            token_url = discover_token_url(options["base_url"])
+
         auth_client = SmartAuthClient(
-            token_url=options.get("token_url", ""),
+            token_url=token_url,
             client_id=options.get("client_id", ""),
-            auth_type=options.get("auth_type", "none"),
+            auth_type=auth_type,
             private_key_pem=options.get("private_key_pem", ""),
             client_secret=options.get("client_secret", ""),
             scope=options.get("scope", ""),

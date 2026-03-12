@@ -27,10 +27,13 @@ connection:
       parameters:
         - name: token_url
           type: string
-          required: true
+          required: false
           description: >
-            OAuth2 token endpoint URL. Usually found at the FHIR server's
-            /.well-known/smart-configuration endpoint.
+            OAuth2 token endpoint URL. If omitted, the connector will attempt to
+            auto-discover it by fetching {base_url}/.well-known/smart-configuration
+            per the SMART on FHIR Backend Services specification.
+            Provide explicitly if the server does not publish a SMART configuration
+            document, or to override auto-discovery.
             Example: https://ehr.example.com/oauth/token
 
         - name: client_id
@@ -84,9 +87,13 @@ connection:
       parameters:
         - name: token_url
           type: string
-          required: true
+          required: false
           description: >
-            OAuth2 token endpoint URL.
+            OAuth2 token endpoint URL. If omitted, the connector will attempt to
+            auto-discover it by fetching {base_url}/.well-known/smart-configuration
+            per the SMART on FHIR Backend Services specification.
+            Provide explicitly if the server does not publish a SMART configuration
+            document, or to override auto-discovery.
             Example: https://ehr.example.com/oauth/token
 
         - name: client_id

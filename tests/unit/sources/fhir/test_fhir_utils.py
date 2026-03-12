@@ -230,3 +230,77 @@ def test_jwt_assertion_does_not_use_http_basic_auth():
     call_kwargs = mock_post.call_args.kwargs
     assert "auth" not in call_kwargs, \
         "jwt_assertion must not use HTTP Basic auth — credentials are in client_assertion body"
+
+
+def test_discover_token_url_returns_token_endpoint():
+    """discover_token_url must fetch .well-known/smart-configuration and return token_endpoint."""
+    from unittest.mock import patch, MagicMock
+    from databricks.labs.community_connector.sources.fhir.fhir_utils import discover_token_url
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "token_endpoint": "https://auth.example.com/oauth/token",
+        "authorization_endpoint": "https://auth.example.com/oauth/authorize",
+    }
+    with patch("databricks.labs.community_connector.sources.fhir.fhir_utils.requests.get",
+               return_value=mock_resp) as mock_get:
+        result = discover_token_url("https://fhir.example.com/R4")
+
+    mock_get.assert_called_once_with(
+        "https://fhir.example.com/R4/.well-known/smart-configuration",
+        headers={"Accept": "application/json"},
+        timeout=30,
+    )
+    assert result == "https://auth.example.com/oauth/token"
+
+
+def test_discover_token_url_raises_on_http_error():
+    from unittest.mock import patch, MagicMock
+    from databricks.labs.community_connector.sources.fhir.fhir_utils import discover_token_url
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 404
+    mock_resp.text = "Not Found"
+    with patch("databricks.labs.community_connector.sources.fhir.fhir_utils.requests.get",
+               return_value=mock_resp):
+        try:
+            discover_token_url("https://fhir.example.com/R4")
+            assert False, "Should have raised RuntimeError"
+        except RuntimeError as e:
+            assert "404" in str(e)
+
+
+def test_discover_token_url_raises_if_token_endpoint_missing():
+    from unittest.mock import patch, MagicMock
+    from databricks.labs.community_connector.sources.fhir.fhir_utils import discover_token_url
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"authorization_endpoint": "https://auth.example.com/authorize"}
+    with patch("databricks.labs.community_connector.sources.fhir.fhir_utils.requests.get",
+               return_value=mock_resp):
+        try:
+            discover_token_url("https://fhir.example.com/R4")
+            assert False, "Should have raised RuntimeError"
+        except RuntimeError as e:
+            assert "token_endpoint" in str(e)
+
+
+def test_fhir_connector_auto_discovers_token_url_when_omitted():
+    """When token_url is absent and auth_type != none, connector must auto-discover it."""
+    from unittest.mock import patch
+    from databricks.labs.community_connector.sources.fhir.fhir import FhirLakeflowConnect
+
+    with patch("databricks.labs.community_connector.sources.fhir.fhir.discover_token_url",
+               return_value="https://auth.example.com/token") as mock_discover:
+        connector = FhirLakeflowConnect({
+            "base_url": "https://fhir.example.com/R4",
+            "auth_type": "client_secret",
+            "client_id": "cid",
+            "client_secret": "sec",
+            # token_url intentionally omitted
+        })
+
+    mock_discover.assert_called_once_with("https://fhir.example.com/R4")
+    assert connector._client._auth_client._token_url == "https://auth.example.com/token"
