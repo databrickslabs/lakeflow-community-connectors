@@ -35,7 +35,7 @@ class SmartAuthClient:
 
     def __init__(self, token_url: str, client_id: str, auth_type: str,
                  private_key_pem: str = "", client_secret: str = "", scope: str = "",
-                 kid: str = "") -> None:
+                 kid: str = "", private_key_algorithm: str = "RS384") -> None:
         self._token_url = token_url
         self._client_id = client_id
         self._auth_type = auth_type
@@ -43,6 +43,7 @@ class SmartAuthClient:
         self._client_secret = client_secret
         self._scope = scope
         self._kid = kid
+        self._private_key_algorithm = private_key_algorithm
         self._access_token: Optional[str] = None
         self._expires_at: Optional[datetime] = None
 
@@ -89,7 +90,7 @@ class SmartAuthClient:
                 "registered with the FHIR server's JWK Set."
             )
         jwt_headers = {"kid": self._kid, "typ": "JWT"}
-        assertion = jwt.encode(payload, self._private_key_pem, algorithm="RS256", headers=jwt_headers)
+        assertion = jwt.encode(payload, self._private_key_pem, algorithm=self._private_key_algorithm, headers=jwt_headers)
         data = {
             "grant_type": "client_credentials",
             "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",

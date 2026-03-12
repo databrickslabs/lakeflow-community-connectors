@@ -18,7 +18,9 @@ connection:
   auth_methods:
     - name: jwt_assertion
       description: >
-        SMART Backend Services authentication using RSA private key.
+        SMART Backend Services authentication using an asymmetric private key (RSA or EC).
+        Implements the JWT assertion flow per the SMART on FHIR Backend Services specification.
+        Supported algorithms: RS384 (default), ES384.
         Use this for production FHIR servers that support SMART Backend Services
         (e.g., Epic, Cerner). The connector will obtain a short-lived access token
         using the JWT assertion flow.
@@ -53,6 +55,17 @@ connection:
             identifier SHALL be unique within the client's JWK Set and must match
             the key registered with the FHIR server. Required by the SMART on FHIR
             Backend Services specification.
+
+        - name: private_key_algorithm
+          type: string
+          required: false
+          description: >
+            JWT signing algorithm. Defaults to "RS384".
+            Per the SMART on FHIR Backend Services spec, clients SHALL support RS384 and ES384.
+            Accepted values: "RS384" (RSA with SHA-384), "ES384" (ECDSA with SHA-384).
+            Additional algorithms (e.g. RS256) are permitted by the spec via MAY but are
+            not recommended for production use with spec-compliant servers.
+            Example: RS384
 
         - name: scope
           type: string

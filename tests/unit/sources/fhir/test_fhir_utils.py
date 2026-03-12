@@ -139,3 +139,38 @@ def test_jwt_assertion_raises_if_kid_missing():
         assert False, "Should have raised ValueError"
     except ValueError as e:
         assert "kid" in str(e).lower()
+
+
+def test_jwt_assertion_defaults_to_rs384():
+    """Default algorithm must be RS384 per SMART spec SHOULD guidance."""
+    from unittest.mock import patch
+    auth = SmartAuthClient(
+        token_url="https://auth.example.com/token",
+        client_id="my-client",
+        auth_type="jwt_assertion",
+        kid="k1",
+    )
+    with patch("databricks.labs.community_connector.sources.fhir.fhir_utils.jwt") as mock_jwt:
+        mock_jwt.encode.return_value = "h.p.s"
+        auth._jwt_assertion_data()
+    call_args = mock_jwt.encode.call_args
+    algorithm_used = call_args.kwargs.get("algorithm") or (call_args.args[2] if len(call_args.args) > 2 else None)
+    assert algorithm_used == "RS384", f"Expected RS384, got {algorithm_used}"
+
+
+def test_jwt_assertion_uses_configured_algorithm():
+    """Algorithm must be configurable to ES384 per SMART spec SHALL support requirement."""
+    from unittest.mock import patch
+    auth = SmartAuthClient(
+        token_url="https://auth.example.com/token",
+        client_id="my-client",
+        auth_type="jwt_assertion",
+        kid="k1",
+        private_key_algorithm="ES384",
+    )
+    with patch("databricks.labs.community_connector.sources.fhir.fhir_utils.jwt") as mock_jwt:
+        mock_jwt.encode.return_value = "h.p.s"
+        auth._jwt_assertion_data()
+    call_args = mock_jwt.encode.call_args
+    algorithm_used = call_args.kwargs.get("algorithm") or (call_args.args[2] if len(call_args.args) > 2 else None)
+    assert algorithm_used == "ES384", f"Expected ES384, got {algorithm_used}"
