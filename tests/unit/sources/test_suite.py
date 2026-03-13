@@ -1,1931 +1,797 @@
 # pylint: disable=too-many-lines
 """Test suite for LakeflowConnect implementations.
 
-Design goals
-------------
-1. **Per-table diagnostics** – every table emits its own TestResult so an LLM
-   agent (or human) can see exactly which table failed which check.
-2. **Actionable fix hints** – every failure includes a ``fix_hint`` that tells
-   the agent what code to change.
-3. **Pagination-contract test** – validates the offset protocol the framework
-   relies on (stop when ``end_offset == start_offset``).
-4. **Machine-readable output** – ``TestReport.to_json()`` and
-   ``TestReport.failure_summary()`` for programmatic consumption.
+Usage — each connector test file subclasses ``LakeflowConnectTests``::
+
+    class TestMyConnector(LakeflowConnectTests):
+        connector_class = MyLakeflowConnect
+
+Config and table_configs are auto-loaded from a ``configs/`` directory next to
+the test file (``dev_config.json`` and ``dev_table_config.json``).  Override
+the class attributes to supply them explicitly.
+
+Then run::
+
+    pytest tests/unit/sources/my_source/ -v                       # all tests
+    pytest tests/unit/sources/my_source/ -k "test_read_table"     # one test
 """
 
+import inspect
 import json
 import traceback
-from dataclasses import dataclass, field
-from datetime import datetime
-from enum import Enum
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Type
 
+import pytest
 from pyspark.sql.types import *  # pylint: disable=wildcard-import,unused-wildcard-import
 
+from databricks.labs.community_connector.interface.lakeflow_connect import LakeflowConnect
 from databricks.labs.community_connector.libs.utils import parse_value
 
-# Valid values for read_table_metadata()["ingestion_type"]
 VALID_INGESTION_TYPES = {"snapshot", "cdc", "cdc_with_deletes", "append"}
 
 
-# ---------------------------------------------------------------------------
-# Data classes
-# ---------------------------------------------------------------------------
+class LakeflowConnectTests:
+    """Base test class for LakeflowConnect connectors.
 
-class TestStatus(Enum):
-    PASSED = "PASSED"
-    FAILED = "FAILED"
-    ERROR = "ERROR"
+    Subclass this and set the class attributes below.  Pytest discovers the
+    subclass and runs each ``test_*`` method as a separate test item.
 
+    Class attributes:
+        connector_class: The LakeflowConnect subclass to test (required).
+        config: Init options dict passed to connector_class.__init__.
+        table_configs: Per-table options keyed by table name.
+        sample_records: Max records to consume per table during read tests.
+        test_utils_class: Optional LakeflowConnectTestUtils subclass for
+            write-back tests.
+    """
 
-@dataclass
-class TestResult:
-    """Represents the result of a single test."""
-
-    test_name: str
-    status: TestStatus
-    message: str = ""
-    fix_hint: Optional[str] = None
-    table_name: Optional[str] = None
-    details: Dict[str, Any] = field(default_factory=dict)
-    exception: Optional[Exception] = None
-    traceback_str: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {
-            "test_name": self.test_name,
-            "status": self.status.value,
-            "message": self.message,
-        }
-        if self.fix_hint:
-            d["fix_hint"] = self.fix_hint
-        if self.table_name:
-            d["table_name"] = self.table_name
-        if self.details:
-            d["details"] = self.details
-        if self.traceback_str:
-            d["traceback"] = self.traceback_str
-        return d
-
-
-@dataclass
-class TestReport:
-    """Complete test report."""
-
-    connector_class_name: str
-    test_results: List[TestResult]
-    total_tests: int
-    passed_tests: int
-    failed_tests: int
-    error_tests: int
-    timestamp: str
-
-    def success_rate(self) -> float:
-        if self.total_tests == 0:
-            return 0.0
-        return (self.passed_tests / self.total_tests) * 100
-
-    # -- Machine-readable helpers ------------------------------------------
-
-    def to_json(self, indent: int = 2) -> str:
-        """Return the full report as a JSON string."""
-        return json.dumps(
-            {
-                "connector_class_name": self.connector_class_name,
-                "timestamp": self.timestamp,
-                "summary": {
-                    "total": self.total_tests,
-                    "passed": self.passed_tests,
-                    "failed": self.failed_tests,
-                    "errors": self.error_tests,
-                    "success_rate": round(self.success_rate(), 1),
-                },
-                "results": [r.to_dict() for r in self.test_results],
-            },
-            indent=indent,
-            default=str,
-        )
-
-    def failure_summary(self) -> str:
-        """Return a compact, LLM-friendly summary of failures only.
-
-        Each line contains the test name, a one-sentence reason, and the fix
-        hint (if available).  Passed tests are omitted so the agent can focus
-        on what to fix.
-
-        Ends with a ``pytest -k`` command to re-run only the failing tests.
-        """
-        lines: List[str] = []
-        failed_top_level_names: set = set()
-        for r in self.test_results:
-            if r.status == TestStatus.PASSED:
-                continue
-            parts = [f"[{r.status.value}] {r.test_name}: {r.message}"]
-            if r.fix_hint:
-                parts.append(f"  -> Fix: {r.fix_hint}")
-            if r.traceback_str:
-                # Only keep the last line of the traceback (the actual error).
-                last_line = r.traceback_str.strip().rsplit("\n", 1)[-1]
-                parts.append(f"  -> Exception: {last_line}")
-            lines.append("\n".join(parts))
-            # Extract top-level name: "test_read_table[orders]" -> "test_read_table"
-            top_name = r.test_name.split("[")[0]
-            failed_top_level_names.add(top_name)
-        if not lines:
-            return "All tests passed."
-        rerun_expr = " or ".join(sorted(failed_top_level_names))
-        lines.append(
-            f"To re-run only the failed tests:\n"
-            f"  pytest -k \"{rerun_expr}\" <test_file>"
-        )
-        return "\n\n".join(lines)
-
-
-class TestFailedException(Exception):
-    """Exception raised when tests fail or have errors."""
-
-    def __init__(self, message: str, report: TestReport):
-        super().__init__(message)
-        self.report = report
-
-
-# ---------------------------------------------------------------------------
-# Tester
-# ---------------------------------------------------------------------------
-
-class LakeflowConnectTester:
-    def __init__(
-        self,
-        init_options: dict,
-        table_configs: Dict[str, Dict[str, Any]] = {},
-        sample_records: int = 10,
-    ):
-        self._init_options = init_options
-        # Per-table configuration passed as table_options into connector methods.
-        self._table_configs: Dict[str, Dict[str, Any]] = table_configs
-        # Number of records to sample from iterators during read validation.
-        self._sample_records: int = sample_records
-        self.test_results: List[TestResult] = []
+    connector_class: Type[LakeflowConnect] = None  # type: ignore[assignment]
+    config: dict = None  # type: ignore[assignment]
+    table_configs: Dict[str, Dict[str, Any]] = None  # type: ignore[assignment]
+    sample_records: int = 50
+    test_utils_class = None
 
     # ------------------------------------------------------------------
-    # Test registry & entry point
+    # Setup
     # ------------------------------------------------------------------
 
-    # Ordered list of all test method names.  The order matters because some
-    # tests depend on earlier ones (e.g. everything after initialization
-    # requires a working connector instance).
-    ALL_TESTS: List[str] = [
-        "test_initialization",
-        "test_list_tables",
-        "test_get_table_schema",
-        "test_read_table_metadata",
-        "test_read_table",
-        "test_micro_batch_offset_contract",
-        "test_read_table_deletes",
-    ]
+    @classmethod
+    def _config_dir(cls) -> Path:
+        """Return the ``configs/`` directory next to the subclass test file."""
+        return Path(inspect.getfile(cls)).parent / "configs"
 
-    # Write-back tests (only run when connector_test_utils is available).
-    WRITE_BACK_TESTS: List[str] = [
-        "test_list_insertable_tables",
-        "test_list_deletable_tables",
-        "test_write_to_source",
-        "test_incremental_after_write",
-        "test_delete_and_read_deletes",
-    ]
-
-    def run_all_tests(self) -> TestReport:
-        """Run all available tests and return a comprehensive report."""
-        self.test_results = []
-
-        self.test_initialization()
-
-        if self.connector is None:
-            return self._generate_report()
-
-        for name in self.ALL_TESTS:
-            if name == "test_initialization":
-                continue
-            getattr(self, name)()
-
-        has_write_utils = (
-            hasattr(self, "connector_test_utils")
-            and self.connector_test_utils is not None
+    @classmethod
+    def _load_config(cls) -> dict:
+        """Load ``dev_config.json`` from the config dir."""
+        path = cls._config_dir() / "dev_config.json"
+        assert path.exists(), (
+            f"Config file not found: {path}\n"
+            "  Fix: Create dev_config.json with connector credentials."
         )
-        if has_write_utils:
-            for name in self.WRITE_BACK_TESTS:
-                getattr(self, name)()
+        with open(path, "r") as f:
+            return json.load(f)
 
-        return self._generate_report()
+    @classmethod
+    def _load_table_configs(cls) -> Dict[str, Dict[str, Any]]:
+        """Load ``dev_table_config.json`` if it exists, else return {}."""
+        path = cls._config_dir() / "dev_table_config.json"
+        if not path.exists():
+            return {}
+        with open(path, "r") as f:
+            return json.load(f)
+
+    @classmethod
+    def setup_class(cls):
+        assert cls.connector_class is not None, (
+            "Set connector_class in your test subclass"
+        )
+        if cls.config is None:
+            cls.config = cls._load_config()
+        if cls.table_configs is None:
+            cls.table_configs = cls._load_table_configs()
+        cls.connector = cls.connector_class(cls.config)
+        cls.test_utils = None
+        if cls.test_utils_class:
+            try:
+                cls.test_utils = cls.test_utils_class(cls.config)
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _opts(self, table: str) -> dict:
+        return self.table_configs.get(table, {})
+
+    def _tables(self) -> List[str]:
+        return self.connector.list_tables()
 
     # ------------------------------------------------------------------
     # test_initialization
     # ------------------------------------------------------------------
 
     def test_initialization(self):
-        """Test connector initialization."""
-        try:
-            self.connector = LakeflowConnect(self._init_options)  # pylint: disable=undefined-variable
-
-            # Try to initialize test utils – not all connectors have them.
-            try:
-                self.connector_test_utils = LakeflowConnectTestUtils(self._init_options)  # pylint: disable=undefined-variable
-            except Exception:
-                self.connector_test_utils = None
-
-            if self.connector is None:
-                self._add_result(TestResult(
-                    test_name="test_initialization",
-                    status=TestStatus.FAILED,
-                    message="Connector initialization returned None",
-                    fix_hint="__init__ must not return None. Ensure it stores options and returns normally.",
-                ))
-            else:
-                self._add_result(TestResult(
-                    test_name="test_initialization",
-                    status=TestStatus.PASSED,
-                    message="Connector initialized successfully",
-                ))
-
-        except Exception as e:
-            self._add_result(TestResult(
-                test_name="test_initialization",
-                status=TestStatus.ERROR,
-                message=f"Initialization failed: {e}",
-                fix_hint=(
-                    "The connector's __init__(options) raised an exception. "
-                    "Check that all required keys are present in options and that "
-                    "no network calls happen during __init__."
-                ),
-                exception=e,
-                traceback_str=traceback.format_exc(),
-            ))
-            self.connector = None
+        """Connector was created successfully in setup_class."""
+        assert self.connector is not None, (
+            "Connector is None after __init__.\n"
+            "  Fix: __init__ must not return None."
+        )
 
     # ------------------------------------------------------------------
     # test_list_tables
     # ------------------------------------------------------------------
 
     def test_list_tables(self):
-        """Test list_tables returns a non-empty list of unique strings."""
-        try:
-            tables = self.connector.list_tables()
-
-            if not isinstance(tables, list):
-                self._add_result(TestResult(
-                    test_name="test_list_tables",
-                    status=TestStatus.FAILED,
-                    message=f"Expected list, got {type(tables).__name__}",
-                    fix_hint="list_tables() must return a list[str].",
-                    details={"returned_type": str(type(tables)), "returned_value": str(tables)},
-                ))
-                return
-
-            if not tables:
-                self._add_result(TestResult(
-                    test_name="test_list_tables",
-                    status=TestStatus.FAILED,
-                    message="list_tables() returned an empty list",
-                    fix_hint="list_tables() must return at least one table name.",
-                ))
-                return
-
-            for i, table in enumerate(tables):
-                if not isinstance(table, str):
-                    self._add_result(TestResult(
-                        test_name="test_list_tables",
-                        status=TestStatus.FAILED,
-                        message=f"Table name at index {i} is not a string: {type(table).__name__}",
-                        fix_hint="Every element of list_tables() must be a str.",
-                        details={"table_index": i, "table_value": str(table)},
-                    ))
-                    return
-
-            # Check uniqueness
-            duplicates = [t for t in tables if tables.count(t) > 1]
-            if duplicates:
-                self._add_result(TestResult(
-                    test_name="test_list_tables",
-                    status=TestStatus.FAILED,
-                    message=f"Duplicate table names: {sorted(set(duplicates))}",
-                    fix_hint="list_tables() must return unique table names. Remove duplicates.",
-                ))
-                return
-
-            self._add_result(TestResult(
-                test_name="test_list_tables",
-                status=TestStatus.PASSED,
-                message=f"Returned {len(tables)} tables: {tables}",
-                details={"tables": tables, "count": len(tables)},
-            ))
-
-        except Exception as e:
-            self._add_result(TestResult(
-                test_name="test_list_tables",
-                status=TestStatus.ERROR,
-                message=f"list_tables() raised: {e}",
-                fix_hint="list_tables() must not raise exceptions.",
-                exception=e,
-                traceback_str=traceback.format_exc(),
-            ))
+        """list_tables returns a non-empty list of unique strings."""
+        tables = self.connector.list_tables()
+        assert isinstance(tables, list), (
+            f"Expected list, got {type(tables).__name__}.\n"
+            "  Fix: list_tables() must return list[str]."
+        )
+        assert tables, (
+            "list_tables() returned an empty list.\n"
+            "  Fix: Must return at least one table name."
+        )
+        for i, t in enumerate(tables):
+            assert isinstance(t, str), (
+                f"Table at index {i} is {type(t).__name__}, expected str.\n"
+                "  Fix: Every element of list_tables() must be a str."
+            )
+        dupes = [t for t in tables if tables.count(t) > 1]
+        assert not dupes, (
+            f"Duplicate table names: {sorted(set(dupes))}.\n"
+            "  Fix: list_tables() must return unique names."
+        )
 
     # ------------------------------------------------------------------
-    # test_get_table_schema  (per-table)
+    # test_get_table_schema  (per-table, collected)
     # ------------------------------------------------------------------
 
     def test_get_table_schema(self):
-        """Test get_table_schema for every table."""
-        tables = self._get_tables_safe("test_get_table_schema")
-        if tables is None:
-            return
-
-        for table_name in tables:
-            test_name = f"test_get_table_schema[{table_name}]"
+        """get_table_schema returns a valid StructType for every table."""
+        errors = []
+        for table in self._tables():
             try:
-                schema = self.connector.get_table_schema(
-                    table_name, self._get_table_options(table_name)
-                )
-
+                schema = self.connector.get_table_schema(table, self._opts(table))
                 if not isinstance(schema, StructType):
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message=f"Expected StructType, got {type(schema).__name__}",
-                        fix_hint="get_table_schema() must return a pyspark.sql.types.StructType.",
-                        table_name=table_name,
-                    ))
+                    errors.append(
+                        f"[{table}] Expected StructType, got {type(schema).__name__}.\n"
+                        "  Fix: get_table_schema() must return pyspark.sql.types.StructType."
+                    )
                     continue
-
                 if not schema.fields:
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message="Schema has no fields",
-                        fix_hint="get_table_schema() returned an empty StructType. Add StructField entries.",
-                        table_name=table_name,
-                    ))
+                    errors.append(
+                        f"[{table}] Schema has no fields.\n"
+                        "  Fix: Add StructField entries to the returned StructType."
+                    )
                     continue
-
-                # Check for duplicate field names
-                field_names = [f.name for f in schema.fields]
-                dupes = [n for n in field_names if field_names.count(n) > 1]
+                names = [f.name for f in schema.fields]
+                dupes = [n for n in names if names.count(n) > 1]
                 if dupes:
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message=f"Duplicate field names in schema: {sorted(set(dupes))}",
-                        fix_hint="Schema field names must be unique. Remove or rename duplicates.",
-                        table_name=table_name,
-                    ))
-                    continue
-
-                self._add_result(TestResult(
-                    test_name=test_name,
-                    status=TestStatus.PASSED,
-                    message=f"Schema has {len(schema.fields)} fields",
-                    table_name=table_name,
-                    details={
-                        "field_count": len(schema.fields),
-                        "fields": [
-                            {"name": f.name, "type": str(f.dataType), "nullable": f.nullable}
-                            for f in schema.fields
-                        ],
-                    },
-                ))
-
+                    errors.append(
+                        f"[{table}] Duplicate field names: {sorted(set(dupes))}.\n"
+                        "  Fix: Schema field names must be unique."
+                    )
             except Exception as e:
-                self._add_result(TestResult(
-                    test_name=test_name,
-                    status=TestStatus.ERROR,
-                    message=f"get_table_schema raised: {e}",
-                    fix_hint=f"get_table_schema('{table_name}', ...) must not raise. Check the table name mapping.",
-                    table_name=table_name,
-                    exception=e,
-                    traceback_str=traceback.format_exc(),
-                ))
+                errors.append(f"[{table}] get_table_schema raised: {e}")
+        if errors:
+            pytest.fail("\n\n".join(errors))
 
     # ------------------------------------------------------------------
-    # test_read_table_metadata  (per-table)
+    # test_read_table_metadata  (per-table, collected)
     # ------------------------------------------------------------------
 
     def test_read_table_metadata(self):  # pylint: disable=too-many-branches
-        """Test read_table_metadata for every table."""
-        tables = self._get_tables_safe("test_read_table_metadata")
-        if tables is None:
-            return
-
-        for table_name in tables:
-            test_name = f"test_read_table_metadata[{table_name}]"
+        """read_table_metadata returns valid metadata for every table."""
+        errors = []
+        for table in self._tables():
             try:
-                metadata = self.connector.read_table_metadata(
-                    table_name, self._get_table_options(table_name)
-                )
-
-                if not isinstance(metadata, dict):
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message=f"Expected dict, got {type(metadata).__name__}",
-                        fix_hint="read_table_metadata() must return a dict.",
-                        table_name=table_name,
-                    ))
-                    continue
-
-                # ---- ingestion_type ----------------------------------
-                ingestion_type = metadata.get("ingestion_type")
-                if ingestion_type is None:
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message="Missing required key 'ingestion_type'",
-                        fix_hint=(
-                            "read_table_metadata() must return a dict with 'ingestion_type'. "
-                            f"Valid values: {sorted(VALID_INGESTION_TYPES)}"
-                        ),
-                        table_name=table_name,
-                    ))
-                    continue
-
-                if ingestion_type not in VALID_INGESTION_TYPES:
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message=f"Invalid ingestion_type: '{ingestion_type}'",
-                        fix_hint=f"ingestion_type must be one of {sorted(VALID_INGESTION_TYPES)}.",
-                        table_name=table_name,
-                        details={"ingestion_type": ingestion_type},
-                    ))
-                    continue
-
-                # ---- primary_keys ------------------------------------
-                primary_keys = metadata.get("primary_keys")
-                pk_ok = True
-                if self._should_validate_primary_key(metadata):
-                    if primary_keys is None:
-                        self._add_result(TestResult(
-                            test_name=test_name,
-                            status=TestStatus.FAILED,
-                            message="Missing required key 'primary_keys'",
-                            fix_hint=(
-                                "read_table_metadata() must include 'primary_keys' (list[str]) "
-                                f"for ingestion_type='{ingestion_type}'."
-                            ),
-                            table_name=table_name,
-                        ))
-                        continue
-                    if not isinstance(primary_keys, list):
-                        self._add_result(TestResult(
-                            test_name=test_name,
-                            status=TestStatus.FAILED,
-                            message=f"primary_keys should be list, got {type(primary_keys).__name__}",
-                            fix_hint="primary_keys must be a list of column name strings.",
-                            table_name=table_name,
-                        ))
-                        continue
-                    if not primary_keys:
-                        self._add_result(TestResult(
-                            test_name=test_name,
-                            status=TestStatus.FAILED,
-                            message="primary_keys is empty",
-                            fix_hint=(
-                                f"For ingestion_type='{ingestion_type}', primary_keys must "
-                                "contain at least one column name."
-                            ),
-                            table_name=table_name,
-                        ))
-                        continue
-
-                    # Validate PKs exist in schema
-                    try:
-                        schema = self.connector.get_table_schema(
-                            table_name, self._get_table_options(table_name)
-                        )
-                        if not self._validate_primary_keys(primary_keys, schema):
-                            missing = [
-                                pk for pk in primary_keys
-                                if not self._field_exists_in_schema(pk, schema)
-                            ]
-                            self._add_result(TestResult(
-                                test_name=test_name,
-                                status=TestStatus.FAILED,
-                                message=f"primary_keys {missing} not found in schema",
-                                fix_hint=(
-                                    f"These primary key columns are missing from get_table_schema('{table_name}'). "
-                                    "Either add them to the schema or fix the primary_keys list."
-                                ),
-                                table_name=table_name,
-                                details={"primary_keys": primary_keys, "schema_fields": schema.fieldNames()},
-                            ))
-                            pk_ok = False
-                    except Exception:
-                        pass  # Schema test already covers schema errors.
-
-                # ---- cursor_field ------------------------------------
-                if self._should_validate_cursor_field(metadata):
-                    cursor_field = metadata.get("cursor_field")
-                    if cursor_field is None:
-                        self._add_result(TestResult(
-                            test_name=test_name,
-                            status=TestStatus.FAILED,
-                            message="Missing required key 'cursor_field'",
-                            fix_hint=(
-                                f"read_table_metadata() must include 'cursor_field' (str) "
-                                f"for ingestion_type='{ingestion_type}'."
-                            ),
-                            table_name=table_name,
-                        ))
-                        continue
-                    if not isinstance(cursor_field, str):
-                        self._add_result(TestResult(
-                            test_name=test_name,
-                            status=TestStatus.FAILED,
-                            message=f"cursor_field should be str, got {type(cursor_field).__name__}",
-                            fix_hint="cursor_field must be a single column name string, not a list or other type.",
-                            table_name=table_name,
-                        ))
-                        continue
-
-                    # Validate cursor field exists in schema
-                    try:
-                        schema = self.connector.get_table_schema(
-                            table_name, self._get_table_options(table_name)
-                        )
-                        if not self._field_exists_in_schema(cursor_field, schema):
-                            self._add_result(TestResult(
-                                test_name=test_name,
-                                status=TestStatus.FAILED,
-                                message=f"cursor_field '{cursor_field}' not found in schema",
-                                fix_hint=(
-                                    f"The cursor_field '{cursor_field}' must exist in get_table_schema('{table_name}'). "
-                                    "Either add it to the schema or choose a different cursor_field."
-                                ),
-                                table_name=table_name,
-                                details={"cursor_field": cursor_field, "schema_fields": schema.fieldNames()},
-                            ))
-                            continue
-                    except Exception:
-                        pass
-
-                # ---- cdc_with_deletes requires read_table_deletes ----
-                if (
-                    ingestion_type == "cdc_with_deletes"
-                    and not hasattr(self.connector, "read_table_deletes")
-                ):
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message="ingestion_type is 'cdc_with_deletes' but connector does not implement read_table_deletes()",
-                        fix_hint=(
-                            "Either implement read_table_deletes() or change ingestion_type to 'cdc'."
-                        ),
-                        table_name=table_name,
-                    ))
-                    continue
-
-                if not pk_ok:
-                    continue
-
-                self._add_result(TestResult(
-                    test_name=test_name,
-                    status=TestStatus.PASSED,
-                    message=f"Metadata valid (ingestion_type={ingestion_type})",
-                    table_name=table_name,
-                    details={"metadata": metadata},
-                ))
-
+                err = self._validate_metadata(table)
+                if err:
+                    errors.append(err)
             except Exception as e:
-                self._add_result(TestResult(
-                    test_name=test_name,
-                    status=TestStatus.ERROR,
-                    message=f"read_table_metadata raised: {e}",
-                    fix_hint=f"read_table_metadata('{table_name}', ...) must not raise.",
-                    table_name=table_name,
-                    exception=e,
-                    traceback_str=traceback.format_exc(),
-                ))
+                errors.append(f"[{table}] read_table_metadata raised: {e}")
+        if errors:
+            pytest.fail("\n\n".join(errors))
+
+    def _validate_metadata(self, table: str) -> Optional[str]:  # pylint: disable=too-many-return-statements,too-many-branches
+        """Validate metadata for one table. Returns error string or None."""
+        metadata = self.connector.read_table_metadata(table, self._opts(table))
+        if not isinstance(metadata, dict):
+            return (
+                f"[{table}] Expected dict, got {type(metadata).__name__}.\n"
+                "  Fix: read_table_metadata() must return a dict."
+            )
+
+        # ingestion_type
+        it = metadata.get("ingestion_type")
+        if it is None:
+            return (
+                f"[{table}] Missing 'ingestion_type'.\n"
+                f"  Fix: Must be one of {sorted(VALID_INGESTION_TYPES)}."
+            )
+        if it not in VALID_INGESTION_TYPES:
+            return (
+                f"[{table}] Invalid ingestion_type '{it}'.\n"
+                f"  Fix: Must be one of {sorted(VALID_INGESTION_TYPES)}."
+            )
+
+        # primary_keys (required for non-append)
+        if it != "append":
+            pks = metadata.get("primary_keys")
+            if pks is None:
+                return (
+                    f"[{table}] Missing 'primary_keys'.\n"
+                    f"  Fix: Required for ingestion_type='{it}'."
+                )
+            if not isinstance(pks, list) or not pks:
+                return (
+                    f"[{table}] primary_keys must be a non-empty list, got {pks!r}.\n"
+                    "  Fix: Provide at least one column name string."
+                )
+            try:
+                schema = self.connector.get_table_schema(table, self._opts(table))
+                missing = [pk for pk in pks if not self._field_in_schema(pk, schema)]
+                if missing:
+                    return (
+                        f"[{table}] primary_keys {missing} not in schema {schema.fieldNames()}.\n"
+                        "  Fix: Add them to get_table_schema() or fix the primary_keys list."
+                    )
+            except Exception:
+                pass
+
+        # cursor_field (required for cdc / cdc_with_deletes)
+        if it not in ("snapshot", "append"):
+            cf = metadata.get("cursor_field")
+            if cf is None:
+                return (
+                    f"[{table}] Missing 'cursor_field'.\n"
+                    f"  Fix: Required for ingestion_type='{it}'."
+                )
+            if not isinstance(cf, str):
+                return (
+                    f"[{table}] cursor_field must be str, got {type(cf).__name__}.\n"
+                    "  Fix: Provide a single column name string."
+                )
+            try:
+                schema = self.connector.get_table_schema(table, self._opts(table))
+                if not self._field_in_schema(cf, schema):
+                    return (
+                        f"[{table}] cursor_field '{cf}' not in schema {schema.fieldNames()}.\n"
+                        "  Fix: Add it to get_table_schema() or choose a different cursor_field."
+                    )
+            except Exception:
+                pass
+
+        # cdc_with_deletes requires read_table_deletes
+        if it == "cdc_with_deletes" and not hasattr(self.connector, "read_table_deletes"):
+            return (
+                f"[{table}] ingestion_type='cdc_with_deletes' but read_table_deletes() not implemented.\n"
+                "  Fix: Implement read_table_deletes() or change ingestion_type to 'cdc'."
+            )
+
+        return None
 
     # ------------------------------------------------------------------
-    # test_read_table  (per-table, delegates to shared helper)
+    # test_read_table  (per-table, collected)
     # ------------------------------------------------------------------
 
     def test_read_table(self):
-        """Test read_table for every table."""
-        tables = self._get_tables_safe("test_read_table")
-        if tables is None:
-            return
-
-        for table_name in tables:
-            self._test_read_for_table(
-                test_name_prefix="test_read_table",
-                read_fn=self.connector.read_table,
-                table_name=table_name,
-                is_read_table=True,
+        """read_table returns valid (iterator, offset) for every table."""
+        errors = []
+        for table in self._tables():
+            err = self._validate_read(
+                table, self.connector.read_table, "read_table", is_read_table=True
             )
+            if err:
+                errors.append(err)
+        if errors:
+            pytest.fail("\n\n".join(errors))
 
     # ------------------------------------------------------------------
-    # test_read_table_deletes  (per-table for cdc_with_deletes tables)
+    # test_read_table_deletes  (per-table, collected)
     # ------------------------------------------------------------------
 
     def test_read_table_deletes(self):
-        """Test read_table_deletes for tables with ingestion_type 'cdc_with_deletes'."""
+        """read_table_deletes works for all cdc_with_deletes tables."""
         if not hasattr(self.connector, "read_table_deletes"):
-            self._add_result(TestResult(
-                test_name="test_read_table_deletes",
-                status=TestStatus.PASSED,
-                message="Skipped: connector does not implement read_table_deletes",
-            ))
-            return
+            pytest.skip("Connector does not implement read_table_deletes")
 
-        tables = self._get_tables_safe("test_read_table_deletes")
-        if tables is None:
-            return
+        tables = [
+            t for t in self._tables()
+            if self._ingestion_type(t) == "cdc_with_deletes"
+        ]
+        if not tables:
+            pytest.skip("No tables with ingestion_type 'cdc_with_deletes'")
 
-        tables_with_deletes = self._filter_tables_by_ingestion_type(tables, "cdc_with_deletes")
-        if not tables_with_deletes:
-            self._add_result(TestResult(
-                test_name="test_read_table_deletes",
-                status=TestStatus.PASSED,
-                message="Skipped: no tables with ingestion_type 'cdc_with_deletes'",
-            ))
-            return
-
-        for table_name in tables_with_deletes:
-            self._test_read_for_table(
-                test_name_prefix="test_read_table_deletes",
-                read_fn=self.connector.read_table_deletes,  # pylint: disable=no-member
-                table_name=table_name,
-                is_read_table=False,
+        errors = []
+        for table in tables:
+            err = self._validate_read(
+                table, self.connector.read_table_deletes,
+                "read_table_deletes", is_read_table=False,
             )
+            if err:
+                errors.append(err)
+        if errors:
+            pytest.fail("\n\n".join(errors))
 
     # ------------------------------------------------------------------
-    # test_pagination_contract  (per-table)
+    # test_micro_batch_offset_contract  (per-table, collected)
     # ------------------------------------------------------------------
 
     def test_micro_batch_offset_contract(self):
-        """Test that the read_table micro-batch offset protocol works.
+        """read_table handles the micro-batch offset round-trip.
 
-        The framework repeatedly calls ``read_table(table, prev_offset, opts)``
-        in successive micro-batches and stops when ``new_offset == prev_offset``.
-        This test makes **two** calls per table to verify the contract without
-        excessive API usage.
+        The framework calls read_table repeatedly, passing the previous offset
+        back. This test makes two calls per table to verify the contract.
         """
-        tables = self._get_tables_safe("test_micro_batch_offset_contract")
-        if tables is None:
-            return
-
-        for table_name in tables:
-            test_name = f"test_micro_batch_offset_contract[{table_name}]"
+        errors = []
+        for table in self._tables():
             try:
-                # --- Call 1: initial read (empty offset) ---------------
-                result1 = self.connector.read_table(
-                    table_name, {}, self._get_table_options(table_name)
-                )
-
-                if not isinstance(result1, tuple) or len(result1) != 2:
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message=f"First read_table call returned {type(result1).__name__}, expected 2-tuple",
-                        fix_hint="read_table() must always return (iterator, offset_dict).",
-                        table_name=table_name,
-                    ))
-                    continue
-
-                iter1, offset1 = result1
-                page1 = self._consume_iterator(iter1)
-
-                if offset1 is not None and not isinstance(offset1, dict):
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message=f"Offset must be dict or None, got {type(offset1).__name__}",
-                        fix_hint="read_table() must return a dict as the second element (the offset).",
-                        table_name=table_name,
-                    ))
-                    continue
-
-                # None offset → table reads everything in one batch
-                if offset1 is None:
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.PASSED,
-                        message=f"Table returns all data in one batch (offset=None, {len(page1)} records)",
-                        table_name=table_name,
-                    ))
-                    continue
-
-                # Offset must be JSON-serializable
-                try:
-                    json.dumps(offset1)
-                except (TypeError, ValueError) as je:
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message=f"Offset is not JSON-serializable: {je}",
-                        fix_hint=(
-                            "The offset dict must be JSON-serializable because the framework "
-                            "checkpoints it. Avoid datetime objects or custom classes as values."
-                        ),
-                        table_name=table_name,
-                        details={"offset": str(offset1)},
-                    ))
-                    continue
-
-                # --- Call 2: read from offset1 -------------------------
-                result2 = self.connector.read_table(
-                    table_name, offset1, self._get_table_options(table_name)
-                )
-
-                if not isinstance(result2, tuple) or len(result2) != 2:
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message="Second read_table call (with offset) returned invalid format",
-                        fix_hint=(
-                            "read_table() must handle receiving its own previously-returned "
-                            "offset as start_offset. Ensure the offset dict is correctly parsed."
-                        ),
-                        table_name=table_name,
-                    ))
-                    continue
-
-                iter2, offset2 = result2
-                page2 = self._consume_iterator(iter2)
-
-                if offset2 is not None and not isinstance(offset2, dict):
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message=f"Second offset must be dict or None, got {type(offset2).__name__}",
-                        table_name=table_name,
-                    ))
-                    continue
-
-                terminated = (offset2 == offset1) or (offset2 is None)
-                self._add_result(TestResult(
-                    test_name=test_name,
-                    status=TestStatus.PASSED,
-                    message=(
-                        f"Pagination OK: page1={len(page1)} records, page2={len(page2)} records"
-                        f"{' (terminated)' if terminated else ' (more data available)'}"
-                    ),
-                    table_name=table_name,
-                    details={
-                        "offset_after_page1": offset1,
-                        "offset_after_page2": offset2,
-                        "terminated": terminated,
-                    },
-                ))
-
+                err = self._validate_offset_contract(table)
+                if err:
+                    errors.append(err)
             except Exception as e:
-                self._add_result(TestResult(
-                    test_name=test_name,
-                    status=TestStatus.ERROR,
-                    message=f"Pagination test error: {e}",
-                    fix_hint=(
-                        "read_table() raised an exception when called with its own offset. "
-                        "Make sure the connector can round-trip its offsets."
-                    ),
-                    table_name=table_name,
-                    exception=e,
-                    traceback_str=traceback.format_exc(),
-                ))
+                errors.append(
+                    f"[{table}] Offset contract error: {e}\n"
+                    "  Fix: read_table() must handle receiving its own previously-returned offset."
+                )
+        if errors:
+            pytest.fail("\n\n".join(errors))
 
-    # ------------------------------------------------------------------
-    # Shared read-method helper (per-table)
-    # ------------------------------------------------------------------
+    def _validate_offset_contract(self, table: str) -> Optional[str]:
+        """Two-call offset round-trip check. Returns error string or None."""
+        # Call 1
+        result1 = self.connector.read_table(table, {}, self._opts(table))
+        if not isinstance(result1, tuple) or len(result1) != 2:
+            return (
+                f"[{table}] read_table returned {type(result1).__name__}, expected 2-tuple.\n"
+                "  Fix: read_table() must return (iterator, offset_dict)."
+            )
 
-    def _test_read_for_table(  # pylint: disable=too-many-return-statements,too-many-branches
-        self,
-        test_name_prefix: str,
-        read_fn: Callable,
-        table_name: str,
-        is_read_table: bool = True,
-    ):
-        """Validate a single table's read method and emit one TestResult.
+        iter1, offset1 = result1
+        self._consume(iter1)
 
-        Args:
-            test_name_prefix: e.g. "test_read_table" or "test_read_table_deletes"
-            read_fn: The bound method to call (connector.read_table or connector.read_table_deletes)
-            table_name: Table to test
-            is_read_table: True for read_table, False for read_table_deletes
-        """
-        test_name = f"{test_name_prefix}[{table_name}]"
-        method_name = "read_table" if is_read_table else "read_table_deletes"
+        if offset1 is not None and not isinstance(offset1, dict):
+            return (
+                f"[{table}] Offset must be dict or None, got {type(offset1).__name__}.\n"
+                "  Fix: Return a dict as the offset."
+            )
+
+        ingestion_type = self._ingestion_type(table)
+        if offset1 is None:
+            if ingestion_type != "snapshot":
+                return (
+                    f"[{table}] Offset is None but ingestion_type is '{ingestion_type}'.\n"
+                    "  Fix: read_table() must return a non-None offset dict for "
+                    "non-snapshot tables so the framework can track micro-batch progress."
+                )
+            return None  # Snapshot table, nothing more to test.
 
         try:
-            result = read_fn(table_name, {}, self._get_table_options(table_name))
+            json.dumps(offset1)
+        except (TypeError, ValueError) as e:
+            return (
+                f"[{table}] Offset not JSON-serializable: {e}\n"
+                "  Fix: Use only strings/numbers/booleans/None in the offset dict."
+            )
 
-            # ---- Return type ----
+        # Call 2 — pass offset1 back
+        result2 = self.connector.read_table(table, offset1, self._opts(table))
+        if not isinstance(result2, tuple) or len(result2) != 2:
+            return (
+                f"[{table}] Second read_table call returned invalid format.\n"
+                "  Fix: read_table() must handle its own offset as start_offset."
+            )
+
+        _, offset2 = result2
+        if offset2 is not None and not isinstance(offset2, dict):
+            return (
+                f"[{table}] Second offset must be dict or None, got {type(offset2).__name__}."
+            )
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Shared read-validation helper
+    # ------------------------------------------------------------------
+
+    def _validate_read(  # pylint: disable=too-many-return-statements,too-many-branches
+        self,
+        table: str,
+        read_fn: Callable,
+        method_name: str,
+        is_read_table: bool = True,
+    ) -> Optional[str]:
+        """Validate a read method for one table. Returns error string or None."""
+        try:
+            result = read_fn(table, {}, self._opts(table))
+
             if not isinstance(result, tuple) or len(result) != 2:
-                self._add_result(TestResult(
-                    test_name=test_name,
-                    status=TestStatus.FAILED,
-                    message=f"Expected 2-tuple (Iterator, dict), got {type(result).__name__}",
-                    fix_hint=f"{method_name}() must return (records_iterator, offset_dict).",
-                    table_name=table_name,
-                ))
-                return
+                return (
+                    f"[{table}] {method_name}() returned {type(result).__name__}, expected 2-tuple.\n"
+                    f"  Fix: {method_name}() must return (records_iterator, offset_dict)."
+                )
 
             iterator, offset = result
 
-            # ---- Iterator ----
             if not hasattr(iterator, "__iter__"):
-                self._add_result(TestResult(
-                    test_name=test_name,
-                    status=TestStatus.FAILED,
-                    message=f"First element is not iterable: {type(iterator).__name__}",
-                    fix_hint=f"{method_name}() must return an iterator/generator as the first element.",
-                    table_name=table_name,
-                ))
-                return
+                return (
+                    f"[{table}] First element is not iterable: {type(iterator).__name__}.\n"
+                    f"  Fix: {method_name}() must return an iterator/generator as the first element."
+                )
 
-            # ---- Offset type ----
             if offset is not None and not isinstance(offset, dict):
-                self._add_result(TestResult(
-                    test_name=test_name,
-                    status=TestStatus.FAILED,
-                    message=f"Offset must be dict or None, got {type(offset).__name__}",
-                    fix_hint=f"{method_name}() must return a dict (or None) as the second element.",
-                    table_name=table_name,
-                ))
-                return
+                return (
+                    f"[{table}] Offset must be dict or None, got {type(offset).__name__}.\n"
+                    f"  Fix: {method_name}() must return a dict (or None) as the second element."
+                )
 
-            # ---- Offset JSON-serializable ----
             if isinstance(offset, dict):
                 try:
                     json.dumps(offset)
-                except (TypeError, ValueError) as je:
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message=f"Offset is not JSON-serializable: {je}",
-                        fix_hint="Offset values must be JSON-serializable (strings, numbers, booleans, None).",
-                        table_name=table_name,
-                        details={"offset": str(offset)},
-                    ))
-                    return
+                except (TypeError, ValueError) as e:
+                    return (
+                        f"[{table}] Offset not JSON-serializable: {e}\n"
+                        "  Fix: Use only strings/numbers/booleans/None in the offset dict."
+                    )
 
-            # ---- Consume iterator ----
-            sample_records: List[dict] = []
+            # Consume iterator
+            records: List[dict] = []
             try:
-                for record in iterator:
-                    if not isinstance(record, dict):
-                        self._add_result(TestResult(
-                            test_name=test_name,
-                            status=TestStatus.FAILED,
-                            message=f"Record is {type(record).__name__}, expected dict",
-                            fix_hint=f"{method_name}() must yield dicts. Got: {str(record)[:200]}",
-                            table_name=table_name,
-                        ))
-                        return
-                    sample_records.append(record)
-                    if len(sample_records) >= self._sample_records:
+                for rec in iterator:
+                    if not isinstance(rec, dict):
+                        return (
+                            f"[{table}] Record is {type(rec).__name__}, expected dict.\n"
+                            f"  Fix: {method_name}() must yield dicts."
+                        )
+                    records.append(rec)
+                    if len(records) >= self.sample_records:
                         break
-            except Exception as iter_e:
-                self._add_result(TestResult(
-                    test_name=test_name,
-                    status=TestStatus.FAILED,
-                    message=f"Iterator raised during iteration: {iter_e}",
-                    fix_hint=f"The iterator returned by {method_name}() raised an exception while yielding records.",
-                    table_name=table_name,
-                    exception=iter_e,
-                    traceback_str=traceback.format_exc(),
-                ))
-                return
-
-            # ---- Parse records with schema ----
-            try:
-                schema = self.connector.get_table_schema(
-                    table_name, self._get_table_options(table_name)
+            except Exception as e:
+                return (
+                    f"[{table}] Iterator raised: {e}\n"
+                    f"  Fix: The iterator from {method_name}() must not raise during iteration."
                 )
-            except Exception as schema_e:
-                self._add_result(TestResult(
-                    test_name=test_name,
-                    status=TestStatus.ERROR,
-                    message=f"Could not fetch schema for record validation: {schema_e}",
-                    fix_hint="get_table_schema() is needed to validate records. Fix it first.",
-                    table_name=table_name,
-                ))
-                return
 
-            for i, record in enumerate(sample_records):
+            # Parse with schema
+            try:
+                schema = self.connector.get_table_schema(table, self._opts(table))
+            except Exception as e:
+                return f"[{table}] get_table_schema raised during record validation: {e}"
+
+            for i, rec in enumerate(records):
                 try:
-                    parse_value(record, schema)
-                except Exception as parse_e:
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message=f"Record {i} failed schema parsing: {parse_e}",
-                        fix_hint=(
-                            f"The record from {method_name}() cannot be parsed with the schema from "
-                            f"get_table_schema('{table_name}'). Either fix the record format or "
-                            "adjust the schema. The framework handles type conversion — return raw values."
-                        ),
-                        table_name=table_name,
-                        details={"record": record, "schema_fields": schema.fieldNames()},
-                    ))
-                    return
+                    parse_value(rec, schema)
+                except Exception as e:
+                    return (
+                        f"[{table}] Record {i} failed schema parsing: {e}\n"
+                        f"  Fix: Check that {method_name}() returns raw values compatible "
+                        f"with get_table_schema('{table}'). The framework handles type conversion."
+                    )
 
-            # ---- Field-level validations ----
-            if sample_records:
-                for record in sample_records:
-                    # Non-nullable check (read_table only)
-                    if is_read_table:
-                        violations = self._check_non_nullable_fields(record, schema)
-                        if violations:
-                            self._add_result(TestResult(
-                                test_name=test_name,
-                                status=TestStatus.FAILED,
-                                message=f"Non-nullable field(s) are None: {violations}",
-                                fix_hint=(
-                                    "Either make these fields nullable=True in get_table_schema() "
-                                    f"or ensure {method_name}() always populates them."
-                                ),
-                                table_name=table_name,
-                                details={"violations": violations, "record": record},
-                            ))
-                            return
+            # Field-level checks
+            for rec in records:
+                if is_read_table:
+                    violations = self._check_non_nullable(rec, schema)
+                    if violations:
+                        return (
+                            f"[{table}] Non-nullable field(s) are None: {violations}\n"
+                            f"  Fix: Make these fields nullable=True in schema, or populate them in {method_name}()."
+                        )
 
-                    # All-columns-null check
-                    if self._all_columns_null(record, schema):
-                        self._add_result(TestResult(
-                            test_name=test_name,
-                            status=TestStatus.FAILED,
-                            message="All columns are null in a record",
-                            fix_hint=(
-                                f"{method_name}() yielded a record where every field is None. "
-                                "This usually means the API response is not being parsed correctly."
-                            ),
-                            table_name=table_name,
-                            details={"record": record},
-                        ))
-                        return
+                if self._all_null(rec, schema):
+                    return (
+                        f"[{table}] All columns are null in a record.\n"
+                        f"  Fix: API response is likely not being parsed correctly in {method_name}()."
+                    )
 
-                    # Primary-key presence check (for read_table_deletes)
-                    if not is_read_table:
-                        try:
-                            metadata = self.connector.read_table_metadata(
-                                table_name, self._get_table_options(table_name)
+                if not is_read_table:
+                    try:
+                        meta = self.connector.read_table_metadata(table, self._opts(table))
+                        pks = meta.get("primary_keys", [])
+                        missing = [pk for pk in pks if self._nested_get(rec, pk) is None]
+                        if missing:
+                            return (
+                                f"[{table}] Deleted record missing primary key(s): {missing}\n"
+                                "  Fix: read_table_deletes() must include primary keys in every record."
                             )
-                            pk_fields = metadata.get("primary_keys", [])
-                            missing_pks = [
-                                pk for pk in pk_fields
-                                if self._get_nested_value(record, pk) is None
-                            ]
-                            if missing_pks:
-                                self._add_result(TestResult(
-                                    test_name=test_name,
-                                    status=TestStatus.FAILED,
-                                    message=f"Deleted record missing primary key(s): {missing_pks}",
-                                    fix_hint=(
-                                        "read_table_deletes() must include primary key fields in every record "
-                                        "so the framework can identify which rows were deleted."
-                                    ),
-                                    table_name=table_name,
-                                    details={"record": record, "primary_keys": pk_fields},
-                                ))
-                                return
-                        except Exception:
-                            pass  # Metadata errors covered elsewhere.
+                    except Exception:
+                        pass
 
-            # ---- PASSED ----
-            self._add_result(TestResult(
-                test_name=test_name,
-                status=TestStatus.PASSED,
-                message=f"Read {len(sample_records)} records successfully",
-                table_name=table_name,
-                details={
-                    "records_sampled": len(sample_records),
-                    "offset_keys": list(offset.keys()) if isinstance(offset, dict) else None,
-                    "sample_records": sample_records[:2],
-                },
-            ))
+            return None
 
         except Exception as e:
-            self._add_result(TestResult(
-                test_name=test_name,
-                status=TestStatus.ERROR,
-                message=f"{method_name} raised: {e}",
-                fix_hint=f"{method_name}('{table_name}', {{}}, ...) must not raise.",
-                table_name=table_name,
-                exception=e,
-                traceback_str=traceback.format_exc(),
-            ))
+            return f"[{table}] {method_name}() raised: {e}\n{traceback.format_exc()}"
 
     # ------------------------------------------------------------------
     # Write-back tests
     # ------------------------------------------------------------------
 
     def test_list_insertable_tables(self):
-        """Test that list_insertable_tables returns a subset of list_tables."""
-        try:
-            insertable_tables = self.connector_test_utils.list_insertable_tables()
-            all_tables = self.connector.list_tables()
+        """list_insertable_tables returns a subset of list_tables."""
+        if not self.test_utils:
+            pytest.skip("No test_utils_class configured")
 
-            if not isinstance(insertable_tables, list):
-                self._add_result(TestResult(
-                    test_name="test_list_insertable_tables",
-                    status=TestStatus.FAILED,
-                    message=f"Expected list, got {type(insertable_tables).__name__}",
-                    fix_hint="list_insertable_tables() must return a list[str].",
-                ))
-                return
-
-            insertable_set = set(insertable_tables)
-            all_tables_set = set(all_tables)
-
-            if not insertable_set.issubset(all_tables_set):
-                invalid = insertable_set - all_tables_set
-                self._add_result(TestResult(
-                    test_name="test_list_insertable_tables",
-                    status=TestStatus.FAILED,
-                    message=f"Insertable tables not subset of all tables: {invalid}",
-                    fix_hint="Every table in list_insertable_tables() must also appear in list_tables().",
-                ))
-                return
-
-            self._add_result(TestResult(
-                test_name="test_list_insertable_tables",
-                status=TestStatus.PASSED,
-                message=f"Insertable tables ({len(insertable_tables)}) is subset of all tables ({len(all_tables)})",
-            ))
-
-        except Exception as e:
-            self._add_result(TestResult(
-                test_name="test_list_insertable_tables",
-                status=TestStatus.ERROR,
-                message=f"list_insertable_tables failed: {e}",
-                exception=e,
-                traceback_str=traceback.format_exc(),
-            ))
+        insertable = self.test_utils.list_insertable_tables()
+        assert isinstance(insertable, list), (
+            f"Expected list, got {type(insertable).__name__}.\n"
+            "  Fix: list_insertable_tables() must return list[str]."
+        )
+        all_tables = set(self._tables())
+        invalid = set(insertable) - all_tables
+        assert not invalid, (
+            f"Insertable tables not in list_tables(): {invalid}.\n"
+            "  Fix: Every insertable table must also appear in list_tables()."
+        )
 
     def test_list_deletable_tables(self):
-        """Test that list_deletable_tables returns valid tables with cdc_with_deletes ingestion type."""
-        if not hasattr(self.connector_test_utils, "list_deletable_tables"):
-            self._add_result(TestResult(
-                test_name="test_list_deletable_tables",
-                status=TestStatus.PASSED,
-                message="Skipped: test utils does not implement list_deletable_tables",
-            ))
-            return
+        """list_deletable_tables returns valid cdc_with_deletes tables."""
+        if not self.test_utils:
+            pytest.skip("No test_utils_class configured")
+        if not hasattr(self.test_utils, "list_deletable_tables"):
+            pytest.skip("test_utils does not implement list_deletable_tables")
 
-        try:
-            deletable_tables = self.connector_test_utils.list_deletable_tables()
-            all_tables = self.connector.list_tables()
+        deletable = self.test_utils.list_deletable_tables()
+        assert isinstance(deletable, list)
+        if not deletable:
+            pytest.skip("No deletable tables configured")
 
-            if not isinstance(deletable_tables, list):
-                self._add_result(TestResult(
-                    test_name="test_list_deletable_tables",
-                    status=TestStatus.FAILED,
-                    message=f"Expected list, got {type(deletable_tables).__name__}",
-                    fix_hint="list_deletable_tables() must return a list[str].",
-                ))
-                return
+        all_tables = set(self._tables())
+        invalid = set(deletable) - all_tables
+        assert not invalid, (
+            f"Deletable tables not in list_tables(): {invalid}.\n"
+            "  Fix: Every deletable table must also appear in list_tables()."
+        )
 
-            if not deletable_tables:
-                self._add_result(TestResult(
-                    test_name="test_list_deletable_tables",
-                    status=TestStatus.PASSED,
-                    message="No deletable tables configured",
-                ))
-                return
-
-            deletable_set = set(deletable_tables)
-            all_tables_set = set(all_tables)
-
-            if not deletable_set.issubset(all_tables_set):
-                invalid = deletable_set - all_tables_set
-                self._add_result(TestResult(
-                    test_name="test_list_deletable_tables",
-                    status=TestStatus.FAILED,
-                    message=f"Deletable tables not subset of all tables: {invalid}",
-                    fix_hint="Every table in list_deletable_tables() must also appear in list_tables().",
-                ))
-                return
-
-            # Verify ingestion type
-            invalid_tables = []
-            for tbl in deletable_tables:
-                try:
-                    meta = self.connector.read_table_metadata(
-                        tbl, self._get_table_options(tbl)
-                    )
-                    it = meta.get("ingestion_type")
-                    if it != "cdc_with_deletes":
-                        invalid_tables.append({"table": tbl, "ingestion_type": it})
-                except Exception as e:
-                    invalid_tables.append({"table": tbl, "error": str(e)})
-
-            if invalid_tables:
-                self._add_result(TestResult(
-                    test_name="test_list_deletable_tables",
-                    status=TestStatus.FAILED,
-                    message="Deletable tables must have ingestion_type 'cdc_with_deletes'",
-                    fix_hint="Change ingestion_type to 'cdc_with_deletes' for deletable tables or remove them from list_deletable_tables().",
-                    details={"invalid_tables": invalid_tables},
-                ))
-                return
-
-            self._add_result(TestResult(
-                test_name="test_list_deletable_tables",
-                status=TestStatus.PASSED,
-                message=f"Deletable tables ({len(deletable_tables)}) validated successfully",
-                details={"deletable_tables": deletable_tables},
-            ))
-
-        except Exception as e:
-            self._add_result(TestResult(
-                test_name="test_list_deletable_tables",
-                status=TestStatus.ERROR,
-                message=f"list_deletable_tables failed: {e}",
-                exception=e,
-                traceback_str=traceback.format_exc(),
-            ))
-
-    def test_write_to_source(self):  # pylint: disable=too-many-locals,too-many-branches
-        """Test generate_rows_and_write on each insertable table."""
-        try:
-            insertable_tables = self.connector_test_utils.list_insertable_tables()
-            if not insertable_tables:
-                self._add_result(TestResult(
-                    test_name="test_write_to_source",
-                    status=TestStatus.FAILED,
-                    message="No insertable tables available",
-                    fix_hint="list_insertable_tables() returned empty. Add tables or skip write tests.",
-                ))
-                return
-        except Exception:
-            self._add_result(TestResult(
-                test_name="test_write_to_source",
-                status=TestStatus.FAILED,
-                message="Could not get insertable tables",
-            ))
-            return
-
-        test_row_count = 1
-
-        for test_table in insertable_tables:
-            test_name = f"test_write_to_source[{test_table}]"
-            try:
-                result = self.connector_test_utils.generate_rows_and_write(
-                    test_table, test_row_count
+        errors = []
+        for table in deletable:
+            it = self._ingestion_type(table)
+            if it != "cdc_with_deletes":
+                errors.append(
+                    f"[{table}] ingestion_type is '{it}', expected 'cdc_with_deletes'.\n"
+                    "  Fix: Change ingestion_type or remove from list_deletable_tables()."
                 )
+        if errors:
+            pytest.fail("\n\n".join(errors))
 
+    def test_write_to_source(self):  # pylint: disable=too-many-branches
+        """generate_rows_and_write works on each insertable table."""
+        if not self.test_utils:
+            pytest.skip("No test_utils_class configured")
+
+        insertable = self.test_utils.list_insertable_tables()
+        if not insertable:
+            pytest.skip("No insertable tables")
+
+        errors = []
+        for table in insertable:
+            try:
+                result = self.test_utils.generate_rows_and_write(table, 1)
                 if not isinstance(result, tuple) or len(result) != 3:
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message=f"Expected 3-tuple, got {type(result).__name__}",
-                        fix_hint="generate_rows_and_write() must return (bool, list[dict], dict).",
-                        table_name=test_table,
-                    ))
+                    errors.append(f"[{table}] Expected 3-tuple, got {type(result).__name__}.")
                     continue
 
-                success, rows, column_names = result
-
-                if not isinstance(success, bool) or not isinstance(rows, list) or not isinstance(column_names, dict):
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message=(
-                            f"Invalid return types: success={type(success).__name__}, "
-                            f"rows={type(rows).__name__}, column_mapping={type(column_names).__name__}"
-                        ),
-                        fix_hint="generate_rows_and_write() must return (bool, list[dict], dict[str,str]).",
-                        table_name=test_table,
-                    ))
-                    continue
-
+                success, rows, col_map = result
                 if not success:
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message="Write was not successful (returned False)",
-                        fix_hint="generate_rows_and_write() returned success=False. Check the write implementation.",
-                        table_name=test_table,
-                    ))
+                    errors.append(f"[{table}] Write returned success=False.")
                     continue
-
-                if len(rows) != test_row_count:
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message=f"Expected {test_row_count} rows, got {len(rows)}",
-                        fix_hint="generate_rows_and_write() should return exactly the number of rows requested.",
-                        table_name=test_table,
-                    ))
+                if len(rows) != 1:
+                    errors.append(f"[{table}] Expected 1 row, got {len(rows)}.")
                     continue
-
-                if not column_names:
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message="Expected non-empty column_mapping when successful",
-                        fix_hint="generate_rows_and_write() must return a non-empty column mapping dict.",
-                        table_name=test_table,
-                    ))
+                if not col_map:
+                    errors.append(f"[{table}] Empty column_mapping on success.")
                     continue
-
-                # Validate rows are dicts
-                bad_row = False
                 for i, row in enumerate(rows):
                     if not isinstance(row, dict):
-                        self._add_result(TestResult(
-                            test_name=test_name,
-                            status=TestStatus.FAILED,
-                            message=f"Row {i} is {type(row).__name__}, expected dict",
-                            table_name=test_table,
-                        ))
-                        bad_row = True
+                        errors.append(f"[{table}] Row {i} is {type(row).__name__}, expected dict.")
                         break
-                if bad_row:
-                    continue
-
-                self._add_result(TestResult(
-                    test_name=test_name,
-                    status=TestStatus.PASSED,
-                    message=f"Wrote {len(rows)} row(s) successfully",
-                    table_name=test_table,
-                    details={"rows": len(rows), "column_mappings": len(column_names)},
-                ))
-
             except Exception as e:
-                self._add_result(TestResult(
-                    test_name=test_name,
-                    status=TestStatus.ERROR,
-                    message=f"Write test error: {e}",
-                    table_name=test_table,
-                    exception=e,
-                    traceback_str=traceback.format_exc(),
-                ))
+                errors.append(f"[{table}] generate_rows_and_write raised: {e}")
+        if errors:
+            pytest.fail("\n\n".join(errors))
 
-    def test_incremental_after_write(self):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
-        """Test incremental ingestion after writing a row."""
-        try:
-            insertable_tables = self.connector_test_utils.list_insertable_tables()
-            if not insertable_tables:
-                self._add_result(TestResult(
-                    test_name="test_incremental_after_write",
-                    status=TestStatus.FAILED,
-                    message="No insertable tables available",
-                ))
-                return
-        except Exception:
-            self._add_result(TestResult(
-                test_name="test_incremental_after_write",
-                status=TestStatus.FAILED,
-                message="Could not get insertable tables",
-            ))
-            return
+    def test_incremental_after_write(self):  # pylint: disable=too-many-branches
+        """Incremental read after write returns the written row."""
+        if not self.test_utils:
+            pytest.skip("No test_utils_class configured")
 
-        for test_table in insertable_tables:
-            test_name = f"test_incremental_after_write[{test_table}]"
+        insertable = self.test_utils.list_insertable_tables()
+        if not insertable:
+            pytest.skip("No insertable tables")
+
+        errors = []
+        for table in insertable:
             try:
-                metadata = self.connector.read_table_metadata(
-                    test_table, self._get_table_options(test_table)
-                )
-
-                # Get initial state
-                initial_result = self.connector.read_table(
-                    test_table, {}, self._get_table_options(test_table)
-                )
-                if not isinstance(initial_result, tuple) or len(initial_result) != 2:
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message="Failed to get initial table state",
-                        table_name=test_table,
-                    ))
-                    continue
-
-                initial_iterator, initial_offset = initial_result
-                initial_record_count = 0
-                if metadata.get("ingestion_type") == "snapshot":
-                    for _ in initial_iterator:
-                        initial_record_count += 1
-
-                # Write 1 row
-                write_result = self.connector_test_utils.generate_rows_and_write(
-                    test_table, 1
-                )
-                if not isinstance(write_result, tuple) or len(write_result) != 3:
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message="Write failed: invalid return format",
-                        table_name=test_table,
-                    ))
-                    continue
-
-                write_success, written_rows, column_mapping = write_result
-                if not write_success:
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message="Write was not successful",
-                        fix_hint="generate_rows_and_write() returned False. Fix write logic first.",
-                        table_name=test_table,
-                    ))
-                    continue
-
-                # Read after write
-                after_result = self.connector.read_table(
-                    test_table, initial_offset, self._get_table_options(test_table)
-                )
-                if not isinstance(after_result, tuple) or len(after_result) != 2:
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message="Read after write returned invalid format",
-                        table_name=test_table,
-                    ))
-                    continue
-
-                after_iterator, _ = after_result
-                after_records = list(after_iterator)
-                actual_count = len(after_records)
-                ingestion_type = metadata.get("ingestion_type", "cdc")
-
-                if ingestion_type in ("cdc", "cdc_with_deletes", "append"):
-                    if actual_count < 1:
-                        self._add_result(TestResult(
-                            test_name=test_name,
-                            status=TestStatus.FAILED,
-                            message=f"Expected >= 1 record for {ingestion_type}, got {actual_count}",
-                            fix_hint=(
-                                "After writing 1 row, incremental read should return at least 1 new record. "
-                                "Check that the offset logic correctly tracks new data."
-                            ),
-                            table_name=test_table,
-                            details={"ingestion_type": ingestion_type, "actual_count": actual_count},
-                        ))
-                        continue
-                else:
-                    expected = initial_record_count + 1
-                    if actual_count != expected:
-                        self._add_result(TestResult(
-                            test_name=test_name,
-                            status=TestStatus.FAILED,
-                            message=f"Expected {expected} records for snapshot, got {actual_count}",
-                            fix_hint="For snapshot tables, full re-read should include the newly written row.",
-                            table_name=test_table,
-                            details={"initial_count": initial_record_count, "actual_count": actual_count},
-                        ))
-                        continue
-
-                # Verify written row is present
-                if not self._verify_written_rows_present(
-                    written_rows, after_records, column_mapping
-                ):
-                    self._add_result(TestResult(
-                        test_name=test_name,
-                        status=TestStatus.FAILED,
-                        message="Written row not found in returned results",
-                        fix_hint=(
-                            "The row written via generate_rows_and_write() was not found in the "
-                            "subsequent read_table() results. Check column_mapping and offset logic."
-                        ),
-                        table_name=test_table,
-                        details={
-                            "written_rows": written_rows,
-                            "returned_count": actual_count,
-                            "column_mapping": column_mapping,
-                        },
-                    ))
-                    continue
-
-                self._add_result(TestResult(
-                    test_name=test_name,
-                    status=TestStatus.PASSED,
-                    message=f"Incremental read after write OK ({actual_count} records, {ingestion_type})",
-                    table_name=test_table,
-                ))
-
+                err = self._validate_incremental_after_write(table)
+                if err:
+                    errors.append(err)
             except Exception as e:
-                self._add_result(TestResult(
-                    test_name=test_name,
-                    status=TestStatus.ERROR,
-                    message=f"Incremental test error: {e}",
-                    table_name=test_table,
-                    exception=e,
-                    traceback_str=traceback.format_exc(),
-                ))
+                errors.append(f"[{table}] Incremental test error: {e}")
+        if errors:
+            pytest.fail("\n\n".join(errors))
 
-    def test_delete_and_read_deletes(self):  # pylint: disable=too-many-return-statements
-        """Test delete functionality and verify deleted rows appear in read_table_deletes."""
-        if not hasattr(self.connector_test_utils, "delete_rows"):
-            self._add_result(TestResult(
-                test_name="test_delete_and_read_deletes",
-                status=TestStatus.PASSED,
-                message="Skipped: test utils does not implement delete_rows",
-            ))
-            return
+    def _validate_incremental_after_write(self, table: str) -> Optional[str]:
+        """Write 1 row, then read incrementally. Returns error or None."""
+        metadata = self.connector.read_table_metadata(table, self._opts(table))
+        ingestion_type = metadata.get("ingestion_type", "cdc")
 
-        if not hasattr(self.connector, "read_table_deletes"):
-            self._add_result(TestResult(
-                test_name="test_delete_and_read_deletes",
-                status=TestStatus.PASSED,
-                message="Skipped: connector does not implement read_table_deletes",
-            ))
-            return
+        # Initial read
+        initial_result = self.connector.read_table(table, {}, self._opts(table))
+        if not isinstance(initial_result, tuple) or len(initial_result) != 2:
+            return f"[{table}] Initial read_table returned invalid format."
+        initial_iter, initial_offset = initial_result
+        initial_count = 0
+        if ingestion_type == "snapshot":
+            for _ in initial_iter:
+                initial_count += 1
 
-        try:
-            deletable_tables = self.connector_test_utils.list_deletable_tables()
-            if not deletable_tables:
-                self._add_result(TestResult(
-                    test_name="test_delete_and_read_deletes",
-                    status=TestStatus.PASSED,
-                    message="Skipped: no deletable tables configured",
-                ))
-                return
-        except Exception:
-            self._add_result(TestResult(
-                test_name="test_delete_and_read_deletes",
-                status=TestStatus.FAILED,
-                message="Could not get deletable tables",
-            ))
-            return
+        # Write
+        write_result = self.test_utils.generate_rows_and_write(table, 1)
+        if not isinstance(write_result, tuple) or len(write_result) != 3:
+            return f"[{table}] generate_rows_and_write returned invalid format."
+        success, written_rows, col_map = write_result
+        if not success:
+            return f"[{table}] Write returned success=False."
 
-        test_table = deletable_tables[0]
-        self._run_delete_test_for_table(test_table)
+        # Read after write
+        after_result = self.connector.read_table(table, initial_offset, self._opts(table))
+        if not isinstance(after_result, tuple) or len(after_result) != 2:
+            return f"[{table}] Read after write returned invalid format."
+        after_iter, _ = after_result
+        after_records = list(after_iter)
+        count = len(after_records)
 
-    def _run_delete_test_for_table(self, test_table: str):
-        """Run delete test for a single table."""
-        test_name = f"test_delete_and_read_deletes[{test_table}]"
-        try:
-            delete_result = self.connector_test_utils.delete_rows(test_table, 1)
+        if ingestion_type in ("cdc", "cdc_with_deletes", "append"):
+            if count < 1:
+                return (
+                    f"[{table}] Expected >= 1 record for {ingestion_type}, got {count}.\n"
+                    "  Fix: Offset logic not tracking new data correctly."
+                )
+        else:
+            expected = initial_count + 1
+            if count != expected:
+                return (
+                    f"[{table}] Expected {expected} records for snapshot, got {count}.\n"
+                    "  Fix: Snapshot re-read should include newly written row."
+                )
 
-            if not isinstance(delete_result, tuple) or len(delete_result) != 3:
-                self._add_result(TestResult(
-                    test_name=test_name,
-                    status=TestStatus.FAILED,
-                    message=f"delete_rows returned invalid format: {type(delete_result)}",
-                    fix_hint="delete_rows() must return (bool, list[dict], dict[str,str]).",
-                    table_name=test_table,
-                ))
-                return
-
-            success, deleted_rows, column_mapping = delete_result
-
-            if not success or not deleted_rows:
-                self._add_result(TestResult(
-                    test_name=test_name,
-                    status=TestStatus.FAILED,
-                    message="delete_rows failed or returned empty deleted_rows",
-                    fix_hint="delete_rows() must return success=True and at least one deleted row dict.",
-                    table_name=test_table,
-                ))
-                return
-
-            read_result = self.connector.read_table_deletes(  # pylint: disable=no-member
-                test_table, {}, self._get_table_options(test_table)
+        if not self._rows_present(written_rows, after_records, col_map):
+            return (
+                f"[{table}] Written row not found in read results.\n"
+                "  Fix: Check column_mapping and offset logic."
             )
 
-            if not isinstance(read_result, tuple) or len(read_result) != 2:
-                self._add_result(TestResult(
-                    test_name=test_name,
-                    status=TestStatus.FAILED,
-                    message=f"read_table_deletes returned invalid format: {type(read_result)}",
-                    fix_hint="read_table_deletes() must return (iterator, offset_dict).",
-                    table_name=test_table,
-                ))
-                return
+        return None
 
-            iterator, _ = read_result
-            deleted_records = list(iterator)
+    def test_delete_and_read_deletes(self):
+        """Delete a row and verify it appears in read_table_deletes."""
+        if not self.test_utils:
+            pytest.skip("No test_utils_class configured")
+        if not hasattr(self.test_utils, "delete_rows"):
+            pytest.skip("test_utils does not implement delete_rows")
+        if not hasattr(self.connector, "read_table_deletes"):
+            pytest.skip("Connector does not implement read_table_deletes")
 
-            if not self._verify_written_rows_present(deleted_rows, deleted_records, column_mapping):
-                self._add_result(TestResult(
-                    test_name=test_name,
-                    status=TestStatus.FAILED,
-                    message="Deleted row not found in read_table_deletes results",
-                    fix_hint=(
-                        "The row deleted via delete_rows() was not found in read_table_deletes(). "
-                        "Check column_mapping and that the source API surfaces deletes."
-                    ),
-                    table_name=test_table,
-                    details={
-                        "deleted_rows": deleted_rows,
-                        "deleted_records_count": len(deleted_records),
-                    },
-                ))
-                return
-
-            self._add_result(TestResult(
-                test_name=test_name,
-                status=TestStatus.PASSED,
-                message=f"Delete flow verified on '{test_table}'",
-                table_name=test_table,
-                details={
-                    "deleted_rows": deleted_rows,
-                    "deleted_records_count": len(deleted_records),
-                },
-            ))
-
-        except Exception as e:
-            self._add_result(TestResult(
-                test_name=test_name,
-                status=TestStatus.ERROR,
-                message=f"Delete test error: {e}",
-                table_name=test_table,
-                exception=e,
-                traceback_str=traceback.format_exc(),
-            ))
-
-    # ------------------------------------------------------------------
-    # Helper: safely get tables (used by many tests)
-    # ------------------------------------------------------------------
-
-    def _get_tables_safe(self, caller_test_name: str) -> Optional[List[str]]:
-        """Return the table list or emit a FAILED result and return None."""
         try:
-            tables = self.connector.list_tables()
-            if not tables:
-                self._add_result(TestResult(
-                    test_name=caller_test_name,
-                    status=TestStatus.FAILED,
-                    message="No tables available (list_tables returned empty)",
-                    fix_hint="Fix list_tables() first — it must return at least one table name.",
-                ))
-                return None
-            return tables
+            deletable = self.test_utils.list_deletable_tables()
         except Exception:
-            self._add_result(TestResult(
-                test_name=caller_test_name,
-                status=TestStatus.FAILED,
-                message="Could not get tables (list_tables raised)",
-                fix_hint="Fix list_tables() first.",
-            ))
+            deletable = []
+        if not deletable:
+            pytest.skip("No deletable tables configured")
+
+        table = deletable[0]
+        delete_result = self.test_utils.delete_rows(table, 1)
+        assert isinstance(delete_result, tuple) and len(delete_result) == 3, (
+            f"delete_rows returned {type(delete_result)}, expected 3-tuple."
+        )
+        success, deleted_rows, col_map = delete_result
+        assert success and deleted_rows, "delete_rows failed or returned empty."
+
+        read_result = self.connector.read_table_deletes(table, {}, self._opts(table))
+        assert isinstance(read_result, tuple) and len(read_result) == 2, (
+            f"read_table_deletes returned {type(read_result)}, expected 2-tuple."
+        )
+        iterator, _ = read_result
+        deleted_records = list(iterator)
+
+        assert self._rows_present(deleted_rows, deleted_records, col_map), (
+            f"Deleted row not found in read_table_deletes results.\n"
+            "  Fix: Check column_mapping and that the source API surfaces deletes."
+        )
+
+    # ------------------------------------------------------------------
+    # Internal utilities
+    # ------------------------------------------------------------------
+
+    def _ingestion_type(self, table: str) -> Optional[str]:
+        try:
+            meta = self.connector.read_table_metadata(table, self._opts(table))
+            return meta.get("ingestion_type")
+        except Exception:
             return None
 
-    def _filter_tables_by_ingestion_type(
-        self, tables: List[str], ingestion_type: str
-    ) -> List[str]:
-        """Return only tables whose metadata has the given ingestion_type."""
-        result = []
-        for tbl in tables:
-            try:
-                meta = self.connector.read_table_metadata(
-                    tbl, self._get_table_options(tbl)
-                )
-                if meta.get("ingestion_type") == ingestion_type:
-                    result.append(tbl)
-            except Exception:
-                pass
-        return result
-
-    def _consume_iterator(self, iterator, max_records: int = None) -> List[dict]:
-        """Consume up to ``max_records`` items from an iterator."""
+    def _consume(self, iterator, max_records: int = None) -> List[dict]:
         if max_records is None:
-            max_records = self._sample_records
-        records: List[dict] = []
-        for record in iterator:
-            records.append(record)
-            if len(records) >= max_records:
+            max_records = self.sample_records
+        out: List[dict] = []
+        for rec in iterator:
+            out.append(rec)
+            if len(out) >= max_records:
                 break
-        return records
+        return out
 
-    # ------------------------------------------------------------------
-    # Schema / record helpers
-    # ------------------------------------------------------------------
-
-    def _field_exists_in_schema(self, field_path: str, schema) -> bool:
-        """Check if a field path exists in the schema (supports nested dot notation)."""
-        if "." not in field_path:
-            return field_path in schema.fieldNames()
-
-        parts = field_path.split(".", 1)
-        field_name, remaining = parts[0], parts[1]
-
-        if field_name not in schema.fieldNames():
+    def _field_in_schema(self, path: str, schema) -> bool:
+        if "." not in path:
+            return path in schema.fieldNames()
+        head, tail = path.split(".", 1)
+        if head not in schema.fieldNames():
             return False
+        dt = schema[head].dataType
+        return isinstance(dt, StructType) and self._field_in_schema(tail, dt)
 
-        field_type = schema[field_name].dataType
-        if isinstance(field_type, StructType):
-            return self._field_exists_in_schema(remaining, field_type)
-        return False
-
-    def _validate_primary_keys(self, primary_keys: list, schema) -> bool:
-        return all(self._field_exists_in_schema(f, schema) for f in primary_keys)
-
-    def _should_validate_cursor_field(self, metadata: dict) -> bool:
-        ingestion_type = metadata.get("ingestion_type")
-        return ingestion_type not in ("snapshot", "append")
-
-    def _should_validate_primary_key(self, metadata: dict) -> bool:
-        return metadata.get("ingestion_type") != "append"
-
-    def _check_non_nullable_fields(
+    def _check_non_nullable(
         self, record: dict, schema: StructType, prefix: str = ""
     ) -> List[str]:
-        """Return field paths that are non-nullable but None in the record."""
         violations = []
         for f in schema.fields:
             path = f"{prefix}.{f.name}" if prefix else f.name
-            value = record.get(f.name) if isinstance(record, dict) else None
-            if not f.nullable and value is None:
+            val = record.get(f.name) if isinstance(record, dict) else None
+            if not f.nullable and val is None:
                 violations.append(path)
-            if isinstance(f.dataType, StructType) and isinstance(value, dict):
-                violations.extend(
-                    self._check_non_nullable_fields(value, f.dataType, path)
-                )
+            if isinstance(f.dataType, StructType) and isinstance(val, dict):
+                violations.extend(self._check_non_nullable(val, f.dataType, path))
         return violations
 
-    def _all_columns_null(
-        self, record: dict, schema: StructType, prefix: str = ""
-    ) -> bool:
-        """Return True if every schema field is None in the record."""
+    def _all_null(self, record: dict, schema: StructType) -> bool:
         for f in schema.fields:
-            value = record.get(f.name) if isinstance(record, dict) else None
-            if value is not None and not isinstance(value, dict):
+            val = record.get(f.name) if isinstance(record, dict) else None
+            if val is not None and not isinstance(val, dict):
                 return False
-            if isinstance(f.dataType, StructType) and isinstance(value, dict):
-                path = f"{prefix}.{f.name}" if prefix else f.name
-                if not self._all_columns_null(value, f.dataType, path):
+            if isinstance(f.dataType, StructType) and isinstance(val, dict):
+                if not self._all_null(val, f.dataType):
                     return False
         return True
 
-    def _get_nested_value(self, record: Dict, path: str) -> Any:
-        """Get a value from a nested dict using dot notation."""
-        current = record
+    def _nested_get(self, record: dict, path: str) -> Any:
+        cur = record
         for part in path.split("."):
-            if isinstance(current, dict) and part in current:
-                current = current[part]
+            if isinstance(cur, dict) and part in cur:
+                cur = cur[part]
             else:
                 return None
-        return current
+        return cur
 
-    def _verify_written_rows_present(
+    def _rows_present(
         self,
         written_rows: List[Dict],
         returned_records: List[Dict],
-        column_mapping: Dict[str, str],
+        col_map: Dict[str, str],
     ) -> bool:
-        """Verify that written rows appear in returned results using column_mapping."""
-        if not written_rows or not column_mapping:
+        if not written_rows or not col_map:
             return True
 
-        written_signatures = []
+        written_sigs = []
         for row in written_rows:
-            sig = {
-                col: row.get(col)
-                for col in column_mapping.keys()
-                if col in row
-            }
-            print(f"\nwritten row: {sig}\n")
-            written_signatures.append(sig)
+            sig = {c: row.get(c) for c in col_map if c in row}
+            written_sigs.append(sig)
 
-        returned_signatures = []
-        for record in returned_records:
-            if isinstance(record, str):
+        returned_sigs = []
+        for rec in returned_records:
+            if isinstance(rec, str):
                 try:
-                    record = json.loads(record)
+                    rec = json.loads(rec)
                 except Exception:
                     continue
-
-            if isinstance(record, dict):
+            if isinstance(rec, dict):
                 sig = {}
-                for written_col, returned_col in column_mapping.items():
-                    value = self._get_nested_value(record, returned_col)
-                    if value is not None:
-                        sig[written_col] = value
-                print(f"\nreturned row: {sig}\n")
+                for wc, rc in col_map.items():
+                    v = self._nested_get(rec, rc)
+                    if v is not None:
+                        sig[wc] = v
                 if sig:
-                    returned_signatures.append(sig)
+                    returned_sigs.append(sig)
 
-        for ws in written_signatures:
-            if ws not in returned_signatures:
-                return False
-        return True
-
-    # ------------------------------------------------------------------
-    # Result management & report generation
-    # ------------------------------------------------------------------
-
-    def _add_result(self, result: TestResult):
-        self.test_results.append(result)
-
-    def _get_table_options(self, table_name: str) -> Dict[str, Any]:
-        return self._table_configs.get(table_name, {})
-
-    def _generate_report(self) -> TestReport:
-        passed = sum(1 for r in self.test_results if r.status == TestStatus.PASSED)
-        failed = sum(1 for r in self.test_results if r.status == TestStatus.FAILED)
-        errors = sum(1 for r in self.test_results if r.status == TestStatus.ERROR)
-
-        return TestReport(
-            connector_class_name="LakeflowConnect",
-            test_results=self.test_results,
-            total_tests=len(self.test_results),
-            passed_tests=passed,
-            failed_tests=failed,
-            error_tests=errors,
-            timestamp=datetime.now().isoformat(),  # pylint: disable=no-member
-        )
-
-    # ------------------------------------------------------------------
-    # Reporting
-    # ------------------------------------------------------------------
-
-    def print_report(self, report: TestReport, show_details: bool = True):
-        print(f"\n{'=' * 60}")
-        print("LAKEFLOW CONNECT TEST REPORT")
-        print(f"{'=' * 60}")
-        print(f"Connector Class: {report.connector_class_name}")
-        print(f"Timestamp: {report.timestamp}")
-        print(f"\nSUMMARY:")
-        print(f"  Total Tests: {report.total_tests}")
-        print(f"  Passed: {report.passed_tests}")
-        print(f"  Failed: {report.failed_tests}")
-        print(f"  Errors: {report.error_tests}")
-        print(f"  Success Rate: {report.success_rate():.1f}%")
-
-        if show_details:
-            print(f"\nTEST RESULTS:")
-            print(f"{'-' * 60}")
-
-            status_symbol = {
-                TestStatus.PASSED: "PASS",
-                TestStatus.FAILED: "FAIL",
-                TestStatus.ERROR: "ERR!",
-            }
-
-            for result in report.test_results:
-                symbol = status_symbol[result.status]
-                print(f"[{symbol}] {result.test_name}")
-                print(f"       {result.message}")
-
-                if result.fix_hint and result.status != TestStatus.PASSED:
-                    print(f"       Fix: {result.fix_hint}")
-
-                if result.details and result.status != TestStatus.PASSED:
-                    print(
-                        f"       Details: {json.dumps(result.details, indent=8, default=str)}"
-                    )
-
-                if result.traceback_str and result.status in (
-                    TestStatus.ERROR,
-                    TestStatus.FAILED,
-                ):
-                    print(f"       Traceback:\n{result.traceback_str}")
-
-                print()
-
-        # Print compact failure summary for LLM agents
-        if report.failed_tests > 0 or report.error_tests > 0:
-            print(f"{'=' * 60}")
-            print("FAILURE SUMMARY (for automated agents)")
-            print(f"{'=' * 60}")
-            print(report.failure_summary())
-            print()
-
-            failed_tests = [
-                r.test_name for r in report.test_results if r.status == TestStatus.FAILED
-            ]
-            error_tests = [
-                r.test_name for r in report.test_results if r.status == TestStatus.ERROR
-            ]
-            parts = []
-            if failed_tests:
-                parts.append(f"Failed tests: {', '.join(failed_tests)}")
-            if error_tests:
-                parts.append(f"Error tests: {', '.join(error_tests)}")
-            error_message = (
-                f"Test suite failed with {report.failed_tests} failures "
-                f"and {report.error_tests} errors. {' | '.join(parts)}"
-            )
-            raise TestFailedException(error_message, report)
-
-
-# ---------------------------------------------------------------------------
-# Pytest integration
-# ---------------------------------------------------------------------------
-
-def create_test_class(
-    connector_class,
-    config: dict,
-    table_configs: Optional[Dict[str, Dict[str, Any]]] = None,
-    sample_records: int = 10,
-    test_utils_class=None,
-    setup_fn: Optional[Callable] = None,
-) -> type:
-    """Create a pytest test class with one test method per tester check.
-
-    Each ``test_*`` method on ``LakeflowConnectTester`` becomes a separate
-    pytest item, so ``pytest -k "test_read_table"`` re-runs only that check.
-
-    Usage in a connector test file::
-
-        # tests/unit/sources/my_source/test_my_source_lakeflow_connect.py
-        from tests.unit.sources.test_suite import create_test_class
-        from my_source import MyLakeflowConnect
-
-        TestMySource = create_test_class(
-            connector_class=MyLakeflowConnect,
-            config=load_config(...),
-        )
-
-    Then run::
-
-        pytest tests/unit/sources/my_source/ -v
-        pytest tests/unit/sources/my_source/ -k "test_read_table"
-        pytest tests/unit/sources/my_source/ -k "test_read_table or test_get_table_schema"
-
-    Args:
-        connector_class: The LakeflowConnect subclass to test.
-        config: Init options dict (same as ``LakeflowConnectTester``).
-        table_configs: Per-table options (default empty).
-        sample_records: Max records to sample per table.
-        test_utils_class: Optional ``LakeflowConnectTestUtils`` subclass for
-            write-back tests.
-        setup_fn: Optional callable invoked once before all tests (e.g. to
-            reset a simulated API).
-    """
-    import pytest  # Local import so test_suite.py can be used outside pytest.
-
-    class _TestClass:
-        @classmethod
-        def setup_class(cls):
-            if setup_fn:
-                setup_fn()
-
-            # Inject into module namespace (backward compat with run_all_tests).
-            import tests.unit.sources.test_suite as ts
-            ts.LakeflowConnect = connector_class
-            if test_utils_class:
-                ts.LakeflowConnectTestUtils = test_utils_class
-
-            cls._tester = LakeflowConnectTester(
-                config,
-                table_configs or {},
-                sample_records,
-            )
-            # Initialize the connector once — every other test needs it.
-            cls._tester.test_initialization()
-
-        def _run_and_assert(self, method_name: str):
-            """Run one tester method, then assert that no new failures appeared."""
-            tester = self.__class__._tester
-            if tester.connector is None:
-                pytest.fail("Connector initialization failed — fix test_initialization first.")
-
-            start_idx = len(tester.test_results)
-            getattr(tester, method_name)()
-            new_results = tester.test_results[start_idx:]
-
-            failures = [r for r in new_results if r.status != TestStatus.PASSED]
-            if failures:
-                lines = []
-                for f in failures:
-                    line = f"[{f.status.value}] {f.test_name}: {f.message}"
-                    if f.fix_hint:
-                        line += f"\n  Fix: {f.fix_hint}"
-                    lines.append(line)
-                pytest.fail("\n\n".join(lines))
-
-        # test_initialization is validated via the setup_class result.
-        def test_initialization(self):
-            results = [
-                r for r in self.__class__._tester.test_results
-                if r.test_name == "test_initialization"
-            ]
-            failures = [r for r in results if r.status != TestStatus.PASSED]
-            if failures:
-                msg = failures[0].message
-                if failures[0].fix_hint:
-                    msg += f"\n  Fix: {failures[0].fix_hint}"
-                pytest.fail(msg)
-
-    # Dynamically add a test method for each tester check (except init).
-    for method_name in LakeflowConnectTester.ALL_TESTS:
-        if method_name == "test_initialization":
-            continue
-
-        def _make_test(name):
-            def test_method(self):
-                self._run_and_assert(name)
-            test_method.__name__ = name
-            test_method.__qualname__ = f"_TestClass.{name}"
-            return test_method
-
-        setattr(_TestClass, method_name, _make_test(method_name))
-
-    # Write-back tests — skip gracefully when no test utils are available.
-    for method_name in LakeflowConnectTester.WRITE_BACK_TESTS:
-        def _make_write_test(name):
-            def test_method(self):
-                tester = self.__class__._tester
-                has_utils = (
-                    hasattr(tester, "connector_test_utils")
-                    and tester.connector_test_utils is not None
-                )
-                if not has_utils:
-                    pytest.skip("No connector_test_utils available")
-                self._run_and_assert(name)
-            test_method.__name__ = name
-            test_method.__qualname__ = f"_TestClass.{name}"
-            return test_method
-
-        setattr(_TestClass, method_name, _make_write_test(method_name))
-
-    return _TestClass
+        return all(ws in returned_sigs for ws in written_sigs)
