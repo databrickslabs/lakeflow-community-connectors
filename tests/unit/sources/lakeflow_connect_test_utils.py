@@ -1,7 +1,7 @@
 from typing import Dict, Tuple, List
 
 
-class LakeflowConnectTestUtils:
+class LakeflowConnectWriteTestUtils:
     """
     Base class for connector-specific test utilities.
     Each connector should extend this class to provide connector-specific implementations
@@ -21,15 +21,6 @@ class LakeflowConnectTestUtils:
                     Same options format as used by LakeflowConnect
         """
         self.options = options
-
-    def get_source_name(self) -> str:
-        """
-        Return the source connector name.
-        
-        Returns:
-            String name of the connector (default: "unknown")
-        """
-        return "unknown"
 
     def list_insertable_tables(self) -> List[str]:
         """
@@ -63,10 +54,16 @@ class LakeflowConnectTestUtils:
         Returns:
             Tuple containing:
             - Boolean indicating success of the operation (default: False)
-            - List of rows as dictionaries (default: empty list)
-            - Dictionary mapping written column names to returned column names.
-              Use dot notation for nested paths (e.g., {"email": "properties.email"}
-              if the connector returns fields nested under a properties object).
+            - List of rows as dictionaries representing what was written (default: empty list)
+            - Dictionary mapping write-side field names to read-side field names.
+              The test suite uses this to verify that values written to the source
+              appear correctly when the connector reads them back. Use dot notation
+              for nested paths when the connector returns data in a different
+              structure than the write API accepts.
+              Examples:
+                {"order_id": "order_id"}             — names match on both sides
+                {"email": "properties.email"}        — read nests fields under "properties"
+                {"language": "user_language"}         — connector renames the field
               Default: empty dict
         """
         return False, [], {}
@@ -106,6 +103,7 @@ class LakeflowConnectTestUtils:
             Tuple containing:
             - Boolean indicating success of the operation (default: False)
             - List of deleted rows as dictionaries (default: empty list)
-            - Dictionary mapping written column names to returned column names (default: empty dict)
+            - Dictionary mapping write-side field names to read-side field names,
+              same format as generate_rows_and_write (default: empty dict)
         """
         return False, [], {}

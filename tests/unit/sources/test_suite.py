@@ -29,6 +29,7 @@ from databricks.labs.community_connector.interface.lakeflow_connect import Lakef
 from databricks.labs.community_connector.libs.utils import parse_value
 
 VALID_INGESTION_TYPES = {"snapshot", "cdc", "cdc_with_deletes", "append"}
+_INVALID_TABLE_NAME = "__nonexistent_table_$$_9z9z9z__"
 
 
 class LakeflowConnectTests:
@@ -42,7 +43,7 @@ class LakeflowConnectTests:
         config: Init options dict passed to connector_class.__init__.
         table_configs: Per-table options keyed by table name.
         sample_records: Max records to consume per table during read tests.
-        test_utils_class: Optional LakeflowConnectTestUtils subclass for
+        test_utils_class: Optional LakeflowConnectWriteTestUtils subclass for
             write-back tests.
     """
 
@@ -144,6 +145,30 @@ class LakeflowConnectTests:
             f"Duplicate table names: {sorted(set(dupes))}.\n"
             "  Fix: list_tables() must return unique names."
         )
+
+    # ------------------------------------------------------------------
+    # test_invalid_table_name
+    # ------------------------------------------------------------------
+
+    def test_invalid_table_name(self):
+        """get_table_schema, read_table_metadata, and read_table raise on an invalid table name."""
+        methods = {
+            "get_table_schema": lambda: self.connector.get_table_schema(_INVALID_TABLE_NAME, {}),
+            "read_table_metadata": lambda: self.connector.read_table_metadata(_INVALID_TABLE_NAME, {}),
+            "read_table": lambda: self.connector.read_table(_INVALID_TABLE_NAME, {}, {}),
+        }
+        errors = []
+        for name, fn in methods.items():
+            try:
+                fn()
+                errors.append(
+                    f"{name}() did not raise for invalid table '{_INVALID_TABLE_NAME}'.\n"
+                    f"  Fix: {name}() should raise an exception for unknown table names."
+                )
+            except Exception:
+                pass
+        if errors:
+            pytest.fail("\n\n".join(errors))
 
     # ------------------------------------------------------------------
     # test_get_table_schema  (per-table, collected)
@@ -636,8 +661,11 @@ class LakeflowConnectTests:
         if not success:
             return f"[{table}] Write returned success=False."
 
-        # Read after write
-        after_result = self.connector.read_table(table, initial_offset, self._opts(table))
+        # Read after write — create a fresh connector instance, just like a
+        # real pipeline trigger would, so connectors that cap cursors at init
+        # time can observe the newly-written data.
+        fresh_connector = self.connector_class(self.config)
+        after_result = fresh_connector.read_table(table, initial_offset, self._opts(table))
         if not isinstance(after_result, tuple) or len(after_result) != 2:
             return f"[{table}] Read after write returned invalid format."
         after_iter, _ = after_result
