@@ -95,14 +95,15 @@ Optional table options (must be listed in the connection’s `externalOptionsAll
 
 | Option        | Tables                    | Required | Description |
 |---------------|---------------------------|----------|-------------|
-| `date_from`   | All                       | No       | Initial range start, format `dd/mm/yyyy`. If omitted (first run), defaults to 30 days before yesterday. |
-| `date_to`     | All                       | No       | Initial range end, format `dd/mm/yyyy`. Used only on first run with `date_from`. |
-| `chunk_days`  | All                       | No       | Number of days per API request chunk (integer, minimum 1). Default: 1. |
+| `date_from`   | All                       | Yes*     | Range start, format `dd/mm/yyyy`. *Required for the intended contract; if omitted, connector falls back to last 30 days before yesterday. |
+| `date_to`     | All                       | No       | Range end, format `dd/mm/yyyy`. Optional; when omitted, the connector uses **current execution time** as the end. |
+| `chunk_days`  | All                       | No       | Number of days per API request chunk (integer, minimum 1, max 60). Default: 1. Ranges longer than 60 days are split into multiple API calls. |
 | `biddingZone` or `bidding_zone` | `total_load` only | No | Bidding zone filter. Allowed values: `North`, `Centre-North`, `South`, `Centre-South`, `Sardinia`, `Sicily`, `Calabria`, `Italy`. |
 | `type`        | `actual_generation`, `renewable_generation` | No | Primary source / energy source filter. Allowed (e.g.): `Thermal`, `Wind`, `Geothermal`, `Photovoltaic`, `Self-consumption`, `Hydro`. |
 
-- **First run**: If neither a stored cursor nor `date_from`/`date_to` is provided, the connector uses the last 30 days up to end of yesterday.
-- **Subsequent runs**: The connector uses the stored cursor and requests the next chunk(s) up to end of yesterday.
+- **First run**: Provide `date_from` (required). Optionally provide `date_to`; if omitted, data is read up to **current execution time**. Ranges longer than 60 days are chunked into multiple API calls of at most 60 days each; the last chunk may end at current time (e.g. not midnight).
+- **Subsequent runs (CDC when `date_to` is omitted)**: Each run fetches from the **last stored cursor** (from the previous run) up to **current execution time**. If that span is more than 60 days, the connector makes multiple 60-day API calls automatically. The stored `start_offset` (cursor) is used so you always resume from where you left off.
+- **Subsequent runs (bounded when `date_to` is set)**: The connector uses the stored cursor and does not go past the requested `date_to` (persisted as `range_end` in the offset).
 
 
 ## Schema Highlights
