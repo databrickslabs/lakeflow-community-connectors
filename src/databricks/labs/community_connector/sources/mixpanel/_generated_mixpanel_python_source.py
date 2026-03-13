@@ -760,13 +760,12 @@ def register_lakeflow_source(spark):
                     print(f"Fetched {chunk_records} events from {current_start} to {chunk_end} ({json_errors} JSON errors)")
 
                 except requests.exceptions.RequestException as e:
-                    print(f"Error fetching events data for {current_start} to {chunk_end}: {e}")
                     # For rate limit errors, return what we have so far and continue from where we failed
                     if "429" in str(e):
-                        print("Rate limit hit - returning partial data")
-                        # Return data fetched so far with offset to continue from current_start
+                        print(f"Rate limit hit fetching events {current_start} to {chunk_end} - returning partial data")
                         next_offset = {"start_date": current_start}
                         return iter(all_records), next_offset
+                    raise
 
                 # Move to next chunk
                 current_start = (datetime.strptime(chunk_end, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -807,9 +806,7 @@ def register_lakeflow_source(spark):
                     records.append(cohort)
 
             except requests.exceptions.RequestException as e:
-                print(f"Error fetching cohorts data: {e}")
-                # Return partial data with current offset
-                return iter(records), start_offset if start_offset else {}
+                raise
 
             print(f"Fetched {len(records)} cohorts (full refresh)")
 
@@ -874,13 +871,10 @@ def register_lakeflow_source(spark):
                             time.sleep(0.34)
 
                     except requests.exceptions.RequestException as e:
-                        print(f"Error fetching members for cohort {cohort_id}: {e}")
-                        # Continue to next cohort
-                        continue
+                        raise
 
             except requests.exceptions.RequestException as e:
-                print(f"Error fetching cohorts list: {e}")
-                return iter(records), start_offset if start_offset else {}
+                raise
 
             print(f"Fetched {len(records)} cohort member relationships across {len(cohorts)} cohorts")
 
@@ -973,8 +967,7 @@ def register_lakeflow_source(spark):
                         break
 
                 except requests.exceptions.RequestException as e:
-                    print(f"Error fetching engage data: {e}")
-                    break
+                    raise
 
             # Update offset with latest cursor for next incremental sync
             next_offset = {
