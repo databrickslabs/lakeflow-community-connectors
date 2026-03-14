@@ -306,3 +306,123 @@ def _allergy(r: dict) -> dict:
     }
 
 
+# ─── Encounter ────────────────────────────────────────────────────────────────
+# FHIR R4: https://hl7.org/fhir/R4/encounter.html
+# UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-Encounter v2.5.0
+# MS fields: identifier, status(R), class(R Coding), serviceType, subject,
+#            participant, reasonCode, reasonReference
+# NOTE: Encounter.class is FHIR type Coding (1..1), NOT CodeableConcept
+
+_ENCOUNTER_PARTICIPANT = StructType([
+    _f("type", ArrayType(CODEABLE_CONCEPT)),
+    _f("period", PERIOD),
+    _f("individual", REFERENCE),
+])
+
+_ENCOUNTER_DIAGNOSIS = StructType([
+    _f("condition", REFERENCE),
+    _f("use", CODEABLE_CONCEPT),
+    _f("rank", IntegerType()),
+])
+
+_ENCOUNTER_HOSPITALIZATION = StructType([
+    _f("admit_source", CODEABLE_CONCEPT),
+    _f("re_admission", CODEABLE_CONCEPT),
+    _f("discharge_disposition", CODEABLE_CONCEPT),
+    _f("origin", REFERENCE),
+    _f("destination", REFERENCE),
+])
+
+_ENCOUNTER_LOCATION = StructType([
+    _f("location", REFERENCE),
+    _f("status", StringType()),
+    _f("physical_type", CODEABLE_CONCEPT),
+    _f("period", PERIOD),
+])
+
+_ENCOUNTER_SCHEMA = _s(
+    _f("identifier", ArrayType(IDENTIFIER)),
+    _f("status", StringType()),
+    _f("class_coding", CODING),
+    _f("type", ArrayType(CODEABLE_CONCEPT)),
+    _f("service_type", CODEABLE_CONCEPT),
+    _f("priority", CODEABLE_CONCEPT),
+    _f("subject", REFERENCE),
+    _f("episode_of_care", ArrayType(REFERENCE)),
+    _f("participant", ArrayType(_ENCOUNTER_PARTICIPANT)),
+    _f("appointment", ArrayType(REFERENCE)),
+    _f("period", PERIOD),
+    _f("reason_code", ArrayType(CODEABLE_CONCEPT)),
+    _f("reason_reference", ArrayType(REFERENCE)),
+    _f("diagnosis", ArrayType(_ENCOUNTER_DIAGNOSIS)),
+    _f("hospitalization", _ENCOUNTER_HOSPITALIZATION),
+    _f("location", ArrayType(_ENCOUNTER_LOCATION)),
+    _f("service_provider", REFERENCE),
+    _f("part_of", REFERENCE),
+)
+
+
+def _extract_encounter_participant(obj: dict) -> dict:
+    return {
+        "type": [extract_codeable_concept(t) for t in (obj.get("type") or [])],
+        "period": extract_period(obj.get("period")),
+        "individual": extract_reference(obj.get("individual")),
+    }
+
+
+def _extract_encounter_diagnosis(obj: dict) -> dict:
+    return {
+        "condition": extract_reference(obj.get("condition")),
+        "use": extract_codeable_concept(obj.get("use")),
+        "rank": obj.get("rank"),
+    }
+
+
+def _extract_encounter_hospitalization(obj: dict | None) -> dict | None:
+    if not obj:
+        return None
+    return {
+        "admit_source": extract_codeable_concept(obj.get("admitSource")),
+        "re_admission": extract_codeable_concept(obj.get("reAdmission")),
+        "discharge_disposition": extract_codeable_concept(obj.get("dischargeDisposition")),
+        "origin": extract_reference(obj.get("origin")),
+        "destination": extract_reference(obj.get("destination")),
+    }
+
+
+def _extract_encounter_location(obj: dict) -> dict:
+    return {
+        "location": extract_reference(obj.get("location")),
+        "status": obj.get("status"),
+        "physical_type": extract_codeable_concept(obj.get("physicalType")),
+        "period": extract_period(obj.get("period")),
+    }
+
+
+@register("Encounter", "base_r4", _ENCOUNTER_SCHEMA)
+def _encounter(r: dict) -> dict:
+    class_obj = r.get("class") or {}
+    return {
+        "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
+        "status": r.get("status"),
+        "class_coding": {
+            "system": class_obj.get("system"),
+            "code": class_obj.get("code"),
+            "display": class_obj.get("display"),
+        } if class_obj else None,
+        "type": [extract_codeable_concept(t) for t in (r.get("type") or [])],
+        "service_type": extract_codeable_concept(r.get("serviceType")),
+        "priority": extract_codeable_concept(r.get("priority")),
+        "subject": extract_reference(r.get("subject")),
+        "episode_of_care": [extract_reference(e) for e in (r.get("episodeOfCare") or [])],
+        "participant": [_extract_encounter_participant(p) for p in (r.get("participant") or [])],
+        "appointment": [extract_reference(a) for a in (r.get("appointment") or [])],
+        "period": extract_period(r.get("period")),
+        "reason_code": [extract_codeable_concept(rc) for rc in (r.get("reasonCode") or [])],
+        "reason_reference": [extract_reference(rr) for rr in (r.get("reasonReference") or [])],
+        "diagnosis": [_extract_encounter_diagnosis(d) for d in (r.get("diagnosis") or [])],
+        "hospitalization": _extract_encounter_hospitalization(r.get("hospitalization")),
+        "location": [_extract_encounter_location(loc) for loc in (r.get("location") or [])],
+        "service_provider": extract_reference(r.get("serviceProvider")),
+        "part_of": extract_reference(r.get("partOf")),
+    }
