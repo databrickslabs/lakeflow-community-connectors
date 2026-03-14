@@ -175,7 +175,7 @@ _PRIMITIVE_PARSERS = {
 }
 
 
-def parse_value(value: Any, field_type: DataType) -> Any:
+def parse_value(value: Any, field_type: DataType) -> Any:  # pylint: disable=too-many-return-statements
     """
     Converts a JSON value into a PySpark-compatible data type based on the provided field type.
     """

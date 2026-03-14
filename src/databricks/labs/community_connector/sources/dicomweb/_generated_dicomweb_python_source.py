@@ -6,7 +6,6 @@
 # ==============================================================================
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from datetime import (
     date,
     datetime,
@@ -14,7 +13,7 @@ from datetime import (
     timezone,
 )
 from decimal import Decimal
-from typing import Any, Iterator
+from typing import Any, Iterator, Sequence
 import json
 import os
 import time
@@ -27,8 +26,26 @@ from pyspark.sql.datasource import (
     InputPartition,
     SimpleDataSourceStreamReader,
 )
+from pyspark.sql.types import (
+    ArrayType,
+    BinaryType,
+    BooleanType,
+    DataType,
+    DateType,
+    DecimalType,
+    DoubleType,
+    FloatType,
+    IntegerType,
+    LongType,
+    MapType,
+    StringType,
+    StructField,
+    StructType,
+    TimestampType,
+    VariantType,
+    VariantVal,
+)
 from urllib.error import HTTPError
-from pyspark.sql.types import *
 import base64
 import logging
 import urllib.error
@@ -192,7 +209,7 @@ def register_lakeflow_source(spark):
     }
 
 
-    def parse_value(value: Any, field_type: DataType) -> Any:
+    def parse_value(value: Any, field_type: DataType) -> Any:  # pylint: disable=too-many-return-statements
         """
         Converts a JSON value into a PySpark-compatible data type based on the provided field type.
         """
@@ -206,6 +223,10 @@ def register_lakeflow_source(spark):
             return _parse_array(value, field_type)
         if isinstance(field_type, MapType):
             return _parse_map(value, field_type)
+
+        # Handle VariantType
+        if isinstance(field_type, VariantType):
+            return VariantVal.parseJson(value) if isinstance(value, str) else value
 
         # Handle primitive types via type-based lookup
         try:
@@ -366,6 +387,150 @@ def register_lakeflow_source(spark):
             raise NotImplementedError(
                 "read_table_deletes() must be implemented when ingestion_type is 'cdc_with_deletes'"
             )
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/interface/supports_partition.py
+    ########################################################
+
+    class SupportsPartition(ABC):
+        """Mixin for connectors that support partitioned reads across Spark executors.
+
+        Must be used together with LakeflowConnect. Implement this when your
+        connector can split work into partitions that Spark distributes to workers,
+        instead of reading all data in one partition batch.
+
+        Usage::
+
+            class MyConnector(LakeflowConnect, SupportsPartition):
+                ...
+        """
+
+        def __init_subclass__(cls, **kwargs):
+            super().__init_subclass__(**kwargs)
+            # Skip abstract intermediate classes (e.g. SupportsPartitionedStream).
+            # ABCMeta hasn't set __abstractmethods__ yet, so check the class's own dict.
+            if any(getattr(v, "__isabstractmethod__", False) for v in vars(cls).values()):
+                return
+            if not issubclass(cls, LakeflowConnect):
+                raise TypeError(
+                    f"{cls.__name__} uses SupportsPartition but does not extend "
+                    f"LakeflowConnect. Add LakeflowConnect to the base classes."
+                )
+
+        @abstractmethod
+        def get_partitions(
+            self,
+            table_name: str,
+            table_options: dict[str, str],
+        ) -> Sequence[dict]:
+            """Return partition descriptors for reading data.
+
+            Each returned dict is passed to :meth:`read_partition` on an executor.
+
+            Args:
+                table_name: The name of the table.
+                table_options: A dictionary of options for accessing the table.
+            Returns:
+                A sequence of partition descriptor dicts. Each dict must be
+                JSON-serialisable (primitive types only).
+            """
+
+        @abstractmethod
+        def read_partition(
+            self, table_name: str, partition: dict, table_options: dict[str, str]
+        ) -> Iterator[dict]:
+            """Read records for a single partition.
+
+            This method runs on Spark executors and must be self-contained.
+
+            Args:
+                table_name: The name of the table.
+                partition: One of the partition dicts returned by
+                    :meth:`get_partitions`.
+                table_options: A dictionary of options for accessing the table.
+            Returns:
+                An iterator of records as JSON-compatible dicts.
+            """
+
+
+    class SupportsPartitionedStream(SupportsPartition):
+        """Mixin for connectors that support partitioned streaming reads.
+
+        Extends :class:`SupportsPartition` with offset awareness for streaming
+        micro-batches. A connector implementing this mixin automatically supports
+        both partitioned batch reads (via the inherited interface) and partitioned
+        streaming reads.
+
+        Usage::
+
+            class MyConnector(LakeflowConnect, SupportsPartitionedStream):
+                ...
+        """
+
+        def is_partitioned(self, table_name: str) -> bool:
+            """Return whether the given table supports partitioned streaming.
+
+            The default returns True. Override to return False for tables that
+            should fall back to simpleStreamReader.
+
+            Args:
+                table_name: The name of the table.
+                table_options: A dictionary of options for accessing the table.
+            """
+            return True
+
+        @abstractmethod
+        def latest_offset(
+            self,
+            table_name: str,
+            table_options: dict[str, str],
+            start_offset: dict | None = None,
+        ) -> dict:
+            """Return the most recent offset available for the table.
+
+            Called by Spark on every micro-batch to discover new data.
+
+            Args:
+                table_name: The name of the table.
+                table_options: A dictionary of options for accessing the table.
+                start_offset: The current start offset, or None on the first call.
+                    PySpark's ``DataSourceStreamReader.latestOffset()`` does not
+                    pass this yet, so the framework always sends None for now.
+                    Connectors may use it to implement windowed batching when
+                    called directly.
+            Returns:
+                A dict whose keys and values are primitive types (str, int, bool).
+            """
+
+        @abstractmethod
+        def get_partitions(
+            self,
+            table_name: str,
+            table_options: dict[str, str],
+            start_offset: dict | None = None,
+            end_offset: dict | None = None,
+        ) -> Sequence[dict]:
+            """Return partition descriptors for reading data.
+
+            Each returned dict is passed to :meth:`read_partition` on an executor.
+
+            For batch reads, ``start_offset`` and ``end_offset`` are both None —
+            return partitions covering the entire table.
+
+            For streaming micro-batches, they delimit the offset range — return
+            partitions covering that range, or an empty sequence when
+            ``start_offset == end_offset``.
+
+            Args:
+                table_name: The name of the table.
+                table_options: A dictionary of options for accessing the table.
+                start_offset: The start offset (exclusive), or None for batch.
+                end_offset: The end offset (inclusive), or None for batch.
+            Returns:
+                A sequence of partition descriptor dicts. Each dict must be
+                JSON-serialisable (primitive types only).
+            """
 
 
     ########################################################
@@ -725,185 +890,6 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
-    # src/databricks/labs/community_connector/sources/dicomweb/dicomweb_datasource.py
-    ########################################################
-
-    @dataclass
-    class SimplePartition(InputPartition):
-        """Single partition carrying the serialised start-offset."""
-
-        start_json: str
-
-
-    @dataclass
-    class DicomBatchPartition(InputPartition):
-        """Batch of instance records to process on an executor."""
-
-        instances_json: str
-        options_json: str
-
-
-    # ---------------------------------------------------------------------------
-    # DataSourceStreamReader — runs read() on executors
-    # ---------------------------------------------------------------------------
-
-
-    class DicomStreamReader(DataSourceStreamReader):
-        """Executor-distributed streaming reader for DICOMweb.
-
-        * Non-file tables and instances without ``fetch_dicom_files`` /
-          ``fetch_metadata``: a single ``SimplePartition`` is returned and
-          ``read()`` queries the source normally on one executor.
-
-        * Instances with file/metadata fetch enabled: ``partitions()`` collects
-          bare instance records on the driver, then batches them into
-          ``DicomBatchPartition`` objects.  Each ``read(DicomBatchPartition)``
-          runs on a Spark executor with UC Volume FUSE access and performs the
-          WADO-RS downloads there.
-        """
-
-        def __init__(self, options, schema, lakeflow_connect):
-            self.options = options
-            self.schema = schema
-            self._lakeflow_connect = lakeflow_connect
-
-        # -- offsets -------------------------------------------------------------
-
-        def initialOffset(self):
-            return {}
-
-        def latestOffset(self):
-            return {"study_date": date.today().strftime("%Y%m%d"), "page_offset": 0}
-
-        # -- partitioning --------------------------------------------------------
-
-        def partitions(self, start, end):
-            is_delete_flow = self.options.get(IS_DELETE_FLOW) == "true"
-            table_options = {k: v for k, v in self.options.items() if k != IS_DELETE_FLOW}
-            table_name = self.options.get(TABLE_NAME)
-            fetch_files = table_options.get("fetch_dicom_files", "false").lower() == "true"
-            fetch_metadata = table_options.get("fetch_metadata", "false").lower() == "true"
-            volume_path = table_options.get("dicom_volume_path", "")
-
-            if not is_delete_flow and table_name == "instances" and (fetch_files or fetch_metadata):
-                if fetch_files and not volume_path:
-                    raise ValueError("fetch_dicom_files=true requires dicom_volume_path")
-                return self._collect_instance_partitions(table_name, table_options, start)
-            return [SimplePartition(start_json=json.dumps(start if start else {}))]
-
-        def _collect_instance_partitions(self, table_name, table_options, start):
-            """Driver-side: page through bare instance records, batch into partitions."""
-            meta_options = dict(table_options)
-            meta_options["fetch_dicom_files"] = "false"
-            meta_options["fetch_metadata"] = "false"
-
-            all_records = []
-            current_start = dict(start) if start else {}
-            while True:
-                records, next_offset = self._lakeflow_connect.read_table(
-                    table_name,
-                    current_start,
-                    meta_options,
-                )
-                batch = list(records)
-                all_records.extend(batch)
-                if not batch or next_offset.get("page_offset", 0) == 0:
-                    break
-                if next_offset == current_start:
-                    break
-                current_start = next_offset
-
-            batch_size = int(self.options.get("dicom_batch_size", "50"))
-            options_json = json.dumps(dict(self.options))
-            return [
-                DicomBatchPartition(
-                    instances_json=json.dumps(all_records[i : i + batch_size], default=str),
-                    options_json=options_json,
-                )
-                for i in range(0, max(1, len(all_records)), batch_size)
-            ]
-
-        # -- read (executor-side) ------------------------------------------------
-
-        def read(self, partition):
-            if isinstance(partition, DicomBatchPartition):
-                return self._read_dicom_batch(partition)
-            return self._read_simple(partition)
-
-        def _read_dicom_batch(self, partition):
-            """Executor: download DICOM files and/or fetch metadata."""
-            instances = json.loads(partition.instances_json)
-            options = json.loads(partition.options_json)
-            table_options = {k: v for k, v in options.items() if k != IS_DELETE_FLOW}
-            volume_path = table_options.get("dicom_volume_path", "")
-            wado_mode = table_options.get("wado_mode", "auto")
-            fetch_metadata = table_options.get("fetch_metadata", "false").lower() == "true"
-            fetch_files = table_options.get("fetch_dicom_files", "false").lower() == "true"
-            connector = LakeflowConnectImpl(options)
-
-            if fetch_metadata:
-                sop_to_meta: dict = {}
-                seen_series: set = set()
-                for rec in instances:
-                    key = (rec.get("study_instance_uid"), rec.get("series_instance_uid"))
-                    if key not in seen_series and all(key):
-                        seen_series.add(key)
-                        sop_to_meta.update(connector._build_metadata_map(key[0], key[1]))
-                for rec in instances:
-                    sop_uid = rec.get("sop_instance_uid")
-                    rec["metadata"] = sop_to_meta.get(sop_uid) if sop_uid else None
-
-            results = []
-            for rec in instances:
-                if fetch_files:
-                    rec = connector._attach_dicom_file(rec, volume_path, wado_mode)
-                results.append(parse_value(rec, self.schema))
-            return iter(results)
-
-        def _read_simple(self, partition):
-            """Executor: query source and return records (no file downloads)."""
-            start = json.loads(partition.start_json)
-            table_name = self.options.get(TABLE_NAME)
-            is_delete_flow = self.options.get(IS_DELETE_FLOW) == "true"
-            table_options = {k: v for k, v in self.options.items() if k != IS_DELETE_FLOW}
-            connector = LakeflowConnectImpl(self.options)
-            if is_delete_flow:
-                records, _ = connector.read_table_deletes(table_name, start, table_options)
-            else:
-                records, _ = connector.read_table(table_name, start, table_options)
-            return iter(map(lambda x: parse_value(x, self.schema), records))
-
-        def commit(self, end):
-            pass
-
-
-    # ---------------------------------------------------------------------------
-    # __init_subclass__ hook — inject streamReader into LakeflowSource
-    # ---------------------------------------------------------------------------
-    # When lakeflow_datasource.py (merged after this section) defines
-    # ``class LakeflowSource(DataSource)``, Python calls
-    # ``DataSource.__init_subclass__(LakeflowSource)``.  We use this hook to
-    # attach ``streamReader`` directly onto ``LakeflowSource.__dict__``.
-    #
-    # Because the base class remains the original pyspark DataSource (importable
-    # on executors) and ``_stream_reader`` is a plain closure, cloudpickle
-    # serialises everything by value — no ``databricks.labs`` module reference
-    # ends up in the pickle stream.
-    # ---------------------------------------------------------------------------
-
-
-    @classmethod
-    def _dicom_init_subclass(cls, **kwargs):
-        def _stream_reader(self, schema):
-            return DicomStreamReader(self.options, schema, self.lakeflow_connect)
-
-        cls.streamReader = _stream_reader
-
-
-    DataSource.__init_subclass__ = _dicom_init_subclass
-
-
-    ########################################################
     # src/databricks/labs/community_connector/sources/dicomweb/dicomweb_parser.py
     ########################################################
 
@@ -1177,44 +1163,6 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
-    # src/databricks/labs/community_connector/sources/dicomweb/dicomweb_utils_ext.py
-    ########################################################
-
-    def parse_value(value: Any, field_type: DataType) -> Any:
-        """Extended parse_value with VariantType support.
-
-        Shadows the parse_value from utils.py to add handling for VariantType.
-        When field_type is VariantType and value is a JSON string, the string is
-        converted to a VariantVal using VariantVal.parseJson(). If value is already
-        a VariantVal it is returned unchanged. All other types fall through to the
-        same logic as utils.parse_value.
-        """
-        if value is None:
-            return None
-
-        if isinstance(field_type, StructType):
-            result = _parse_struct(value, field_type)
-        elif isinstance(field_type, ArrayType):
-            result = _parse_array(value, field_type)
-        elif isinstance(field_type, MapType):
-            result = _parse_map(value, field_type)
-        elif isinstance(field_type, VariantType):
-            result = VariantVal.parseJson(value) if isinstance(value, str) else value
-        elif type(field_type) in _PRIMITIVE_PARSERS:
-            result = _PRIMITIVE_PARSERS[type(field_type)](value)
-        elif hasattr(field_type, "fromJson"):
-            try:
-                result = field_type.fromJson(value)
-            except (ValueError, TypeError) as e:
-                raise ValueError(
-                    f"Error converting '{value}' ({type(value)}) to {field_type}: {str(e)}"
-                ) from e
-        else:
-            raise TypeError(f"Unsupported field type: {field_type}")
-        return result
-
-
-    ########################################################
     # src/databricks/labs/community_connector/sources/dicomweb/dicomweb.py
     ########################################################
 
@@ -1228,7 +1176,7 @@ def register_lakeflow_source(spark):
     DEFAULT_START_DATE = "19000101"  # Effectively "all history" on first run
     DEFAULT_PAGE_SIZE = 100
     DEFAULT_LOOKBACK_DAYS = 1
-    DEFAULT_MAX_RECORDS_PER_BATCH = 500
+    DEFAULT_NUM_PARTITIONS = 8
 
     # WADO-RS retrieval mode
     WADO_MODE_AUTO = "auto"
@@ -1241,7 +1189,7 @@ def register_lakeflow_source(spark):
     # ---------------------------------------------------------------------------
 
 
-    class DICOMwebLakeflowConnect(LakeflowConnect):
+    class DICOMwebLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         """Lakeflow connector for DICOMweb VNA/PACS systems."""
 
         def __init__(self, options: dict[str, str]) -> None:
@@ -1267,10 +1215,6 @@ def register_lakeflow_source(spark):
 
             # Cached WADO-RS mode detected at runtime (only used when wado_mode=auto)
             self._wado_mode_detected: str | None = None
-
-            # Cap cursors at init time so a trigger never chases new data.
-            # The next trigger creates a fresh instance and picks up from here.
-            self._init_ts: str = date.today().strftime("%Y%m%d")
 
         # ------------------------------------------------------------------
         # Schema / metadata
@@ -1307,117 +1251,142 @@ def register_lakeflow_source(spark):
             start_offset: dict,
             table_options: dict[str, str],
         ) -> tuple[Iterator[dict], dict]:
-            """
-            Incrementally read records from the given table.
-
-            Args:
-                table_name:   One of "studies", "series", "instances", "diagnostics".
-                start_offset: Previous offset dict, or {} for first run.
-                table_options: Per-table options from the pipeline spec.
-
-            Returns:
-                (record_iterator, next_offset_dict)
-            """
             if table_name not in SUPPORTED_TABLES:
                 raise ValueError(f"Unknown table '{table_name}'. Valid: {SUPPORTED_TABLES}")
 
-            # Diagnostics table: runs a capability probe on every trigger, no cursor
+            # Only diagnostics uses read_table (via simpleStreamReader).
+            # studies/series/instances go through the partitioned path.
             if table_name == "diagnostics":
                 probe_iter = self._run_diagnostics_probe()
                 next_offset = {"probe_timestamp": datetime.now(tz=timezone.utc).isoformat()}
                 return probe_iter, next_offset
 
-            start_offset = start_offset or {}
-            date_cursor = start_offset.get("study_date", DEFAULT_START_DATE)
-            page_offset = start_offset.get("page_offset", 0)
-
-            # Short-circuit: cursor is at or past today — stream has caught up to init time.
-            if start_offset and date_cursor >= self._init_ts:
-                return iter([]), start_offset
-
-            page_size = int(table_options.get("page_size", DEFAULT_PAGE_SIZE))
-            max_records = int(
-                table_options.get("max_records_per_batch", str(DEFAULT_MAX_RECORDS_PER_BATCH))
-            )
-            lookback_days = int(table_options.get("lookback_days", DEFAULT_LOOKBACK_DAYS))
-
-            today_str = date.today().strftime("%Y%m%d")
-            date_range = f"{_subtract_days(date_cursor, lookback_days)}-{today_str}"
-
-            logger.info(
-                "read_table table=%s date_range=%s page_offset=%d page_size=%d max_records=%d",
-                table_name,
-                date_range,
-                page_offset,
-                page_size,
-                max_records,
+            raise ValueError(
+                f"Table '{table_name}' uses partitioned reads; read_table is not supported."
             )
 
+        # ------------------------------------------------------------------
+        # SupportsPartitionedStream
+        # ------------------------------------------------------------------
+
+        def is_partitioned(self, table_name: str) -> bool:
+            return table_name in ("studies", "series", "instances")
+
+        def latest_offset(
+            self,
+            table_name: str,
+            table_options: dict[str, str],
+            start_offset: dict | None = None,
+        ) -> dict:
+            today = date.today().strftime("%Y%m%d")
+            window_days = int(table_options.get("window_days", "0"))
+            if window_days > 0:
+                # Use start_offset if available, otherwise fall back to starting_date option.
+                start_date = (
+                    start_offset.get("study_date", DEFAULT_START_DATE)
+                    if start_offset
+                    else table_options.get("starting_date", DEFAULT_START_DATE)
+                )
+                next_end = _add_days(start_date, window_days)
+                return {"study_date": min(next_end, today)}
+            return {"study_date": today}
+
+        def get_partitions(
+            self,
+            table_name: str,
+            table_options: dict[str, str],
+            start_offset: dict | None = None,
+            end_offset: dict | None = None,
+        ) -> list[dict]:
+            if start_offset is None and end_offset is None:
+                # Batch mode: partition the entire table
+                start_date = table_options.get("starting_date", DEFAULT_START_DATE)
+                date_range = f"{start_date}-{date.today().strftime('%Y%m%d')}"
+                if table_name == "instances":
+                    return self._partition_instances(date_range, table_options)
+                return [{"date_range": date_range}]
+
+            # Stream mode: derive date range from the offsets Spark passes in.
+            start_date = (start_offset or {}).get("study_date", DEFAULT_START_DATE)
+            end_date = end_offset["study_date"]
+            if start_date >= end_date:
+                return []
+
+            lookback_days = int(table_options.get("lookback_days", str(DEFAULT_LOOKBACK_DAYS)))
+            date_range = f"{_subtract_days(start_date, lookback_days)}-{end_date}"
+
+            if table_name == "instances":
+                return self._partition_instances(date_range, table_options)
+            return [{"date_range": date_range}]
+
+        def read_partition(
+            self, table_name: str, partition: dict, table_options: dict[str, str]
+        ) -> Iterator[dict]:
             if table_name == "studies":
-                records, next_page_offset = self._collect_studies(
-                    date_range, page_size, page_offset, max_records
-                )
+                return self._read_studies_partition(partition, table_options)
             elif table_name == "series":
-                records, next_page_offset = self._collect_series(
-                    date_range, page_size, page_offset, max_records
-                )
-            else:
-                records, next_page_offset = self._collect_instances(
-                    date_range, page_offset, table_options
-                )
+                return self._read_series_partition(partition, table_options)
+            elif table_name == "instances":
+                return self._read_instances_partition(partition, table_options)
+            raise ValueError(f"Unsupported table for partitioned read: {table_name}")
 
-            if not records:
-                end_offset = {"study_date": today_str, "page_offset": 0}
-                if start_offset == end_offset:
-                    return iter([]), start_offset
-                return iter([]), end_offset
+        def _partition_instances(self, date_range: str, table_options: dict[str, str]) -> list[dict]:
+            """Query studies in the date range and distribute them into partitions.
 
-            end_offset = {"study_date": today_str, "page_offset": next_page_offset}
-            if start_offset == end_offset:
-                return iter([]), start_offset
-            return iter(records), end_offset
-
-        # ------------------------------------------------------------------
-        # Eager record collection (supports max_records_per_batch)
-        # ------------------------------------------------------------------
-
-        def _collect_studies(
-            self, date_range: str, page_size: int, start_offset: int, max_records: int
-        ) -> tuple[list[dict], int]:
-            """Collect up to max_records studies via flat QIDO-RS pagination.
-
-            Returns (records, next_page_offset) where next_page_offset is 0 when
-            all pages are exhausted, or the study-level offset to resume from when
-            the batch limit is hit mid-scan.
+            Each study is assigned to the lightest bin (fewest estimated instances).
             """
-            records: list[dict] = []
-            offset = start_offset
-            while len(records) < max_records:
+            num_partitions = int(table_options.get("num_partitions", str(DEFAULT_NUM_PARTITIONS)))
+            page_size = int(table_options.get("page_size", DEFAULT_PAGE_SIZE))
+
+            bins: list[list[dict]] = [[] for _ in range(num_partitions)]
+            bin_counts = [0] * num_partitions
+            offset = 0
+            while True:
                 batch = self._client.query_studies(date_range, limit=page_size, offset=offset)
                 if not batch:
-                    return records, 0
+                    break
+                for raw in batch:
+                    study = parse_study(raw)
+                    uid = study.get("study_instance_uid")
+                    if uid:
+                        count = study.get("number_of_study_related_instances") or 1
+                        min_idx = bin_counts.index(min(bin_counts))
+                        bins[min_idx].append({"uid": uid, "study_date": study.get("study_date")})
+                        bin_counts[min_idx] += count
+                if len(batch) < page_size:
+                    break
+                offset += page_size
+
+            return [{"studies": b} for b in bins if b]
+
+        def _read_studies_partition(
+            self, partition: dict, table_options: dict[str, str]
+        ) -> Iterator[dict]:
+            date_range = partition["date_range"]
+            page_size = int(table_options.get("page_size", DEFAULT_PAGE_SIZE))
+            offset = 0
+            while True:
+                batch = self._client.query_studies(date_range, limit=page_size, offset=offset)
+                if not batch:
+                    break
                 for raw in batch:
                     record = parse_study(raw)
                     record["connection_name"] = self._connection_name
-                    records.append(record)
+                    yield record
                 if len(batch) < page_size:
-                    return records, 0  # last partial page — all data consumed
+                    break
                 offset += page_size
-            return records, offset  # hit batch limit; next call resumes from this offset
 
-        def _collect_series(
-            self, date_range: str, page_size: int, start_offset: int, max_records: int
-        ) -> tuple[list[dict], int]:
-            """Hierarchical series collection: enumerate studies, then fetch series per study.
-
-            Returns (records, next_study_page_offset).
-            """
-            records: list[dict] = []
-            study_offset = start_offset
-            while len(records) < max_records:
-                studies = self._client.query_studies(date_range, limit=page_size, offset=study_offset)
+        def _read_series_partition(
+            self, partition: dict, table_options: dict[str, str]
+        ) -> Iterator[dict]:
+            date_range = partition["date_range"]
+            page_size = int(table_options.get("page_size", DEFAULT_PAGE_SIZE))
+            offset = 0
+            while True:
+                studies = self._client.query_studies(date_range, limit=page_size, offset=offset)
                 if not studies:
-                    return records, 0
+                    break
                 for study_raw in studies:
                     study = parse_study(study_raw)
                     study_uid = study.get("study_instance_uid")
@@ -1425,66 +1394,20 @@ def register_lakeflow_source(spark):
                         continue
                     for series_raw in self._client.query_series_for_study(study_uid):
                         record = parse_series(series_raw)
-                        # Propagate study_date / study_instance_uid from parent if missing
                         if not record.get("study_date"):
                             record["study_date"] = study.get("study_date")
                         if not record.get("study_instance_uid"):
                             record["study_instance_uid"] = study_uid
                         record["connection_name"] = self._connection_name
-                        records.append(record)
-                        if len(records) >= max_records:
-                            break  # stop mid-series list
-                    if len(records) >= max_records:
-                        break  # stop mid-study page
-                if len(records) >= max_records:
-                    return records, study_offset  # hit limit; resume from same page next call
+                        yield record
                 if len(studies) < page_size:
-                    return records, 0
-                study_offset += page_size
-            return records, study_offset
+                    break
+                offset += page_size
 
-        def _collect_instances(
-            self,
-            date_range: str,
-            start_offset: int,
-            table_options: dict[str, str],
-        ) -> tuple[list[dict], int]:
-            """Hierarchical instances collection: enumerate studies → series → instances.
-
-            Optionally fetches DICOM JSON metadata (fetch_metadata=true) and writes
-            DICOM files to a UC Volume (fetch_dicom_files=true).
-
-            Returns (records, next_study_page_offset).
-            """
-            page_size = int(table_options.get("page_size", DEFAULT_PAGE_SIZE))
-            max_records = int(
-                table_options.get("max_records_per_batch", str(DEFAULT_MAX_RECORDS_PER_BATCH))
-            )
-            records: list[dict] = []
-            study_offset = start_offset
-            while len(records) < max_records:
-                studies = self._client.query_studies(date_range, limit=page_size, offset=study_offset)
-                if not studies:
-                    return records, 0
-                for study_raw in studies:
-                    study_records = self._collect_instances_for_study(study_raw, table_options)
-                    records.extend(study_records)
-                    if len(records) >= max_records:
-                        return records[:max_records], study_offset
-                if len(studies) < page_size:
-                    return records, 0
-                study_offset += page_size
-            return records, study_offset
-
-        def _collect_instances_for_study(
-            self, study_raw: dict, table_options: dict[str, str]
-        ) -> list[dict]:
-            """Collect all instance records for a single study."""
-            study = parse_study(study_raw)
-            study_uid = study.get("study_instance_uid")
-            if not study_uid:
-                return []
-
+        def _read_instances_partition(
+            self, partition: dict, table_options: dict[str, str]
+        ) -> Iterator[dict]:
+            """Read instances for the studies assigned to this partition."""
             fetch_files = table_options.get("fetch_dicom_files", "false").lower() == "true"
             volume_path = table_options.get("dicom_volume_path", "")
             fetch_metadata = table_options.get("fetch_metadata", "false").lower() == "true"
@@ -1493,34 +1416,36 @@ def register_lakeflow_source(spark):
             if fetch_files and not volume_path:
                 raise ValueError("fetch_dicom_files=true requires dicom_volume_path to be set")
 
-            records: list[dict] = []
-            for series_raw in self._client.query_series_for_study(study_uid):
-                series = parse_series(series_raw)
-                series_uid = series.get("series_instance_uid")
-                if not series_uid:
-                    continue
+            for study_info in partition["studies"]:
+                study_uid = study_info["uid"]
+                study_date = study_info.get("study_date")
 
-                instances_raw = self._client.query_instances_for_series(study_uid, series_uid)
-                sop_to_meta: dict[str, str] = {}
-                if fetch_metadata:
-                    sop_to_meta = self._build_metadata_map(study_uid, series_uid)
+                for series_raw in self._client.query_series_for_study(study_uid):
+                    series = parse_series(series_raw)
+                    series_uid = series.get("series_instance_uid")
+                    if not series_uid:
+                        continue
 
-                for inst_raw in instances_raw:
-                    record = parse_instance(inst_raw)
-                    if not record.get("study_date"):
-                        record["study_date"] = study.get("study_date")
-                    if not record.get("study_instance_uid"):
-                        record["study_instance_uid"] = study_uid
-                    if not record.get("series_instance_uid"):
-                        record["series_instance_uid"] = series_uid
+                    instances_raw = self._client.query_instances_for_series(study_uid, series_uid)
+                    sop_to_meta: dict[str, str] = {}
                     if fetch_metadata:
-                        sop_uid = record.get("sop_instance_uid")
-                        record["metadata"] = sop_to_meta.get(sop_uid) if sop_uid else None
-                    if fetch_files:
-                        record = self._attach_dicom_file(record, volume_path, wado_mode)
-                    record["connection_name"] = self._connection_name
-                    records.append(record)
-            return records
+                        sop_to_meta = self._build_metadata_map(study_uid, series_uid)
+
+                    for inst_raw in instances_raw:
+                        record = parse_instance(inst_raw)
+                        if not record.get("study_date"):
+                            record["study_date"] = study_date
+                        if not record.get("study_instance_uid"):
+                            record["study_instance_uid"] = study_uid
+                        if not record.get("series_instance_uid"):
+                            record["series_instance_uid"] = series_uid
+                        if fetch_metadata:
+                            sop_uid = record.get("sop_instance_uid")
+                            record["metadata"] = sop_to_meta.get(sop_uid) if sop_uid else None
+                        if fetch_files:
+                            record = self._attach_dicom_file(record, volume_path, wado_mode)
+                        record["connection_name"] = self._connection_name
+                        yield record
 
         # ------------------------------------------------------------------
         # WADO-RS helpers
@@ -1831,6 +1756,16 @@ def register_lakeflow_source(spark):
             return date_str
 
 
+    def _add_days(date_str: str, days: int) -> str:
+        """Add `days` to a YYYYMMDD date string."""
+        try:
+            d = date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]))
+            d = d + timedelta(days=days)
+            return d.strftime("%Y%m%d")
+        except (ValueError, IndexError):
+            return date_str
+
+
     ########################################################
     # src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py
     ########################################################
@@ -1892,6 +1827,47 @@ def register_lakeflow_source(spark):
             return self.read(start)[0]
 
 
+    class LakeflowPartitionedStreamReader(DataSourceStreamReader):
+        """Proxy that bridges SupportsPartitionedStream to PySpark's DataSourceStreamReader.
+
+        Used when a connector implements the SupportsPartitionedStream mixin to
+        support partitioned streaming reads across Spark executors.
+        """
+
+        def __init__(
+            self,
+            options: dict[str, str],
+            schema: StructType,
+            lakeflow_connect: LakeflowConnect,
+        ):
+            self.options = options
+            self.schema = schema
+            self.lakeflow_connect = lakeflow_connect
+            self.table_name = options[TABLE_NAME]
+            self.table_options = {k: v for k, v in options.items() if k != IS_DELETE_FLOW}
+
+        def initialOffset(self):
+            return {}
+
+        def latestOffset(self):
+            # PySpark does not pass the current offset to latestOffset() yet,
+            # so we forward None.  Once PySpark supports it, pass the real value.
+            return self.lakeflow_connect.latest_offset(self.table_name, self.table_options, None)
+
+        def partitions(self, start: dict, end: dict):
+            partition_descs = self.lakeflow_connect.get_partitions(
+                self.table_name, self.table_options, start, end
+            )
+            return [InputPartition(json.dumps(p)) for p in partition_descs]
+
+        def read(self, partition: InputPartition):
+            partition_desc = json.loads(partition.value)
+            records = self.lakeflow_connect.read_partition(
+                self.table_name, partition_desc, self.table_options
+            )
+            return map(lambda x: parse_value(x, self.schema), records)
+
+
     class LakeflowBatchReader(DataSourceReader):
         def __init__(
             self,
@@ -1903,18 +1879,30 @@ def register_lakeflow_source(spark):
             self.schema = schema
             self.lakeflow_connect = lakeflow_connect
             self.table_name = options[TABLE_NAME]
+            self._supports_partition = isinstance(lakeflow_connect, SupportsPartition)
+
+        def partitions(self):
+            if self._supports_partition and self.table_name != METADATA_TABLE:
+                try:
+                    partition_descs = self.lakeflow_connect.get_partitions(
+                        self.table_name, self.options
+                    )
+                    return [InputPartition(json.dumps(p)) for p in partition_descs]
+                except Exception:
+                    self._supports_partition = False
+            return [InputPartition(None)]
 
         def read(self, partition):
-            all_records = []
             if self.table_name == METADATA_TABLE:
-                all_records = self._read_table_metadata()
-            else:
-                all_records, _ = self.lakeflow_connect.read_table(
-                    self.table_name, None, self.options
+                records = self._read_table_metadata()
+            elif self._supports_partition and partition.value is not None:
+                partition_desc = json.loads(partition.value)
+                records = self.lakeflow_connect.read_partition(
+                    self.table_name, partition_desc, self.options
                 )
-
-            rows = map(lambda x: parse_value(x, self.schema), all_records)
-            return iter(rows)
+            else:
+                records, _ = self.lakeflow_connect.read_table(self.table_name, None, self.options)
+            return map(lambda x: parse_value(x, self.schema), records)
 
         def _read_table_metadata(self):
             table_name_list = self.options.get(TABLE_NAME_LIST, "")
@@ -1960,6 +1948,17 @@ def register_lakeflow_source(spark):
 
         def reader(self, schema: StructType):
             return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)
+
+        def streamReader(self, schema: StructType):
+            # Use the partitioned DataSourceStreamReader when the connector
+            # implements SupportsPartitionedStream and the table opts in.
+            # Otherwise, delegate to super() which raises PySparkNotImplementedError,
+            # causing Spark to fall back to simpleStreamReader().
+            if isinstance(self.lakeflow_connect, SupportsPartitionedStream):
+                table = self.options[TABLE_NAME]
+                if self.lakeflow_connect.is_partitioned(table):
+                    return LakeflowPartitionedStreamReader(self.options, schema, self.lakeflow_connect)
+            return super().streamReader(schema)
 
         def simpleStreamReader(self, schema: StructType):
             return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
