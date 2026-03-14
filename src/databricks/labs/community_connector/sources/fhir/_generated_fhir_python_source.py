@@ -2000,6 +2000,9 @@ def register_lakeflow_source(spark):
         return None
 
 
+    # Alias required by _patient_uk (mirrors the import in uk_core.py)
+    _base_patient = _patient
+
     # ─── Patient (UK Core) ────────────────────────────────────────────────────────
     # UK Core adds NHS number and UK-specific extensions on top of base_r4 Patient
     _PATIENT_UK_SCHEMA = StructType(
