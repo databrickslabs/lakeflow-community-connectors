@@ -236,3 +236,73 @@ def _condition(r: dict) -> dict:
     }
 
 
+# ─── AllergyIntolerance ───────────────────────────────────────────────────────
+# FHIR R4: https://hl7.org/fhir/R4/allergyintolerance.html
+# UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-AllergyIntolerance v2.5.0
+# MS fields: clinicalStatus, verificationStatus, code(R), patient(R), reaction, reaction.severity
+# NOTE: category is 0..* code (array of strings), not CodeableConcept — per spec
+# onset[x]: onsetDateTime | onsetString
+_ALLERGY_REACTION = StructType([
+    _f("substance", CODEABLE_CONCEPT),
+    _f("manifestation", ArrayType(CODEABLE_CONCEPT)),
+    _f("description", StringType()),
+    _f("onset", TimestampType()),
+    _f("severity", StringType()),
+    _f("exposure_route", CODEABLE_CONCEPT),
+])
+
+_ALLERGY_SCHEMA = _s(
+    _f("identifier", ArrayType(IDENTIFIER)),
+    _f("clinical_status", CODEABLE_CONCEPT),
+    _f("verification_status", CODEABLE_CONCEPT),
+    _f("type", StringType()),
+    _f("category", ArrayType(StringType())),
+    _f("criticality", StringType()),
+    _f("code", CODEABLE_CONCEPT),
+    _f("patient", REFERENCE),
+    _f("encounter", REFERENCE),
+    _f("onset_datetime", TimestampType()),
+    _f("onset_string", StringType()),
+    _f("recorded_date", StringType()),
+    _f("recorder", REFERENCE),
+    _f("asserter", REFERENCE),
+    _f("last_occurrence", TimestampType()),
+    _f("note", ArrayType(ANNOTATION)),
+    _f("reaction", ArrayType(_ALLERGY_REACTION)),
+)
+
+
+def _extract_allergy_reaction(obj: dict) -> dict:
+    return {
+        "substance": extract_codeable_concept(obj.get("substance")),
+        "manifestation": [extract_codeable_concept(m) for m in (obj.get("manifestation") or [])],
+        "description": obj.get("description"),
+        "onset": obj.get("onset"),
+        "severity": obj.get("severity"),
+        "exposure_route": extract_codeable_concept(obj.get("exposureRoute")),
+    }
+
+
+@register("AllergyIntolerance", "base_r4", _ALLERGY_SCHEMA)
+def _allergy(r: dict) -> dict:
+    return {
+        "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
+        "clinical_status": extract_codeable_concept(r.get("clinicalStatus")),
+        "verification_status": extract_codeable_concept(r.get("verificationStatus")),
+        "type": r.get("type"),
+        "category": r.get("category") or [],
+        "criticality": r.get("criticality"),
+        "code": extract_codeable_concept(r.get("code")),
+        "patient": extract_reference(r.get("patient")),
+        "encounter": extract_reference(r.get("encounter")),
+        "onset_datetime": r.get("onsetDateTime"),
+        "onset_string": r.get("onsetString"),
+        "recorded_date": r.get("recordedDate"),
+        "recorder": extract_reference(r.get("recorder")),
+        "asserter": extract_reference(r.get("asserter")),
+        "last_occurrence": r.get("lastOccurrence"),
+        "note": [extract_annotation(n) for n in (r.get("note") or [])],
+        "reaction": [_extract_allergy_reaction(rx) for rx in (r.get("reaction") or [])],
+    }
+
+
