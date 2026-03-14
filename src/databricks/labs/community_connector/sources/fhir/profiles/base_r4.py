@@ -184,3 +184,55 @@ def _observation(r: dict) -> dict:
     }
 
 
+# ─── Condition ────────────────────────────────────────────────────────────────
+# FHIR R4: https://hl7.org/fhir/R4/condition.html
+# UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-Condition v2.6.0
+# MS fields: clinicalStatus, verificationStatus, severity, code, subject, recorder
+# onset[x]: onsetDateTime | onsetPeriod | onsetString
+# abatement[x]: abatementDateTime | abatementString
+_CONDITION_SCHEMA = _s(
+    _f("identifier", ArrayType(IDENTIFIER)),
+    _f("clinical_status", CODEABLE_CONCEPT),
+    _f("verification_status", CODEABLE_CONCEPT),
+    _f("category", ArrayType(CODEABLE_CONCEPT)),
+    _f("severity", CODEABLE_CONCEPT),
+    _f("code", CODEABLE_CONCEPT),
+    _f("body_site", ArrayType(CODEABLE_CONCEPT)),
+    _f("subject", REFERENCE),
+    _f("encounter", REFERENCE),
+    _f("onset_datetime", TimestampType()),
+    _f("onset_period", PERIOD),
+    _f("onset_string", StringType()),
+    _f("abatement_datetime", TimestampType()),
+    _f("abatement_string", StringType()),
+    _f("recorded_date", StringType()),
+    _f("recorder", REFERENCE),
+    _f("asserter", REFERENCE),
+    _f("note", ArrayType(ANNOTATION)),
+)
+
+
+@register("Condition", "base_r4", _CONDITION_SCHEMA)
+def _condition(r: dict) -> dict:
+    return {
+        "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
+        "clinical_status": extract_codeable_concept(r.get("clinicalStatus")),
+        "verification_status": extract_codeable_concept(r.get("verificationStatus")),
+        "category": [extract_codeable_concept(c) for c in (r.get("category") or [])],
+        "severity": extract_codeable_concept(r.get("severity")),
+        "code": extract_codeable_concept(r.get("code")),
+        "body_site": [extract_codeable_concept(b) for b in (r.get("bodySite") or [])],
+        "subject": extract_reference(r.get("subject")),
+        "encounter": extract_reference(r.get("encounter")),
+        "onset_datetime": r.get("onsetDateTime"),
+        "onset_period": extract_period(r.get("onsetPeriod")),
+        "onset_string": r.get("onsetString"),
+        "abatement_datetime": r.get("abatementDateTime"),
+        "abatement_string": r.get("abatementString"),
+        "recorded_date": r.get("recordedDate"),
+        "recorder": extract_reference(r.get("recorder")),
+        "asserter": extract_reference(r.get("asserter")),
+        "note": [extract_annotation(n) for n in (r.get("note") or [])],
+    }
+
+
