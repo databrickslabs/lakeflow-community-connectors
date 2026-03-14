@@ -1,55 +1,41 @@
 """
 DICOMwebLakeflowConnect — main Lakeflow Community Connector class.
 
-Exposes three tables from any DICOMweb-compliant VNA/PACS system:
-    studies    QIDO-RS /studies                                 (flat pagination)
-    series     QIDO-RS /studies/{uid}/series                    (hierarchical)
-    instances  QIDO-RS /studies/{uid}/series/{uid}/instances    (hierarchical)
+Implements ``LakeflowConnect`` + ``SupportsPartitionedStream`` for DICOMweb
+VNA/PACS systems.
 
-Incremental strategy
---------------------
-Cursor = ISO date string YYYYMMDD tracking the max study_date seen.
-QIDO-RS filter: StudyDate={cursor_date minus lookback_days}-{today}
-Offset format:  {"study_date": "20231215", "page_offset": 0}
+Tables
+------
+    studies      QIDO-RS /studies                                 (flat pagination)
+    series       QIDO-RS /studies/{uid}/series                    (hierarchical)
+    instances    QIDO-RS /studies/{uid}/series/{uid}/instances    (hierarchical)
+    diagnostics  Capability probe of all QIDO-RS / WADO-RS endpoints
 
-page_offset tracks the study-level QIDO-RS offset within a trigger run.
-When max_records_per_batch is hit mid-scan, page_offset preserves the
-position so the next microbatch resumes from where it left off.
+studies, series, and instances use the partitioned streaming path
+(``SupportsPartitionedStream``).  diagnostics uses ``simpleStreamReader``
+via ``read_table``.
 
-The series and instances tables use *hierarchical* QIDO-RS endpoints that
-are required by servers such as the AWS S3 Static WADO Server.  Studies are
-enumerated first (flat, paginated), then series/instances are fetched per
-parent UID.
+Streaming strategy (partitioned path)
+-------------------------------------
+Offset = ``{"study_date": "YYYYMMDD"}``.  ``latest_offset`` returns
+today's date; Spark advances the start offset each micro-batch.
+
+``get_partitions`` discovers studies in the date range on the driver.
+For instances, studies are bin-packed across ``num_partitions`` executors
+by ``number_of_study_related_instances``.
+
+``read_partition`` runs on executors and fetches data via QIDO-RS,
+optionally downloading DICOM files (WADO-RS) and metadata.
 
 WADO-RS file retrieval (fetch_dicom_files=true)
 -----------------------------------------------
-Standard servers return a full .dcm file:
-    GET /studies/{uid}/series/{uid}/instances/{uid}
-
-Frame-based servers (e.g. AWS S3 Static WADO) return individual image frames:
-    GET /studies/{uid}/series/{uid}/instances/{uid}/frames/1
-
-Set wado_mode=auto (default) to auto-detect: the connector tries the full
-instance endpoint first; if it returns 404/406/415 it falls back to frames
-and caches the detection for the rest of the run.  Set wado_mode=full or
-wado_mode=frames to force a specific mode.
+wado_mode=auto (default) tries the full instance endpoint first; if the
+server returns 404/406/415 it falls back to frame retrieval.
 
 DICOM metadata (fetch_metadata=true)
 --------------------------------------
-When enabled, the connector fetches full DICOM JSON metadata for each series
-via the WADO-RS metadata endpoint:
-    GET /studies/{uid}/series/{uid}/metadata
-
-The complete JSON object for each instance is stored in the `metadata` column
-(VariantType on DBR 15.x+, JSON string on older runtimes).
-
-Usage (Databricks notebook)
----------------------------
-    from databricks.labs.community_connector.sources.dicomweb import DICOMwebLakeflowConnect
-    connector = DICOMwebLakeflowConnect({
-        "base_url": "https://orthanc.uclouvain.be/demo/dicom-web",
-    })
-    records, next_offset = connector.read_table("studies", {}, {})
+Fetches full DICOM JSON per series via WADO-RS metadata endpoint and
+stores it in the ``metadata`` column (VariantType).
 """
 
 import json
@@ -62,6 +48,9 @@ from urllib.error import HTTPError
 from pyspark.sql.types import StructType
 
 from databricks.labs.community_connector.interface.lakeflow_connect import LakeflowConnect
+from databricks.labs.community_connector.interface.supports_partition import (
+    SupportsPartitionedStream,
+)
 from databricks.labs.community_connector.sources.dicomweb.dicomweb_client import DICOMwebClient
 from databricks.labs.community_connector.sources.dicomweb.dicomweb_parser import (
     parse_instance,
@@ -82,7 +71,7 @@ SUPPORTED_TABLES = ("studies", "series", "instances", "diagnostics")
 DEFAULT_START_DATE = "19000101"  # Effectively "all history" on first run
 DEFAULT_PAGE_SIZE = 100
 DEFAULT_LOOKBACK_DAYS = 1
-DEFAULT_MAX_RECORDS_PER_BATCH = 500
+DEFAULT_NUM_PARTITIONS = 8
 
 # WADO-RS retrieval mode
 WADO_MODE_AUTO = "auto"
@@ -95,7 +84,7 @@ WADO_MODE_FRAMES = "frames"
 # ---------------------------------------------------------------------------
 
 
-class DICOMwebLakeflowConnect(LakeflowConnect):
+class DICOMwebLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
     """Lakeflow connector for DICOMweb VNA/PACS systems."""
 
     def __init__(self, options: dict[str, str]) -> None:
@@ -121,10 +110,6 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
 
         # Cached WADO-RS mode detected at runtime (only used when wado_mode=auto)
         self._wado_mode_detected: str | None = None
-
-        # Cap cursors at init time so a trigger never chases new data.
-        # The next trigger creates a fresh instance and picks up from here.
-        self._init_ts: str = date.today().strftime("%Y%m%d")
 
     # ------------------------------------------------------------------
     # Schema / metadata
@@ -161,117 +146,144 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
         start_offset: dict,
         table_options: dict[str, str],
     ) -> tuple[Iterator[dict], dict]:
-        """
-        Incrementally read records from the given table.
-
-        Args:
-            table_name:   One of "studies", "series", "instances", "diagnostics".
-            start_offset: Previous offset dict, or {} for first run.
-            table_options: Per-table options from the pipeline spec.
-
-        Returns:
-            (record_iterator, next_offset_dict)
-        """
         if table_name not in SUPPORTED_TABLES:
             raise ValueError(f"Unknown table '{table_name}'. Valid: {SUPPORTED_TABLES}")
 
-        # Diagnostics table: runs a capability probe on every trigger, no cursor
+        # Only diagnostics uses read_table (via simpleStreamReader).
+        # studies/series/instances go through the partitioned path.
         if table_name == "diagnostics":
             probe_iter = self._run_diagnostics_probe()
             next_offset = {"probe_timestamp": datetime.now(tz=timezone.utc).isoformat()}
             return probe_iter, next_offset
 
-        start_offset = start_offset or {}
-        date_cursor = start_offset.get("study_date", DEFAULT_START_DATE)
-        page_offset = start_offset.get("page_offset", 0)
-
-        # Short-circuit: cursor is at or past today — stream has caught up to init time.
-        if start_offset and date_cursor >= self._init_ts:
-            return iter([]), start_offset
-
-        page_size = int(table_options.get("page_size", DEFAULT_PAGE_SIZE))
-        max_records = int(
-            table_options.get("max_records_per_batch", str(DEFAULT_MAX_RECORDS_PER_BATCH))
-        )
-        lookback_days = int(table_options.get("lookback_days", DEFAULT_LOOKBACK_DAYS))
-
-        today_str = date.today().strftime("%Y%m%d")
-        date_range = f"{_subtract_days(date_cursor, lookback_days)}-{today_str}"
-
-        logger.info(
-            "read_table table=%s date_range=%s page_offset=%d page_size=%d max_records=%d",
-            table_name,
-            date_range,
-            page_offset,
-            page_size,
-            max_records,
+        raise ValueError(
+            f"Table '{table_name}' uses partitioned reads; read_table is not supported."
         )
 
+    # ------------------------------------------------------------------
+    # SupportsPartitionedStream
+    # ------------------------------------------------------------------
+
+    def is_partitioned(self, table_name: str) -> bool:
+        return table_name in ("studies", "series", "instances")
+
+    def latest_offset(
+        self,
+        table_name: str,
+        table_options: dict[str, str],
+        start_offset: dict | None = None,
+    ) -> dict:
+        today = date.today().strftime("%Y%m%d")
+        window_days = int(table_options.get("window_days", "0"))
+        if window_days > 0:
+            # Use start_offset if available, otherwise fall back to starting_date option.
+            start_date = (
+                start_offset.get("study_date", DEFAULT_START_DATE)
+                if start_offset
+                else table_options.get("starting_date", DEFAULT_START_DATE)
+            )
+            next_end = _add_days(start_date, window_days)
+            return {"study_date": min(next_end, today)}
+        return {"study_date": today}
+
+    def get_partitions(
+        self,
+        table_name: str,
+        table_options: dict[str, str],
+        start_offset: dict | None = None,
+        end_offset: dict | None = None,
+    ) -> list[dict]:
+        if start_offset is None and end_offset is None:
+            # Batch mode: partition the entire table
+            date_range = f"{DEFAULT_START_DATE}-{date.today().strftime('%Y%m%d')}"
+            if table_name == "instances":
+                return self._partition_instances(date_range, table_options)
+            return [{"date_range": date_range}]
+
+        # Stream mode: derive date range from the offsets Spark passes in.
+        start_date = (start_offset or {}).get("study_date", DEFAULT_START_DATE)
+        end_date = end_offset["study_date"]
+        if start_date >= end_date:
+            return []
+
+        lookback_days = int(table_options.get("lookback_days", str(DEFAULT_LOOKBACK_DAYS)))
+        date_range = f"{_subtract_days(start_date, lookback_days)}-{end_date}"
+
+        if table_name == "instances":
+            return self._partition_instances(date_range, table_options)
+        return [{"date_range": date_range}]
+
+    def read_partition(
+        self, table_name: str, partition: dict, table_options: dict[str, str]
+    ) -> Iterator[dict]:
         if table_name == "studies":
-            records, next_page_offset = self._collect_studies(
-                date_range, page_size, page_offset, max_records
-            )
+            return self._read_studies_partition(partition, table_options)
         elif table_name == "series":
-            records, next_page_offset = self._collect_series(
-                date_range, page_size, page_offset, max_records
-            )
-        else:
-            records, next_page_offset = self._collect_instances(
-                date_range, page_offset, table_options
-            )
+            return self._read_series_partition(partition, table_options)
+        elif table_name == "instances":
+            return self._read_instances_partition(partition, table_options)
+        raise ValueError(f"Unsupported table for partitioned read: {table_name}")
 
-        if not records:
-            end_offset = {"study_date": today_str, "page_offset": 0}
-            if start_offset == end_offset:
-                return iter([]), start_offset
-            return iter([]), end_offset
+    def _partition_instances(self, date_range: str, table_options: dict[str, str]) -> list[dict]:
+        """Query studies in the date range and distribute them into partitions.
 
-        end_offset = {"study_date": today_str, "page_offset": next_page_offset}
-        if start_offset == end_offset:
-            return iter([]), start_offset
-        return iter(records), end_offset
-
-    # ------------------------------------------------------------------
-    # Eager record collection (supports max_records_per_batch)
-    # ------------------------------------------------------------------
-
-    def _collect_studies(
-        self, date_range: str, page_size: int, start_offset: int, max_records: int
-    ) -> tuple[list[dict], int]:
-        """Collect up to max_records studies via flat QIDO-RS pagination.
-
-        Returns (records, next_page_offset) where next_page_offset is 0 when
-        all pages are exhausted, or the study-level offset to resume from when
-        the batch limit is hit mid-scan.
+        Each study is assigned to the lightest bin (fewest estimated instances).
         """
-        records: list[dict] = []
-        offset = start_offset
-        while len(records) < max_records:
+        num_partitions = int(table_options.get("num_partitions", str(DEFAULT_NUM_PARTITIONS)))
+        page_size = int(table_options.get("page_size", DEFAULT_PAGE_SIZE))
+
+        bins: list[list[dict]] = [[] for _ in range(num_partitions)]
+        bin_counts = [0] * num_partitions
+        offset = 0
+        while True:
             batch = self._client.query_studies(date_range, limit=page_size, offset=offset)
             if not batch:
-                return records, 0
+                break
+            for raw in batch:
+                study = parse_study(raw)
+                uid = study.get("study_instance_uid")
+                if uid:
+                    count = study.get("number_of_study_related_instances") or 1
+                    min_idx = bin_counts.index(min(bin_counts))
+                    bins[min_idx].append({"uid": uid, "study_date": study.get("study_date")})
+                    bin_counts[min_idx] += count
+            if len(batch) < page_size:
+                break
+            offset += page_size
+
+        return [{"studies": b} for b in bins if b]
+
+    def _read_studies_partition(
+        self, partition: dict, table_options: dict[str, str]
+    ) -> Iterator[dict]:
+        date_range = partition["date_range"]
+        page_size = int(table_options.get("page_size", DEFAULT_PAGE_SIZE))
+        records: list[dict] = []
+        offset = 0
+        while True:
+            batch = self._client.query_studies(date_range, limit=page_size, offset=offset)
+            if not batch:
+                break
             for raw in batch:
                 record = parse_study(raw)
                 record["connection_name"] = self._connection_name
                 records.append(record)
             if len(batch) < page_size:
-                return records, 0  # last partial page — all data consumed
+                break
             offset += page_size
-        return records, offset  # hit batch limit; next call resumes from this offset
+        return iter(records)
 
-    def _collect_series(
-        self, date_range: str, page_size: int, start_offset: int, max_records: int
-    ) -> tuple[list[dict], int]:
-        """Hierarchical series collection: enumerate studies, then fetch series per study.
-
-        Returns (records, next_study_page_offset).
-        """
+    def _read_series_partition(
+        self, partition: dict, table_options: dict[str, str]
+    ) -> Iterator[dict]:
+        date_range = partition["date_range"]
+        page_size = int(table_options.get("page_size", DEFAULT_PAGE_SIZE))
         records: list[dict] = []
-        study_offset = start_offset
-        while len(records) < max_records:
-            studies = self._client.query_studies(date_range, limit=page_size, offset=study_offset)
+        offset = 0
+        while True:
+            studies = self._client.query_studies(date_range, limit=page_size, offset=offset)
             if not studies:
-                return records, 0
+                break
             for study_raw in studies:
                 study = parse_study(study_raw)
                 study_uid = study.get("study_instance_uid")
@@ -279,66 +291,21 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
                     continue
                 for series_raw in self._client.query_series_for_study(study_uid):
                     record = parse_series(series_raw)
-                    # Propagate study_date / study_instance_uid from parent if missing
                     if not record.get("study_date"):
                         record["study_date"] = study.get("study_date")
                     if not record.get("study_instance_uid"):
                         record["study_instance_uid"] = study_uid
                     record["connection_name"] = self._connection_name
                     records.append(record)
-                    if len(records) >= max_records:
-                        break  # stop mid-series list
-                if len(records) >= max_records:
-                    break  # stop mid-study page
-            if len(records) >= max_records:
-                return records, study_offset  # hit limit; resume from same page next call
             if len(studies) < page_size:
-                return records, 0
-            study_offset += page_size
-        return records, study_offset
+                break
+            offset += page_size
+        return iter(records)
 
-    def _collect_instances(
-        self,
-        date_range: str,
-        start_offset: int,
-        table_options: dict[str, str],
-    ) -> tuple[list[dict], int]:
-        """Hierarchical instances collection: enumerate studies → series → instances.
-
-        Optionally fetches DICOM JSON metadata (fetch_metadata=true) and writes
-        DICOM files to a UC Volume (fetch_dicom_files=true).
-
-        Returns (records, next_study_page_offset).
-        """
-        page_size = int(table_options.get("page_size", DEFAULT_PAGE_SIZE))
-        max_records = int(
-            table_options.get("max_records_per_batch", str(DEFAULT_MAX_RECORDS_PER_BATCH))
-        )
-        records: list[dict] = []
-        study_offset = start_offset
-        while len(records) < max_records:
-            studies = self._client.query_studies(date_range, limit=page_size, offset=study_offset)
-            if not studies:
-                return records, 0
-            for study_raw in studies:
-                study_records = self._collect_instances_for_study(study_raw, table_options)
-                records.extend(study_records)
-                if len(records) >= max_records:
-                    return records[:max_records], study_offset
-            if len(studies) < page_size:
-                return records, 0
-            study_offset += page_size
-        return records, study_offset
-
-    def _collect_instances_for_study(
-        self, study_raw: dict, table_options: dict[str, str]
-    ) -> list[dict]:
-        """Collect all instance records for a single study."""
-        study = parse_study(study_raw)
-        study_uid = study.get("study_instance_uid")
-        if not study_uid:
-            return []
-
+    def _read_instances_partition(
+        self, partition: dict, table_options: dict[str, str]
+    ) -> Iterator[dict]:
+        """Read instances for the studies assigned to this partition."""
         fetch_files = table_options.get("fetch_dicom_files", "false").lower() == "true"
         volume_path = table_options.get("dicom_volume_path", "")
         fetch_metadata = table_options.get("fetch_metadata", "false").lower() == "true"
@@ -348,33 +315,37 @@ class DICOMwebLakeflowConnect(LakeflowConnect):
             raise ValueError("fetch_dicom_files=true requires dicom_volume_path to be set")
 
         records: list[dict] = []
-        for series_raw in self._client.query_series_for_study(study_uid):
-            series = parse_series(series_raw)
-            series_uid = series.get("series_instance_uid")
-            if not series_uid:
-                continue
+        for study_info in partition["studies"]:
+            study_uid = study_info["uid"]
+            study_date = study_info.get("study_date")
 
-            instances_raw = self._client.query_instances_for_series(study_uid, series_uid)
-            sop_to_meta: dict[str, str] = {}
-            if fetch_metadata:
-                sop_to_meta = self._build_metadata_map(study_uid, series_uid)
+            for series_raw in self._client.query_series_for_study(study_uid):
+                series = parse_series(series_raw)
+                series_uid = series.get("series_instance_uid")
+                if not series_uid:
+                    continue
 
-            for inst_raw in instances_raw:
-                record = parse_instance(inst_raw)
-                if not record.get("study_date"):
-                    record["study_date"] = study.get("study_date")
-                if not record.get("study_instance_uid"):
-                    record["study_instance_uid"] = study_uid
-                if not record.get("series_instance_uid"):
-                    record["series_instance_uid"] = series_uid
+                instances_raw = self._client.query_instances_for_series(study_uid, series_uid)
+                sop_to_meta: dict[str, str] = {}
                 if fetch_metadata:
-                    sop_uid = record.get("sop_instance_uid")
-                    record["metadata"] = sop_to_meta.get(sop_uid) if sop_uid else None
-                if fetch_files:
-                    record = self._attach_dicom_file(record, volume_path, wado_mode)
-                record["connection_name"] = self._connection_name
-                records.append(record)
-        return records
+                    sop_to_meta = self._build_metadata_map(study_uid, series_uid)
+
+                for inst_raw in instances_raw:
+                    record = parse_instance(inst_raw)
+                    if not record.get("study_date"):
+                        record["study_date"] = study_date
+                    if not record.get("study_instance_uid"):
+                        record["study_instance_uid"] = study_uid
+                    if not record.get("series_instance_uid"):
+                        record["series_instance_uid"] = series_uid
+                    if fetch_metadata:
+                        sop_uid = record.get("sop_instance_uid")
+                        record["metadata"] = sop_to_meta.get(sop_uid) if sop_uid else None
+                    if fetch_files:
+                        record = self._attach_dicom_file(record, volume_path, wado_mode)
+                    record["connection_name"] = self._connection_name
+                    records.append(record)
+        return iter(records)
 
     # ------------------------------------------------------------------
     # WADO-RS helpers
@@ -680,6 +651,16 @@ def _subtract_days(date_str: str, days: int) -> str:
     try:
         d = date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]))
         d = d - timedelta(days=days)
+        return d.strftime("%Y%m%d")
+    except (ValueError, IndexError):
+        return date_str
+
+
+def _add_days(date_str: str, days: int) -> str:
+    """Add `days` to a YYYYMMDD date string."""
+    try:
+        d = date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]))
+        d = d + timedelta(days=days)
         return d.strftime("%Y%m%d")
     except (ValueError, IndexError):
         return date_str

@@ -95,7 +95,10 @@ class SupportsPartitionedStream(SupportsPartition):
 
     @abstractmethod
     def latest_offset(
-        self, table_name: str, table_options: dict[str, str]
+        self,
+        table_name: str,
+        table_options: dict[str, str],
+        start_offset: dict | None = None,
     ) -> dict:
         """Return the most recent offset available for the table.
 
@@ -104,6 +107,11 @@ class SupportsPartitionedStream(SupportsPartition):
         Args:
             table_name: The name of the table.
             table_options: A dictionary of options for accessing the table.
+            start_offset: The current start offset, or None on the first call.
+                PySpark's ``DataSourceStreamReader.latestOffset()`` does not
+                pass this yet, so the framework always sends None for now.
+                Connectors may use it to implement windowed batching when
+                called directly.
         Returns:
             A dict whose keys and values are primitive types (str, int, bool).
         """

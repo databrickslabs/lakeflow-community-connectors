@@ -49,7 +49,7 @@ class MyLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
 
 ### Additional from SupportsPartitionedStream (streaming partitioning)
 
-- **`latest_offset(table_name, table_options)`** — Return the most recent offset available. Called by Spark every micro-batch. Return a dict with primitive values (str, int, bool).
+- **`latest_offset(table_name, table_options, start_offset=None)`** — Return the most recent offset available. Called by Spark every micro-batch. `start_offset` is the current committed offset (None on first call and when PySpark doesn't pass it yet). Return a dict with primitive values (str, int, bool).
 - **`get_partitions(table_name, table_options, start_offset=None, end_offset=None)`** — Overrides the batch version with optional offset params. When `start_offset` and `end_offset` are both `None`, behave as batch (partition the entire table). When offsets are provided, partition only the given range. Return an empty list when `start_offset == end_offset`.
 - **`is_partitioned(table_name)`** *(optional override)* — Return `False` for tables that should fall back to `simpleStreamReader`. Default is `True`.
 

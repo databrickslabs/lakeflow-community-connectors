@@ -21,6 +21,8 @@ from pyspark.sql.types import (
     DateType,
     TimestampType,
     BinaryType,
+    VariantType,
+    VariantVal,
 )
 
 
@@ -187,6 +189,10 @@ def parse_value(value: Any, field_type: DataType) -> Any:
         return _parse_array(value, field_type)
     if isinstance(field_type, MapType):
         return _parse_map(value, field_type)
+
+    # Handle VariantType
+    if isinstance(field_type, VariantType):
+        return VariantVal.parseJson(value) if isinstance(value, str) else value
 
     # Handle primitive types via type-based lookup
     try:

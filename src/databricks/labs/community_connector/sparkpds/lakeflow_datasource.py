@@ -114,7 +114,9 @@ class LakeflowPartitionedStreamReader(DataSourceStreamReader):
         return {}
 
     def latestOffset(self):
-        return self.lakeflow_connect.latest_offset(self.table_name, self.table_options)
+        # PySpark does not pass the current offset to latestOffset() yet,
+        # so we forward None.  Once PySpark supports it, pass the real value.
+        return self.lakeflow_connect.latest_offset(self.table_name, self.table_options, None)
 
     def partitions(self, start: dict, end: dict):
         partition_descs = self.lakeflow_connect.get_partitions(
