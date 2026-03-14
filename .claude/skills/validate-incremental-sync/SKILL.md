@@ -1,6 +1,7 @@
 ---
 name: validate-incremental-sync
 description: Validate that a connector's CDC/incremental sync implementation correctly tracks offsets and filters records.
+disable-model-invocation: true
 ---
 
 # Validate Incremental Sync Behavior

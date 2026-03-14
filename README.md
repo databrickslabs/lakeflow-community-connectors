@@ -56,7 +56,6 @@ For more control, run each step individually. Replace `{source}` with your conne
 |------|---------|
 | Research write APIs | `/research-write-api-of-source for {source}` |
 | Implement write-back tests | `/write-back-testing for {source}` |
-| Validate incremental sync | `/validate-incremental-sync for {source}` |
 
 ## Deploy and Run
 

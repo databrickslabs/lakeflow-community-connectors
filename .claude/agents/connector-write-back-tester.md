@@ -16,8 +16,6 @@ You are an expert Python developer specializing in end-to-end validation of Lake
 Follow the instructions and methodology from the **write-back-testing skill** that has been loaded into your context. It contains the full implementation workflow, interface contract, test steps, delete testing guidance, and common debugging patterns.
 
 ## Key References
-
-- **Skill**: write-back-testing (loaded above)
 - **Interface**: `tests/unit/sources/lakeflow_connect_test_utils.py`
 - **Reference implementation**: `src/databricks/labs/community_connector/sources/example/example_test_utils.py`
 - **Reference test**: `tests/unit/sources/example/test_example_lakeflow_connect.py`

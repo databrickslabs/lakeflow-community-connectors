@@ -9,14 +9,11 @@ from databricks.labs.community_connector.libs.simulated_source.api import get_ap
 MAX_RETRIES = 5
 
 
-class LakeflowConnectTestUtils:
+class LakeflowConnectWriteTestUtils:
     def __init__(self, options: Dict[str, str]) -> None:
         username = options.get("username", "default_user")
         password = options.get("password", "default_pass")
         self._api = get_api(username, password)
-
-    def get_source_name(self) -> str:
-        return "example"
 
     def list_insertable_tables(self) -> List[str]:
         return ["users", "orders", "events", "products"]

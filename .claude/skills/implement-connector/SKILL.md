@@ -19,7 +19,6 @@ For simple connectors, keeping everything in a single `{source_name}.py` file is
 ## Implementation Requirements
 
 - **Interface:** Implement all methods declared in the `LakeflowConnect` interface. Do not add an extra main function.
-- **Table Validation:** At the beginning of each function, check if the provided `table_name` exists in the list of supported tables. If it does not, raise an explicit exception (e.g., `ValueError`).
 - **Schema:** In `get_table_schema`, prefer `StructType` over `MapType` to enforce explicit typing. Avoid flattening nested fields. Prefer `LongType` over `IntegerType` to avoid overflow. Do not convert the JSON into dictionaries based on the schema before returning in `read_table`; return the raw parsed JSON and let the framework handle type coercion.
 - **Metadata:** If `ingestion_type` returned from `read_table_metadata` is `cdc` or `cdc_with_deletes`, both `primary_keys` and `cursor_field` are required.
 - **Deletes:** If `ingestion_type` is `cdc_with_deletes`, you must implement `read_table_deletes()`. This method should return records with at minimum the primary key fields and cursor field populated.
