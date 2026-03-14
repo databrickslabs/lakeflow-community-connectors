@@ -189,7 +189,7 @@ You need:
 Clone the repository and install the CLI from source:
 
 ```bash
-git clone https://github.com/FiifiB/lakeflow-community-connectors.git
+git clone https://github.com/databrickslabs/lakeflow-community-connectors.git
 cd lakeflow-community-connectors
 cd tools/community_connector
 pip install -e .
@@ -289,7 +289,7 @@ This command clones the connector source code from GitHub into your Databricks w
 ```bash
 community-connector create_pipeline fhir my_fhir_pipeline \
   --connection-name my_fhir_conn \
-  --repo-url https://github.com/FiifiB/lakeflow-community-connectors.git \
+  --repo-url https://github.com/databrickslabs/lakeflow-community-connectors.git \
   --catalog main \
   --target clinical
 ```
@@ -315,7 +315,7 @@ Then pass it to the command:
 ```bash
 community-connector create_pipeline fhir my_fhir_pipeline \
   --pipeline-spec pipeline_spec.json \
-  --repo-url https://github.com/FiifiB/lakeflow-community-connectors.git
+  --repo-url https://github.com/databrickslabs/lakeflow-community-connectors.git
 ```
 
 **Use a specific schema profile** (see [Profile System](#profile-system)):
