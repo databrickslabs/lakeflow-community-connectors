@@ -195,7 +195,8 @@ class DICOMwebLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
     ) -> list[dict]:
         if start_offset is None and end_offset is None:
             # Batch mode: partition the entire table
-            date_range = f"{DEFAULT_START_DATE}-{date.today().strftime('%Y%m%d')}"
+            start_date = table_options.get("starting_date", DEFAULT_START_DATE)
+            date_range = f"{start_date}-{date.today().strftime('%Y%m%d')}"
             if table_name == "instances":
                 return self._partition_instances(date_range, table_options)
             return [{"date_range": date_range}]
@@ -258,7 +259,6 @@ class DICOMwebLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
     ) -> Iterator[dict]:
         date_range = partition["date_range"]
         page_size = int(table_options.get("page_size", DEFAULT_PAGE_SIZE))
-        records: list[dict] = []
         offset = 0
         while True:
             batch = self._client.query_studies(date_range, limit=page_size, offset=offset)
@@ -267,18 +267,16 @@ class DICOMwebLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             for raw in batch:
                 record = parse_study(raw)
                 record["connection_name"] = self._connection_name
-                records.append(record)
+                yield record
             if len(batch) < page_size:
                 break
             offset += page_size
-        return iter(records)
 
     def _read_series_partition(
         self, partition: dict, table_options: dict[str, str]
     ) -> Iterator[dict]:
         date_range = partition["date_range"]
         page_size = int(table_options.get("page_size", DEFAULT_PAGE_SIZE))
-        records: list[dict] = []
         offset = 0
         while True:
             studies = self._client.query_studies(date_range, limit=page_size, offset=offset)
@@ -296,11 +294,10 @@ class DICOMwebLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
                     if not record.get("study_instance_uid"):
                         record["study_instance_uid"] = study_uid
                     record["connection_name"] = self._connection_name
-                    records.append(record)
+                    yield record
             if len(studies) < page_size:
                 break
             offset += page_size
-        return iter(records)
 
     def _read_instances_partition(
         self, partition: dict, table_options: dict[str, str]
@@ -314,7 +311,6 @@ class DICOMwebLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         if fetch_files and not volume_path:
             raise ValueError("fetch_dicom_files=true requires dicom_volume_path to be set")
 
-        records: list[dict] = []
         for study_info in partition["studies"]:
             study_uid = study_info["uid"]
             study_date = study_info.get("study_date")
@@ -344,8 +340,7 @@ class DICOMwebLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
                     if fetch_files:
                         record = self._attach_dicom_file(record, volume_path, wado_mode)
                     record["connection_name"] = self._connection_name
-                    records.append(record)
-        return iter(records)
+                    yield record
 
     # ------------------------------------------------------------------
     # WADO-RS helpers

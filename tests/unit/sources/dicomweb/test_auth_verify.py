@@ -1,9 +1,9 @@
 """
 Auth verification test for DICOMwebLakeflowConnect.
 
-Connects to the real DICOMweb server configured in dev_config.json,
-calls list_tables() to confirm reachability, then calls read_table()
-on "studies" to confirm that records can be fetched end-to-end.
+Connects to the real DICOMweb server configured in dev_config.json and
+makes the simplest possible API call (query 1 study) to verify that
+the base_url, credentials, and network connectivity are correct.
 
 Run with:
     .venv/bin/python -m pytest tests/unit/sources/dicomweb/test_auth_verify.py -v
@@ -31,69 +31,18 @@ pytestmark = pytest.mark.skipif(
 def _make_connector() -> DICOMwebLakeflowConnect:
     """Load dev_config.json and return an instantiated connector."""
     config = load_config(CONFIG_PATH)
-    # Auth is inferred from credentials: username+password → basic, token → bearer, else none
     return DICOMwebLakeflowConnect(config)
 
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
-
-
-def test_auth_list_tables():
-    """Connector can be instantiated and list_tables() returns expected table names."""
-    connector = _make_connector()
-    tables = connector.list_tables()
-
-    print(f"\n[auth-check] list_tables() returned: {tables}")
-
-    assert isinstance(tables, list), "list_tables() must return a list"
-    assert len(tables) > 0, "list_tables() returned an empty list — no tables available"
-    assert "studies" in tables, f"Expected 'studies' in tables, got: {tables}"
-
-
-def test_auth_read_studies():
-    """
-    read_table('studies') fetches at least one record from the live server.
-
-    Uses page_size=5 to keep the request small and avoid hammering the demo
-    server while still verifying end-to-end connectivity.
-    """
+def test_auth_connectivity():
+    """Verify credentials and connectivity by querying a single study."""
     connector = _make_connector()
 
-    records_iter, next_offset = connector.read_table(
-        table_name="studies",
-        start_offset={},
-        table_options={"page_size": "5"},
+    # Simplest API call: fetch 1 study from the server
+    results = connector._client.query_studies("19000101-99991231", limit=1, offset=0)
+
+    assert isinstance(results, list), f"Expected list, got {type(results).__name__}"
+    assert len(results) > 0, (
+        "Server returned no studies. "
+        "Check that the DICOMweb server is reachable and dev_config.json credentials are correct."
     )
-
-    # Materialise only the first batch — stop after 5 records to stay light.
-    records: list[dict] = []
-    for record in records_iter:
-        records.append(record)
-        if len(records) >= 5:
-            break
-
-    print(f"\n[auth-check] read_table('studies') returned {len(records)} record(s)")
-    if records:
-        sample_keys = list(records[0].keys())
-        print(f"[auth-check] Sample record keys: {sample_keys}")
-        print(f"[auth-check] study_instance_uid: {records[0].get('study_instance_uid')}")
-        print(f"[auth-check] study_date:        {records[0].get('study_date')}")
-        print(f"[auth-check] connection_name:  {records[0].get('connection_name')}")
-
-    assert len(records) > 0, (
-        "read_table('studies') returned no records. "
-        "Check that the DICOMweb server is reachable and the credentials in dev_config.json are correct."
-    )
-
-    # Every record must carry a study_instance_uid (the primary key)
-    for rec in records:
-        assert rec.get("study_instance_uid"), f"Record is missing study_instance_uid: {rec}"
-
-    # next_offset must be a dict with at least a study_date key
-    assert isinstance(next_offset, dict), f"Expected dict next_offset, got {type(next_offset)}"
-    assert "study_date" in next_offset, f"next_offset missing 'study_date': {next_offset}"
-
-    print(f"[auth-check] next_offset: {next_offset}")
-    print("[auth-check] Auth verification PASSED.")

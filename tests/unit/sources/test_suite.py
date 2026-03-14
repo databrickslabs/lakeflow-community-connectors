@@ -26,6 +26,10 @@ import pytest
 from pyspark.sql.types import *  # pylint: disable=wildcard-import,unused-wildcard-import
 
 from databricks.labs.community_connector.interface.lakeflow_connect import LakeflowConnect
+from databricks.labs.community_connector.interface.supports_partition import (
+    SupportsPartition,
+    SupportsPartitionedStream,
+)
 from databricks.labs.community_connector.libs.utils import parse_value
 
 VALID_INGESTION_TYPES = {"snapshot", "cdc", "cdc_with_deletes", "append"}
@@ -108,6 +112,22 @@ class LakeflowConnectTests:
 
     def _tables(self) -> List[str]:
         return self.connector.list_tables()
+
+    def _is_partitioned(self, table: str) -> bool:
+        """Check if a table uses partitioned reads instead of read_table."""
+        if isinstance(self.connector, SupportsPartitionedStream):
+            return self.connector.is_partitioned(table)
+        if isinstance(self.connector, SupportsPartition):
+            return True
+        return False
+
+    def _non_partitioned_tables(self) -> List[str]:
+        """Return tables that use read_table (not partitioned reads)."""
+        return [t for t in self._tables() if not self._is_partitioned(t)]
+
+    def _partitioned_tables(self) -> List[str]:
+        """Return tables that use partitioned reads."""
+        return [t for t in self._tables() if self._is_partitioned(t)]
 
     # ------------------------------------------------------------------
     # test_initialization
@@ -304,9 +324,12 @@ class LakeflowConnectTests:
     # ------------------------------------------------------------------
 
     def test_read_table(self):
-        """read_table returns valid (iterator, offset) for every table."""
+        """read_table returns valid (iterator, offset) for non-partitioned tables."""
+        tables = self._non_partitioned_tables()
+        if not tables:
+            pytest.skip("All tables use partitioned reads")
         errors = []
-        for table in self._tables():
+        for table in tables:
             err = self._validate_read(
                 table, self.connector.read_table, "read_table", is_read_table=True
             )
@@ -320,12 +343,12 @@ class LakeflowConnectTests:
     # ------------------------------------------------------------------
 
     def test_read_table_deletes(self):
-        """read_table_deletes works for all cdc_with_deletes tables."""
+        """read_table_deletes works for all non-partitioned cdc_with_deletes tables."""
         if not hasattr(self.connector, "read_table_deletes"):
             pytest.skip("Connector does not implement read_table_deletes")
 
         tables = [
-            t for t in self._tables()
+            t for t in self._non_partitioned_tables()
             if self._ingestion_type(t) == "cdc_with_deletes"
         ]
         if not tables:
@@ -352,8 +375,11 @@ class LakeflowConnectTests:
         The framework calls read_table repeatedly, passing the previous offset
         back. This test makes two calls per table to verify the contract.
         """
+        tables = self._non_partitioned_tables()
+        if not tables:
+            pytest.skip("All tables use partitioned reads")
         errors = []
-        for table in self._tables():
+        for table in tables:
             try:
                 err = self._validate_offset_contract(table)
                 if err:
@@ -623,9 +649,12 @@ class LakeflowConnectTests:
         if not self.test_utils:
             pytest.skip("No test_utils_class configured")
 
-        insertable = self.test_utils.list_insertable_tables()
+        insertable = [
+            t for t in self.test_utils.list_insertable_tables()
+            if not self._is_partitioned(t)
+        ]
         if not insertable:
-            pytest.skip("No insertable tables")
+            pytest.skip("No insertable non-partitioned tables")
 
         errors = []
         for table in insertable:

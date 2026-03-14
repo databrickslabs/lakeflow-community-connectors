@@ -1,15 +1,19 @@
 {
     "studies": {
-        "max_records_per_batch": "3",
-        "page_size": "3"
+        "starting_date": "20090101",
+        "window_days": "2000"
     },
     "series": {
-        "max_records_per_batch": "3",
-        "page_size": "3"
+        "starting_date": "20090101",
+        "window_days": "2000"
     },
     "instances": {
-        "max_records_per_batch": "3",
-        "page_size": "3"
+        "starting_date": "20090101",
+        "window_days": "2000",
+        "num_partitions": "2",
+        "fetch_dicom_files": "true",
+        "fetch_metadata": "true",
+        "wado_mode": "auto"
     },
     "diagnostics": {}
 }
