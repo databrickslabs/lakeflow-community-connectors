@@ -28,7 +28,7 @@ To configure the connector, provide the following parameters when creating your 
 | `externalOptionsAllowList` | string | Yes | Comma-separated list of table-specific option names that are allowed to be passed through to the connector. This connector requires table-specific options, so this parameter must be set. | See full list below |
 
 This connector supports the following table-specific options via `externalOptionsAllowList`:
-`fetch_dicom_files,dicom_volume_path,lookback_days,page_size,max_records_per_batch,fetch_metadata,wado_mode,dicom_batch_size`
+`starting_date,window_days,num_partitions,lookback_days,page_size,fetch_dicom_files,dicom_volume_path,fetch_metadata,wado_mode`
 
 > **Note**: Table-specific options such as `lookback_days`, `page_size`, or `fetch_dicom_files` are **not** connection parameters. They are provided per-table via `table_configuration` in the pipeline specification. These option names must be included in `externalOptionsAllowList` for the connection to allow them at runtime.
 
@@ -62,7 +62,7 @@ A Unity Catalog connection for this connector can be created in two ways via the
 
 1. Follow the **Lakeflow Community Connector** UI flow from the **Add Data** page.
 2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
-3. Set `externalOptionsAllowList` to `fetch_dicom_files,dicom_volume_path,lookback_days,page_size,max_records_per_batch,fetch_metadata,wado_mode,dicom_batch_size` (required for this connector to pass table-specific options).
+3. Set `externalOptionsAllowList` to `starting_date,window_days,num_partitions,lookback_days,page_size,fetch_dicom_files,dicom_volume_path,fetch_metadata,wado_mode` (required for this connector to pass table-specific options).
 
 The connection can also be created using the standard Unity Catalog API, for example:
 
@@ -74,7 +74,7 @@ OPTIONS (
   auth_type                'none',
   connection_name          'my-pacs-prod',
   sourceName               'dicomweb',
-  externalOptionsAllowList 'fetch_dicom_files,dicom_volume_path,lookback_days,page_size,max_records_per_batch,fetch_metadata,wado_mode,dicom_batch_size'
+  externalOptionsAllowList 'starting_date,window_days,num_partitions,lookback_days,page_size,fetch_dicom_files,dicom_volume_path,fetch_metadata,wado_mode'
   -- For Basic auth, add:
   -- auth_type 'basic',
   -- username  'svc-dicom',
@@ -105,7 +105,7 @@ The DICOMweb connector exposes a **static list** of four tables corresponding to
 | `instances` | Instance (SOP) metadata. One row per individual DICOM file. | `cdc` | `sop_instance_uid` | `study_date` |
 | `diagnostics` | Capability probe results. One row per tested DICOMweb endpoint. | `cdc` | `endpoint` | `probe_timestamp` |
 
-**Incremental sync strategy:** The `studies`, `series`, and `instances` tables use a `study_date`-based cursor. On each pipeline run, the connector queries for studies within a date range starting from the last known cursor (minus `lookback_days` for late-arriving records) through today. The `diagnostics` table re-probes all endpoints on every trigger.
+**Incremental sync strategy:** The `studies`, `series`, and `instances` tables use partitioned streaming with a `study_date`-based cursor. The connector divides the date range into micro-batch windows controlled by `window_days`. In each micro-batch, the connector discovers studies in the date window on the driver, then distributes the actual data reads across Spark executors in parallel. The `lookback_days` option adds overlap to each window to catch late-arriving or backdated studies. When `window_days` is not set, each micro-batch covers the full range from the last cursor through today. The `diagnostics` table re-probes all endpoints on every trigger.
 
 **Delete handling:** DICOMweb (QIDO-RS) does not provide a delete-notification mechanism. Deleted studies, series, or instances will remain in the Delta table unless removed by a separate out-of-band process. The connector performs upserts (CDC) only.
 
@@ -157,7 +157,7 @@ The DICOMweb connector exposes a **static list** of four tables corresponding to
 
 **Special columns:**
 
-- `dicom_file_path`: Populated only when the `fetch_dicom_files` table option is set to `true`. Files are written by Spark executors (which have Unity Catalog Volume FUSE access) to `{dicom_volume_path}/{study_instance_uid}/{series_instance_uid}/{sop_instance_uid}.dcm` (or `.jpg` for frame-based retrieval). Instances are batched across executors in groups of `dicom_batch_size` for parallel downloads. If the download fails for a given instance, this field is set to `NULL` and the pipeline continues without interruption.
+- `dicom_file_path`: Populated only when the `fetch_dicom_files` table option is set to `true`. Files are written by Spark executors (which have Unity Catalog Volume FUSE access) to `{dicom_volume_path}/{study_instance_uid}/{series_instance_uid}/{sop_instance_uid}.dcm` (or `.jpg` for frame-based retrieval). Studies are distributed across `num_partitions` executors for parallel downloads. If the download fails for a given instance, this field is set to `NULL` and the pipeline continues without interruption.
 
 - `metadata`: Populated only when the `fetch_metadata` table option is set to `true`. Contains the complete DICOM JSON tag set for the instance as a VARIANT type. You can query individual DICOM tags using Databricks' semi-structured data access syntax:
   ```sql
@@ -214,14 +214,15 @@ The following options control how the connector reads data from the DICOMweb ser
 
 | Option | Applies To | Required | Default | Description |
 |--------|-----------|----------|---------|-------------|
+| `starting_date` | studies, series, instances | No | `19000101` | Earliest study date to scan, in `YYYYMMDD` format. On the first pipeline run this determines where the scan begins. For large PACS systems, set this to a recent date (e.g., `20230101`) to avoid scanning the full archive on the initial load. |
+| `window_days` | studies, series, instances | No | `0` (disabled) | Size of each micro-batch date window in days. When set to a positive value, the connector advances through the date range in fixed-size windows (e.g., `30` processes 30 days per micro-batch). This is useful for controlling the amount of data processed per trigger and ensuring timely convergence. When `0` or unset, each micro-batch covers the full range from the last cursor through today. |
+| `num_partitions` | instances | No | `8` | Number of Spark executor partitions used for parallel instance reads. Studies discovered in the date window are bin-packed across this many partitions by estimated instance count, balancing work across executors. Increase for large clusters; decrease for small clusters or when individual studies are very large. |
 | `page_size` | studies, series, instances | No | `100` | Number of records per QIDO-RS request. Increase for large PACS systems (e.g., `500` or `1000` if the server supports it). |
-| `max_records_per_batch` | studies, series, instances | No | `500` | Maximum number of records to return per micro-batch. When this limit is reached mid-scan, the connector saves its position and resumes from that point on the next micro-batch. |
-| `lookback_days` | studies, series, instances | No | `1` | Number of days to subtract from the cursor date on each run. This overlap window catches late-arriving or backdated studies that might otherwise be missed. |
+| `lookback_days` | studies, series, instances | No | `1` | Number of days to subtract from the start of each micro-batch date window. This overlap catches late-arriving or backdated studies that might otherwise be missed. |
 | `fetch_dicom_files` | instances | No | `false` | When set to `true`, downloads each DICOM file (or image frame) via WADO-RS and writes it to the path specified by `dicom_volume_path`. Downloads are distributed across Spark executors for parallelism. |
 | `dicom_volume_path` | instances | Conditional | -- | Unity Catalog Volume path where downloaded DICOM files are stored. Required when `fetch_dicom_files` is `true`. Example: `/Volumes/catalog/schema/dicom_files`. |
 | `wado_mode` | instances | No | `auto` | Controls how DICOM files are retrieved. `auto`: tries full `.dcm` retrieval first, falls back to frame retrieval on HTTP 404/406/415. `full`: always retrieves the complete `.dcm` file. `frames`: always retrieves the first image frame as `.jpg`. Use `frames` for servers that only support frame-level retrieval (e.g., Static DICOMweb / S3 Static WADO deployments). |
-| `fetch_metadata` | instances | No | `false` | When set to `true`, fetches the full DICOM JSON metadata for each instance via the WADO-RS metadata endpoint and stores it in the `metadata` column as VARIANT. Metadata requests are distributed across Spark executors (one request per unique series per batch). |
-| `dicom_batch_size` | instances | No | `50` | Number of instances per executor partition when `fetch_dicom_files` or `fetch_metadata` is enabled. Increasing this reduces scheduling overhead but makes each task larger; decreasing it increases parallelism. Tune based on cluster size and average instance size. |
+| `fetch_metadata` | instances | No | `false` | When set to `true`, fetches the full DICOM JSON metadata for each instance via the WADO-RS metadata endpoint and stores it in the `metadata` column as VARIANT. Metadata is fetched per series and distributed across Spark executors. |
 
 ## Data Type Mapping
 
@@ -269,6 +270,8 @@ Example configuration ingesting all four tables:
           "destination_catalog": "main",
           "destination_schema": "dicom_bronze",
           "table_configuration": {
+            "starting_date": "20230101",
+            "window_days": "30",
             "lookback_days": "1",
             "page_size": "200"
           }
@@ -280,6 +283,8 @@ Example configuration ingesting all four tables:
           "destination_catalog": "main",
           "destination_schema": "dicom_bronze",
           "table_configuration": {
+            "starting_date": "20230101",
+            "window_days": "30",
             "lookback_days": "1",
             "page_size": "200"
           }
@@ -291,8 +296,11 @@ Example configuration ingesting all four tables:
           "destination_catalog": "main",
           "destination_schema": "dicom_bronze",
           "table_configuration": {
+            "starting_date": "20230101",
+            "window_days": "30",
             "lookback_days": "1",
             "page_size": "200",
+            "num_partitions": "8",
             "fetch_metadata": "true",
             "fetch_dicom_files": "true",
             "dicom_volume_path": "/Volumes/main/dicom_bronze/dicom_files",
@@ -314,7 +322,7 @@ Example configuration ingesting all four tables:
 
 **Configuration notes:**
 - `source_table` must be one of: `studies`, `series`, `instances`, `diagnostics`.
-- Options such as `lookback_days`, `page_size`, `max_records_per_batch`, `fetch_dicom_files`, `dicom_volume_path`, `fetch_metadata`, `wado_mode`, and `dicom_batch_size` go under `table_configuration` and must be listed in the connection's `externalOptionsAllowList`.
+- Options such as `starting_date`, `window_days`, `num_partitions`, `lookback_days`, `page_size`, `fetch_dicom_files`, `dicom_volume_path`, `fetch_metadata`, and `wado_mode` go under `table_configuration` and must be listed in the connection's `externalOptionsAllowList`.
 - All table option values are passed as strings (e.g., `"200"`, `"true"`).
 - The `diagnostics` table requires no special table configuration options.
 
@@ -323,11 +331,12 @@ Example configuration ingesting all four tables:
 #### Best Practices
 
 - **Start small**: Begin by syncing only `studies` to verify connectivity and data volume before enabling `series` and `instances`.
-- **Set a realistic initial date range**: On the first run, the connector defaults to scanning all history (from `19000101`). For large PACS systems with millions of instances, this can be very slow. Limit the initial scan by setting an appropriate `lookback_days` or running with a recent date range.
+- **Set `starting_date` for the initial load**: On the first run, the connector defaults to scanning all history (from `19000101`). For large PACS systems with millions of instances, this can be very slow. Set `starting_date` to a recent date (e.g., `20230101`) to limit the initial scan window.
+- **Use `window_days` to control micro-batch size**: Setting `window_days` (e.g., `30`) divides the date range into fixed-size windows processed one per trigger. This keeps each micro-batch manageable and ensures the pipeline converges in a predictable number of iterations. Without `window_days`, each micro-batch processes the entire range from the last cursor to today, which can be very large on the first run.
+- **Tune `num_partitions` for instance workloads**: The default of `8` works well for most clusters. Increase for larger clusters (e.g., `16` or `32`) to improve parallelism. Decrease for small clusters or when individual studies contain very large numbers of instances. The connector bin-packs studies across partitions by estimated instance count.
 - **Use incremental sync**: After the initial load, the connector uses `study_date`-based cursors to fetch only new or recently modified records on each run. The `lookback_days` setting provides overlap to catch late-arriving or backdated studies.
 - **Tune `page_size`**: The default of `100` works well for most servers. For large PACS systems, increasing to `500` or `1000` can reduce the total number of API calls. Reduce `page_size` if the server times out on large result sets.
-- **Enable file retrieval selectively**: The `fetch_dicom_files` option issues one additional WADO-RS request per instance and should be enabled only when raw DICOM files are needed (e.g., for AI/ML image analysis pipelines). Each `.dcm` file can range from a few KB (text reports) to several hundred MB (CT/MR volumes). Downloads are distributed across Spark executors in parallel batches of `dicom_batch_size` instances.
-- **Tune `dicom_batch_size` for file and metadata workloads**: When `fetch_dicom_files` or `fetch_metadata` is enabled, instance batches are processed in parallel across executors. The default of `50` works well for most cluster sizes. Increase it (e.g., `200`) on large clusters to reduce scheduling overhead; decrease it (e.g., `10`) if individual DICOM files are very large (CT/MR volumes) to avoid executor memory pressure.
+- **Enable file retrieval selectively**: The `fetch_dicom_files` option issues one additional WADO-RS request per instance and should be enabled only when raw DICOM files are needed (e.g., for AI/ML image analysis pipelines). Each `.dcm` file can range from a few KB (text reports) to several hundred MB (CT/MR volumes). Downloads are distributed across `num_partitions` Spark executors in parallel.
 - **Monitor Volume storage**: When using `fetch_dicom_files`, plan Unity Catalog Volume capacity based on the expected data volume. Files are organized by `{study_instance_uid}/{series_instance_uid}/{sop_instance_uid}.dcm`.
 - **Schedule appropriately**: For near-real-time analytics, run every 15-30 minutes. For batch loads, a daily schedule is sufficient. Be aware that cloud-hosted DICOMweb endpoints (Azure, GCP) issue tokens that typically expire after 1 hour -- for long-running initial loads, token refresh must be handled externally.
 
@@ -356,7 +365,8 @@ Example configuration ingesting all four tables:
   - Confirm the `dicom_volume_path` points to an existing Unity Catalog Volume (`/Volumes/catalog/schema/volume_name`).
 
 - **Slow ingestion on first run**:
-  - Set a recent start date or increase `lookback_days` from a recent cursor to limit the scan window.
+  - Set `starting_date` to a recent date (e.g., `20230101`) to limit the initial scan window.
+  - Set `window_days` (e.g., `30`) to process the date range in manageable micro-batch windows rather than all at once.
   - Reduce `page_size` if the PACS is timing out on large result sets.
   - Ingest `studies` and `series` before enabling `instances`, which is typically the largest table.
 
