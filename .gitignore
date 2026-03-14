@@ -44,5 +44,8 @@ Thumbs.db
 # Claude
 .claude/agent-memory-local/
 
+# Git worktrees
+.worktrees/
+
 # Dev config
 tests/unit/sources/*/configs/dev_config.json
