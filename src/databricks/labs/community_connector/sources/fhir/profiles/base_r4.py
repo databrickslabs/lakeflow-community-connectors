@@ -426,3 +426,73 @@ def _encounter(r: dict) -> dict:
         "service_provider": extract_reference(r.get("serviceProvider")),
         "part_of": extract_reference(r.get("partOf")),
     }
+
+
+# ─── Procedure ────────────────────────────────────────────────────────────────
+# FHIR R4: https://hl7.org/fhir/R4/procedure.html
+# UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-Procedure v2.5.0
+# MS fields: status(R), code, subject(R), performed[x]
+# performed[x]: performedDateTime | performedPeriod
+_PROCEDURE_PERFORMER = StructType([
+    _f("function", CODEABLE_CONCEPT),
+    _f("actor", REFERENCE),
+    _f("on_behalf_of", REFERENCE),
+])
+
+_PROCEDURE_SCHEMA = _s(
+    _f("identifier", ArrayType(IDENTIFIER)),
+    _f("status", StringType()),
+    _f("status_reason", CODEABLE_CONCEPT),
+    _f("category", CODEABLE_CONCEPT),
+    _f("code", CODEABLE_CONCEPT),
+    _f("subject", REFERENCE),
+    _f("encounter", REFERENCE),
+    _f("performed_datetime", TimestampType()),
+    _f("performed_period", PERIOD),
+    _f("recorder", REFERENCE),
+    _f("asserter", REFERENCE),
+    _f("performer", ArrayType(_PROCEDURE_PERFORMER)),
+    _f("location", REFERENCE),
+    _f("reason_code", ArrayType(CODEABLE_CONCEPT)),
+    _f("reason_reference", ArrayType(REFERENCE)),
+    _f("body_site", ArrayType(CODEABLE_CONCEPT)),
+    _f("outcome", CODEABLE_CONCEPT),
+    _f("report", ArrayType(REFERENCE)),
+    _f("complication", ArrayType(CODEABLE_CONCEPT)),
+    _f("follow_up", ArrayType(CODEABLE_CONCEPT)),
+    _f("note", ArrayType(ANNOTATION)),
+)
+
+
+@register("Procedure", "base_r4", _PROCEDURE_SCHEMA)
+def _procedure(r: dict) -> dict:
+    return {
+        "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
+        "status": r.get("status"),
+        "status_reason": extract_codeable_concept(r.get("statusReason")),
+        "category": extract_codeable_concept(r.get("category")),
+        "code": extract_codeable_concept(r.get("code")),
+        "subject": extract_reference(r.get("subject")),
+        "encounter": extract_reference(r.get("encounter")),
+        "performed_datetime": r.get("performedDateTime"),
+        "performed_period": extract_period(r.get("performedPeriod")),
+        "recorder": extract_reference(r.get("recorder")),
+        "asserter": extract_reference(r.get("asserter")),
+        "performer": [
+            {
+                "function": extract_codeable_concept(p.get("function")),
+                "actor": extract_reference(p.get("actor")),
+                "on_behalf_of": extract_reference(p.get("onBehalfOf")),
+            }
+            for p in (r.get("performer") or [])
+        ],
+        "location": extract_reference(r.get("location")),
+        "reason_code": [extract_codeable_concept(rc) for rc in (r.get("reasonCode") or [])],
+        "reason_reference": [extract_reference(rr) for rr in (r.get("reasonReference") or [])],
+        "body_site": [extract_codeable_concept(b) for b in (r.get("bodySite") or [])],
+        "outcome": extract_codeable_concept(r.get("outcome")),
+        "report": [extract_reference(rp) for rp in (r.get("report") or [])],
+        "complication": [extract_codeable_concept(c) for c in (r.get("complication") or [])],
+        "follow_up": [extract_codeable_concept(f) for f in (r.get("followUp") or [])],
+        "note": [extract_annotation(n) for n in (r.get("note") or [])],
+    }
