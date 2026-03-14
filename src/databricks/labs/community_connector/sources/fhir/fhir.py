@@ -60,7 +60,8 @@ class FhirLakeflowConnect(LakeflowConnect):
 
     def get_table_schema(self, table_name: str, table_options: dict[str, str]) -> StructType:
         self._validate_table(table_name)
-        return get_schema(table_name)
+        profile = table_options.get("profile", "uk_core")
+        return get_schema(table_name, profile=profile)
 
     def read_table_metadata(self, table_name: str, table_options: dict[str, str]) -> dict:
         self._validate_table(table_name)
@@ -87,6 +88,7 @@ class FhirLakeflowConnect(LakeflowConnect):
         page_size = int(table_options.get("page_size", str(DEFAULT_PAGE_SIZE)))
         max_records = int(table_options.get("max_records_per_batch", str(DEFAULT_MAX_RECORDS)))
         page_delay = float(table_options.get("page_delay", str(PAGE_DELAY)))
+        profile = table_options.get("profile", "uk_core")
 
         params: dict[str, str] = {"_count": str(page_size)}
         if since:
@@ -94,7 +96,7 @@ class FhirLakeflowConnect(LakeflowConnect):
 
         records = []
         for resource in iter_bundle_pages(self._client, table_name, params, max_records=max_records, page_delay=page_delay):
-            records.append(extract_record(resource, table_name))
+            records.append(extract_record(resource, table_name, profile=profile))
 
         if not records:
             return iter([]), start_offset or {}

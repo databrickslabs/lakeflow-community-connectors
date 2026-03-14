@@ -22,6 +22,7 @@ import requests
 from databricks.labs.community_connector.sources.fhir.fhir_constants import (
     HTTP_TIMEOUT, INITIAL_BACKOFF, MAX_RETRIES, PAGE_DELAY, RETRIABLE_STATUS_CODES, TOKEN_TIMEOUT,
 )
+from databricks.labs.community_connector.sources.fhir.fhir_profile_registry import extract
 
 
 class SmartAuthClient:
@@ -254,11 +255,12 @@ def _safe(d, *keys, default=None):
     return d
 
 
-def extract_record(resource: dict, resource_type: str) -> dict:
+def extract_record(resource: dict, resource_type: str, profile: str = "uk_core") -> dict:
     """Map a raw FHIR resource to hybrid schema format (typed fields + raw_json).
 
-    Returns raw field values -- do NOT pre-convert types; the framework handles coercion.
-    Absent struct fields return None, not {}.
+    Delegates to the profile registry for resource-specific extraction.
+    Returns raw field values — do NOT pre-convert types; framework handles coercion.
+    profile defaults to 'uk_core' (falls back to base_r4 for resources without UK Core override).
     """
     meta = resource.get("meta") or {}
     record = {
@@ -267,185 +269,5 @@ def extract_record(resource: dict, resource_type: str) -> dict:
         "lastUpdated": meta.get("lastUpdated"),
         "raw_json": json.dumps(resource),
     }
-    extractor = _EXTRACTORS.get(resource_type)
-    if extractor:
-        record.update(extractor(resource))
+    record.update(extract(resource, resource_type, profile))
     return record
-
-
-# ---------------------------------------------------------------------------
-# Resource-specific field extractors
-# ---------------------------------------------------------------------------
-
-def _patient(r):
-    name = ((r.get("name") or [{}])[0]) or {}
-    return {
-        "gender": r.get("gender"),
-        "birthDate": r.get("birthDate"),
-        "active": r.get("active"),
-        "name_text": name.get("text"),
-        "name_family": name.get("family"),
-    }
-
-
-def _observation(r):
-    code = r.get("code") or {}
-    codings = code.get("coding") or [{}]
-    coding = (codings[0] if codings else None) or {}
-    vq = r.get("valueQuantity") or {}
-    return {
-        "status": r.get("status"),
-        "code_text": code.get("text"),
-        "code_system": coding.get("system"),
-        "code_code": coding.get("code"),
-        "subject_reference": _safe(r, "subject", "reference"),
-        "effective_datetime": r.get("effectiveDateTime"),
-        "value_quantity_value": vq.get("value"),
-        "value_quantity_unit": vq.get("unit"),
-        "value_string": r.get("valueString"),
-        "issued": r.get("issued"),
-    }
-
-
-def _condition(r):
-    cs = _safe(r, "clinicalStatus", "coding") or [{}]
-    vs = _safe(r, "verificationStatus", "coding") or [{}]
-    return {
-        "clinical_status": (cs[0] or {}).get("code"),
-        "verification_status": (vs[0] or {}).get("code"),
-        "code_text": _safe(r, "code", "text"),
-        "subject_reference": _safe(r, "subject", "reference"),
-        "onset_datetime": r.get("onsetDateTime"),
-        "recorded_date": r.get("recordedDate"),
-    }
-
-
-def _encounter(r):
-    class_ = r.get("class") or {}
-    period = r.get("period") or {}
-    return {
-        "status": r.get("status"),
-        "class_code": class_.get("code"),
-        "subject_reference": _safe(r, "subject", "reference"),
-        "period_start": period.get("start"),
-        "period_end": period.get("end"),
-    }
-
-
-def _procedure(r):
-    return {
-        "status": r.get("status"),
-        "code_text": _safe(r, "code", "text"),
-        "subject_reference": _safe(r, "subject", "reference"),
-        "performed_datetime": r.get("performedDateTime"),
-    }
-
-
-def _medication_request(r):
-    return {
-        "status": r.get("status"),
-        "intent": r.get("intent"),
-        "medication_text": _safe(r, "medicationCodeableConcept", "text"),
-        "subject_reference": _safe(r, "subject", "reference"),
-        "authored_on": r.get("authoredOn"),
-    }
-
-
-def _diagnostic_report(r):
-    return {
-        "status": r.get("status"),
-        "code_text": _safe(r, "code", "text"),
-        "subject_reference": _safe(r, "subject", "reference"),
-        "effective_datetime": r.get("effectiveDateTime"),
-        "issued": r.get("issued"),
-    }
-
-
-def _allergy(r):
-    cs = _safe(r, "clinicalStatus", "coding") or [{}]
-    vs = _safe(r, "verificationStatus", "coding") or [{}]
-    return {
-        "clinical_status": (cs[0] or {}).get("code"),
-        "verification_status": (vs[0] or {}).get("code"),
-        "code_text": _safe(r, "code", "text"),
-        "patient_reference": _safe(r, "patient", "reference"),
-        "recorded_date": r.get("recordedDate"),
-    }
-
-
-def _immunization(r):
-    return {
-        "status": r.get("status"),
-        "vaccine_code_text": _safe(r, "vaccineCode", "text"),
-        "patient_reference": _safe(r, "patient", "reference"),
-        "occurrence_datetime": r.get("occurrenceDateTime"),
-    }
-
-
-def _coverage(r):
-    payors = r.get("payor") or [None]
-    period = r.get("period") or {}
-    return {
-        "status": r.get("status"),
-        "beneficiary_reference": _safe(r, "beneficiary", "reference"),
-        "payor_reference": _safe(payors[0] or {}, "reference"),
-        "period_start": period.get("start"),
-        "period_end": period.get("end"),
-    }
-
-
-def _care_plan(r):
-    period = r.get("period") or {}
-    return {
-        "status": r.get("status"),
-        "intent": r.get("intent"),
-        "subject_reference": _safe(r, "subject", "reference"),
-        "period_start": period.get("start"),
-        "period_end": period.get("end"),
-    }
-
-
-def _goal(r):
-    return {
-        "lifecycle_status": r.get("lifecycleStatus"),
-        "description_text": _safe(r, "description", "text"),
-        "subject_reference": _safe(r, "subject", "reference"),
-        "start_date": r.get("startDate"),
-    }
-
-
-def _device(r):
-    names = r.get("deviceName") or [{}]
-    return {
-        "status": r.get("status"),
-        "device_name": (names[0] or {}).get("name"),
-        "type_text": _safe(r, "type", "text"),
-        "patient_reference": _safe(r, "patient", "reference"),
-    }
-
-
-def _document_reference(r):
-    return {
-        "status": r.get("status"),
-        "type_text": _safe(r, "type", "text"),
-        "subject_reference": _safe(r, "subject", "reference"),
-        "date": r.get("date"),
-    }
-
-
-_EXTRACTORS = {
-    "Patient": _patient,
-    "Observation": _observation,
-    "Condition": _condition,
-    "Encounter": _encounter,
-    "Procedure": _procedure,
-    "MedicationRequest": _medication_request,
-    "DiagnosticReport": _diagnostic_report,
-    "AllergyIntolerance": _allergy,
-    "Immunization": _immunization,
-    "Coverage": _coverage,
-    "CarePlan": _care_plan,
-    "Goal": _goal,
-    "Device": _device,
-    "DocumentReference": _document_reference,
-}

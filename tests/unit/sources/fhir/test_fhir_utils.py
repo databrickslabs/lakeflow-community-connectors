@@ -52,14 +52,16 @@ def test_extract_record_patient_typed_fields():
         "resourceType": "Patient", "id": "p3",
         "meta": {"lastUpdated": "2024-01-01T00:00:00+00:00"},
         "gender": "female", "birthDate": "1985-03-12", "active": True,
-        "name": [{"text": "Jane Doe", "family": "Doe"}],
+        "name": [{"text": "Jane Doe", "family": "Doe", "given": ["Jane"]}],
     }
     record = extract_record(resource, "Patient")
     assert record["gender"] == "female"
     assert record["birthDate"] == "1985-03-12"
     assert record["active"] is True
-    assert record["name_text"] == "Jane Doe"
-    assert record["name_family"] == "Doe"
+    # name is now an array of HumanName structs
+    assert record["name"][0]["family"] == "Doe"
+    assert record["name"][0]["text"] == "Jane Doe"
+    assert record["name"][0]["given"] == ["Jane"]
 
 def test_extract_record_observation_typed_fields():
     resource = {
@@ -72,10 +74,14 @@ def test_extract_record_observation_typed_fields():
     }
     record = extract_record(resource, "Observation")
     assert record["status"] == "final"
-    assert record["code_text"] == "Body weight"
-    assert record["subject_reference"] == "Patient/p1"
-    assert record["value_quantity_value"] == 70.5
-    assert record["value_quantity_unit"] == "kg"
+    # code is now a CodeableConcept struct
+    assert record["code"]["text"] == "Body weight"
+    assert record["code"]["coding"][0]["code"] == "29463-7"
+    # subject is now a Reference struct
+    assert record["subject"]["reference"] == "Patient/p1"
+    # value_quantity is now a Quantity struct
+    assert record["value_quantity"]["value"] == 70.5
+    assert record["value_quantity"]["unit"] == "kg"
 
 def test_extract_record_unknown_resource_returns_common_only():
     resource = {"resourceType": "UnknownXYZ", "id": "u1", "meta": {"lastUpdated": "2024-01-01T00:00:00Z"}}
