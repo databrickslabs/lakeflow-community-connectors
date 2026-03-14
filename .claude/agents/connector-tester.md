@@ -20,4 +20,3 @@ Follow the instructions and methodology from the **test-and-fix-connector skill*
 - **Skill**: test-and-fix-connector (loaded above)
 - **Base test suite**: `tests/unit/sources/test_suite.py`
 - **Example test**: `tests/unit/sources/example/test_example_lakeflow_connect.py`
-- **More references**: `src/databricks/labs/community_connector/sources/{other_sources}`

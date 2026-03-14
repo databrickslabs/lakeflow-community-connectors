@@ -14,6 +14,9 @@ args:
   - name: pipeline_name
     description: The name of the existing pipeline to update. Only used when mode is 'update'. If omitted in update mode, the user will be prompted.
     required: false
+  - name: use_local_source
+    description: "Defaults to false. When true, uploads local source files to overwrite the source directory in the cloned workspace repo. Use when the connector has not been published to the remote repo yet. The CLI still clones the repo (for framework/interface code), then uploads local *.py, README.md, and connector_spec.yaml on top. Do not prompt the user for this — only set to true if the user explicitly requests it."
+    required: false
 ---
 
 # Deploy Connector
@@ -35,11 +38,18 @@ If **update**, also collect the pipeline name (unless `{{pipeline_name}}` was pr
 
 ---
 
-## Step 0.5 — Check if connector is published (Create mode only)
+## Step 0.5 — Prepare local source (if requested)
 
-If creating a new pipeline, use `AskUserQuestion` to ask if the connector has been published to the `databrickslabs` repo.
-- **Yes**: Proceed to the next step.
-- **No**: Ask the user for their custom Git repository URL and branch name. Then, update `tools/community_connector/src/databricks/labs/community_connector_cli/default_config.yaml` to use their provided `url` and `branch` under the `repo:` section. (Reinstall the CLI later in Step 4 to ensure changes take effect).
+If `{{use_local_source}}` is true:
+
+1. Check whether the generated file exists: `src/databricks/labs/community_connector/sources/{{source_name}}/_generated_{{source_name}}_python_source.py`
+2. If it does **not** exist, run the merge script to generate it:
+   ```bash
+   python tools/scripts/merge_python_source.py {{source_name}}
+   ```
+3. You will pass `--use-local-source` to the CLI in Step 5. The CLI still clones the Git repo (for framework/interface code), then uploads the local source files on top — overwriting the source directory in the workspace repo. This is used when the connector has not been published to the remote repo yet.
+
+If `{{use_local_source}}` is not true, skip this step — the default deployment assumes the connector source is already in the remote Git repo.
 
 ---
 
@@ -140,13 +150,23 @@ Use `create_pipeline` or `update_pipeline` based on the mode from Step 0.
 
 1. Write the spec to `tests/unit/sources/{{source_name}}/configs/{PIPELINE_NAME}_spec.json`.
 
-2. Run:
+2. Run the appropriate command:
+
+   **Create mode:**
    ```bash
-   community-connector <create_pipeline|update_pipeline> {{source_name}} <PIPELINE_NAME> \
+   community-connector create_pipeline {{source_name}} <PIPELINE_NAME> \
      -ps tests/unit/sources/{{source_name}}/configs/{PIPELINE_NAME}_spec.json \
-     [-c <CATALOG>] [-t <TARGET>]
+     [-c <CATALOG>] [-t <TARGET>] [--use-local-source]
    ```
-   Include `-c`/`-t` only if catalog/schema were provided in Step 2b.
+
+   **Update mode** (no source_name needed):
+   ```bash
+   community-connector update_pipeline <PIPELINE_NAME> \
+     -ps tests/unit/sources/{{source_name}}/configs/{PIPELINE_NAME}_spec.json
+   ```
+
+   - Include `-c`/`-t` only if catalog/schema were provided in Step 2b (create mode only).
+   - Include `--use-local-source` if `{{use_local_source}}` is true (create mode only, from Step 0.5).
 
 3. After success, delete the spec file.
 

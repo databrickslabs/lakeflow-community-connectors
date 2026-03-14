@@ -11,7 +11,7 @@ import requests
 
 # Batch API settings
 BATCH_SIZE = 50  # Gmail batch API supports up to 100, using 50 for safety
-MAX_WORKERS = 5  # Concurrent workers for parallel fetching
+MAX_WORKERS = 3  # Concurrent workers for parallel fetching
 
 
 class GmailApiClient:

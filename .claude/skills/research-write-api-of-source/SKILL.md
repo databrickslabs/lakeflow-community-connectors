@@ -1,48 +1,38 @@
 ---
-name: research-write-api-of-source 
+name: research-write-api-of-source
 description: Research and document write/create APIs of a source system to enable write-back testing functionality.
 disable-model-invocation: true
 ---
 
-# Research Write APIs of Source System 
+# Research Write APIs of Source System
 
 ## Goal
-Research and document the write/create APIs for the source system to enable write-back testing. This step is **completely separate** from the core connector implementation and should only be done if comprehensive end-to-end validation is needed.
 
-## When to Do This Step
-
-**Skip this step if:**
-- ❌ Source API is read-only (no create/insert endpoints)
-- ❌ Only production environment available (too risky)
-- ❌ Write permissions unavailable or expensive to obtain
-- ❌ You want to ship the connector quickly (read-only validation is sufficient)
-- ❌ Write operations have side effects (notifications, triggers, etc.)
-
-**Do this step if:**
-- ✅ Source API supports write operations
-- ✅ You have write permissions and test/sandbox environment
-- ✅ You want end-to-end validation of write → read → incremental sync cycle
-- ✅ You have time for comprehensive testing
+Research and document write/create API endpoints for each table supported by the connector. These write APIs are used **only** for generating test data — they are not part of the connector's read functionality.
 
 ## Input
-- The `{source_name}_api_doc.md` created by the `research-source-api` skill (for reference)
-- Access to source API documentation
+
+- The existing `{source_name}_api_doc.md` (for auth details, base URLs, and the list of supported tables)
+- The connector implementation under `src/databricks/labs/community_connector/sources/{source_name}/` (for table names and field mappings)
 
 ## Output
-Add a new section `## Write-Back APIs (For Testing Only)` to your existing `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md` file.
 
-## Documentation Template for Write-Back APIs Section
+Append a `## Write-Back APIs (For Testing Only)` section to the existing `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md`.
+
+## Research Process
+
+1. **Identify tables** — Read the API doc and connector implementation to get the full list of supported tables.
+2. **Search official docs** — For each table, search for POST/PUT/create endpoints in the official API documentation.
+3. **Cross-reference** — Verify payload structure and required fields against at least two sources (official docs, Airbyte test utilities, Singer taps, SDK source code, etc.).
+4. **Document** — For each table with a write endpoint, fill in the template below. Skip tables that are read-only.
+5. **Log sources** — Record every URL consulted in the Research Log.
+
+## Output Template
 
 ````markdown
 ## Write-Back APIs (For Testing Only)
 
-**⚠️ WARNING: These APIs are documented solely for test data generation. They are NOT part of the connector's read functionality.**
-
-### Purpose
-These write endpoints enable automated testing by:
-1. Creating test data in the source system
-2. Validating that incremental sync picks up newly created records
-3. Verifying field mappings and schema correctness end-to-end
+**These APIs are documented solely for test data generation. They are NOT part of the connector's read functionality.**
 
 ### Write Endpoints
 
@@ -58,7 +48,7 @@ These write endpoints enable automated testing by:
   "field2": "value2"
 }
 ```
-- **Response**: Document what the API returns (ID, created timestamp, etc.)
+- **Response**: What the API returns (ID, created timestamp, etc.)
 
 ### Field Name Transformations
 
@@ -73,11 +63,9 @@ If no transformations exist, state: "Field names are consistent between write an
 
 ### Write-Specific Constraints
 
-- **Rate Limits**: Document write-specific rate limits (if different from read)
-- **Eventual Consistency**: Note any delays between write and read visibility
-- **Required Delays**: Recommend wait time after writes (e.g., "Wait 5-10 seconds after write before reading")
-- **Unique Constraints**: Document fields that must be unique (to guide test data generation)
-- **Test Environment**: Confirm sandbox/test environment availability and how to access it
+- **Rate Limits**: Write-specific rate limits (if different from read)
+- **Eventual Consistency**: Delays between write and read visibility
+- **Unique Constraints**: Fields that must be unique (to guide test data generation)
 
 ### Research Log for Write APIs
 
@@ -85,24 +73,13 @@ If no transformations exist, state: "Field names are consistent between write an
 |-------------|-----|----------------|------------|-------------------|
 | Official Docs | ... | YYYY-MM-DD | High | Write endpoints and payload structure |
 | Reference Impl | ... | YYYY-MM-DD | Med | Field transformations |
-```
-
-## Research Requirements
-
-Follow the same rigorous research process as the `research-source-api` skill:
-1. **Check official API documentation** for write/create endpoints
-2. **Find reference implementations** (Airbyte test utilities, Singer tap tests, etc.)
-3. **Cross-reference at least two sources** for payload structure and required fields
-4. **Test if possible**: If you have sandbox access, verify one write operation works
-5. **Document everything** in Research Log with full URLs
-
-## Validation Checklist
-
-- [ ] At least one write endpoint documented with complete payload structure
-- [ ] All required fields for write operations identified
-- [ ] Field name transformations (if any) documented in mapping table
-- [ ] Rate limits and constraints noted
-- [ ] Eventual consistency delays documented (if applicable)
-- [ ] Research log completed with sources
 ````
 
+## Acceptance Checklist
+
+- [ ] Every supported table checked for write endpoint availability
+- [ ] Each writable table has a complete endpoint doc with example payload
+- [ ] All required fields for write operations identified
+- [ ] Field name transformations documented (or explicitly noted as consistent)
+- [ ] Write-specific constraints (rate limits, consistency delays) noted
+- [ ] Research log completed with full URLs

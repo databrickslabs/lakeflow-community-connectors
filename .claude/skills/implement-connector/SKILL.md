@@ -10,14 +10,11 @@ disable-model-invocation: true
 Implement the Python connector for **{{source_name}}** that conforms exactly to the interface defined in  
 [lakeflow_connect.py](../src/databricks/labs/community_connector/interface/lakeflow_connect.py). The implementation should be based on the source API documentation in `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md` produced by the `research-source-api` skill.
 
+**CRITICAL REQUIREMENT:** Refer to `src/databricks/labs/community_connector/sources/example/example.py` for concrete examples of different patterns. You should follow the patterns demonstrated in the example connector.
+
 ## File Organization
 
 For simple connectors, keeping everything in a single `{source_name}.py` file is perfectly fine. If the main file grows beyond **1000 lines**, split it into multiple files for better maintainability. 
-
-When using multiple files, use absolute imports:
-```python
-from databricks.labs.community_connector.sources.{source_name}.{util_file_name} import some_helper
-```
 
 ## Implementation Requirements
 
@@ -29,24 +26,38 @@ from databricks.labs.community_connector.sources.{source_name}.{util_file_name} 
 - **Data Processing:** If a StructType field is absent in the response, assign `None` as the default value instead of an empty dictionary `{}`. Avoid creating mock objects.
 - **Table Options:** The functions `get_table_schema`, `read_table_metadata`, and `read_table` accept a `table_options` dictionary. Do not include parameters required by individual tables in the global connection options; rely on `table_options` instead.
 - **API Usage:** If a data source provides both a list API and a get API for the same object, always use the list API. Only call the get API for individual entries if explicitly requested. For child objects that require a parent identifier, list the parent objects first, then list child objects for each parent, and combine the results.
-- **Reference:** Refer to `src/databricks/labs/community_connector/sources/example/example.py` for concrete examples of all these patterns.
 
 ## Incremental read_table with offsets 
 
-For incremental ingestion of tables (`cdc` and `append_only`), the framework calls `read_table` repeatedly within a single trigger run. Each call produces one microbatch. Pagination stops when the returned `end_offset` equals `start_offset`.
+For incremental ingestion of tables (`cdc` and `append_only`), the framework calls `read_table` repeatedly within a single trigger run. Each call produces one microbatch. A trigger run stops when the returned `end_offset` equals `start_offset`.
 
-### Admission Control: `max_records_per_batch` (always required)
+### Admission Control: `max_records_per_batch` 
 
 Every incremental table **must** support a `max_records_per_batch` table option. This caps how many records a single `read_table` call returns to the framework, giving Spark a bounded microbatch to process. Without it, a single call could return millions of rows and overwhelm the Spark driver.
 
 This is **orthogonal** to the query-scoping strategies below. Regardless of whether you use a sliding window, a server-side limit, or neither, you must still respect `max_records_per_batch` by stopping record accumulation once the count is reached.
+
+**Exception — best-effort enforcement:** When the API does not support ascending sort and a sliding time-window is used (see below), `max_records_per_batch` becomes best-effort. The window must be drained completely to avoid skipping or duplicating records, so the actual batch size is governed by the window size rather than a strict record count.
+
+### Ascending Sort Order Requirement
+
+When a connector stops mid-way (due to `max_records_per_batch` or page limits), it checkpoints the max cursor value and resumes with `since=<that value>`. This only works if the API returns records **sorted ascending by the cursor field**. With descending order the max cursor comes from the first record, so `since` never advances — creating an infinite loop of re-fetching the same data.
+
+**When the API does not support ascending sort**, use one of:
+- **Sliding time-window (Strategy A below):** Query with both `since` and `until` so sort order within the window doesn't matter — the cursor advances to the window end regardless. In this mode `max_records_per_batch` is best-effort since the entire window must be drained.
+- **Full read per batch:** Read all available data in a single batch and use the current time as the `since` filter for the next call. This avoids the sort-order problem entirely but only works for smaller datasets where fetching everything is practical.
 
 ### Query-Scoping Strategies
 
 A common problem with incremental reads is that the query to the source API is too broad. For example, an API that accepts a `since` parameter but no `until` parameter forces the server to scan from `since` all the way to "now" — which can be slow or time out on large accounts. Two strategies exist to scope the query and avoid this:
 
 **Strategy A — Sliding time-window** (for APIs with `since`/`until` or equivalent start/end time parameters):
-Add a bounded end-time to the query. Instead of querying from `since` to now, query from `since` to `since + window_seconds`. Paginate all records within that window, then advance the cursor to the window end. If the window is empty, still advance the cursor so the next call slides forward. The `window_seconds` table option controls the window size. Provide a sensible default (e.g. 3600), but note that the optimal value depends on the data volume and it is up to the user to adjust it for their specific use case. For testing, always start with a very small value. Use this when the API supports both start and end time filters. 
+Add a bounded end-time to the query. Instead of querying from `since` to now, query from `since` to `since + window_seconds`. Paginate all records within that window, then advance the cursor to the window end. If the window is empty, still advance the cursor so the next call slides forward. The `window_seconds` table option controls the window size. Provide a sensible default (e.g. 86400), but note that the optimal value depends on the data volume and it is up to the user to adjust it for their specific use case. For testing, always start with a very small value. Use this when the API supports both start and end time filters.
+
+**Critical: the first call must have a bounded `since`.** Without it, the query is unbounded (everything up to `until`), which defeats the purpose of the window on large datasets. Resolve the starting cursor in this order:
+1. **Prior offset** — `start_offset["cursor"]` from a previous read.
+2. **User-supplied start** — a `start_timestamp` table option the user provides. This is the fallback when auto-discovery is not possible.
+3. **Auto-discovery** — if the API allows it, peek at the oldest record to determine the starting point. For example: request page 1 with `per_page=1` (or equivalent small limit) and no time filters; if the API sorts ascending, the first record is the oldest. If it sorts descending, use the Link header or equivalent to find the last page, then read the last record from that page. This adds 1–2 lightweight API calls but avoids requiring the user to know when data starts.
 
 **Strategy B — Server-side limit** (for APIs with `limit`/`max_results`/`page_size` parameters):
 Pass a small `limit` parameter directly to the API so the server returns a bounded page. This keeps each individual API call small. Calls repeat until `max_records_per_batch` is reached.
@@ -81,9 +92,9 @@ If the source API uses timestamp-based cursors (e.g. `since`/`updated_at`), appl
 
 These options are **critical for testing**. Without them, tests may hang or take forever by attempting to read the entire dataset from the source.
 
-- Always configure a **small** `max_records_per_batch` in the test's `dev_table_config.json` (e.g., 5).
-- If using a sliding window, start with a **small** `window_seconds` (e.g., 60 or 300).
-- If using a server-side limit, start with a **small** `limit` (e.g., 5).
+- Always configure a **small** `max_records_per_batch` in the test's `dev_table_config.json` (e.g., 100).
+- If using a sliding window, start with a **small**: for example `window_seconds` (e.g., 300 or 3600).
+- If using a server-side limit, start with a **small** for example `limit` (e.g., 5), or `max_pages` (e.g. 1)
 - Gradually increase these values only if the small values do not generate enough data for testing.
 
 ## API Call Best Practices
