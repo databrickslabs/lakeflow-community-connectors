@@ -543,3 +543,76 @@ def _diagnostic_report(r: dict) -> dict:
         "conclusion": r.get("conclusion"),
         "conclusion_code": [extract_codeable_concept(cc) for cc in (r.get("conclusionCode") or [])],
     }
+
+
+# ─── MedicationRequest ────────────────────────────────────────────────────────
+# FHIR R4: https://hl7.org/fhir/R4/medicationrequest.html
+# UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-MedicationRequest v2.5.0
+# MS fields: identifier, status(R), intent(R), category, medication[x](R), subject(R),
+#            authoredOn, requester, dosageInstruction, dispenseRequest, substitution
+# medication[x]: medicationCodeableConcept | medicationReference
+
+_DISPENSE_REQUEST = StructType([
+    _f("validity_period", PERIOD),
+    _f("number_of_repeats_allowed", IntegerType()),
+    _f("quantity_value", DoubleType()),
+    _f("quantity_unit", StringType()),
+    _f("expected_supply_duration_value", DoubleType()),
+    _f("expected_supply_duration_unit", StringType()),
+])
+
+_MEDICATION_REQUEST_SCHEMA = _s(
+    _f("identifier", ArrayType(IDENTIFIER)),
+    _f("status", StringType()),
+    _f("status_reason", CODEABLE_CONCEPT),
+    _f("intent", StringType()),
+    _f("category", ArrayType(CODEABLE_CONCEPT)),
+    _f("priority", StringType()),
+    _f("medication_codeable_concept", CODEABLE_CONCEPT),
+    _f("medication_reference", REFERENCE),
+    _f("subject", REFERENCE),
+    _f("encounter", REFERENCE),
+    _f("authored_on", StringType()),
+    _f("requester", REFERENCE),
+    _f("reason_code", ArrayType(CODEABLE_CONCEPT)),
+    _f("reason_reference", ArrayType(REFERENCE)),
+    _f("note", ArrayType(ANNOTATION)),
+    _f("dosage_instruction", ArrayType(DOSAGE)),
+    _f("dispense_request", _DISPENSE_REQUEST),
+    _f("substitution_allowed_boolean", BooleanType()),
+)
+
+
+@register("MedicationRequest", "base_r4", _MEDICATION_REQUEST_SCHEMA)
+def _medication_request(r: dict) -> dict:
+    dr = r.get("dispenseRequest") or {}
+    dr_qty = dr.get("quantity") or {}
+    dr_dur = dr.get("expectedSupplyDuration") or {}
+    sub = r.get("substitution") or {}
+    return {
+        "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
+        "status": r.get("status"),
+        "status_reason": extract_codeable_concept(r.get("statusReason")),
+        "intent": r.get("intent"),
+        "category": [extract_codeable_concept(c) for c in (r.get("category") or [])],
+        "priority": r.get("priority"),
+        "medication_codeable_concept": extract_codeable_concept(r.get("medicationCodeableConcept")),
+        "medication_reference": extract_reference(r.get("medicationReference")),
+        "subject": extract_reference(r.get("subject")),
+        "encounter": extract_reference(r.get("encounter")),
+        "authored_on": r.get("authoredOn"),
+        "requester": extract_reference(r.get("requester")),
+        "reason_code": [extract_codeable_concept(rc) for rc in (r.get("reasonCode") or [])],
+        "reason_reference": [extract_reference(rr) for rr in (r.get("reasonReference") or [])],
+        "note": [extract_annotation(n) for n in (r.get("note") or [])],
+        "dosage_instruction": [extract_dosage(d) for d in (r.get("dosageInstruction") or [])],
+        "dispense_request": {
+            "validity_period": extract_period(dr.get("validityPeriod")),
+            "number_of_repeats_allowed": dr.get("numberOfRepeatsAllowed"),
+            "quantity_value": dr_qty.get("value"),
+            "quantity_unit": dr_qty.get("unit"),
+            "expected_supply_duration_value": dr_dur.get("value"),
+            "expected_supply_duration_unit": dr_dur.get("unit"),
+        } if dr else None,
+        "substitution_allowed_boolean": sub.get("allowedBoolean"),
+    }
