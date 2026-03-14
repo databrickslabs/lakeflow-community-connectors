@@ -22,6 +22,7 @@ import requests
 from databricks.labs.community_connector.sources.fhir.fhir_constants import (
     HTTP_TIMEOUT, INITIAL_BACKOFF, MAX_RETRIES, PAGE_DELAY, RETRIABLE_STATUS_CODES, TOKEN_TIMEOUT,
 )
+from databricks.labs.community_connector.sources.fhir.fhir_profile_registry import extract
 
 
 class SmartAuthClient:
@@ -261,14 +262,6 @@ def extract_record(resource: dict, resource_type: str, profile: str = "uk_core")
     Returns raw field values — do NOT pre-convert types; framework handles coercion.
     profile defaults to 'uk_core' (falls back to base_r4 for resources without UK Core override).
     """
-    # Import here to avoid circular imports at module load time
-    from databricks.labs.community_connector.sources.fhir.profiles import (
-        extract as _profile_extract,
-    )
-    # Import to trigger registration (idempotent after first import)
-    from databricks.labs.community_connector.sources.fhir.profiles import base_r4 as _br4  # noqa: F401
-    from databricks.labs.community_connector.sources.fhir.profiles import uk_core as _ukc  # noqa: F401
-
     meta = resource.get("meta") or {}
     record = {
         "id": resource.get("id"),
@@ -276,5 +269,5 @@ def extract_record(resource: dict, resource_type: str, profile: str = "uk_core")
         "lastUpdated": meta.get("lastUpdated"),
         "raw_json": json.dumps(resource),
     }
-    record.update(_profile_extract(resource, resource_type, profile))
+    record.update(extract(resource, resource_type, profile))
     return record

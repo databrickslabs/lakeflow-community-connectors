@@ -22,7 +22,7 @@ from databricks.labs.community_connector.sources.fhir.fhir_types import (
     CODEABLE_CONCEPT,
     extract_codeable_concept,
 )
-from databricks.labs.community_connector.sources.fhir.profiles import (
+from databricks.labs.community_connector.sources.fhir.fhir_profile_registry import (
     _COMMON_FIELDS, register,
 )
 from databricks.labs.community_connector.sources.fhir.profiles.base_r4 import (

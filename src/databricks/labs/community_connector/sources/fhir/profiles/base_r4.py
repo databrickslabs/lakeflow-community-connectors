@@ -24,7 +24,7 @@ from databricks.labs.community_connector.sources.fhir.fhir_types import (
     extract_identifier, extract_period, extract_quantity, extract_reference,
     _safe,
 )
-from databricks.labs.community_connector.sources.fhir.profiles import (
+from databricks.labs.community_connector.sources.fhir.fhir_profile_registry import (
     _COMMON_FIELDS, register,
 )
 
@@ -99,6 +99,7 @@ _OBS_COMPONENT = StructType([
     _f("value_string", StringType()),
     _f("value_codeable_concept", CODEABLE_CONCEPT),
     _f("value_boolean", BooleanType()),
+    _f("value_integer", LongType()),
     _f("data_absent_reason", CODEABLE_CONCEPT),
 ])
 
@@ -150,6 +151,7 @@ def _extract_obs_component(obj: dict) -> dict:
         "value_string": obj.get("valueString"),
         "value_codeable_concept": extract_codeable_concept(obj.get("valueCodeableConcept")),
         "value_boolean": obj.get("valueBoolean"),
+        "value_integer": obj.get("valueInteger"),
         "data_absent_reason": extract_codeable_concept(obj.get("dataAbsentReason")),
     }
 

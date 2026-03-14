@@ -313,3 +313,21 @@ def test_observation_extract_missing_fields_return_none_or_empty():
     assert result["reference_range"] == []
     assert result["has_member"] == []
     assert result["derived_from"] == []
+
+
+def test_observation_component_has_value_integer():
+    schema = get_schema("Observation", "base_r4")
+    f = next(f for f in schema.fields if f.name == "component")
+    inner = {sf.name for sf in f.dataType.elementType.fields}
+    assert "value_integer" in inner
+
+
+def test_observation_extract_component_value_integer():
+    resource = {
+        "resourceType": "Observation", "id": "obs_int",
+        "status": "final",
+        "code": {"text": "Score"},
+        "component": [{"code": {"text": "Pain score"}, "valueInteger": 7}],
+    }
+    result = extract(resource, "Observation", "base_r4")
+    assert result["component"][0]["value_integer"] == 7
