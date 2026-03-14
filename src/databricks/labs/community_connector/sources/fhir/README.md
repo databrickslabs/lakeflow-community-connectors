@@ -21,7 +21,15 @@ Ingests clinical data from any FHIR R4-compliant server into Databricks Delta ta
 - [Connection Parameters Reference](#connection-parameters-reference)
 - [Table Configuration Reference](#table-configuration-reference)
 - [Supported Resource Types](#supported-resource-types)
-- [Schema Reference](#schema-reference)
+- [Schema Design](#schema-design)
+  - [Common Columns](#common-columns)
+  - [Typed Columns — UK Core Profile (default)](#typed-columns--uk-core-profile-default)
+  - [Profile System](#profile-system)
+  - [FHIR Type Mappings](#fhir-type-mappings)
+  - [Per-Resource Column Reference](#per-resource-column-reference)
+- [Architecture](#architecture)
+  - [Profile Registry](#profile-registry)
+  - [Extending the Connector](#extending-the-connector)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -133,10 +141,7 @@ system/Patient.read system/Observation.read   # specific resource types
 
 **Use for:** Servers using symmetric OAuth2 client credentials, including managed FHIR cloud services and SMART v1 confidential clients.
 
-**How it works:** The connector sends `client_id` and `client_secret` via HTTP Basic authentication to the token endpoint and receives an access token. This is a machine-to-machine flow — no user login is required.
-
-> **Why `client_credentials`, not `authorization_code`?**
-> The `authorization_code` grant requires a human to authenticate interactively in a browser. A data pipeline running unattended on a schedule cannot do this. `client_credentials` is the correct OAuth2 grant for backend services.
+**How it works:** The connector sends `client_id` and `client_secret` via HTTP Basic authentication to the token endpoint and receives an access token.
 
 #### Required connection parameters
 
@@ -147,15 +152,15 @@ system/Patient.read system/Observation.read   # specific resource types
 | `client_id` | OAuth2 client ID |
 | `client_secret` | OAuth2 client secret |
 | `token_url` | Token endpoint URL (omit to auto-discover from `/.well-known/smart-configuration`) |
-| `scope` | Space-separated scopes (required by most servers — check your FHIR server's documentation) |
+| `scope` | Space-separated scopes (required by most servers) |
 
-> **Note on `token_url`:** Some managed FHIR services do not publish a `/.well-known/smart-configuration` document. If auto-discovery fails, set `token_url` explicitly using the token endpoint provided by your service's documentation.
+> **Note on `token_url`:** Some managed FHIR services do not publish a `/.well-known/smart-configuration` document. If auto-discovery fails, set `token_url` explicitly.
 
 ---
 
 ### 3. No Authentication — Open Servers
 
-**Use for:** Public FHIR servers, local development, or sandbox environments that require no credentials (e.g., [HAPI FHIR public test server](https://hapi.fhir.org/baseR4)).
+**Use for:** Public FHIR servers, local development, or sandbox environments (e.g., [HAPI FHIR public test server](https://hapi.fhir.org/baseR4)).
 
 #### Required connection parameters
 
@@ -196,29 +201,23 @@ Verify the install:
 community-connector --help
 ```
 
-You should see the available commands listed: `create_connection`, `create_pipeline`, `run_pipeline`, etc.
-
 ---
 
 ### Step 2 — Authenticate the CLI with your Databricks workspace
 
-The CLI uses the [Databricks Python SDK](https://docs.databricks.com/dev-tools/sdk-python.html) and inherits the same authentication as the Databricks CLI. It resolves credentials in this order:
+The CLI uses the [Databricks Python SDK](https://docs.databricks.com/dev-tools/sdk-python.html) and inherits the same authentication as the Databricks CLI.
 
 **Option A — Databricks CLI profile (recommended):**
-
-If you already have the Databricks CLI configured, the `community-connector` CLI picks up your default profile automatically with no extra flags:
 
 ```bash
 community-connector create_connection fhir ...
 ```
 
-To use a non-default profile, set the environment variable before the command:
+To use a non-default profile:
 
 ```bash
 DATABRICKS_CONFIG_PROFILE=my-profile community-connector create_connection fhir ...
 ```
-
-Set up a profile with: `databricks configure --profile my-profile`
 
 **Option B — Environment variables:**
 
@@ -227,13 +226,11 @@ export DATABRICKS_HOST=https://your-workspace.azuredatabricks.net
 export DATABRICKS_TOKEN=your-personal-access-token
 ```
 
-To generate a personal access token: in Databricks go to **Settings → Developer → Access tokens → Generate new token**.
-
 ---
 
 ### Step 3 — Create a Unity Catalog connection
 
-The connection stores your FHIR server credentials securely in Unity Catalog. Since the FHIR connector is not yet in the published Databricks repository, pass `--spec` pointing to the local `connector_spec.yaml` from the cloned fork so the CLI can validate your options correctly.
+The connection stores your FHIR server credentials securely in Unity Catalog. Pass `--spec` pointing to the local `connector_spec.yaml` so the CLI can validate your options correctly.
 
 Run the command for your auth method from the root of the cloned repo:
 
@@ -276,35 +273,16 @@ community-connector create_connection fhir my_fhir_conn \
   }'
 ```
 
-> **PEM keys:** Inside a JSON string, newlines must be written as `\n`. You can generate the correctly escaped value with:
+> **PEM keys:** Inside a JSON string, newlines must be written as `\n`. Generate the correctly escaped value with:
 > ```bash
 > python3 -c "import json; print(json.dumps(open('private_key.pem').read()))"
 > ```
-> Copy the output (without the surrounding quotes) as the value for `private_key_pem`.
-
-> **`token_url`:** This can be omitted for servers that publish `/.well-known/smart-configuration` — the connector will auto-discover the token endpoint. Set it explicitly if your server does not publish this document.
-
-On success you will see:
-
-```
-Creating connection for source: fhir
-Connection name: my_fhir_conn
-Connection type: GENERIC_LAKEFLOW_CONNECT
-  ✓ Connection created!
-
-============================================================
-Connection Name: my_fhir_conn
-Connection ID:   <uuid>
-============================================================
-```
 
 ---
 
 ### Step 4 — Create the pipeline
 
 This command clones the connector source code from GitHub into your Databricks workspace (sparse checkout — only the FHIR connector and shared libraries are downloaded), creates an `ingest.py` notebook, and registers a serverless Lakeflow Spark Declarative Pipeline.
-
-Since the FHIR connector is not yet in the official published repository, pass `--repo-url` to point the CLI at the fork instead of the default `databrickslabs` repository:
 
 **Ingest all 14 default resource types:**
 
@@ -316,11 +294,7 @@ community-connector create_pipeline fhir my_fhir_pipeline \
   --target clinical
 ```
 
-- `--repo-url` overrides the default repo with the fork containing the FHIR connector
-- `--catalog` sets the target Unity Catalog catalog (default: `main`)
-- `--target` sets the target schema (default: `default`)
-
-**Ingest a specific subset of resource types, or customise options per table:**
+**Ingest a specific subset of resource types:**
 
 Create a `pipeline_spec.json` file:
 
@@ -328,26 +302,8 @@ Create a `pipeline_spec.json` file:
 {
   "connection_name": "my_fhir_conn",
   "objects": [
-    {
-      "table": {
-        "source_table": "Patient",
-        "destination_catalog": "main",
-        "destination_schema": "clinical",
-        "table_configuration": {
-          "page_size": "100",
-          "max_records_per_batch": "1000"
-        }
-      }
-    },
-    {
-      "table": {
-        "source_table": "Observation",
-        "table_configuration": {
-          "page_size": "50",
-          "max_records_per_batch": "500"
-        }
-      }
-    },
+    {"table": {"source_table": "Patient"}},
+    {"table": {"source_table": "Observation"}},
     {"table": {"source_table": "Condition"}},
     {"table": {"source_table": "Encounter"}}
   ]
@@ -362,7 +318,21 @@ community-connector create_pipeline fhir my_fhir_pipeline \
   --repo-url https://github.com/FiifiB/lakeflow-community-connectors.git
 ```
 
-On success the CLI prints the pipeline ID and a direct link to it in your workspace.
+**Use a specific schema profile** (see [Profile System](#profile-system)):
+
+```json
+{
+  "connection_name": "my_fhir_conn",
+  "objects": [
+    {
+      "table": {
+        "source_table": "Patient",
+        "table_configuration": {"profile": "base_r4"}
+      }
+    }
+  ]
+}
+```
 
 ---
 
@@ -384,48 +354,37 @@ Or go to **Databricks UI → Jobs & pipelines → Pipelines**, find `my_fhir_pip
 
 ---
 
-### Update an existing pipeline
-
-To change the resource types or table options after the pipeline has been created:
-
-```bash
-community-connector update_pipeline my_fhir_pipeline \
-  --pipeline-spec updated_pipeline_spec.json
-```
-
----
-
 ## Connection Parameters Reference
 
 These are set at the **connection level** (shared across all tables in the pipeline).
 
 | Parameter | Required | Auth Method | Description |
 |---|---|---|---|
-| `base_url` | Yes | All | Base URL of the FHIR R4 server. All resource requests are built from this. Example: `https://hapi.fhir.org/baseR4` |
+| `base_url` | Yes | All | Base URL of the FHIR R4 server. Example: `https://hapi.fhir.org/baseR4` |
 | `auth_type` | Yes | All | Authentication method. One of: `jwt_assertion`, `client_secret`, `none` |
 | `token_url` | Conditional | `jwt_assertion`, `client_secret` | OAuth2 token endpoint. If omitted, auto-discovered from `{base_url}/.well-known/smart-configuration` |
 | `client_id` | Conditional | `jwt_assertion`, `client_secret` | OAuth2 client ID registered with the FHIR server |
 | `private_key_pem` | Conditional | `jwt_assertion` | RSA or EC private key in PEM format, including `BEGIN`/`END` delimiters |
-| `kid` | Conditional | `jwt_assertion` | Key ID identifying the key pair registered with the server. Must match exactly. |
+| `kid` | Conditional | `jwt_assertion` | Key ID identifying the key pair registered with the server |
 | `private_key_algorithm` | No | `jwt_assertion` | Signing algorithm. Default: `RS384`. Accepted: `RS384`, `ES384` |
 | `client_secret` | Conditional | `client_secret` | OAuth2 client secret |
 | `scope` | Conditional | `jwt_assertion` (required), `client_secret` (required for some servers) | Space-separated OAuth2 scopes. Example: `system/*.read` |
-| `externalOptionsAllowList` | Yes | All | Must be set to: `resource_types,page_size,max_records_per_batch,page_delay` |
 
 ---
 
 ## Table Configuration Reference
 
-These are set per-table in `table_configuration` and must be listed in `externalOptionsAllowList`.
+These are set per-table inside `table_configuration` in the pipeline spec.
 
 | Option | Default | Description |
 |---|---|---|
-| `page_size` | `100` | Number of resources requested per page (`_count` parameter sent to FHIR server). Reduce if the server rate-limits you. |
+| `page_size` | `100` | Number of resources requested per page (`_count` parameter). Reduce if the server rate-limits you. |
 | `max_records_per_batch` | `1000` | Maximum records fetched per pipeline trigger. Controls run duration and API load. |
-| `page_delay` | `0.0` | Seconds to sleep between paginated requests. Set to `1.0` for public shared servers (HAPI FHIR). Leave at `0.0` for private production EHRs. |
+| `page_delay` | `0.0` | Seconds to sleep between paginated requests. Set to `1.0` for public shared servers. |
 | `resource_types` | all 14 | Comma-separated list to limit which resource types are available. Example: `Patient,Observation,Condition` |
+| `profile` | `uk_core` | Schema profile to use for this table. One of: `uk_core` (default), `base_r4`. See [Profile System](#profile-system). |
 
-> **`max_records_per_batch` and data completeness:** If multiple records share the same `lastUpdated` timestamp and `max_records_per_batch` cuts mid-batch, records sharing the exact cursor value may be skipped on subsequent runs. Set `max_records_per_batch` generously (≥1000) to reduce this risk, especially for bulk-imported datasets where many records share a timestamp.
+> **`max_records_per_batch` and data completeness:** If multiple records share the same `lastUpdated` timestamp and `max_records_per_batch` cuts mid-batch, records sharing the exact cursor value may be skipped on subsequent runs. Set `max_records_per_batch` generously (≥1000) for bulk-imported datasets.
 
 ---
 
@@ -433,46 +392,254 @@ These are set per-table in `table_configuration` and must be listed in `external
 
 All 14 resource types use CDC ingestion with `id` as the primary key and `lastUpdated` as the cursor.
 
-| Resource Type | Key Clinical Fields |
-|---|---|
-| `Patient` | `gender`, `birthDate`, `active`, `name_text`, `name_family` |
-| `Observation` | `status`, `code_text`, `code_system`, `code_code`, `subject_reference`, `effective_datetime`, `value_quantity_value`, `value_quantity_unit`, `value_string`, `issued` |
-| `Condition` | `clinical_status`, `verification_status`, `code_text`, `subject_reference`, `onset_datetime`, `recorded_date` |
-| `Encounter` | `status`, `class_code`, `subject_reference`, `period_start`, `period_end` |
-| `Procedure` | `status`, `code_text`, `subject_reference`, `performed_datetime` |
-| `MedicationRequest` | `status`, `intent`, `medication_text`, `subject_reference`, `authored_on` |
-| `DiagnosticReport` | `status`, `code_text`, `subject_reference`, `effective_datetime`, `issued` |
-| `AllergyIntolerance` | `clinical_status`, `verification_status`, `code_text`, `patient_reference`, `recorded_date` |
-| `Immunization` | `status`, `vaccine_code_text`, `patient_reference`, `occurrence_datetime` |
-| `Coverage` | `status`, `beneficiary_reference`, `payor_reference`, `period_start`, `period_end` |
-| `CarePlan` | `status`, `intent`, `subject_reference`, `period_start`, `period_end` |
-| `Goal` | `lifecycle_status`, `description_text`, `subject_reference`, `start_date` |
-| `Device` | `status`, `device_name`, `type_text`, `patient_reference` |
-| `DocumentReference` | `status`, `type_text`, `subject_reference`, `date` |
+| Resource Type | Profile | Total Columns |
+|---|---|---|
+| `Patient` | UK Core 2.6.1 | 22 |
+| `Observation` | UK Core 2.5.0 | 28 |
+| `Condition` | UK Core 2.6.0 | 22 |
+| `Encounter` | UK Core 2.5.0 | 22 |
+| `Procedure` | UK Core 2.5.0 | 25 |
+| `MedicationRequest` | UK Core 2.5.0 | 22 |
+| `DiagnosticReport` | UK Core 2.5.0 | 20 |
+| `AllergyIntolerance` | UK Core 2.5.0 | 21 |
+| `Immunization` | UK Core 2.4.0 | 27 |
+| `Coverage` | Base FHIR R4 | 19 |
+| `CarePlan` | UK Core 2.2.0 | 20 |
+| `Goal` | Base FHIR R4 | 19 |
+| `Device` | UK Core 1.2.0 | 20 |
+| `DocumentReference` | UK Core 2.2.0 | 19 |
 
-Every table also includes:
+Coverage and Goal have no UK Core profile — the base FHIR R4 spec is used directly.
+
+---
+
+## Schema Design
+
+### Common Columns
+
+Every table includes these four columns regardless of resource type or profile:
 
 | Column | Type | Description |
 |---|---|---|
 | `id` | `StringType` | FHIR resource ID (primary key) |
 | `resourceType` | `StringType` | FHIR resource type name |
-| `lastUpdated` | `TimestampType` | `meta.lastUpdated` — used as the CDC cursor |
+| `lastUpdated` | `TimestampType` | `meta.lastUpdated` — CDC cursor |
 | `raw_json` | `StringType` | Full FHIR resource as a JSON string — complete, lossless storage |
 
----
+### Typed Columns — UK Core Profile (default)
 
-## Schema Reference
+Beyond the four common columns, each resource has typed columns extracted from the FHIR JSON. Repeated FHIR elements (cardinality `0..*` or `1..*`) are represented as `ArrayType(StructType(...))`, which you can query in Databricks SQL using standard array syntax:
 
-FHIR types map to Spark SQL types as follows:
+```sql
+-- Explode Patient names into rows
+SELECT id, explode(name) AS n FROM clinical.patient;
+
+-- Access first name directly
+SELECT id, name[0].family AS surname FROM clinical.patient;
+
+-- Filter by NHS number (UK Core Patient only)
+SELECT * FROM clinical.patient WHERE nhs_number = '9000000009';
+
+-- Explode Observation components (e.g. blood pressure panels)
+SELECT id, component[0].value_quantity.value AS systolic,
+           component[1].value_quantity.value AS diastolic
+FROM clinical.observation
+WHERE code.coding[0].code = '55284-4';
+```
+
+**Key structural types used across all schemas:**
+
+| FHIR Type | Spark Representation |
+|---|---|
+| `Coding` | `StructType(system, code, display)` |
+| `CodeableConcept` | `StructType(coding: ArrayType(Coding), text)` |
+| `Reference` | `StructType(reference, display)` |
+| `Period` | `StructType(start: Timestamp, end: Timestamp)` |
+| `Identifier` | `StructType(system, value, use)` |
+| `HumanName` | `StructType(family, given: ArrayType(String), text, use)` |
+| `Address` | `StructType(use, line: ArrayType(String), city, district, postalCode, country)` |
+| `ContactPoint` | `StructType(system, value, use)` |
+| `Quantity` | `StructType(value: Double, unit, system, code)` |
+| `Dosage` | `StructType(text, timing_code, dose_value: Double, dose_unit, route, site)` |
+
+### Profile System
+
+The connector ships with two schema profiles:
+
+| Profile | Description | When to use |
+|---|---|---|
+| `uk_core` | UK Core R4 implementation guide (default) | UK-based EHRs, NHS data, servers publishing UK Core extensions |
+| `base_r4` | Base FHIR R4 specification | Non-UK servers, international deployments, or when UK Core extensions are not present |
+
+**Default:** `uk_core`. For most resources, both profiles produce identical schemas — UK Core only adds meaningful extra columns to `Patient` (see below). For all other resources, `uk_core` falls back to `base_r4` automatically.
+
+**UK Core Patient extra columns** (beyond base_r4):
+
+| Column | Type | Source |
+|---|---|---|
+| `nhs_number` | `StringType` | Extracted from `identifier` where `system = https://fhir.nhs.uk/Id/nhs-number` |
+| `ethnic_category` | `CodeableConcept` | UK Core extension `Extension-UKCore-EthnicCategory` |
+| `birth_sex` | `CodeableConcept` | UK Core extension `Extension-UKCore-BirthSex` |
+| `death_notification_status` | `CodeableConcept` | UK Core extension `Extension-UKCore-DeathNotificationStatus` |
+| `interpreter_required` | `BooleanType` | HL7 base extension `patient-interpreterRequired` |
+| `residential_status` | `CodeableConcept` | UK Core extension `Extension-UKCore-ResidentialStatus` |
+
+To use a specific profile per table, set it in `table_configuration`:
+
+```json
+{
+  "table": {
+    "source_table": "Patient",
+    "table_configuration": {"profile": "base_r4"}
+  }
+}
+```
+
+### FHIR Type Mappings
+
+FHIR primitive types map to Spark types as follows:
 
 | FHIR Type | Spark Type | Notes |
 |---|---|---|
-| `string`, `code`, `uri` | `StringType` | Status codes, identifiers, reference URLs |
-| `instant`, `dateTime` | `TimestampType` | ISO 8601 with timezone. Example: `2024-01-15T10:30:00+00:00` |
-| `date` | `StringType` | Partial dates (e.g. `2024-01` or `2024`) cannot map to a full timestamp |
-| `boolean` | `BooleanType` | `true` / `false` |
-| `decimal` | `DoubleType` | Numeric quantities such as lab values |
-| `Reference.reference` | `StringType` | FHIR reference strings, e.g. `Patient/123` |
+| `string`, `code`, `uri`, `id` | `StringType` | Status codes, identifiers, reference URLs |
+| `instant`, `dateTime` | `TimestampType` | ISO 8601 with timezone |
+| `date` | `StringType` | Partial dates (e.g. `2024-01`) cannot be represented as Timestamp |
+| `boolean` | `BooleanType` | |
+| `decimal` | `DoubleType` | Lab values, quantities |
+| `integer`, `positiveInt` | `LongType` | Counts, ranks |
+| `Reference.reference` | `StringType` (inside Reference struct) | e.g. `Patient/123` |
+
+> All typed columns are nullable. FHIR R4 has very few required fields, and even required fields may be absent from records exported by some servers. The `raw_json` column preserves all data losslessly.
+
+### Per-Resource Column Reference
+
+#### Patient
+
+| Column | Type | FHIR Source |
+|---|---|---|
+| `identifier` | `ArrayType(Identifier)` | `Patient.identifier` |
+| `active` | `BooleanType` | `Patient.active` |
+| `name` | `ArrayType(HumanName)` | `Patient.name` |
+| `telecom` | `ArrayType(ContactPoint)` | `Patient.telecom` |
+| `gender` | `StringType` | `Patient.gender` |
+| `birthDate` | `StringType` | `Patient.birthDate` |
+| `deceased_boolean` | `BooleanType` | `Patient.deceasedBoolean` |
+| `deceased_datetime` | `TimestampType` | `Patient.deceasedDateTime` |
+| `address` | `ArrayType(Address)` | `Patient.address` |
+| `maritalStatus` | `CodeableConcept` | `Patient.maritalStatus` |
+| `generalPractitioner` | `ArrayType(Reference)` | `Patient.generalPractitioner` |
+| `managingOrganization` | `Reference` | `Patient.managingOrganization` |
+| *UK Core only:* `nhs_number` | `StringType` | NHS number identifier slice |
+| *UK Core only:* `ethnic_category` | `CodeableConcept` | UK Core extension |
+| *UK Core only:* `birth_sex` | `CodeableConcept` | UK Core extension |
+| *UK Core only:* `death_notification_status` | `CodeableConcept` | UK Core extension |
+| *UK Core only:* `interpreter_required` | `BooleanType` | HL7 base extension |
+| *UK Core only:* `residential_status` | `CodeableConcept` | UK Core extension |
+
+#### Observation
+
+| Column | Type | FHIR Source |
+|---|---|---|
+| `status` | `StringType` | `Observation.status` |
+| `category` | `ArrayType(CodeableConcept)` | `Observation.category` |
+| `code` | `CodeableConcept` | `Observation.code` |
+| `subject` | `Reference` | `Observation.subject` |
+| `encounter` | `Reference` | `Observation.encounter` |
+| `effective_datetime` | `TimestampType` | `Observation.effectiveDateTime` |
+| `effective_period` | `Period` | `Observation.effectivePeriod` |
+| `issued` | `TimestampType` | `Observation.issued` |
+| `performer` | `ArrayType(Reference)` | `Observation.performer` |
+| `value_quantity` | `Quantity` | `Observation.valueQuantity` |
+| `value_codeable_concept` | `CodeableConcept` | `Observation.valueCodeableConcept` |
+| `value_string` | `StringType` | `Observation.valueString` |
+| `value_boolean` | `BooleanType` | `Observation.valueBoolean` |
+| `value_integer` | `LongType` | `Observation.valueInteger` |
+| `data_absent_reason` | `CodeableConcept` | `Observation.dataAbsentReason` |
+| `interpretation` | `ArrayType(CodeableConcept)` | `Observation.interpretation` |
+| `body_site` | `CodeableConcept` | `Observation.bodySite` |
+| `method` | `CodeableConcept` | `Observation.method` |
+| `specimen` | `Reference` | `Observation.specimen` |
+| `device` | `Reference` | `Observation.device` |
+| `reference_range` | `ArrayType(struct)` | `Observation.referenceRange` |
+| `has_member` | `ArrayType(Reference)` | `Observation.hasMember` |
+| `derived_from` | `ArrayType(Reference)` | `Observation.derivedFrom` |
+| `component` | `ArrayType(struct)` | `Observation.component` — includes `code`, `value_quantity`, `value_string`, `value_codeable_concept`, `value_boolean`, `value_integer`, `data_absent_reason` |
+
+For all other resource types, use `DESCRIBE TABLE <catalog>.<schema>.<table>` in Databricks SQL to see the full column list, or refer to `profiles/base_r4.py` in the source.
+
+---
+
+## Architecture
+
+### Profile Registry
+
+The connector uses a **profile registry** to decouple schema definitions from ingestion logic. This makes it straightforward to support different national or organisational FHIR implementation guides without touching the core ingestion pipeline.
+
+**How it works:**
+
+```
+Lookup: get_schema("Patient", "uk_core")
+
+PROFILE_CHAIN = ["uk_core", "base_r4"]
+
+Step 1: Check registry for ("Patient", "uk_core") → found → return UK Core Patient schema (22 col + NHS fields)
+Step 2: (not reached)
+
+Lookup: get_schema("Observation", "uk_core")
+
+Step 1: Check registry for ("Observation", "uk_core") → not found
+Step 2: Check registry for ("Observation", "base_r4") → found → return base R4 Observation schema
+```
+
+Each resource schema and extractor function is registered as a pair keyed by `(resource_type, profile)`. If a resource has no profile-specific override, the lookup automatically falls back to the next profile in the chain.
+
+**Source files:**
+
+| File | Purpose |
+|---|---|
+| `fhir_types.py` | Shared Spark type building blocks (`CODING`, `CODEABLE_CONCEPT`, `REFERENCE`, etc.) and extractor helpers |
+| `fhir_profile_registry.py` | Registry implementation — `register` decorator, `get_schema`, `extract`, `PROFILE_CHAIN` |
+| `profiles/base_r4.py` | Base FHIR R4 schemas and extractors for all 14 resources, validated against [hl7.org/fhir/R4](https://hl7.org/fhir/R4/) |
+| `profiles/uk_core.py` | UK Core overrides — currently adds NHS number and UK extensions to Patient |
+| `fhir_schemas.py` | Public API — imports and re-exports `get_schema` and `FALLBACK_SCHEMA` |
+| `fhir_utils.py` | HTTP client, auth, bundle pagination, and profile-aware `extract_record` |
+| `fhir.py` | `LakeflowConnect` implementation — orchestrates ingestion |
+
+### Extending the Connector
+
+#### Adding a new FHIR resource type
+
+1. Open `profiles/base_r4.py`
+2. Add a schema constant and extractor function decorated with `@register("NewResource", "base_r4", schema)`
+3. The resource is automatically available in all pipelines via the `resource_types` table option
+
+No changes needed to `fhir.py`, `fhir_schemas.py`, or any other file.
+
+#### Adding a new national profile (e.g. AU Core, US Core)
+
+1. Create `profiles/au_core.py` with overrides only for resources that differ from base R4:
+
+```python
+from databricks.labs.community_connector.sources.fhir.fhir_profile_registry import register
+from databricks.labs.community_connector.sources.fhir.profiles.base_r4 import _patient as _base_patient, _PATIENT_SCHEMA
+
+# Only override resources where AU Core differs from base R4
+@register("Patient", "au_core", _AU_PATIENT_SCHEMA)
+def _patient_au(r: dict) -> dict:
+    result = _base_patient(r)
+    # add AU-specific fields...
+    return result
+```
+
+2. Add `"au_core"` to `PROFILE_CHAIN` in `fhir_profile_registry.py`:
+
+```python
+PROFILE_CHAIN: list = ["au_core", "uk_core", "base_r4"]
+```
+
+3. Import `au_core` in `fhir_schemas.py` to trigger registration.
+
+Resources not overridden in `au_core.py` will automatically fall back to `uk_core`, then `base_r4`. You only need to define what actually differs.
 
 ---
 
@@ -480,11 +647,11 @@ FHIR types map to Spark SQL types as follows:
 
 ### `invalid_grant` from token endpoint
 
-The OAuth2 client is not configured for `client_credentials` flow. Confirm with your FHIR server or authorisation server administrator that the client is registered as a machine-to-machine (backend service) client with the `client_credentials` grant type enabled.
+The OAuth2 client is not configured for `client_credentials` flow. Confirm with your FHIR server or authorisation server administrator that the client is registered as a backend service client with the `client_credentials` grant type enabled.
 
 ### `invalid_scope` from token endpoint
 
-The scope value in your config does not match what is registered on the authorisation server. Check your FHIR server or authorisation server documentation for the exact scope strings supported. Scope values are case-sensitive and must be an exact match.
+The scope value does not match what is registered on the authorisation server. Scope values are case-sensitive and must be an exact match.
 
 ### Server does not support `_lastUpdated`
 
@@ -492,29 +659,29 @@ The connector raises:
 ```
 FHIR server appears to have ignored the '_lastUpdated=gt{since}' filter
 ```
-when it sends an incremental filter but receives records older than the cursor. This means the server ignores the `_lastUpdated` search parameter. Contact your FHIR server administrator — `_lastUpdated` is not mandatory in the FHIR spec and some servers do not implement it.
+when it sends an incremental filter but receives records older than the cursor. Contact your FHIR server administrator — `_lastUpdated` is not mandatory in the FHIR spec and some servers do not implement it.
 
 ### HTTP 401 / 403 on resource requests
 
 - **`jwt_assertion`**: Confirm the `kid` in your config exactly matches the key ID registered with the server. Confirm `private_key_pem` is the private key corresponding to the public key you registered.
-- **`client_secret`**: Confirm `client_id` and `client_secret` are correct and have not expired or been rotated.
+- **`client_secret`**: Confirm `client_id` and `client_secret` are correct and have not expired.
 - **All methods**: Confirm `scope` includes permissions for the resource types you are ingesting.
-
-### Empty results on incremental sync
-
-This is expected when no records were created or modified since the last run. The cursor stays unchanged and the next run will check again from the same point.
 
 ### Rate limiting (429 responses)
 
 The connector retries with exponential backoff (5 → 10 → 20 → 40 → 80 seconds, max 5 retries). If rate limiting persists:
 
-- Reduce `page_size` (fewer records per API call)
-- Reduce `max_records_per_batch` (fewer total records per pipeline trigger)
+- Reduce `page_size`
+- Reduce `max_records_per_batch`
 - Increase the pipeline schedule interval
+
+### Empty results on incremental sync
+
+Expected when no records were created or modified since the last run.
 
 ### Resource type returns 404
 
-FHIR resource type names are case-sensitive. Use exact casing: `Patient`, not `patient` or `PATIENT`. Confirm the server supports the resource type.
+FHIR resource type names are case-sensitive. Use exact casing: `Patient`, not `patient` or `PATIENT`.
 
 ---
 
@@ -522,6 +689,5 @@ FHIR resource type names are case-sensitive. Use exact casing: `Patient`, not `p
 
 - [FHIR R4 Specification](https://hl7.org/fhir/R4/)
 - [SMART on FHIR Backend Services](https://hl7.org/fhir/smart-app-launch/backend-services.html)
-- [SMART on FHIR Conformance / Discovery](https://hl7.org/fhir/smart-app-launch/conformance.html)
-- [Databricks Secrets](https://docs.databricks.com/security/secrets/index.html)
+- [UK Core FHIR R4 Implementation Guide](https://simplifier.net/guide/uk-core-implementation-guide-stu3-sequence)
 - [HAPI FHIR public test server](https://hapi.fhir.org/baseR4)
