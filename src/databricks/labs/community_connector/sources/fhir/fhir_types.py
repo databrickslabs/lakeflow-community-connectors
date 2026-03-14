@@ -10,7 +10,7 @@ Return None (not {}) for absent objects — Spark treats None as null.
 """
 
 from pyspark.sql.types import (
-    ArrayType, BooleanType, DoubleType, IntegerType, StringType,
+    ArrayType, DoubleType, StringType,
     StructField, StructType, TimestampType,
 )
 
@@ -171,11 +171,15 @@ def extract_period(obj: dict | None) -> dict | None:
     return {"start": obj.get("start"), "end": obj.get("end")}
 
 
-def extract_identifier(obj: dict) -> dict:
+def extract_identifier(obj: dict | None) -> dict | None:
+    if not obj:
+        return None
     return {"system": obj.get("system"), "value": obj.get("value"), "use": obj.get("use")}
 
 
-def extract_human_name(obj: dict) -> dict:
+def extract_human_name(obj: dict | None) -> dict | None:
+    if not obj:
+        return None
     return {
         "family": obj.get("family"),
         "given": obj.get("given") or [],
@@ -184,7 +188,9 @@ def extract_human_name(obj: dict) -> dict:
     }
 
 
-def extract_address(obj: dict) -> dict:
+def extract_address(obj: dict | None) -> dict | None:
+    if not obj:
+        return None
     return {
         "use": obj.get("use"),
         "line": obj.get("line") or [],
@@ -195,7 +201,9 @@ def extract_address(obj: dict) -> dict:
     }
 
 
-def extract_contact_point(obj: dict) -> dict:
+def extract_contact_point(obj: dict | None) -> dict | None:
+    if not obj:
+        return None
     return {"system": obj.get("system"), "value": obj.get("value"), "use": obj.get("use")}
 
 
@@ -210,7 +218,9 @@ def extract_quantity(obj: dict | None) -> dict | None:
     }
 
 
-def extract_annotation(obj: dict) -> dict:
+def extract_annotation(obj: dict | None) -> dict | None:
+    if not obj:
+        return None
     return {"text": obj.get("text"), "time": obj.get("time")}
 
 

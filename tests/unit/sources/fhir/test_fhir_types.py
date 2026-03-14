@@ -2,7 +2,7 @@
 and extractor helpers against FHIR R4 datatypes spec."""
 
 from pyspark.sql.types import (
-    ArrayType, BooleanType, DoubleType, StringType, StructType, TimestampType,
+    ArrayType, DoubleType, StringType, StructType, TimestampType,
 )
 
 from databricks.labs.community_connector.sources.fhir.fhir_types import (
