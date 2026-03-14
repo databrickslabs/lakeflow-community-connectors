@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+  <defs>
+    <linearGradient id="flameGrad" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" style="stop-color:#c0392b;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#e67e22;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f39c12;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Flame shape representing FHIR (Fast Healthcare Interoperability Resources) -->
+  <path d="
+    M200 40
+    C200 40 260 100 270 160
+    C280 200 265 220 255 230
+    C260 195 245 175 230 165
+    C235 200 220 225 205 240
+    C200 248 195 255 195 265
+    C185 250 182 235 185 218
+    C170 230 160 248 162 268
+    C148 255 140 235 142 210
+    C130 225 125 248 128 270
+    C115 252 110 225 115 195
+    C105 210 100 232 103 258
+    C88 238 85 210 92 182
+    C75 200 70 228 75 258
+    C58 235 55 198 68 165
+    C50 185 45 215 50 248
+    C30 218 28 178 45 142
+    C55 115 80 88 110 72
+    C95 100 98 130 105 150
+    C120 118 145 88 160 60
+    C168 80 170 105 168 125
+    C180 95 192 60 200 40Z
+    M200 290
+    C215 278 225 262 225 245
+    C225 225 212 210 200 200
+    C188 210 175 225 175 245
+    C175 262 185 278 200 290Z
+  " fill="url(#flameGrad)" fill-rule="evenodd"/>
+  <!-- FHIR text -->
+  <text x="200" y="365" font-family="Arial, Helvetica, sans-serif" font-size="52" font-weight="bold" text-anchor="middle" fill="#2c3e50">FHIR</text>
+  <text x="200" y="392" font-family="Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" fill="#7f8c8d">R4</text>
+</svg>
