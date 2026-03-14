@@ -16,7 +16,7 @@ Field name verification (camelCase in FHIR JSON → snake_case in schema):
     class.name     → class_coverage[].name
   subrogation      → subrogation
 """
-from pyspark.sql.types import ArrayType, BooleanType, IntegerType, StringType, StructType
+from pyspark.sql.types import ArrayType, BooleanType, LongType, StringType, StructType
 
 import databricks.labs.community_connector.sources.fhir.profiles.base_r4  # noqa: F401
 from databricks.labs.community_connector.sources.fhir.profiles import get_schema, extract
@@ -78,7 +78,7 @@ def test_coverage_subrogation_is_boolean():
 def test_coverage_order_is_integer():
     schema = get_schema("Coverage", "base_r4")
     f = next(f for f in schema.fields if f.name == "order")
-    assert isinstance(f.dataType, IntegerType)
+    assert isinstance(f.dataType, LongType)
 
 
 def test_coverage_policy_holder_exists():

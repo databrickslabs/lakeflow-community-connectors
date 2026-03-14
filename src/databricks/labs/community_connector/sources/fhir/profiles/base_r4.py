@@ -12,7 +12,7 @@ Do NOT import base_r4 from profiles/__init__.py (would cause circular import).
 """
 
 from pyspark.sql.types import (
-    ArrayType, BooleanType, DoubleType, IntegerType, StringType,
+    ArrayType, BooleanType, DoubleType, LongType, StringType,
     StructField, StructType, TimestampType,
 )
 
@@ -116,7 +116,7 @@ _OBSERVATION_SCHEMA = _s(
     _f("value_codeable_concept", CODEABLE_CONCEPT),
     _f("value_string", StringType()),
     _f("value_boolean", BooleanType()),
-    _f("value_integer", IntegerType()),
+    _f("value_integer", LongType()),
     _f("data_absent_reason", CODEABLE_CONCEPT),
     _f("interpretation", ArrayType(CODEABLE_CONCEPT)),
     _f("body_site", CODEABLE_CONCEPT),
@@ -322,7 +322,7 @@ _ENCOUNTER_PARTICIPANT = StructType([
 _ENCOUNTER_DIAGNOSIS = StructType([
     _f("condition", REFERENCE),
     _f("use", CODEABLE_CONCEPT),
-    _f("rank", IntegerType()),
+    _f("rank", LongType()),
 ])
 
 _ENCOUNTER_HOSPITALIZATION = StructType([
@@ -554,7 +554,7 @@ def _diagnostic_report(r: dict) -> dict:
 
 _DISPENSE_REQUEST = StructType([
     _f("validity_period", PERIOD),
-    _f("number_of_repeats_allowed", IntegerType()),
+    _f("number_of_repeats_allowed", LongType()),
     _f("quantity_value", DoubleType()),
     _f("quantity_unit", StringType()),
     _f("expected_supply_duration_value", DoubleType()),
@@ -633,9 +633,9 @@ _PROTOCOL_APPLIED = StructType([
     _f("series", StringType()),
     _f("authority", REFERENCE),
     _f("target_disease", ArrayType(CODEABLE_CONCEPT)),
-    _f("dose_number_positive_int", IntegerType()),
+    _f("dose_number_positive_int", LongType()),
     _f("dose_number_string", StringType()),
-    _f("series_doses_positive_int", IntegerType()),
+    _f("series_doses_positive_int", LongType()),
     _f("series_doses_string", StringType()),
 ])
 
@@ -734,7 +734,7 @@ _COVERAGE_SCHEMA = _s(
     _f("period", PERIOD),
     _f("payor", ArrayType(REFERENCE)),
     _f("class_coverage", ArrayType(_COVERAGE_CLASS)),
-    _f("order", IntegerType()),
+    _f("order", LongType()),
     _f("network", StringType()),
     _f("subrogation", BooleanType()),
 )

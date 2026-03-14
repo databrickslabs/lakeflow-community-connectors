@@ -18,7 +18,7 @@ Field name verification (camelCase in FHIR JSON → snake_case in schema):
     expectedSupplyDuration  → expected_supply_duration_value / _unit
   substitution.allowedBoolean → substitution_allowed_boolean
 """
-from pyspark.sql.types import ArrayType, BooleanType, DoubleType, IntegerType, StringType, StructType
+from pyspark.sql.types import ArrayType, BooleanType, DoubleType, LongType, StringType, StructType
 
 import databricks.labs.community_connector.sources.fhir.profiles.base_r4  # noqa: F401
 from databricks.labs.community_connector.sources.fhir.profiles import get_schema, extract
@@ -81,7 +81,7 @@ def test_medication_request_dispense_request_number_of_repeats_is_integer():
     schema = get_schema("MedicationRequest", "base_r4")
     f = next(f for f in schema.fields if f.name == "dispense_request")
     rpt = next(sf for sf in f.dataType.fields if sf.name == "number_of_repeats_allowed")
-    assert isinstance(rpt.dataType, IntegerType)
+    assert isinstance(rpt.dataType, LongType)
 
 
 def test_medication_request_dispense_request_quantity_value_is_double():

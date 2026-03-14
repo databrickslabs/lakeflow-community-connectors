@@ -17,7 +17,7 @@ Field name verification (camelCase in FHIR JSON → snake_case in schema):
   dischargeDisposition → discharge_disposition  (on hospitalization)
   physicalType      → physical_type      (on location)
 """
-from pyspark.sql.types import ArrayType, IntegerType, StringType, StructType
+from pyspark.sql.types import ArrayType, LongType, StringType, StructType
 
 import databricks.labs.community_connector.sources.fhir.profiles.base_r4  # noqa: F401
 from databricks.labs.community_connector.sources.fhir.profiles import get_schema, extract
@@ -76,7 +76,7 @@ def test_encounter_diagnosis_rank_is_integer():
     schema = get_schema("Encounter", "base_r4")
     f = next(f for f in schema.fields if f.name == "diagnosis")
     rank_field = next(sf for sf in f.dataType.elementType.fields if sf.name == "rank")
-    assert isinstance(rank_field.dataType, IntegerType)
+    assert isinstance(rank_field.dataType, LongType)
 
 
 def test_encounter_hospitalization_is_struct_with_fields():

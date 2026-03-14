@@ -19,7 +19,7 @@ Field name verification (camelCase in FHIR JSON → snake_case in schema):
   derivedFrom       → derived_from
 """
 from pyspark.sql.types import (
-    ArrayType, BooleanType, IntegerType, StringType, StructType, TimestampType,
+    ArrayType, BooleanType, LongType, StringType, StructType, TimestampType,
 )
 
 import databricks.labs.community_connector.sources.fhir.profiles.base_r4  # noqa: F401
@@ -90,7 +90,7 @@ def test_observation_value_boolean_is_boolean():
 def test_observation_value_integer_is_integer():
     schema = get_schema("Observation", "base_r4")
     f = next(f for f in schema.fields if f.name == "value_integer")
-    assert isinstance(f.dataType, IntegerType)
+    assert isinstance(f.dataType, LongType)
 
 
 def test_observation_value_codeable_concept_is_struct():
