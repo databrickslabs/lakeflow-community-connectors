@@ -616,3 +616,416 @@ def _medication_request(r: dict) -> dict:
         } if dr else None,
         "substitution_allowed_boolean": sub.get("allowedBoolean"),
     }
+
+
+# ─── Immunization ─────────────────────────────────────────────────────────────
+# FHIR R4: https://hl7.org/fhir/R4/immunization.html
+# UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-Immunization v2.4.0
+# MS: status(R), vaccineCode(R), patient(R), occurrence[x](R), manufacturer, lotNumber, doseQuantity
+# occurrence[x]: occurrenceDateTime | occurrenceString
+
+_IMMUNIZATION_PERFORMER = StructType([
+    _f("function", CODEABLE_CONCEPT),
+    _f("actor", REFERENCE),
+])
+
+_PROTOCOL_APPLIED = StructType([
+    _f("series", StringType()),
+    _f("authority", REFERENCE),
+    _f("target_disease", ArrayType(CODEABLE_CONCEPT)),
+    _f("dose_number_positive_int", IntegerType()),
+    _f("dose_number_string", StringType()),
+    _f("series_doses_positive_int", IntegerType()),
+    _f("series_doses_string", StringType()),
+])
+
+_IMMUNIZATION_SCHEMA = _s(
+    _f("identifier", ArrayType(IDENTIFIER)),
+    _f("status", StringType()),
+    _f("status_reason", CODEABLE_CONCEPT),
+    _f("vaccine_code", CODEABLE_CONCEPT),
+    _f("patient", REFERENCE),
+    _f("encounter", REFERENCE),
+    _f("occurrence_datetime", TimestampType()),
+    _f("occurrence_string", StringType()),
+    _f("recorded", StringType()),
+    _f("primary_source", BooleanType()),
+    _f("manufacturer", REFERENCE),
+    _f("lot_number", StringType()),
+    _f("expiration_date", StringType()),
+    _f("site", CODEABLE_CONCEPT),
+    _f("route", CODEABLE_CONCEPT),
+    _f("dose_quantity", QUANTITY),
+    _f("performer", ArrayType(_IMMUNIZATION_PERFORMER)),
+    _f("reason_code", ArrayType(CODEABLE_CONCEPT)),
+    _f("reason_reference", ArrayType(REFERENCE)),
+    _f("is_subpotent", BooleanType()),
+    _f("program_eligibility", ArrayType(CODEABLE_CONCEPT)),
+    _f("funding_source", CODEABLE_CONCEPT),
+    _f("protocol_applied", ArrayType(_PROTOCOL_APPLIED)),
+)
+
+
+def _extract_protocol_applied(obj: dict) -> dict:
+    return {
+        "series": obj.get("series"),
+        "authority": extract_reference(obj.get("authority")),
+        "target_disease": [extract_codeable_concept(td) for td in (obj.get("targetDisease") or [])],
+        "dose_number_positive_int": obj.get("doseNumberPositiveInt"),
+        "dose_number_string": obj.get("doseNumberString"),
+        "series_doses_positive_int": obj.get("seriesDosesPositiveInt"),
+        "series_doses_string": obj.get("seriesDosesString"),
+    }
+
+
+@register("Immunization", "base_r4", _IMMUNIZATION_SCHEMA)
+def _immunization(r: dict) -> dict:
+    return {
+        "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
+        "status": r.get("status"),
+        "status_reason": extract_codeable_concept(r.get("statusReason")),
+        "vaccine_code": extract_codeable_concept(r.get("vaccineCode")),
+        "patient": extract_reference(r.get("patient")),
+        "encounter": extract_reference(r.get("encounter")),
+        "occurrence_datetime": r.get("occurrenceDateTime"),
+        "occurrence_string": r.get("occurrenceString"),
+        "recorded": r.get("recorded"),
+        "primary_source": r.get("primarySource"),
+        "manufacturer": extract_reference(r.get("manufacturer")),
+        "lot_number": r.get("lotNumber"),
+        "expiration_date": r.get("expirationDate"),
+        "site": extract_codeable_concept(r.get("site")),
+        "route": extract_codeable_concept(r.get("route")),
+        "dose_quantity": extract_quantity(r.get("doseQuantity")),
+        "performer": [
+            {"function": extract_codeable_concept(p.get("function")), "actor": extract_reference(p.get("actor"))}
+            for p in (r.get("performer") or [])
+        ],
+        "reason_code": [extract_codeable_concept(rc) for rc in (r.get("reasonCode") or [])],
+        "reason_reference": [extract_reference(rr) for rr in (r.get("reasonReference") or [])],
+        "is_subpotent": r.get("isSubpotent"),
+        "program_eligibility": [extract_codeable_concept(pe) for pe in (r.get("programEligibility") or [])],
+        "funding_source": extract_codeable_concept(r.get("fundingSource")),
+        "protocol_applied": [_extract_protocol_applied(pa) for pa in (r.get("protocolApplied") or [])],
+    }
+
+
+# ─── Coverage ─────────────────────────────────────────────────────────────────
+# FHIR R4: https://hl7.org/fhir/R4/coverage.html
+# No UK Core profile — base R4 is authoritative
+# Required: status(R), beneficiary(R), payor(R 1..*)
+# NOTE: FHIR JSON field is "class" — use r.get("class") in extractor
+_COVERAGE_CLASS = StructType([
+    _f("type", CODEABLE_CONCEPT),
+    _f("value", StringType()),
+    _f("name", StringType()),
+])
+
+_COVERAGE_SCHEMA = _s(
+    _f("identifier", ArrayType(IDENTIFIER)),
+    _f("status", StringType()),
+    _f("type", CODEABLE_CONCEPT),
+    _f("policy_holder", REFERENCE),
+    _f("subscriber", REFERENCE),
+    _f("subscriber_id", StringType()),
+    _f("beneficiary", REFERENCE),
+    _f("dependent", StringType()),
+    _f("relationship", CODEABLE_CONCEPT),
+    _f("period", PERIOD),
+    _f("payor", ArrayType(REFERENCE)),
+    _f("class_coverage", ArrayType(_COVERAGE_CLASS)),
+    _f("order", IntegerType()),
+    _f("network", StringType()),
+    _f("subrogation", BooleanType()),
+)
+
+
+@register("Coverage", "base_r4", _COVERAGE_SCHEMA)
+def _coverage(r: dict) -> dict:
+    return {
+        "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
+        "status": r.get("status"),
+        "type": extract_codeable_concept(r.get("type")),
+        "policy_holder": extract_reference(r.get("policyHolder")),
+        "subscriber": extract_reference(r.get("subscriber")),
+        "subscriber_id": r.get("subscriberId"),
+        "beneficiary": extract_reference(r.get("beneficiary")),
+        "dependent": r.get("dependent"),
+        "relationship": extract_codeable_concept(r.get("relationship")),
+        "period": extract_period(r.get("period")),
+        "payor": [extract_reference(p) for p in (r.get("payor") or [])],
+        "class_coverage": [
+            {"type": extract_codeable_concept(c.get("type")), "value": c.get("value"), "name": c.get("name")}
+            for c in (r.get("class") or [])
+        ],
+        "order": r.get("order"),
+        "network": r.get("network"),
+        "subrogation": r.get("subrogation"),
+    }
+
+
+# ─── CarePlan ─────────────────────────────────────────────────────────────────
+# FHIR R4: https://hl7.org/fhir/R4/careplan.html
+# UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-CarePlan v2.2.0
+# UK Core adds minimal constraints only. Required: status(R), intent(R), subject(R)
+_CARE_PLAN_ACTIVITY = StructType([
+    _f("reference", REFERENCE),
+    _f("detail_status", StringType()),
+    _f("detail_code", CODEABLE_CONCEPT),
+    _f("detail_description", StringType()),
+])
+
+_CARE_PLAN_SCHEMA = _s(
+    _f("identifier", ArrayType(IDENTIFIER)),
+    _f("status", StringType()),
+    _f("intent", StringType()),
+    _f("category", ArrayType(CODEABLE_CONCEPT)),
+    _f("title", StringType()),
+    _f("description", StringType()),
+    _f("subject", REFERENCE),
+    _f("encounter", REFERENCE),
+    _f("period", PERIOD),
+    _f("created", StringType()),
+    _f("author", REFERENCE),
+    _f("care_team", ArrayType(REFERENCE)),
+    _f("addresses", ArrayType(REFERENCE)),
+    _f("goal", ArrayType(REFERENCE)),
+    _f("activity", ArrayType(_CARE_PLAN_ACTIVITY)),
+    _f("note", ArrayType(ANNOTATION)),
+)
+
+
+@register("CarePlan", "base_r4", _CARE_PLAN_SCHEMA)
+def _care_plan(r: dict) -> dict:
+    def _extract_activity(obj: dict) -> dict:
+        detail = obj.get("detail") or {}
+        return {
+            "reference": extract_reference(obj.get("reference")),
+            "detail_status": detail.get("status"),
+            "detail_code": extract_codeable_concept(detail.get("code")),
+            "detail_description": detail.get("description"),
+        }
+    return {
+        "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
+        "status": r.get("status"),
+        "intent": r.get("intent"),
+        "category": [extract_codeable_concept(c) for c in (r.get("category") or [])],
+        "title": r.get("title"),
+        "description": r.get("description"),
+        "subject": extract_reference(r.get("subject")),
+        "encounter": extract_reference(r.get("encounter")),
+        "period": extract_period(r.get("period")),
+        "created": r.get("created"),
+        "author": extract_reference(r.get("author")),
+        "care_team": [extract_reference(ct) for ct in (r.get("careTeam") or [])],
+        "addresses": [extract_reference(a) for a in (r.get("addresses") or [])],
+        "goal": [extract_reference(g) for g in (r.get("goal") or [])],
+        "activity": [_extract_activity(a) for a in (r.get("activity") or [])],
+        "note": [extract_annotation(n) for n in (r.get("note") or [])],
+    }
+
+
+# ─── Goal ─────────────────────────────────────────────────────────────────────
+# FHIR R4: https://hl7.org/fhir/R4/goal.html
+# No UK Core profile — base R4 is authoritative
+# Required: lifecycleStatus(R), description(R), subject(R)
+# start[x]: startDate | startCodeableConcept
+_GOAL_TARGET = StructType([
+    _f("measure", CODEABLE_CONCEPT),
+    _f("detail_quantity", QUANTITY),
+    _f("detail_string", StringType()),
+    _f("detail_boolean", BooleanType()),
+    _f("due_date", StringType()),
+])
+
+_GOAL_SCHEMA = _s(
+    _f("identifier", ArrayType(IDENTIFIER)),
+    _f("lifecycle_status", StringType()),
+    _f("achievement_status", CODEABLE_CONCEPT),
+    _f("category", ArrayType(CODEABLE_CONCEPT)),
+    _f("priority", CODEABLE_CONCEPT),
+    _f("description", CODEABLE_CONCEPT),
+    _f("subject", REFERENCE),
+    _f("start_date", StringType()),
+    _f("start_codeable_concept", CODEABLE_CONCEPT),
+    _f("target", ArrayType(_GOAL_TARGET)),
+    _f("status_date", StringType()),
+    _f("status_reason", StringType()),
+    _f("expressed_by", REFERENCE),
+    _f("addresses", ArrayType(REFERENCE)),
+    _f("note", ArrayType(ANNOTATION)),
+)
+
+
+def _extract_goal_target(obj: dict) -> dict:
+    return {
+        "measure": extract_codeable_concept(obj.get("measure")),
+        "detail_quantity": extract_quantity(obj.get("detailQuantity")),
+        "detail_string": obj.get("detailString"),
+        "detail_boolean": obj.get("detailBoolean"),
+        "due_date": obj.get("dueDate"),
+    }
+
+
+@register("Goal", "base_r4", _GOAL_SCHEMA)
+def _goal(r: dict) -> dict:
+    return {
+        "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
+        "lifecycle_status": r.get("lifecycleStatus"),
+        "achievement_status": extract_codeable_concept(r.get("achievementStatus")),
+        "category": [extract_codeable_concept(c) for c in (r.get("category") or [])],
+        "priority": extract_codeable_concept(r.get("priority")),
+        "description": extract_codeable_concept(r.get("description")),
+        "subject": extract_reference(r.get("subject")),
+        "start_date": r.get("startDate"),
+        "start_codeable_concept": extract_codeable_concept(r.get("startCodeableConcept")),
+        "target": [_extract_goal_target(t) for t in (r.get("target") or [])],
+        "status_date": r.get("statusDate"),
+        "status_reason": r.get("statusReason"),
+        "expressed_by": extract_reference(r.get("expressedBy")),
+        "addresses": [extract_reference(a) for a in (r.get("addresses") or [])],
+        "note": [extract_annotation(n) for n in (r.get("note") or [])],
+    }
+
+
+# ─── Device ───────────────────────────────────────────────────────────────────
+# FHIR R4: https://hl7.org/fhir/R4/device.html
+# UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-Device v1.2.0
+# MS fields (UK Core): status, type
+_DEVICE_NAME = StructType([
+    _f("name", StringType()),
+    _f("type", StringType()),
+])
+
+_DEVICE_SCHEMA = _s(
+    _f("identifier", ArrayType(IDENTIFIER)),
+    _f("status", StringType()),
+    _f("status_reason", ArrayType(CODEABLE_CONCEPT)),
+    _f("manufacturer", StringType()),
+    _f("manufacture_date", StringType()),
+    _f("expiration_date", StringType()),
+    _f("lot_number", StringType()),
+    _f("serial_number", StringType()),
+    _f("device_name", ArrayType(_DEVICE_NAME)),
+    _f("model_number", StringType()),
+    _f("type", CODEABLE_CONCEPT),
+    _f("patient", REFERENCE),
+    _f("owner", REFERENCE),
+    _f("contact", ArrayType(CONTACT_POINT)),
+    _f("note", ArrayType(ANNOTATION)),
+    _f("safety", ArrayType(CODEABLE_CONCEPT)),
+)
+
+
+@register("Device", "base_r4", _DEVICE_SCHEMA)
+def _device(r: dict) -> dict:
+    return {
+        "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
+        "status": r.get("status"),
+        "status_reason": [extract_codeable_concept(sr) for sr in (r.get("statusReason") or [])],
+        "manufacturer": r.get("manufacturer"),
+        "manufacture_date": r.get("manufactureDate"),
+        "expiration_date": r.get("expirationDate"),
+        "lot_number": r.get("lotNumber"),
+        "serial_number": r.get("serialNumber"),
+        "device_name": [{"name": dn.get("name"), "type": dn.get("type")} for dn in (r.get("deviceName") or [])],
+        "model_number": r.get("modelNumber"),
+        "type": extract_codeable_concept(r.get("type")),
+        "patient": extract_reference(r.get("patient")),
+        "owner": extract_reference(r.get("owner")),
+        "contact": [extract_contact_point(cp) for cp in (r.get("contact") or [])],
+        "note": [extract_annotation(n) for n in (r.get("note") or [])],
+        "safety": [extract_codeable_concept(s) for s in (r.get("safety") or [])],
+    }
+
+
+# ─── DocumentReference ────────────────────────────────────────────────────────
+# FHIR R4: https://hl7.org/fhir/R4/documentreference.html
+# UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-DocumentReference v2.2.0
+# MS: identifier, status(R), type, category, subject, date, author, description, content(R 1..*)
+_DOC_REF_RELATES_TO = StructType([
+    _f("code", StringType()),
+    _f("target", REFERENCE),
+])
+
+_DOC_REF_CONTENT = StructType([
+    _f("attachment_url", StringType()),
+    _f("attachment_title", StringType()),
+    _f("attachment_content_type", StringType()),
+    _f("format_code", StringType()),
+    _f("format_system", StringType()),
+])
+
+_DOC_REF_CONTEXT = StructType([
+    _f("encounter", ArrayType(REFERENCE)),
+    _f("event", ArrayType(CODEABLE_CONCEPT)),
+    _f("period", PERIOD),
+    _f("facility_type", CODEABLE_CONCEPT),
+    _f("practice_setting", CODEABLE_CONCEPT),
+])
+
+_DOCUMENT_REFERENCE_SCHEMA = _s(
+    _f("identifier", ArrayType(IDENTIFIER)),
+    _f("status", StringType()),
+    _f("doc_status", StringType()),
+    _f("type", CODEABLE_CONCEPT),
+    _f("category", ArrayType(CODEABLE_CONCEPT)),
+    _f("subject", REFERENCE),
+    _f("date", TimestampType()),
+    _f("author", ArrayType(REFERENCE)),
+    _f("authenticator", REFERENCE),
+    _f("custodian", REFERENCE),
+    _f("relates_to", ArrayType(_DOC_REF_RELATES_TO)),
+    _f("description", StringType()),
+    _f("security_label", ArrayType(CODEABLE_CONCEPT)),
+    _f("content", ArrayType(_DOC_REF_CONTENT)),
+    _f("context", _DOC_REF_CONTEXT),
+)
+
+
+def _extract_doc_ref_content(obj: dict) -> dict:
+    att = obj.get("attachment") or {}
+    fmt = obj.get("format") or {}
+    return {
+        "attachment_url": att.get("url"),
+        "attachment_title": att.get("title"),
+        "attachment_content_type": att.get("contentType"),
+        "format_code": fmt.get("code"),
+        "format_system": fmt.get("system"),
+    }
+
+
+def _extract_doc_ref_context(obj: dict | None) -> dict | None:
+    if not obj:
+        return None
+    return {
+        "encounter": [extract_reference(e) for e in (obj.get("encounter") or [])],
+        "event": [extract_codeable_concept(ev) for ev in (obj.get("event") or [])],
+        "period": extract_period(obj.get("period")),
+        "facility_type": extract_codeable_concept(obj.get("facilityType")),
+        "practice_setting": extract_codeable_concept(obj.get("practiceSetting")),
+    }
+
+
+@register("DocumentReference", "base_r4", _DOCUMENT_REFERENCE_SCHEMA)
+def _document_reference(r: dict) -> dict:
+    return {
+        "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
+        "status": r.get("status"),
+        "doc_status": r.get("docStatus"),
+        "type": extract_codeable_concept(r.get("type")),
+        "category": [extract_codeable_concept(c) for c in (r.get("category") or [])],
+        "subject": extract_reference(r.get("subject")),
+        "date": r.get("date"),
+        "author": [extract_reference(a) for a in (r.get("author") or [])],
+        "authenticator": extract_reference(r.get("authenticator")),
+        "custodian": extract_reference(r.get("custodian")),
+        "relates_to": [
+            {"code": rt.get("code"), "target": extract_reference(rt.get("target"))}
+            for rt in (r.get("relatesTo") or [])
+        ],
+        "description": r.get("description"),
+        "security_label": [extract_codeable_concept(sl) for sl in (r.get("securityLabel") or [])],
+        "content": [_extract_doc_ref_content(c) for c in (r.get("content") or [])],
+        "context": _extract_doc_ref_context(r.get("context")),
+    }
