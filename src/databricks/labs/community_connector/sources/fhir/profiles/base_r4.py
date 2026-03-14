@@ -496,3 +496,50 @@ def _procedure(r: dict) -> dict:
         "follow_up": [extract_codeable_concept(f) for f in (r.get("followUp") or [])],
         "note": [extract_annotation(n) for n in (r.get("note") or [])],
     }
+
+
+# ─── DiagnosticReport ─────────────────────────────────────────────────────────
+# FHIR R4: https://hl7.org/fhir/R4/diagnosticreport.html
+# UK Core: https://fhir.hl7.org.uk/StructureDefinition/UKCore-DiagnosticReport v2.5.0
+# MS fields: status(R), category, code(R), subject, encounter, issued, result
+# effective[x]: effectiveDateTime | effectivePeriod
+_DIAGNOSTIC_REPORT_SCHEMA = _s(
+    _f("identifier", ArrayType(IDENTIFIER)),
+    _f("based_on", ArrayType(REFERENCE)),
+    _f("status", StringType()),
+    _f("category", ArrayType(CODEABLE_CONCEPT)),
+    _f("code", CODEABLE_CONCEPT),
+    _f("subject", REFERENCE),
+    _f("encounter", REFERENCE),
+    _f("effective_datetime", TimestampType()),
+    _f("effective_period", PERIOD),
+    _f("issued", TimestampType()),
+    _f("performer", ArrayType(REFERENCE)),
+    _f("results_interpreter", ArrayType(REFERENCE)),
+    _f("specimen", ArrayType(REFERENCE)),
+    _f("result", ArrayType(REFERENCE)),
+    _f("conclusion", StringType()),
+    _f("conclusion_code", ArrayType(CODEABLE_CONCEPT)),
+)
+
+
+@register("DiagnosticReport", "base_r4", _DIAGNOSTIC_REPORT_SCHEMA)
+def _diagnostic_report(r: dict) -> dict:
+    return {
+        "identifier": [extract_identifier(i) for i in (r.get("identifier") or [])],
+        "based_on": [extract_reference(b) for b in (r.get("basedOn") or [])],
+        "status": r.get("status"),
+        "category": [extract_codeable_concept(c) for c in (r.get("category") or [])],
+        "code": extract_codeable_concept(r.get("code")),
+        "subject": extract_reference(r.get("subject")),
+        "encounter": extract_reference(r.get("encounter")),
+        "effective_datetime": r.get("effectiveDateTime"),
+        "effective_period": extract_period(r.get("effectivePeriod")),
+        "issued": r.get("issued"),
+        "performer": [extract_reference(p) for p in (r.get("performer") or [])],
+        "results_interpreter": [extract_reference(ri) for ri in (r.get("resultsInterpreter") or [])],
+        "specimen": [extract_reference(s) for s in (r.get("specimen") or [])],
+        "result": [extract_reference(res) for res in (r.get("result") or [])],
+        "conclusion": r.get("conclusion"),
+        "conclusion_code": [extract_codeable_concept(cc) for cc in (r.get("conclusionCode") or [])],
+    }
