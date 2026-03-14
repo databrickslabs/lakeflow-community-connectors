@@ -7,7 +7,7 @@ disable-model-invocation: true
 # Implement the Connector 
 
 ## Goal
-Implement the Python connector for **{{source_name}}** that conforms exactly to the interface defined in  
+Implement the Python connector for **{{source_name}}** that conforms exactly to the `LakeflowConnect` interface defined in  
 [lakeflow_connect.py](../src/databricks/labs/community_connector/interface/lakeflow_connect.py). The implementation should be based on the source API documentation in `src/databricks/labs/community_connector/sources/{source_name}/{source_name}_api_doc.md` produced by the `research-source-api` skill.
 
 **CRITICAL REQUIREMENT:** Refer to `src/databricks/labs/community_connector/sources/example/example.py` for concrete examples of different patterns. You should follow the patterns demonstrated in the example connector.
