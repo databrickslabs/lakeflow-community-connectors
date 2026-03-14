@@ -1,0 +1,15 @@
+{
+    "studies": {
+        "max_records_per_batch": "3",
+        "page_size": "3"
+    },
+    "series": {
+        "max_records_per_batch": "3",
+        "page_size": "3"
+    },
+    "instances": {
+        "max_records_per_batch": "3",
+        "page_size": "3"
+    },
+    "diagnostics": {}
+}
