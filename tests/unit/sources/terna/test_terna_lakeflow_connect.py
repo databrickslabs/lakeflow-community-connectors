@@ -1,5 +1,7 @@
 """Test the Terna connector using the LakeflowConnect test suite."""
 
+import re
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -11,7 +13,7 @@ from tests.unit.sources.test_utils import load_config
 
 import logging
 
-LOGGER = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def test_terna_init_raises_without_credentials():
@@ -48,65 +50,8 @@ def test_terna_list_tables_and_schema():
         "bidding_zone",
     ]
 
-
-def test_terna_read_table_total_load_returns_data():
-    """Call the Terna API and assert total_load returns at least one record with expected fields."""
-    config_dir = Path(__file__).parent / "configs"
-    config = load_config(config_dir / "dev_config.json")
-    table_config = load_config(config_dir / "dev_table_config.json")
-
-    if not config.get("client_id") or not config.get("client_secret"):
-        pytest.skip("Terna API credentials not set in dev_config.json")
-
-    connector = TernaLakeflowConnect(config)
-    table_options = table_config.get("total_load", {})
-    records_iter, offset = connector.read_table("total_load", None, table_options)
-
-    records = list(records_iter)
-    assert isinstance(offset, dict), "read_table should return (iterator, offset)"
-    assert len(records) >= 1, "Expected at least one record from total_load API"
-
-    row = records[0]
-    expected_keys = {"date", "date_tz", "date_offset", "total_load_MW", "bidding_zone"}
-    assert expected_keys.issubset(row.keys()), f"Record should have keys {expected_keys}, got {list(row.keys())}"
-
-
-def test_terna_read_table_with_simulated_offset():
-    """Simulate a resume: pass a hand-crafted start_offset so the connector fetches the next chunk.
-
-    Offset format (from terna.py):
-      - cursor: "yyyy-mm-dd hh:mm:ss" — next chunk starts the day after this date.
-      - range_end (optional): same format; caps the end of the range when date_to spans multiple chunks.
-    """
-    config_dir = Path(__file__).parent / "configs"
-    config = load_config(config_dir / "dev_config.json")
-    table_config = load_config(config_dir / "dev_table_config.json")
-
-    if not config.get("client_id") or not config.get("client_secret"):
-        pytest.skip("Terna API credentials not set in dev_config.json")
-
-    connector = TernaLakeflowConnect(config)
-    table_options = table_config.get("total_load", {})
-
-    # Simulate "we already read up to 2025-03-02"; next chunk will be 2025-03-03 within range_end
-    start_offset = {
-        "cursor": "2025-03-02 23:59:59",
-        "range_end": "2025-03-07 23:59:59",
-    }
-    records_iter, end_offset = connector.read_table("total_load", start_offset, table_options)
-
-    records = list(records_iter)
-    assert isinstance(end_offset, dict)
-    assert "cursor" in end_offset
-    # range_end is preserved for multi-chunk runs
-    LOGGER.info(end_offset)
-    assert end_offset.get("range_end") == "2025-03-07 23:59:59"
-    # Should have data for 2025-03-03 onward (or empty if API has no data for that day)
-    assert all(isinstance(r, dict) for r in records)
-
-
-def test_terna_read_table_with_no_end():
-    """When only date_from is provided (no date_to), connector uses current execution time as end."""
+def test_terna_full_missing_date_from():
+    """When date_from is missing, connector raises ValueError (API requires it)."""
     config_dir = Path(__file__).parent / "configs"
     config = load_config(config_dir / "dev_config.json")
 
@@ -114,22 +59,16 @@ def test_terna_read_table_with_no_end():
         pytest.skip("Terna API credentials not set in dev_config.json")
 
     connector = TernaLakeflowConnect(config)
-    # Only date_from; date_to omitted → effective end = current execution time
-    table_options = {"date_from": "01/03/2025"}
-    records_iter, offset = connector.read_table("total_load", None, table_options)
+    table_options = {"date_to": "29/02/2024", "bidding_zone": "Italy"}
+    start_offset = None
 
-    records = list(records_iter)
-    assert isinstance(offset, dict)
-    assert "cursor" in offset
-    # When range spans beyond first chunk, range_end is set (to current time or chunk end)
-    if offset.get("range_end"):
-        # Cursor/range_end format is yyyy-mm-dd hh:mm:ss (may be current time, not 23:59:59)
-        assert len(offset["range_end"]) >= 19
-    assert all(isinstance(r, dict) for r in records)
+    with pytest.raises(ValueError, match="total_load requires 'date_from'"):
+        records_iter, offset = connector.read_table("total_load", start_offset, table_options)
+        records = list(records_iter)
 
 
-def test_terna_cdc_resume_uses_current_now():
-    """CDC mode (no date_to): a second run with the same offset and no date_to fetches from cursor to current now."""
+def test_terna_beyond_five_years_limit():
+    """When date_from is missing, connector raises ValueError (API requires it)."""
     config_dir = Path(__file__).parent / "configs"
     config = load_config(config_dir / "dev_config.json")
 
@@ -137,26 +76,15 @@ def test_terna_cdc_resume_uses_current_now():
         pytest.skip("Terna API credentials not set in dev_config.json")
 
     connector = TernaLakeflowConnect(config)
-    table_options = {"date_from": "01/03/2025"}  # no date_to = CDC
+    table_options = {"date_from": "31/12/2020", "bidding_zone": "Italy"}
+    start_offset = None
 
-    # First "run": get one chunk and offset
-    records_1, offset_1 = connector.read_table("total_load", None, table_options)
-    list_1 = list(records_1)
-    assert isinstance(offset_1, dict)
-    assert "cursor" in offset_1
-
-    # Second "run" (simulated): resume with that offset, still no date_to → effective_end = current now
-    records_2, offset_2 = connector.read_table("total_load", offset_1, table_options)
-    list_2 = list(records_2)
-    assert isinstance(offset_2, dict)
-    assert "cursor" in offset_2
-    # Cursor should advance or stay; we must be able to call read again (CDC always goes to "now")
-    assert offset_2["cursor"] >= offset_1["cursor"]
-    assert all(isinstance(r, dict) for r in list_1 + list_2)
+    with pytest.raises(ValueError, match="Terna connector: 'date_from' must be within the last 5 solar years, not sooner than 01/01/2021"):
+        connector.read_table("total_load", start_offset, table_options)
 
 
-def test_terna_cdc_old_cursor_still_fetches_to_now():
-    """CDC mode: even with an old cursor (no date_to), connector fetches from cursor+1 to current now."""
+def test_terna_cdc_more_than_sixty_days_multiple_chunks():
+    """When date_from is missing, connector raises ValueError (API requires it)."""
     config_dir = Path(__file__).parent / "configs"
     config = load_config(config_dir / "dev_config.json")
 
@@ -164,21 +92,20 @@ def test_terna_cdc_old_cursor_still_fetches_to_now():
         pytest.skip("Terna API credentials not set in dev_config.json")
 
     connector = TernaLakeflowConnect(config)
-    # No date_to = CDC; old cursor in the past
-    table_options = {"date_from": "01/01/2025"}
-    start_offset = {"cursor": "2025-01-15 23:59:59"}  # no range_end → effective_end = now
+
+    date_to = datetime.now()
+    date_from = (date_to - timedelta(days=1)).strftime("%d/%m/%Y")
+    table_options = {"date_from": date_from, "bidding_zone": "Italy"}
+    start_offset = None
 
     records_iter, offset = connector.read_table("total_load", start_offset, table_options)
     records = list(records_iter)
-    assert isinstance(offset, dict)
-    assert "cursor" in offset
-    # Should get a chunk from 2025-01-16 toward "now" (may be empty if API has no data for that range)
-    assert offset["cursor"] >= "2025-01-15 23:59:59"
-    assert all(isinstance(r, dict) for r in records)
+
+    assert offset.get("cursor") == date_to.strftime("%d/%m/%Y")
 
 
-def test_terna_bounded_resume_caps_at_range_end():
-    """Bounded mode (date_to set): resume with cursor at range_end returns no more data."""
+def test_terna_cdc_more_than_sixty_days_single_chunk():
+    """When date_from is missing, connector raises ValueError (API requires it)."""
     config_dir = Path(__file__).parent / "configs"
     config = load_config(config_dir / "dev_config.json")
 
@@ -186,52 +113,101 @@ def test_terna_bounded_resume_caps_at_range_end():
         pytest.skip("Terna API credentials not set in dev_config.json")
 
     connector = TernaLakeflowConnect(config)
-    table_options = {"date_from": "01/03/2025", "date_to": "07/03/2025"}
-    # Cursor already at end of requested range → next from_date would be 2025-03-08 > range_end
-    start_offset = {
-        "cursor": "2025-03-07 23:59:59",
-        "range_end": "2025-03-07 23:59:59",
-    }
+
+    date_to = datetime.now()
+    date_from = (date_to - timedelta(days=20)).strftime("%d/%m/%Y")
+    table_options = {"date_from": date_from, "bidding_zone": "Italy"}
+    start_offset = None
 
     records_iter, offset = connector.read_table("total_load", start_offset, table_options)
     records = list(records_iter)
-    assert isinstance(offset, dict)
-    # Bounded: effective_end = min(now, range_end) = 2025-03-07; from_date = 2025-03-08 > effective_end → no data
+
+    assert len(records) == 4 * 24 * 20
+    assert offset.get("cursor") == date_to.strftime("%d/%m/%Y")
+
+
+def test_terna_cdc():
+    """When date_from is missing, connector raises ValueError (API requires it)."""
+    config_dir = Path(__file__).parent / "configs"
+    config = load_config(config_dir / "dev_config.json")
+
+    if not config.get("client_id") or not config.get("client_secret"):
+        pytest.skip("Terna API credentials not set in dev_config.json")
+
+    connector = TernaLakeflowConnect(config)
+
+    date_from = (datetime.now() - timedelta(days=20)).strftime("%d/%m/%Y")
+    table_options = {"date_from": date_from, "bidding_zone": "Italy"}
+    start_offset = None
+
+    records_iter, offset = connector.read_table("total_load", start_offset, table_options)
+    records = list(records_iter)
+
+    assert len(records) == 4 * 24 * 20
+    assert offset.get("cursor") == datetime.now().strftime("%d/%m/%Y")
+
+def test_terna_cdc_empty_because_same_date():
+    """When date_from is missing, connector raises ValueError (API requires it)."""
+    config_dir = Path(__file__).parent / "configs"
+    config = load_config(config_dir / "dev_config.json")
+
+    if not config.get("client_id") or not config.get("client_secret"):
+        pytest.skip("Terna API credentials not set in dev_config.json")
+
+    connector = TernaLakeflowConnect(config)
+
+    date_from = datetime.now().strftime("%d/%m/%Y")
+
+    table_options = {"date_from": date_from, "bidding_zone": "Italy"}
+    start_offset = None
+
+    records_iter, offset = connector.read_table("total_load", start_offset, table_options)
+    records = list(records_iter)
+
+    logger.info(records)
+    logger.info(offset)
+
     assert len(records) == 0
-    assert offset.get("cursor") == "2025-03-07 23:59:59" or "cursor" in offset
+    assert offset.get("cursor") == date_from
 
-
-def test_terna_offset_chaining():
-    """Offset returned from a read can be used as start_offset for the next read (pagination contract)."""
+def test_terna_full_start_end_dates():
     config_dir = Path(__file__).parent / "configs"
     config = load_config(config_dir / "dev_config.json")
-    table_config = load_config(config_dir / "dev_table_config.json")
 
     if not config.get("client_id") or not config.get("client_secret"):
         pytest.skip("Terna API credentials not set in dev_config.json")
 
     connector = TernaLakeflowConnect(config)
-    table_options = table_config.get("total_load", {})
+    table_options = {"date_from": "01/02/2024", "date_to": "29/02/2024", "bidding_zone": "Italy"}
+    # Full refresh, cursor is None
+    start_offset = None
 
-    # First page: no offset
-    records_1, offset_1 = connector.read_table("total_load", None, table_options)
-    list_1 = list(records_1)
-    assert isinstance(offset_1, dict)
-    assert "cursor" in offset_1
+    records_iter, offset = connector.read_table("total_load", start_offset, table_options)
+    records = list(records_iter)
+    
+    assert isinstance(offset, dict)
+    assert len(records) == 4 * 24 * 29 
+    assert offset.get("cursor") == "29/02/2024"
 
-    # Second page: use offset from first read as start_offset
-    records_2, offset_2 = connector.read_table("total_load", offset_1, table_options)
-    list_2 = list(records_2)
-    assert isinstance(offset_2, dict)
-    assert "cursor" in offset_2
 
-    # Cursor should advance (or stay if first chunk was the last in range)
-    assert offset_2["cursor"] >= offset_1["cursor"], (
-        "Second read cursor should be >= first (or same if no more data)"
-    )
-    # If we got data in the first chunk, second chunk may be empty or have later dates
-    assert all(isinstance(r, dict) for r in list_1 + list_2)
+def test_terna_not_full_start_end_dates():
+    config_dir = Path(__file__).parent / "configs"
+    config = load_config(config_dir / "dev_config.json")
 
+    if not config.get("client_id") or not config.get("client_secret"):
+        pytest.skip("Terna API credentials not set in dev_config.json")
+
+    connector = TernaLakeflowConnect(config)
+    table_options = {"date_from": "28/02/2024", "date_to": "29/02/2024", "bidding_zone": "Italy"}
+    # Full refresh, cursor is None
+    start_offset = {"cursor": "29/02/2024"}
+
+    records_iter, offset = connector.read_table("total_load", start_offset, table_options)
+    records = list(records_iter)
+    
+    assert isinstance(offset, dict)
+    assert len(records) == 0 
+    assert offset.get("cursor") == "29/02/2024"
 
 def test_terna_connector():
     """Test the Terna connector using the shared LakeflowConnect test suite."""

@@ -36,8 +36,8 @@ RETRIABLE_STATUS_CODES = {429, 500, 502, 503}
 QPS_BACKOFF_SEC = 3.0
 # Terna API allows at most this many days per request; longer ranges are chunked
 TERNA_MAX_DAYS_PER_REQUEST = 60
-# Terna API allows history only up to this many days before the current date
-TERNA_MAX_HISTORY_DAYS = 5 * 365
+# Terna API allows history only within the last N solar years (date_from not sooner than 01/01/(year-N))
+TERNA_MAX_HISTORY_SOLAR_YEARS = 5
 
 
 class TernaLakeflowConnect(LakeflowConnect):
@@ -134,7 +134,7 @@ class TernaLakeflowConnect(LakeflowConnect):
                 self._oauth_token = body.get("access_token")
                 if not self._oauth_token:
                     raise RuntimeError("Terna token response missing access_token")
-                expires_in = int(body.get("expires_in", 300))
+                expires_in = int(body.get("expire_format_api_dates_in", 300))
                 self._oauth_expires_at = now + expires_in
                 return self._oauth_token
             last_error = RuntimeError(
@@ -203,9 +203,14 @@ class TernaLakeflowConnect(LakeflowConnect):
         return dt.strftime("%d/%m/%Y")
 
     @staticmethod
+    def _string_to_datetime(date_string: str) -> datetime:
+        """Format datetime as dd/mm/yyyy for API query params."""
+        return datetime.strptime(date_string, "%d/%m/%Y").replace(tzinfo=timezone.utc)
+
+    @staticmethod
     def _format_cursor(dt: datetime) -> str:
         """Format datetime for cursor/range_end (yyyy-mm-dd hh:mm:ss)."""
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
+        return dt.strftime("%d/%m/%Y")
 
     @staticmethod
     def _default_date_range() -> tuple[datetime, datetime]:
@@ -216,15 +221,16 @@ class TernaLakeflowConnect(LakeflowConnect):
         return start, end
 
     def _check_history_limit(self, from_date: datetime) -> None:
-        """Raise ValueError if from_date is earlier than the API's 5-year history limit."""
+        """Raise ValueError if from_date is earlier than the API's 5 solar-year history limit."""
         now = datetime.now(timezone.utc)
-        min_allowed = (now - timedelta(days=TERNA_MAX_HISTORY_DAYS)).replace(
-            hour=0, minute=0, second=0, microsecond=0
+        min_allowed = datetime(
+            now.year - TERNA_MAX_HISTORY_SOLAR_YEARS, 1, 1, tzinfo=timezone.utc
         )
         if from_date < min_allowed:
             raise ValueError(
-                f"Terna API allows at most {TERNA_MAX_HISTORY_DAYS} days of history "
-                f"(from_date {from_date.strftime('%Y-%m-%d')} is before {min_allowed.strftime('%Y-%m-%d')})"
+                f"Terna API allows history only within the last {TERNA_MAX_HISTORY_SOLAR_YEARS} solar years "
+                f"(date_from not sooner than 01/01/{now.year - TERNA_MAX_HISTORY_SOLAR_YEARS}); "
+                f"got {from_date.strftime('%Y-%m-%d')}"
             )
 
     def _next_chunk(
@@ -239,8 +245,7 @@ class TernaLakeflowConnect(LakeflowConnect):
         each run fetches from the last cursor to current execution time (multiple 60-day
         API calls if needed). When dateTo is set, range is bounded and range_end is used on resume.
         """
-        logger.info("start_offset=%s", start_offset)
-
+        
         # Parse inputs once
         cursor_str = (start_offset or {}).get("cursor") if start_offset else None
         date_from = self._parse_start_offset(cursor_str)
@@ -351,12 +356,20 @@ class TernaLakeflowConnect(LakeflowConnect):
         extra_params: dict[str, str] | None = None,
     ) -> list[dict]:
         """Request one date chunk and return the data array; empty list on error or no data."""
+
+        logger.info(f"Querying data for api {table_name} from: {date_from}, to {date_to}")
+
+        if date_from == date_to:
+            return []
+        
         params = {
             "dateFrom": self._format_api_date(date_from),
             "dateTo": self._format_api_date(date_to),
         }
         if extra_params:
             params.update(extra_params)
+
+        logger.debug(f"Querying data for api {table_name} with params: {params}")
 
         resp = self._request("GET", path, params=params)
         if resp.status_code != 200:
@@ -365,8 +378,10 @@ class TernaLakeflowConnect(LakeflowConnect):
             )
         body = resp.json()
         data = body.get(array_key)
+
         if not isinstance(data, list):
             return []
+
         return data
 
     def _read_total_load(
@@ -375,12 +390,6 @@ class TernaLakeflowConnect(LakeflowConnect):
         table_options: dict[str, str],
     ) -> tuple[Iterator[dict], dict]:
         """Read total_load in one date chunk. Optional table_options: biddingZone (comma or repeated)."""
-
-        chunk_result, range_end_opt = self._next_chunk(start_offset, table_options)
-        if chunk_result is None:
-            return iter([]), start_offset or {}
-
-        from_date, to_date = chunk_result
 
         extra = {}
         bidding_zone = (
@@ -391,26 +400,81 @@ class TernaLakeflowConnect(LakeflowConnect):
         if bidding_zone:
             # API accepts multiple biddingZone params
             extra["biddingZone"] = bidding_zone.strip()
-
-        records = self._read_table_chunk(
-            "total_load",
-            "/load/v2.0/total-load",
-            from_date,
-            to_date,
-            table_options,
-            "total_load",
-            extra_params=extra if extra else None,
+        
+        date_from = (
+            table_options.get("date_from")
+            or table_options.get("dateFrom")
+            or table_options.get("datefrom")
         )
-        if not records:
-            end_offset = {"cursor": self._format_cursor(to_date)}
+
+        date_to = (
+            table_options.get("date_to")
+            or table_options.get("dateTo")
+            or table_options.get("dateto")
+        )
+
+        if date_from is None:
+            raise ValueError(
+                "Terna connector, API total_load requires 'date_from'"
+            )
+
+        date_from = self._string_to_datetime(date_from)
+        now = datetime.now(timezone.utc)
+        min_allowed = datetime(
+            now.year - TERNA_MAX_HISTORY_SOLAR_YEARS, 1, 1, tzinfo=timezone.utc
+        )
+        if date_from < min_allowed:
+            raise ValueError(
+                f"Terna connector: 'date_from' must be within the last {TERNA_MAX_HISTORY_SOLAR_YEARS} solar years, not sooner than 01/01/{now.year - TERNA_MAX_HISTORY_SOLAR_YEARS}"
+            )
+
+        if date_to is not None:
+            date_to = self._string_to_datetime(date_to)
         else:
-            max_date = self._max_date_in_records(records)
-            end_offset = {"cursor": max_date} if max_date else dict(start_offset or {})
-        if range_end_opt is not None:
-            end_offset["range_end"] = range_end_opt
-        elif start_offset and "range_end" in start_offset:
-            end_offset["range_end"] = start_offset["range_end"]
-        return iter(records), end_offset
+            date_to = datetime.now(timezone.utc)
+
+        if self._format_cursor(date_from) == self._format_cursor(date_to):
+            return iter([]), {'cursor': self._format_cursor(date_to)}
+
+        if start_offset is None:
+            # We are in a full refresh. Normally I want all data from date_from to date_to unless date_to is None
+            pass       
+        else:
+            # We are in CDC. date_from is the cursor from the previous run. Normally I want all data from date_from to date_to unless date_to is None
+            date_from = self._string_to_datetime(start_offset.get("cursor"))
+
+            if date_to is None:
+                # We are in the setup where I want all data from date_from to current time
+                pass
+        
+        # INSERT_YOUR_CODE
+        # The API accepts maximum 60 days per request (inclusive). We need to split [date_from, date_to] in chunks.
+        # We'll produce a list of (chunk_start, chunk_end) where each chunk is at most 60 days (special handling for the last chunk).
+
+        chunks = []
+        current_start = date_from
+        while current_start < date_to:
+            current_end = min(current_start + timedelta(days=TERNA_MAX_DAYS_PER_REQUEST - 1), date_to)
+            chunks.append((current_start, current_end))
+            current_start = current_end + timedelta(days=1)
+
+        logger.info(f"Requested more than 60 days, will be split in {len(chunks)} API calls.")
+
+        records = []
+        for chunk in chunks:
+            date_from, date_to = chunk
+            records.extend(self._read_table_chunk(
+                "total_load",
+                "/load/v2.0/total-load",
+                date_from,
+                date_to,
+                table_options,
+                "total_load",
+                extra_params=extra if extra else None,
+            ))
+
+        last_chunk_end = chunks[-1][1]
+        return iter(records), {'cursor': self._format_cursor(last_chunk_end)}
 
     def _read_actual_generation(
         self,
