@@ -29,6 +29,7 @@ from tests.unit.sources.test_suite import LakeflowConnectTests
 
 class TestDICOMwebConnector(LakeflowConnectTests, SupportsPartitionedStreamTests):
     connector_class = DICOMwebLakeflowConnect
+    sample_records = 10
 
     @classmethod
     def setup_class(cls):
@@ -63,6 +64,7 @@ class TestDICOMwebConnectorMocked(LakeflowConnectTests, SupportsPartitionedStrea
 
     connector_class = DICOMwebLakeflowConnect
     config = {"base_url": "https://dicomweb.example.com"}
+    sample_records = 10000  # We allow more records for mock tests
 
     @classmethod
     def setup_class(cls):
