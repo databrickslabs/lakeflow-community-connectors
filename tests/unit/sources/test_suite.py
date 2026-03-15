@@ -141,6 +141,22 @@ class LakeflowConnectTests:
         )
 
     # ------------------------------------------------------------------
+    # test_partition_suite
+    # ------------------------------------------------------------------
+
+    def test_partition_requires_lakeflow_connect(self):
+        """SupportsPartition / SupportsPartitionedStream must also subclass LakeflowConnect."""
+        cls = type(self.connector)
+        if not issubclass(cls, (SupportsPartition, SupportsPartitionedStream)):
+            pytest.skip("Connector does not use partition mixins")
+        assert issubclass(cls, LakeflowConnect), (
+            f"{cls.__name__} extends {SupportsPartition.__name__} or "
+            f"{SupportsPartitionedStream.__name__} but not {LakeflowConnect.__name__}.\n"
+            "  Fix: Use multiple inheritance, e.g. "
+            f"class {cls.__name__}(LakeflowConnect, SupportsPartition): ..."
+        )
+
+    # ------------------------------------------------------------------
     # test_list_tables
     # ------------------------------------------------------------------
 
