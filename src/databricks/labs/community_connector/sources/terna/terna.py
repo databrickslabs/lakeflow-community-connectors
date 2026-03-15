@@ -186,13 +186,13 @@ class TernaLakeflowConnect(LakeflowConnect):
     # -------------------------------------------------------------------------
 
     @staticmethod
-    def _parse_cursor(cursor: str | None) -> datetime | None:
+    def _parse_start_offset(start_offset: dict | None) -> datetime | None:
         """Parse cursor string (yyyy-mm-dd hh:mm:ss) to datetime (UTC)."""
-        if not cursor or not cursor.strip():
+        if not start_offset or not start_offset.strip():
             return None
         try:
             # API returns 'yyyy-mm-dd hh:mm:ss'; treat as naive then assume UTC
-            dt = datetime.strptime(cursor.strip()[:19], "%Y-%m-%d %H:%M:%S")
+            dt = datetime.strptime(start_offset.strip()[:19], "%Y-%m-%d %H:%M:%S")
             return dt.replace(tzinfo=timezone.utc)
         except (ValueError, TypeError):
             return None
@@ -235,64 +235,16 @@ class TernaLakeflowConnect(LakeflowConnect):
         """
         Compute the next date chunk (from_date, to_date) in UTC.
         Returns (None, None) if no more data (cursor already at or past end).
-        dateFrom is mandatory; dateTo is optional. When         dateTo is omitted (CDC mode),
+        dateFrom is mandatory; dateTo is optional. When dateTo is omitted (CDC mode),
         each run fetches from the last cursor to current execution time (multiple 60-day
         API calls if needed). When dateTo is set, range is bounded and range_end is used on resume.
         """
         logger.info("start_offset=%s", start_offset)
-        cursor = (start_offset or {}).get("cursor") if start_offset else None
-        cursor_dt = self._parse_cursor(cursor)
-        range_end_str = (start_offset or {}).get("range_end") if start_offset else None
-        range_end_dt = self._parse_cursor(range_end_str)
 
-        date_to_opt = (
-            table_options.get("date_to")
-            or table_options.get("dateTo")
-            or table_options.get("dateto")
-        )
+        # Parse inputs once
+        cursor_str = (start_offset or {}).get("cursor") if start_offset else None
+        date_from = self._parse_start_offset(cursor_str)
 
-        # Default 60 days per chunk so each run fetches from offset to dateTo/now in 60-day API calls
-        chunk_key = (
-            table_options.get("chunk_days")
-            or table_options.get("chunkdays")
-        )
-        if chunk_key is not None:
-            try:
-                chunk_days = max(1, int(chunk_key))
-            except (TypeError, ValueError):
-                chunk_days = TERNA_MAX_DAYS_PER_REQUEST
-        else:
-            chunk_days = TERNA_MAX_DAYS_PER_REQUEST
-        chunk_days = min(chunk_days, TERNA_MAX_DAYS_PER_REQUEST)
-
-        now = datetime.now(timezone.utc)
-        end_cap = (now - timedelta(days=1)).replace(
-            hour=23, minute=59, second=59, microsecond=0
-        )
-
-        if cursor_dt is not None:
-            # Resume: CDC (no dateTo) → always fetch to current now; bounded (dateTo set) → cap at range_end
-            if date_to_opt:
-                effective_end = (
-                    min(now, range_end_dt.replace(tzinfo=timezone.utc))
-                    if range_end_dt is not None
-                    else now
-                )
-            else:
-                effective_end = now
-            from_date = (cursor_dt.replace(tzinfo=timezone.utc) + timedelta(days=1)).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
-            self._check_history_limit(from_date)
-            if from_date > effective_end:
-                return None, range_end_str
-            chunk_end = (from_date + timedelta(days=chunk_days - 1)).replace(
-                hour=23, minute=59, second=59, microsecond=0
-            )
-            to_date = min(chunk_end, effective_end)
-            return (from_date, to_date), range_end_str
-
-        # First run: date_from (required), date_to (optional; default = current execution time)
         date_from_opt = (
             table_options.get("date_from")
             or table_options.get("dateFrom")
@@ -303,6 +255,39 @@ class TernaLakeflowConnect(LakeflowConnect):
             or table_options.get("dateTo")
             or table_options.get("dateto")
         )
+        range_end_str = (start_offset or {}).get("range_end") if start_offset else None
+        range_end_dt = self._parse_start_offset(range_end_str) if range_end_str else None
+
+        now = datetime.now(timezone.utc)
+        end_cap = (now - timedelta(days=1)).replace(
+            hour=23, minute=59, second=59, microsecond=0
+        )
+
+        if date_from is not None:
+            # Resume: from_date = day after cursor; effective_end from range_end (bounded) or now (CDC)
+            from_date = (date_from.replace(tzinfo=timezone.utc) + timedelta(days=1)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            if range_end_dt is not None:
+                effective_end = min(now, range_end_dt.replace(tzinfo=timezone.utc))
+            else:
+                # CDC: min(now, from_date + TERNA_MAX_DAYS_PER_REQUEST)
+                effective_end = min(
+                    now,
+                    (from_date + timedelta(days=TERNA_MAX_DAYS_PER_REQUEST)).replace(
+                        hour=23, minute=59, second=59, microsecond=0
+                    ),
+                )
+            self._check_history_limit(from_date)
+            if from_date > effective_end:
+                return None, range_end_str
+            chunk_end = (from_date + timedelta(days=TERNA_MAX_DAYS_PER_REQUEST - 1)).replace(
+                hour=23, minute=59, second=59, microsecond=0
+            )
+            to_date = min(chunk_end, effective_end)
+            return (from_date, to_date), range_end_str
+
+        # First run: date_from from options; date_to from options or min(now, from_date + 60d)
         if date_from_opt:
             try:
                 from_date = datetime.strptime(
@@ -316,7 +301,13 @@ class TernaLakeflowConnect(LakeflowConnect):
                     )
                     effective_end = min(to_date_requested, now)
                 else:
-                    effective_end = now
+                    # date_to None: end = min(now, from_date + TERNA_MAX_DAYS_PER_REQUEST)
+                    effective_end = min(
+                        now,
+                        (from_date + timedelta(days=TERNA_MAX_DAYS_PER_REQUEST)).replace(
+                            hour=23, minute=59, second=59, microsecond=0
+                        ),
+                    )
                 self._check_history_limit(from_date)
                 if from_date > effective_end:
                     return None, None
@@ -332,7 +323,8 @@ class TernaLakeflowConnect(LakeflowConnect):
                 return (from_date, to_date), range_end_for_offset
             except (ValueError, TypeError):
                 pass
-        # Fallback when date_from not provided (backward compatibility; contract is dateFrom mandatory, dateTo optional)
+
+        # Fallback when date_from not provided (backward compatibility)
         start_default, end_default = self._default_date_range()
         self._check_history_limit(start_default)
         chunk = (start_default, min(end_default, end_cap))
@@ -385,11 +377,11 @@ class TernaLakeflowConnect(LakeflowConnect):
         """Read total_load in one date chunk. Optional table_options: biddingZone (comma or repeated)."""
 
         chunk_result, range_end_opt = self._next_chunk(start_offset, table_options)
-        
         if chunk_result is None:
             return iter([]), start_offset or {}
 
         from_date, to_date = chunk_result
+
         extra = {}
         bidding_zone = (
             table_options.get("biddingZone")
@@ -497,7 +489,7 @@ class TernaLakeflowConnect(LakeflowConnect):
         start_offset: dict | None,
         table_options: dict[str, str],
     ) -> tuple[Iterator[dict], dict]:
-        """Read physical_foreign_flow in one date chunk. Uses x_api_key if set."""
+        """Read physical_foreign_flow in one date chunk."""
         chunk_result, range_end_opt = self._next_chunk(start_offset, table_options)
         if chunk_result is None:
             return iter([]), start_offset or {}
