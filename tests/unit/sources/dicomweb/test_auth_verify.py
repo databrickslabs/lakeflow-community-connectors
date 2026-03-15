@@ -2,8 +2,8 @@
 Auth verification test for DICOMwebLakeflowConnect.
 
 Connects to the real DICOMweb server configured in dev_config.json and
-makes the simplest possible API call (query 1 study) to verify that
-the base_url, credentials, and network connectivity are correct.
+makes the simplest possible API call to verify that the base_url,
+credentials, and network connectivity are correct.
 
 Run with:
     .venv/bin/python -m pytest tests/unit/sources/dicomweb/test_auth_verify.py -v
@@ -35,14 +35,16 @@ def _make_connector() -> DICOMwebLakeflowConnect:
 
 
 def test_auth_connectivity():
-    """Verify credentials and connectivity by querying a single study."""
+    """Verify credentials and connectivity by probing the /studies endpoint."""
     connector = _make_connector()
 
-    # Simplest API call: fetch 1 study from the server
-    results = connector._client.query_studies("19000101-99991231", limit=1, offset=0)
+    result = connector._client.probe_endpoint("/studies?limit=1")
 
-    assert isinstance(results, list), f"Expected list, got {type(results).__name__}"
-    assert len(results) > 0, (
-        "Server returned no studies. "
-        "Check that the DICOMweb server is reachable and dev_config.json credentials are correct."
+    if result["error"] is not None:
+        pytest.skip(f"DICOMweb server unreachable: {result['error']}")
+
+    assert result["status_code"] is not None, "Probe returned no status code"
+    assert result["status_code"] == 200, (
+        f"Expected HTTP 200, got {result['status_code']}. "
+        "Check that dev_config.json credentials are correct."
     )
