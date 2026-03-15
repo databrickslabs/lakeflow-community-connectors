@@ -725,7 +725,7 @@ def register_lakeflow_source(spark):
             if self._format_cursor(date_from) == self._format_cursor(date_to):
                 return iter([]), {'cursor': self._format_cursor(date_to)}
 
-            if start_offset is None:
+            if start_offset is None or start_offset.get("cursor") is None:
                 # We are in a full refresh. Normally I want all data from date_from to date_to unless date_to is None
                 pass       
             else:
