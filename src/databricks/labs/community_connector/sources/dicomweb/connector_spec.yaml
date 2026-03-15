@@ -1,0 +1,73 @@
+# DICOMweb Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+#
+# The DICOMweb connector supports three authentication methods:
+# 1. None - For open/unauthenticated endpoints
+# 2. Basic - HTTP Basic authentication (username + password)
+# 3. Bearer - Token-based authentication
+
+display_name: DICOMweb VNA/PACS
+connection:
+  # ---------------------------------------------------------------------------
+  # Authentication Methods
+  # Choose ONE of the following authentication approaches
+  # ---------------------------------------------------------------------------
+  auth_methods:
+    - name: none
+      description: >
+        No authentication. Use for open DICOMweb endpoints that do not
+        require credentials (e.g. local Orthanc instances).
+      parameters: []
+
+    - name: basic
+      description: >
+        Authenticate using HTTP Basic authentication with a username
+        and password.
+      parameters:
+        - name: username
+          type: string
+          required: true
+          description: >
+            Username for HTTP Basic authentication.
+
+        - name: password
+          type: string
+          required: true
+          secret: true
+          description: >
+            Password for HTTP Basic authentication.
+
+    - name: bearer
+      description: >
+        Authenticate using a Bearer token for token-based authentication.
+      parameters:
+        - name: token
+          type: string
+          required: true
+          secret: true
+          description: >
+            Bearer token for token-based authentication.
+
+  # ---------------------------------------------------------------------------
+  # Common Parameters (shared across all authentication methods)
+  # ---------------------------------------------------------------------------
+  parameters:
+    - name: base_url
+      type: string
+      required: true
+      description: >
+        Base URL of the DICOMweb endpoint, including any path prefix.
+        Example: https://your-pacs.example.com/dicom-web
+
+    - name: connection_name
+      type: string
+      required: false
+      description: >
+        Human-readable name for this connection, injected as the `connection_name`
+        column in every table (studies, series, instances, diagnostics).
+        Defaults to base_url when not set.
+        Set this when ingesting from multiple DICOMweb sources into the same
+        Delta tables so records can be traced back to their origin connection.
+
+external_options_allowlist: "fetch_dicom_files,dicom_volume_path,lookback_days,page_size,max_records_per_batch,fetch_metadata,wado_mode,dicom_batch_size"

@@ -376,7 +376,7 @@ def detect_auth_method(
 
     provided_params = set(options_dict.keys())
     best_match: Optional[AuthMethod] = None
-    best_match_score = 0
+    best_match_score = -1
 
     for method in parsed_spec.auth_methods:
         # Calculate how many of this method's required params are provided
