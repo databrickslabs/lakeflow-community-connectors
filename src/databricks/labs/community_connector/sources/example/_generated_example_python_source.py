@@ -396,18 +396,6 @@ def register_lakeflow_source(spark):
                 ...
         """
 
-        def __init_subclass__(cls, **kwargs):
-            super().__init_subclass__(**kwargs)
-            # Skip abstract intermediate classes (e.g. SupportsPartitionedStream).
-            # ABCMeta hasn't set __abstractmethods__ yet, so check the class's own dict.
-            if any(getattr(v, "__isabstractmethod__", False) for v in vars(cls).values()):
-                return
-            if not issubclass(cls, LakeflowConnect):
-                raise TypeError(
-                    f"{cls.__name__} uses SupportsPartition but does not extend "
-                    f"LakeflowConnect. Add LakeflowConnect to the base classes."
-                )
-
         @abstractmethod
         def get_partitions(
             self,
