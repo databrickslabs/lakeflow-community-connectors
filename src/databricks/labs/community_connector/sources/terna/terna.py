@@ -302,10 +302,6 @@ class TernaLakeflowConnect(LakeflowConnect):
                 # We are in the setup where I want all data from date_from to current time
                 pass
         
-        # INSERT_YOUR_CODE
-        # The API accepts maximum 60 days per request (inclusive). We need to split [date_from, date_to] in chunks.
-        # We'll produce a list of (chunk_start, chunk_end) where each chunk is at most 60 days (special handling for the last chunk).
-
         chunks = []
         current_start = date_from
         while current_start < date_to:
