@@ -143,7 +143,7 @@ class TernaApiClient:
         date_to: datetime,
         table_options: dict[str, str],
         array_key: str,
-        extra_params: dict[str, str] | None = None,
+        extra_params: dict[str, str | list[str]] | None = None,
     ) -> list[dict[str, Any]]:
         """Request one date chunk and return the data array; empty list on error or no data."""
         logger.info(
