@@ -13,7 +13,7 @@ def test_all_schemas_are_struct_types():
 
 
 def test_all_schemas_have_common_fields():
-    required = {"id", "resourceType", "lastUpdated", "raw_json"}
+    required = {"id", "resourceType", "lastUpdated", "raw_json", "extension"}
     for resource in DEFAULT_RESOURCES:
         names = {f.name for f in get_schema(resource).fields}
         assert required <= names, f"{resource} missing: {required - names}"
@@ -29,7 +29,7 @@ def test_last_updated_is_nullable_timestamp():
 def test_unknown_resource_returns_fallback():
     schema = get_schema("UnknownXYZ")
     assert schema == FALLBACK_SCHEMA
-    assert {f.name for f in schema.fields} == {"id", "resourceType", "lastUpdated", "raw_json"}
+    assert {f.name for f in schema.fields} == {"id", "resourceType", "lastUpdated", "raw_json", "extension"}
 
 
 def test_patient_schema_has_name_as_array():

@@ -9,7 +9,6 @@ Key design decisions (from fhir_api_doc.md):
 - All HTTP calls have timeout=60 to prevent hangs on slow FHIR servers.
 """
 
-import json
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -93,7 +92,8 @@ class SmartAuthClient:
         now = datetime.now(timezone.utc)
         payload = {
             "iss": self._client_id, "sub": self._client_id, "aud": self._token_url,
-            "jti": str(uuid.uuid4()), "iat": now, "exp": now + timedelta(minutes=5),
+            "jti": str(uuid.uuid4()), "iat": now, "nbf": now,
+            "exp": now + timedelta(minutes=5),
         }
         if not self._kid:
             raise ValueError(
@@ -267,7 +267,8 @@ def extract_record(resource: dict, resource_type: str, profile: str = "uk_core")
         "id": resource.get("id"),
         "resourceType": resource.get("resourceType", resource_type),
         "lastUpdated": meta.get("lastUpdated"),
-        "raw_json": json.dumps(resource),
+        "raw_json": resource,
+        "extension": resource.get("extension"),
     }
     record.update(extract(resource, resource_type, profile))
     return record

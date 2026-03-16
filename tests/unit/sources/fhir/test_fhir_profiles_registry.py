@@ -52,7 +52,7 @@ def test_uk_core_overrides_base_r4():
 def test_unknown_resource_returns_fallback_schema():
     result = get_schema("DoesNotExist", "uk_core")
     assert result == FALLBACK_SCHEMA
-    assert {f.name for f in result.fields} == {"id", "resourceType", "lastUpdated", "raw_json"}
+    assert {f.name for f in result.fields} == {"id", "resourceType", "lastUpdated", "raw_json", "extension"}
 
 
 def test_extract_calls_correct_extractor():
@@ -78,7 +78,7 @@ def test_profile_chain_order():
 
 def test_common_fields_present():
     names = {f.name for f in _COMMON_FIELDS}
-    assert names == {"id", "resourceType", "lastUpdated", "raw_json"}
+    assert names == {"id", "resourceType", "lastUpdated", "raw_json", "extension"}
 
 
 def test_fallback_schema_is_struct_type():

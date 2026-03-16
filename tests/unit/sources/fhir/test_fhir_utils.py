@@ -41,7 +41,7 @@ def test_extract_record_common_fields():
     assert record["id"] == "p1"
     assert record["resourceType"] == "Patient"
     assert record["lastUpdated"] == "2024-01-15T10:30:00+00:00"
-    assert json.loads(record["raw_json"]) == resource
+    assert record["raw_json"] == resource
 
 def test_extract_record_missing_meta_returns_none_for_last_updated():
     record = extract_record({"resourceType": "Patient", "id": "p2"}, "Patient")
@@ -86,7 +86,7 @@ def test_extract_record_observation_typed_fields():
 def test_extract_record_unknown_resource_returns_common_only():
     resource = {"resourceType": "UnknownXYZ", "id": "u1", "meta": {"lastUpdated": "2024-01-01T00:00:00Z"}}
     record = extract_record(resource, "UnknownXYZ")
-    assert set(record.keys()) == {"id", "resourceType", "lastUpdated", "raw_json"}
+    assert set(record.keys()) == {"id", "resourceType", "lastUpdated", "raw_json", "extension"}
 
 
 # --- Integration tests (hit live HAPI FHIR server) ---

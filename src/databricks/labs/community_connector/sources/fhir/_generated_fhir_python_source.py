@@ -401,7 +401,8 @@ def register_lakeflow_source(spark):
         StructField("id", StringType(), nullable=True),
         StructField("resourceType", StringType(), nullable=True),
         StructField("lastUpdated", TimestampType(), nullable=True),
-        StructField("raw_json", StringType(), nullable=True),
+        StructField("raw_json", VariantType(), nullable=True),
+        StructField("extension", VariantType(), nullable=True),
     ]
 
     FALLBACK_SCHEMA = StructType(_COMMON_FIELDS)
@@ -1775,7 +1776,8 @@ def register_lakeflow_source(spark):
             now = datetime.now(timezone.utc)
             payload = {
                 "iss": self._client_id, "sub": self._client_id, "aud": self._token_url,
-                "jti": str(uuid.uuid4()), "iat": now, "exp": now + timedelta(minutes=5),
+                "jti": str(uuid.uuid4()), "iat": now, "nbf": now,
+                "exp": now + timedelta(minutes=5),
             }
             if not self._kid:
                 raise ValueError(
@@ -1949,7 +1951,8 @@ def register_lakeflow_source(spark):
             "id": resource.get("id"),
             "resourceType": resource.get("resourceType", resource_type),
             "lastUpdated": meta.get("lastUpdated"),
-            "raw_json": json.dumps(resource),
+            "raw_json": resource,
+            "extension": resource.get("extension"),
         }
         record.update(extract(resource, resource_type, profile))
         return record
@@ -1999,9 +2002,6 @@ def register_lakeflow_source(spark):
                 return ext
         return None
 
-
-    # Alias required by _patient_uk (mirrors the import in uk_core.py)
-    _base_patient = _patient
 
     # ─── Patient (UK Core) ────────────────────────────────────────────────────────
     # UK Core adds NHS number and UK-specific extensions on top of base_r4 Patient
