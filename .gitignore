@@ -43,3 +43,4 @@ Thumbs.db
 
 # Claude
 .claude/agent-memory-local/
+tests/unit/sources/terna/configs/dev_config.json

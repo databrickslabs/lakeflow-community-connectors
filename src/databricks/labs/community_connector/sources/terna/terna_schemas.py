@@ -37,18 +37,6 @@ TOTAL_LOAD_SCHEMA = StructType(
     ]
 )
 
-# Bidding zones supported by the Terna API
-TOTAL_LOAD_BIDDING_ZONES = [
-    "North",
-    "Centre-North",
-    "South",
-    "Centre-South",
-    "Sardinia",
-    "Sicily",
-    "Calabria",
-    "Italy",
-]
-
 # actual_generation: date, date_tz, date_offset, actual_generation_GWh, primary_source
 ACTUAL_GENERATION_SCHEMA = StructType(
     [

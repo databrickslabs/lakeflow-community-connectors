@@ -39,7 +39,6 @@ class TernaLakeflowConnect(LakeflowConnect):
         self._client = TernaApiClient(options)
         self._total_load_reader = TotalLoadReader(self._client)
 
-
     def list_tables(self) -> list[str]:
         """List names of all tables supported by this connector."""
         return SUPPORTED_TABLES

@@ -4,9 +4,6 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Iterator
 
-from databricks.labs.community_connector.sources.terna.terna_schemas import (
-    TOTAL_LOAD_BIDDING_ZONES,
-)
 from databricks.labs.community_connector.sources.terna.utils.terna_api_client import (
     TernaApiClient,
 )
@@ -21,9 +18,44 @@ TERNA_MAX_HISTORY_SOLAR_YEARS = 5
 TOTAL_LOAD_PATH = "/load/v2.0/total-load"
 ARRAY_KEY = "total_load"
 
+from pyspark.sql.types import (
+    StringType,
+    StructField,
+    StructType,
+)
 
 class TotalLoadReader:
     """Reads total_load data from the Terna Public API in date-range chunks."""
+
+    # total_load: date, date_tz, date_offset, total_load_MW, forecast_total_load_MW, bidding_zone
+    TOTAL_LOAD_SCHEMA = StructType(
+        [
+            StructField("date", StringType(), True),
+            StructField("date_tz", StringType(), True),
+            StructField("date_offset", StringType(), True),
+            StructField("total_load_MW", StringType(), True),
+            StructField("forecast_total_load_MW", StringType(), True),
+            StructField("bidding_zone", StringType(), True),
+        ]
+    )
+
+    TOTAL_LOAD_METADATA = {
+        "primary_keys": ["date", "bidding_zone"],
+        "cursor_field": "date",
+        "ingestion_type": "append",
+    }
+
+    # Bidding zones supported by the Terna API
+    TOTAL_LOAD_BIDDING_ZONES = [
+        "North",
+        "Centre-North",
+        "South",
+        "Centre-South",
+        "Sardinia",
+        "Sicily",
+        "Calabria",
+        "Italy",
+    ]
 
     def __init__(self, client: TernaApiClient) -> None:
         self._client = client
@@ -49,10 +81,10 @@ class TotalLoadReader:
                 else list(raw_bidding_zones)
             )
             for bidding_zone in zones:
-                if bidding_zone not in TOTAL_LOAD_BIDDING_ZONES:
+                if bidding_zone not in self.TOTAL_LOAD_BIDDING_ZONES:
                     raise ValueError(
                         f"Terna connector: Invalid biddingZone value {bidding_zone}. "
-                        f"Must be one of {', '.join(TOTAL_LOAD_BIDDING_ZONES)}"
+                        f"Must be one of {', '.join(self.TOTAL_LOAD_BIDDING_ZONES)}"
                     )
             extra["biddingZone"] = zones
 
