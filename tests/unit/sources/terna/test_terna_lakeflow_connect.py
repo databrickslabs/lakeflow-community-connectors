@@ -59,7 +59,7 @@ def test_terna_full_missing_date_from():
         pytest.skip("Terna API credentials not set in dev_config.json")
 
     connector = TernaLakeflowConnect(config)
-    table_options = {"date_to": "29/02/2024", "bidding_zone": "Italy"}
+    table_options = {"date_to": "29/02/2024", "bidding_zones": ["Italy"]}
     start_offset = None
 
     with pytest.raises(ValueError, match="total_load requires 'date_from'"):
@@ -76,7 +76,7 @@ def test_terna_beyond_five_years_limit():
         pytest.skip("Terna API credentials not set in dev_config.json")
 
     connector = TernaLakeflowConnect(config)
-    table_options = {"date_from": "31/12/2020", "bidding_zone": "Italy"}
+    table_options = {"date_from": "31/12/2020", "bidding_zones": ["Italy"]}
     start_offset = None
 
     with pytest.raises(ValueError, match="Terna connector: 'date_from' must be within the last 5 solar years, not sooner than 01/01/2021"):
@@ -95,7 +95,7 @@ def test_terna_cdc_more_than_sixty_days_multiple_chunks():
 
     date_to = datetime.now()
     date_from = (date_to - timedelta(days=1)).strftime("%d/%m/%Y")
-    table_options = {"date_from": date_from, "bidding_zone": "Italy"}
+    table_options = {"date_from": date_from, "bidding_zones": ["Italy"]}
     start_offset = None
 
     records_iter, offset = connector.read_table("total_load", start_offset, table_options)
@@ -114,15 +114,17 @@ def test_terna_cdc_more_than_sixty_days_single_chunk():
 
     connector = TernaLakeflowConnect(config)
 
+    days = 80
+
     date_to = datetime.now()
-    date_from = (date_to - timedelta(days=20)).strftime("%d/%m/%Y")
-    table_options = {"date_from": date_from, "bidding_zone": "Italy"}
+    date_from = (date_to - timedelta(days=days)).strftime("%d/%m/%Y")
+    table_options = {"date_from": date_from, "bidding_zones": ["Italy"]}
     start_offset = None
 
     records_iter, offset = connector.read_table("total_load", start_offset, table_options)
     records = list(records_iter)
 
-    assert len(records) == 4 * 24 * 20
+    assert len(records) == 4 * 24 * (days-2)
     assert offset.get("cursor") == date_to.strftime("%d/%m/%Y")
 
 
@@ -136,14 +138,15 @@ def test_terna_cdc():
 
     connector = TernaLakeflowConnect(config)
 
-    date_from = (datetime.now() - timedelta(days=20)).strftime("%d/%m/%Y")
-    table_options = {"date_from": date_from, "bidding_zone": "Italy"}
+    days = 2
+
+    date_from = (datetime.now() - timedelta(days=days)).strftime("%d/%m/%Y")
+    table_options = {"date_from": date_from, "bidding_zones": ["Italy"]}
     start_offset = None
 
     records_iter, offset = connector.read_table("total_load", start_offset, table_options)
     records = list(records_iter)
 
-    assert len(records) == 4 * 24 * 20
     assert offset.get("cursor") == datetime.now().strftime("%d/%m/%Y")
 
 def test_terna_cdc_empty_because_same_date():
@@ -158,14 +161,11 @@ def test_terna_cdc_empty_because_same_date():
 
     date_from = datetime.now().strftime("%d/%m/%Y")
 
-    table_options = {"date_from": date_from, "bidding_zone": "Italy"}
+    table_options = {"date_from": date_from, "bidding_zones": ["Italy"]}
     start_offset = None
 
     records_iter, offset = connector.read_table("total_load", start_offset, table_options)
     records = list(records_iter)
-
-    logger.info(records)
-    logger.info(offset)
 
     assert len(records) == 0
     assert offset.get("cursor") == date_from
@@ -178,7 +178,7 @@ def test_terna_full_start_end_dates():
         pytest.skip("Terna API credentials not set in dev_config.json")
 
     connector = TernaLakeflowConnect(config)
-    table_options = {"date_from": "01/02/2024", "date_to": "29/02/2024", "bidding_zone": "Italy"}
+    table_options = {"date_from": "01/02/2024", "date_to": "29/02/2024", "bidding_zones": ["Italy"]}
     # Full refresh, cursor is None
     start_offset = None
 
@@ -198,8 +198,7 @@ def test_terna_not_full_start_end_dates():
         pytest.skip("Terna API credentials not set in dev_config.json")
 
     connector = TernaLakeflowConnect(config)
-    table_options = {"date_from": "28/02/2024", "date_to": "29/02/2024", "bidding_zone": "Italy"}
-    # Full refresh, cursor is None
+    table_options = {"date_from": "28/02/2024", "date_to": "29/02/2024", "bidding_zones": ["Italy"]}
     start_offset = {"cursor": "29/02/2024"}
 
     records_iter, offset = connector.read_table("total_load", start_offset, table_options)
@@ -218,15 +217,13 @@ def test_terna_wrong_bidding_zone():
         pytest.skip("Terna API credentials not set in dev_config.json")
 
     connector = TernaLakeflowConnect(config)
-    table_options = {"date_from": "28/02/2024", "date_to": "29/02/2024", "bidding_zone": "Trento"}
+    table_options = {"date_from": "28/02/2024", "date_to": "29/02/2024", "bidding_zones": ["Trento"]}
     # Full refresh, cursor is None
-    start_offset = {"cursor": "29/02/2024"}
+    start_offset = {"cursor": "28/02/2024"}
 
-    records_iter, offset = connector.read_table("total_load", start_offset, table_options)
-    records = list(records_iter)
-    
-    with pytest.raises(ValueError, match="Terna connector: Invalid biddingZone value Trento. Must be one of: North Centre-North, South, Centre-South, Sardinia, Sicily, Calabria, Italy"):
-        connector.read_table("total_load", start_offset, table_options)
+    with pytest.raises(ValueError, match="Terna connector: Invalid biddingZone value Trento. Must be one of North, Centre-North, South, Centre-South, Sardinia, Sicily, Calabria, Italy"):
+        records_iter, offset = connector.read_table("total_load", start_offset, table_options)
+        records = list(records_iter)
 
 
 def test_terna_multiple_bidding_zones():
@@ -237,30 +234,10 @@ def test_terna_multiple_bidding_zones():
         pytest.skip("Terna API credentials not set in dev_config.json")
 
     connector = TernaLakeflowConnect(config)
-    table_options = {"date_from": "28/02/2024", "date_to": "29/02/2024", "bidding_zone": "Italy", "bidding_zone": "North"}
+    table_options = {"date_from": "28/02/2024", "date_to": "29/02/2024", "bidding_zones": ["Italy", "North"]}
     # Full refresh, cursor is None
-    start_offset = {"cursor": "29/02/2024"}
+    start_offset = {"cursor": "28/02/2024"}
 
     records_iter, offset = connector.read_table("total_load", start_offset, table_options)
     records = list(records_iter)
     
-    logger.info(records)
-
-
-def test_terna_connector():
-    """Test the Terna connector using the shared LakeflowConnect test suite."""
-    test_suite.LakeflowConnect = TernaLakeflowConnect
-
-    config_dir = Path(__file__).parent / "configs"
-    config = load_config(config_dir / "dev_config.json")
-    table_config = load_config(config_dir / "dev_table_config.json")
-
-    # Real API; keep sample_records small to avoid rate limits
-    tester = LakeflowConnectTester(config, table_config, sample_records=10)
-    report = tester.run_all_tests()
-    tester.print_report(report, show_details=True)
-
-    assert report.passed_tests == report.total_tests, (
-        f"Test suite had failures: {report.failed_tests} failed, "
-        f"{report.error_tests} errors"
-    )

@@ -213,7 +213,7 @@ class TernaLakeflowConnect(LakeflowConnect):
     ) -> list[dict]:
         """Request one date chunk and return the data array; empty list on error or no data."""
 
-        logger.info(f"Querying data for api {table_name} from: {date_from}, to {date_to}")
+        logger.info(f"Querying data for api {table_name} from {date_from}, to {date_to}, extra params: {extra_params}")
 
         if date_from == date_to:
             return []
@@ -222,10 +222,8 @@ class TernaLakeflowConnect(LakeflowConnect):
             "dateFrom": self._format_api_date(date_from),
             "dateTo": self._format_api_date(date_to),
         }
-        if extra_params:
+        if extra_params is not None:
             params.update(extra_params)
-
-        logger.debug(f"Querying data for api {table_name} with params: {params}")
 
         resp = self._request("GET", path, params=params)
         if resp.status_code != 200:
@@ -247,19 +245,23 @@ class TernaLakeflowConnect(LakeflowConnect):
     ) -> tuple[Iterator[dict], dict]:
         """Read total_load in one date chunk. Optional table_options: biddingZone (comma or repeated)."""
 
+        logger.info(f"Table options: {table_options}")
+
         extra = {}
-        bidding_zone = (
-            table_options.get("biddingZone")
-            or table_options.get("bidding_zone")
-            or table_options.get("biddingzone")
+        bidding_zones = (
+            table_options.get("biddingZones")
+            or table_options.get("bidding_zones")
+            or table_options.get("biddingzones")
         )
-        if bidding_zone:
+
+        if bidding_zones is not None:
             # API accepts multiple biddingZone params
-            if bidding_zone not in TOTAL_LOAD_BIDDING_ZONES:
-                raise ValueError(
-                    f"Terna connector: Invalid biddingZone value {bidding_zone}. Must be one of: {', '.join(TOTAL_LOAD_BIDDING_ZONES)}"
-                )
-            extra["biddingZone"] = bidding_zone.strip()
+            for bidding_zone in bidding_zones:
+                if bidding_zone not in TOTAL_LOAD_BIDDING_ZONES:
+                    raise ValueError(
+                        f"Terna connector: Invalid biddingZone value {bidding_zone}. Must be one of {', '.join(TOTAL_LOAD_BIDDING_ZONES)}"
+                    )
+            extra["biddingZone"] = bidding_zones
         
         date_from = (
             table_options.get("date_from")
@@ -309,15 +311,15 @@ class TernaLakeflowConnect(LakeflowConnect):
         
         chunks = []
         current_start = date_from
-        while current_start < date_to:
+        while current_start <= date_to:
             current_end = min(current_start + timedelta(days=TERNA_MAX_DAYS_PER_REQUEST - 1), date_to)
             chunks.append((current_start, current_end))
             current_start = current_end + timedelta(days=1)
 
         if len(chunks) > 1:
             logger.info(f"Requested more than 60 days, will be split in {len(chunks)} API calls.")
-        else:
-            chunks.append((date_from, date_to))
+        #else:
+        #    chunks.append((date_from, date_to))
 
         records = []
         for chunk in chunks:
