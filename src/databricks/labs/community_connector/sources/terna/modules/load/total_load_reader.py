@@ -26,9 +26,6 @@ ARRAY_KEY = "total_load"
 class TotalLoadReader:
     """Reads total_load data from the Terna Public API in date-range chunks."""
 
-    TOTAL_LOAD_SCHEMA = TOTAL_LOAD_SCHEMA
-    TOTAL_LOAD_METADATA = TOTAL_LOAD_METADATA
-
     # Bidding zones supported by the Terna API
     TOTAL_LOAD_BIDDING_ZONES = [
         "North",
