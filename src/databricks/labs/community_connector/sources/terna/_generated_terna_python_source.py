@@ -8,13 +8,37 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Iterator
+from typing import Any, Iterator, Sequence
 import json
 import time
 
 from pyspark.sql import Row
-from pyspark.sql.datasource import DataSource, DataSourceReader, SimpleDataSourceStreamReader
-from pyspark.sql.types import *
+from pyspark.sql.datasource import (
+    DataSource,
+    DataSourceReader,
+    DataSourceStreamReader,
+    InputPartition,
+    SimpleDataSourceStreamReader,
+)
+from pyspark.sql.types import (
+    ArrayType,
+    BinaryType,
+    BooleanType,
+    DataType,
+    DateType,
+    DecimalType,
+    DoubleType,
+    FloatType,
+    IntegerType,
+    LongType,
+    MapType,
+    StringType,
+    StructField,
+    StructType,
+    TimestampType,
+    VariantType,
+    VariantVal,
+)
 import base64
 import logging
 import requests
@@ -177,7 +201,7 @@ def register_lakeflow_source(spark):
     }
 
 
-    def parse_value(value: Any, field_type: DataType) -> Any:
+    def parse_value(value: Any, field_type: DataType) -> Any:  # pylint: disable=too-many-return-statements
         """
         Converts a JSON value into a PySpark-compatible data type based on the provided field type.
         """
@@ -191,6 +215,10 @@ def register_lakeflow_source(spark):
             return _parse_array(value, field_type)
         if isinstance(field_type, MapType):
             return _parse_map(value, field_type)
+
+        # Handle VariantType
+        if isinstance(field_type, VariantType):
+            return VariantVal.parseJson(value) if isinstance(value, str) else value
 
         # Handle primitive types via type-based lookup
         try:
@@ -354,18 +382,152 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
+    # src/databricks/labs/community_connector/interface/supports_partition.py
+    ########################################################
+
+    class SupportsPartition(ABC):
+        """Mixin for connectors that support partitioned reads across Spark executors.
+
+        Must be used together with LakeflowConnect. Implement this when your
+        connector can split work into partitions that Spark distributes to workers,
+        instead of reading all data in one partition batch.
+
+        Usage::
+
+            class MyConnector(LakeflowConnect, SupportsPartition):
+                ...
+        """
+
+        @abstractmethod
+        def get_partitions(
+            self,
+            table_name: str,
+            table_options: dict[str, str],
+        ) -> Sequence[dict]:
+            """Return partition descriptors for reading data.
+
+            Each returned dict is passed to :meth:`read_partition` on an executor.
+
+            Args:
+                table_name: The name of the table.
+                table_options: A dictionary of options for accessing the table.
+            Returns:
+                A sequence of partition descriptor dicts. Each dict must be
+                JSON-serialisable (primitive types only).
+            """
+
+        @abstractmethod
+        def read_partition(
+            self, table_name: str, partition: dict, table_options: dict[str, str]
+        ) -> Iterator[dict]:
+            """Read records for a single partition.
+
+            This method runs on Spark executors and must be self-contained.
+
+            Args:
+                table_name: The name of the table.
+                partition: One of the partition dicts returned by
+                    :meth:`get_partitions`.
+                table_options: A dictionary of options for accessing the table.
+            Returns:
+                An iterator of records as JSON-compatible dicts.
+            """
+
+
+    class SupportsPartitionedStream(SupportsPartition):
+        """Mixin for connectors that support partitioned streaming reads.
+
+        Extends :class:`SupportsPartition` with offset awareness for streaming
+        micro-batches. A connector implementing this mixin automatically supports
+        both partitioned batch reads (via the inherited interface) and partitioned
+        streaming reads.
+
+        Usage::
+
+            class MyConnector(LakeflowConnect, SupportsPartitionedStream):
+                ...
+        """
+
+        def is_partitioned(self, table_name: str) -> bool:
+            """Return whether the given table supports partitioned streaming.
+
+            The default returns True. Override to return False for tables that
+            should fall back to simpleStreamReader.
+
+            Args:
+                table_name: The name of the table.
+                table_options: A dictionary of options for accessing the table.
+            """
+            return True
+
+        @abstractmethod
+        def latest_offset(
+            self,
+            table_name: str,
+            table_options: dict[str, str],
+            start_offset: dict | None = None,
+        ) -> dict:
+            """Return the most recent offset available for the table.
+
+            Called by Spark on every micro-batch to discover new data.
+
+            Args:
+                table_name: The name of the table.
+                table_options: A dictionary of options for accessing the table.
+                start_offset: The current start offset, or None on the first call.
+                    PySpark's ``DataSourceStreamReader.latestOffset()`` does not
+                    pass this yet, so the framework always sends None for now.
+                    Connectors may use it to implement windowed batching when
+                    called directly.
+            Returns:
+                A dict whose keys and values are primitive types (str, int, bool).
+            """
+
+        @abstractmethod
+        def get_partitions(
+            self,
+            table_name: str,
+            table_options: dict[str, str],
+            start_offset: dict | None = None,
+            end_offset: dict | None = None,
+        ) -> Sequence[dict]:
+            """Return partition descriptors for reading data.
+
+            Each returned dict is passed to :meth:`read_partition` on an executor.
+
+            For batch reads, ``start_offset`` and ``end_offset`` are both None —
+            return partitions covering the entire table.
+
+            For streaming micro-batches, they delimit the offset range — return
+            partitions covering that range, or an empty sequence when
+            ``start_offset == end_offset``.
+
+            Args:
+                table_name: The name of the table.
+                table_options: A dictionary of options for accessing the table.
+                start_offset: The start offset (exclusive), or None for batch.
+                end_offset: The end offset (inclusive), or None for batch.
+            Returns:
+                A sequence of partition descriptor dicts. Each dict must be
+                JSON-serialisable (primitive types only).
+            """
+
+
+    ########################################################
     # src/databricks/labs/community_connector/sources/terna/terna_schemas.py
     ########################################################
 
     SUPPORTED_TABLES = [
         "total_load",
-        "actual_generation",
-        "renewable_generation",
-        "physical_foreign_flow",
+        "market_load",
+        #"actual_generation",
+        #"renewable_generation",
+        #"physical_foreign_flow",
     ]
 
     # =============================================================================
     # Table schema definitions (API returns strings for numeric fields)
+    # Defined here to avoid circular import: readers import from this module.
     # =============================================================================
 
     # total_load: date, date_tz, date_offset, total_load_MW, forecast_total_load_MW, bidding_zone
@@ -380,18 +542,35 @@ def register_lakeflow_source(spark):
         ]
     )
 
-    # Bidding zones supported by the Terna API
-    TOTAL_LOAD_BIDDING_ZONES = [
-        "North",
-        "Centre-North",
-        "South",
-        "Centre-South",
-        "Sardinia",
-        "Sicily",
-        "Calabria",
-        "Italy",
-    ]
+    TOTAL_LOAD_METADATA = {
+        "primary_keys": ["date", "bidding_zone"],
+        "cursor_field": "date",
+        "ingestion_type": "append",
+    }
 
+    # market_load: date, date_tz, date_offset, market_load_MW, bidding_zone
+    MARKET_LOAD_SCHEMA = StructType(
+        [
+            StructField("date", StringType(), True),
+            StructField("date_tz", StringType(), True),
+            StructField("date_offset", StringType(), True),
+            StructField("market_load_MW", StringType(), True),
+            StructField("forecast_market_load_MW", StringType(), True),
+            StructField("bidding_zone", StringType(), True),
+        ]
+    )
+
+    MARKET_LOAD_METADATA = {
+        "primary_keys": ["date", "bidding_zone"],
+        "cursor_field": "date",
+        "ingestion_type": "append",
+    }
+
+    # =============================================================================
+    # Legacy / commented-out schema definitions
+    # =============================================================================
+
+    '''
     # actual_generation: date, date_tz, date_offset, actual_generation_GWh, primary_source
     ACTUAL_GENERATION_SCHEMA = StructType(
         [
@@ -427,12 +606,14 @@ def register_lakeflow_source(spark):
             StructField("physical_foreign_flow_MW", StringType(), True),
         ]
     )
+    '''
 
     TABLE_SCHEMAS = {
         "total_load": TOTAL_LOAD_SCHEMA,
-        "actual_generation": ACTUAL_GENERATION_SCHEMA,
-        "renewable_generation": RENEWABLE_GENERATION_SCHEMA,
-        "physical_foreign_flow": PHYSICAL_FOREIGN_FLOW_SCHEMA,
+        "market_load": MARKET_LOAD_SCHEMA,
+        #"actual_generation": ACTUAL_GENERATION_SCHEMA,
+        #"renewable_generation": RENEWABLE_GENERATION_SCHEMA,
+        #"physical_foreign_flow": PHYSICAL_FOREIGN_FLOW_SCHEMA,
     }
 
     # =============================================================================
@@ -440,11 +621,11 @@ def register_lakeflow_source(spark):
     # =============================================================================
 
     TABLE_METADATA = {
-        "total_load": {
-            "primary_keys": ["date", "bidding_zone"],
-            "cursor_field": "date",
-            "ingestion_type": "append",
-        },
+        "total_load": TOTAL_LOAD_METADATA,
+        "market_load": MARKET_LOAD_METADATA,
+    }
+
+    '''
         "actual_generation": {
             "primary_keys": ["date", "primary_source"],
             "cursor_field": "date",
@@ -460,11 +641,11 @@ def register_lakeflow_source(spark):
             "cursor_field": "date",
             "ingestion_type": "append",
         },
-    }
+        '''
 
 
     ########################################################
-    # src/databricks/labs/community_connector/sources/terna/terna.py
+    # src/databricks/labs/community_connector/sources/terna/utils/terna_api_client.py
     ########################################################
 
     logger = logging.getLogger(__name__)
@@ -481,80 +662,27 @@ def register_lakeflow_source(spark):
     RETRIABLE_STATUS_CODES = {429, 500, 502, 503}
     # Backoff when 403 "Developer Over Qps" (longer to respect rate limit)
     QPS_BACKOFF_SEC = 3.0
-    # Terna API allows at most this many days per request; longer ranges are chunked
-    TERNA_MAX_DAYS_PER_REQUEST = 60
-    # Terna API allows history only within the last N solar years (date_from not sooner than 01/01/(year-N))
-    TERNA_MAX_HISTORY_SOLAR_YEARS = 5
 
-    class TernaLakeflowConnect(LakeflowConnect):
-        """LakeflowConnect implementation for the Terna Public API."""
+
+    class TernaApiClient:
+        """Handles Terna API: OAuth token, HTTP requests, table validation, date formatting, and chunk reads."""
 
         def __init__(self, options: dict[str, str]) -> None:
-            """
-            Initialize the Terna connector.
-
-            Expected options:
-                - client_id: OAuth 2.0 Client Credentials application key (required).
-                - client_secret: OAuth 2.0 Client Credentials secret (required).
-                - base_url: Base URL for the API (default https://api.terna.it).
-                - x_api_key: Optional API key for Physical Foreign Flow when that
-                  endpoint uses x-api-key instead of Bearer token.
-            """
-            super().__init__(options)
-
             client_id = options.get("client_id")
             client_secret = options.get("client_secret")
-
             if not client_id or not client_secret:
                 raise ValueError(
                     "Terna connector requires 'client_id' and 'client_secret' in options"
                 )
-
             self._client_id = client_id
             self._client_secret = client_secret
             self._base_url = (options.get("base_url") or DEFAULT_BASE_URL).rstrip("/")
-
             self._oauth_token: str | None = None
             self._oauth_expires_at: float = 0.0
             self._session = requests.Session()
             self._session.headers["Accept"] = "application/json"
 
-
-        def list_tables(self) -> list[str]:
-            """List names of all tables supported by this connector."""
-            return SUPPORTED_TABLES
-
-        def get_table_schema(
-            self, table_name: str, table_options: dict[str, str]
-        ) -> StructType:
-            """Return the Spark schema for the given table."""
-            self._validate_table(table_name)
-            return TABLE_SCHEMAS[table_name]
-
-        def read_table_metadata(
-            self, table_name: str, table_options: dict[str, str]
-        ) -> dict:
-            """Return metadata (primary_keys, cursor_field, ingestion_type) for the table."""
-            self._validate_table(table_name)
-            return dict(TABLE_METADATA[table_name])
-
-        def read_table(
-            self,
-            table_name: str,
-            start_offset: dict | None,
-            table_options: dict[str, str],
-        ) -> tuple[Iterator[dict], dict]:
-            """Read records by date-range chunks; cursor is the last 'date' value (yyyy-mm-dd hh:mm:ss)."""
-            self._validate_table(table_name)
-            reader = {
-                "total_load": self._read_total_load,
-                #"actual_generation": self._read_actual_generation,
-                #"renewable_generation": self._read_renewable_generation,
-                #"physical_foreign_flow": self._read_physical_foreign_flow,
-            }[table_name]
-            return reader(start_offset, table_options)
-
-        def _get_token(self) -> str:
+        def get_token(self) -> str:
             """Obtain or refresh OAuth 2.0 access token (Client Credentials). Retries on 403/429 (rate limit)."""
             now = time.time()
             if self._oauth_token and now < self._oauth_expires_at - TOKEN_REFRESH_MARGIN_SEC:
@@ -580,7 +708,7 @@ def register_lakeflow_source(spark):
                     self._oauth_token = body.get("access_token")
                     if not self._oauth_token:
                         raise RuntimeError("Terna token response missing access_token")
-                    expires_in = int(body.get("expire_format_api_dates_in", 300))
+                    expires_in = int(body.get("expires_in", 300))
                     self._oauth_expires_at = now + expires_in
                     return self._oauth_token
                 last_error = RuntimeError(
@@ -593,7 +721,7 @@ def register_lakeflow_source(spark):
                 raise last_error
             raise last_error
 
-        def _request(
+        def request(
             self,
             method: str,
             path: str,
@@ -603,7 +731,7 @@ def register_lakeflow_source(spark):
             params = params or {}
             url = f"{self._base_url}{path}"
 
-            self._session.headers["Authorization"] = f"Bearer {self._get_token()}"
+            self._session.headers["Authorization"] = f"Bearer {self.get_token()}"
             self._session.headers["businessID"] = str(uuid.uuid4())
 
             backoff = INITIAL_BACKOFF
@@ -620,33 +748,30 @@ def register_lakeflow_source(spark):
                     backoff *= 2
             return resp
 
-        def _validate_table(self, table_name: str) -> None:
+        def validate_table(self, table_name: str) -> None:
+            """Raise ValueError if table_name is not in SUPPORTED_TABLES."""
             if table_name not in SUPPORTED_TABLES:
                 raise ValueError(
                     f"Table {table_name!r} is not supported. "
                     f"Supported tables: {SUPPORTED_TABLES}"
                 )
 
-        # -------------------------------------------------------------------------
-        # Date-range helpers (API uses dd/mm/yyyy; cursor is yyyy-mm-dd hh:mm:ss)
-        # -------------------------------------------------------------------------
-
         @staticmethod
-        def _format_api_date(dt: datetime) -> str:
+        def format_api_date(dt: datetime) -> str:
             """Format datetime as dd/mm/yyyy for API query params."""
             return dt.strftime("%d/%m/%Y")
 
         @staticmethod
-        def _string_to_datetime(date_string: str) -> datetime:
-            """Format datetime as dd/mm/yyyy for API query params."""
+        def string_to_datetime(date_string: str) -> datetime:
+            """Parse date string dd/mm/yyyy to datetime (UTC)."""
             return datetime.strptime(date_string, "%d/%m/%Y").replace(tzinfo=timezone.utc)
 
         @staticmethod
-        def _format_cursor(dt: datetime) -> str:
-            """Format datetime for cursor/range_end (yyyy-mm-dd hh:mm:ss)."""
+        def format_cursor(dt: datetime) -> str:
+            """Format datetime for cursor/range_end (dd/mm/yyyy)."""
             return dt.strftime("%d/%m/%Y")
 
-        def _read_table_chunk(
+        def read_table_chunk(
             self,
             table_name: str,
             path: str,
@@ -654,25 +779,28 @@ def register_lakeflow_source(spark):
             date_to: datetime,
             table_options: dict[str, str],
             array_key: str,
-            extra_params: dict[str, str] | None = None,
-        ) -> list[dict]:
+            extra_params: dict[str, str | list[str]] | None = None,
+        ) -> list[dict[str, Any]]:
             """Request one date chunk and return the data array; empty list on error or no data."""
-
-            logger.info(f"Querying data for api {table_name} from: {date_from}, to {date_to}")
+            logger.info(
+                "Querying data for api %s from %s, to %s, extra params: %s",
+                table_name,
+                date_from,
+                date_to,
+                extra_params,
+            )
 
             if date_from == date_to:
                 return []
 
             params = {
-                "dateFrom": self._format_api_date(date_from),
-                "dateTo": self._format_api_date(date_to),
+                "dateFrom": self.format_api_date(date_from),
+                "dateTo": self.format_api_date(date_to),
             }
-            if extra_params:
+            if extra_params is not None:
                 params.update(extra_params)
 
-            logger.debug(f"Querying data for api {table_name} with params: {params}")
-
-            resp = self._request("GET", path, params=params)
+            resp = self.request("GET", path, params=params)
             if resp.status_code != 200:
                 raise RuntimeError(
                     f"Terna API error for {table_name}: {resp.status_code} {resp.text}"
@@ -685,99 +813,340 @@ def register_lakeflow_source(spark):
 
             return data
 
-        def _read_total_load(
+
+    ########################################################
+    # src/databricks/labs/community_connector/sources/terna/modules/load/market_load_reader.py
+    ########################################################
+
+    logger = logging.getLogger(__name__)
+
+    # Terna API allows at most this many days per request; longer ranges are chunked
+    TERNA_MAX_DAYS_PER_REQUEST = 60
+    # Terna API allows history only within the last N solar years
+    TERNA_MAX_HISTORY_SOLAR_YEARS = 5
+
+    MARKET_LOAD_PATH = "/load/v2.0/market-load"
+    ARRAY_KEY = "market_load"
+
+
+    class MarketLoadReader:
+        """Reads market_load data from the Terna Public API in date-range chunks."""
+
+        MARKET_LOAD_SCHEMA = MARKET_LOAD_SCHEMA
+        MARKET_LOAD_METADATA = MARKET_LOAD_METADATA
+
+        # Bidding zones supported by the Terna API
+        MARKET_LOAD_BIDDING_ZONES = [
+            "North",
+            "Centre-North",
+            "South",
+            "Centre-South",
+            "Sardinia",
+            "Sicily",
+            "Calabria",
+            "Italy",
+        ]
+
+        def __init__(self, client: TernaApiClient) -> None:
+            self._client = client
+
+        def read(
             self,
             start_offset: dict | None,
             table_options: dict[str, str],
         ) -> tuple[Iterator[dict], dict]:
-            """Read total_load in one date chunk. Optional table_options: biddingZone (comma or repeated)."""
+            """Read market_load records. Optional table_options: biddingZone (comma-separated or repeated)."""
+            logger.info("Table options: %s", table_options)
 
-            extra = {}
-            bidding_zone = (
-                table_options.get("biddingZone")
-                or table_options.get("bidding_zone")
-                or table_options.get("biddingzone")
+            extra: dict[str, str | list[str]] = {}
+            raw_bidding_zones = (
+                table_options.get("biddingZones")
+                or table_options.get("bidding_zones")
+                or table_options.get("biddingzones")
             )
-            if bidding_zone:
-                # API accepts multiple biddingZone params
-                if bidding_zone not in TOTAL_LOAD_BIDDING_ZONES:
-                    raise ValueError(
-                        f"Terna connector: Invalid biddingZone value {bidding_zone}. Must be one of: {', '.join(TOTAL_LOAD_BIDDING_ZONES)}"
-                    )
-                extra["biddingZone"] = bidding_zone.strip()
+            if raw_bidding_zones is not None:
+                zones = (
+                    [z.strip() for z in raw_bidding_zones.split(",")]
+                    if isinstance(raw_bidding_zones, str)
+                    else list(raw_bidding_zones)
+                )
+                for bidding_zone in zones:
+                    if bidding_zone not in self.MARKET_LOAD_BIDDING_ZONES:
+                        raise ValueError(
+                            f"Terna connector: Invalid biddingZone value {bidding_zone}. "
+                            f"Must be one of {', '.join(self.MARKET_LOAD_BIDDING_ZONES)}"
+                        )
+                extra["biddingZone"] = zones
 
-            date_from = (
+            date_from_str = (
                 table_options.get("date_from")
                 or table_options.get("dateFrom")
                 or table_options.get("datefrom")
             )
-
-            date_to = (
+            date_to_str = (
                 table_options.get("date_to")
                 or table_options.get("dateTo")
                 or table_options.get("dateto")
             )
 
-            if date_from is None:
+            if date_from_str is None:
                 raise ValueError(
-                    "Terna connector, API total_load requires 'date_from'"
+                    "Terna connector, API market_load requires 'date_from'"
                 )
 
-            date_from = self._string_to_datetime(date_from)
+            date_from = self._client.string_to_datetime(date_from_str)
             now = datetime.now(timezone.utc)
             min_allowed = datetime(
                 now.year - TERNA_MAX_HISTORY_SOLAR_YEARS, 1, 1, tzinfo=timezone.utc
             )
             if date_from < min_allowed:
                 raise ValueError(
-                    f"Terna connector: 'date_from' must be within the last {TERNA_MAX_HISTORY_SOLAR_YEARS} solar years, not sooner than 01/01/{now.year - TERNA_MAX_HISTORY_SOLAR_YEARS}"
+                    f"Terna connector: 'date_from' must be within the last "
+                    f"{TERNA_MAX_HISTORY_SOLAR_YEARS} solar years, not sooner than "
+                    f"01/01/{now.year - TERNA_MAX_HISTORY_SOLAR_YEARS}"
                 )
 
-            if date_to is not None:
-                date_to = self._string_to_datetime(date_to)
+            if date_to_str is not None:
+                date_to = self._client.string_to_datetime(date_to_str)
             else:
                 date_to = datetime.now(timezone.utc)
 
-            if self._format_cursor(date_from) == self._format_cursor(date_to):
-                return iter([]), {'cursor': self._format_cursor(date_to)}
+            if self._client.format_cursor(date_from) == self._client.format_cursor(date_to):
+                return iter([]), {"cursor": self._client.format_cursor(date_to)}
 
-            if start_offset is None or start_offset.get("cursor") is None:
-                # We are in a full refresh. Normally I want all data from date_from to date_to unless date_to is None
-                pass       
-            else:
-                # We are in CDC. date_from is the cursor from the previous run. Normally I want all data from date_from to date_to unless date_to is None
-                date_from = self._string_to_datetime(start_offset.get("cursor"))
+            if start_offset and start_offset.get("cursor"):
+                date_from = self._client.string_to_datetime(start_offset["cursor"])
 
-                if date_to is None:
-                    # We are in the setup where I want all data from date_from to current time
-                    pass
-
-            chunks = []
+            chunks: list[tuple[datetime, datetime]] = []
             current_start = date_from
-            while current_start < date_to:
-                current_end = min(current_start + timedelta(days=TERNA_MAX_DAYS_PER_REQUEST - 1), date_to)
+            while current_start <= date_to:
+                current_end = min(
+                    current_start + timedelta(days=TERNA_MAX_DAYS_PER_REQUEST - 1),
+                    date_to,
+                )
                 chunks.append((current_start, current_end))
                 current_start = current_end + timedelta(days=1)
 
             if len(chunks) > 1:
-                logger.info(f"Requested more than 60 days, will be split in {len(chunks)} API calls.")
+                logger.info(
+                    "Requested more than 60 days, will be split in %s API calls.",
+                    len(chunks),
+                )
+
+            records: list[dict] = []
+            for chunk_from, chunk_to in chunks:
+                records.extend(
+                    self._client.read_table_chunk(
+                        "market_load",
+                        MARKET_LOAD_PATH,
+                        chunk_from,
+                        chunk_to,
+                        table_options,
+                        ARRAY_KEY,
+                        extra_params=extra if extra else None,
+                    )
+                )
+
+            return iter(records), {
+                "cursor": self._client.format_cursor(chunks[-1][1])
+            }
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/sources/terna/modules/load/total_load_reader.py
+    ########################################################
+
+    logger = logging.getLogger(__name__)
+
+    # Terna API allows at most this many days per request; longer ranges are chunked
+    TERNA_MAX_DAYS_PER_REQUEST = 60
+    # Terna API allows history only within the last N solar years
+    TERNA_MAX_HISTORY_SOLAR_YEARS = 5
+
+    TOTAL_LOAD_PATH = "/load/v2.0/total-load"
+    ARRAY_KEY = "total_load"
+
+
+    class TotalLoadReader:
+        """Reads total_load data from the Terna Public API in date-range chunks."""
+
+        TOTAL_LOAD_SCHEMA = TOTAL_LOAD_SCHEMA
+        TOTAL_LOAD_METADATA = TOTAL_LOAD_METADATA
+
+        # Bidding zones supported by the Terna API
+        TOTAL_LOAD_BIDDING_ZONES = [
+            "North",
+            "Centre-North",
+            "South",
+            "Centre-South",
+            "Sardinia",
+            "Sicily",
+            "Calabria",
+            "Italy",
+        ]
+
+        def __init__(self, client: TernaApiClient) -> None:
+            self._client = client
+
+        def read(
+            self,
+            start_offset: dict | None,
+            table_options: dict[str, str],
+        ) -> tuple[Iterator[dict], dict]:
+            """Read total_load records. Optional table_options: biddingZone (comma-separated or repeated)."""
+            logger.info("Table options: %s", table_options)
+
+            extra: dict[str, str | list[str]] = {}
+            raw_bidding_zones = (
+                table_options.get("biddingZones")
+                or table_options.get("bidding_zones")
+                or table_options.get("biddingzones")
+            )
+            if raw_bidding_zones is not None:
+                zones = (
+                    [z.strip() for z in raw_bidding_zones.split(",")]
+                    if isinstance(raw_bidding_zones, str)
+                    else list(raw_bidding_zones)
+                )
+                for bidding_zone in zones:
+                    if bidding_zone not in self.TOTAL_LOAD_BIDDING_ZONES:
+                        raise ValueError(
+                            f"Terna connector: Invalid biddingZone value {bidding_zone}. "
+                            f"Must be one of {', '.join(self.TOTAL_LOAD_BIDDING_ZONES)}"
+                        )
+                extra["biddingZone"] = zones
+
+            date_from_str = (
+                table_options.get("date_from")
+                or table_options.get("dateFrom")
+                or table_options.get("datefrom")
+            )
+            date_to_str = (
+                table_options.get("date_to")
+                or table_options.get("dateTo")
+                or table_options.get("dateto")
+            )
+
+            if date_from_str is None:
+                raise ValueError(
+                    "Terna connector, API total_load requires 'date_from'"
+                )
+
+            date_from = self._client.string_to_datetime(date_from_str)
+            now = datetime.now(timezone.utc)
+            min_allowed = datetime(
+                now.year - TERNA_MAX_HISTORY_SOLAR_YEARS, 1, 1, tzinfo=timezone.utc
+            )
+            if date_from < min_allowed:
+                raise ValueError(
+                    f"Terna connector: 'date_from' must be within the last "
+                    f"{TERNA_MAX_HISTORY_SOLAR_YEARS} solar years, not sooner than "
+                    f"01/01/{now.year - TERNA_MAX_HISTORY_SOLAR_YEARS}"
+                )
+
+            if date_to_str is not None:
+                date_to = self._client.string_to_datetime(date_to_str)
             else:
-                chunks.append((date_from, date_to))
+                date_to = datetime.now(timezone.utc)
 
-            records = []
-            for chunk in chunks:
-                date_from, date_to = chunk
-                records.extend(self._read_table_chunk(
-                    "total_load",
-                    "/load/v2.0/total-load",
-                    date_from,
+            if self._client.format_cursor(date_from) == self._client.format_cursor(date_to):
+                return iter([]), {"cursor": self._client.format_cursor(date_to)}
+
+            if start_offset and start_offset.get("cursor"):
+                date_from = self._client.string_to_datetime(start_offset["cursor"])
+
+            chunks: list[tuple[datetime, datetime]] = []
+            current_start = date_from
+            while current_start <= date_to:
+                current_end = min(
+                    current_start + timedelta(days=TERNA_MAX_DAYS_PER_REQUEST - 1),
                     date_to,
-                    table_options,
-                    "total_load",
-                    extra_params=extra if extra else None,
-                ))
+                )
+                chunks.append((current_start, current_end))
+                current_start = current_end + timedelta(days=1)
 
-            return iter(records), {'cursor': self._format_cursor(chunks[-1][1])}
+            if len(chunks) > 1:
+                logger.info(
+                    "Requested more than 60 days, will be split in %s API calls.",
+                    len(chunks),
+                )
+
+            records: list[dict] = []
+            for chunk_from, chunk_to in chunks:
+                records.extend(
+                    self._client.read_table_chunk(
+                        "total_load",
+                        TOTAL_LOAD_PATH,
+                        chunk_from,
+                        chunk_to,
+                        table_options,
+                        ARRAY_KEY,
+                        extra_params=extra if extra else None,
+                    )
+                )
+
+            return iter(records), {
+                "cursor": self._client.format_cursor(chunks[-1][1])
+            }
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/sources/terna/terna.py
+    ########################################################
+
+    class TernaLakeflowConnect(LakeflowConnect):
+        """LakeflowConnect implementation for the Terna Public API."""
+
+        def __init__(self, options: dict[str, str]) -> None:
+            """
+            Initialize the Terna connector.
+
+            Expected options:
+                - client_id: OAuth 2.0 Client Credentials application key (required).
+                - client_secret: OAuth 2.0 Client Credentials secret (required).
+                - base_url: Base URL for the API (default https://api.terna.it).
+                - x_api_key: Optional API key for Physical Foreign Flow when that
+                  endpoint uses x-api-key instead of Bearer token.
+            """
+            super().__init__(options)
+            self._client = TernaApiClient(options)
+            self._total_load_reader = TotalLoadReader(self._client)
+            self._market_load_reader = MarketLoadReader(self._client)
+
+        def list_tables(self) -> list[str]:
+            """List names of all tables supported by this connector."""
+            return SUPPORTED_TABLES
+
+        def get_table_schema(
+            self, table_name: str, table_options: dict[str, str]
+        ) -> StructType:
+            """Return the Spark schema for the given table."""
+            self._client.validate_table(table_name)
+            return TABLE_SCHEMAS[table_name]
+
+        def read_table_metadata(
+            self, table_name: str, table_options: dict[str, str]
+        ) -> dict:
+            """Return metadata (primary_keys, cursor_field, ingestion_type) for the table."""
+            self._client.validate_table(table_name)
+            return dict(TABLE_METADATA[table_name])
+
+        def read_table(
+            self,
+            table_name: str,
+            start_offset: dict | None,
+            table_options: dict[str, str],
+        ) -> tuple[Iterator[dict], dict]:
+            """Read records by date-range chunks; cursor is the last 'date' value (yyyy-mm-dd hh:mm:ss)."""
+            self._client.validate_table(table_name)
+            reader = {
+                "total_load": self._total_load_reader.read,
+                "market_load": self._market_load_reader.read,
+                #"actual_generation": self._read_actual_generation,
+                #"renewable_generation": self._read_renewable_generation,
+                #"physical_foreign_flow": self._read_physical_foreign_flow,
+            }[table_name]
+            return reader(start_offset, table_options)
     '''
         def _read_actual_generation(
             self,
@@ -944,6 +1313,47 @@ def register_lakeflow_source(spark):
             return self.read(start)[0]
 
 
+    class LakeflowPartitionedStreamReader(DataSourceStreamReader):
+        """Proxy that bridges SupportsPartitionedStream to PySpark's DataSourceStreamReader.
+
+        Used when a connector implements the SupportsPartitionedStream mixin to
+        support partitioned streaming reads across Spark executors.
+        """
+
+        def __init__(
+            self,
+            options: dict[str, str],
+            schema: StructType,
+            lakeflow_connect: LakeflowConnect,
+        ):
+            self.options = options
+            self.schema = schema
+            self.lakeflow_connect = lakeflow_connect
+            self.table_name = options[TABLE_NAME]
+            self.table_options = {k: v for k, v in options.items() if k != IS_DELETE_FLOW}
+
+        def initialOffset(self):
+            return {}
+
+        def latestOffset(self):
+            # PySpark does not pass the current offset to latestOffset() yet,
+            # so we forward None.  Once PySpark supports it, pass the real value.
+            return self.lakeflow_connect.latest_offset(self.table_name, self.table_options, None)
+
+        def partitions(self, start: dict, end: dict):
+            partition_descs = self.lakeflow_connect.get_partitions(
+                self.table_name, self.table_options, start, end
+            )
+            return [InputPartition(json.dumps(p)) for p in partition_descs]
+
+        def read(self, partition: InputPartition):
+            partition_desc = json.loads(partition.value)
+            records = self.lakeflow_connect.read_partition(
+                self.table_name, partition_desc, self.table_options
+            )
+            return map(lambda x: parse_value(x, self.schema), records)
+
+
     class LakeflowBatchReader(DataSourceReader):
         def __init__(
             self,
@@ -955,18 +1365,30 @@ def register_lakeflow_source(spark):
             self.schema = schema
             self.lakeflow_connect = lakeflow_connect
             self.table_name = options[TABLE_NAME]
+            self._supports_partition = isinstance(lakeflow_connect, SupportsPartition)
+
+        def partitions(self):
+            if self._supports_partition and self.table_name != METADATA_TABLE:
+                try:
+                    partition_descs = self.lakeflow_connect.get_partitions(
+                        self.table_name, self.options
+                    )
+                    return [InputPartition(json.dumps(p)) for p in partition_descs]
+                except Exception:
+                    self._supports_partition = False
+            return [InputPartition(None)]
 
         def read(self, partition):
-            all_records = []
             if self.table_name == METADATA_TABLE:
-                all_records = self._read_table_metadata()
-            else:
-                all_records, _ = self.lakeflow_connect.read_table(
-                    self.table_name, None, self.options
+                records = self._read_table_metadata()
+            elif self._supports_partition and partition.value is not None:
+                partition_desc = json.loads(partition.value)
+                records = self.lakeflow_connect.read_partition(
+                    self.table_name, partition_desc, self.options
                 )
-
-            rows = map(lambda x: parse_value(x, self.schema), all_records)
-            return iter(rows)
+            else:
+                records, _ = self.lakeflow_connect.read_table(self.table_name, None, self.options)
+            return map(lambda x: parse_value(x, self.schema), records)
 
         def _read_table_metadata(self):
             table_name_list = self.options.get(TABLE_NAME_LIST, "")
@@ -1012,6 +1434,17 @@ def register_lakeflow_source(spark):
 
         def reader(self, schema: StructType):
             return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)
+
+        def streamReader(self, schema: StructType):
+            # Use the partitioned DataSourceStreamReader when the connector
+            # implements SupportsPartitionedStream and the table opts in.
+            # Otherwise, delegate to super() which raises PySparkNotImplementedError,
+            # causing Spark to fall back to simpleStreamReader().
+            if isinstance(self.lakeflow_connect, SupportsPartitionedStream):
+                table = self.options[TABLE_NAME]
+                if self.lakeflow_connect.is_partitioned(table):
+                    return LakeflowPartitionedStreamReader(self.options, schema, self.lakeflow_connect)
+            return super().streamReader(schema)
 
         def simpleStreamReader(self, schema: StructType):
             return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)
