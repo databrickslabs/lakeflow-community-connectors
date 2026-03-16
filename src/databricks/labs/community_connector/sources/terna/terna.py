@@ -13,6 +13,7 @@ from pyspark.sql.types import StructType
 from databricks.labs.community_connector.interface import LakeflowConnect
 from databricks.labs.community_connector.sources.terna.modules.load import (
     TotalLoadReader,
+    MarketLoadReader,
 )
 from databricks.labs.community_connector.sources.terna.terna_schemas import (
     SUPPORTED_TABLES,
@@ -38,6 +39,7 @@ class TernaLakeflowConnect(LakeflowConnect):
         super().__init__(options)
         self._client = TernaApiClient(options)
         self._total_load_reader = TotalLoadReader(self._client)
+        self._market_load_reader = MarketLoadReader(self._client)
 
     def list_tables(self) -> list[str]:
         """List names of all tables supported by this connector."""
@@ -67,6 +69,7 @@ class TernaLakeflowConnect(LakeflowConnect):
         self._client.validate_table(table_name)
         reader = {
             "total_load": self._total_load_reader.read,
+            "market_load": self._market_load_reader.read,
             #"actual_generation": self._read_actual_generation,
             #"renewable_generation": self._read_renewable_generation,
             #"physical_foreign_flow": self._read_physical_foreign_flow,

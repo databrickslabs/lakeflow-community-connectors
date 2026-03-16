@@ -1,12 +1,12 @@
-"""Reader for the total_load table (Terna load API)."""
+"""Reader for the market_load table (Terna load API)."""
 
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Iterator
 
 from databricks.labs.community_connector.sources.terna.terna_schemas import (
-    TOTAL_LOAD_METADATA,
-    TOTAL_LOAD_SCHEMA,
+    MARKET_LOAD_METADATA,
+    MARKET_LOAD_SCHEMA,
 )
 from databricks.labs.community_connector.sources.terna.utils.terna_api_client import (
     TernaApiClient,
@@ -19,18 +19,18 @@ TERNA_MAX_DAYS_PER_REQUEST = 60
 # Terna API allows history only within the last N solar years
 TERNA_MAX_HISTORY_SOLAR_YEARS = 5
 
-TOTAL_LOAD_PATH = "/load/v2.0/total-load"
-ARRAY_KEY = "total_load"
+MARKET_LOAD_PATH = "/load/v2.0/market-load"
+ARRAY_KEY = "market_load"
 
 
-class TotalLoadReader:
-    """Reads total_load data from the Terna Public API in date-range chunks."""
+class MarketLoadReader:
+    """Reads market_load data from the Terna Public API in date-range chunks."""
 
-    TOTAL_LOAD_SCHEMA = TOTAL_LOAD_SCHEMA
-    TOTAL_LOAD_METADATA = TOTAL_LOAD_METADATA
+    MARKET_LOAD_SCHEMA = MARKET_LOAD_SCHEMA
+    MARKET_LOAD_METADATA = MARKET_LOAD_METADATA
 
     # Bidding zones supported by the Terna API
-    TOTAL_LOAD_BIDDING_ZONES = [
+    MARKET_LOAD_BIDDING_ZONES = [
         "North",
         "Centre-North",
         "South",
@@ -49,7 +49,7 @@ class TotalLoadReader:
         start_offset: dict | None,
         table_options: dict[str, str],
     ) -> tuple[Iterator[dict], dict]:
-        """Read total_load records. Optional table_options: biddingZone (comma-separated or repeated)."""
+        """Read market_load records. Optional table_options: biddingZone (comma-separated or repeated)."""
         logger.info("Table options: %s", table_options)
 
         extra: dict[str, str | list[str]] = {}
@@ -65,10 +65,10 @@ class TotalLoadReader:
                 else list(raw_bidding_zones)
             )
             for bidding_zone in zones:
-                if bidding_zone not in self.TOTAL_LOAD_BIDDING_ZONES:
+                if bidding_zone not in self.MARKET_LOAD_BIDDING_ZONES:
                     raise ValueError(
                         f"Terna connector: Invalid biddingZone value {bidding_zone}. "
-                        f"Must be one of {', '.join(self.TOTAL_LOAD_BIDDING_ZONES)}"
+                        f"Must be one of {', '.join(self.MARKET_LOAD_BIDDING_ZONES)}"
                     )
             extra["biddingZone"] = zones
 
@@ -85,7 +85,7 @@ class TotalLoadReader:
 
         if date_from_str is None:
             raise ValueError(
-                "Terna connector, API total_load requires 'date_from'"
+                "Terna connector, API market_load requires 'date_from'"
             )
 
         date_from = self._client.string_to_datetime(date_from_str)
@@ -131,8 +131,8 @@ class TotalLoadReader:
         for chunk_from, chunk_to in chunks:
             records.extend(
                 self._client.read_table_chunk(
-                    "total_load",
-                    TOTAL_LOAD_PATH,
+                    "market_load",
+                    MARKET_LOAD_PATH,
                     chunk_from,
                     chunk_to,
                     table_options,
