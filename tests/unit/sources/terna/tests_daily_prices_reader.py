@@ -113,8 +113,8 @@ def test_terna_daily_prices_valid_data_type_orario():
 
     connector = TernaLakeflowConnect(config)
     table_options = {
-        "date_from": "01/02/2024",
-        "date_to": "02/02/2024",
+        "date_from": "01/03/2024",
+        "date_to": "17/03/2024",
         "data_types": "Orario",
     }
     start_offset = None
@@ -127,7 +127,8 @@ def test_terna_daily_prices_valid_data_type_orario():
 
     assert isinstance(offset, dict)
     assert "cursor" in offset
-    assert offset["cursor"] == "02/02/2024"
+    assert len(records) > 0
+    assert offset["cursor"] == "17/03/2024"
 
 
 def test_terna_daily_prices_valid_data_type_quarto_orario():
