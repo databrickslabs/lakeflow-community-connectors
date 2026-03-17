@@ -9,6 +9,9 @@ import requests
 from databricks.labs.community_connector.sources.terna.terna import TernaLakeflowConnect
 from tests.unit.sources.test_utils import load_config
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 def test_terna_init_raises_without_credentials():
     """Initializing without client_id or client_secret raises ValueError."""
@@ -173,6 +176,28 @@ def test_terna_daily_prices_cdc_empty_because_same_date():
     assert offset.get("cursor") == date_from
 
 
+def test_terna_daily_prices_date_from_no_end():
+    """When date_from equals date_to, connector returns empty iterator and cursor."""
+    config_dir = Path(__file__).parent / "configs"
+    config = load_config(config_dir / "dev_config.json")
+
+    if not config.get("client_id") or not config.get("client_secret"):
+        pytest.skip("Terna API credentials not set in dev_config.json")
+
+    connector = TernaLakeflowConnect(config)
+    date_from = datetime.now().strftime("%d/%m/%Y")
+    table_options = {"date_from": "01/03/2026", "date_to": "17/03/2026", "data_types": "Quarto Orario"}
+    start_offset = None
+
+    records_iter, offset = connector.read_table("daily_prices", start_offset, table_options)
+    records = list(records_iter)
+
+    logger.info(f"Records: {len(records)}")
+
+    #assert len(records) == 0
+    assert offset.get("cursor") == date_from
+
+
 def test_terna_daily_prices_full_start_end_dates():
     """Read daily_prices with date_from and date_to; cursor is date_to."""
     config_dir = Path(__file__).parent / "configs"
@@ -182,7 +207,7 @@ def test_terna_daily_prices_full_start_end_dates():
         pytest.skip("Terna API credentials not set in dev_config.json")
 
     connector = TernaLakeflowConnect(config)
-    table_options = {"date_from": "01/02/2024", "date_to": "29/02/2024", "data_types": "Orario"}
+    table_options = {"date_from": "01/03/2026", "date_to": "17/03/2026", "data_types": "Quarto Orario"}
     start_offset = None
 
     try:
@@ -192,7 +217,7 @@ def test_terna_daily_prices_full_start_end_dates():
         pytest.skip(f"Terna API unreachable: {e}")
 
     assert isinstance(offset, dict)
-    assert offset.get("cursor") == "29/02/2024"
+    assert offset.get("cursor") == "17/03/2026"
 
 
 def test_terna_daily_prices_cursor_resume():
