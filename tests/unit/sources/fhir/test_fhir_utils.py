@@ -41,7 +41,7 @@ def test_extract_record_common_fields():
     assert record["id"] == "p1"
     assert record["resourceType"] == "Patient"
     assert record["lastUpdated"] == "2024-01-15T10:30:00+00:00"
-    assert record["raw_json"] == resource
+    assert json.loads(record["raw_json"]) == resource
 
 def test_extract_record_missing_meta_returns_none_for_last_updated():
     record = extract_record({"resourceType": "Patient", "id": "p2"}, "Patient")

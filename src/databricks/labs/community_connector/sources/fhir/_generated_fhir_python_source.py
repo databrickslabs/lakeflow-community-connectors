@@ -401,8 +401,8 @@ def register_lakeflow_source(spark):
         StructField("id", StringType(), nullable=True),
         StructField("resourceType", StringType(), nullable=True),
         StructField("lastUpdated", TimestampType(), nullable=True),
-        StructField("raw_json", VariantType(), nullable=True),
-        StructField("extension", VariantType(), nullable=True),
+        StructField("raw_json", StringType(), nullable=True),
+        StructField("extension", StringType(), nullable=True),
     ]
 
     FALLBACK_SCHEMA = StructType(_COMMON_FIELDS)
@@ -746,6 +746,7 @@ def register_lakeflow_source(spark):
             "generalPractitioner": [extract_reference(gp) for gp in (r.get("generalPractitioner") or [])],
             "managingOrganization": extract_reference(r.get("managingOrganization")),
         }
+
 
     # Alias required by _patient_uk (mirrors `from profiles.base_r4 import _patient as _base_patient`
     # in uk_core.py — the merge script inlines functions under their original names so the alias
@@ -1955,8 +1956,10 @@ def register_lakeflow_source(spark):
             "id": resource.get("id"),
             "resourceType": resource.get("resourceType", resource_type),
             "lastUpdated": meta.get("lastUpdated"),
-            "raw_json": resource,
-            "extension": resource.get("extension"),
+            # raw_json and extension are stored as StringType (JSON strings).
+            # Downstream queries on DBR 15.3+ can use parse_json() to get VARIANT.
+            "raw_json": json.dumps(resource),
+            "extension": json.dumps(resource.get("extension")),
         }
         record.update(extract(resource, resource_type, profile))
         return record

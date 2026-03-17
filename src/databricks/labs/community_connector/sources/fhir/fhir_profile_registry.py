@@ -18,7 +18,7 @@ To add a new resource:
 
 from typing import Callable
 
-from pyspark.sql.types import StringType, StructField, StructType, TimestampType, VariantType
+from pyspark.sql.types import StringType, StructField, StructType, TimestampType
 
 _SCHEMA_REGISTRY: dict = {}
 _EXTRACTOR_REGISTRY: dict = {}
@@ -31,8 +31,8 @@ _COMMON_FIELDS: list = [
     StructField("id", StringType(), nullable=True),
     StructField("resourceType", StringType(), nullable=True),
     StructField("lastUpdated", TimestampType(), nullable=True),
-    StructField("raw_json", VariantType(), nullable=True),
-    StructField("extension", VariantType(), nullable=True),
+    StructField("raw_json", StringType(), nullable=True),
+    StructField("extension", StringType(), nullable=True),
 ]
 
 FALLBACK_SCHEMA = StructType(_COMMON_FIELDS)

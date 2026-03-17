@@ -148,4 +148,4 @@ connection:
 # These table-specific options must be included in the externalOptionsAllowList
 # parameter of the UC connection to allow them to be passed through.
 # ============================================================================
-external_options_allowlist: "resource_types,page_size,max_records_per_batch,page_delay"
+external_options_allowlist: "resource_types,page_size,max_records_per_batch,page_delay,profile"

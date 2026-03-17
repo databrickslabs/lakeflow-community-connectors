@@ -9,6 +9,7 @@ Key design decisions (from fhir_api_doc.md):
 - All HTTP calls have timeout=60 to prevent hangs on slow FHIR servers.
 """
 
+import json
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -267,12 +268,10 @@ def extract_record(resource: dict, resource_type: str, profile: str = "uk_core")
         "id": resource.get("id"),
         "resourceType": resource.get("resourceType", resource_type),
         "lastUpdated": meta.get("lastUpdated"),
-        # raw_json and extension are declared VariantType in _COMMON_FIELDS.
-        # The Lakeflow framework accepts raw Python dict/list for VariantType columns —
-        # do NOT pre-serialise with json.dumps(); pass the native Python object directly.
-        # Validated on Databricks Runtime 15.3+ / PySpark 4.1.1.
-        "raw_json": resource,
-        "extension": resource.get("extension"),
+        # raw_json and extension are stored as StringType (JSON strings).
+        # Downstream queries on DBR 15.3+ can use parse_json() to get VARIANT.
+        "raw_json": json.dumps(resource),
+        "extension": json.dumps(resource.get("extension")),
     }
     record.update(extract(resource, resource_type, profile))
     return record
