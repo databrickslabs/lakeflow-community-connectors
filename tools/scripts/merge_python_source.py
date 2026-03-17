@@ -7,6 +7,7 @@ support module imports for Python Data Source implementations.
 This script combines:
 1. src/databricks/labs/community_connector/libs/utils.py (parsing utilities)
 2. src/databricks/labs/community_connector/interface/lakeflow_connect.py (LakeflowConnect base class)
+2b. src/databricks/labs/community_connector/interface/supports_partition.py (partition support mixins)
 3. src/databricks/labs/community_connector/sources/{source_name}/*.py (source library files, in dependency order)
 4. src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py (main source connector implementation)
 5. src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py (PySpark data source registration)
@@ -94,9 +95,9 @@ def find_lakeflow_connect_class(source_content: str, source_name: str) -> str:
         ValueError: If no LakeflowConnect implementation is found.
         ValueError: If multiple LakeflowConnect implementations are found.
     """
-    # Pattern: class SomeName(LakeflowConnect):
-    # Matches classes that inherit from LakeflowConnect
-    subclass_pattern = r"^class\s+(\w+)\s*\(\s*LakeflowConnect\s*\)\s*:"
+    # Pattern: class SomeName(LakeflowConnect, ...):
+    # Matches classes that inherit from LakeflowConnect (possibly with additional bases)
+    subclass_pattern = r"^class\s+(\w+)\s*\([^)]*\bLakeflowConnect\b[^)]*\)\s*:"
     matches = re.findall(subclass_pattern, source_content, re.MULTILINE)
 
     if len(matches) == 0:
@@ -581,6 +582,7 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     src_base = PROJECT_ROOT / "src" / "databricks" / "labs" / "community_connector"
     utils_path = src_base / "libs" / "utils.py"
     interface_path = src_base / "interface" / "lakeflow_connect.py"
+    partition_path = src_base / "interface" / "supports_partition.py"
     source_path = src_base / "sources" / source_name / f"{source_name}.py"
     lakeflow_source_path = src_base / "sparkpds" / "lakeflow_datasource.py"
 
@@ -593,23 +595,14 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     # Discover additional library files in the source directory
     lib_files = get_source_lib_files(source_name)
 
-    # Verify all files exist
-    print(f"Merging files for source: {source_name}", file=sys.stderr)
-    print(f"- utils.py: {utils_path}", file=sys.stderr)
-    print(f"- lakeflow_connect.py: {interface_path}", file=sys.stderr)
-    if lib_files:
-        for lib_file in lib_files:
-            print(f"- {lib_file.name}: {lib_file}", file=sys.stderr)
-    print(f"- {source_name}.py: {source_path}", file=sys.stderr)
-    print(f"- lakeflow_datasource.py: {lakeflow_source_path}", file=sys.stderr)
-
     try:
         # Read all files
         utils_content = read_file_content(utils_path)
         interface_content = read_file_content(interface_path)
+        partition_content = read_file_content(partition_path)
         source_content = read_file_content(source_path)
         lakeflow_source_content = read_file_content(lakeflow_source_path)
-        
+
         # Read library files
         lib_contents = []
         for lib_file in lib_files:
@@ -618,6 +611,17 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # Log files being merged
+    print(f"Merging files for source: {source_name}", file=sys.stderr)
+    print(f"- utils.py: {utils_path}", file=sys.stderr)
+    print(f"- lakeflow_connect.py: {interface_path}", file=sys.stderr)
+    print(f"- supports_partition.py: {partition_path}", file=sys.stderr)
+    if lib_files:
+        for lib_file in lib_files:
+            print(f"- {lib_file.name}: {lib_file}", file=sys.stderr)
+    print(f"- {source_name}.py: {source_path}", file=sys.stderr)
+    print(f"- lakeflow_datasource.py: {lakeflow_source_path}", file=sys.stderr)
+
     # Find the LakeflowConnect implementation class name in the source
     lakeflow_connect_class = find_lakeflow_connect_class(source_content, source_name)
     print(f"- LakeflowConnect implementation: {lakeflow_connect_class}", file=sys.stderr)
@@ -625,9 +629,10 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     # Extract imports and code from each file
     utils_imports, utils_code = extract_imports_and_code(utils_content)
     interface_imports, interface_code = extract_imports_and_code(interface_content)
+    partition_imports, partition_code = extract_imports_and_code(partition_content)
     source_imports, source_code = extract_imports_and_code(source_content)
     lakeflow_imports, lakeflow_code = extract_imports_and_code(lakeflow_source_content)
-    
+
     # Extract imports and code from library files
     lib_imports_and_code = []
     for lib_file, content in lib_contents:
@@ -673,7 +678,7 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     lakeflow_code = "\n".join(filtered_lines)
 
     # Deduplicate and organize all imports
-    all_import_lists = [utils_imports, interface_imports]
+    all_import_lists = [utils_imports, interface_imports, partition_imports]
     for _, lib_imports, _ in lib_imports_and_code:
         all_import_lists.append(lib_imports)
     all_import_lists.extend([source_imports, lakeflow_imports])
@@ -729,6 +734,21 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     merged_lines.append("    " + "#" * 56)
     merged_lines.append("")
     for line in interface_code.strip().split("\n"):
+        if line.strip():
+            merged_lines.append("    " + line)
+        else:
+            merged_lines.append("")
+    merged_lines.append("")
+    merged_lines.append("")
+
+    # Section 2b: src/databricks/labs/community_connector/interface/supports_partition.py
+    merged_lines.append("    " + "#" * 56)
+    merged_lines.append(
+        "    # src/databricks/labs/community_connector/interface/supports_partition.py"
+    )
+    merged_lines.append("    " + "#" * 56)
+    merged_lines.append("")
+    for line in partition_code.strip().split("\n"):
         if line.strip():
             merged_lines.append("    " + line)
         else:

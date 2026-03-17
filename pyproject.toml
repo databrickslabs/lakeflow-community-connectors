@@ -40,3 +40,11 @@ line-length = 100
 
 [tool.ruff]
 line-length = 100
+
+[tool.pyrefly]
+project-includes = ["**/*.py"]
+project-excludes = []
+search-path = []
+disable-search-path-heuristics = true
+ignore-missing-imports = ["*"]
+ignore-errors-in-generated-code = true

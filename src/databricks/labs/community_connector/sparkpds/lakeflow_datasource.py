@@ -1,12 +1,18 @@
 from typing import Iterator
 import json
-from pyspark.sql.types import *
+from pyspark.sql.types import StructType, StructField, StringType, ArrayType
 from pyspark.sql.datasource import (
     DataSource,
+    DataSourceStreamReader,
+    InputPartition,
     SimpleDataSourceStreamReader,
     DataSourceReader,
 )
-from databricks.labs.community_connector.interface import LakeflowConnect
+from databricks.labs.community_connector.interface import (
+    LakeflowConnect,
+    SupportsPartition,
+    SupportsPartitionedStream,
+)
 from databricks.labs.community_connector.libs.utils import parse_value
 
 
@@ -85,6 +91,47 @@ class LakeflowStreamReader(SimpleDataSourceStreamReader):
         return self.read(start)[0]
 
 
+class LakeflowPartitionedStreamReader(DataSourceStreamReader):
+    """Proxy that bridges SupportsPartitionedStream to PySpark's DataSourceStreamReader.
+
+    Used when a connector implements the SupportsPartitionedStream mixin to
+    support partitioned streaming reads across Spark executors.
+    """
+
+    def __init__(
+        self,
+        options: dict[str, str],
+        schema: StructType,
+        lakeflow_connect: LakeflowConnect,
+    ):
+        self.options = options
+        self.schema = schema
+        self.lakeflow_connect = lakeflow_connect
+        self.table_name = options[TABLE_NAME]
+        self.table_options = {k: v for k, v in options.items() if k != IS_DELETE_FLOW}
+
+    def initialOffset(self):
+        return {}
+
+    def latestOffset(self):
+        # PySpark does not pass the current offset to latestOffset() yet,
+        # so we forward None.  Once PySpark supports it, pass the real value.
+        return self.lakeflow_connect.latest_offset(self.table_name, self.table_options, None)
+
+    def partitions(self, start: dict, end: dict):
+        partition_descs = self.lakeflow_connect.get_partitions(
+            self.table_name, self.table_options, start, end
+        )
+        return [InputPartition(json.dumps(p)) for p in partition_descs]
+
+    def read(self, partition: InputPartition):
+        partition_desc = json.loads(partition.value)
+        records = self.lakeflow_connect.read_partition(
+            self.table_name, partition_desc, self.table_options
+        )
+        return map(lambda x: parse_value(x, self.schema), records)
+
+
 class LakeflowBatchReader(DataSourceReader):
     def __init__(
         self,
@@ -96,18 +143,30 @@ class LakeflowBatchReader(DataSourceReader):
         self.schema = schema
         self.lakeflow_connect = lakeflow_connect
         self.table_name = options[TABLE_NAME]
+        self._supports_partition = isinstance(lakeflow_connect, SupportsPartition)
+
+    def partitions(self):
+        if self._supports_partition and self.table_name != METADATA_TABLE:
+            try:
+                partition_descs = self.lakeflow_connect.get_partitions(
+                    self.table_name, self.options
+                )
+                return [InputPartition(json.dumps(p)) for p in partition_descs]
+            except Exception:
+                self._supports_partition = False
+        return [InputPartition(None)]
 
     def read(self, partition):
-        all_records = []
         if self.table_name == METADATA_TABLE:
-            all_records = self._read_table_metadata()
-        else:
-            all_records, _ = self.lakeflow_connect.read_table(
-                self.table_name, None, self.options
+            records = self._read_table_metadata()
+        elif self._supports_partition and partition.value is not None:
+            partition_desc = json.loads(partition.value)
+            records = self.lakeflow_connect.read_partition(
+                self.table_name, partition_desc, self.options
             )
-
-        rows = map(lambda x: parse_value(x, self.schema), all_records)
-        return iter(rows)
+        else:
+            records, _ = self.lakeflow_connect.read_table(self.table_name, None, self.options)
+        return map(lambda x: parse_value(x, self.schema), records)
 
     def _read_table_metadata(self):
         table_name_list = self.options.get(TABLE_NAME_LIST, "")
@@ -153,6 +212,17 @@ class LakeflowSource(DataSource):
 
     def reader(self, schema: StructType):
         return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)
+
+    def streamReader(self, schema: StructType):
+        # Use the partitioned DataSourceStreamReader when the connector
+        # implements SupportsPartitionedStream and the table opts in.
+        # Otherwise, delegate to super() which raises PySparkNotImplementedError,
+        # causing Spark to fall back to simpleStreamReader().
+        if isinstance(self.lakeflow_connect, SupportsPartitionedStream):
+            table = self.options[TABLE_NAME]
+            if self.lakeflow_connect.is_partitioned(table):
+                return LakeflowPartitionedStreamReader(self.options, schema, self.lakeflow_connect)
+        return super().streamReader(schema)
 
     def simpleStreamReader(self, schema: StructType):
         return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)

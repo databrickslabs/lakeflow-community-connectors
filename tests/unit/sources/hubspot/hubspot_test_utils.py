@@ -5,8 +5,7 @@ from datetime import datetime
 from typing import Dict, List, Tuple
 
 
-# TODO: Refactor this utils to improve the interface in the future and do not add more tests using this utils.
-class LakeflowConnectTestUtils:
+class LakeflowConnectWriteTestUtils:
     """
     Test utilities for HubSpot connector.
     Provides write-back functionality for testing HubSpot data ingestion.
@@ -26,10 +25,6 @@ class LakeflowConnectTestUtils:
             "Authorization": f"Bearer {self.access_token}",
             "Content-Type": "application/json",
         }
-
-    def get_source_name(self) -> str:
-        """Return the source connector name."""
-        return "hubspot"
 
     def list_insertable_tables(self) -> List[str]:
         """
