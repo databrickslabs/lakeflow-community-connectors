@@ -832,7 +832,7 @@ def register_lakeflow_source(spark):
     # Terna API allows history only within the last N solar years
     MAX_HISTORY_SOLAR_YEARS = 5
 
-    DAILY_PRICES_PATH = "/load/v2.0/daily-prices"
+    DAILY_PRICES_PATH = "/fees/v1.0/daily-prices"
     ARRAY_KEY = "daily_prices"
 
 
