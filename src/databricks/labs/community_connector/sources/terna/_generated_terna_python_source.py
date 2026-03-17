@@ -776,6 +776,10 @@ def register_lakeflow_source(spark):
             """Format datetime for cursor/range_end (dd/mm/yyyy)."""
             return dt.strftime("%d/%m/%Y")
 
+        @staticmethod
+        def validate_extra_params(extra_params: str | list[str]) -> None:
+            return list(set([z.strip() for z in extra_params.split(",")]))
+
         def read_table_chunk(
             self,
             table_name: str,
@@ -857,35 +861,21 @@ def register_lakeflow_source(spark):
             logger.info("Table options: %s", table_options)
 
             extra: dict[str, str | list[str]] = {}
-            raw_data_types = (
-                table_options.get("dataTypes")
-                or table_options.get("data_types")
-                or table_options.get("datatypes")
-            )
+
+            raw_data_types = table_options.get("data_types")
+
             if raw_data_types is not None:
-                data_types = (
-                    [z.strip() for z in raw_data_types.split(",")]
-                    if isinstance(raw_data_types, str)
-                    else list(raw_data_types)
-                )
+                data_types = self._client.validate_extra_params(raw_data_types)
+
                 for data_type in data_types:
                     if data_type not in self.DAILY_PRICES_DATA_TYPES:
                         raise ValueError(
-                            f"Terna connector: Invalid dataType value {data_type}. "
-                            f"Must be one of {', '.join(self.DAILY_PRICES_DATA_TYPES)}"
+                            f"Terna connector: Invalid dataType value {data_type}. Must be one of {', '.join(self.DAILY_PRICES_DATA_TYPES)}"
                         )
                 extra["dataType"] = data_types
 
-            date_from_str = (
-                table_options.get("date_from")
-                or table_options.get("dateFrom")
-                or table_options.get("datefrom")
-            )
-            date_to_str = (
-                table_options.get("date_to")
-                or table_options.get("dateTo")
-                or table_options.get("dateto")
-            )
+            date_from_str = table_options.get("date_from")
+            date_to_str = table_options.get("date_to")
 
             if date_from_str is None:
                 raise ValueError(
@@ -992,35 +982,21 @@ def register_lakeflow_source(spark):
             logger.info("Table options: %s", table_options)
 
             extra: dict[str, str | list[str]] = {}
-            raw_bidding_zones = (
-                table_options.get("biddingZones")
-                or table_options.get("bidding_zones")
-                or table_options.get("biddingzones")
-            )
+
+            raw_bidding_zones = table_options.get("bidding_zones")
+
             if raw_bidding_zones is not None:
-                zones = (
-                    [z.strip() for z in raw_bidding_zones.split(",")]
-                    if isinstance(raw_bidding_zones, str)
-                    else list(raw_bidding_zones)
-                )
-                for bidding_zone in zones:
+                bidding_zones = self._client.validate_extra_params(raw_bidding_zones)
+
+                for bidding_zone in bidding_zones:
                     if bidding_zone not in self.MARKET_LOAD_BIDDING_ZONES:
                         raise ValueError(
-                            f"Terna connector: Invalid biddingZone value {bidding_zone}. "
-                            f"Must be one of {', '.join(self.MARKET_LOAD_BIDDING_ZONES)}"
+                            f"Terna connector: Invalid biddingZone value {bidding_zone}. Must be one of {', '.join(self.MARKET_LOAD_BIDDING_ZONES)}"
                         )
-                extra["biddingZone"] = zones
+                extra["biddingZone"] = bidding_zones
 
-            date_from_str = (
-                table_options.get("date_from")
-                or table_options.get("dateFrom")
-                or table_options.get("datefrom")
-            )
-            date_to_str = (
-                table_options.get("date_to")
-                or table_options.get("dateTo")
-                or table_options.get("dateto")
-            )
+            date_from_str = table_options.get("date_from")
+            date_to_str = table_options.get("date_to")
 
             if date_from_str is None:
                 raise ValueError(
@@ -1127,35 +1103,21 @@ def register_lakeflow_source(spark):
             logger.info("Table options: %s", table_options)
 
             extra: dict[str, str | list[str]] = {}
-            raw_bidding_zones = (
-                table_options.get("biddingZones")
-                or table_options.get("bidding_zones")
-                or table_options.get("biddingzones")
-            )
+
+            raw_bidding_zones = table_options.get("bidding_zones")
+
             if raw_bidding_zones is not None:
-                zones = (
-                    [z.strip() for z in raw_bidding_zones.split(",")]
-                    if isinstance(raw_bidding_zones, str)
-                    else list(raw_bidding_zones)
-                )
-                for bidding_zone in zones:
+                bidding_zones = self._client.validate_extra_params(raw_bidding_zones)
+
+                for bidding_zone in bidding_zones:
                     if bidding_zone not in self.TOTAL_LOAD_BIDDING_ZONES:
                         raise ValueError(
-                            f"Terna connector: Invalid biddingZone value {bidding_zone}. "
-                            f"Must be one of {', '.join(self.TOTAL_LOAD_BIDDING_ZONES)}"
+                            f"Terna connector: Invalid biddingZone value {bidding_zone}. Must be one of {', '.join(self.TOTAL_LOAD_BIDDING_ZONES)}"
                         )
-                extra["biddingZone"] = zones
+                extra["biddingZone"] = bidding_zones
 
-            date_from_str = (
-                table_options.get("date_from")
-                or table_options.get("dateFrom")
-                or table_options.get("datefrom")
-            )
-            date_to_str = (
-                table_options.get("date_to")
-                or table_options.get("dateTo")
-                or table_options.get("dateto")
-            )
+            date_from_str = table_options.get("date_from")
+            date_to_str = table_options.get("date_to")
 
             if date_from_str is None:
                 raise ValueError(
