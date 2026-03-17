@@ -133,6 +133,26 @@ def test_jwt_assertion_includes_kid_header():
     assert data["client_assertion"] == "header.payload.sig"
 
 
+def test_jwt_assertion_includes_nbf_claim():
+    """Epic backend OAuth requires nbf claim (not in SMART v2 base spec but mandatory for Epic).
+    nbf must equal iat and cannot be in the future.
+    Ref: https://fhir.epic.com/Documentation?docId=oauth2 — JWT claims table.
+    """
+    from unittest.mock import patch
+    auth = SmartAuthClient(
+        token_url="https://auth.example.com/token",
+        client_id="my-client",
+        auth_type="jwt_assertion",
+        kid="k1",
+    )
+    with patch("databricks.labs.community_connector.sources.fhir.fhir_utils.jwt") as mock_jwt:
+        mock_jwt.encode.return_value = "h.p.s"
+        auth._jwt_assertion_data()
+    payload = mock_jwt.encode.call_args.args[0]
+    assert "nbf" in payload, "Epic requires nbf claim in JWT assertion"
+    assert payload["nbf"] == payload["iat"], "nbf must equal iat (cannot be in the future)"
+
+
 def test_jwt_assertion_raises_if_kid_missing():
     """kid is required for jwt_assertion per SMART spec — must raise if omitted."""
     from unittest.mock import patch

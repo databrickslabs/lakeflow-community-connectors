@@ -747,6 +747,10 @@ def register_lakeflow_source(spark):
             "managingOrganization": extract_reference(r.get("managingOrganization")),
         }
 
+    # Alias required by _patient_uk (mirrors `from profiles.base_r4 import _patient as _base_patient`
+    # in uk_core.py — the merge script inlines functions under their original names so the alias
+    # must be synthesised explicitly here).
+    _base_patient = _patient
 
     # ─── Observation ──────────────────────────────────────────────────────────────
     # FHIR R4: https://hl7.org/fhir/R4/observation.html
