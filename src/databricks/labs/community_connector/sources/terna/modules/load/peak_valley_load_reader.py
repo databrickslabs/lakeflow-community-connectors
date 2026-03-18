@@ -4,10 +4,12 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Iterator
 
-from databricks.labs.community_connector.sources.terna.terna_schemas import (
-    PEAK_VALLEY_LOAD_METADATA,
-    PEAK_VALLEY_LOAD_SCHEMA,
+from pyspark.sql.types import (
+    StringType,
+    StructField,
+    StructType,
 )
+
 from databricks.labs.community_connector.sources.terna.utils.terna_api_client import (
     TernaApiClient,
 )
@@ -20,11 +22,28 @@ TERNA_MAX_DAYS_PER_REQUEST = 60
 TERNA_MAX_HISTORY_SOLAR_YEARS = 5
 
 PEAK_VALLEY_LOAD_PATH = "/load/v2.0/peak-valley-load"
-PEAK_VALLEY_KEY = "peak_valley_load"
-
 
 class PeakValleyLoadReader:
     """Reads total_load data from the Terna Public API in date-range chunks."""
+
+    PEAK_VALLEY_KEY = "peak_valley_load"
+
+    # peak_valley_load: date, date_tz, date_offset, peak_load_MW, valley_load_MW, bidding_zone
+    PEAK_VALLEY_LOAD_SCHEMA = StructType(
+        [
+            StructField("date", StringType(), True),
+            StructField("date_tz", StringType(), True),
+            StructField("date_offset", StringType(), True),
+            StructField("peak_load_GW", StringType(), True),
+            StructField("valley_load_GW", StringType(), True)
+        ]
+    )
+
+    PEAK_VALLEY_LOAD_METADATA = {
+        "primary_keys": ["date"],
+        "cursor_field": "date",
+        "ingestion_type": "append",
+    }
 
     def __init__(self, client: TernaApiClient) -> None:
         self._client = client
@@ -88,12 +107,12 @@ class PeakValleyLoadReader:
         for chunk_from, chunk_to in chunks:
             records.extend(
                 self._client.read_table_chunk(
-                    PEAK_VALLEY_KEY,
+                    self.PEAK_VALLEY_KEY,
                     PEAK_VALLEY_LOAD_PATH,
                     chunk_from,
                     chunk_to,
                     table_options,
-                    PEAK_VALLEY_KEY,
+                    self.PEAK_VALLEY_KEY,
                     extra_params=extra if extra else None,
                 )
             )

@@ -4,10 +4,12 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Iterator
 
-from databricks.labs.community_connector.sources.terna.terna_schemas import (
-    TOTAL_LOAD_METADATA,
-    TOTAL_LOAD_SCHEMA,
+from pyspark.sql.types import (
+    StringType,
+    StructField,
+    StructType,
 )
+
 from databricks.labs.community_connector.sources.terna.utils.terna_api_client import (
     TernaApiClient,
 )
@@ -20,8 +22,6 @@ TERNA_MAX_DAYS_PER_REQUEST = 60
 TERNA_MAX_HISTORY_SOLAR_YEARS = 5
 
 TOTAL_LOAD_PATH = "/load/v2.0/total-load"
-TOTAL_LOAD_KEY = "total_load"
-
 
 class TotalLoadReader:
     """Reads total_load data from the Terna Public API in date-range chunks."""
@@ -37,6 +37,25 @@ class TotalLoadReader:
         "Calabria",
         "Italy",
     ]
+    
+    TOTAL_LOAD_KEY = "total_load"
+
+    TOTAL_LOAD_SCHEMA = StructType(
+        [
+            StructField("date", StringType(), True),
+            StructField("date_tz", StringType(), True),
+            StructField("date_offset", StringType(), True),
+            StructField("total_load_MW", StringType(), True),
+            StructField("forecast_total_load_MW", StringType(), True),
+            StructField("bidding_zone", StringType(), True),
+        ]
+    )
+
+    TOTAL_LOAD_METADATA = {
+        "primary_keys": ["date", "bidding_zone"],
+        "cursor_field": "date",
+        "ingestion_type": "append",
+    }
 
     def __init__(self, client: TernaApiClient) -> None:
         self._client = client
@@ -114,12 +133,12 @@ class TotalLoadReader:
         for chunk_from, chunk_to in chunks:
             records.extend(
                 self._client.read_table_chunk(
-                    TOTAL_LOAD_KEY,
+                    self.TOTAL_LOAD_KEY,
                     TOTAL_LOAD_PATH,
                     chunk_from,
                     chunk_to,
                     table_options,
-                    TOTAL_LOAD_KEY,
+                    self.TOTAL_LOAD_KEY,
                     extra_params=extra if extra else None,
                 )
             )

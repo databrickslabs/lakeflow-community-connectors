@@ -4,6 +4,12 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Iterator
 
+from pyspark.sql.types import (
+    StringType,
+    StructField,
+    StructType,
+)
+
 from databricks.labs.community_connector.sources.terna.utils.terna_api_client import (
     TernaApiClient,
 )
@@ -16,7 +22,6 @@ MAX_DAYS_PER_REQUEST = 62
 MAX_HISTORY_SOLAR_YEARS = 5
 
 DAILY_PRICES_PATH = "/fees/v1.0/daily-prices"
-DAILY_PRICES_KEY = "daily_prices"
 
 
 class DailyPricesReader:
@@ -27,6 +32,27 @@ class DailyPricesReader:
         "Orario",
         "Quarto Orario"
     ]
+
+    DAILY_PRICES_KEY = "daily_prices"
+
+    DAILY_PRICES_SCHEMA = StructType(
+        [
+            StructField("publication_date", StringType(), True),
+            StructField("reference_date", StringType(), True),
+            StructField("data_type", StringType(), True),
+            StructField("date_tz", StringType(), True),
+            StructField("macrozone", StringType(), True),
+            StructField("base_price_EURxMWh", StringType(), True),
+            StructField("incentive_component_EURxMWh", StringType(), True),
+            StructField("unbalance_price_EURxMWh", StringType(), True),
+        ]
+    )
+
+    DAILY_PRICES_METADATA = {
+        "primary_keys": ["reference_date", "macrozone"],
+        "cursor_field": "reference_date",
+        "ingestion_type": "append",
+    }
 
     def __init__(self, client: TernaApiClient) -> None:
         self._client = client
@@ -104,12 +130,12 @@ class DailyPricesReader:
         for chunk_from, chunk_to in chunks:
             records.extend(
                 self._client.read_table_chunk(
-                    DAILY_PRICES_KEY,
+                    self.DAILY_PRICES_KEY,
                     DAILY_PRICES_PATH,
                     chunk_from,
                     chunk_to,
                     table_options,
-                    DAILY_PRICES_KEY,
+                    self.DAILY_PRICES_KEY,
                     extra_params=extra if extra else None,
                 )
             )

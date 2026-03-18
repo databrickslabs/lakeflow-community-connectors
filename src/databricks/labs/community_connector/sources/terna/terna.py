@@ -19,12 +19,40 @@ from databricks.labs.community_connector.sources.terna.modules.load import (
     TotalLoadReader,
     PeakValleyLoadReader,
 )
-from databricks.labs.community_connector.sources.terna.terna_schemas import (
-    SUPPORTED_TABLES,
-    TABLE_METADATA,
-    TABLE_SCHEMAS,
-)
 from databricks.labs.community_connector.sources.terna.utils import TernaApiClient
+
+# =============================================================================
+# Supported tables (static list)
+# =============================================================================
+
+SUPPORTED_TABLES = [
+    TotalLoadReader.TOTAL_LOAD_KEY,
+    MarketLoadReader.MARKET_LOAD_KEY,
+    DailyPricesReader.DAILY_PRICES_KEY,
+    PeakValleyLoadReader.PEAK_VALLEY_KEY
+]
+
+# =============================================================================
+# Table schemas
+# =============================================================================
+
+TABLE_SCHEMAS = {
+    "total_load": TotalLoadReader.TOTAL_LOAD_SCHEMA,
+    "market_load": MarketLoadReader.MARKET_LOAD_SCHEMA,
+    "daily_prices": DailyPricesReader.DAILY_PRICES_SCHEMA,
+    "peak_valley_load": PeakValleyLoadReader.PEAK_VALLEY_LOAD_SCHEMA,
+}
+
+# =============================================================================
+# Table metadata: primary keys, cursor field, ingestion type (all append)
+# =============================================================================
+
+TABLE_METADATA = {
+    "total_load": TotalLoadReader.TOTAL_LOAD_METADATA,
+    "market_load": MarketLoadReader.MARKET_LOAD_METADATA,
+    "daily_prices": DailyPricesReader.DAILY_PRICES_METADATA,
+    "peak_valley_load": PeakValleyLoadReader.PEAK_VALLEY_LOAD_METADATA,
+}
 
 class TernaLakeflowConnect(LakeflowConnect):
     """LakeflowConnect implementation for the Terna Public API."""
@@ -41,7 +69,7 @@ class TernaLakeflowConnect(LakeflowConnect):
               endpoint uses x-api-key instead of Bearer token.
         """
         super().__init__(options)
-        self._client = TernaApiClient(options)
+        self._client = TernaApiClient(options, SUPPORTED_TABLES)
         self._total_load_reader = TotalLoadReader(self._client)
         self._market_load_reader = MarketLoadReader(self._client)
         self._daily_prices_reader = DailyPricesReader(self._client)

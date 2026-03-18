@@ -4,6 +4,12 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Iterator
 
+from pyspark.sql.types import (
+    StringType,
+    StructField,
+    StructType,
+)
+
 from databricks.labs.community_connector.sources.terna.utils.terna_api_client import (
     TernaApiClient,
 )
@@ -16,8 +22,6 @@ TERNA_MAX_DAYS_PER_REQUEST = 60
 TERNA_MAX_HISTORY_SOLAR_YEARS = 5
 
 MARKET_LOAD_PATH = "/load/v2.0/market-load"
-MARKET_LOAD_KEY = "market_load"
-
 
 class MarketLoadReader:
     """Reads market_load data from the Terna Public API in date-range chunks."""
@@ -33,6 +37,25 @@ class MarketLoadReader:
         "Calabria",
         "Italy",
     ]
+
+    MARKET_LOAD_KEY = "market_load"
+
+    MARKET_LOAD_SCHEMA = StructType(
+        [
+            StructField("date", StringType(), True),
+            StructField("date_tz", StringType(), True),
+            StructField("date_offset", StringType(), True),
+            StructField("market_load_MW", StringType(), True),
+            StructField("forecast_market_load_MW", StringType(), True),
+            StructField("bidding_zone", StringType(), True),
+        ]
+    )
+
+    MARKET_LOAD_METADATA = {
+        "primary_keys": ["date", "bidding_zone"],
+        "cursor_field": "date",
+        "ingestion_type": "append",
+    }
 
     def __init__(self, client: TernaApiClient) -> None:
         self._client = client
@@ -110,12 +133,12 @@ class MarketLoadReader:
         for chunk_from, chunk_to in chunks:
             records.extend(
                 self._client.read_table_chunk(
-                    MARKET_LOAD_KEY,
+                    self.MARKET_LOAD_KEY,
                     MARKET_LOAD_PATH,
                     chunk_from,
                     chunk_to,
                     table_options,
-                    MARKET_LOAD_KEY,
+                    self.MARKET_LOAD_KEY,
                     extra_params=extra if extra else None,
                 )
             )

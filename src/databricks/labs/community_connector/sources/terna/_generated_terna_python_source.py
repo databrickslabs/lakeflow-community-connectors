@@ -514,118 +514,6 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
-    # src/databricks/labs/community_connector/sources/terna/terna_schemas.py
-    ########################################################
-
-    SUPPORTED_TABLES = [
-        "total_load",
-        "market_load",
-        "daily_prices",
-        "peak_valley_load"
-    ]
-
-    # =============================================================================
-    # Table schema definitions (API returns strings for numeric fields)
-    # Defined here to avoid circular import: readers import from this module.
-    # =============================================================================
-
-    # total_load: date, date_tz, date_offset, total_load_MW, forecast_total_load_MW, bidding_zone
-    TOTAL_LOAD_SCHEMA = StructType(
-        [
-            StructField("date", StringType(), True),
-            StructField("date_tz", StringType(), True),
-            StructField("date_offset", StringType(), True),
-            StructField("total_load_MW", StringType(), True),
-            StructField("forecast_total_load_MW", StringType(), True),
-            StructField("bidding_zone", StringType(), True),
-        ]
-    )
-
-    TOTAL_LOAD_METADATA = {
-        "primary_keys": ["date", "bidding_zone"],
-        "cursor_field": "date",
-        "ingestion_type": "append",
-    }
-
-    # market_load: date, date_tz, date_offset, market_load_MW, bidding_zone
-    MARKET_LOAD_SCHEMA = StructType(
-        [
-            StructField("date", StringType(), True),
-            StructField("date_tz", StringType(), True),
-            StructField("date_offset", StringType(), True),
-            StructField("market_load_MW", StringType(), True),
-            StructField("forecast_market_load_MW", StringType(), True),
-            StructField("bidding_zone", StringType(), True),
-        ]
-    )
-
-    MARKET_LOAD_METADATA = {
-        "primary_keys": ["date", "bidding_zone"],
-        "cursor_field": "date",
-        "ingestion_type": "append",
-    }
-
-    # peak_valley_load: date, date_tz, date_offset, peak_load_MW, valley_load_MW, bidding_zone
-    PEAK_VALLEY_LOAD_SCHEMA = StructType(
-        [
-            StructField("date", StringType(), True),
-            StructField("date_tz", StringType(), True),
-            StructField("date_offset", StringType(), True),
-            StructField("peak_load_GW", StringType(), True),
-            StructField("valley_load_GW", StringType(), True)
-        ]
-    )
-
-    PEAK_VALLEY_LOAD_METADATA = {
-        "primary_keys": ["date"],
-        "cursor_field": "date",
-        "ingestion_type": "append",
-    }
-
-    # daily_prices: date, date_tz, date_offset, price_eur_mwh, bidding_zone
-    DAILY_PRICES_SCHEMA = StructType(
-        [
-            StructField("publication_date", StringType(), True),
-            StructField("reference_date", StringType(), True),
-            StructField("data_type", StringType(), True),
-            StructField("date_tz", StringType(), True),
-            StructField("macrozone", StringType(), True),
-            StructField("base_price_EURxMWh", StringType(), True),
-            StructField("incentive_component_EURxMWh", StringType(), True),
-            StructField("unbalance_price_EURxMWh", StringType(), True),
-        ]
-    )
-
-    DAILY_PRICES_METADATA = {
-        "primary_keys": ["reference_date", "macrozone"],
-        "cursor_field": "reference_date",
-        "ingestion_type": "append",
-    }
-
-    # =============================================================================
-    # Legacy / commented-out schema definitions
-    # =============================================================================
-
-    TABLE_SCHEMAS = {
-        "total_load": TOTAL_LOAD_SCHEMA,
-        "market_load": MARKET_LOAD_SCHEMA,
-        "daily_prices": DAILY_PRICES_SCHEMA,
-        "peak_valley_load": PEAK_VALLEY_LOAD_SCHEMA,
-    }
-
-    # =============================================================================
-    # Table metadata: primary keys, cursor field, ingestion type (all append)
-    # =============================================================================
-
-    TABLE_METADATA = {
-        "total_load": TOTAL_LOAD_METADATA,
-        "market_load": MARKET_LOAD_METADATA,
-        "daily_prices": DAILY_PRICES_METADATA,
-        "peak_valley_load": PEAK_VALLEY_LOAD_METADATA,
-    }
-
-
-    ########################################################
     # src/databricks/labs/community_connector/sources/terna/utils/terna_api_client.py
     ########################################################
 
@@ -648,7 +536,8 @@ def register_lakeflow_source(spark):
     class TernaApiClient:
         """Handles Terna API: OAuth token, HTTP requests, table validation, date formatting, and chunk reads."""
 
-        def __init__(self, options: dict[str, str]) -> None:
+        def __init__(self, options: dict[str, str], supported_tables: list[str]) -> None:
+
             client_id = options.get("client_id")
             client_secret = options.get("client_secret")
             if not client_id or not client_secret:
@@ -658,6 +547,7 @@ def register_lakeflow_source(spark):
             self._client_id = client_id
             self._client_secret = client_secret
             self._base_url = (options.get("base_url") or DEFAULT_BASE_URL).rstrip("/")
+            self._supported_tables = supported_tables
             self._oauth_token: str | None = None
             self._oauth_expires_at: float = 0.0
             self._session = requests.Session()
@@ -731,10 +621,10 @@ def register_lakeflow_source(spark):
 
         def validate_table(self, table_name: str) -> None:
             """Raise ValueError if table_name is not in SUPPORTED_TABLES."""
-            if table_name not in SUPPORTED_TABLES:
+            if table_name not in self._supported_tables:
                 raise ValueError(
                     f"Table {table_name!r} is not supported. "
-                    f"Supported tables: {SUPPORTED_TABLES}"
+                    f"Supported tables: {self._supported_tables}"
                 )
 
         @staticmethod
@@ -813,7 +703,6 @@ def register_lakeflow_source(spark):
     MAX_HISTORY_SOLAR_YEARS = 5
 
     DAILY_PRICES_PATH = "/fees/v1.0/daily-prices"
-    DAILY_PRICES_KEY = "daily_prices"
 
 
     class DailyPricesReader:
@@ -824,6 +713,27 @@ def register_lakeflow_source(spark):
             "Orario",
             "Quarto Orario"
         ]
+
+        DAILY_PRICES_KEY = "daily_prices"
+
+        DAILY_PRICES_SCHEMA = StructType(
+            [
+                StructField("publication_date", StringType(), True),
+                StructField("reference_date", StringType(), True),
+                StructField("data_type", StringType(), True),
+                StructField("date_tz", StringType(), True),
+                StructField("macrozone", StringType(), True),
+                StructField("base_price_EURxMWh", StringType(), True),
+                StructField("incentive_component_EURxMWh", StringType(), True),
+                StructField("unbalance_price_EURxMWh", StringType(), True),
+            ]
+        )
+
+        DAILY_PRICES_METADATA = {
+            "primary_keys": ["reference_date", "macrozone"],
+            "cursor_field": "reference_date",
+            "ingestion_type": "append",
+        }
 
         def __init__(self, client: TernaApiClient) -> None:
             self._client = client
@@ -901,12 +811,12 @@ def register_lakeflow_source(spark):
             for chunk_from, chunk_to in chunks:
                 records.extend(
                     self._client.read_table_chunk(
-                        DAILY_PRICES_KEY,
+                        self.DAILY_PRICES_KEY,
                         DAILY_PRICES_PATH,
                         chunk_from,
                         chunk_to,
                         table_options,
-                        DAILY_PRICES_KEY,
+                        self.DAILY_PRICES_KEY,
                         extra_params=extra if extra else None,
                     )
                 )
@@ -928,8 +838,6 @@ def register_lakeflow_source(spark):
     TERNA_MAX_HISTORY_SOLAR_YEARS = 5
 
     MARKET_LOAD_PATH = "/load/v2.0/market-load"
-    MARKET_LOAD_KEY = "market_load"
-
 
     class MarketLoadReader:
         """Reads market_load data from the Terna Public API in date-range chunks."""
@@ -945,6 +853,25 @@ def register_lakeflow_source(spark):
             "Calabria",
             "Italy",
         ]
+
+        MARKET_LOAD_KEY = "market_load"
+
+        MARKET_LOAD_SCHEMA = StructType(
+            [
+                StructField("date", StringType(), True),
+                StructField("date_tz", StringType(), True),
+                StructField("date_offset", StringType(), True),
+                StructField("market_load_MW", StringType(), True),
+                StructField("forecast_market_load_MW", StringType(), True),
+                StructField("bidding_zone", StringType(), True),
+            ]
+        )
+
+        MARKET_LOAD_METADATA = {
+            "primary_keys": ["date", "bidding_zone"],
+            "cursor_field": "date",
+            "ingestion_type": "append",
+        }
 
         def __init__(self, client: TernaApiClient) -> None:
             self._client = client
@@ -1022,12 +949,12 @@ def register_lakeflow_source(spark):
             for chunk_from, chunk_to in chunks:
                 records.extend(
                     self._client.read_table_chunk(
-                        MARKET_LOAD_KEY,
+                        self.MARKET_LOAD_KEY,
                         MARKET_LOAD_PATH,
                         chunk_from,
                         chunk_to,
                         table_options,
-                        MARKET_LOAD_KEY,
+                        self.MARKET_LOAD_KEY,
                         extra_params=extra if extra else None,
                     )
                 )
@@ -1049,11 +976,28 @@ def register_lakeflow_source(spark):
     TERNA_MAX_HISTORY_SOLAR_YEARS = 5
 
     PEAK_VALLEY_LOAD_PATH = "/load/v2.0/peak-valley-load"
-    PEAK_VALLEY_KEY = "peak_valley_load"
-
 
     class PeakValleyLoadReader:
         """Reads total_load data from the Terna Public API in date-range chunks."""
+
+        PEAK_VALLEY_KEY = "peak_valley_load"
+
+        # peak_valley_load: date, date_tz, date_offset, peak_load_MW, valley_load_MW, bidding_zone
+        PEAK_VALLEY_LOAD_SCHEMA = StructType(
+            [
+                StructField("date", StringType(), True),
+                StructField("date_tz", StringType(), True),
+                StructField("date_offset", StringType(), True),
+                StructField("peak_load_GW", StringType(), True),
+                StructField("valley_load_GW", StringType(), True)
+            ]
+        )
+
+        PEAK_VALLEY_LOAD_METADATA = {
+            "primary_keys": ["date"],
+            "cursor_field": "date",
+            "ingestion_type": "append",
+        }
 
         def __init__(self, client: TernaApiClient) -> None:
             self._client = client
@@ -1117,12 +1061,12 @@ def register_lakeflow_source(spark):
             for chunk_from, chunk_to in chunks:
                 records.extend(
                     self._client.read_table_chunk(
-                        PEAK_VALLEY_KEY,
+                        self.PEAK_VALLEY_KEY,
                         PEAK_VALLEY_LOAD_PATH,
                         chunk_from,
                         chunk_to,
                         table_options,
-                        PEAK_VALLEY_KEY,
+                        self.PEAK_VALLEY_KEY,
                         extra_params=extra if extra else None,
                     )
                 )
@@ -1144,8 +1088,6 @@ def register_lakeflow_source(spark):
     TERNA_MAX_HISTORY_SOLAR_YEARS = 5
 
     TOTAL_LOAD_PATH = "/load/v2.0/total-load"
-    TOTAL_LOAD_KEY = "total_load"
-
 
     class TotalLoadReader:
         """Reads total_load data from the Terna Public API in date-range chunks."""
@@ -1161,6 +1103,25 @@ def register_lakeflow_source(spark):
             "Calabria",
             "Italy",
         ]
+
+        TOTAL_LOAD_KEY = "total_load"
+
+        TOTAL_LOAD_SCHEMA = StructType(
+            [
+                StructField("date", StringType(), True),
+                StructField("date_tz", StringType(), True),
+                StructField("date_offset", StringType(), True),
+                StructField("total_load_MW", StringType(), True),
+                StructField("forecast_total_load_MW", StringType(), True),
+                StructField("bidding_zone", StringType(), True),
+            ]
+        )
+
+        TOTAL_LOAD_METADATA = {
+            "primary_keys": ["date", "bidding_zone"],
+            "cursor_field": "date",
+            "ingestion_type": "append",
+        }
 
         def __init__(self, client: TernaApiClient) -> None:
             self._client = client
@@ -1238,12 +1199,12 @@ def register_lakeflow_source(spark):
             for chunk_from, chunk_to in chunks:
                 records.extend(
                     self._client.read_table_chunk(
-                        TOTAL_LOAD_KEY,
+                        self.TOTAL_LOAD_KEY,
                         TOTAL_LOAD_PATH,
                         chunk_from,
                         chunk_to,
                         table_options,
-                        TOTAL_LOAD_KEY,
+                        self.TOTAL_LOAD_KEY,
                         extra_params=extra if extra else None,
                     )
                 )
@@ -1256,6 +1217,35 @@ def register_lakeflow_source(spark):
     ########################################################
     # src/databricks/labs/community_connector/sources/terna/terna.py
     ########################################################
+
+    SUPPORTED_TABLES = [
+        TotalLoadReader.TOTAL_LOAD_KEY,
+        MarketLoadReader.MARKET_LOAD_KEY,
+        DailyPricesReader.DAILY_PRICES_KEY,
+        PeakValleyLoadReader.PEAK_VALLEY_KEY
+    ]
+
+    # =============================================================================
+    # Table schemas
+    # =============================================================================
+
+    TABLE_SCHEMAS = {
+        "total_load": TotalLoadReader.TOTAL_LOAD_SCHEMA,
+        "market_load": MarketLoadReader.MARKET_LOAD_SCHEMA,
+        "daily_prices": DailyPricesReader.DAILY_PRICES_SCHEMA,
+        "peak_valley_load": PeakValleyLoadReader.PEAK_VALLEY_LOAD_SCHEMA,
+    }
+
+    # =============================================================================
+    # Table metadata: primary keys, cursor field, ingestion type (all append)
+    # =============================================================================
+
+    TABLE_METADATA = {
+        "total_load": TotalLoadReader.TOTAL_LOAD_METADATA,
+        "market_load": MarketLoadReader.MARKET_LOAD_METADATA,
+        "daily_prices": DailyPricesReader.DAILY_PRICES_METADATA,
+        "peak_valley_load": PeakValleyLoadReader.PEAK_VALLEY_LOAD_METADATA,
+    }
 
     class TernaLakeflowConnect(LakeflowConnect):
         """LakeflowConnect implementation for the Terna Public API."""
@@ -1272,7 +1262,7 @@ def register_lakeflow_source(spark):
                   endpoint uses x-api-key instead of Bearer token.
             """
             super().__init__(options)
-            self._client = TernaApiClient(options)
+            self._client = TernaApiClient(options, SUPPORTED_TABLES)
             self._total_load_reader = TotalLoadReader(self._client)
             self._market_load_reader = MarketLoadReader(self._client)
             self._daily_prices_reader = DailyPricesReader(self._client)
