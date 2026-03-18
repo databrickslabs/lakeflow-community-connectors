@@ -17,6 +17,7 @@ from databricks.labs.community_connector.sources.terna.modules.fees import (
 from databricks.labs.community_connector.sources.terna.modules.load import (
     MarketLoadReader,
     TotalLoadReader,
+    PeakValleyLoadReader,
 )
 from databricks.labs.community_connector.sources.terna.terna_schemas import (
     SUPPORTED_TABLES,
@@ -44,6 +45,7 @@ class TernaLakeflowConnect(LakeflowConnect):
         self._total_load_reader = TotalLoadReader(self._client)
         self._market_load_reader = MarketLoadReader(self._client)
         self._daily_prices_reader = DailyPricesReader(self._client)
+        self._peak_valley_load_reader = PeakValleyLoadReader(self._client)
 
     def list_tables(self) -> list[str]:
         """List names of all tables supported by this connector."""
@@ -75,5 +77,6 @@ class TernaLakeflowConnect(LakeflowConnect):
             "total_load": self._total_load_reader.read,
             "market_load": self._market_load_reader.read,
             "daily_prices": self._daily_prices_reader.read,
+            "peak_valley_load": self._peak_valley_load_reader.read,
         }[table_name]
         return reader(start_offset, table_options)

@@ -1,9 +1,13 @@
-"""Reader for the market_load table (Terna load API)."""
+"""Reader for the total_load table (Terna load API)."""
 
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Iterator
 
+from databricks.labs.community_connector.sources.terna.terna_schemas import (
+    PEAK_VALLEY_LOAD_METADATA,
+    PEAK_VALLEY_LOAD_SCHEMA,
+)
 from databricks.labs.community_connector.sources.terna.utils.terna_api_client import (
     TernaApiClient,
 )
@@ -15,24 +19,12 @@ TERNA_MAX_DAYS_PER_REQUEST = 60
 # Terna API allows history only within the last N solar years
 TERNA_MAX_HISTORY_SOLAR_YEARS = 5
 
-MARKET_LOAD_PATH = "/load/v2.0/market-load"
-MARKET_LOAD_KEY = "market_load"
+PEAK_VALLEY_LOAD_PATH = "/load/v2.0/peak-valley-load"
+PEAK_VALLEY_KEY = "peak_valley_load"
 
 
-class MarketLoadReader:
-    """Reads market_load data from the Terna Public API in date-range chunks."""
-
-    # Bidding zones supported by the Terna API
-    MARKET_LOAD_BIDDING_ZONES = [
-        "North",
-        "Centre-North",
-        "South",
-        "Centre-South",
-        "Sardinia",
-        "Sicily",
-        "Calabria",
-        "Italy",
-    ]
+class PeakValleyLoadReader:
+    """Reads total_load data from the Terna Public API in date-range chunks."""
 
     def __init__(self, client: TernaApiClient) -> None:
         self._client = client
@@ -42,30 +34,16 @@ class MarketLoadReader:
         start_offset: dict | None,
         table_options: dict[str, str],
     ) -> tuple[Iterator[dict], dict]:
-        """Read market_load records. Optional table_options: biddingZone (comma-separated or repeated)."""
+        """Read total_load records. Optional table_options: biddingZone (comma-separated or repeated)."""
         logger.info("Table options: %s", table_options)
 
         extra: dict[str, str | list[str]] = {}
-        
-        raw_bidding_zones = table_options.get("bidding_zones")
-        
-        if raw_bidding_zones is not None:
-            bidding_zones = self._client.validate_extra_params(raw_bidding_zones)
-
-            for bidding_zone in bidding_zones:
-                if bidding_zone not in self.MARKET_LOAD_BIDDING_ZONES:
-                    raise ValueError(
-                        f"Terna connector: Invalid biddingZone value {bidding_zone}. Must be one of {', '.join(self.MARKET_LOAD_BIDDING_ZONES)}"
-                    )
-            extra["biddingZone"] = bidding_zones
 
         date_from_str = table_options.get("date_from")
         date_to_str = table_options.get("date_to")
 
         if date_from_str is None:
-            raise ValueError(
-                "Terna connector, API market_load requires 'date_from'"
-            )
+            raise ValueError("peak_valley_load requires 'date_from'")
 
         date_from = self._client.string_to_datetime(date_from_str)
         now = datetime.now(timezone.utc)
@@ -110,12 +88,12 @@ class MarketLoadReader:
         for chunk_from, chunk_to in chunks:
             records.extend(
                 self._client.read_table_chunk(
-                    MARKET_LOAD_KEY,
-                    MARKET_LOAD_PATH,
+                    PEAK_VALLEY_KEY,
+                    PEAK_VALLEY_LOAD_PATH,
                     chunk_from,
                     chunk_to,
                     table_options,
-                    MARKET_LOAD_KEY,
+                    PEAK_VALLEY_KEY,
                     extra_params=extra if extra else None,
                 )
             )

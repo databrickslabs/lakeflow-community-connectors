@@ -16,7 +16,7 @@ MAX_DAYS_PER_REQUEST = 62
 MAX_HISTORY_SOLAR_YEARS = 5
 
 DAILY_PRICES_PATH = "/fees/v1.0/daily-prices"
-ARRAY_KEY = "daily_prices"
+DAILY_PRICES_KEY = "daily_prices"
 
 
 class DailyPricesReader:
@@ -104,12 +104,12 @@ class DailyPricesReader:
         for chunk_from, chunk_to in chunks:
             records.extend(
                 self._client.read_table_chunk(
-                    "daily_prices",
+                    DAILY_PRICES_KEY,
                     DAILY_PRICES_PATH,
                     chunk_from,
                     chunk_to,
                     table_options,
-                    ARRAY_KEY,
+                    DAILY_PRICES_KEY,
                     extra_params=extra if extra else None,
                 )
             )

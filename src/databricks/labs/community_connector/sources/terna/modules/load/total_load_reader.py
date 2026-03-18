@@ -20,7 +20,7 @@ TERNA_MAX_DAYS_PER_REQUEST = 60
 TERNA_MAX_HISTORY_SOLAR_YEARS = 5
 
 TOTAL_LOAD_PATH = "/load/v2.0/total-load"
-ARRAY_KEY = "total_load"
+TOTAL_LOAD_KEY = "total_load"
 
 
 class TotalLoadReader:
@@ -114,12 +114,12 @@ class TotalLoadReader:
         for chunk_from, chunk_to in chunks:
             records.extend(
                 self._client.read_table_chunk(
-                    "total_load",
+                    TOTAL_LOAD_KEY,
                     TOTAL_LOAD_PATH,
                     chunk_from,
                     chunk_to,
                     table_options,
-                    ARRAY_KEY,
+                    TOTAL_LOAD_KEY,
                     extra_params=extra if extra else None,
                 )
             )
