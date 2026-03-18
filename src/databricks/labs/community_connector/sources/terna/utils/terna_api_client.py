@@ -8,10 +8,6 @@ from typing import Any
 
 import requests
 
-from databricks.labs.community_connector.sources.terna.terna_schemas import (
-    SUPPORTED_TABLES,
-)
-
 logger = logging.getLogger(__name__)
 
 # Token endpoint path (relative to base_url)
@@ -31,7 +27,8 @@ QPS_BACKOFF_SEC = 3.0
 class TernaApiClient:
     """Handles Terna API: OAuth token, HTTP requests, table validation, date formatting, and chunk reads."""
 
-    def __init__(self, options: dict[str, str]) -> None:
+    def __init__(self, options: dict[str, str], supported_tables: list[str]) -> None:
+        
         client_id = options.get("client_id")
         client_secret = options.get("client_secret")
         if not client_id or not client_secret:
@@ -41,6 +38,7 @@ class TernaApiClient:
         self._client_id = client_id
         self._client_secret = client_secret
         self._base_url = (options.get("base_url") or DEFAULT_BASE_URL).rstrip("/")
+        self._supported_tables = supported_tables
         self._oauth_token: str | None = None
         self._oauth_expires_at: float = 0.0
         self._session = requests.Session()
@@ -114,10 +112,10 @@ class TernaApiClient:
 
     def validate_table(self, table_name: str) -> None:
         """Raise ValueError if table_name is not in SUPPORTED_TABLES."""
-        if table_name not in SUPPORTED_TABLES:
+        if table_name not in self._supported_tables:
             raise ValueError(
                 f"Table {table_name!r} is not supported. "
-                f"Supported tables: {SUPPORTED_TABLES}"
+                f"Supported tables: {self._supported_tables}"
             )
 
     @staticmethod
