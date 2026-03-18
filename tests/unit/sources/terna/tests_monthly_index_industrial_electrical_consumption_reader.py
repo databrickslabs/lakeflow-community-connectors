@@ -1,6 +1,6 @@
-"""Test the Terna connector using the LakeflowConnect test suite."""
+"""Tests for the monthly_index_industrial_electrical_consumption table reader."""
 
-import re
+import calendar
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -12,6 +12,16 @@ from tests.unit.sources.test_utils import load_config
 import logging
 
 logger = logging.getLogger(__name__)
+
+TABLE = "monthly_index_industrial_electrical_consumption"
+
+
+def _get_connector():
+    config_dir = Path(__file__).parent / "configs"
+    config = load_config(config_dir / "dev_config.json")
+    if not config.get("client_id") or not config.get("client_secret"):
+        pytest.skip("Terna API credentials not set in dev_config.json")
+    return TernaLakeflowConnect(config)
 
 
 def test_terna_init_raises_without_credentials():
@@ -27,193 +37,156 @@ def test_terna_init_raises_without_credentials():
 
 
 def test_terna_full_missing_date_from():
-    """When date_from is missing, connector raises ValueError (API requires it)."""
-    config_dir = Path(__file__).parent / "configs"
-    config = load_config(config_dir / "dev_config.json")
-
-    if not config.get("client_id") or not config.get("client_secret"):
-        pytest.skip("Terna API credentials not set in dev_config.json")
-
-    connector = TernaLakeflowConnect(config)
-    table_options = {"date_to": "29/02/2024", "bidding_zones": "Italy"}
-    start_offset = None
+    """When date_from is missing, connector raises ValueError."""
+    connector = _get_connector()
+    table_options = {"date_to": "29/02/2024"}
 
     with pytest.raises(ValueError, match="monthly_index_industrial_electrical_consumption requires 'date_from'"):
-        records_iter, offset = connector.read_table("monthly_index_industrial_electrical_consumption", start_offset, table_options)
-        records = list(records_iter)
+        connector.read_table(TABLE, None, table_options)
 
 
 def test_terna_beyond_five_years_limit():
-    """When date_from is missing, connector raises ValueError (API requires it)."""
-    config_dir = Path(__file__).parent / "configs"
-    config = load_config(config_dir / "dev_config.json")
-
-    if not config.get("client_id") or not config.get("client_secret"):
-        pytest.skip("Terna API credentials not set in dev_config.json")
-
-    connector = TernaLakeflowConnect(config)
-    table_options = {"date_from": "31/12/2020", "bidding_zones": "Italy"}
-    start_offset = None
+    """date_from older than 5 solar years raises ValueError."""
+    connector = _get_connector()
+    table_options = {"date_from": "31/12/2020"}
 
     with pytest.raises(ValueError, match="Terna connector: 'date_from' must be within the last 5 solar years, not sooner than 01/01/2021"):
-        connector.read_table("monthly_index_industrial_electrical_consumption", start_offset, table_options)
+        connector.read_table(TABLE, None, table_options)
 
 
-def test_terna_cdc_more_than_sixty_days_multiple_chunks():
-    """When date_from is missing, connector raises ValueError (API requires it)."""
-    config_dir = Path(__file__).parent / "configs"
-    config = load_config(config_dir / "dev_config.json")
+def test_terna_invalid_sector():
+    """An invalid sector value raises ValueError."""
+    connector = _get_connector()
+    table_options = {"date_from": "01/02/2024", "date_to": "28/02/2024", "sectors": "INVALID_SECTOR"}
 
-    if not config.get("client_id") or not config.get("client_secret"):
-        pytest.skip("Terna API credentials not set in dev_config.json")
-
-    connector = TernaLakeflowConnect(config)
-
-    date_to = datetime.now()
-    date_from = (date_to - timedelta(days=1)).strftime("%d/%m/%Y")
-    table_options = {"date_from": date_from, "bidding_zones": "Italy"}
-    start_offset = None
-
-    records_iter, offset = connector.read_table("monthly_index_industrial_electrical_consumption", start_offset, table_options)
-    records = list(records_iter)
-
-    assert offset.get("cursor") == date_to.strftime("%d/%m/%Y")
+    with pytest.raises(ValueError, match="Invalid sector value INVALID_SECTOR"):
+        connector.read_table(TABLE, None, table_options)
 
 
-def test_terna_cdc_more_than_sixty_days_single_chunk():
-    """When date_from is missing, connector raises ValueError (API requires it)."""
-    config_dir = Path(__file__).parent / "configs"
-    config = load_config(config_dir / "dev_config.json")
+def test_terna_invalid_tension_type():
+    """An invalid tension_type value raises ValueError."""
+    connector = _get_connector()
+    table_options = {"date_from": "01/02/2024", "date_to": "28/02/2024", "tension_types": "BT"}
 
-    if not config.get("client_id") or not config.get("client_secret"):
-        pytest.skip("Terna API credentials not set in dev_config.json")
+    with pytest.raises(ValueError, match="Invalid tension_type value BT"):
+        connector.read_table(TABLE, None, table_options)
 
-    connector = TernaLakeflowConnect(config)
-
-    days = 80
-
-    date_to = datetime.now()
-    date_from = (date_to - timedelta(days=days)).strftime("%d/%m/%Y")
-    table_options = {"date_from": date_from, "bidding_zones": "Italy"}
-    start_offset = None
-
-    records_iter, offset = connector.read_table("monthly_index_industrial_electrical_consumption", start_offset, table_options)
-    records = list(records_iter)
-
-    assert len(records) == 4 * 24 * (days-2)
-    assert offset.get("cursor") == date_to.strftime("%d/%m/%Y")
-
-
-def test_terna_cdc():
-    """When date_from is missing, connector raises ValueError (API requires it)."""
-    config_dir = Path(__file__).parent / "configs"
-    config = load_config(config_dir / "dev_config.json")
-
-    if not config.get("client_id") or not config.get("client_secret"):
-        pytest.skip("Terna API credentials not set in dev_config.json")
-
-    connector = TernaLakeflowConnect(config)
-
-    days = 2
-
-    date_from = (datetime.now() - timedelta(days=days)).strftime("%d/%m/%Y")
-    table_options = {"date_from": date_from, "bidding_zones": "Italy"}
-    start_offset = None
-
-    records_iter, offset = connector.read_table("monthly_index_industrial_electrical_consumption", start_offset, table_options)
-    records = list(records_iter)
-
-    assert offset.get("cursor") == datetime.now().strftime("%d/%m/%Y")
 
 def test_terna_cdc_empty_because_same_date():
-    """When date_from is missing, connector raises ValueError (API requires it)."""
-    config_dir = Path(__file__).parent / "configs"
-    config = load_config(config_dir / "dev_config.json")
-
-    if not config.get("client_id") or not config.get("client_secret"):
-        pytest.skip("Terna API credentials not set in dev_config.json")
-
-    connector = TernaLakeflowConnect(config)
-
+    """When date_from == date_to, returns empty with cursor == date_from."""
+    connector = _get_connector()
     date_from = datetime.now().strftime("%d/%m/%Y")
+    table_options = {"date_from": date_from}
 
-    table_options = {"date_from": date_from, "bidding_zones": "Italy"}
-    start_offset = None
-
-    records_iter, offset = connector.read_table("monthly_index_industrial_electrical_consumption", start_offset, table_options)
+    records_iter, offset = connector.read_table(TABLE, None, table_options)
     records = list(records_iter)
 
     assert len(records) == 0
     assert offset.get("cursor") == date_from
 
-def test_terna_full_start_end_dates():
-    config_dir = Path(__file__).parent / "configs"
-    config = load_config(config_dir / "dev_config.json")
 
-    if not config.get("client_id") or not config.get("client_secret"):
-        pytest.skip("Terna API credentials not set in dev_config.json")
+def test_terna_full_single_month():
+    """Full read of a single known historical month returns data."""
+    connector = _get_connector()
+    table_options = {"date_from": "01/11/2024", "date_to": "30/11/2024"}
 
-    connector = TernaLakeflowConnect(config)
-    table_options = {"date_from": "01/02/2024", "date_to": "29/02/2024", "bidding_zones": "Italy"}
-    # Full refresh, cursor is None
-    start_offset = None
-
-    records_iter, offset = connector.read_table("monthly_index_industrial_electrical_consumption", start_offset, table_options)
+    records_iter, offset = connector.read_table(TABLE, None, table_options)
     records = list(records_iter)
-    
+
     assert isinstance(offset, dict)
-    assert len(records) == 4 * 24 * 29 
-    assert offset.get("cursor") == "29/02/2024"
+    assert len(records) > 0
+    assert offset.get("cursor") == "30/11/2024"
 
 
-def test_terna_not_full_start_end_dates():
-    config_dir = Path(__file__).parent / "configs"
-    config = load_config(config_dir / "dev_config.json")
+def test_terna_full_multi_month():
+    """Reading a range spanning multiple months returns data and cursor at end of last month."""
+    connector = _get_connector()
+    table_options = {"date_from": "01/10/2024", "date_to": "15/12/2024"}
 
-    if not config.get("client_id") or not config.get("client_secret"):
-        pytest.skip("Terna API credentials not set in dev_config.json")
-
-    connector = TernaLakeflowConnect(config)
-    table_options = {"date_from": "28/02/2024", "date_to": "29/02/2024", "bidding_zones": "Italy"}
-    start_offset = {"cursor": "29/02/2024"}
-
-    records_iter, offset = connector.read_table("monthly_index_industrial_electrical_consumption", start_offset, table_options)
+    records_iter, offset = connector.read_table(TABLE, None, table_options)
     records = list(records_iter)
-    
+
     assert isinstance(offset, dict)
-    assert len(records) == 0 
-    assert offset.get("cursor") == "29/02/2024"
+    assert len(records) > 0
+    assert offset.get("cursor") == "31/12/2024"
 
 
-def test_terna_wrong_bidding_zone():
-    config_dir = Path(__file__).parent / "configs"
-    config = load_config(config_dir / "dev_config.json")
+def test_terna_not_full_cursor_at_date_to():
+    """When cursor == date_to, returns empty (already fully read)."""
+    connector = _get_connector()
+    table_options = {"date_from": "01/11/2024", "date_to": "30/11/2024"}
+    start_offset = {"cursor": "30/11/2024"}
 
-    if not config.get("client_id") or not config.get("client_secret"):
-        pytest.skip("Terna API credentials not set in dev_config.json")
-
-    connector = TernaLakeflowConnect(config)
-    table_options = {"date_from": "28/02/2024", "date_to": "29/02/2024", "bidding_zones": "Trento"}
-    # Full refresh, cursor is None
-    start_offset = {"cursor": "28/02/2024"}
-
-    with pytest.raises(ValueError, match="Terna connector: Invalid biddingZone value Trento. Must be one of North, Centre-North, South, Centre-South, Sardinia, Sicily, Calabria, Italy"):
-        records_iter, offset = connector.read_table("monthly_index_industrial_electrical_consumption", start_offset, table_options)
-        records = list(records_iter)
-
-
-def test_terna_multiple_bidding_zones():
-    config_dir = Path(__file__).parent / "configs"
-    config = load_config(config_dir / "dev_config.json")
-
-    if not config.get("client_id") or not config.get("client_secret"):
-        pytest.skip("Terna API credentials not set in dev_config.json")
-
-    connector = TernaLakeflowConnect(config)
-    table_options = {"date_from": "28/02/2024", "date_to": "29/02/2024", "bidding_zones": "Italy,North"}
-    # Full refresh, cursor is None
-    start_offset = {"cursor": "28/02/2024"}
-
-    records_iter, offset = connector.read_table("monthly_index_industrial_electrical_consumption", start_offset, table_options)
+    records_iter, offset = connector.read_table(TABLE, start_offset, table_options)
     records = list(records_iter)
-    
+
+    assert isinstance(offset, dict)
+    assert len(records) == 0
+    assert offset.get("cursor") == "30/11/2024"
+
+
+def test_terna_cdc_default_date_to():
+    """When date_to is omitted, defaults to now; cursor set to end of current month."""
+    connector = _get_connector()
+    now = datetime.now()
+    date_from = (now - timedelta(days=2)).strftime("%d/%m/%Y")
+    table_options = {"date_from": date_from}
+
+    records_iter, offset = connector.read_table(TABLE, None, table_options)
+    records = list(records_iter)
+
+    last_day = calendar.monthrange(now.year, now.month)[1]
+    expected_cursor = f"{last_day:02d}/{now.month:02d}/{now.year}"
+    assert offset.get("cursor") == expected_cursor
+
+
+def test_terna_with_sector_filter():
+    """Reading with a sector filter returns data."""
+    connector = _get_connector()
+    table_options = {
+        "date_from": "01/11/2024",
+        "date_to": "30/11/2024",
+        "sectors": "ALIMENTARE",
+    }
+
+    records_iter, offset = connector.read_table(TABLE, None, table_options)
+    records = list(records_iter)
+
+    assert isinstance(offset, dict)
+    assert len(records) > 0
+    for record in records:
+        assert record.get("sector") == "ALIMENTARE"
+
+
+def test_terna_with_tension_type_filter():
+    """Reading with a tension_type filter returns data."""
+    connector = _get_connector()
+    table_options = {
+        "date_from": "01/11/2024",
+        "date_to": "30/11/2024",
+        "tension_types": "AT",
+    }
+
+    records_iter, offset = connector.read_table(TABLE, None, table_options)
+    records = list(records_iter)
+
+    assert isinstance(offset, dict)
+    assert len(records) > 0
+    for record in records:
+        assert record.get("tension_type") == "AT"
+
+
+def test_terna_with_multiple_sectors():
+    """Reading with multiple comma-separated sectors completes without error."""
+    connector = _get_connector()
+    table_options = {
+        "date_from": "01/11/2024",
+        "date_to": "30/11/2024",
+        "sectors": "ALIMENTARE,CHIMICA",
+    }
+
+    records_iter, offset = connector.read_table(TABLE, None, table_options)
+    records = list(records_iter)
+
+    assert isinstance(offset, dict)
+    assert offset.get("cursor") == "30/11/2024"
