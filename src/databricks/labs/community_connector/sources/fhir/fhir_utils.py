@@ -28,7 +28,7 @@ from databricks.labs.community_connector.sources.fhir.fhir_profile_registry impo
 _SUPPORTED_ALGORITHMS = {"RS384", "ES384"}
 
 
-class SmartAuthClient:  # pylint: disable=too-few-public-methods
+class SmartAuthClient:  # pylint: disable=too-few-public-methods,too-many-instance-attributes
     """Fetches and caches a SMART on FHIR Bearer token.
 
     auth_type values:

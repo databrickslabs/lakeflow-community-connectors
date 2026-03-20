@@ -235,6 +235,7 @@ def extract_annotation(obj: dict | None) -> dict | None:
 
 
 def extract_dosage(obj: dict) -> dict:
+    """Extract a FHIR Dosage backbone element into a flat dict."""
     timing = obj.get("timing") or {}
     timing_codings = _safe(timing, "code", "coding") or []
     timing_code = (timing_codings[0] or {}).get("code") if timing_codings else None
