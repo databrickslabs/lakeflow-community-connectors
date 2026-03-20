@@ -95,7 +95,7 @@ class FhirLakeflowConnect(LakeflowConnect):
         page_delay = float(table_options.get("page_delay", str(PAGE_DELAY)))
         profile = table_options.get("profile", "uk_core")
 
-        params: dict[str, str] = {"_count": str(page_size)}
+        params: dict[str, str] = {"_count": str(page_size), "_sort": "_lastUpdated"}
         if since:
             params["_lastUpdated"] = f"gt{since}"
 
