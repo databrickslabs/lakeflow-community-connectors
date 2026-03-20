@@ -15,6 +15,11 @@ from databricks.labs.community_connector.interface import LakeflowConnect
 from databricks.labs.community_connector.sources.fhir.fhir_constants import (
     CURSOR_FIELD, DEFAULT_MAX_RECORDS, DEFAULT_PAGE_SIZE, DEFAULT_RESOURCES, PAGE_DELAY,
 )
+
+
+def _parse_ts(ts: str) -> datetime:
+    """Parse a FHIR instant (ISO 8601 with timezone) to a datetime."""
+    return datetime.fromisoformat(ts)
 from databricks.labs.community_connector.sources.fhir.fhir_schemas import get_schema
 from databricks.labs.community_connector.sources.fhir.fhir_utils import (
     FhirHttpClient, SmartAuthClient, discover_token_url, extract_record, iter_bundle_pages,
@@ -82,7 +87,7 @@ class FhirLakeflowConnect(LakeflowConnect):
         self._validate_table(table_name)
 
         since = start_offset.get("cursor") if start_offset else None
-        if since and since >= self._init_ts:
+        if since and _parse_ts(since) >= _parse_ts(self._init_ts):
             return iter([]), start_offset
 
         page_size = int(table_options.get("page_size", str(DEFAULT_PAGE_SIZE)))
@@ -107,7 +112,8 @@ class FhirLakeflowConnect(LakeflowConnect):
         # Records with null lastUpdated are excluded from this check (cardinality 0..1 in spec).
         if since:
             has_datable = [r for r in records if r.get(CURSOR_FIELD)]
-            newer = [r for r in has_datable if r[CURSOR_FIELD] > since]
+            since_dt = _parse_ts(since)
+            newer = [r for r in has_datable if _parse_ts(r[CURSOR_FIELD]) > since_dt]
             if has_datable and not newer:
                 raise RuntimeError(
                     f"FHIR server appears to have ignored the '_lastUpdated=gt{since}' filter — "
@@ -118,12 +124,11 @@ class FhirLakeflowConnect(LakeflowConnect):
                 )
 
         # Advance cursor to max lastUpdated across batch.
-        # ISO8601 string comparison is correct for FHIR instants (always timezone-qualified).
         cursors = [r[CURSOR_FIELD] for r in records if r.get(CURSOR_FIELD)]
         if not cursors:
             return iter(records), start_offset or {}
 
-        last_cursor = max(cursors)
+        last_cursor = max(cursors, key=_parse_ts)
         end_offset = {"cursor": last_cursor}
 
         if start_offset and start_offset == end_offset:
