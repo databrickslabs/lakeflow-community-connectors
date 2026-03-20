@@ -9,7 +9,7 @@ DEFAULT_RESOURCES = [
 
 CURSOR_FIELD = "lastUpdated"
 
-RETRIABLE_STATUS_CODES = {429, 500, 502, 503}  # 502 common on Azure Health Data Services and AWS HealthLake
+RETRIABLE_STATUS_CODES = {429, 500, 502, 503}  # 502: Azure/AWS
 MAX_RETRIES = 5
 INITIAL_BACKOFF = 5.0  # seconds; doubled after each retry (5→10→20→40→80)
 PAGE_DELAY = 0.0       # seconds to sleep between paginated requests; set to 1.0 for public servers

@@ -22,6 +22,7 @@ from databricks.labs.community_connector.sources.fhir.fhir_constants import TOKE
 
 
 def validate(config: dict) -> None:
+    """Validate FHIR credentials by performing a token exchange and metadata fetch."""
     auth_type = config.get("auth_type", "none")
     base_url = config.get("base_url", "").rstrip("/")
 
@@ -91,6 +92,7 @@ def _fail(message: str) -> None:
 
 
 def main() -> None:
+    """CLI entry point for credential validation."""
     parser = argparse.ArgumentParser(
         description="Validate FHIR connector credentials against a real FHIR server."
     )

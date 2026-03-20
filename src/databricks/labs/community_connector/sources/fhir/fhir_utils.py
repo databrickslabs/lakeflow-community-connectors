@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterator, Optional
 from urllib.parse import urljoin
 
-import jwt
+import jwt  # pylint: disable=import-error
 import requests
 
 from databricks.labs.community_connector.sources.fhir.fhir_constants import (
@@ -25,7 +25,10 @@ from databricks.labs.community_connector.sources.fhir.fhir_constants import (
 from databricks.labs.community_connector.sources.fhir.fhir_profile_registry import extract
 
 
-class SmartAuthClient:
+_SUPPORTED_ALGORITHMS = {"RS384", "ES384"}
+
+
+class SmartAuthClient:  # pylint: disable=too-few-public-methods
     """Fetches and caches a SMART on FHIR Bearer token.
 
     auth_type values:
@@ -34,9 +37,12 @@ class SmartAuthClient:
     - "none": No authentication (open servers, dev/test only)
     """
 
-    def __init__(self, token_url: str, client_id: str, auth_type: str,
-                 private_key_pem: str = "", client_secret: str = "", scope: str = "",
-                 kid: str = "", private_key_algorithm: str = "RS384") -> None:
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self, token_url: str, client_id: str, auth_type: str,
+        private_key_pem: str = "", client_secret: str = "",
+        scope: str = "", kid: str = "",
+        private_key_algorithm: str = "RS384",
+    ) -> None:
         self._token_url = token_url
         self._client_id = client_id
         self._auth_type = auth_type
@@ -49,15 +55,15 @@ class SmartAuthClient:
         self._expires_at: Optional[datetime] = None
 
         if auth_type == "jwt_assertion":
-            _SUPPORTED_ALGORITHMS = {"RS384", "ES384"}
             if private_key_algorithm not in _SUPPORTED_ALGORITHMS:
                 raise ValueError(
-                    f"private_key_algorithm {private_key_algorithm!r} is not supported. "
-                    f"Use one of: {sorted(_SUPPORTED_ALGORITHMS)}. "
-                    f"Per the SMART on FHIR Backend Services spec, clients SHALL support RS384 and ES384."
+                    f"private_key_algorithm {private_key_algorithm!r} "
+                    f"is not supported. "
+                    f"Use one of: {sorted(_SUPPORTED_ALGORITHMS)}."
                 )
 
     def get_token(self) -> str:
+        """Return a cached or freshly-fetched Bearer token."""
         if self._auth_type == "none":
             return ""
         if self._access_token and self._expires_at:
@@ -103,7 +109,11 @@ class SmartAuthClient:
                 "registered with the FHIR server's JWK Set."
             )
         jwt_headers = {"kid": self._kid, "typ": "JWT"}
-        assertion = jwt.encode(payload, self._private_key_pem, algorithm=self._private_key_algorithm, headers=jwt_headers)
+        assertion = jwt.encode(
+            payload, self._private_key_pem,
+            algorithm=self._private_key_algorithm,
+            headers=jwt_headers,
+        )
         data = {
             "grant_type": "client_credentials",
             "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
@@ -173,13 +183,18 @@ class FhirHttpClient:
         return h
 
     def get(self, resource_type: str, params: Optional[dict] = None) -> requests.Response:
+        """Fetch a FHIR resource type with optional query parameters."""
         url = urljoin(self._base_url, resource_type)
         return self.get_url(url, params=params)
 
     def get_url(self, url: str, params: Optional[dict] = None) -> requests.Response:
+        """Fetch a URL with retry logic and auth injection."""
         backoff = INITIAL_BACKOFF
         for attempt in range(MAX_RETRIES):
-            resp = self._session.get(url, params=params, headers=self._headers(), timeout=HTTP_TIMEOUT)
+            resp = self._session.get(
+                url, params=params,
+                headers=self._headers(), timeout=HTTP_TIMEOUT,
+            )
             if resp.status_code not in RETRIABLE_STATUS_CODES:
                 return resp
             if attempt < MAX_RETRIES - 1:

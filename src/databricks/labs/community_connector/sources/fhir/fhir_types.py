@@ -145,12 +145,14 @@ def _safe(d, *keys, default=None):
 
 
 def extract_coding(obj: dict | None) -> dict | None:
+    """Extract a FHIR Coding datatype."""
     if not obj:
         return None
     return {"system": obj.get("system"), "code": obj.get("code"), "display": obj.get("display")}
 
 
 def extract_codeable_concept(obj: dict | None) -> dict | None:
+    """Extract a FHIR CodeableConcept datatype."""
     if not obj:
         return None
     return {
@@ -160,24 +162,28 @@ def extract_codeable_concept(obj: dict | None) -> dict | None:
 
 
 def extract_reference(obj: dict | None) -> dict | None:
+    """Extract a FHIR Reference datatype."""
     if not obj:
         return None
     return {"reference": obj.get("reference"), "display": obj.get("display")}
 
 
 def extract_period(obj: dict | None) -> dict | None:
+    """Extract a FHIR Period datatype."""
     if not obj:
         return None
     return {"start": obj.get("start"), "end": obj.get("end")}
 
 
 def extract_identifier(obj: dict | None) -> dict | None:
+    """Extract a FHIR Identifier datatype."""
     if not obj:
         return None
     return {"system": obj.get("system"), "value": obj.get("value"), "use": obj.get("use")}
 
 
 def extract_human_name(obj: dict | None) -> dict | None:
+    """Extract a FHIR HumanName datatype."""
     if not obj:
         return None
     return {
@@ -189,6 +195,7 @@ def extract_human_name(obj: dict | None) -> dict | None:
 
 
 def extract_address(obj: dict | None) -> dict | None:
+    """Extract a FHIR Address datatype."""
     if not obj:
         return None
     return {
@@ -202,12 +209,14 @@ def extract_address(obj: dict | None) -> dict | None:
 
 
 def extract_contact_point(obj: dict | None) -> dict | None:
+    """Extract a FHIR ContactPoint datatype."""
     if not obj:
         return None
     return {"system": obj.get("system"), "value": obj.get("value"), "use": obj.get("use")}
 
 
 def extract_quantity(obj: dict | None) -> dict | None:
+    """Extract a FHIR Quantity datatype."""
     if not obj:
         return None
     return {
@@ -219,6 +228,7 @@ def extract_quantity(obj: dict | None) -> dict | None:
 
 
 def extract_annotation(obj: dict | None) -> dict | None:
+    """Extract a FHIR Annotation datatype."""
     if not obj:
         return None
     return {"text": obj.get("text"), "time": obj.get("time")}

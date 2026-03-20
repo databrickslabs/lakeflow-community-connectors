@@ -6,8 +6,8 @@ All other resources fall back to base_r4 via the registry fallback chain.
 Profile sources:
   UK Core Patient v2.6.1: https://fhir.hl7.org.uk/StructureDefinition/UKCore-Patient
   Extension URLs verified from:
-    https://github.com/NHSDigital/FHIR-R4-UKCORE-STAGING-MAIN/structuredefinitions/UKCore-Patient.xml
-    https://hl7.org/fhir/R4/extension-patient-interpreterrequired.html
+    NHSDigital/FHIR-R4-UKCORE-STAGING-MAIN structuredefinitions/UKCore-Patient.xml
+    hl7.org/fhir/R4/extension-patient-interpreterrequired.html
 
 Resources with UK Core entries here:
   - Patient: adds NHS number, ethnic category, birth sex, and other UK extensions
@@ -48,7 +48,10 @@ _EXT_BIRTH_SEX = "https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-B
 # Complex nested extension (sub-extensions: deathNotificationStatus, systemEffectiveDate)
 # Top-level valueX not used directly; sub-extension deathNotificationStatus is valueCodeableConcept
 # Verified from Extension-UKCore-DeathNotificationStatus.xml
-_EXT_DEATH_NOTIFICATION_STATUS = "https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-DeathNotificationStatus"
+_EXT_DEATH_NOTIFICATION_STATUS = (
+    "https://fhir.hl7.org.uk/StructureDefinition/"
+    "Extension-UKCore-DeathNotificationStatus"
+)
 
 # valueBoolean — standard HL7 R4 extension (NOT a UK Core-specific URL).
 # UK Core Patient profile references the base HL7 extension for interpreter required.
@@ -58,7 +61,10 @@ _EXT_DEATH_NOTIFICATION_STATUS = "https://fhir.hl7.org.uk/StructureDefinition/Ex
 _EXT_INTERPRETER_REQUIRED = "http://hl7.org/fhir/StructureDefinition/patient-interpreterRequired"
 
 # valueCodeableConcept — verified from Extension-UKCore-ResidentialStatus.xml
-_EXT_RESIDENTIAL_STATUS = "https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-ResidentialStatus"
+_EXT_RESIDENTIAL_STATUS = (
+    "https://fhir.hl7.org.uk/StructureDefinition/"
+    "Extension-UKCore-ResidentialStatus"
+)
 
 # NHS number identifier system — verified: fixedUri in UKCore-Patient.xml
 _NHS_NUMBER_SYSTEM = "https://fhir.nhs.uk/Id/nhs-number"

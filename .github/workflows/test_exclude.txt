@@ -22,3 +22,4 @@ tests/unit/sources/surveymonkey/test_surveymonkey_lakeflow_connect.py
 tests/unit/sources/zendesk/test_zendesk_lakeflow_connect.py
 tests/unit/sources/zoho_crm/test_zoho_crm_lakeflow_connect.py
 tests/unit/sources/fhir/test_fhir_lakeflow_connect.py
+tests/unit/sources/fhir/test_fhir_utils.py

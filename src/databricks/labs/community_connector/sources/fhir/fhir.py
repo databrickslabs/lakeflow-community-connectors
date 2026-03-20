@@ -100,7 +100,10 @@ class FhirLakeflowConnect(LakeflowConnect):
             params["_lastUpdated"] = f"gt{since}"
 
         records = []
-        for resource in iter_bundle_pages(self._client, table_name, params, max_records=max_records, page_delay=page_delay):
+        for resource in iter_bundle_pages(
+            self._client, table_name, params,
+            max_records=max_records, page_delay=page_delay,
+        ):
             records.append(extract_record(resource, table_name, profile=profile))
 
         if not records:

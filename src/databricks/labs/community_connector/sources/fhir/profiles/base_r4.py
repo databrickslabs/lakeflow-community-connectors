@@ -10,6 +10,7 @@ Column names in extractors use snake_case (e.g. effective_datetime, body_site).
 Usage: imported by fhir_schemas.py to trigger @register decorators.
 Do NOT import base_r4 from profiles/__init__.py (would cause circular import).
 """
+# pylint: disable=too-many-lines
 
 from pyspark.sql.types import (
     ArrayType, BooleanType, DoubleType, LongType, StringType,
@@ -72,7 +73,10 @@ def _patient(r: dict) -> dict:
         "deceased_datetime": r.get("deceasedDateTime"),
         "address": [extract_address(a) for a in (r.get("address") or [])],
         "maritalStatus": extract_codeable_concept(r.get("maritalStatus")),
-        "generalPractitioner": [extract_reference(gp) for gp in (r.get("generalPractitioner") or [])],
+        "generalPractitioner": [
+            extract_reference(gp)
+            for gp in (r.get("generalPractitioner") or [])
+        ],
         "managingOrganization": extract_reference(r.get("managingOrganization")),
     }
 
@@ -539,7 +543,10 @@ def _diagnostic_report(r: dict) -> dict:
         "effective_period": extract_period(r.get("effectivePeriod")),
         "issued": r.get("issued"),
         "performer": [extract_reference(p) for p in (r.get("performer") or [])],
-        "results_interpreter": [extract_reference(ri) for ri in (r.get("resultsInterpreter") or [])],
+        "results_interpreter": [
+            extract_reference(ri)
+            for ri in (r.get("resultsInterpreter") or [])
+        ],
         "specimen": [extract_reference(s) for s in (r.get("specimen") or [])],
         "result": [extract_reference(res) for res in (r.get("result") or [])],
         "conclusion": r.get("conclusion"),
@@ -700,15 +707,24 @@ def _immunization(r: dict) -> dict:
         "route": extract_codeable_concept(r.get("route")),
         "dose_quantity": extract_quantity(r.get("doseQuantity")),
         "performer": [
-            {"function": extract_codeable_concept(p.get("function")), "actor": extract_reference(p.get("actor"))}
+            {
+                "function": extract_codeable_concept(p.get("function")),
+                "actor": extract_reference(p.get("actor")),
+            }
             for p in (r.get("performer") or [])
         ],
         "reason_code": [extract_codeable_concept(rc) for rc in (r.get("reasonCode") or [])],
         "reason_reference": [extract_reference(rr) for rr in (r.get("reasonReference") or [])],
         "is_subpotent": r.get("isSubpotent"),
-        "program_eligibility": [extract_codeable_concept(pe) for pe in (r.get("programEligibility") or [])],
+        "program_eligibility": [
+            extract_codeable_concept(pe)
+            for pe in (r.get("programEligibility") or [])
+        ],
         "funding_source": extract_codeable_concept(r.get("fundingSource")),
-        "protocol_applied": [_extract_protocol_applied(pa) for pa in (r.get("protocolApplied") or [])],
+        "protocol_applied": [
+            _extract_protocol_applied(pa)
+            for pa in (r.get("protocolApplied") or [])
+        ],
     }
 
 
@@ -757,7 +773,11 @@ def _coverage(r: dict) -> dict:
         "period": extract_period(r.get("period")),
         "payor": [extract_reference(p) for p in (r.get("payor") or [])],
         "class_coverage": [
-            {"type": extract_codeable_concept(c.get("type")), "value": c.get("value"), "name": c.get("name")}
+            {
+                "type": extract_codeable_concept(c.get("type")),
+                "value": c.get("value"),
+                "name": c.get("name"),
+            }
             for c in (r.get("class") or [])
         ],
         "order": r.get("order"),
@@ -930,7 +950,10 @@ def _device(r: dict) -> dict:
         "expiration_date": r.get("expirationDate"),
         "lot_number": r.get("lotNumber"),
         "serial_number": r.get("serialNumber"),
-        "device_name": [{"name": dn.get("name"), "type": dn.get("type")} for dn in (r.get("deviceName") or [])],
+        "device_name": [
+            {"name": dn.get("name"), "type": dn.get("type")}
+            for dn in (r.get("deviceName") or [])
+        ],
         "model_number": r.get("modelNumber"),
         "type": extract_codeable_concept(r.get("type")),
         "patient": extract_reference(r.get("patient")),
