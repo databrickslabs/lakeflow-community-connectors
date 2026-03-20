@@ -18,6 +18,9 @@ Validate the generated connector for **{{source_name}}** by executing the provid
 Create a `test_{source_name}_lakeflow_connect.py` under the `tests/unit/sources/{source_name}/` directory.
 **Always follow `tests/unit/sources/example/test_example_lakeflow_connect.py` as the primary example** — it shows the correct pattern: load both `dev_config.json` and `dev_table_config.json`, pass `table_config` and a small `sample_records` (e.g. 5) to `LakeflowConnectTester`.
 
+### Partitioned Connector Tests
+If the connector implements `SupportsPartition` or `SupportsPartitionedStream` (check the connector class definition for these mixins), the test class **must** also inherit from `SupportsPartitionedStreamTests` alongside `LakeflowConnectTests`. This adds partition-specific test coverage (partition key validation, partitioned reads, micro-batch convergence, etc.).
+
 ## 2. Test Configuration (Credentials & Bounds)
 Use the configuration files in `tests/unit/sources/{source_name}/configs/` to initialize your tests. Do **not** mock data; tests must connect to an actual instance.
 
