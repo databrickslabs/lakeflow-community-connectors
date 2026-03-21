@@ -12,33 +12,42 @@ connection:
     - name: host
       type: string
       required: true
+      secret: true
       description: >
         Denodo Virtual DataPort server hostname or IP address.
+        Store in Azure Key Vault and retrieve via Databricks Secret Scopes.
 
     - name: port
       type: string
       required: false
+      secret: true
       description: >
         PostgreSQL-compatible interface port. Default is 9996.
+        Store in Azure Key Vault and retrieve via Databricks Secret Scopes.
 
     - name: database
       type: string
       required: true
+      secret: true
       description: >
         Denodo Virtual Database (VDB) name to connect to.
+        Store in Azure Key Vault and retrieve via Databricks Secret Scopes.
 
     - name: user
       type: string
       required: true
+      secret: true
       description: >
         Denodo username with read access to the target views.
+        Store in Azure Key Vault and retrieve via Databricks Secret Scopes.
 
     - name: password
       type: string
       required: true
       secret: true
       description: >
-        Denodo password. Use Databricks Secrets for secure storage.
+        Denodo password.
+        Store in Azure Key Vault and retrieve via Databricks Secret Scopes.
 
     - name: ssl_mode
       type: string

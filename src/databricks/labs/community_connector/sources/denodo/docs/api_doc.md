@@ -26,6 +26,22 @@ Standard PostgreSQL username/password authentication over the PostgreSQL
 wire protocol. No OAuth or token-based auth — credentials are sent during
 the `psycopg2.connect()` handshake.
 
+**All connection parameters (host, port, database, user, password) must be
+stored in Azure Key Vault and retrieved via Databricks Secret Scopes at
+runtime.** Never hardcode these values in source code, notebooks, or config
+files.
+
+```python
+# Example: retrieve all params from Azure Key Vault via Secret Scopes
+options = {
+    "host":     dbutils.secrets.get(scope="denodo", key="denodo-host"),
+    "port":     dbutils.secrets.get(scope="denodo", key="denodo-port"),
+    "database": dbutils.secrets.get(scope="denodo", key="denodo-database"),
+    "user":     dbutils.secrets.get(scope="denodo", key="denodo-user"),
+    "password": dbutils.secrets.get(scope="denodo", key="denodo-password"),
+}
+```
+
 ## Metadata Discovery
 
 ### List Schemas (Denodo Folders)

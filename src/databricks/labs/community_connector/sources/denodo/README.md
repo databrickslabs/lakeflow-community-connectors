@@ -11,13 +11,17 @@ into Databricks Lakeflow via the PostgreSQL-compatible protocol.
 
 ## Connection Parameters
 
+All connection parameters **must** be stored in Azure Key Vault and retrieved
+via Databricks Secret Scopes. Never hardcode credentials or connection details
+in notebooks, pipeline configs, or code.
+
 | Parameter  | Required | Default  | Description                           |
 |------------|----------|----------|---------------------------------------|
 | host       | Yes      | —        | Denodo VDP server hostname or IP      |
 | port       | No       | 9996     | PostgreSQL interface port             |
 | database   | Yes      | —        | Virtual Database (VDB) name           |
 | user       | Yes      | —        | Denodo username                       |
-| password   | Yes      | —        | Denodo password (use Databricks Secrets) |
+| password   | Yes      | —        | Denodo password                       |
 | ssl_mode   | No       | prefer   | SSL mode: disable, prefer, require    |
 
 ## Ingestion Options
@@ -53,6 +57,51 @@ and `cursor_column=updated_at` (or equivalent).
 
 > **Note:** Deleted records are not detected. For true CDC, configure
 > change tracking at the source system level and expose it through Denodo.
+
+## Secrets Management (Azure Key Vault)
+
+All connection parameters are retrieved at runtime via Azure Databricks
+Secret Scopes backed by Azure Key Vault. **No credentials in code.**
+
+### 1. Create secrets in Azure Key Vault
+
+```
+az keyvault secret set --vault-name <vault> --name denodo-host     --value <denodo-server>
+az keyvault secret set --vault-name <vault> --name denodo-port     --value 9996
+az keyvault secret set --vault-name <vault> --name denodo-database --value <vdb-name>
+az keyvault secret set --vault-name <vault> --name denodo-user     --value <username>
+az keyvault secret set --vault-name <vault> --name denodo-password --value <password>
+```
+
+### 2. Create a Databricks Secret Scope backed by Key Vault
+
+```python
+# Via Databricks CLI:
+# databricks secrets create-scope --scope denodo \
+#   --scope-backend-type AZURE_KEYVAULT \
+#   --resource-id <key-vault-resource-id> \
+#   --dns-name https://<vault>.vault.azure.net/
+```
+
+### 3. Use in pipeline / notebook
+
+```python
+options = {
+    "host":     dbutils.secrets.get(scope="denodo", key="denodo-host"),
+    "port":     dbutils.secrets.get(scope="denodo", key="denodo-port"),
+    "database": dbutils.secrets.get(scope="denodo", key="denodo-database"),
+    "user":     dbutils.secrets.get(scope="denodo", key="denodo-user"),
+    "password": dbutils.secrets.get(scope="denodo", key="denodo-password"),
+    "ssl_mode": "require",
+    "sync_mode": "incremental",
+    "cursor_column": "updated_at",
+}
+
+connector = DenodoLakeflowConnect(options)
+```
+
+> **Important:** The `dbutils.secrets.get()` values are redacted in notebook
+> output and logs. They are never persisted in plain text.
 
 ## Cluster Setup
 
