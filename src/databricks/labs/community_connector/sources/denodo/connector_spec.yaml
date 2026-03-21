@@ -1,0 +1,55 @@
+# Denodo Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: Denodo Virtual DataPort
+connection:
+  parameters:
+    - name: host
+      type: string
+      required: true
+      description: >
+        Denodo Virtual DataPort server hostname or IP address.
+
+    - name: port
+      type: string
+      required: false
+      description: >
+        PostgreSQL-compatible interface port. Default is 9996.
+
+    - name: database
+      type: string
+      required: true
+      description: >
+        Denodo Virtual Database (VDB) name to connect to.
+
+    - name: user
+      type: string
+      required: true
+      description: >
+        Denodo username with read access to the target views.
+
+    - name: password
+      type: string
+      required: true
+      secret: true
+      description: >
+        Denodo password. Use Databricks Secrets for secure storage.
+
+    - name: ssl_mode
+      type: string
+      required: false
+      description: >
+        SSL connection mode: disable, prefer, or require. Default is prefer.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# ============================================================================
+external_options_allowlist: "schemas,tables,exclude_tables,sync_mode,cursor_column,cursor_overrides,batch_size"
