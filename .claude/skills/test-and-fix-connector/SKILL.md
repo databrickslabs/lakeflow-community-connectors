@@ -53,6 +53,17 @@ Run the tests using the project virtual environment (Python 3.10+ required):
 python3.10 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
+pip install requests
+```
+
+**Run contract tests first (no credentials needed).** These catch structural issues — missing methods, wrong signatures, malformed spec — before hitting the live API:
+```bash
+pytest tests/unit/sources/test_contract.py -k {source_name} -v
+```
+Fix any failures here before proceeding. Contract failures are always implementation bugs, not environment issues.
+
+**Then run the live tests:**
+```bash
 pytest tests/unit/sources/{source_name}/test_{source_name}_lakeflow_connect.py -v
 ```
 
