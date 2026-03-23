@@ -1,0 +1,16 @@
+{
+  "Patient": {"page_size": "5", "max_records_per_batch": "5"},
+  "Observation": {"page_size": "5", "max_records_per_batch": "5"},
+  "Condition": {"page_size": "5", "max_records_per_batch": "5"},
+  "Encounter": {"page_size": "5", "max_records_per_batch": "5"},
+  "Procedure": {"page_size": "5", "max_records_per_batch": "5"},
+  "MedicationRequest": {"page_size": "5", "max_records_per_batch": "5"},
+  "DiagnosticReport": {"page_size": "5", "max_records_per_batch": "5"},
+  "AllergyIntolerance": {"page_size": "5", "max_records_per_batch": "5"},
+  "Immunization": {"page_size": "5", "max_records_per_batch": "5"},
+  "Coverage": {"page_size": "5", "max_records_per_batch": "5"},
+  "CarePlan": {"page_size": "5", "max_records_per_batch": "5"},
+  "Goal": {"page_size": "5", "max_records_per_batch": "5"},
+  "Device": {"page_size": "5", "max_records_per_batch": "5"},
+  "DocumentReference": {"page_size": "5", "max_records_per_batch": "5"}
+}

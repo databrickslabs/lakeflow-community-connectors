@@ -1,0 +1,19 @@
+{
+  "connection_name": "healthlake_fhir_conn",
+  "objects": [
+    {"table": {"source_table": "Patient", "table_configuration": {"profile": "uk_core"}}},
+    {"table": {"source_table": "Observation", "table_configuration": {"profile": "uk_core"}}},
+    {"table": {"source_table": "Condition", "table_configuration": {"profile": "uk_core"}}},
+    {"table": {"source_table": "Encounter", "table_configuration": {"profile": "uk_core"}}},
+    {"table": {"source_table": "Procedure", "table_configuration": {"profile": "uk_core"}}},
+    {"table": {"source_table": "MedicationRequest", "table_configuration": {"profile": "uk_core"}}},
+    {"table": {"source_table": "DiagnosticReport", "table_configuration": {"profile": "uk_core"}}},
+    {"table": {"source_table": "AllergyIntolerance", "table_configuration": {"profile": "uk_core"}}},
+    {"table": {"source_table": "Immunization", "table_configuration": {"profile": "uk_core"}}},
+    {"table": {"source_table": "Coverage", "table_configuration": {"profile": "uk_core"}}},
+    {"table": {"source_table": "CarePlan", "table_configuration": {"profile": "uk_core"}}},
+    {"table": {"source_table": "Goal", "table_configuration": {"profile": "uk_core"}}},
+    {"table": {"source_table": "Device", "table_configuration": {"profile": "uk_core"}}},
+    {"table": {"source_table": "DocumentReference", "table_configuration": {"profile": "uk_core"}}}
+  ]
+}
