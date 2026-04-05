@@ -27,10 +27,27 @@ connection:
         explicitly shared with this integration.
 
 # ============================================================================
+# Connection Parameters (continued)
+# ============================================================================
+    - name: base_url
+      type: string
+      required: false
+      description: >
+        Base URL for the Notion API. Override to use an alternative endpoint.
+        Defaults to https://api.notion.com if not specified.
+
+    - name: notion_version
+      type: string
+      required: false
+      description: >
+        Notion API version in YYYY-MM-DD format.
+        Defaults to 2026-03-11 if not specified.
+
+# ============================================================================
 # External Options Allowlist
 # These table-specific options must be included in the externalOptionsAllowList
 # parameter of the UC connection to allow them to be passed through.
 # Use a comma-separated string of option names.
-# If no table-specific options are needed, set to empty string.
+# If no table-specific options are needed, set to empty string or omit.
 # ============================================================================
-external_options_allowlist: ""
+external_options_allowlist: "max_records_per_batch,max_pages_per_batch"
