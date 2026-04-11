@@ -4,8 +4,6 @@ This module contains helper functions for API interaction, project/repo
 resolution, and the PR auto-discovery pattern used across multiple tables.
 """
 
-from __future__ import annotations
-
 from typing import Any, Callable
 
 import requests

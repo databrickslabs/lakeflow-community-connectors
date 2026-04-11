@@ -16,7 +16,6 @@ from typing import (
 )
 import json
 
-from __future__ import annotations
 from pyspark.sql import Row
 from pyspark.sql.datasource import (
     DataSource,
