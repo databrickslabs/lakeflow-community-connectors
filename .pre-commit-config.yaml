@@ -1,0 +1,38 @@
+# Pre-commit hooks configuration
+# See https://pre-commit.com for more information
+#
+# Installation is optional, per developer:
+#   pip install pre-commit
+#   pre-commit install
+#
+# Run manually on all files:
+#   pre-commit run --all-files
+#
+# Run a specific hook:
+#   pre-commit run ruff --all-files
+#   pre-commit run merge-python-source --all-files
+
+repos:
+  # Ruff linter and formatter
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.2
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # Regenerate merged source files when shared or source connector code changes.
+  # Triggers when any of these are modified:
+  #   - src/databricks/labs/community_connector/libs/utils.py
+  #   - src/databricks/labs/community_connector/interface/lakeflow_connect.py
+  #   - src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py
+  #   - src/databricks/labs/community_connector/sources/**/*.py (excluding _generated_ files)
+  - repo: local
+    hooks:
+      - id: merge-python-source
+        name: Regenerate merged Python source files
+        entry: python3 tools/scripts/merge_python_source.py all
+        language: system
+        pass_filenames: false
+        files: ^src/databricks/labs/community_connector/(libs/utils\.py|interface/lakeflow_connect\.py|sparkpds/lakeflow_datasource\.py|sources/.+\.py)$
+        exclude: _generated_

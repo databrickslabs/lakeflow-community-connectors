@@ -10,6 +10,7 @@ import base64
 import json
 import os
 import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch, create_autospec
 
 import click
@@ -18,11 +19,13 @@ from click.testing import CliRunner
 
 from databricks.sdk import WorkspaceClient
 
-from databricks.labs.community_connector.cli import (
+from databricks.labs.community_connector_cli.cli import (
     main,
     _parse_pipeline_spec,
     _load_ingest_template,
     _find_pipeline_by_name,
+    _find_local_source_path,
+    _upload_source_files,
     _load_connector_spec,
     _validate_connection_options,
     _validate_connection_options_with_spec,
@@ -33,7 +36,7 @@ from databricks.labs.community_connector.cli import (
     _get_ingest_path_from_pipeline,
     _extract_source_name_from_ingest,
 )
-from databricks.labs.community_connector.connector_spec import (
+from databricks.labs.community_connector_cli.connector_spec import (
     ParsedConnectorSpec,
     AuthMethod,
 )
@@ -125,7 +128,7 @@ class TestLoadIngestTemplate:
         """Test loading the default ingest template."""
         content = _load_ingest_template()
 
-        assert "from pipeline.ingestion_pipeline import ingest" in content
+        assert "from databricks.labs.community_connector.pipeline import ingest" in content
         assert "{SOURCE_NAME}" in content
         assert "{CONNECTION_NAME}" in content
 
@@ -133,7 +136,7 @@ class TestLoadIngestTemplate:
         """Test loading the base ingest template."""
         content = _load_ingest_template("ingest_template_base.py")
 
-        assert "from pipeline.ingestion_pipeline import ingest" in content
+        assert "from databricks.labs.community_connector.pipeline import ingest" in content
         assert "{SOURCE_NAME}" in content
         assert "{PIPELINE_SPEC}" in content
 
@@ -191,7 +194,7 @@ class TestCreatePipelineCommand:
         """Test that either --connection-name or --pipeline-spec is required."""
         runner = CliRunner()
 
-        with patch('databricks.labs.community_connector.cli.WorkspaceClient'):
+        with patch("databricks.labs.community_connector_cli.cli.WorkspaceClient"):
             result = runner.invoke(
                 main,
                 ['create_pipeline', 'github', 'my_pipeline'],
@@ -200,10 +203,10 @@ class TestCreatePipelineCommand:
         assert result.exit_code != 0
         assert "Either --connection-name or --pipeline-spec must be provided" in result.output
 
-    @patch('databricks.labs.community_connector.cli.WorkspaceClient')
-    @patch('databricks.labs.community_connector.cli.RepoClient')
-    @patch('databricks.labs.community_connector.cli.PipelineClient')
-    @patch('databricks.labs.community_connector.cli._create_workspace_file')
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli.RepoClient")
+    @patch("databricks.labs.community_connector_cli.cli.PipelineClient")
+    @patch("databricks.labs.community_connector_cli.cli._create_workspace_file")
     def test_create_pipeline_with_connection_name(
         self, mock_create_file, mock_pipeline_client, mock_repo_client, mock_workspace_client
     ):
@@ -238,12 +241,365 @@ class TestCreatePipelineCommand:
         # Should succeed (or at least pass the validation)
         assert "Either --connection-name or --pipeline-spec must be provided" not in result.output
 
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli.RepoClient")
+    @patch("databricks.labs.community_connector_cli.cli.PipelineClient")
+    @patch("databricks.labs.community_connector_cli.cli._create_workspace_file")
+    def test_create_pipeline_with_package(
+        self, mock_create_file, mock_pipeline_client, mock_repo_client, mock_workspace_client
+    ):
+        """Test create_pipeline with --package skips repo clone and creates directory."""
+        runner = CliRunner()
+
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.current_user.me.return_value.user_name = "test@example.com"
+        mock_ws.config.host = "https://test.databricks.com"
+
+        mock_pipeline = MagicMock()
+        mock_pipeline_client.return_value = mock_pipeline
+        mock_pipeline_response = MagicMock()
+        mock_pipeline_response.pipeline_id = "pipeline-xyz"
+        mock_pipeline.create.return_value = mock_pipeline_response
+
+        mock_pipeline_info = MagicMock()
+        mock_pipeline_info.spec.catalog = "main"
+        mock_pipeline_info.spec.schema = "default"
+        mock_pipeline_info.spec.environment = None
+        mock_ws.pipelines.get.return_value = mock_pipeline_info
+
+        with tempfile.NamedTemporaryFile(suffix=".whl") as temp_pkg:
+            temp_pkg.write(b"dummy wheel content")
+            temp_pkg.flush()
+
+            result = runner.invoke(
+                main,
+                [
+                    'create_pipeline', 'github', 'my_pipeline',
+                    '-n', 'my_conn', '--package', temp_pkg.name,
+                ],
+            )
+
+            assert result.exit_code == 0, f"Exit code: {result.exit_code}\nOutput: {result.output}"
+            assert "Using local connector packages" in result.output
+            assert "Package uploaded successfully" in result.output
+            assert "Creating workspace directory" in result.output
+
+            # Repo should NOT be cloned
+            mock_repo_client.return_value.create.assert_not_called()
+
+            # Workspace directory should be created via mkdirs
+            mock_ws.workspace.mkdirs.assert_called()
+
+            mock_ws.files.upload.assert_called_once()
+            mock_ws.pipelines.update.assert_called_once()
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli.RepoClient")
+    @patch("databricks.labs.community_connector_cli.cli.PipelineClient")
+    @patch("databricks.labs.community_connector_cli.cli._create_workspace_file")
+    def test_create_pipeline_with_multiple_packages(
+        self, mock_create_file, mock_pipeline_client, mock_repo_client, mock_workspace_client
+    ):
+        """Test create_pipeline with multiple --package options skips repo clone."""
+        runner = CliRunner()
+
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.current_user.me.return_value.user_name = "test@example.com"
+        mock_ws.config.host = "https://test.databricks.com"
+
+        mock_pipeline = MagicMock()
+        mock_pipeline_client.return_value = mock_pipeline
+        mock_pipeline_response = MagicMock()
+        mock_pipeline_response.pipeline_id = "pipeline-xyz"
+        mock_pipeline.create.return_value = mock_pipeline_response
+
+        mock_pipeline_info = MagicMock()
+        mock_pipeline_info.spec.catalog = "main"
+        mock_pipeline_info.spec.schema = "default"
+        mock_pipeline_info.spec.environment = None
+        mock_ws.pipelines.get.return_value = mock_pipeline_info
+
+        with tempfile.NamedTemporaryFile(suffix=".whl") as pkg1, \
+             tempfile.NamedTemporaryFile(suffix=".whl") as pkg2:
+            pkg1.write(b"wheel1")
+            pkg1.flush()
+            pkg2.write(b"wheel2")
+            pkg2.flush()
+
+            result = runner.invoke(
+                main,
+                [
+                    'create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn',
+                    '-p', pkg1.name, '-p', pkg2.name,
+                ],
+            )
+
+            assert result.exit_code == 0, f"Exit code: {result.exit_code}\nOutput: {result.output}"
+            mock_repo_client.return_value.create.assert_not_called()
+            assert mock_ws.files.upload.call_count == 2
+            mock_ws.pipelines.update.assert_called_once()
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli.RepoClient")
+    @patch("databricks.labs.community_connector_cli.cli.PipelineClient")
+    @patch("databricks.labs.community_connector_cli.cli._create_workspace_file")
+    def test_create_pipeline_prints_url_at_end(
+        self, mock_create_file, mock_pipeline_client, mock_repo_client, mock_workspace_client
+    ):
+        """Test that pipeline URL/ID is printed after all steps including package upload."""
+        runner = CliRunner()
+
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.current_user.me.return_value.user_name = "test@example.com"
+        mock_ws.config.host = "https://test.databricks.com"
+
+        mock_pipeline = MagicMock()
+        mock_pipeline_client.return_value = mock_pipeline
+        mock_pipeline_response = MagicMock()
+        mock_pipeline_response.pipeline_id = "pipeline-xyz"
+        mock_pipeline.create.return_value = mock_pipeline_response
+
+        mock_pipeline_info = MagicMock()
+        mock_pipeline_info.spec.catalog = "main"
+        mock_pipeline_info.spec.schema = "default"
+        mock_pipeline_info.spec.environment = None
+        mock_ws.pipelines.get.return_value = mock_pipeline_info
+
+        with tempfile.NamedTemporaryFile(suffix=".whl") as temp_pkg:
+            temp_pkg.write(b"dummy wheel content")
+            temp_pkg.flush()
+
+            result = runner.invoke(
+                main,
+                ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn', '-p', temp_pkg.name],
+            )
+
+            assert result.exit_code == 0, f"Exit code: {result.exit_code}\nOutput: {result.output}"
+
+            output = result.output
+            pkg_uploaded_pos = output.index("Package uploaded successfully")
+            pipeline_url_pos = output.index("Pipeline URL:")
+            assert pipeline_url_pos > pkg_uploaded_pos
+
+class TestFindLocalSourcePath:
+    """Tests for _find_local_source_path function."""
+
+    def test_finds_source_from_cwd(self, tmp_path):
+        """Test finding source directory when cwd is the repo root."""
+        source_dir = (
+            tmp_path / "src" / "databricks" / "labs"
+            / "community_connector" / "sources" / "github"
+        )
+        source_dir.mkdir(parents=True)
+
+        with patch.object(Path, "cwd", return_value=tmp_path):
+            result = _find_local_source_path("github")
+
+        assert result is not None
+        assert result == source_dir.resolve()
+
+    def test_returns_none_when_not_found(self, tmp_path):
+        """Test returning None when source directory doesn't exist."""
+        with patch.object(Path, "cwd", return_value=tmp_path):
+            result = _find_local_source_path("nonexistent_source")
+
+        assert result is None
+
+
+class TestUploadSourceFiles:
+    """Tests for _upload_source_files function."""
+
+    def test_uploads_py_readme_and_spec(self, tmp_path):
+        """Test that *.py, README.md, and connector_spec.yaml are uploaded."""
+        source_dir = (
+            tmp_path / "src" / "databricks" / "labs"
+            / "community_connector" / "sources" / "mysource"
+        )
+        source_dir.mkdir(parents=True)
+        (source_dir / "mysource.py").write_text("# connector code")
+        (source_dir / "__init__.py").write_text("")
+        (source_dir / "README.md").write_text("# My Source")
+        (source_dir / "connector_spec.yaml").write_text("connection: {}")
+        (source_dir / "icon.svg").write_text("<svg/>")  # should be skipped
+
+        mock_ws = MagicMock()
+
+        with patch(
+            "databricks.labs.community_connector_cli.cli._find_local_source_path",
+            return_value=source_dir,
+        ):
+            _upload_source_files(mock_ws, "mysource", "/workspace/path", debug=False)
+
+        assert mock_ws.workspace.mkdirs.call_count == 1
+        assert mock_ws.workspace.import_.call_count == 4  # 2 .py + README.md + connector_spec.yaml
+
+    def test_raises_when_source_not_found(self):
+        """Test that ClickException is raised when source directory is not found."""
+        mock_ws = MagicMock()
+
+        with patch(
+            "databricks.labs.community_connector_cli.cli._find_local_source_path",
+            return_value=None,
+        ):
+            with pytest.raises(click.ClickException, match="Could not find local source directory"):
+                _upload_source_files(mock_ws, "nosource", "/workspace/path", debug=False)
+
+    def test_uploads_only_py_when_no_readme_or_spec(self, tmp_path):
+        """Test upload when only .py files exist (no README.md or connector_spec.yaml)."""
+        source_dir = (
+            tmp_path / "src" / "databricks" / "labs"
+            / "community_connector" / "sources" / "mysource"
+        )
+        source_dir.mkdir(parents=True)
+        (source_dir / "mysource.py").write_text("# code")
+
+        mock_ws = MagicMock()
+
+        with patch(
+            "databricks.labs.community_connector_cli.cli._find_local_source_path",
+            return_value=source_dir,
+        ):
+            _upload_source_files(mock_ws, "mysource", "/workspace/path", debug=False)
+
+        assert mock_ws.workspace.import_.call_count == 1
+
+
+# pylint: disable=too-many-arguments,too-many-positional-arguments
+class TestCreatePipelineUseLocalSource:
+    """Tests for create_pipeline command with --use-local-source flag."""
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli.RepoClient")
+    @patch("databricks.labs.community_connector_cli.cli.PipelineClient")
+    @patch("databricks.labs.community_connector_cli.cli._create_workspace_file")
+    @patch("databricks.labs.community_connector_cli.cli._upload_source_files")
+    def test_create_pipeline_with_use_local_source(
+        self, mock_upload_src, mock_create_file, mock_pipeline_client,
+        mock_repo_client, mock_workspace_client
+    ):
+        """Test create_pipeline with --use-local-source uploads source files."""
+        runner = CliRunner()
+
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.current_user.me.return_value.user_name = "test@example.com"
+        mock_ws.config.host = "https://test.databricks.com"
+
+        mock_repo = MagicMock()
+        mock_repo_client.return_value = mock_repo
+        mock_repo_info = MagicMock()
+        mock_repo_info.path = "/Repos/test@example.com/repo"
+        mock_repo.create.return_value = mock_repo_info
+        mock_repo.get_repo_path.return_value = mock_repo_info.path
+
+        mock_pipeline = MagicMock()
+        mock_pipeline_client.return_value = mock_pipeline
+        mock_pipeline_response = MagicMock()
+        mock_pipeline_response.pipeline_id = "pipeline-xyz"
+        mock_pipeline.create.return_value = mock_pipeline_response
+
+        result = runner.invoke(
+            main,
+            ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn', '--use-local-source'],
+        )
+
+        assert result.exit_code == 0, f"Exit code: {result.exit_code}\nOutput: {result.output}"
+        mock_upload_src.assert_called_once()
+        call_args = mock_upload_src.call_args
+        assert call_args[0][1] == "github"  # source_name
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli.RepoClient")
+    @patch("databricks.labs.community_connector_cli.cli.PipelineClient")
+    @patch("databricks.labs.community_connector_cli.cli._create_workspace_file")
+    @patch("databricks.labs.community_connector_cli.cli._upload_source_files")
+    def test_create_pipeline_without_use_local_source(
+        self, mock_upload_src, mock_create_file, mock_pipeline_client,
+        mock_repo_client, mock_workspace_client
+    ):
+        """Test create_pipeline without --use-local-source does NOT upload source files."""
+        runner = CliRunner()
+
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.current_user.me.return_value.user_name = "test@example.com"
+        mock_ws.config.host = "https://test.databricks.com"
+
+        mock_repo = MagicMock()
+        mock_repo_client.return_value = mock_repo
+        mock_repo_info = MagicMock()
+        mock_repo_info.path = "/Repos/test@example.com/repo"
+        mock_repo.create.return_value = mock_repo_info
+        mock_repo.get_repo_path.return_value = mock_repo_info.path
+
+        mock_pipeline = MagicMock()
+        mock_pipeline_client.return_value = mock_pipeline
+        mock_pipeline_response = MagicMock()
+        mock_pipeline_response.pipeline_id = "pipeline-xyz"
+        mock_pipeline.create.return_value = mock_pipeline_response
+
+        result = runner.invoke(
+            main,
+            ['create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn'],
+        )
+
+        assert result.exit_code == 0, f"Exit code: {result.exit_code}\nOutput: {result.output}"
+        mock_upload_src.assert_not_called()
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli.RepoClient")
+    @patch("databricks.labs.community_connector_cli.cli.PipelineClient")
+    @patch("databricks.labs.community_connector_cli.cli._create_workspace_file")
+    @patch("databricks.labs.community_connector_cli.cli._upload_source_files")
+    def test_create_pipeline_use_local_source_with_package(
+        self, mock_upload_src, mock_create_file, mock_pipeline_client,
+        mock_repo_client, mock_workspace_client
+    ):
+        """Test create_pipeline with both --use-local-source and --package."""
+        runner = CliRunner()
+
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.current_user.me.return_value.user_name = "test@example.com"
+        mock_ws.config.host = "https://test.databricks.com"
+
+        mock_pipeline = MagicMock()
+        mock_pipeline_client.return_value = mock_pipeline
+        mock_pipeline_response = MagicMock()
+        mock_pipeline_response.pipeline_id = "pipeline-xyz"
+        mock_pipeline.create.return_value = mock_pipeline_response
+
+        mock_pipeline_info = MagicMock()
+        mock_pipeline_info.spec.catalog = "main"
+        mock_pipeline_info.spec.schema = "default"
+        mock_pipeline_info.spec.environment = None
+        mock_ws.pipelines.get.return_value = mock_pipeline_info
+
+        with tempfile.NamedTemporaryFile(suffix=".whl") as temp_pkg:
+            temp_pkg.write(b"dummy wheel content")
+            temp_pkg.flush()
+
+            result = runner.invoke(
+                main,
+                [
+                    'create_pipeline', 'github', 'my_pipeline', '-n', 'my_conn',
+                    '-p', temp_pkg.name, '--use-local-source',
+                ],
+            )
+
+        assert result.exit_code == 0, f"Exit code: {result.exit_code}\nOutput: {result.output}"
+        mock_upload_src.assert_called_once()
+        mock_ws.files.upload.assert_called_once()
+
 
 class TestRunPipelineCommand:
     """Tests for run_pipeline command."""
 
-    @patch('databricks.labs.community_connector.cli.WorkspaceClient')
-    @patch('databricks.labs.community_connector.cli.PipelineClient')
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli.PipelineClient")
     def test_run_pipeline_finds_by_name(self, mock_pipeline_client, mock_workspace_client):
         """Test that run_pipeline finds pipeline by name."""
         runner = CliRunner()
@@ -271,7 +627,7 @@ class TestRunPipelineCommand:
         assert result.exit_code == 0
         assert "Pipeline run started" in result.output
 
-    @patch('databricks.labs.community_connector.cli.WorkspaceClient')
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
     def test_run_pipeline_not_found(self, mock_workspace_client):
         """Test error when pipeline is not found."""
         runner = CliRunner()
@@ -293,8 +649,8 @@ class TestRunPipelineCommand:
 class TestShowPipelineCommand:
     """Tests for show_pipeline command."""
 
-    @patch('databricks.labs.community_connector.cli.WorkspaceClient')
-    @patch('databricks.labs.community_connector.cli.PipelineClient')
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli.PipelineClient")
     def test_show_pipeline_displays_info(self, mock_pipeline_client, mock_workspace_client):
         """Test that show_pipeline displays pipeline information."""
         runner = CliRunner()
@@ -355,8 +711,8 @@ class TestCreateConnectionCommand:
         assert result.exit_code != 0
         assert "Invalid JSON" in result.output
 
-    @patch("databricks.labs.community_connector.cli._load_connector_spec")
-    @patch('databricks.labs.community_connector.cli.WorkspaceClient')
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
     def test_create_connection_warns_missing_external_options_no_spec(
         self, mock_workspace_client, mock_load_spec
     ):
@@ -377,8 +733,8 @@ class TestCreateConnectionCommand:
 
         assert "externalOptionsAllowList" in result.output
 
-    @patch("databricks.labs.community_connector.cli._load_connector_spec")
-    @patch("databricks.labs.community_connector.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
     def test_create_connection_validates_required_params(
         self, mock_workspace_client, mock_load_spec
     ):
@@ -411,8 +767,8 @@ class TestCreateConnectionCommand:
         assert "Missing required connection parameters" in result.output
         assert "token" in result.output
 
-    @patch("databricks.labs.community_connector.cli._load_connector_spec")
-    @patch("databricks.labs.community_connector.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
     def test_create_connection_fails_unknown_params(self, mock_workspace_client, mock_load_spec):
         """Test error when unknown connection parameters are provided."""
         runner = CliRunner()
@@ -447,12 +803,12 @@ class TestCreateConnectionCommand:
         assert "Unknown connection parameters" in result.output
         assert "unknown_param" in result.output
 
-    @patch("databricks.labs.community_connector.cli._load_connector_spec")
-    @patch("databricks.labs.community_connector.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli._load_connector_spec")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
     def test_create_connection_auto_adds_external_options_allowlist(
         self, mock_workspace_client, mock_load_spec
     ):
-        """Test that externalOptionsAllowList is auto-added from spec merged with constant allowlist."""
+        """Test externalOptionsAllowList is auto-added from merged spec."""
         runner = CliRunner()
 
         mock_load_spec.return_value = {
@@ -492,16 +848,8 @@ class TestCreateConnectionCommand:
         assert "isDeleteFlow" in allowlist
 
 
-class TestVersionAndHelp:
-    """Tests for --version and --help options."""
-
-    def test_version_option(self):
-        """Test --version displays version."""
-        runner = CliRunner()
-        result = runner.invoke(main, ['--version'])
-
-        assert result.exit_code == 0
-        assert "community-connector" in result.output
+class TestHelpOptions:
+    """Tests for --help options."""
 
     def test_help_option(self):
         """Test --help displays help."""
@@ -525,7 +873,7 @@ class TestVersionAndHelp:
         assert "--connection-name" in result.output
         assert "--pipeline-spec" in result.output
         assert "--catalog" in result.output
-        assert "--target" in result.output
+        assert "--schema" in result.output
 
 
 class TestValidateConnectionOptions:
@@ -1000,17 +1348,18 @@ pipeline_spec = {}
 class TestUpdatePipelineCommand:
     """Tests for update_pipeline command."""
 
-    def test_update_pipeline_requires_pipeline_spec(self):
-        """Test that --pipeline-spec is required."""
+    def test_update_pipeline_requires_spec_or_package(self):
+        """Test that at least --pipeline-spec or --package is required."""
         runner = CliRunner()
 
-        result = runner.invoke(
-            main,
-            ["update_pipeline", "my_pipeline"],
-        )
+        with patch("databricks.labs.community_connector_cli.cli.WorkspaceClient"):
+            result = runner.invoke(
+                main,
+                ["update_pipeline", "my_pipeline"],
+            )
 
         assert result.exit_code != 0
-        assert "Missing option" in result.output or "required" in result.output.lower()
+        assert "At least one of --pipeline-spec or --package must be provided" in result.output
 
     def test_update_pipeline_help(self):
         """Test update_pipeline --help."""
@@ -1021,7 +1370,7 @@ class TestUpdatePipelineCommand:
         assert "--pipeline-spec" in result.output
         assert "PIPELINE_NAME" in result.output
 
-    @patch("databricks.labs.community_connector.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
     def test_update_pipeline_not_found(self, mock_workspace_client):
         """Test error when pipeline is not found."""
         runner = CliRunner()
@@ -1043,9 +1392,9 @@ class TestUpdatePipelineCommand:
         assert result.exit_code != 0
         assert "not found" in result.output
 
-    @patch("databricks.labs.community_connector.cli._create_workspace_file")
-    @patch("databricks.labs.community_connector.cli.WorkspaceClient")
-    @patch("databricks.labs.community_connector.cli.PipelineClient")
+    @patch("databricks.labs.community_connector_cli.cli._create_workspace_file")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli.PipelineClient")
     def test_update_pipeline_success(
         self, mock_pipeline_client, mock_workspace_client, mock_create_file
     ):
@@ -1095,8 +1444,149 @@ class TestUpdatePipelineCommand:
         call_args = mock_create_file.call_args
         assert "ingest.py" in call_args[0][1]  # path contains ingest.py
 
-    @patch("databricks.labs.community_connector.cli.WorkspaceClient")
-    @patch("databricks.labs.community_connector.cli.PipelineClient")
+    @patch("databricks.labs.community_connector_cli.cli._create_workspace_file")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli.PipelineClient")
+    def test_update_pipeline_with_package(
+        self, mock_pipeline_client, mock_workspace_client, mock_create_file
+    ):
+        """Test update_pipeline with --package option alongside --pipeline-spec."""
+        runner = CliRunner()
+
+        # Setup workspace client mock
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.config.host = "https://test.databricks.com"
+
+        # Setup pipeline list mock
+        mock_pipeline_obj = MagicMock()
+        mock_pipeline_obj.pipeline_id = "pipeline-123"
+        mock_ws.pipelines.list_pipelines.return_value = [mock_pipeline_obj]
+
+        # Setup pipeline client mock
+        mock_client = MagicMock()
+        mock_pipeline_client.return_value = mock_client
+        mock_pipeline_info = MagicMock()
+        mock_pipeline_info.spec.root_path = "/Users/test/workspace"
+        mock_pipeline_info.spec.libraries = []
+        mock_pipeline_info.spec.catalog = "main"
+        mock_pipeline_info.spec.schema = "default"
+        mock_pipeline_info.spec.environment = None
+        mock_pipeline_info.spec.as_dict.return_value = {"name": "test"}
+        mock_client.get.return_value = mock_pipeline_info
+
+        # Setup workspace export mock (for reading existing ingest.py)
+        mock_export_response = MagicMock()
+        existing_content = 'source_name = "github"\npipeline_spec = {}'
+        mock_export_response.content = base64.b64encode(existing_content.encode()).decode()
+        mock_ws.workspace.export.return_value = mock_export_response
+
+        with tempfile.NamedTemporaryFile(suffix=".whl") as temp_pkg:
+            temp_pkg.write(b"dummy wheel content")
+            temp_pkg.flush()
+
+            result = runner.invoke(
+                main,
+                [
+                    "update_pipeline",
+                    "my_pipeline",
+                    "-ps",
+                    '{"connection_name": "my_conn", '
+                    '"objects": [{"table": {"source_table": "users"}}]}',
+                    "--package",
+                    temp_pkg.name
+                ],
+            )
+
+        assert result.exit_code == 0, f"Exit code: {result.exit_code}\nOutput: {result.output}"
+        assert "Using local connector packages" in result.output
+        assert "Package uploaded successfully" in result.output
+        assert "Pipeline dependencies updated" in result.output
+
+        # Verify Files API was used
+        mock_ws.files.upload.assert_called_once()
+        mock_ws.pipelines.update.assert_called_once()
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli.PipelineClient")
+    def test_update_pipeline_package_only(self, mock_pipeline_client, mock_workspace_client):
+        """Test update_pipeline with --package only (no --pipeline-spec)."""
+        runner = CliRunner()
+
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.config.host = "https://test.databricks.com"
+
+        mock_pipeline_obj = MagicMock()
+        mock_pipeline_obj.pipeline_id = "pipeline-123"
+        mock_ws.pipelines.list_pipelines.return_value = [mock_pipeline_obj]
+
+        mock_client = MagicMock()
+        mock_pipeline_client.return_value = mock_client
+        mock_pipeline_info = MagicMock()
+        mock_pipeline_info.spec.catalog = "main"
+        mock_pipeline_info.spec.schema = "default"
+        mock_pipeline_info.spec.environment = None
+        mock_client.get.return_value = mock_pipeline_info
+
+        with tempfile.NamedTemporaryFile(suffix=".whl") as temp_pkg:
+            temp_pkg.write(b"dummy wheel content")
+            temp_pkg.flush()
+
+            result = runner.invoke(
+                main,
+                ["update_pipeline", "my_pipeline", "-p", temp_pkg.name],
+            )
+
+        assert result.exit_code == 0, f"Exit code: {result.exit_code}\nOutput: {result.output}"
+        assert "Package uploaded successfully" in result.output
+        assert "Pipeline dependencies updated" in result.output
+        assert "Pipeline updated successfully" in result.output
+        # Should NOT read or update ingest.py
+        mock_ws.workspace.export.assert_not_called()
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli.PipelineClient")
+    def test_update_pipeline_multiple_packages_only(
+        self, mock_pipeline_client, mock_workspace_client
+    ):
+        """Test update_pipeline with multiple --package options (no --pipeline-spec)."""
+        runner = CliRunner()
+
+        mock_ws = MagicMock()
+        mock_workspace_client.return_value = mock_ws
+        mock_ws.config.host = "https://test.databricks.com"
+
+        mock_pipeline_obj = MagicMock()
+        mock_pipeline_obj.pipeline_id = "pipeline-123"
+        mock_ws.pipelines.list_pipelines.return_value = [mock_pipeline_obj]
+
+        mock_client = MagicMock()
+        mock_pipeline_client.return_value = mock_client
+        mock_pipeline_info = MagicMock()
+        mock_pipeline_info.spec.catalog = "main"
+        mock_pipeline_info.spec.schema = "default"
+        mock_pipeline_info.spec.environment = None
+        mock_client.get.return_value = mock_pipeline_info
+
+        with tempfile.NamedTemporaryFile(suffix=".whl") as pkg1, \
+             tempfile.NamedTemporaryFile(suffix=".whl") as pkg2:
+            pkg1.write(b"wheel1")
+            pkg1.flush()
+            pkg2.write(b"wheel2")
+            pkg2.flush()
+
+            result = runner.invoke(
+                main,
+                ["update_pipeline", "my_pipeline", "-p", pkg1.name, "-p", pkg2.name],
+            )
+
+        assert result.exit_code == 0, f"Exit code: {result.exit_code}\nOutput: {result.output}"
+        assert mock_ws.files.upload.call_count == 2
+        mock_ws.pipelines.update.assert_called_once()
+
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli.PipelineClient")
     def test_update_pipeline_cannot_determine_ingest_path(
         self, mock_pipeline_client, mock_workspace_client
     ):
@@ -1129,8 +1619,8 @@ class TestUpdatePipelineCommand:
         assert result.exit_code != 0
         assert "Could not determine ingest.py path" in result.output
 
-    @patch("databricks.labs.community_connector.cli.WorkspaceClient")
-    @patch("databricks.labs.community_connector.cli.PipelineClient")
+    @patch("databricks.labs.community_connector_cli.cli.WorkspaceClient")
+    @patch("databricks.labs.community_connector_cli.cli.PipelineClient")
     def test_update_pipeline_cannot_extract_source_name(
         self, mock_pipeline_client, mock_workspace_client
     ):
@@ -1184,7 +1674,9 @@ objects:
             temp_path = f.name
 
         try:
-            with patch("databricks.labs.community_connector.cli.WorkspaceClient") as mock_ws_client:
+            with patch(
+                "databricks.labs.community_connector_cli.cli.WorkspaceClient"
+            ) as mock_ws_client:
                 mock_ws = MagicMock()
                 mock_ws_client.return_value = mock_ws
                 mock_ws.pipelines.list_pipelines.return_value = []

@@ -4,18 +4,20 @@ name: Generate Merged Source File
 on:
   pull_request:
     paths:
-      - 'sources/**/*.py'
-      - 'libs/utils.py'
-      - 'pipeline/lakeflow_python_source.py'
-      - '!sources/**/test/**'
+      - 'src/databricks/labs/community_connector/sources/**/*.py'
+      - 'src/databricks/labs/community_connector/libs/utils.py'
+      - 'src/databricks/labs/community_connector/interface/lakeflow_connect.py'
+      - 'src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py'
+      - '!src/databricks/labs/community_connector/sources/**/test/**'
   push:
     branches:
       - main
     paths:
-      - 'sources/**/*.py'
-      - 'libs/utils.py'
-      - 'pipeline/lakeflow_python_source.py'
-      - '!sources/**/test/**'
+      - 'src/databricks/labs/community_connector/sources/**/*.py'
+      - 'src/databricks/labs/community_connector/libs/utils.py'
+      - 'src/databricks/labs/community_connector/interface/lakeflow_connect.py'
+      - 'src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py'
+      - '!src/databricks/labs/community_connector/sources/**/test/**'
 
 permissions:
   contents: read
@@ -37,29 +39,33 @@ jobs:
         uses: tj-actions/changed-files@v46
         with:
           files: |
-            sources/**/*.py
-            libs/utils.py
-            pipeline/lakeflow_python_source.py
+            src/databricks/labs/community_connector/sources/**/*.py
+            src/databricks/labs/community_connector/libs/utils.py
+            src/databricks/labs/community_connector/interface/lakeflow_connect.py
+            src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py
           files_ignore: |
-            sources/**/_generated_*.py
-            sources/**/test/**
+            src/databricks/labs/community_connector/sources/**/_generated_*.py
+            src/databricks/labs/community_connector/sources/**/test/**
 
       - name: Get changed generated files
         id: changed-generated
         uses: tj-actions/changed-files@v46
         with:
           files: |
-            sources/**/_generated_*.py
+            src/databricks/labs/community_connector/sources/**/_generated_*.py
 
       - name: Determine sources to regenerate
         id: sources
         run: |
           SOURCES_TO_REGENERATE=""
+          SOURCES_DIR="src/databricks/labs/community_connector/sources"
           
           # Check if shared files changed (affects all sources)
           SHARED_CHANGED="false"
           for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
-            if [[ "$file" == "libs/utils.py" ]] || [[ "$file" == "pipeline/lakeflow_python_source.py" ]]; then
+            if [[ "$file" == "src/databricks/labs/community_connector/libs/utils.py" ]] || \
+               [[ "$file" == "src/databricks/labs/community_connector/interface/lakeflow_connect.py" ]] || \
+               [[ "$file" == "src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py" ]]; then
               SHARED_CHANGED="true"
               break
             fi
@@ -67,21 +73,21 @@ jobs:
           
           if [[ "$SHARED_CHANGED" == "true" ]]; then
             # Regenerate all sources that have a main source file
-            for dir in sources/*/; do
+            for dir in ${SOURCES_DIR}/*/; do
               source_name=$(basename "$dir")
               # Skip interface directory and check if main source file exists
-              if [[ "$source_name" != "interface" ]] && [[ -f "sources/${source_name}/${source_name}.py" ]]; then
+              if [[ "$source_name" != "interface" ]] && [[ -f "${SOURCES_DIR}/${source_name}/${source_name}.py" ]]; then
                 SOURCES_TO_REGENERATE="$SOURCES_TO_REGENERATE $source_name"
               fi
             done
           else
             # Check sources whose source files changed
             for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
-              if [[ "$file" == sources/*/[!_]*.py ]]; then
-                # Extract source name from path like sources/zendesk/zendesk.py
-                source_name=$(echo "$file" | cut -d'/' -f2)
+              if [[ "$file" == ${SOURCES_DIR}/*/[!_]*.py ]]; then
+                # Extract source name from path like src/databricks/labs/community_connector/sources/zendesk/zendesk.py
+                source_name=$(basename "$(dirname "$file")")
                 # Check if main source file exists and it's not interface
-                if [[ "$source_name" != "interface" ]] && [[ -f "sources/${source_name}/${source_name}.py" ]]; then
+                if [[ "$source_name" != "interface" ]] && [[ -f "${SOURCES_DIR}/${source_name}/${source_name}.py" ]]; then
                   # Add to list if not already present
                   if [[ ! " $SOURCES_TO_REGENERATE " =~ " $source_name " ]]; then
                     SOURCES_TO_REGENERATE="$SOURCES_TO_REGENERATE $source_name"
@@ -92,10 +98,10 @@ jobs:
             
             # Also check sources whose generated files changed
             for file in ${{ steps.changed-generated.outputs.all_changed_files }}; do
-              # Extract source name from path like sources/zendesk/_generated_zendesk_python_source.py
-              source_name=$(echo "$file" | cut -d'/' -f2)
+              # Extract source name from path like src/databricks/labs/community_connector/sources/zendesk/_generated_zendesk_python_source.py
+              source_name=$(basename "$(dirname "$file")")
               # Check if main source file exists and it's not interface
-              if [[ "$source_name" != "interface" ]] && [[ -f "sources/${source_name}/${source_name}.py" ]]; then
+              if [[ "$source_name" != "interface" ]] && [[ -f "${SOURCES_DIR}/${source_name}/${source_name}.py" ]]; then
                 # Add to list if not already present
                 if [[ ! " $SOURCES_TO_REGENERATE " =~ " $source_name " ]]; then
                   SOURCES_TO_REGENERATE="$SOURCES_TO_REGENERATE $source_name"
@@ -120,15 +126,16 @@ jobs:
       - name: Check if generated files are up to date
         if: steps.sources.outputs.sources != ''
         run: |
+          SOURCES_DIR="src/databricks/labs/community_connector/sources"
           # Check if there are any differences between the regenerated files and what's in the repo
-          if git diff --quiet sources/**/_generated_*.py 2>/dev/null; then
+          if git diff --quiet ${SOURCES_DIR}/**/_generated_*.py 2>/dev/null; then
             echo "✅ Generated source files are up to date. No changes needed."
             exit 0
           else
             echo "❌ Generated source files are out of date!"
             echo ""
             echo "The following files need to be regenerated:"
-            git diff --name-only sources/**/_generated_*.py
+            git diff --name-only ${SOURCES_DIR}/**/_generated_*.py
             echo ""
             echo "Please run the following commands locally and commit the changes:"
             echo ""
@@ -137,7 +144,7 @@ jobs:
             done
             echo ""
             echo "Then add the generated files to your commit:"
-            echo "  git add sources/**/_generated_*.py"
+            echo "  git add ${SOURCES_DIR}/**/_generated_*.py"
             echo "  git commit --amend --no-edit"
             echo "  git push --force-with-lease"
             exit 1

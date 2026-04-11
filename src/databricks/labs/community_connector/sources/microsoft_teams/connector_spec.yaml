@@ -1,0 +1,40 @@
+# microsoft_teams Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: Microsoft Teams
+connection:
+  parameters:
+    - name: tenant_id
+      type: string
+      required: true
+      description: >
+        Azure AD tenant ID (GUID format). Found on the app registration
+        Overview page in Azure Portal.
+
+    - name: client_id
+      type: string
+      required: true
+      description: >
+        Application (client) ID (GUID format). Found on the app registration
+        Overview page in Azure Portal.
+
+    - name: client_secret
+      type: string
+      required: true
+      secret: true
+      description: >
+        Client secret value from the app registration Certificates & secrets
+        page. Used for OAuth 2.0 Client Credentials Flow authentication.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# ============================================================================
+external_options_allowlist: "team_id,channel_id,message_id,start_date,top,max_pages_per_batch,lookback_seconds,fetch_all_teams,fetch_all_channels,fetch_all_messages,use_delta_api,max_concurrent_threads"
