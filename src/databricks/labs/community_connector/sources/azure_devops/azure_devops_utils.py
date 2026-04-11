@@ -141,42 +141,42 @@ def for_each_pr(
                 callback(project, repo_id, int(pr_id))
             )
         elif repo_id:
-            _collect_prs_for_repo(
-                session, base_url, project, repo_id,
-                callback, all_records,
+            _collect_prs(
+                session, base_url, project,
+                [repo_id], callback, all_records,
             )
         else:
             repos = fetch_repos(session, base_url, project)
-            for repo in repos:
-                rid = repo.get("id")
-                if not rid:
-                    continue
-                _collect_prs_for_repo(
-                    session, base_url, project, rid,
-                    callback, all_records,
-                )
+            repo_ids = [
+                r["id"] for r in repos if r.get("id")
+            ]
+            _collect_prs(
+                session, base_url, project,
+                repo_ids, callback, all_records,
+            )
 
     return all_records
 
 
-def _collect_prs_for_repo(
+def _collect_prs(
     session: requests.Session,
     base_url: str,
     project: str,
-    repo_id: str,
+    repo_ids: list[str],
     callback: Callable[[str, str, int], list[dict[str, Any]]],
-    out: list[dict[str, Any]],
+    out: list[dict[str, Any]],  # pylint: disable=too-many-arguments,too-many-positional-arguments
 ) -> None:
-    """Fetch all PRs in *repo_id* and call *callback* for each."""
-    try:
-        prs = fetch_prs(session, base_url, project, repo_id)
-    except RuntimeError:
-        return
-    for pr in prs:
-        pid = pr.get("pullRequestId")
-        if pid is None:
-            continue
+    """Fetch all PRs in each repo and call *callback* for each."""
+    for repo_id in repo_ids:
         try:
-            out.extend(callback(project, repo_id, pid))
+            prs = fetch_prs(session, base_url, project, repo_id)
         except RuntimeError:
             continue
+        for pr in prs:
+            pid = pr.get("pullRequestId")
+            if pid is None:
+                continue
+            try:
+                out.extend(callback(project, repo_id, pid))
+            except RuntimeError:
+                continue
