@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-import requests
 import base64
-from typing import Iterator, Any
+import json
+from typing import Any, Iterator
+
+import requests
 
 from pyspark.sql.types import (
     StructType,
@@ -754,11 +756,11 @@ class LakeflowConnect:
         """
         # Determine which project to use
         project = table_options.get("project") or self.project
-        
+
         # If no project specified, fetch from all projects
         if not project:
             return self._read_repositories_all_projects(start_offset, table_options)
-        
+
         url = f"{self.base_url}/{project}/_apis/git/repositories"
         params = {
             "api-version": "7.1",
@@ -809,33 +811,33 @@ class LakeflowConnect:
     ) -> (Iterator[dict], dict):
         """
         Helper method to fetch repositories from ALL projects in the organization.
-        
+
         This is called when no project is specified at connection or table level.
         """
         # First, get all projects
         projects_iterator, _ = self._read_projects({}, {})
         projects = list(projects_iterator)
-        
+
         all_records: list[dict[str, Any]] = []
-        
+
         for project_obj in projects:
             project_name = project_obj.get("name")
             if not project_name:
                 continue
-                
+
             # Fetch repositories for this project
             try:
                 # Create a temporary table_options with this project
                 temp_options = dict(table_options)
                 temp_options["project"] = project_name
-                
+
                 # Recursively call _read_repositories with this specific project
                 repos_iterator, _ = self._read_repositories({}, temp_options)
                 all_records.extend(list(repos_iterator))
             except Exception:
                 # Skip projects that fail (might not have Git enabled)
                 continue
-        
+
         return iter(all_records), {}
 
     def _read_commits(
@@ -851,7 +853,7 @@ class LakeflowConnect:
         Supports pagination using $skip offset from start_offset.
         """
         repository_id = table_options.get("repository_id")
-        
+
         # If repository_id not provided, fetch from all repositories
         if not repository_id:
             return self._read_commits_all_repos(start_offset, table_options)
@@ -862,11 +864,11 @@ class LakeflowConnect:
             raise ValueError("Project must be specified either at connection level or in table_options when repository_id is provided")
 
         url = f"{self.base_url}/{project}/_apis/git/repositories/{repository_id}/commits"
-        
+
         # Get pagination offset from start_offset
         skip = start_offset.get("skip", 0)
         top = 1000  # Fetch 1000 commits per page
-        
+
         params = {
             "api-version": "7.1",
             "$top": str(top),
@@ -913,7 +915,7 @@ class LakeflowConnect:
         if len(commits) == top:
             # More data likely available
             new_offset["skip"] = skip + top
-        
+
         return iter(records), new_offset
 
     def _read_commits_all_repos(
@@ -921,7 +923,7 @@ class LakeflowConnect:
     ) -> (Iterator[dict], dict):
         """
         Read commits from ALL repositories in the project.
-        
+
         This method:
         1. Fetches all repositories
         2. For each repository, fetches commits
@@ -930,25 +932,25 @@ class LakeflowConnect:
         # First, get all repositories
         repos_iterator, _ = self._read_repositories({}, {})
         repositories = list(repos_iterator)
-        
+
         if not repositories:
             # No repositories found, return empty
             return iter([]), {}
-        
+
         all_commits = []
-        
+
         # For each repository, fetch commits
         for repo in repositories:
             repo_id = repo.get("id")
             project_name = repo.get("project_name")  # Get project from repo
             if not repo_id or not project_name:
                 continue
-                
+
             # Create modified table_options with this repository_id and project
             repo_table_options = dict(table_options)
             repo_table_options["repository_id"] = repo_id
             repo_table_options["project"] = project_name  # Add project from repo
-            
+
             # Fetch commits for this repository
             try:
                 commits_iterator, _ = self._read_commits(start_offset, repo_table_options)
@@ -958,7 +960,7 @@ class LakeflowConnect:
                 # If a repository fails, continue with others
                 # (e.g., empty repo, permissions issue)
                 continue
-        
+
         # Return all commits combined
         return iter(all_commits), {}
 
@@ -974,7 +976,7 @@ class LakeflowConnect:
         - status_filter (optional): Filter by status (active, completed, abandoned, all). Default: all.
         """
         repository_id = table_options.get("repository_id")
-        
+
         # If repository_id not provided, fetch from all repositories
         if not repository_id:
             return self._read_pullrequests_all_repos(start_offset, table_options)
@@ -985,9 +987,9 @@ class LakeflowConnect:
             raise ValueError("Project must be specified either at connection level or in table_options when repository_id is provided")
 
         url = f"{self.base_url}/{project}/_apis/git/repositories/{repository_id}/pullrequests"
-        
+
         status_filter = table_options.get("status_filter", "all")
-        
+
         params = {
             "api-version": "7.1",
             "searchCriteria.status": status_filter,
@@ -1038,7 +1040,7 @@ class LakeflowConnect:
     ) -> (Iterator[dict], dict):
         """
         Read pull requests from ALL repositories in the project.
-        
+
         This method:
         1. Fetches all repositories
         2. For each repository, fetches pull requests
@@ -1047,25 +1049,25 @@ class LakeflowConnect:
         # First, get all repositories
         repos_iterator, _ = self._read_repositories({}, {})
         repositories = list(repos_iterator)
-        
+
         if not repositories:
             # No repositories found, return empty
             return iter([]), {}
-        
+
         all_prs = []
-        
+
         # For each repository, fetch pull requests
         for repo in repositories:
             repo_id = repo.get("id")
             project_name = repo.get("project_name")  # Get project from repo
             if not repo_id or not project_name:
                 continue
-                
+
             # Create modified table_options with this repository_id and project
             repo_table_options = dict(table_options)
             repo_table_options["repository_id"] = repo_id
             repo_table_options["project"] = project_name  # Add project from repo
-            
+
             # Fetch PRs for this repository
             try:
                 prs_iterator, _ = self._read_pullrequests(start_offset, repo_table_options)
@@ -1074,7 +1076,7 @@ class LakeflowConnect:
             except Exception:
                 # If a repository fails, continue with others
                 continue
-        
+
         # Return all PRs combined
         return iter(all_prs), {}
 
@@ -1090,7 +1092,7 @@ class LakeflowConnect:
         - filter (optional): Ref name prefix filter (e.g., 'heads/' for branches, 'tags/' for tags).
         """
         repository_id = table_options.get("repository_id")
-        
+
         # If repository_id not provided, fetch from all repositories
         if not repository_id:
             return self._read_refs_all_repos(start_offset, table_options)
@@ -1101,11 +1103,11 @@ class LakeflowConnect:
             raise ValueError("Project must be specified either at connection level or in table_options when repository_id is provided")
 
         url = f"{self.base_url}/{project}/_apis/git/repositories/{repository_id}/refs"
-        
+
         params = {
             "api-version": "7.1",
         }
-        
+
         # Add optional filter parameter
         ref_filter = table_options.get("filter")
         if ref_filter:
@@ -1150,7 +1152,7 @@ class LakeflowConnect:
     ) -> (Iterator[dict], dict):
         """
         Read refs from ALL repositories in the project.
-        
+
         This method:
         1. Fetches all repositories
         2. For each repository, fetches refs
@@ -1159,25 +1161,25 @@ class LakeflowConnect:
         # First, get all repositories
         repos_iterator, _ = self._read_repositories({}, {})
         repositories = list(repos_iterator)
-        
+
         if not repositories:
             # No repositories found, return empty
             return iter([]), {}
-        
+
         all_refs = []
-        
+
         # For each repository, fetch refs
         for repo in repositories:
             repo_id = repo.get("id")
             project_name = repo.get("project_name")  # Get project from repo
             if not repo_id or not project_name:
                 continue
-                
+
             # Create modified table_options with this repository_id and project
             repo_table_options = dict(table_options)
             repo_table_options["repository_id"] = repo_id
             repo_table_options["project"] = project_name  # Add project from repo
-            
+
             # Fetch refs for this repository
             try:
                 refs_iterator, _ = self._read_refs(start_offset, repo_table_options)
@@ -1186,7 +1188,7 @@ class LakeflowConnect:
             except Exception:
                 # If a repository fails, continue with others
                 continue
-        
+
         # Return all refs combined
         return iter(all_refs), {}
 
@@ -1203,7 +1205,7 @@ class LakeflowConnect:
         Supports pagination using $skip offset from start_offset.
         """
         repository_id = table_options.get("repository_id")
-        
+
         # If repository_id not provided, fetch from all repositories
         if not repository_id:
             return self._read_pushes_all_repos(start_offset, table_options)
@@ -1214,11 +1216,11 @@ class LakeflowConnect:
             raise ValueError("Project must be specified either at connection level or in table_options when repository_id is provided")
 
         url = f"{self.base_url}/{project}/_apis/git/repositories/{repository_id}/pushes"
-        
+
         # Get pagination offset from start_offset
         skip = start_offset.get("skip", 0)
         top = 1000  # Fetch 1000 pushes per page
-        
+
         params = {
             "api-version": "7.1",
             "$top": str(top),
@@ -1261,7 +1263,7 @@ class LakeflowConnect:
         if len(pushes) == top:
             # More data likely available
             new_offset["skip"] = skip + top
-        
+
         return iter(records), new_offset
 
     def _read_pushes_all_repos(
@@ -1269,7 +1271,7 @@ class LakeflowConnect:
     ) -> (Iterator[dict], dict):
         """
         Read pushes from ALL repositories in the project.
-        
+
         This method:
         1. Fetches all repositories
         2. For each repository, fetches pushes
@@ -1278,25 +1280,25 @@ class LakeflowConnect:
         # First, get all repositories
         repos_iterator, _ = self._read_repositories({}, {})
         repositories = list(repos_iterator)
-        
+
         if not repositories:
             # No repositories found, return empty
             return iter([]), {}
-        
+
         all_pushes = []
-        
+
         # For each repository, fetch pushes
         for repo in repositories:
             repo_id = repo.get("id")
             project_name = repo.get("project_name")  # Get project from repo
             if not repo_id or not project_name:
                 continue
-                
+
             # Create modified table_options with this repository_id and project
             repo_table_options = dict(table_options)
             repo_table_options["repository_id"] = repo_id
             repo_table_options["project"] = project_name  # Add project from repo
-            
+
             # Fetch pushes for this repository
             try:
                 pushes_iterator, _ = self._read_pushes(start_offset, repo_table_options)
@@ -1305,7 +1307,7 @@ class LakeflowConnect:
             except Exception:
                 # If a repository fails, continue with others
                 continue
-        
+
         # Return all pushes combined
         return iter(all_pushes), {}
 
@@ -1396,7 +1398,7 @@ class LakeflowConnect:
 
         # Determine which project to use
         project = table_options.get("project") or self.project
-        
+
         # If no project specified, fetch from all projects
         if not project:
             projects_iterator, _ = self._read_projects({}, {})
@@ -1525,7 +1527,7 @@ class LakeflowConnect:
 
         # Determine which project to use
         project = table_options.get("project") or self.project
-        
+
         # If no project specified, fetch from all projects
         if not project:
             projects_iterator, _ = self._read_projects({}, {})
@@ -1658,7 +1660,7 @@ class LakeflowConnect:
 
         # Determine which project to use
         project = table_options.get("project") or self.project
-        
+
         # If no project specified, fetch from all projects
         if not project:
             projects_iterator, _ = self._read_projects({}, {})
@@ -1787,7 +1789,7 @@ class LakeflowConnect:
 
         # Determine which project to use
         project = table_options.get("project") or self.project
-        
+
         # If no project specified, fetch from all projects
         if not project:
             projects_iterator, _ = self._read_projects({}, {})
@@ -1918,10 +1920,10 @@ class LakeflowConnect:
         POST /{organization}/{project}/_apis/wit/wiql?api-version=7.1
         """
         ids = table_options.get("ids")
-        
+
         # Determine which project to use
         project = table_options.get("project") or self.project
-        
+
         # If no project specified, fetch from all projects
         if not project:
             projects_iterator, _ = self._read_projects({}, {})
@@ -1948,14 +1950,14 @@ class LakeflowConnect:
                     raise RuntimeError(
                         f"Azure DevOps API error for workitems WIQL: {wiql_response.status_code} {wiql_response.text}"
                     )
-                
+
                 wiql_results = wiql_response.json()
                 work_item_refs = wiql_results.get("workItems", [])
-                
+
                 # If no work items found in this project, skip
                 if not work_item_refs:
                     continue
-                
+
                 # Extract IDs from WIQL results
                 discovered_ids = [str(ref.get("id")) for ref in work_item_refs if ref.get("id")]
                 ids_to_fetch = ",".join(discovered_ids)
@@ -1985,7 +1987,6 @@ class LakeflowConnect:
                 record["project_name"] = project
 
                 # Convert fields dict to JSON string for storage
-                import json
                 if "fields" in record and isinstance(record["fields"], dict):
                     record["fields"] = json.dumps(record["fields"])
 
@@ -2005,7 +2006,7 @@ class LakeflowConnect:
         """
         # Determine which project to use
         project = table_options.get("project") or self.project
-        
+
         # If no project specified, fetch from all projects
         if not project:
             projects_iterator, _ = self._read_projects({}, {})
@@ -2042,7 +2043,6 @@ class LakeflowConnect:
                 record["project_name"] = project
 
                 # Convert fields dict to JSON string for storage
-                import json
                 if "fields" in record and isinstance(record["fields"], dict):
                     record["fields"] = json.dumps(record["fields"])
 
@@ -2069,7 +2069,7 @@ class LakeflowConnect:
         """
         # Determine which project to use
         project = table_options.get("project") or self.project
-        
+
         # If no project specified, fetch from all projects
         if not project:
             projects_iterator, _ = self._read_projects({}, {})
@@ -2099,4 +2099,3 @@ class LakeflowConnect:
                 all_records.append(record)
 
         return iter(all_records), {}
-
