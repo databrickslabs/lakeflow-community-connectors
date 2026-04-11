@@ -1103,46 +1103,32 @@ def register_lakeflow_source(spark):
                 all_records.extend(
                     callback(project, repo_id, int(pr_id))
                 )
-            elif repo_id:
-                _collect_prs(
-                    session, base_url, project,
-                    [repo_id], callback, all_records,
-                )
             else:
-                repos = fetch_repos(session, base_url, project)
-                repo_ids = [
-                    r["id"] for r in repos if r.get("id")
-                ]
-                _collect_prs(
-                    session, base_url, project,
-                    repo_ids, callback, all_records,
+                target_ids = (
+                    [repo_id] if repo_id
+                    else [r["id"] for r in
+                          fetch_repos(session, base_url, project)
+                          if r.get("id")]
                 )
+                for rid in target_ids:
+                    try:
+                        prs = fetch_prs(
+                            session, base_url, project, rid
+                        )
+                    except RuntimeError:
+                        continue
+                    for pr in prs:
+                        pid = pr.get("pullRequestId")
+                        if pid is None:
+                            continue
+                        try:
+                            all_records.extend(
+                                callback(project, rid, pid)
+                            )
+                        except RuntimeError:
+                            continue
 
         return all_records
-
-
-    def _collect_prs(
-        session: requests.Session,
-        base_url: str,
-        project: str,
-        repo_ids: list[str],
-        callback: Callable[[str, str, int], list[dict[str, Any]]],
-        out: list[dict[str, Any]],  # pylint: disable=too-many-arguments,too-many-positional-arguments
-    ) -> None:
-        """Fetch all PRs in each repo and call *callback* for each."""
-        for repo_id in repo_ids:
-            try:
-                prs = fetch_prs(session, base_url, project, repo_id)
-            except RuntimeError:
-                continue
-            for pr in prs:
-                pid = pr.get("pullRequestId")
-                if pid is None:
-                    continue
-                try:
-                    out.extend(callback(project, repo_id, pid))
-                except RuntimeError:
-                    continue
 
 
     ########################################################
