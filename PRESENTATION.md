@@ -8,19 +8,24 @@ author: Yong Li
 
 ### A Template-Driven, AI-Assisted Framework
 ### for Building Data Ingestion Connectors
+### by Community (Databricks Eng & SA, Customers and Third Parties)
 
 ---
 
 ## The Problem
 
-Building a new data source connector is **repetitive and error-prone**:
+**Long-tail data sources never make the roadmap of a managed connector team.**
 
-- Every source needs the same plumbing — pagination, offsets, checkpointing, schema, retry, streaming
-- Every source needs the same scaffolding — packaging, testing, docs, deployment
-- Every connector author reinvents the same patterns in slightly different ways
-- Ingesting from **long-tail SaaS sources** never makes the roadmap for a managed connector team
+- A managed connector team can only build + support a handful of sources well
+- The market has **thousands** of SaaS and industry-specific sources
+- Every customer has "that one weird system" that blocks their migration to Databricks
+- Building a one-off connector is repetitive, error-prone, and expensive to maintain
+- Managed ingestion connectors are **tightly coupled with the engine** — they ship on the engine's release train
+- **No customization path** for anyone outside Databricks engineering — SAs and customers cannot extend or fork
 
-**Result:** slow delivery, inconsistent quality, high maintenance cost.
+**Result:** low coverage compared to Fivetran and others, slow delivery and release, high maintenance cost.
+
+We need a way to let **anyone** (Databricks Eng, SAs, customers, third parties) ship a production-grade connector quickly.
 
 ---
 
@@ -76,7 +81,7 @@ Built on top of:
 ```
 
 - **The PDS API is a contract**, not a layer. Spark defines it; anyone can implement it.
-- **`LakeflowSource` is a specialized implementation** of that contract — it knows how to serve the two virtual tables (`_lakeflow_table_list`, `_lakeflow_metadata`) and how to stream with offsets.
+- **`LakeflowSource` is a specialized implementation** of that contract — it covers both metadata and reading of the actual table data, so that a pipeline can be built in a unified way.
 - **`LakeflowConnect` is the plug-in point** `LakeflowSource` calls into for source-specific behavior.
 
 One specialized PDS implementation powers every connector. The author never touches Spark internals.
@@ -85,38 +90,41 @@ One specialized PDS implementation powers every connector. The author never touc
 
 ## Registration → End-to-End Ingestion
 
-A connector becomes a running pipeline with one `register` + one `readStream`:
+A connector becomes a running pipeline with **one `register` + one `ingest`**. The entire SDP machinery is wrapped behind a single `ingest(spark, spec)` call — the user only writes a spec.
 
 ```python
+from databricks.labs.community_connector import register
+from databricks.labs.community_connector.pipeline import ingest
+
 # 1. Register — wraps LakeflowConnect as a Spark PDS named "lakeflow_connect"
-register(spark, "github")   # or register(spark, MyLakeflowConnect)
+register(spark, "github")
 
-# 2. Read — SDP pipeline calls the PDS by name, passing only the UC connection
-@sdp.view
-def issues_cdc():
-    return (spark.readStream.format("lakeflow_connect")
-              .option("databricks.connection", "my_github_conn")
-              .option("tableName", "issues")
-              .load())
+# 2. Declare what to ingest — just a spec dict
+pipeline_spec = {
+    "connection_name": "my_github_conn",
+    "objects": [
+        {"table": {"source_table": "issues"}},
+        {"table": {"source_table": "pull_requests",
+                   "table_configuration": {"scd_type": "SCD_TYPE_2"}}},
+    ],
+}
 
-# 3. Merge — SDP applies CDC into a Delta table
-sdp.apply_changes(target="issues", source="issues_cdc",
-                  keys=["id"], sequence_by=col("updated_at"))
+# 3. Ingest — one call fans out into views, apply_changes, and streaming flows
+ingest(spark, pipeline_spec)
 ```
 
-The runtime handles the rest:
+Inside `ingest`, the library:
 
-```
-  UC connection options ──► LakeflowConnect.__init__
-  tableName == "issues" ──► LakeflowConnect.read_table(...)
-  pagination + offset checkpointing  ──►  SDP  ──►  Delta table (SCD, deletes)
-```
+- Looks up each table's metadata (primary keys, cursor, ingestion type) via the `_lakeflow_metadata` virtual table
+- Generates the right `@sdp.view` + `apply_changes` / `apply_changes_from_snapshot` / `append_flow` per table
+- Wires in delete flows for `cdc_with_deletes` tables automatically
 
-Same registration path works for the UI, the CLI, and local tests.
+**The user writes a spec. The library writes the pipeline.**
+Same path works for the UI, the CLI, and local tests.
 
 ---
 
-## The UC Connection: Credentials as Infrastructure
+## The UC Connection
 
 We built a **generic Unity Catalog connection** that stores arbitrary key-value pairs — any source's auth shape fits in one object:
 
@@ -244,8 +252,6 @@ Author picks a type per-table. Framework handles the rest.
 
 ## Batch Boundary & Admission Control
 
-Every incremental table supports `max_records_per_batch`.
-
 ```
 start_offset      ──►   read_table   ──►   (iter, end_offset)
                                               │
@@ -294,7 +300,126 @@ New connectors are written **by following this example**, not by reading framewo
 
 ---
 
-## Part 2 — The AI Agent Plugin
+## Part 2 — The UI Experience
+
+---
+
+## Entry Point: The Tile Gallery
+
+```
+  + New  ─►  Add or upload data  ─►  Community connectors
+
+  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌──────────┐
+  │ GitHub  │ │ Zendesk │ │ HubSpot │ │  Gmail  │ │   FHIR   │
+  └─────────┘ └─────────┘ └─────────┘ └─────────┘ └──────────┘
+  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌──────────────────────┐
+  │ Mixpanel│ │Qualtrics│ │   ...   │ │ + Add Community      │
+  └─────────┘ └─────────┘ └─────────┘ │   Connector          │
+                                      └──────────────────────┘
+```
+
+One click → guided flow, no notebooks, no CLI, no code.
+
+---
+
+## The Core User Journey
+
+```
+1. Click a tile  ────────────────►  source selected
+
+2. Connection  ──►  ○ Create new UC connection
+                    ○ Select existing connection
+
+3. Pipeline setup
+   ├─ Pipeline name
+   ├─ Root path (where connector code will live as a workspace repo)
+   └─ Default catalog + schema
+
+4. Pipeline spec  ──►  tables, destinations, extra params per table
+
+5. Run ingestion  ──►  SDP pipeline executes
+```
+
+What the UI does behind the scenes at step 3:
+- **Sparse-checkout clone** of the connector code into a workspace repo under the chosen root path
+- **Creates a workspace pipeline** that uses that repo as its source
+- User can edit the pipeline spec later; connector code is right there in the workspace
+
+---
+
+## Config-Driven UI: One Connection, Many Faces
+
+The insight that makes this scale:
+
+```
+         What the user sees                  What actually exists
+         ─────────────────                   ────────────────────
+
+   ┌─────────────────────────┐
+   │  New GitHub Connection  │
+   │  ─────────────────────  │
+   │  Personal Access Token  │           ┌──────────────────────┐
+   │  Organization           │   ──►     │                      │
+   │  API Base URL           │           │   Generic UC         │
+   └─────────────────────────┘           │   Connection         │
+                                         │   (arbitrary         │
+   ┌─────────────────────────┐           │    key-value pairs)  │
+   │  New Zendesk Connection │   ──►     │                      │
+   │  ─────────────────────  │           └──────────────────────┘
+   │  Subdomain              │
+   │  API Token              │
+   │  Email                  │
+   └─────────────────────────┘
+```
+
+Each connector's **`connector_spec.yaml`** describes which parameters to prompt for. The UI reads the spec and renders the form. **Adding a connector = adding a spec file.** No UI code changes.
+
+---
+
+## Custom Connectors: Bring Your Own Repo
+
+Same flow, one difference — the user supplies **their own git repo path**:
+
+```
+Community connectors gallery
+      │
+      ▼
+ ┌────────────────────────────┐
+ │ + Add Community Connector  │
+ └────────────┬───────────────┘
+              ▼
+        Paste git repo URL
+              │
+              ▼
+   Sparse-checkout clone → workspace repo
+   Read their connector_spec.yaml → render form
+   Create pipeline → run ingestion
+```
+
+The typical path:
+
+1. **Fork / clone** `lakeflow-community-connectors`
+2. Run **`/create-connector <my_source>`** — the agent writes code, tests, docs, spec
+3. Push to the user's own repo
+4. Deploy via **"+ Add Community Connector"** pointing at that repo
+
+**The same agents and skills power both first-party and custom connectors.**
+A connector anywhere on GitHub becomes a deployable tile in minutes.
+
+---
+
+## Two Other Deployment Paths
+
+The UI is primary, but there are escape hatches:
+
+- **CLI** — `community-connector create_pipeline <source> <pipeline> -n <conn>` — same outcome, scriptable
+- **Agent** — `/deploy-connector` — interactive, walks through the same steps as the UI
+
+All three paths converge on the same artifacts: a UC connection, a workspace repo (sparse checkout), and an SDP pipeline.
+
+---
+
+## Part 3 — The AI Agent Plugin
 
 ---
 
@@ -562,125 +687,6 @@ End-to-end proof that the connector correctly models the source's lifecycle.
 
 ---
 
-## Part 3 — The UI Experience
-
----
-
-## Entry Point: The Tile Gallery
-
-```
-  + New  ─►  Add or upload data  ─►  Community connectors
-
-  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌──────────┐
-  │ GitHub  │ │ Zendesk │ │ HubSpot │ │  Gmail  │ │   FHIR   │
-  └─────────┘ └─────────┘ └─────────┘ └─────────┘ └──────────┘
-  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌──────────────────────┐
-  │ Mixpanel│ │Qualtrics│ │   ...   │ │ + Add Community      │
-  └─────────┘ └─────────┘ └─────────┘ │   Connector          │
-                                      └──────────────────────┘
-```
-
-One click → guided flow, no notebooks, no CLI, no code.
-
----
-
-## The Core User Journey
-
-```
-1. Click a tile  ────────────────►  source selected
-
-2. Connection  ──►  ○ Create new UC connection
-                    ○ Select existing connection
-
-3. Pipeline setup
-   ├─ Pipeline name
-   ├─ Root path (where connector code will live as a workspace repo)
-   └─ Default catalog + schema
-
-4. Pipeline spec  ──►  tables, destinations, extra params per table
-
-5. Run ingestion  ──►  SDP pipeline executes
-```
-
-What the UI does behind the scenes at step 3:
-- **Sparse-checkout clone** of the connector code into a workspace repo under the chosen root path
-- **Creates a workspace pipeline** that uses that repo as its source
-- User can edit the pipeline spec later; connector code is right there in the workspace
-
----
-
-## Config-Driven UI: One Connection, Many Faces
-
-The insight that makes this scale:
-
-```
-         What the user sees                  What actually exists
-         ─────────────────                   ────────────────────
-
-   ┌─────────────────────────┐
-   │  New GitHub Connection  │
-   │  ─────────────────────  │
-   │  Personal Access Token  │           ┌──────────────────────┐
-   │  Organization           │   ──►     │                      │
-   │  API Base URL           │           │   Generic UC         │
-   └─────────────────────────┘           │   Connection         │
-                                         │   (arbitrary         │
-   ┌─────────────────────────┐           │    key-value pairs)  │
-   │  New Zendesk Connection │   ──►     │                      │
-   │  ─────────────────────  │           └──────────────────────┘
-   │  Subdomain              │
-   │  API Token              │
-   │  Email                  │
-   └─────────────────────────┘
-```
-
-Each connector's **`connector_spec.yaml`** describes which parameters to prompt for. The UI reads the spec and renders the form. **Adding a connector = adding a spec file.** No UI code changes.
-
----
-
-## Custom Connectors: Bring Your Own Repo
-
-Same flow, one difference — the user supplies **their own git repo path**:
-
-```
-Community connectors gallery
-      │
-      ▼
- ┌────────────────────────────┐
- │ + Add Community Connector  │
- └────────────┬───────────────┘
-              ▼
-        Paste git repo URL
-              │
-              ▼
-   Sparse-checkout clone → workspace repo
-   Read their connector_spec.yaml → render form
-   Create pipeline → run ingestion
-```
-
-The typical path:
-
-1. **Fork / clone** `lakeflow-community-connectors`
-2. Run **`/create-connector <my_source>`** — the agent writes code, tests, docs, spec
-3. Push to the user's own repo
-4. Deploy via **"+ Add Community Connector"** pointing at that repo
-
-**The same agents and skills power both first-party and custom connectors.**
-A connector anywhere on GitHub becomes a deployable tile in minutes.
-
----
-
-## Two Other Deployment Paths
-
-The UI is primary, but there are escape hatches:
-
-- **CLI** — `community-connector create_pipeline <source> <pipeline> -n <conn>` — same outcome, scriptable
-- **Agent** — `/deploy-connector` — interactive, walks through the same steps as the UI
-
-All three paths converge on the same artifacts: a UC connection, a workspace repo (sparse checkout), and an SDP pipeline.
-
----
-
 ## Part 4 — The Road Ahead
 
 Current vs Future, one topic at a time.
@@ -723,7 +729,7 @@ Four concrete wins from moving onto the managed ingestion architecture:
 
 3. **UI to explore the source and pick tables** — the managed flow already has this. Community connectors gain it automatically.
 
-4. **Escapes SDP-editor limits for Python data sources** — SDP's editor doesn't support multi-file imports, which has been a persistent pain. Wheel-packaged connectors sidestep this entirely.
+4. **No more SDP-editor limits** — the SDP editor doesn't support multi-file imports for Python data sources, which has been a persistent pain. Wheel-packaged connectors sidestep this entirely.
 
 ---
 
@@ -803,7 +809,7 @@ Today the agent produces a connector in one shot. Tomorrow, a network of agents 
  └────────────────────────────────┘      └────────────────────────────────┘
 ```
 
-**Goal:** a repo that self-evolves. Super-super-low human maintenance.
+**Goal:** a self-evolving repo with minimal human maintenance.
 
 ---
 
@@ -852,14 +858,14 @@ Both flows share skills and subagents; they differ in **orchestration** and **de
 
 ---
 
-## Support Agents: the Self-Evolving Repo
+## Support Agents: The Self-Evolving Repo
 
 Beyond `/create-connector`, a portfolio of specialized agents keeps the codebase honest:
 
 - **Eval agent** — scores connector output quality against a benchmark; regression-detects after template changes
 - **Review agent** — does first-pass PR review on connector changes before humans see them
 - **API-sync agent** — periodically crawls each source's API docs; opens PRs when endpoints, schemas, or auth flows drift
-- **Debug agent** — ingested a failed test run, isolates root cause, proposes a fix PR
+- **Debug agent** — given a failed test run, isolates the root cause and proposes a fix PR
 
 **Template ↔ agent co-evolution:** when a new connector pattern forces a template or PDS change, the **same PR updates the affected skills and subagents** so the next `/create-connector` already knows about it.
 
