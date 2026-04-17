@@ -304,21 +304,11 @@ New connectors are written **by following this example**, not by reading framewo
 
 ---
 
-## Entry Point: The Tile Gallery
+## Demo: The UI in Action
 
-```
-  + New  ─►  Add or upload data  ─►  Community connectors
+> *Live walkthrough — from the Community Connectors gallery to a running pipeline.*
 
-  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌──────────┐
-  │ GitHub  │ │ Zendesk │ │ HubSpot │ │  Gmail  │ │   FHIR   │
-  └─────────┘ └─────────┘ └─────────┘ └─────────┘ └──────────┘
-  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌──────────────────────┐
-  │ Mixpanel│ │Qualtrics│ │   ...   │ │ + Add Community      │
-  └─────────┘ └─────────┘ └─────────┘ │   Connector          │
-                                      └──────────────────────┘
-```
-
-One click → guided flow, no notebooks, no CLI, no code.
+`+ New` → `Add or upload data` → **Community connectors**
 
 ---
 
@@ -373,6 +363,32 @@ The insight that makes this scale:
 ```
 
 Each connector's **`connector_spec.yaml`** describes which parameters to prompt for. The UI reads the spec and renders the form. **Adding a connector = adding a spec file.** No UI code changes.
+
+---
+
+## Auto-Sync: Community Repo → UI
+
+The UI doesn't bundle any connector-specific code. Connector metadata flows from the community repo into the universe repo (where the UI lives) through an automated sync.
+
+```
+  lakeflow-community-connectors                     universe (UI)
+  ──────────────────────────────                    ─────────────
+  sources/<connector>/
+    ├─ connector_spec.yaml    ──┐
+    ├─ <connector>.svg        ──┤   auto-sync job   ┌─ spec registry
+    ├─ README.md              ──┼────────────────►  ├─ logos
+    └─ ...                      │                   └─ docs
+                                │
+                                ▼
+                         UI renders tiles + forms
+```
+
+- **One source of truth** — edit the spec / logo in the community repo, the UI picks it up
+- **Adding a connector = one PR in this repo** — no UI code review, no front-end release
+- **The spec is the contract** between the framework and the UI
+- Same path covers logos, descriptions, and parameter forms
+
+For custom connectors (next slide), the same contract is satisfied without the sync — the user's repo is read directly.
 
 ---
 
@@ -510,7 +526,7 @@ Human confirmation gate between steps. Each step commits its own artifacts.
 
 ## Human-in-the-Loop by Design
 
-Long agentic runs are scary. This workflow stays controllable:
+Long agentic runs *used to be* scary — today's agents are much more reliable, but humans still want visibility into multi-step work. This workflow stays controllable:
 
 - **Confirmation gate after every step** — agent summarizes what was produced, human picks `Continue` or `Review first`
 - **Per-step git commits** — `feat({source}): step N - <summary>` after each step
@@ -689,7 +705,7 @@ End-to-end proof that the connector correctly models the source's lifecycle.
 
 ## Part 4 — The Road Ahead
 
-Current vs Future, one topic at a time.
+Current vs Future (in progress), one topic at a time.
 
 ---
 
@@ -740,9 +756,9 @@ We chose the repo-based path originally for two reasons. Both reasons have since
 | Original concern                                             | Why it held then                                               | Why it no longer blocks us                                     |
 | ------------------------------------------------------------ | -------------------------------------------------------------- | -------------------------------------------------------------- |
 | Let customers **customize the Python code** (Genie-style)    | Direct repo access was the easy path for user edits             | Wheel packages can still be built from a user repo; edits flow through the agent workflow, not in-place notebook hacks |
-| **Maintenance burden** of "managed"-labeled connectors at scale | Hand-maintaining 20+ connectors under a managed SLA was risky  | **LLM agents** now do the mechanical maintenance — research, implement, test, fix — so scale is no longer a headcount problem |
+| **Maintenance burden** of "managed"-labeled connectors at scale | Hand-maintaining 100+ connectors under a managed SLA was risky  | **LLM agents** now do the mechanical maintenance — research, implement, test, fix — so scale is no longer a headcount problem |
 
-**Net:** the constraints that justified the split have dissolved. Unifying is now the right call.
+**Net:** the constraints that justified the split have dissolved — and the repo-based workspace pipeline was a sub-optimal experience to begin with (users managing Git repos just to run an ingestion pipeline). Unifying is now the right call.
 
 ---
 
@@ -779,7 +795,8 @@ Tomorrow, both get the same UI — and custom ones become **publishable** in the
 - **Team sharing** — one person builds a custom connector; the whole workspace gets it as a tile
 - **Governance** — custom connectors become first-class workspace objects (permissions, audit, lifecycle)
 - **No more "first-party vs custom" gap** — UX quality stops depending on whether the connector lives in our repo
-- **Lower bar for contribution** — publish locally first, promote to the main repo later if useful
+- **Private by default** — many users only want their connector available inside their own workspace, not shared with every Databricks customer. Publishing locally is the end state, not a staging step.
+- **Lower bar for contribution** — those who do want to contribute can publish locally first and promote to the main repo later if useful
 
 The AI plugin ships the code; the workspace asset ships the **product experience**.
 
