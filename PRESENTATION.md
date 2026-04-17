@@ -53,53 +53,37 @@ Built on top of:
 ```
    ┌──────────────────────────────────────────────────────────┐
    │  Spark Declarative Pipeline (SDP)                        │  ← orchestrates
-   │  @sdp.view / apply_changes / apply_changes_from_snapshot │
    └──────────────────────┬───────────────────────────────────┘
                           │  spark.readStream.format("lakeflow_connect")
                           ▼
    ┌──────────────────────────────────────────────────────────┐
-   │  Spark Python Data Source API   (contract)               │  ← abstract interface
-   │  DataSource / DataSourceReader / (Simple)StreamReader    │     Spark defines these
+   │  Spark Python Data Source API   (contract)               │  ← Spark defines
    └──────────────────────▲───────────────────────────────────┘
                           │  implements
-                          │
    ┌──────────────────────┴───────────────────────────────────┐
-   │  LakeflowSource — specialized PDS implementation         │  ← WE write this, once
-   │  • serves _lakeflow_table_list  (virtual table: tables)  │
-   │  • serves _lakeflow_metadata    (PKs, cursor, ingest type)
-   │  • batch + streaming reads with offset management        │
-   │  • delete-flow routing for cdc_with_deletes              │
-   │  • injects UC connection options into the connector      │
+   │  LakeflowSource — specialized PDS implementation         │  ← we write, once
+   │     metadata  +  data reads  +  offset management        │
    └──────────────────────┬───────────────────────────────────┘
                           │  calls (plug-in point)
                           ▼
    ┌──────────────────────────────────────────────────────────┐
-   │  LakeflowConnect  (user-written, per-source)             │  ← the only thing you write
-   │  list_tables / get_table_schema / read_table_metadata /  │     per connector
-   │  read_table / read_table_deletes                         │
+   │  LakeflowConnect  — per-source plug-in                   │  ← you write this
    └──────────────────────────────────────────────────────────┘
 ```
 
-- **The PDS API is a contract**, not a layer. Spark defines it; anyone can implement it.
-- **`LakeflowSource` is a specialized implementation** of that contract — it covers both metadata and reading of the actual table data, so that a pipeline can be built in a unified way.
-- **`LakeflowConnect` is the plug-in point** `LakeflowSource` calls into for source-specific behavior.
+- **PDS API** — Spark's abstract contract
+- **LakeflowSource** — one specialized impl, handles metadata + data uniformly
+- **LakeflowConnect** — the per-source plug-in
 
-One specialized PDS implementation powers every connector. The author never touches Spark internals.
+> One PDS implementation powers every connector.
 
 ---
 
-## Registration → End-to-End Ingestion
-
-A connector becomes a running pipeline with **one `register` + one `ingest`**. The entire SDP machinery is wrapped behind a single `ingest(spark, spec)` call — the user only writes a spec.
+## One `register` + One `ingest`
 
 ```python
-from databricks.labs.community_connector import register
-from databricks.labs.community_connector.pipeline import ingest
-
-# 1. Register — wraps LakeflowConnect as a Spark PDS named "lakeflow_connect"
 register(spark, "github")
 
-# 2. Declare what to ingest — just a spec dict
 pipeline_spec = {
     "connection_name": "my_github_conn",
     "objects": [
@@ -109,194 +93,142 @@ pipeline_spec = {
     ],
 }
 
-# 3. Ingest — one call fans out into views, apply_changes, and streaming flows
 ingest(spark, pipeline_spec)
 ```
 
-Inside `ingest`, the library:
+Inside `ingest`:
 
-- Looks up each table's metadata (primary keys, cursor, ingestion type) via the `_lakeflow_metadata` virtual table
-- Generates the right `@sdp.view` + `apply_changes` / `apply_changes_from_snapshot` / `append_flow` per table
-- Wires in delete flows for `cdc_with_deletes` tables automatically
+- Look up metadata per table
+- Generate views + `apply_changes`
+- Wire delete flows for `cdc_with_deletes`
 
-**The user writes a spec. The library writes the pipeline.**
-Same path works for the UI, the CLI, and local tests.
+> **The user writes a spec. The library writes the pipeline.**
 
 ---
 
 ## The UC Connection
 
-We built a **generic Unity Catalog connection** that stores arbitrary key-value pairs — any source's auth shape fits in one object:
-
 ```
-Workspace User ──►  UC Connection "my_github_conn"
-                       { token: ***, api_url: ..., org: ... }
-                                │
-                                │  governed, ACL'd, audited
-                                ▼
-                       granted to pipeline principal
+UC Connection "my_github_conn"
+  { token: ***, api_url: ..., org: ... }
+               │
+               │  governed · ACL'd · audited
+               ▼
+      granted to pipeline principal
 ```
 
-- **One connection type** covers API keys, tokens, basic auth, and custom schemes
-- **Being extended to OAuth** — both User-to-Machine (U2M) and Machine-to-Machine (M2M) flows, so refresh-token handling moves out of the connector and into the platform
-- Secrets **never appear in notebook code or pipeline spec** — only the connection *name*
+- **Generic** — arbitrary key-value pairs; any auth shape fits
+- **OAuth coming** — U2M + M2M, refresh handled by the platform
+- Pipeline code holds only the connection **name**, never the secrets
 
 ---
 
-## How Credentials Reach the Connector
-
-The UC connection is **integrated into the Spark runtime**. Connector code never fetches or parses credentials — it just reads them from `options`.
+## Credentials: Injected by the Runtime
 
 ```python
-# Pipeline code — user passes the connection NAME only
-spark.readStream.format("lakeflow_connect")
-     .option("databricks.connection", "my_github_conn")   # ← name only
-     .option("tableName", "issues")
-     .load()
+# Pipeline code
+.option("databricks.connection", "my_github_conn")   # name only
 ```
 
 ```python
-# Connector code — receives creds already injected
+# Connector code
 class GithubLakeflowConnect(LakeflowConnect):
     def __init__(self, options):
-        self._token = options["token"]      # ← injected by runtime
-        self._api_url = options["api_url"]
+        self._token = options["token"]               # already injected
 ```
 
-- Runtime resolves the connection, checks permissions, injects key-values as `options`
-- Same pattern for every connector — **no per-source credential plumbing**
-- OAuth tokens are resolved/refreshed by the runtime; the connector just sees a valid token
+- Runtime resolves · permission-checks · injects
+- Zero credential plumbing in the connector
+- OAuth refresh lives in the runtime
 
 ---
 
 ## Template Design Goal
 
-> A connector author should write **only source-specific logic**.
-> Everything else is provided by the framework.
+> **Write only source-specific logic.**
 
-What "source-specific" means in practice:
-- How do I list tables?
-- What's the schema?
-- How do I read a batch with an offset?
-
-What the framework owns:
-- Spark Python Data Source contract
-- Streaming + batch reader implementations
-- Offset management and checkpointing
-- UC connection → options wiring
-- SDP pipeline orchestration
-- Packaging, registration, deployment
+| You write                     | Framework owns                            |
+| ----------------------------- | ----------------------------------------- |
+| `list_tables`                 | Spark PDS contract                        |
+| `get_table_schema`            | Batch + streaming readers                 |
+| `read_table_metadata`         | Offsets + checkpointing                   |
+| `read_table`                  | UC connection → options                   |
+| `read_table_deletes` *(opt.)* | SDP orchestration, packaging, deployment  |
 
 ---
 
 ## The `LakeflowConnect` Interface
 
-A single abstract class. Four required methods.
-
 ```python
 class LakeflowConnect(ABC):
     def list_tables(self) -> list[str]: ...
-
-    def get_table_schema(self, table_name, table_options) -> StructType: ...
-
-    def read_table_metadata(self, table_name, table_options) -> dict:
-        # returns: primary_keys, cursor_field, ingestion_type
-        # ingestion_type ∈ {snapshot, cdc, cdc_with_deletes, append}
-        ...
-
-    def read_table(self, table_name, start_offset, table_options
-                   ) -> tuple[Iterator[dict], dict]:
-        # returns (records, end_offset)
-        ...
+    def get_table_schema(self, table, opts) -> StructType: ...
+    def read_table_metadata(self, table, opts) -> dict: ...
+    def read_table(self, table, offset, opts
+                   ) -> tuple[Iterator[dict], dict]: ...
 
     # Optional — only for cdc_with_deletes
     def read_table_deletes(self, ...): ...
 ```
 
-No Spark imports. No streaming protocol. No checkpoint logic.
+> No Spark imports. No streaming protocol. No checkpoint logic.
 
 ---
 
-## How the Framework Amplifies Those 4 Methods
+## Ingestion Types Out of the Box
 
-```
-   Connector author writes              Framework provides
-   ─────────────────────                ──────────────────
-   list_tables()          ──►           lakeflow_datasource.py
-   get_table_schema()                   (Spark PDS reader, stream reader,
-   read_table_metadata()                 partitioned stream reader)
-   read_table()           ──►           Offset / checkpoint management
-   read_table_deletes()                 UC connection → options injection
-                                        Metadata & table-list virtual tables
-                                        SDP ingestion pipeline
-                                        CLI deployment
-```
+| Type                 | Framework does                     | Author provides             |
+| -------------------- | ---------------------------------- | --------------------------- |
+| `snapshot`           | Full refresh                       | Return all rows             |
+| `cdc`                | Merge on PK, advance cursor        | Records sorted by cursor    |
+| `cdc_with_deletes`   | + apply tombstones                 | + `read_table_deletes`      |
+| `append`             | Insert-only, strict offsets        | Small server-side page size |
 
-The framework re-casts the 4 methods into:
-`spark.read.format("lakeflow_connect").option(...).load()`
+> Pick a type per table. The framework handles the rest.
 
 ---
 
-## Ingestion Types Supported Out-of-the-Box
-
-| Ingestion Type       | What framework does                    | What author provides            |
-| -------------------- | -------------------------------------- | ------------------------------- |
-| `snapshot`           | Full refresh each run                  | `read_table` returns all rows   |
-| `cdc`                | Merge on primary key, advance cursor   | Records sorted by cursor        |
-| `cdc_with_deletes`   | Merge + apply tombstones               | Also implement `read_table_deletes` |
-| `append`             | Insert-only, strict offset advancement | Small server-side page limit    |
-
-Author picks a type per-table. Framework handles the rest.
-
----
-
-## Batch Boundary & Admission Control
+## Batch Boundaries, For Free
 
 ```
-start_offset      ──►   read_table   ──►   (iter, end_offset)
-                                              │
-                           ┌──────────────────┘
-                           ▼
-                  end_offset == start_offset ?
-                     │               │
-                   yes              no
-                     │               │
-                   stop         call again with end_offset as start_offset
+start_offset  ──►  read_table  ──►  (iter, end_offset)
+                                         │
+                         end_offset == start_offset ?
+                             │               │
+                            yes             no
+                             │               │
+                            stop    call again with end_offset
 ```
 
-- Pagination, termination, and checkpointing are **framework-driven**
-- Author only advances the cursor honestly
+- Pagination · termination · checkpointing → **framework-driven**
+- Author's job: advance the cursor honestly
 
 ---
 
 ## Scaling Up: Partitioned Reads
 
-For large sources, the template offers an opt-in extension:
-
 ```python
 class MyConnect(LakeflowConnect, SupportsPartitionedStream):
     def get_partitions(self, table, start, end): ...
-    def latest_offset(self, table, table_options): ...
+    def latest_offset(self, table, opts): ...
 ```
 
-- Sliding time-window read → parallel partitions across Spark executors
-- Same interface; just add one mixin and two methods
-- Used for high-volume sources where sequential reads are too slow
-
-The **sliding window** pattern in `LakeflowConnect` is a natural on-ramp to `SupportsPartitionedStream`.
+- Time-window partitions run in parallel across executors
+- One mixin + two methods — same interface
+- For high-volume sources where sequential is too slow
 
 ---
 
 ## Reference Implementation
 
-`sources/example/example.py` — a simulated source that demonstrates every pattern:
+`sources/example/example.py` — every pattern in one place:
 
-- Snapshot, CDC, CDC + deletes, append
-- Three incremental strategies (record-count, server-side limit, sliding window)
+- Snapshot · CDC · CDC + deletes · append
+- Three incremental strategies (count, server-limit, sliding window)
 - Retry with exponential backoff
-- Cursor capping at init time to prevent "chasing new data" mid-run
+- Cursor capping to prevent "chasing new data"
 
-New connectors are written **by following this example**, not by reading framework internals.
+> New connectors are written by following this example.
 
 ---
 
