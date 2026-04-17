@@ -518,6 +518,39 @@ Each skill encodes a lesson learned the hard way:
 
 ---
 
+## Skill in Action: `/deploy-connector`
+
+The skill reads the connector's own README + `connector_spec.yaml`,
+then guides the user through pipeline setup as a conversation:
+
+```
+User: /deploy-connector github
+
+Agent: (reads github/README.md + connector_spec.yaml)
+       Which tables do you want to ingest?
+       Available: issues, pull_requests, releases, ...
+
+User:  issues and pull_requests
+
+Agent: issues uses `cdc_with_deletes` — I'll set it up with
+       primary key `id` and cursor `updated_at`.
+       pull_requests needs an `owner` and `repo` — what values?
+
+User:  databricks / runtime
+
+Agent: Destination catalog + schema?
+       ...
+       Ready to run `community-connector create_pipeline`?
+```
+
+- LLM + connector docs → an expert co-pilot for each source
+- No reading docs, no hand-editing YAML, no guessing options
+- Setup feels like a conversation, not a form
+
+> Smooth, not mechanical.
+
+---
+
 ## This Pattern Generalizes
 
 | Layer             | Connectors                     | Any domain                   |
