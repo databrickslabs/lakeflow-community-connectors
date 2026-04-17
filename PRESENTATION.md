@@ -645,6 +645,39 @@ Current vs Future (in progress), one topic at a time.
 
 ---
 
+## Future Architecture: Two Paths, One Contract
+
+```
+                         ┌─────────┐
+                         │  User   │
+                         └────┬────┘
+                              │
+                              ▼
+                       ┌─────────────┐
+                       │   SDP CP    │   ← one control plane
+                       └──┬────────┬─┘
+                          │        │
+         ┌────────────────┘        └────────────────┐
+         ▼                                          ▼
+ ┌──────────────────────────┐           ┌──────────────────────────┐
+ │ Managed Ingestion        │           │ Schema Exploration       │
+ │ Pipeline                 │           │ (SDP cluster)            │
+ │                          │           │                          │
+ │  init:                   │           │  init:                   │
+ │   register(connector)    │           │   register(connector)    │
+ │                          │           │                          │
+ │  run:                    │           │  list_tables()           │
+ │   ingest(spec)           │           │   get_table_schema()     │
+ └──────────┬───────────────┘           └────────────┬─────────────┘
+            ▼                                        ▼
+      Source API → Delta                   UI: browse + pick tables
+```
+
+> Same `register(connector)` call powers both paths.
+> Pipeline runs it at init; the exploration cluster runs it on demand.
+
+---
+
 ## What the Convergence Buys Us
 
 1. **Unified architecture** — one substrate, one mental model
