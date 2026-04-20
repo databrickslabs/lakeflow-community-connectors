@@ -14,6 +14,7 @@ from databricks.labs.community_connector.sources.azure_devops.azure_devops_schem
 from databricks.labs.community_connector.sources.azure_devops.azure_devops_utils import (
     api_get,
     api_get_list,
+    request_with_retry,
     resolve_projects,
     fetch_repos,
     fetch_prs,
@@ -388,7 +389,7 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
         if token:
             params["continuationToken"] = token
 
-        response = self._session.get(url, params=params, timeout=30)
+        response = request_with_retry(self._session, url, params)
         if response.status_code != 200:
             raise RuntimeError(
                 f"Azure DevOps API error for users: "

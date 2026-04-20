@@ -15,6 +15,7 @@ from typing import (
     Sequence,
 )
 import json
+import time
 
 from pyspark.sql import Row
 from pyspark.sql.datasource import (
@@ -973,18 +974,52 @@ def register_lakeflow_source(spark):
     # src/databricks/labs/community_connector/sources/azure_devops/azure_devops_utils.py
     ########################################################
 
+    RETRIABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+    MAX_RETRIES = 5
+    INITIAL_BACKOFF = 1.0  # seconds; doubled after each retry
+
+
+    def request_with_retry(
+        session: requests.Session,
+        url: str,
+        params: dict[str, str],
+    ) -> requests.Response:
+        """Issue a GET with exponential backoff on retriable errors.
+
+        Honors the ``Retry-After`` header when present, otherwise doubles
+        the backoff (1, 2, 4, 8, 16 s).
+        """
+        backoff = INITIAL_BACKOFF
+        resp = None
+        for attempt in range(MAX_RETRIES):
+            resp = session.get(url, params=params, timeout=30)
+            if resp.status_code not in RETRIABLE_STATUS_CODES:
+                return resp
+
+            if attempt < MAX_RETRIES - 1:
+                retry_after = resp.headers.get("Retry-After")
+                try:
+                    wait = float(retry_after) if retry_after else backoff
+                except (TypeError, ValueError):
+                    wait = backoff
+                time.sleep(wait)
+                backoff *= 2
+
+        return resp
+
+
     def api_get(
         session: requests.Session,
         url: str,
         params: dict[str, str],
         label: str,
     ) -> dict:
-        """Make a GET request and return the parsed JSON response.
+        """Make a GET request (with retry) and return the parsed JSON response.
 
         Raises RuntimeError on non-200 status codes with a descriptive
         message that includes *label* (e.g. ``"commits"``).
         """
-        response = session.get(url, params=params, timeout=30)
+        response = request_with_retry(session, url, params)
         if response.status_code != 200:
             raise RuntimeError(
                 f"Azure DevOps API error for {label}: "
@@ -1500,7 +1535,7 @@ def register_lakeflow_source(spark):
             if token:
                 params["continuationToken"] = token
 
-            response = self._session.get(url, params=params, timeout=30)
+            response = request_with_retry(self._session, url, params)
             if response.status_code != 200:
                 raise RuntimeError(
                     f"Azure DevOps API error for users: "
