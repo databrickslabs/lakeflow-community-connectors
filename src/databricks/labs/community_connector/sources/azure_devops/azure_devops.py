@@ -537,24 +537,88 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
     def _read_workitems(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
-        ids = table_options.get("ids")
+        """Read workitems incrementally using System.ChangedDate as cursor.
+
+        Offset carries per-project watermarks so subsequent runs fetch only
+        items modified since the last sync, via a WIQL filter. The framework
+        uses the top-level ``rev`` cursor to resolve CDC merge precedence.
+
+        When the ``ids`` table option is set, bypasses the incremental path
+        and fetches those specific items (snapshot-style).
+        """
+        explicit_ids = table_options.get("ids")
         projects = self._resolve_projects(table_options)
+
+        start_offset = start_offset or {}
+        watermarks: dict[str, str] = dict(start_offset.get("watermarks", {}))
         all_records: list[dict[str, Any]] = []
 
         for project in projects:
-            if not ids:
-                ids_to_fetch = self._discover_workitem_ids(project)
-                if not ids_to_fetch:
-                    continue
+            if explicit_ids:
+                ids_to_fetch = [
+                    i.strip() for i in explicit_ids.split(",") if i.strip()
+                ]
             else:
-                ids_to_fetch = ids
+                since = watermarks.get(project)
+                ids_to_fetch = self._discover_workitem_ids(project, since)
 
+            if not ids_to_fetch:
+                continue
+
+            records, max_changed = self._fetch_workitems_by_ids(
+                project, ids_to_fetch
+            )
+            all_records.extend(records)
+            if max_changed:
+                watermarks[project] = max_changed
+
+        if explicit_ids:
+            # Snapshot-style read for explicit IDs — stable offset terminates
+            return iter(all_records), start_offset
+        return iter(all_records), {"watermarks": watermarks}
+
+    def _discover_workitem_ids(
+        self, project: str, since: str | None = None
+    ) -> list[str]:
+        """Return work item IDs in *project*, optionally filtered by ChangedDate."""
+        url = f"{self.base_url}/{project}/_apis/wit/wiql"
+        query = "SELECT [System.Id] FROM WorkItems"
+        if since:
+            query += f" WHERE [System.ChangedDate] > '{since}'"
+        query += " ORDER BY [System.ChangedDate] ASC"
+
+        response = self._session.post(
+            url,
+            json={"query": query},
+            params={"api-version": "7.1"},
+            timeout=30,
+        )
+        if response.status_code != 200:
+            return []
+        refs = response.json().get("workItems", [])
+        return [str(r["id"]) for r in refs if r.get("id")]
+
+    def _fetch_workitems_by_ids(
+        self, project: str, ids: list[str]
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """Fetch work items by ID in batches of 200 (ADO bulk GET limit).
+
+        Returns (records, max_changed_date) where max_changed_date is the
+        greatest ``System.ChangedDate`` across the fetched items — used as
+        the watermark for incremental sync.
+        """
+        records: list[dict[str, Any]] = []
+        max_changed: str | None = None
+        batch_size = 200  # ADO bulk workitems GET hard limit
+
+        for i in range(0, len(ids), batch_size):
+            batch = ids[i : i + batch_size]
             url = f"{self.base_url}/{project}/_apis/wit/workitems"
             items = api_get_list(
                 self._session, url,
                 {
                     "api-version": "7.1",
-                    "ids": ids_to_fetch,
+                    "ids": ",".join(batch),
                     "$expand": "relations",
                 },
                 "workitems",
@@ -563,29 +627,17 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
                 rec = dict(item)
                 rec["organization"] = self.organization
                 rec["project_name"] = project
+                changed_date: str | None = None
                 if "fields" in rec and isinstance(rec["fields"], dict):
+                    changed_date = rec["fields"].get("System.ChangedDate")
                     rec["fields"] = json.dumps(rec["fields"])
-                all_records.append(rec)
+                records.append(rec)
+                if changed_date and (
+                    max_changed is None or changed_date > max_changed
+                ):
+                    max_changed = changed_date
 
-        return iter(all_records), {}
-
-    def _discover_workitem_ids(self, project: str) -> str | None:
-        """Use WIQL to discover all work item IDs in a project."""
-        url = f"{self.base_url}/{project}/_apis/wit/wiql"
-        response = self._session.post(
-            url,
-            json={"query": "SELECT [System.Id] FROM WorkItems"},
-            params={"api-version": "7.1"},
-            timeout=30,
-        )
-        if response.status_code != 200:
-            return None
-        refs = response.json().get("workItems", [])
-        if not refs:
-            return None
-        return ",".join(
-            str(r["id"]) for r in refs if r.get("id")
-        )
+        return records, max_changed
 
     def _read_workitem_revisions(
         self, start_offset: dict, table_options: dict[str, str]
