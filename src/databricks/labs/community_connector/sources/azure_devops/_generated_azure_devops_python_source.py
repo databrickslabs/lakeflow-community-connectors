@@ -1683,21 +1683,23 @@ def register_lakeflow_source(spark):
         def _read_workitems(
             self, start_offset: dict, table_options: dict[str, str]
         ) -> tuple[Iterator[dict], dict]:
-            """Read workitems incrementally using System.ChangedDate as cursor.
+            """Read workitems — full fetch with CDC merge for incremental sync.
 
-            WIQL filters items by ``System.ChangedDate > watermark`` so each
-            run returns only items modified since the last sync. Bulk GET
-            returns the current state, and the framework's CDC merge uses
-            the top-level ``rev`` field to decide precedence.
+            WIQL's ``[System.ChangedDate]`` comparisons use date-only
+            precision (YYYY-MM-DD) and reject timestamp literals, so we
+            can't do a fine-grained server-side incremental filter. Instead
+            the connector returns the current state of every work item on
+            each call; the framework's CDC merge uses the top-level ``rev``
+            cursor to apply deltas idempotently — new items are inserted,
+            updated items are upserted when their rev moves forward.
 
-            Watermark advances to the max ``System.ChangedDate`` across
-            returned items, so the end_offset strictly differs from the
-            start_offset whenever new data is returned. This guarantees
-            the streaming framework sees forward progress and commits the
-            records.
+            The offset's watermark is the max ``System.ChangedDate`` across
+            returned items. It advances whenever any item in a project
+            changes, which keeps end_offset != start_offset and signals
+            forward progress to the streaming framework.
 
-            When the ``ids`` table option is set, bypasses the incremental
-            path and fetches those specific items at current state.
+            When the ``ids`` table option is set, bypasses this path and
+            fetches those specific items (snapshot-style).
             """
             explicit_ids = table_options.get("ids")
             projects = self._resolve_projects(table_options)
@@ -1717,8 +1719,7 @@ def register_lakeflow_source(spark):
                     all_records.extend(records)
                     continue
 
-                since = watermarks.get(project)
-                ids_to_fetch = self._discover_workitem_ids(project, since)
+                ids_to_fetch = self._discover_workitem_ids(project)
                 if not ids_to_fetch:
                     continue
 
@@ -1726,10 +1727,12 @@ def register_lakeflow_source(spark):
                     project, ids_to_fetch
                 )
                 all_records.extend(records)
-                # Advance watermark only based on data actually returned so
-                # we never skip over items that the WIQL index hasn't caught
-                # up to yet. Guard against regress with the `> since` check.
-                if max_changed and (not since or max_changed > since):
+                # Advance watermark monotonically so the streaming framework
+                # sees end_offset != start_offset whenever any item changed.
+                if max_changed and (
+                    not watermarks.get(project)
+                    or max_changed > watermarks[project]
+                ):
                     watermarks[project] = max_changed
 
             if explicit_ids:
@@ -1737,24 +1740,21 @@ def register_lakeflow_source(spark):
                 return iter(all_records), start_offset
             return iter(all_records), {"watermarks": watermarks}
 
-        def _discover_workitem_ids(
-            self, project: str, since: str | None = None
-        ) -> list[str]:
-            """Return work item IDs belonging to *project* via WIQL.
+        def _discover_workitem_ids(self, project: str) -> list[str]:
+            """Return all work item IDs belonging to *project* via WIQL.
 
-            WIQL is organization-scoped by default even when called against a
-            project-specific endpoint, so we explicitly filter by
-            ``System.TeamProject`` to avoid cross-project contamination.
+            WIQL is organization-scoped by default, so we filter by
+            ``[System.TeamProject]`` to avoid cross-project contamination.
+            Note: we intentionally don't filter by ``System.ChangedDate`` —
+            WIQL requires date-only precision there and rejects timestamp
+            literals with a 400 error. Incremental behavior is handled by
+            the framework's CDC merge on the ``rev`` cursor.
             """
             url = f"{self.base_url}/{project}/_apis/wit/wiql"
-            where_clauses = [f"[System.TeamProject] = '{project}'"]
-            if since:
-                where_clauses.append(f"[System.ChangedDate] > '{since}'")
-
             query = (
                 "SELECT [System.Id] FROM WorkItems"
-                " WHERE " + " AND ".join(where_clauses)
-                + " ORDER BY [System.ChangedDate] ASC"
+                f" WHERE [System.TeamProject] = '{project}'"
+                " ORDER BY [System.ChangedDate] ASC"
             )
 
             response = self._session.post(
