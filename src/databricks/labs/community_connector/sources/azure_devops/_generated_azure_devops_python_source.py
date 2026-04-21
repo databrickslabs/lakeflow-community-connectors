@@ -6,7 +6,7 @@
 # ==============================================================================
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import (
     Any,
@@ -1210,6 +1210,16 @@ def register_lakeflow_source(spark):
                 }
             )
 
+            # Cap cursors at init time so a single pipeline run reads a
+            # consistent point-in-time snapshot and never chases new data
+            # mid-run. Edits that happen after this timestamp are picked up
+            # by the next pipeline run.
+            self._init_time = (
+                datetime.now(timezone.utc)
+                .isoformat(timespec="milliseconds")
+                .replace("+00:00", "Z")
+            )
+
         # ------------------------------------------------------------------ #
         # Interface methods
         # ------------------------------------------------------------------ #
@@ -1683,14 +1693,16 @@ def register_lakeflow_source(spark):
         def _read_workitems(
             self, start_offset: dict, table_options: dict[str, str]
         ) -> tuple[Iterator[dict], dict]:
-            """Read workitems incrementally using System.ChangedDate as cursor.
+            """Read workitems incrementally with cursor-capped snapshot semantics.
 
-            Offset carries per-project watermarks so subsequent runs fetch only
-            items modified since the last sync, via a WIQL filter. The framework
-            uses the top-level ``rev`` cursor to resolve CDC merge precedence.
+            WIQL filters items by ``System.ChangedDate > watermark`` and caps
+            the scan at ``init_time`` (captured at connector construction).
+            Bulk GET uses ``asOf=init_time`` so the returned state is a
+            consistent point-in-time snapshot. Edits made after init_time are
+            picked up by the next pipeline run via the advanced watermark.
 
-            When the ``ids`` table option is set, bypasses the incremental path
-            and fetches those specific items (snapshot-style).
+            When the ``ids`` table option is set, bypasses the incremental
+            path and fetches those specific items at current state.
             """
             explicit_ids = table_options.get("ids")
             projects = self._resolve_projects(table_options)
@@ -1704,33 +1716,56 @@ def register_lakeflow_source(spark):
                     ids_to_fetch = [
                         i.strip() for i in explicit_ids.split(",") if i.strip()
                     ]
-                else:
-                    since = watermarks.get(project)
-                    ids_to_fetch = self._discover_workitem_ids(project, since)
-
-                if not ids_to_fetch:
+                    records, _ = self._fetch_workitems_by_ids(
+                        project, ids_to_fetch, as_of=None
+                    )
+                    all_records.extend(records)
                     continue
 
-                records, max_changed = self._fetch_workitems_by_ids(
-                    project, ids_to_fetch
+                since = watermarks.get(project)
+                ids_to_fetch = self._discover_workitem_ids(
+                    project, since, self._init_time
                 )
-                all_records.extend(records)
-                if max_changed:
-                    watermarks[project] = max_changed
+                if ids_to_fetch:
+                    records, _ = self._fetch_workitems_by_ids(
+                        project, ids_to_fetch, as_of=self._init_time
+                    )
+                    all_records.extend(records)
+                # Advance watermark to init_time whether or not items changed,
+                # so the next run resumes from the capped point-in-time.
+                if not since or self._init_time > since:
+                    watermarks[project] = self._init_time
 
             if explicit_ids:
-                # Snapshot-style read for explicit IDs — stable offset terminates
+                # Explicit-IDs path is snapshot-like — stable offset terminates
                 return iter(all_records), start_offset
             return iter(all_records), {"watermarks": watermarks}
 
         def _discover_workitem_ids(
-            self, project: str, since: str | None = None
+            self,
+            project: str,
+            since: str | None = None,
+            as_of: str | None = None,
         ) -> list[str]:
-            """Return work item IDs in *project*, optionally filtered by ChangedDate."""
+            """Return work item IDs via WIQL, optionally filtered and capped.
+
+            *since* filters to items changed after the given ISO 8601 timestamp.
+            *as_of* caps the query to items as they existed at that timestamp.
+            """
             url = f"{self.base_url}/{project}/_apis/wit/wiql"
-            query = "SELECT [System.Id] FROM WorkItems"
+            where_clauses: list[str] = []
             if since:
-                query += f" WHERE [System.ChangedDate] > '{since}'"
+                where_clauses.append(f"[System.ChangedDate] > '{since}'")
+            if as_of:
+                where_clauses.append(f"[System.ChangedDate] <= '{as_of}'")
+
+            query = "SELECT [System.Id] FROM WorkItems"
+            if where_clauses:
+                query += " WHERE " + " AND ".join(where_clauses)
+            if as_of:
+                # WIQL ASOF ensures the query itself is evaluated at that
+                # point in time — keeps filter + fetch consistent.
+                query += f" ASOF '{as_of}'"
             query += " ORDER BY [System.ChangedDate] ASC"
 
             response = self._session.post(
@@ -1745,13 +1780,15 @@ def register_lakeflow_source(spark):
             return [str(r["id"]) for r in refs if r.get("id")]
 
         def _fetch_workitems_by_ids(
-            self, project: str, ids: list[str]
+            self,
+            project: str,
+            ids: list[str],
+            as_of: str | None = None,
         ) -> tuple[list[dict[str, Any]], str | None]:
             """Fetch work items by ID in batches of 200 (ADO bulk GET limit).
 
-            Returns (records, max_changed_date) where max_changed_date is the
-            greatest ``System.ChangedDate`` across the fetched items — used as
-            the watermark for incremental sync.
+            When *as_of* is set, returns items as they existed at that
+            timestamp (consistent snapshot). Otherwise returns current state.
             """
             records: list[dict[str, Any]] = []
             max_changed: str | None = None
@@ -1760,14 +1797,15 @@ def register_lakeflow_source(spark):
             for i in range(0, len(ids), batch_size):
                 batch = ids[i : i + batch_size]
                 url = f"{self.base_url}/{project}/_apis/wit/workitems"
+                params: dict[str, str] = {
+                    "api-version": "7.1",
+                    "ids": ",".join(batch),
+                    "$expand": "relations",
+                }
+                if as_of:
+                    params["asOf"] = as_of
                 items = api_get_list(
-                    self._session, url,
-                    {
-                        "api-version": "7.1",
-                        "ids": ",".join(batch),
-                        "$expand": "relations",
-                    },
-                    "workitems",
+                    self._session, url, params, "workitems",
                 )
                 for item in items:
                     rec = dict(item)
