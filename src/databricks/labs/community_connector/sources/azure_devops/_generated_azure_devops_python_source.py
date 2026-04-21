@@ -1740,12 +1740,22 @@ def register_lakeflow_source(spark):
         def _discover_workitem_ids(
             self, project: str, since: str | None = None
         ) -> list[str]:
-            """Return work item IDs via WIQL, optionally filtered by ChangedDate."""
+            """Return work item IDs belonging to *project* via WIQL.
+
+            WIQL is organization-scoped by default even when called against a
+            project-specific endpoint, so we explicitly filter by
+            ``System.TeamProject`` to avoid cross-project contamination.
+            """
             url = f"{self.base_url}/{project}/_apis/wit/wiql"
-            query = "SELECT [System.Id] FROM WorkItems"
+            where_clauses = [f"[System.TeamProject] = '{project}'"]
             if since:
-                query += f" WHERE [System.ChangedDate] > '{since}'"
-            query += " ORDER BY [System.ChangedDate] ASC"
+                where_clauses.append(f"[System.ChangedDate] > '{since}'")
+
+            query = (
+                "SELECT [System.Id] FROM WorkItems"
+                " WHERE " + " AND ".join(where_clauses)
+                + " ORDER BY [System.ChangedDate] ASC"
+            )
 
             response = self._session.post(
                 url,
