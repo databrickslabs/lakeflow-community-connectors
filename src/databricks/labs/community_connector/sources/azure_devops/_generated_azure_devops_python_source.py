@@ -1736,10 +1736,39 @@ def register_lakeflow_source(spark):
         def _read_workitem_revisions(
             self, start_offset: dict, table_options: dict[str, str]
         ) -> tuple[Iterator[dict], dict]:
+            """Read workitem_revisions with per-project pagination tracking.
+
+            Azure DevOps Reporting API tokens are project-scoped, so the
+            offset tracks both the current project and its continuation
+            token. Uses ``isLastBatch`` (not the token presence) to decide
+            whether more data is available — the API always returns a token
+            even on the final batch.
+            """
             projects = self._resolve_projects(table_options)
+            if not projects:
+                return iter([]), start_offset or {}
+
+            start_offset = start_offset or {}
+            prev_project = start_offset.get("project")
+            prev_token = start_offset.get("continuationToken")
+
+            start_idx = 0
+            current_token: str | None = None
+            if prev_project in projects:
+                if prev_token:
+                    # Resume mid-pagination within prev_project
+                    start_idx = projects.index(prev_project)
+                    current_token = prev_token
+                else:
+                    # prev_project completed — advance to the next one
+                    start_idx = projects.index(prev_project) + 1
+                    if start_idx >= len(projects):
+                        return iter([]), start_offset
+
             all_records: list[dict[str, Any]] = []
 
-            for project in projects:
+            for i in range(start_idx, len(projects)):
+                project = projects[i]
                 url = (
                     f"{self.base_url}/{project}"
                     "/_apis/wit/reporting/workitemrevisions"
@@ -1748,13 +1777,18 @@ def register_lakeflow_source(spark):
                     "api-version": "7.1",
                     "includeDeleted": "true",
                 }
-                token = (start_offset or {}).get("continuationToken")
-                if token:
-                    params["continuationToken"] = token
+                if current_token:
+                    params["continuationToken"] = current_token
 
-                data = api_get(
-                    self._session, url, params, "workitem_revisions"
-                )
+                try:
+                    data = api_get(
+                        self._session, url, params, "workitem_revisions"
+                    )
+                except RuntimeError:
+                    # Skip projects we can't read (permissions, disabled, etc.)
+                    current_token = None
+                    continue
+
                 for rev in data.get("values", []):
                     rec = dict(rev)
                     rec["organization"] = self.organization
@@ -1763,13 +1797,19 @@ def register_lakeflow_source(spark):
                         rec["fields"] = json.dumps(rec["fields"])
                     all_records.append(rec)
 
+                is_last_batch = data.get("isLastBatch", True)
                 next_token = data.get("continuationToken")
-                if next_token:
+                if not is_last_batch and next_token:
+                    # More data in this project — resume on next call
                     return iter(all_records), {
-                        "continuationToken": next_token
+                        "project": project,
+                        "continuationToken": next_token,
                     }
 
-            return iter(all_records), {}
+                # This project is done — reset token for the next one
+                current_token = None
+
+            return iter(all_records), {"project": projects[-1]}
 
         def _read_workitem_types(
             self, start_offset: dict, table_options: dict[str, str]
