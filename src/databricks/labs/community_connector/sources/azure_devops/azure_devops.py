@@ -548,13 +548,16 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
     def _read_workitems(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
-        """Read workitems incrementally with cursor-capped snapshot semantics.
+        """Read workitems incrementally using System.ChangedDate as cursor.
 
-        WIQL filters items by ``System.ChangedDate > watermark`` and caps
-        the scan at ``init_time`` (captured at connector construction).
-        Bulk GET uses ``asOf=init_time`` so the returned state is a
-        consistent point-in-time snapshot. Edits made after init_time are
-        picked up by the next pipeline run via the advanced watermark.
+        WIQL filters items by ``System.ChangedDate > watermark`` so each
+        run returns only items modified since the last sync. Bulk GET
+        returns the current state, and the framework's CDC merge uses
+        the top-level ``rev`` field to decide precedence.
+
+        The watermark advances to ``init_time`` (captured at constructor)
+        on every run, so the window for the next run is
+        ``(prev_init_time, next_init_time]``.
 
         When the ``ids`` table option is set, bypasses the incremental
         path and fetches those specific items at current state.
@@ -572,22 +575,20 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
                     i.strip() for i in explicit_ids.split(",") if i.strip()
                 ]
                 records, _ = self._fetch_workitems_by_ids(
-                    project, ids_to_fetch, as_of=None
+                    project, ids_to_fetch
                 )
                 all_records.extend(records)
                 continue
 
             since = watermarks.get(project)
-            ids_to_fetch = self._discover_workitem_ids(
-                project, since, self._init_time
-            )
+            ids_to_fetch = self._discover_workitem_ids(project, since)
             if ids_to_fetch:
                 records, _ = self._fetch_workitems_by_ids(
-                    project, ids_to_fetch, as_of=self._init_time
+                    project, ids_to_fetch
                 )
                 all_records.extend(records)
-            # Advance watermark to init_time whether or not items changed,
-            # so the next run resumes from the capped point-in-time.
+            # Advance watermark to init_time regardless of whether items
+            # changed, so the next run resumes from a stable point.
             if not since or self._init_time > since:
                 watermarks[project] = self._init_time
 
@@ -597,30 +598,13 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
         return iter(all_records), {"watermarks": watermarks}
 
     def _discover_workitem_ids(
-        self,
-        project: str,
-        since: str | None = None,
-        as_of: str | None = None,
+        self, project: str, since: str | None = None
     ) -> list[str]:
-        """Return work item IDs via WIQL, optionally filtered and capped.
-
-        *since* filters to items changed after the given ISO 8601 timestamp.
-        *as_of* caps the query to items as they existed at that timestamp.
-        """
+        """Return work item IDs via WIQL, optionally filtered by ChangedDate."""
         url = f"{self.base_url}/{project}/_apis/wit/wiql"
-        where_clauses: list[str] = []
-        if since:
-            where_clauses.append(f"[System.ChangedDate] > '{since}'")
-        if as_of:
-            where_clauses.append(f"[System.ChangedDate] <= '{as_of}'")
-
         query = "SELECT [System.Id] FROM WorkItems"
-        if where_clauses:
-            query += " WHERE " + " AND ".join(where_clauses)
-        if as_of:
-            # WIQL ASOF ensures the query itself is evaluated at that
-            # point in time — keeps filter + fetch consistent.
-            query += f" ASOF '{as_of}'"
+        if since:
+            query += f" WHERE [System.ChangedDate] > '{since}'"
         query += " ORDER BY [System.ChangedDate] ASC"
 
         response = self._session.post(
@@ -635,16 +619,9 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
         return [str(r["id"]) for r in refs if r.get("id")]
 
     def _fetch_workitems_by_ids(
-        self,
-        project: str,
-        ids: list[str],
-        as_of: str | None = None,
+        self, project: str, ids: list[str]
     ) -> tuple[list[dict[str, Any]], str | None]:
-        """Fetch work items by ID in batches of 200 (ADO bulk GET limit).
-
-        When *as_of* is set, returns items as they existed at that
-        timestamp (consistent snapshot). Otherwise returns current state.
-        """
+        """Fetch work items by ID in batches of 200 (ADO bulk GET limit)."""
         records: list[dict[str, Any]] = []
         max_changed: str | None = None
         batch_size = 200  # ADO bulk workitems GET hard limit
@@ -652,15 +629,14 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
         for i in range(0, len(ids), batch_size):
             batch = ids[i : i + batch_size]
             url = f"{self.base_url}/{project}/_apis/wit/workitems"
-            params: dict[str, str] = {
-                "api-version": "7.1",
-                "ids": ",".join(batch),
-                "$expand": "relations",
-            }
-            if as_of:
-                params["asOf"] = as_of
             items = api_get_list(
-                self._session, url, params, "workitems",
+                self._session, url,
+                {
+                    "api-version": "7.1",
+                    "ids": ",".join(batch),
+                    "$expand": "relations",
+                },
+                "workitems",
             )
             for item in items:
                 rec = dict(item)
