@@ -1736,34 +1736,31 @@ def register_lakeflow_source(spark):
         def _read_workitem_revisions(
             self, start_offset: dict, table_options: dict[str, str]
         ) -> tuple[Iterator[dict], dict]:
-            """Read workitem_revisions with per-project pagination tracking.
+            """Read workitem_revisions with per-project watermarks.
 
-            Azure DevOps Reporting API tokens are project-scoped, so the
-            offset tracks both the current project and its continuation
-            token. Uses ``isLastBatch`` (not the token presence) to decide
-            whether more data is available — the API always returns a token
-            even on the final batch.
+            The Azure DevOps Reporting API's ``continuationToken`` doubles as:
+              - A pagination cursor within a sync (when ``isLastBatch`` is false)
+              - A persistent watermark for the next sync (when ``isLastBatch``
+                is true — passing that token back later returns only revisions
+                that occurred since)
+
+            The offset carries two things:
+              - ``watermarks``: per-project tokens that survive across pipeline
+                runs so subsequent runs fetch only new revisions.
+              - ``resume``: the in-flight pagination state of the current
+                project within a single sync.
             """
             projects = self._resolve_projects(table_options)
             if not projects:
                 return iter([]), start_offset or {}
 
-            start_offset = start_offset or {}
-            prev_project = start_offset.get("project")
-            prev_token = start_offset.get("continuationToken")
+            watermarks, resume = self._parse_wir_offset(start_offset)
 
             start_idx = 0
             current_token: str | None = None
-            if prev_project in projects:
-                if prev_token:
-                    # Resume mid-pagination within prev_project
-                    start_idx = projects.index(prev_project)
-                    current_token = prev_token
-                else:
-                    # prev_project completed — advance to the next one
-                    start_idx = projects.index(prev_project) + 1
-                    if start_idx >= len(projects):
-                        return iter([]), start_offset
+            if resume and resume.get("project") in projects:
+                start_idx = projects.index(resume["project"])
+                current_token = resume.get("continuationToken")
 
             all_records: list[dict[str, Any]] = []
 
@@ -1777,8 +1774,11 @@ def register_lakeflow_source(spark):
                     "api-version": "7.1",
                     "includeDeleted": "true",
                 }
-                if current_token:
-                    params["continuationToken"] = current_token
+                # In-flight pagination token wins; otherwise fall back to the
+                # saved watermark for this project (incremental from last run).
+                token = current_token or watermarks.get(project)
+                if token:
+                    params["continuationToken"] = token
 
                 try:
                     data = api_get(
@@ -1800,16 +1800,45 @@ def register_lakeflow_source(spark):
                 is_last_batch = data.get("isLastBatch", True)
                 next_token = data.get("continuationToken")
                 if not is_last_batch and next_token:
-                    # More data in this project — resume on next call
+                    # Mid-pagination — resume this project on the next call.
+                    # Watermarks stay untouched until the project fully drains.
                     return iter(all_records), {
-                        "project": project,
-                        "continuationToken": next_token,
+                        "watermarks": watermarks,
+                        "resume": {
+                            "project": project,
+                            "continuationToken": next_token,
+                        },
                     }
 
-                # This project is done — reset token for the next one
+                # Project fully drained — persist its final token as the
+                # watermark so the next pipeline run fetches only new revisions.
+                if next_token:
+                    watermarks[project] = next_token
                 current_token = None
 
-            return iter(all_records), {"project": projects[-1]}
+            # All projects drained for this pass — stable offset signals "done".
+            # On the next pipeline run the watermarks drive an incremental sync.
+            return iter(all_records), {"watermarks": watermarks}
+
+        @staticmethod
+        def _parse_wir_offset(
+            start_offset: dict | None,
+        ) -> tuple[dict, dict | None]:
+            """Parse workitem_revisions offset with backwards compatibility."""
+            start_offset = start_offset or {}
+            watermarks = dict(start_offset.get("watermarks", {}))
+            resume = start_offset.get("resume")
+            # Back-compat: older offset shapes used {project, continuationToken}
+            # flat at the top level. Treat those as in-flight pagination.
+            if not watermarks and not resume:
+                old_project = start_offset.get("project")
+                old_token = start_offset.get("continuationToken")
+                if old_project and old_token:
+                    resume = {
+                        "project": old_project,
+                        "continuationToken": old_token,
+                    }
+            return watermarks, resume
 
         def _read_workitem_types(
             self, start_offset: dict, table_options: dict[str, str]
