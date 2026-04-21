@@ -6,7 +6,7 @@
 # ==============================================================================
 
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
 from typing import (
     Any,
@@ -1210,16 +1210,6 @@ def register_lakeflow_source(spark):
                 }
             )
 
-            # Cap cursors at init time so a single pipeline run reads a
-            # consistent point-in-time snapshot and never chases new data
-            # mid-run. Edits that happen after this timestamp are picked up
-            # by the next pipeline run.
-            self._init_time = (
-                datetime.now(timezone.utc)
-                .isoformat(timespec="milliseconds")
-                .replace("+00:00", "Z")
-            )
-
         # ------------------------------------------------------------------ #
         # Interface methods
         # ------------------------------------------------------------------ #
@@ -1700,9 +1690,11 @@ def register_lakeflow_source(spark):
             returns the current state, and the framework's CDC merge uses
             the top-level ``rev`` field to decide precedence.
 
-            The watermark advances to ``init_time`` (captured at constructor)
-            on every run, so the window for the next run is
-            ``(prev_init_time, next_init_time]``.
+            Watermark advances to the max ``System.ChangedDate`` across
+            returned items, so the end_offset strictly differs from the
+            start_offset whenever new data is returned. This guarantees
+            the streaming framework sees forward progress and commits the
+            records.
 
             When the ``ids`` table option is set, bypasses the incremental
             path and fetches those specific items at current state.
@@ -1727,15 +1719,18 @@ def register_lakeflow_source(spark):
 
                 since = watermarks.get(project)
                 ids_to_fetch = self._discover_workitem_ids(project, since)
-                if ids_to_fetch:
-                    records, _ = self._fetch_workitems_by_ids(
-                        project, ids_to_fetch
-                    )
-                    all_records.extend(records)
-                # Advance watermark to init_time regardless of whether items
-                # changed, so the next run resumes from a stable point.
-                if not since or self._init_time > since:
-                    watermarks[project] = self._init_time
+                if not ids_to_fetch:
+                    continue
+
+                records, max_changed = self._fetch_workitems_by_ids(
+                    project, ids_to_fetch
+                )
+                all_records.extend(records)
+                # Advance watermark only based on data actually returned so
+                # we never skip over items that the WIQL index hasn't caught
+                # up to yet. Guard against regress with the `> since` check.
+                if max_changed and (not since or max_changed > since):
+                    watermarks[project] = max_changed
 
             if explicit_ids:
                 # Explicit-IDs path is snapshot-like — stable offset terminates
