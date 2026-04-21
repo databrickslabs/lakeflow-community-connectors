@@ -224,41 +224,113 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
     def _read_commits(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
-        repo_id = table_options.get("repository_id")
-        if not repo_id:
-            return self._for_all_repos(
-                start_offset, table_options, self._read_commits
-            )
+        """Read commits incrementally with per-repo committer-date watermarks.
 
-        project = self._resolve_project(table_options)
-        if not project:
-            raise ValueError(
-                "Project must be specified when repository_id is provided"
-            )
+        Uses ADO's ``searchCriteria.fromDate`` (timestamp-precision,
+        inclusive) for server-side filtering. A client-side strict
+        ``date > watermark`` check prevents re-emitting the boundary
+        commit on the next run (append tables don't de-duplicate on PK).
+        """
+        start_offset = start_offset or {}
+        watermarks: dict[str, str] = dict(start_offset.get("watermarks", {}))
 
-        skip = (start_offset or {}).get("skip", 0)
-        top = 1000
+        repo_pairs = self._resolve_repo_pairs(table_options)
+        all_records: list[dict[str, Any]] = []
+
+        for project, repo_id in repo_pairs:
+            key = f"{project}/{repo_id}"
+            since = watermarks.get(key)
+            records, max_date = self._fetch_commits(project, repo_id, since)
+            all_records.extend(records)
+            if max_date and (not since or max_date > since):
+                watermarks[key] = max_date
+
+        return iter(all_records), {"watermarks": watermarks}
+
+    def _fetch_commits(
+        self, project: str, repo_id: str, since: str | None
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """Fetch all commits for a single repo since *since* (exclusive).
+
+        Paginates via ``$skip``. Applies client-side ``> since`` to make
+        the ADO server-side ``>=`` filter strict, so we don't re-emit
+        the boundary commit.
+        """
         url = (
             f"{self.base_url}/{project}/_apis/git/repositories"
             f"/{repo_id}/commits"
         )
-        commits = api_get_list(
-            self._session, url,
-            {"api-version": "7.1", "$top": str(top), "$skip": str(skip)},
-            "commits",
-        )
+        top = 1000
+        skip = 0
+        max_date: str | None = since
+        records: list[dict[str, Any]] = []
 
-        records = []
-        for c in commits:
-            rec = dict(c)
-            rec["organization"] = self.organization
-            rec["project_name"] = project
-            rec["repository_id"] = repo_id
-            nullify_empty(rec, "author", "committer", "changeCounts")
-            records.append(rec)
+        while True:
+            params: dict[str, str] = {
+                "api-version": "7.1",
+                "$top": str(top),
+                "$skip": str(skip),
+            }
+            if since:
+                params["searchCriteria.fromDate"] = since
 
-        new_offset = {"skip": skip + top} if len(commits) == top else {}
-        return iter(records), new_offset
+            try:
+                page = api_get_list(
+                    self._session, url, params, "commits"
+                )
+            except RuntimeError:
+                # Skip repos we can't read (e.g. disabled, no permission)
+                return records, max_date
+
+            for commit in page:
+                commit_date = commit.get("committer", {}).get("date")
+                if since and commit_date and commit_date <= since:
+                    continue
+                rec = dict(commit)
+                rec["organization"] = self.organization
+                rec["project_name"] = project
+                rec["repository_id"] = repo_id
+                nullify_empty(rec, "author", "committer", "changeCounts")
+                records.append(rec)
+                if commit_date and (
+                    max_date is None or commit_date > max_date
+                ):
+                    max_date = commit_date
+
+            if len(page) < top:
+                break
+            skip += top
+
+        return records, max_date
+
+    def _resolve_repo_pairs(
+        self, table_options: dict[str, str]
+    ) -> list[tuple[str, str]]:
+        """Return the (project, repo_id) pairs to read for this table.
+
+        Priority:
+          1. ``repository_id`` + ``project`` in options -> single pair.
+          2. ``project`` only -> all repos in that project.
+          3. Neither -> all repos across all discovered projects.
+        """
+        repo_id = table_options.get("repository_id")
+        project = self._resolve_project(table_options)
+
+        if repo_id:
+            if not project:
+                raise ValueError(
+                    "Project must be specified when repository_id is provided"
+                )
+            return [(project, repo_id)]
+
+        repos_iter, _ = self._read_repositories({}, {"project": project} if project else {})
+        pairs: list[tuple[str, str]] = []
+        for repo in repos_iter:
+            rid = repo.get("id")
+            proj = repo.get("project_name")
+            if rid and proj:
+                pairs.append((proj, rid))
+        return pairs
 
     def _read_pullrequests(
         self, start_offset: dict, table_options: dict[str, str]
@@ -341,41 +413,77 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
     def _read_pushes(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
-        repo_id = table_options.get("repository_id")
-        if not repo_id:
-            return self._for_all_repos(
-                start_offset, table_options, self._read_pushes
-            )
+        """Read pushes incrementally with per-repo push-date watermarks.
 
-        project = self._resolve_project(table_options)
-        if not project:
-            raise ValueError(
-                "Project must be specified when repository_id is provided"
-            )
+        Same pattern as _read_commits — server-side
+        ``searchCriteria.fromDate`` plus client-side strict ``>`` to
+        make the filter exclusive for append semantics.
+        """
+        start_offset = start_offset or {}
+        watermarks: dict[str, str] = dict(start_offset.get("watermarks", {}))
 
-        skip = (start_offset or {}).get("skip", 0)
-        top = 1000
+        repo_pairs = self._resolve_repo_pairs(table_options)
+        all_records: list[dict[str, Any]] = []
+
+        for project, repo_id in repo_pairs:
+            key = f"{project}/{repo_id}"
+            since = watermarks.get(key)
+            records, max_date = self._fetch_pushes(project, repo_id, since)
+            all_records.extend(records)
+            if max_date and (not since or max_date > since):
+                watermarks[key] = max_date
+
+        return iter(all_records), {"watermarks": watermarks}
+
+    def _fetch_pushes(
+        self, project: str, repo_id: str, since: str | None
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """Fetch all pushes for a single repo since *since* (exclusive)."""
         url = (
             f"{self.base_url}/{project}/_apis/git/repositories"
             f"/{repo_id}/pushes"
         )
-        pushes = api_get_list(
-            self._session, url,
-            {"api-version": "7.1", "$top": str(top), "$skip": str(skip)},
-            "pushes",
-        )
+        top = 1000
+        skip = 0
+        max_date: str | None = since
+        records: list[dict[str, Any]] = []
 
-        records = []
-        for push in pushes:
-            rec = dict(push)
-            rec["organization"] = self.organization
-            rec["project_name"] = project
-            rec["repository_id"] = repo_id
-            nullify_empty(rec, "pushedBy")
-            records.append(rec)
+        while True:
+            params: dict[str, str] = {
+                "api-version": "7.1",
+                "$top": str(top),
+                "$skip": str(skip),
+            }
+            if since:
+                params["searchCriteria.fromDate"] = since
 
-        new_offset = {"skip": skip + top} if len(pushes) == top else {}
-        return iter(records), new_offset
+            try:
+                page = api_get_list(
+                    self._session, url, params, "pushes"
+                )
+            except RuntimeError:
+                return records, max_date
+
+            for push in page:
+                push_date = push.get("date")
+                if since and push_date and push_date <= since:
+                    continue
+                rec = dict(push)
+                rec["organization"] = self.organization
+                rec["project_name"] = project
+                rec["repository_id"] = repo_id
+                nullify_empty(rec, "pushedBy")
+                records.append(rec)
+                if push_date and (
+                    max_date is None or push_date > max_date
+                ):
+                    max_date = push_date
+
+            if len(page) < top:
+                break
+            skip += top
+
+        return records, max_date
 
     # -- Users --------------------------------------------------------- #
 
