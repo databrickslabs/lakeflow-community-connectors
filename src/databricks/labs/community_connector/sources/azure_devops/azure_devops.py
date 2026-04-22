@@ -826,8 +826,27 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
                 rec = dict(rev)
                 rec["organization"] = self.organization
                 rec["project_name"] = project
-                if "fields" in rec and isinstance(rec["fields"], dict):
-                    rec["fields"] = json.dumps(rec["fields"])
+                # The reporting endpoint's top-level response only
+                # includes `id`, `rev`, and `fields`. Populate the
+                # declared schema columns from the data we have:
+                #   - workItemId: same as `id` (reporting endpoint uses
+                #     `id` as the work item ID, no separate revision ID)
+                #   - revisedDate: surfaced inside `fields` as
+                #     System.RevisedDate — hoist it to the top level
+                #   - url: not returned by the reporting endpoint;
+                #     construct the revision resource URL so the column
+                #     is still useful for navigation
+                rec["workItemId"] = rec.get("id")
+                fields_dict = rec.get("fields")
+                if isinstance(fields_dict, dict):
+                    rec["revisedDate"] = fields_dict.get(
+                        "System.RevisedDate"
+                    )
+                    rec["fields"] = json.dumps(fields_dict)
+                rec["url"] = (
+                    f"{self.base_url}/{project}/_apis/wit/workItems/"
+                    f"{rec.get('id')}/revisions/{rec.get('rev')}"
+                )
                 all_records.append(rec)
 
             is_last_batch = data.get("isLastBatch", True)
