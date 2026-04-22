@@ -160,6 +160,25 @@ class MicrosoftTeamsLakeflowConnect(LakeflowConnect):
             )
         return reader(start_offset, table_options)
 
+    @staticmethod
+    def _parse_ts(ts: str | None) -> datetime | None:
+        """Parse an ISO 8601 timestamp to an aware datetime, or None on failure.
+
+        Uses datetime comparison rather than lexical string compare so that
+        timestamps with differing fractional-second precision (e.g.
+        ``...:00Z`` vs ``...:00.123Z`` vs ``...:00.123456Z``) compare by
+        wall-clock time.  Graph API ``lastModifiedDateTime`` typically
+        carries millisecond precision while ``_init_time`` is built from
+        ``datetime.now()`` with microsecond precision — lexical compare
+        would misorder these.
+        """
+        if not ts:
+            return None
+        try:
+            return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return None
+
     def _compute_next_offset(
         self,
         next_cursor: str | None,
@@ -171,6 +190,11 @@ class MicrosoftTeamsLakeflowConnect(LakeflowConnect):
 
         Caps the cursor at ``_init_time`` so a single trigger run only
         drains data that existed when the connector was instantiated.
+        Also guards against backward movement: when ``apply_lookback``
+        widens the ``since`` filter, the API may return only records
+        older than ``current_cursor`` and produce a regressing
+        ``next_cursor``; in that case the offset is held at
+        ``current_cursor``.
         """
         if not records and start_offset:
             return start_offset
@@ -178,7 +202,17 @@ class MicrosoftTeamsLakeflowConnect(LakeflowConnect):
         if not next_cursor:
             return start_offset if start_offset else {}
 
-        next_cursor = min(next_cursor, self._init_time)
+        next_dt = self._parse_ts(next_cursor)
+        init_dt = self._parse_ts(self._init_time)
+        current_dt = self._parse_ts(current_cursor)
+
+        if next_dt is not None and init_dt is not None and next_dt > init_dt:
+            next_cursor = self._init_time
+            next_dt = init_dt
+
+        if current_dt is not None and next_dt is not None and next_dt < current_dt:
+            next_cursor = current_cursor
+            next_dt = current_dt
 
         if next_cursor == current_cursor:
             return start_offset if start_offset else {"cursor": next_cursor}
