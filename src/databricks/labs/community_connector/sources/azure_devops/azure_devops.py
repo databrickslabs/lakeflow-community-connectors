@@ -17,8 +17,6 @@ from databricks.labs.community_connector.sources.azure_devops.azure_devops_utils
     api_get_list,
     request_with_retry,
     resolve_projects,
-    fetch_repos,
-    fetch_prs,
     nullify_empty,
     for_each_pr,
 )
