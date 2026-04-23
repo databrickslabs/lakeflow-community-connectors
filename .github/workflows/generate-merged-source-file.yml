@@ -56,13 +56,18 @@ jobs:
 
       - name: Determine sources to regenerate
         id: sources
+        env:
+          # Read step outputs via env to prevent shell injection from filenames
+          # chosen by PR authors (e.g. `foo;evil.py`).
+          ALL_CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
+          ALL_CHANGED_GENERATED: ${{ steps.changed-generated.outputs.all_changed_files }}
         run: |
           SOURCES_TO_REGENERATE=""
           SOURCES_DIR="src/databricks/labs/community_connector/sources"
-          
+
           # Check if shared files changed (affects all sources)
           SHARED_CHANGED="false"
-          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+          for file in $ALL_CHANGED_FILES; do
             if [[ "$file" == "src/databricks/labs/community_connector/libs/utils.py" ]] || \
                [[ "$file" == "src/databricks/labs/community_connector/interface/lakeflow_connect.py" ]] || \
                [[ "$file" == "src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py" ]]; then
@@ -82,7 +87,7 @@ jobs:
             done
           else
             # Check sources whose source files changed
-            for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+            for file in $ALL_CHANGED_FILES; do
               if [[ "$file" == ${SOURCES_DIR}/*/[!_]*.py ]]; then
                 # Extract source name from path like src/databricks/labs/community_connector/sources/zendesk/zendesk.py
                 source_name=$(basename "$(dirname "$file")")
@@ -97,7 +102,7 @@ jobs:
             done
             
             # Also check sources whose generated files changed
-            for file in ${{ steps.changed-generated.outputs.all_changed_files }}; do
+            for file in $ALL_CHANGED_GENERATED; do
               # Extract source name from path like src/databricks/labs/community_connector/sources/zendesk/_generated_zendesk_python_source.py
               source_name=$(basename "$(dirname "$file")")
               # Check if main source file exists and it's not interface
@@ -117,14 +122,21 @@ jobs:
 
       - name: Regenerate merged source files
         if: steps.sources.outputs.sources != ''
+        env:
+          # Read step output via env to prevent shell injection; the sources
+          # value is transitively derived from PR-author-controlled filenames.
+          SOURCES: ${{ steps.sources.outputs.sources }}
         run: |
-          for source_name in ${{ steps.sources.outputs.sources }}; do
+          for source_name in $SOURCES; do
             echo "Regenerating merged source for: $source_name"
             python tools/scripts/merge_python_source.py "$source_name"
           done
 
       - name: Check if generated files are up to date
         if: steps.sources.outputs.sources != ''
+        env:
+          # Read step output via env to prevent shell injection; see note above.
+          SOURCES: ${{ steps.sources.outputs.sources }}
         run: |
           SOURCES_DIR="src/databricks/labs/community_connector/sources"
           # Check if there are any differences between the regenerated files and what's in the repo
@@ -139,7 +151,7 @@ jobs:
             echo ""
             echo "Please run the following commands locally and commit the changes:"
             echo ""
-            for source_name in ${{ steps.sources.outputs.sources }}; do
+            for source_name in $SOURCES; do
               echo "  python tools/scripts/merge_python_source.py $source_name"
             done
             echo ""
