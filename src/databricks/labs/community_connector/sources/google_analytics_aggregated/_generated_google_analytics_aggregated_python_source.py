@@ -559,6 +559,12 @@ def register_lakeflow_source(spark):
             # Fetch and cache metadata for type information
             self._metadata_cache = None
 
+            # Freeze the upper date bound at init time so GA4 report requests
+            # return a stable cursor across microbatches in a single
+            # Trigger.AvailableNow trigger.  Without this, GA's "today" literal
+            # would flip at UTC midnight and prevent termination.
+            self._init_date = datetime.utcnow().strftime("%Y-%m-%d")
+
         @staticmethod
         def _parse_property_ids(options):
             """Parse and validate property_ids from connection options."""
@@ -1201,10 +1207,10 @@ def register_lakeflow_source(spark):
                 last_date = datetime.strptime(last_date_str, "%Y-%m-%d")
                 start_date = last_date - timedelta(days=lookback_days)
                 start_date_str = start_date.strftime("%Y-%m-%d")
-                end_date_str = "today"
+                end_date_str = self._init_date
             else:
                 start_date_str = table_options.get("start_date", "30daysAgo")
-                end_date_str = "today"
+                end_date_str = self._init_date
 
             date_ranges = [
                 {"startDate": start_date_str, "endDate": end_date_str}
@@ -1380,6 +1386,14 @@ def register_lakeflow_source(spark):
             Supports prebuilt reports (by table_name) and custom reports
             (via table_options with dimensions, metrics, filters, etc.).
             """
+            # Short-circuit once the cursor has caught up to the init-time cap,
+            # so Trigger.AvailableNow can terminate.
+            if (
+                start_offset
+                and start_offset.get("last_date", "") >= self._init_date
+            ):
+                return iter([]), start_offset
+
             table_options = self._get_effective_options(
                 table_name, table_options, merge_overrides=True
             )
@@ -1395,6 +1409,11 @@ def register_lakeflow_source(spark):
             all_rows, max_date = self._fetch_report_data(
                 request_body, request_body["limit"]
             )
+
+            # Cap the returned cursor at the init-time bound so the next call
+            # eventually short-circuits.
+            if max_date and max_date > self._init_date:
+                max_date = self._init_date
 
             if max_date:
                 next_offset = {"last_date": max_date}
