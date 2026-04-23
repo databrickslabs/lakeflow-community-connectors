@@ -6,7 +6,7 @@
 # ==============================================================================
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import (
     Any,
@@ -519,6 +519,17 @@ def register_lakeflow_source(spark):
             # Cache for table metadata
             self._metadata_cache = {}
 
+            # Freeze the upper cursor bound at init time so read_table returns a
+            # stable cursor across microbatches in a single Trigger.AvailableNow
+            # trigger.  Without this, the connector would chase continuously
+            # arriving updatedAt timestamps indefinitely.  HubSpot timestamps are
+            # ISO 8601 with milliseconds (e.g. "2026-04-23T12:34:56.789Z").
+            self._init_ts = (
+                datetime.now(timezone.utc)
+                .strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+                + "Z"
+            )
+
             # Centralized object metadata configuration
             # supports_deletes: HubSpot only supports archived/deleted queries for core CRM objects
             self._object_config = {
@@ -892,6 +903,14 @@ def register_lakeflow_source(spark):
             if table_name not in supported_tables:
                 raise ValueError(f"Unsupported table: {table_name}. Supported tables are: {supported_tables}")
 
+            # Short-circuit once the cursor has caught up to the init-time cap,
+            # so Trigger.AvailableNow can terminate.
+            if (
+                start_offset
+                and start_offset.get("updatedAt", "") >= self._init_ts
+            ):
+                return [], start_offset
+
             # Get discovered properties (no associations needed for deletes)
             metadata = self.read_table_metadata(table_name, table_options)
             property_names = metadata.get("property_names", [])
@@ -934,6 +953,11 @@ def register_lakeflow_source(spark):
                 # Rate limiting
                 time.sleep(0.1)
 
+            # Cap the returned cursor at the init-time bound so the next call
+            # eventually short-circuits.
+            if latest_archived and latest_archived > self._init_ts:
+                latest_archived = self._init_ts
+
             # Return offset with updatedAt key for consistency with normal flow
             offset = {"updatedAt": latest_archived} if latest_archived else {}
             return all_records, offset
@@ -943,6 +967,15 @@ def register_lakeflow_source(spark):
             table_options: Dict[str, str] = None
         ):
             """Read active (non-archived) data from HubSpot API"""
+
+            # Short-circuit once the cursor has caught up to the init-time cap,
+            # so Trigger.AvailableNow can terminate.
+            if (
+                incremental
+                and start_offset
+                and start_offset.get("updatedAt", "") >= self._init_ts
+            ):
+                return [], start_offset
 
             # Get discovered properties and object configuration
             metadata = self.read_table_metadata(table_name, table_options)
@@ -993,6 +1026,11 @@ def register_lakeflow_source(spark):
 
                 # Rate limiting
                 time.sleep(0.1)
+
+            # Cap the returned cursor at the init-time bound so the next call
+            # eventually short-circuits.
+            if incremental and latest_updated and latest_updated > self._init_ts:
+                latest_updated = self._init_ts
 
             offset = {"updatedAt": latest_updated} if latest_updated else {}
             return all_records, offset
