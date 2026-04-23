@@ -19,6 +19,10 @@ permissions:
 
 jobs:
   release-build:
+    # Disabled: release/publish workflows are not permitted per the workflow
+    # security policy. Retained for future restoration pending a decision on
+    # how non-eng releases will be performed.
+    if: false
     runs-on: ubuntu-latest
 
     steps:
