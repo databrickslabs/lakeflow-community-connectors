@@ -350,31 +350,78 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
     def _read_pullrequests(
         self, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
-        repo_id = table_options.get("repository_id")
-        if not repo_id:
-            return self._for_all_repos(
-                start_offset, table_options, self._read_pullrequests
-            )
+        """Read pullrequests incrementally with per-repo watermarks.
 
-        project = self._resolve_project(table_options)
-        if not project:
-            raise ValueError(
-                "Project must be specified when repository_id is provided"
-            )
+        Uses ADO's ``searchCriteria.queryTimeRangeType=updated`` with
+        ``searchCriteria.minTime=watermark`` so each run returns only
+        PRs whose state has changed since the last sync. The watermark
+        is the max of ``closedDate`` (for closed PRs) or ``creationDate``
+        (for open PRs) across returned records.
 
+        Subject to one caveat: modifications to open PRs (title edits,
+        reviewer votes, etc.) are picked up only if ADO's "updated"
+        query reflects those changes. Full refresh recovers anything
+        that slips through.
+        """
         status_filter = table_options.get("status_filter", "all")
+
+        start_offset = start_offset or {}
+        watermarks: dict[str, str] = dict(start_offset.get("watermarks", {}))
+
+        repo_pairs = self._resolve_repo_pairs(table_options)
+        all_records: list[dict[str, Any]] = []
+
+        for project, repo_id in repo_pairs:
+            key = f"{project}/{repo_id}"
+            since = watermarks.get(key)
+            records, max_time = self._fetch_pullrequests(
+                project, repo_id, status_filter, since
+            )
+            all_records.extend(records)
+            if max_time and (not since or max_time > since):
+                watermarks[key] = max_time
+
+        return iter(all_records), {"watermarks": watermarks}
+
+    def _fetch_pullrequests(
+        self,
+        project: str,
+        repo_id: str,
+        status_filter: str,
+        since: str | None,
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """Fetch pullrequests for a single repo, optionally filtered by *since*."""
         url = (
             f"{self.base_url}/{project}/_apis/git/repositories"
             f"/{repo_id}/pullrequests"
         )
-        prs = api_get_list(
-            self._session, url,
-            {"api-version": "7.1", "searchCriteria.status": status_filter},
-            "pullrequests",
-        )
+        params: dict[str, str] = {
+            "api-version": "7.1",
+            "searchCriteria.status": status_filter,
+        }
+        if since:
+            params["searchCriteria.queryTimeRangeType"] = "updated"
+            params["searchCriteria.minTime"] = since
 
-        records = []
+        try:
+            prs = api_get_list(
+                self._session, url, params, "pullrequests"
+            )
+        except RuntimeError as exc:
+            _LOG.warning(
+                "Skipping pullrequests for %s/%s: %s",
+                project, repo_id, exc,
+            )
+            return [], None
+
+        records: list[dict[str, Any]] = []
+        max_time: str | None = since
         for pr in prs:
+            # Client-side strict `>` to make the inclusive server-side
+            # filter behave exclusively for CDC-merge purposes.
+            effective_time = pr.get("closedDate") or pr.get("creationDate")
+            if since and effective_time and effective_time <= since:
+                continue
             rec = dict(pr)
             rec["organization"] = self.organization
             rec["project_name"] = project
@@ -385,7 +432,12 @@ class AzureDevopsLakeflowConnect(LakeflowConnect):
                 "lastMergeCommit",
             )
             records.append(rec)
-        return iter(records), {}
+            if effective_time and (
+                max_time is None or effective_time > max_time
+            ):
+                max_time = effective_time
+
+        return records, max_time
 
     def _read_refs(
         self, start_offset: dict, table_options: dict[str, str]
