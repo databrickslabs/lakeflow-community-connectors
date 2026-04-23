@@ -1738,32 +1738,129 @@ def register_lakeflow_source(spark):
         def _read_pullrequest_threads(
             self, start_offset: dict, table_options: dict[str, str]
         ) -> tuple[Iterator[dict], dict]:
-            projects = self._resolve_projects(table_options)
+            """Read PR threads incrementally with per-repo watermarks.
 
-            def _fetch(project: str, repo_id: str, pr_id: int):
-                url = (
-                    f"{self.base_url}/{project}/_apis/git/repositories"
-                    f"/{repo_id}/pullRequests/{pr_id}/threads"
+            The threads endpoint has no server-side date filter, so we
+            combine two things for incremental behavior:
+
+            1. Discover which PRs to fetch via the ``pullrequests`` endpoint
+               with ``queryTimeRangeType=updated`` + ``minTime=watermark`` —
+               this is the same filter we use for the ``pullrequests`` table
+               and reduces the number of thread fetches per run.
+            2. Client-side filter the returned threads by
+               ``lastUpdatedDate > watermark`` so we only emit threads that
+               have actually changed.
+
+            Caveat: relies on ADO's PR "updated" timestamp reflecting thread
+            changes. If a thread change somehow doesn't advance the parent
+            PR's updated time, full refresh recovers it.
+
+            When both ``repository_id`` and ``pullrequest_id`` are supplied,
+            bypasses the watermark logic and fetches that single PR's
+            threads at current state (snapshot-like).
+            """
+            explicit_repo = table_options.get("repository_id")
+            explicit_pr = table_options.get("pullrequest_id")
+
+            start_offset = start_offset or {}
+            watermarks: dict[str, str] = dict(start_offset.get("watermarks", {}))
+            all_records: list[dict[str, Any]] = []
+
+            # Explicit single-PR path: no watermarks, just fetch current state
+            if explicit_repo and explicit_pr:
+                project = self._resolve_project(table_options)
+                if not project:
+                    raise ValueError(
+                        "Project required when repository_id + pullrequest_id given"
+                    )
+                all_records.extend(
+                    self._fetch_pr_threads(project, explicit_repo, int(explicit_pr))
                 )
+                return iter(all_records), start_offset
+
+            # Auto-discovery path — per-repo incremental watermark
+            for project, repo_id in self._resolve_repo_pairs(table_options):
+                key = f"{project}/{repo_id}"
+                since = watermarks.get(key)
+                max_updated: str | None = since
+
+                pr_ids = self._list_updated_pr_ids(project, repo_id, since)
+                for pr_id in pr_ids:
+                    for thread in self._fetch_pr_threads(project, repo_id, pr_id):
+                        last_updated = thread.get("lastUpdatedDate")
+                        # Inclusive server-side filter on PR "updated" means
+                        # we may re-see old threads; strict `>` here drops
+                        # them to keep append semantics clean.
+                        if since and last_updated and last_updated <= since:
+                            continue
+                        all_records.append(thread)
+                        if last_updated and (
+                            max_updated is None or last_updated > max_updated
+                        ):
+                            max_updated = last_updated
+
+                if max_updated and (not since or max_updated > since):
+                    watermarks[key] = max_updated
+
+            return iter(all_records), {"watermarks": watermarks}
+
+        def _list_updated_pr_ids(
+            self, project: str, repo_id: str, since: str | None
+        ) -> list[int]:
+            """Return PR IDs whose 'updated' timestamp is after *since*."""
+            url = (
+                f"{self.base_url}/{project}/_apis/git/repositories"
+                f"/{repo_id}/pullrequests"
+            )
+            params: dict[str, str] = {
+                "api-version": "7.1",
+                "searchCriteria.status": "all",
+            }
+            if since:
+                params["searchCriteria.queryTimeRangeType"] = "updated"
+                params["searchCriteria.minTime"] = since
+            try:
+                prs = api_get_list(
+                    self._session, url, params, "pullrequest_threads"
+                )
+            except RuntimeError as exc:
+                _LOG.warning(
+                    "Skipping PR discovery for %s/%s: %s", project, repo_id, exc,
+                )
+                return []
+            return [
+                p["pullRequestId"] for p in prs if p.get("pullRequestId")
+            ]
+
+        def _fetch_pr_threads(
+            self, project: str, repo_id: str, pr_id: int
+        ) -> list[dict[str, Any]]:
+            """Fetch all threads for a single PR, with connector fields filled in."""
+            url = (
+                f"{self.base_url}/{project}/_apis/git/repositories"
+                f"/{repo_id}/pullRequests/{pr_id}/threads"
+            )
+            try:
                 threads = api_get_list(
                     self._session, url,
                     {"api-version": "7.1"}, "pullrequest_threads",
                 )
-                results = []
-                for t in threads:
-                    rec = dict(t)
-                    rec["organization"] = self.organization
-                    rec["project_name"] = project
-                    rec["repository_id"] = repo_id
-                    rec["pullrequest_id"] = pr_id
-                    results.append(rec)
-                return results
+            except RuntimeError as exc:
+                _LOG.warning(
+                    "Skipping threads for PR %d in %s/%s: %s",
+                    pr_id, project, repo_id, exc,
+                )
+                return []
 
-            records = for_each_pr(
-                self._session, self.base_url,
-                projects, table_options, _fetch,
-            )
-            return iter(records), {}
+            records: list[dict[str, Any]] = []
+            for thread in threads:
+                rec = dict(thread)
+                rec["organization"] = self.organization
+                rec["project_name"] = project
+                rec["repository_id"] = repo_id
+                rec["pullrequest_id"] = pr_id
+                records.append(rec)
+            return records
 
         def _read_pr_workitems(
             self, start_offset: dict, table_options: dict[str, str]
