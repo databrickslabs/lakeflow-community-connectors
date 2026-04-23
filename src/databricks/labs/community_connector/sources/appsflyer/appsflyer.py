@@ -53,6 +53,12 @@ class AppsflyerLakeflowConnect(LakeflowConnect):
             }
         )
 
+        # Freeze the upper date bound at init time so event-report reads
+        # return a stable cursor across microbatches in a single
+        # Trigger.AvailableNow trigger.  Without this, datetime.utcnow()
+        # advances between calls and prevents termination.
+        self._init_date = datetime.utcnow().strftime("%Y-%m-%d")
+
     def _request_with_retry(self, method: str, url: str, **kwargs) -> requests.Response:
         """Make an HTTP request with retry on transient errors and rate limiting."""
         last_exception = None
@@ -544,6 +550,14 @@ class AppsflyerLakeflowConnect(LakeflowConnect):
         if not cursor:
             cursor = table_options.get("start_date")
 
+        # Short-circuit once the cursor has caught up to the init-time cap,
+        # so Trigger.AvailableNow can terminate.
+        if cursor and cursor >= self._init_date:
+            return iter([]), start_offset or {}
+
+        # Freeze "now" at init-time so to_dt is stable across microbatches.
+        init_dt = datetime.strptime(self._init_date, "%Y-%m-%d")
+
         # Calculate date range
         if cursor:
             # Parse cursor and apply lookback
@@ -552,12 +566,12 @@ class AppsflyerLakeflowConnect(LakeflowConnect):
                 from_dt = cursor_dt - timedelta(hours=lookback_hours)
             except (ValueError, TypeError):
                 # If cursor is not a valid date, default to 7 days ago
-                from_dt = datetime.utcnow() - timedelta(days=7)
+                from_dt = init_dt - timedelta(days=7)
         else:
             # No cursor, default to 7 days ago
-            from_dt = datetime.utcnow() - timedelta(days=7)
+            from_dt = init_dt - timedelta(days=7)
 
-        to_dt = datetime.utcnow()
+        to_dt = init_dt
 
         # Limit to max_days_per_batch
         if (to_dt - from_dt).days > max_days_per_batch:
@@ -589,9 +603,10 @@ class AppsflyerLakeflowConnect(LakeflowConnect):
         # Raw Data Export API returns CSV with UTF-8 BOM
         text = response.content.decode('utf-8-sig')
         if not text or not text.strip():
-            # Empty response, return empty iterator
+            # Empty response, advance the cursor to the queried upper bound
+            # so the next call short-circuits (end_offset == start_offset).
             print(f"[AppsFlyer] No data for {report_type}: {from_date} to {to_date}")
-            return iter([]), cursor
+            return iter([]), {"cursor": to_date}
 
         # Parse CSV into list of dictionaries
         csv_reader = csv.DictReader(io.StringIO(text))
@@ -623,15 +638,19 @@ class AppsflyerLakeflowConnect(LakeflowConnect):
                 if max_cursor is None or record_time > max_cursor:
                     max_cursor = record_time
 
-        # Compute next offset
-        if max_cursor:
-            # For event_time (ISO datetime), extract just the date part
-            if not is_aggregated and max_cursor:
-                try:
-                    max_cursor = max_cursor[:10]  # Extract YYYY-MM-DD
-                except:
-                    pass
+        # For event_time (ISO datetime), extract just the date part
+        if max_cursor and not is_aggregated:
+            try:
+                max_cursor = max_cursor[:10]  # Extract YYYY-MM-DD
+            except:
+                pass
 
-        # Return records and next offset
-        next_offset = {"cursor": max_cursor} if max_cursor else {}
-        return iter(data), next_offset
+        # Advance the cursor at least to the queried upper bound so the
+        # next call makes forward progress (and eventually short-circuits
+        # once it reaches self._init_date).  Cap at self._init_date.
+        if not max_cursor or max_cursor < to_date:
+            max_cursor = to_date
+        if max_cursor > self._init_date:
+            max_cursor = self._init_date
+
+        return iter(data), {"cursor": max_cursor}
