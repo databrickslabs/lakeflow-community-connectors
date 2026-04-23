@@ -545,6 +545,14 @@ def register_lakeflow_source(spark):
             # Cache for schemas
             self._schema_cache = {}
 
+            # Freeze the upper cursor bounds at init time so read_table returns
+            # stable offsets across microbatches in a single Trigger.AvailableNow
+            # trigger.  Without this, datetime.now() calls in the read paths
+            # would advance between calls and prevent termination.
+            now = datetime.now()
+            self._init_date = now.strftime("%Y-%m-%d")
+            self._init_ts = now.isoformat()
+
         def _parse_datetime(self, datetime_str: str) -> datetime:
             """
             Parse datetime string with multiple format support
@@ -825,17 +833,23 @@ def register_lakeflow_source(spark):
 
         def _read_events_table(self, start_offset: dict) -> (Iterator[dict], dict):
             """
-            Read ALL events data from start_date to today using multiple 7-day API calls
+            Read ALL events data from start_date to init_date using multiple 7-day API calls
             """
             # Extract offset information, handle None offset
             start_date = start_offset.get("start_date") if start_offset else None
 
+            # Short-circuit once the cursor has caught up to the init-time cap,
+            # so Trigger.AvailableNow can terminate.
+            if start_date and start_date > self._init_date:
+                return iter([]), start_offset
+
             if not start_date:
                 # For initial snapshot, start from configured historical days ago
-                start_date = (datetime.now() - timedelta(days=self.historical_days)).strftime("%Y-%m-%d")
+                init_dt = datetime.strptime(self._init_date, "%Y-%m-%d")
+                start_date = (init_dt - timedelta(days=self.historical_days)).strftime("%Y-%m-%d")
 
-            # End date is today (inclusive)
-            today = datetime.now().strftime("%Y-%m-%d")
+            # End date is frozen at init time so the offset stabilises
+            today = self._init_date
 
             # If start_date is ahead of today, set it to today
             if start_date > today:
@@ -1036,9 +1050,17 @@ def register_lakeflow_source(spark):
             current_page = start_offset.get("page", 0) if start_offset else 0
             session_id = start_offset.get("session_id") if start_offset else None
 
-            # If no cursor, use historical days for initial sync
+            # Short-circuit once the cursor has caught up to the init-time cap,
+            # so Trigger.AvailableNow can terminate.
+            if last_seen_cursor and last_seen_cursor >= self._init_ts:
+                return iter([]), start_offset
+
+            # If no cursor, use historical days for initial sync.  Derive the
+            # start_time from the frozen self._init_ts so it doesn't drift across
+            # calls within the same trigger.
             if not last_seen_cursor:
-                start_time = (datetime.now() - timedelta(days=self.historical_days)).isoformat()
+                init_dt = datetime.fromisoformat(self._init_ts)
+                start_time = (init_dt - timedelta(days=self.historical_days)).isoformat()
                 print(f"Initial engage sync from: {start_time}")
             else:
                 start_time = last_seen_cursor
@@ -1111,6 +1133,11 @@ def register_lakeflow_source(spark):
 
                 except requests.exceptions.RequestException as e:
                     raise
+
+            # Cap the returned cursor at the init-time bound so the next call
+            # eventually short-circuits.
+            if latest_last_seen and latest_last_seen > self._init_ts:
+                latest_last_seen = self._init_ts
 
             # Update offset with latest cursor for next incremental sync
             next_offset = {
