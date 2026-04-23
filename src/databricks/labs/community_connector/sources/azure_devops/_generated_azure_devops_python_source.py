@@ -45,6 +45,7 @@ from pyspark.sql.types import (
     VariantVal,
 )
 import base64
+import logging
 import requests
 
 
@@ -1169,6 +1170,9 @@ def register_lakeflow_source(spark):
     # src/databricks/labs/community_connector/sources/azure_devops/azure_devops.py
     ########################################################
 
+    _LOG = logging.getLogger(__name__)
+
+
     class AzureDevopsLakeflowConnect(LakeflowConnect):
         def __init__(self, options: dict[str, str]) -> None:
             """Initialize the Azure DevOps connector.
@@ -1298,7 +1302,13 @@ def register_lakeflow_source(spark):
                 try:
                     records_iter, _ = reader(start_offset, opts)
                     all_records.extend(records_iter)
-                except Exception:  # pylint: disable=broad-except
+                except RuntimeError as exc:
+                    # api_get raises RuntimeError on non-200 responses;
+                    # log and continue so one repo doesn't fail the batch.
+                    _LOG.warning(
+                        "Skipping %s/%s for %s: %s",
+                        proj, repo_id, reader.__name__, exc,
+                    )
                     continue
             return iter(all_records), {}
 
@@ -1361,7 +1371,12 @@ def register_lakeflow_source(spark):
                     opts = {**table_options, "project": name}
                     it, _ = self._read_repositories({}, opts)
                     all_records.extend(it)
-                except Exception:  # pylint: disable=broad-except
+                except RuntimeError as exc:
+                    # Projects without Git enabled return 404 — log and
+                    # continue so one bad project doesn't fail the batch.
+                    _LOG.warning(
+                        "Skipping repositories for project %s: %s", name, exc,
+                    )
                     continue
             return iter(all_records), {}
 
@@ -1658,11 +1673,13 @@ def register_lakeflow_source(spark):
                 nullify_empty(rec, "_links")
                 records.append(rec)
 
-            new_offset: dict[str, str] = {}
             next_token = response.headers.get("X-MS-ContinuationToken")
-            if next_token:
-                new_offset["continuationToken"] = next_token
-            return iter(records), new_offset
+            if not next_token:
+                # Drained — return start_offset unchanged so end_offset ==
+                # start_offset and the framework terminates pagination
+                # cleanly without an extra empty round-trip.
+                return iter(records), start_offset or {}
+            return iter(records), {"continuationToken": next_token}
 
         # -- PR sub-resources (threads, workitems, commits, reviewers) ----- #
 
@@ -1859,9 +1876,12 @@ def register_lakeflow_source(spark):
             the framework's CDC merge on the ``rev`` cursor.
             """
             url = f"{self.base_url}/{project}/_apis/wit/wiql"
+            # Escape single quotes in the project name (e.g. "Bob's Team")
+            # so they don't break the WIQL literal or enable injection.
+            safe_project = project.replace("'", "''")
             query = (
                 "SELECT [System.Id] FROM WorkItems"
-                f" WHERE [System.TeamProject] = '{project}'"
+                f" WHERE [System.TeamProject] = '{safe_project}'"
                 " ORDER BY [System.ChangedDate] ASC"
             )
 
