@@ -7218,6 +7218,13 @@ def register_lakeflow_source(spark):
             # Cache for dynamically fetched metadata (populated lazily)
             self._metadata_cache: Optional[Dict[str, Any]] = None
 
+            # Freeze the upper cursor bound at init time so read_table returns a
+            # stable cursor across microbatches in a single Trigger.AvailableNow
+            # trigger.  Without this, the connector would chase continuously
+            # arriving records indefinitely.  OData datetime format (no timezone
+            # suffix): "2026-04-23T12:34:56".
+            self._init_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+
         def list_tables(self) -> List[str]:
             """
             List all available tables supported by this connector.
@@ -7395,6 +7402,14 @@ def register_lakeflow_source(spark):
             Returns:
                 Tuple of (records_iterator, new_offset)
             """
+            # Short-circuit once the cursor has caught up to the init-time cap,
+            # so Trigger.AvailableNow can terminate.
+            if (
+                start_offset
+                and start_offset.get("cursor_value", "") >= self._init_ts
+            ):
+                return iter([]), start_offset
+
             entity_set = config["entity_set"]
             cursor_field = config["cursor_field"]
             select_fields = config.get("select_fields")
@@ -7415,14 +7430,22 @@ def register_lakeflow_source(spark):
             # Add $orderby for consistent ordering
             params["$orderby"] = f"{cursor_field} asc"
 
-            # Add $filter for incremental read if we have a previous cursor
+            # Build $filter for incremental read.  Always include an upper bound
+            # at self._init_ts so the cursor never advances past init time and
+            # the trigger can terminate.
+            filters = [f"{cursor_field} le datetime'{self._init_ts}'"]
             if start_offset and start_offset.get("cursor_value"):
                 cursor_value = start_offset["cursor_value"]
-                # Convert to SAP datetime format for filter
-                params["$filter"] = f"{cursor_field} gt datetime'{cursor_value}'"
+                filters.insert(0, f"{cursor_field} gt datetime'{cursor_value}'")
+            params["$filter"] = " and ".join(filters)
 
             # Fetch all pages of data
             all_records, max_cursor = self._fetch_all_pages(url, params, cursor_field)
+
+            # Cap the returned cursor at the init-time bound (defense in depth —
+            # the $filter above should already enforce this server-side).
+            if max_cursor and max_cursor > self._init_ts:
+                max_cursor = self._init_ts
 
             # Build new offset
             if max_cursor:
@@ -7474,6 +7497,12 @@ def register_lakeflow_source(spark):
             # De-duplicate records for tables known to have identical duplicates from SAP API
             if table_name in DEDUPE_TABLES:
                 all_records = self._deduplicate_records(all_records)
+
+            # Cap the tracked cursor at the init-time bound so repeated snapshot
+            # reads within a Trigger.AvailableNow trigger return the same offset
+            # and the trigger terminates.
+            if max_cursor and max_cursor > self._init_ts:
+                max_cursor = self._init_ts
 
             # For snapshot, we can optionally track the max cursor for future CDC
             if max_cursor:
