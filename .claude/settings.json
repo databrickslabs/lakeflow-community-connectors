@@ -38,6 +38,31 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // empty' | { read -r f; case \"$f\" in *.py) ruff format \"$f\" 2>/dev/null || true ;; esac; }",
+            "statusMessage": "Formatting..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command // empty' | { read -r cmd; case \"$cmd\" in git\\ commit*) git diff --cached --name-only | sed -n 's|^src/databricks/labs/community_connector/sources/\\([^/]*\\)/.*|\\1|p' | sort -u | while read -r src; do python3 tools/scripts/merge_python_source.py \"$src\" && git add \"src/databricks/labs/community_connector/sources/$src/\"; done ;; esac; }",
+            "timeout": 30,
+            "statusMessage": "Merging source files before commit..."
+          }
+        ]
+      }
     ]
   }
 }

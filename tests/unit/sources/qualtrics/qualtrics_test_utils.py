@@ -7,7 +7,7 @@ from typing import Dict, List, Tuple
 import requests
 
 
-class LakeflowConnectTestUtils:
+class LakeflowConnectWriteTestUtils:
     """
     Test utilities for Qualtrics connector.
     Provides write-back functionality for testing Qualtrics survey response ingestion.
@@ -38,10 +38,6 @@ class LakeflowConnectTestUtils:
             "X-API-TOKEN": self.api_token,
             "Content-Type": "application/json"
         }
-
-    def get_source_name(self) -> str:
-        """Return the source connector name."""
-        return "qualtrics"
 
     def list_insertable_tables(self) -> List[str]:
         """

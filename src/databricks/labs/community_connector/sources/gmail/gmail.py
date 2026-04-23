@@ -247,7 +247,7 @@ class GmailLakeflowConnect(LakeflowConnect):
                     if msg_detail.get("historyId"):
                         if (
                             not state["latest_history_id"]
-                            or msg_detail["historyId"] > state["latest_history_id"]
+                            or int(msg_detail["historyId"]) > int(state["latest_history_id"])
                         ):
                             state["latest_history_id"] = msg_detail["historyId"]
                     all_messages.append(msg_detail)
@@ -374,7 +374,7 @@ class GmailLakeflowConnect(LakeflowConnect):
                     if thread_detail.get("historyId"):
                         if (
                             not state["latest_history_id"]
-                            or thread_detail["historyId"] > state["latest_history_id"]
+                            or int(thread_detail["historyId"]) > int(state["latest_history_id"])
                         ):
                             state["latest_history_id"] = thread_detail["historyId"]
                     all_threads.append(thread_detail)
