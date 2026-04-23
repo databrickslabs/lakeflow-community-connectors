@@ -96,7 +96,7 @@ class LakeflowStreamReader(SimpleDataSourceStreamReader, SupportsTriggerAvailabl
         pass
 
 
-class LakeflowPartitionedStreamReader(DataSourceStreamReader):
+class LakeflowPartitionedStreamReader(DataSourceStreamReader, SupportsTriggerAvailableNow):
     """Proxy that bridges SupportsPartitionedStream to PySpark's DataSourceStreamReader.
 
     Used when a connector implements the SupportsPartitionedStream mixin to
@@ -135,6 +135,10 @@ class LakeflowPartitionedStreamReader(DataSourceStreamReader):
             self.table_name, partition_desc, self.table_options
         )
         return map(lambda x: parse_value(x, self.schema), records)
+
+    def prepareForTriggerAvailableNow(self) -> None:
+        # No need to do anything special here. Everything is handled in the __init__ method.
+        pass
 
 
 class LakeflowBatchReader(DataSourceReader):
