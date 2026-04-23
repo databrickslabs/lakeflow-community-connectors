@@ -1,0 +1,8 @@
+# Ignore local configuration files with sensitive credentials
+local_config.json
+local_table_config.json
+dev_config.json
+
+# Keep example files as templates
+!dev_config.json.example
+!dev_table_config.json

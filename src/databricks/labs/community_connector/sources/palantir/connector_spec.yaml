@@ -1,0 +1,28 @@
+# Palantir Foundry Community Connector Spec
+display_name: Palantir Foundry
+
+connection:
+  parameters:
+    - name: token
+      type: string
+      required: true
+      secret: true
+      description: >
+        Bearer token for Palantir Foundry API authentication.
+        Generate from your Foundry instance Developer Console or Account Settings.
+
+    - name: hostname
+      type: string
+      required: true
+      description: >
+        Palantir Foundry hostname (e.g., yourcompany.palantirfoundry.com).
+        Do not include https:// prefix.
+
+    - name: ontology_api_name
+      type: string
+      required: true
+      description: >
+        API name of the ontology to sync (e.g., ontology-282f1207-a9f0-408c-8820-741db4f051b1).
+        Find this via GET /api/v2/ontologies or in Foundry's Ontology Manager.
+
+external_options_allowlist: "cursor_field,page_size"
