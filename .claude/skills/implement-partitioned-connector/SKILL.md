@@ -63,9 +63,28 @@ Spark drives each micro-batch in three steps:
 
 **Offset discovery and data reading are separate.** Unlike `SimpleDataSourceStreamReader` where `read()` discovers and returns data together, here `latest_offset` discovers *what* exists (cheap) and `read_partition` *reads* it (expensive, parallelised). Reading records inside `latest_offset` would be catastrophic — it runs on the driver every interval and the records are discarded.
 
-**Termination:** The stream idles when `latest_offset` returns the same value as the previous call. There is no explicit stop signal.
-
 **Typical pattern:** Source APIs with time-range filters (`since`/`until`). `latest_offset` returns the current high-water mark timestamp. `get_partitions` splits the time range into windows. `read_partition` queries each window.
+
+## Guaranteeing Termination (Trigger AvailableNow)
+
+The connector runs under `Trigger.AvailableNow`, which issues microbatches until the source reports "no more data available" — signalled by **`latest_offset` returning the same value as the previous call**. There is no explicit stop signal. If `latest_offset` keeps returning ever-advancing values (e.g. by reflecting continuously-arriving new data), the trigger never terminates and the pipeline hangs.
+
+This is the partitioned-stream equivalent of the `end_offset == start_offset` rule for the `SimpleDataSourceStreamReader` path, and it is just as critical.
+
+**How to guarantee termination:** Cap the offset at init time. Record `datetime.now(UTC)` in `__init__` (`self._init_time`) and have `latest_offset` return `min(source_high_water_mark, self._init_time)`. Once the stream catches up to `_init_time` — either because there was finite data, or because subsequent microbatches have drained everything up to that cap — `latest_offset` stabilises and the trigger terminates. Data arriving after `_init_time` is picked up by the next trigger, which creates a fresh connector instance with a newer `_init_time`.
+
+```python
+def __init__(self, options):
+    super().__init__(options)
+    self._init_time = datetime.now(timezone.utc).isoformat()
+
+def latest_offset(self, table_name, table_options, start_offset=None):
+    source_max = self._query_source_high_water_mark(table_name)  # e.g. max updated_at
+    capped = min(source_max, self._init_time) if source_max else self._init_time
+    return {"cursor": capped}
+```
+
+Do **not** cap the data returned by `read_partition` at `_init_time`; only cap the *offset*. Records whose cursor is greater than `_init_time` may still be read — they will simply be re-read by the next trigger with a larger `_init_time` window. (For CDC tables with primary keys this is safe via upsert; for append-only tables, design partitions so the cap boundary does not produce duplicates.)
 
 ## Partitioning Design Guidelines
 

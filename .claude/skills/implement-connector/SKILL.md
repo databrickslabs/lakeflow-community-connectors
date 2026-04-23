@@ -30,6 +30,8 @@ For simple connectors, keeping everything in a single `{source_name}.py` file is
 
 For incremental ingestion of tables (`cdc` and `append_only`), the framework calls `read_table` repeatedly within a single trigger run. Each call produces one microbatch. A trigger run stops when the returned `end_offset` equals `start_offset`.
 
+**This termination condition is critical for Trigger AvailableNow.** The connector runs under `Trigger.AvailableNow`, which issues microbatches until the source reports "no more data available" — signalled by `read_table` returning `end_offset == start_offset`. If the connector keeps advancing the offset (e.g. by chasing continuously-arriving new data), the trigger never terminates and the pipeline hangs. Every incremental connector must guarantee this condition is reached — see **Guaranteeing Termination** below.
+
 ### Admission Control: `max_records_per_batch` 
 
 Every incremental table **must** support a `max_records_per_batch` table option. This caps how many records a single `read_table` call returns to the framework, giving Spark a bounded microbatch to process. Without it, a single call could return millions of rows and overwhelm the Spark driver.

@@ -111,6 +111,16 @@ class DICOMwebLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         # Cached WADO-RS mode detected at runtime (only used when wado_mode=auto)
         self._wado_mode_detected: str | None = None
 
+        # Freeze the upper bounds at init time so latest_offset and read_table
+        # return stable values across all microbatches in a single
+        # Trigger.AvailableNow trigger.  Without this, datetime.now() would
+        # advance between calls and prevent termination (the trigger
+        # terminates when the same offset is returned twice in a row).  Data
+        # arriving after these values is picked up by the next trigger.
+        now = datetime.now(tz=timezone.utc)
+        self._init_date = now.strftime("%Y%m%d")
+        self._init_ts = now.isoformat()
+
     # ------------------------------------------------------------------
     # Schema / metadata
     # ------------------------------------------------------------------
@@ -152,9 +162,12 @@ class DICOMwebLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         # Only diagnostics uses read_table (via simpleStreamReader).
         # studies/series/instances go through the partitioned path.
         if table_name == "diagnostics":
+            # Short-circuit on the second call in a single trigger so
+            # Trigger.AvailableNow terminates (end_offset == start_offset).
+            if start_offset and start_offset.get("probe_timestamp") == self._init_ts:
+                return iter([]), start_offset
             probe_iter = self._run_diagnostics_probe()
-            next_offset = {"probe_timestamp": datetime.now(tz=timezone.utc).isoformat()}
-            return probe_iter, next_offset
+            return probe_iter, {"probe_timestamp": self._init_ts}
 
         raise ValueError(
             f"Table '{table_name}' uses partitioned reads; read_table is not supported."
@@ -173,7 +186,6 @@ class DICOMwebLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         table_options: dict[str, str],
         start_offset: dict | None = None,
     ) -> dict:
-        today = date.today().strftime("%Y%m%d")
         window_days = int(table_options.get("window_days", "0"))
         if window_days > 0:
             # Use start_offset if available, otherwise fall back to starting_date option.
@@ -183,8 +195,8 @@ class DICOMwebLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
                 else table_options.get("starting_date", DEFAULT_START_DATE)
             )
             next_end = _add_days(start_date, window_days)
-            return {"study_date": min(next_end, today)}
-        return {"study_date": today}
+            return {"study_date": min(next_end, self._init_date)}
+        return {"study_date": self._init_date}
 
     def get_partitions(
         self,
@@ -196,7 +208,7 @@ class DICOMwebLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         if start_offset is None and end_offset is None:
             # Batch mode: partition the entire table
             start_date = table_options.get("starting_date", DEFAULT_START_DATE)
-            date_range = f"{start_date}-{date.today().strftime('%Y%m%d')}"
+            date_range = f"{start_date}-{self._init_date}"
             if table_name == "instances":
                 return self._partition_instances(date_range, table_options)
             return [{"date_range": date_range}]
