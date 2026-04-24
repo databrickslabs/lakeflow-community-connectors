@@ -54,14 +54,14 @@ compile "${REQ_DIR}/root.txt" pyproject.toml --extra dev
 # tools/community_connector [dev] — test-community-connector.
 compile "${REQ_DIR}/tools.txt" tools/community_connector/pyproject.toml --extra dev
 
-# Pylint runs against root + tools, and also installs pylint itself.
-pylint_in="$(mktemp --suffix=.in)"
-trap 'rm -f "${pylint_in}"' EXIT INT TERM
-printf 'pylint\n' > "${pylint_in}"
+# Pylint runs against root + tools, and also installs pylint itself. The
+# extras file is tracked in the repo so the path baked into the generated
+# header is deterministic — using `mktemp` here would put a random /tmp path
+# into the lock header and cause spurious drift warnings on every regen.
 compile "${REQ_DIR}/pylint.txt" \
     pyproject.toml \
     tools/community_connector/pyproject.toml \
-    "${pylint_in}" \
+    "${REQ_DIR}/_pylint-extras.in" \
     --extra dev
 
 printf '\nDone. Review with: git diff %s/\n' "${REQ_DIR}"

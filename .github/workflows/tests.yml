@@ -270,15 +270,21 @@ jobs:
         with:
           python-version: "3.10"
       - name: Install dependencies
+        env:
+          # Read matrix value via env to prevent shell injection from source
+          # directory names (transitively PR-author controlled).
+          SOURCE: ${{ matrix.source }}
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
           # Install source-specific dependencies if the source has its own pyproject.toml
-          SOURCE_DIR="src/databricks/labs/community_connector/sources/${{ matrix.source }}"
+          SOURCE_DIR="src/databricks/labs/community_connector/sources/${SOURCE}"
           if [ -f "$SOURCE_DIR/pyproject.toml" ]; then
             pip install -e "$SOURCE_DIR"
           fi
       - name: Run ${{ matrix.source }} tests
+        env:
+          SOURCE: ${{ matrix.source }}
         run: |
           IGNORE_FLAGS=""
           EXCLUDE_FILE=".github/workflows/test_exclude.txt"
@@ -288,10 +294,10 @@ jobs:
               [[ "$line" =~ ^[[:space:]]*# ]] && continue
               [[ -z "${line// }" ]] && continue
               # Add --ignore for excluded tests in this source's directory
-              if [[ "$line" == tests/unit/sources/${{ matrix.source }}/* ]]; then
+              if [[ "$line" == tests/unit/sources/${SOURCE}/* ]]; then
                 IGNORE_FLAGS="$IGNORE_FLAGS --ignore=$line"
               fi
             done < "$EXCLUDE_FILE"
           fi
           echo "Ignore flags: $IGNORE_FLAGS"
-          pytest tests/unit/sources/${{ matrix.source }}/ $IGNORE_FLAGS -v
+          pytest "tests/unit/sources/${SOURCE}/" $IGNORE_FLAGS -v
