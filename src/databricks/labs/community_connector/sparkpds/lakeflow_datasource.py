@@ -16,12 +16,7 @@ from databricks.labs.community_connector.interface import (
 )
 from databricks.labs.community_connector.libs.utils import parse_value
 
-# ReadLimit admission-control classes were added in PySpark 4.2.  Fall back
-# to None on older versions so this module still imports cleanly.
-try:
-    from pyspark.sql.streaming.datasource import ReadAllAvailable
-except ImportError:  # pragma: no cover - older PySpark
-    ReadAllAvailable = None
+from pyspark.sql.streaming.datasource import ReadAllAvailable
 
 
 # =============================================================================
@@ -129,16 +124,13 @@ class LakeflowPartitionedStreamReader(DataSourceStreamReader, SupportsTriggerAva
         # Admission control is the connector's responsibility (e.g. via
         # window_days, max_records_per_batch), not the engine's.  Always
         # ask the engine for ReadAllAvailable.
-        if ReadAllAvailable is None:
-            # Older PySpark: the base class default is ReadAllAvailable.
-            return super().getDefaultReadLimit()
         return ReadAllAvailable()
 
     def latestOffset(self, start: dict, limit) -> dict:
         # We declared ReadAllAvailable via getDefaultReadLimit; the engine
         # must respect it.  Anything else means admission-control expectations
         # we do not support — fail loudly rather than silently ignore.
-        if ReadAllAvailable is not None and not isinstance(limit, ReadAllAvailable):
+        if not isinstance(limit, ReadAllAvailable):
             raise ValueError(
                 f"LakeflowPartitionedStreamReader only supports ReadAllAvailable; "
                 f"got {type(limit).__name__}. Micro-batch sizing must be controlled "

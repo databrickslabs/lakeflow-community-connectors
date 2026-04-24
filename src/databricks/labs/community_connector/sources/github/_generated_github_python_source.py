@@ -20,7 +20,7 @@ from pyspark.sql.datasource import (
     InputPartition,
     SimpleDataSourceStreamReader,
 )
-from pyspark.sql.streaming.datasource import SupportsTriggerAvailableNow
+from pyspark.sql.streaming.datasource import ReadAllAvailable, SupportsTriggerAvailableNow
 from pyspark.sql.types import (
     ArrayType,
     BinaryType,
@@ -2008,27 +2008,6 @@ def register_lakeflow_source(spark):
     # src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py
     ########################################################
 
-    try:
-        from pyspark.sql.streaming.datasource import ReadAllAvailable
-    except ImportError:  # pragma: no cover - older PySpark
-        ReadAllAvailable = None
-
-
-    # =============================================================================
-    # TEMPORARY WORKAROUND: Placeholder for merge script replacement
-    # =============================================================================
-    # Due to current Spark Declarative Pipeline (SDP) limitations, Python Data Source
-    # implementations cannot use module imports. The merge script (tools/scripts/
-    # merge_python_source.py) combines this file with source connector implementations
-    # into a single deployable file.
-    #
-    # The line below is replaced during merge:
-    #   - The marker `# __LAKEFLOW_CONNECT_IMPL__` is detected by the merge script
-    #   - `LakeflowConnect` is replaced with the actual implementation class name
-    #     (e.g., GithubLakeflowConnect, or the source's own LakeflowConnect class)
-    #
-    # This workaround will be removed once SDP supports proper module imports.
-    # =============================================================================
     LakeflowConnectImpl = GithubLakeflowConnect
     # Constant option or column names
     METADATA_TABLE = "_lakeflow_metadata"
@@ -2116,16 +2095,13 @@ def register_lakeflow_source(spark):
             # Admission control is the connector's responsibility (e.g. via
             # window_days, max_records_per_batch), not the engine's.  Always
             # ask the engine for ReadAllAvailable.
-            if ReadAllAvailable is None:
-                # Older PySpark: the base class default is ReadAllAvailable.
-                return super().getDefaultReadLimit()
             return ReadAllAvailable()
 
         def latestOffset(self, start: dict, limit) -> dict:
             # We declared ReadAllAvailable via getDefaultReadLimit; the engine
             # must respect it.  Anything else means admission-control expectations
             # we do not support — fail loudly rather than silently ignore.
-            if ReadAllAvailable is not None and not isinstance(limit, ReadAllAvailable):
+            if not isinstance(limit, ReadAllAvailable):
                 raise ValueError(
                     f"LakeflowPartitionedStreamReader only supports ReadAllAvailable; "
                     f"got {type(limit).__name__}. Micro-batch sizing must be controlled "
