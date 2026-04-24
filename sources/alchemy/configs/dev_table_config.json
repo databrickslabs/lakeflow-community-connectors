@@ -1,0 +1,49 @@
+{
+  "nfts_by_owner": {
+    "owner_address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+    "with_metadata": "true",
+    "page_size": "10"
+  },
+  "nfts_for_contract": {
+    "contract_address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D",
+    "with_metadata": "true",
+    "limit": "10"
+  },
+  "nft_metadata": {
+    "contract_address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D",
+    "token_id": "1"
+  },
+  "contract_metadata": {
+    "contract_address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D"
+  },
+  "nft_sales": {
+    "contract_address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D",
+    "order": "desc"
+  },
+  "floor_prices": {
+    "contract_address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D"
+  },
+  "token_prices": {
+    "symbols": "ETH,BTC,USDC"
+  },
+  "token_prices_historical": {
+    "symbol": "ETH",
+    "start_time": "2024-01-01T00:00:00Z",
+    "end_time": "2024-01-02T00:00:00Z"
+  },
+  "tokens_by_wallet": {
+    "addresses": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+    "with_metadata": "true",
+    "with_prices": "true"
+  },
+  "token_balances_by_wallet": {
+    "addresses": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+  },
+  "nfts_by_wallet": {
+    "addresses": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+    "page_size": "10"
+  },
+  "wallet_transactions": {
+    "addresses": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+  }
+}
