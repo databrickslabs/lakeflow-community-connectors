@@ -1219,14 +1219,6 @@ def register_lakeflow_source(spark):
             self._init_date = now.strftime("%Y%m%d")
             self._init_ts = now.isoformat()
 
-            # Default lower-bound study_date when the user has not set
-            # ``starting_date`` in table_options.  Without this default the
-            # stream would start at ``DEFAULT_START_DATE`` ("19000101") and
-            # walk forward one ``window_days`` at a time through ~125 years
-            # of empty windows before reaching any real data.  Users with
-            # older history should set ``starting_date`` explicitly.
-            self._default_start_date = _subtract_days(self._init_date, 365 * 2)
-
         # ------------------------------------------------------------------
         # Schema / metadata
         # ------------------------------------------------------------------
@@ -1286,15 +1278,6 @@ def register_lakeflow_source(spark):
         def is_partitioned(self, table_name: str) -> bool:
             return table_name in ("studies", "series", "instances")
 
-        def _resolve_initial_start_date(self, table_options: dict[str, str]) -> str:
-            """Lower-bound study_date for a fresh stream (no prior offset).
-
-            Priority: ``starting_date`` table option → ``self._default_start_date``
-            (init_date - 2 years).  Subsequent micro-batches derive the lower
-            bound from the previous offset and do not call this helper.
-            """
-            return table_options.get("starting_date", self._default_start_date)
-
         def latest_offset(
             self,
             table_name: str,
@@ -1304,8 +1287,20 @@ def register_lakeflow_source(spark):
             window_days = int(table_options.get("window_days", "0"))
             if window_days > 0:
                 cursor = start_offset.get("study_date") if start_offset else None
-                start_date = cursor or self._resolve_initial_start_date(table_options)
-                next_end = _add_days(start_date, window_days)
+                if not cursor:
+                    # On the first micro-batch there is no prior offset, so the
+                    # user must tell us where to start.  Without a bound, the
+                    # stream would walk forward one window at a time from
+                    # DEFAULT_START_DATE (1900) through ~125 years of empty
+                    # windows.
+                    starting_date = table_options.get("starting_date")
+                    if not starting_date:
+                        raise ValueError(
+                            f"table_options['starting_date'] is required when "
+                            f"window_days > 0 (got window_days={window_days})"
+                        )
+                    cursor = starting_date
+                next_end = _add_days(cursor, window_days)
                 return {"study_date": min(next_end, self._init_date)}
             return {"study_date": self._init_date}
 
@@ -1318,18 +1313,19 @@ def register_lakeflow_source(spark):
         ) -> list[dict]:
             if start_offset is None and end_offset is None:
                 # Batch mode: partition the entire table
-                start_date = self._resolve_initial_start_date(table_options)
+                start_date = table_options.get("starting_date", DEFAULT_START_DATE)
                 date_range = f"{start_date}-{self._init_date}"
                 if table_name == "instances":
                     return self._partition_instances(date_range, table_options)
                 return [{"date_range": date_range}]
 
             # Stream mode: derive date range from the offsets Spark passes in.
-            # On the very first call start_offset is {} (from initialOffset),
-            # so fall back to the resolved default lower bound.
+            # On the very first call start_offset is {} (from initialOffset);
+            # fall back to the user-supplied starting_date, which latest_offset
+            # already validated when window_days > 0.
             start_date = (
                 (start_offset or {}).get("study_date")
-                or self._resolve_initial_start_date(table_options)
+                or table_options.get("starting_date", DEFAULT_START_DATE)
             )
             end_date = end_offset["study_date"]
             if start_date >= end_date:
