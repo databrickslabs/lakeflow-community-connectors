@@ -12,7 +12,9 @@ permissions:
 jobs:
   # Detect which paths changed
   changes:
-    runs-on: ubuntu-latest
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
     outputs:
       libs: ${{ steps.check.outputs.libs }}
       pipeline: ${{ steps.check.outputs.pipeline }}
@@ -140,7 +142,9 @@ jobs:
   test-libs:
     needs: changes
     if: ${{ needs.changes.outputs.libs == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.10"]
@@ -169,7 +173,9 @@ jobs:
   test-pipeline:
     needs: changes
     if: ${{ needs.changes.outputs.pipeline == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.10"]
@@ -198,7 +204,9 @@ jobs:
   test-example:
     needs: changes
     if: ${{ needs.changes.outputs.example == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.10"]
@@ -227,7 +235,9 @@ jobs:
   test-community-connector:
     needs: changes
     if: ${{ needs.changes.outputs.community_connector == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.10"]
@@ -258,7 +268,9 @@ jobs:
   test-source:
     needs: changes
     if: ${{ needs.changes.outputs.sources != '[]' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
     strategy:
       matrix:
         source: ${{ fromJson(needs.changes.outputs.sources) }}
