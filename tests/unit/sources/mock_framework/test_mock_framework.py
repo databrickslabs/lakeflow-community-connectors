@@ -107,8 +107,11 @@ class TestCassetteHelpers:
         assert a == b and a
 
     def test_scrub_headers_case_insensitive(self):
-        scrubbed = scrub_headers({"Authorization": "Bearer abc", "X-Trace": "keep"})
-        assert scrubbed["Authorization"] == REDACTED
+        scrubbed = scrub_headers(
+            {"Set-Cookie": "session=abc", "X-OAuth-Scopes": "repo, admin:org", "X-Trace": "keep"}
+        )
+        assert scrubbed["Set-Cookie"] == REDACTED
+        assert scrubbed["X-OAuth-Scopes"] == REDACTED
         assert scrubbed["X-Trace"] == "keep"
 
 
@@ -136,7 +139,6 @@ class TestCassetteRoundTrip:
                 ),
             )
         )
-        cas._consumed = [True]
         cas.save()
 
         loaded = Cassette.load(tmp_path / "c.json")
@@ -279,18 +281,75 @@ class TestRecordReplay:
                 mode=MODE_REPLAY, cassette_path=tmp_path / "nope.json"
             ).__enter__()
 
-    def test_record_scrubs_auth_header(self, http_server: str, tmp_path: Path):
+    def test_record_scrubs_sensitive_response_headers(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """Response-side sensitive headers (Set-Cookie, X-OAuth-Scopes, etc.)
+        are replaced with ***REDACTED*** before hitting the cassette."""
         path = tmp_path / "scrub.json"
-        with RecordReplayPatch(mode=MODE_RECORD, cassette_path=path):
-            requests.get(
-                f"{http_server}/ping", headers={"Authorization": "Bearer secret123"}
-            )
 
-        # Cassette format does not currently include request headers, but
-        # the response headers shouldn't contain Set-Cookie/etc. and the file
-        # should not contain "secret123" verbatim.
+        def handler_with_secrets(self):
+            body = b'{"ok":true}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Set-Cookie", "session=secret_session_value")
+            self.send_header(
+                "X-OAuth-Scopes", "admin:org, admin:enterprise, repo, workflow"
+            )
+            self.send_header(
+                "github-authentication-token-expiration", "2027-01-01 00:00:00 UTC"
+            )
+            self.send_header("X-Safe", "keep-me")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        monkeypatch.setattr(_Handler, "do_GET", handler_with_secrets)
+
+        server = HTTPServer(("127.0.0.1", 0), _Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with RecordReplayPatch(mode=MODE_RECORD, cassette_path=path):
+                requests.get(f"http://127.0.0.1:{server.server_port}/ping")
+        finally:
+            server.shutdown()
+            server.server_close()
+
         text = path.read_text()
-        assert "secret123" not in text
+        # Sensitive values are gone
+        assert "secret_session_value" not in text
+        assert "admin:enterprise" not in text
+        assert "2027-01-01" not in text
+        # Scrubber actually replaced them (not just stripped)
+        assert "***REDACTED***" in text
+        # Unrelated headers are preserved
+        assert "keep-me" in text
+
+    def test_record_scrubs_email_shapes_in_body(
+        self, http_server: str, tmp_path: Path, monkeypatch
+    ):
+        """Email-shape strings in response bodies are replaced at record time."""
+        path = tmp_path / "emails.json"
+
+        def email_body(self):
+            body = json.dumps(
+                {"user": "alice", "contact": "alice@company.example"}
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        monkeypatch.setattr(_Handler, "do_GET", email_body)
+
+        with RecordReplayPatch(mode=MODE_RECORD, cassette_path=path):
+            requests.get(f"{http_server}/ping")
+
+        text = path.read_text()
+        assert "alice@company.example" not in text
+        assert "redacted@example.com" in text
 
     def test_patch_restores_session_send(self, http_server: str, tmp_path: Path):
         path = tmp_path / "restore.json"
@@ -403,6 +462,31 @@ class TestSynthesizer:
         a = synthesize_body(body, target_count=10, seed=99)
         b = synthesize_body(body, target_count=10, seed=99)
         assert a == b
+
+    def test_synthesis_does_not_alias_nested_dicts(self):
+        """Regression for the shallow-copy bug: each synthesized record must
+        have its own nested dicts, and the original samples must be untouched."""
+        from tests.unit.sources.mock_framework.synthesizer import synthesize_body
+
+        samples = [
+            {"id": 1, "owner": {"id": 10, "login": "alice"}},
+            {"id": 2, "owner": {"id": 20, "login": "bob"}},
+        ]
+        body = json.dumps(samples)
+        expanded = json.loads(synthesize_body(body, target_count=5, seed=42))
+
+        # Every synthesized record has a distinct nested dict object in memory.
+        owner_ids = {id(r["owner"]) for r in expanded}
+        assert len(owner_ids) == 5
+
+        # Varying field (`login`) genuinely differs across records — no shared
+        # mutations of one underlying object.
+        logins = [r["owner"]["login"] for r in expanded]
+        assert len(set(logins)) == 5
+
+        # Original samples are untouched.
+        assert samples[0]["owner"]["login"] == "alice"
+        assert samples[1]["owner"]["login"] == "bob"
 
 
 class TestGetMode:

@@ -5,22 +5,27 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qsl, urlsplit
 
 CASSETTE_VERSION = 1
+# Bump when the cassette JSON schema changes in a non-backward-compatible
+# way; see ``Cassette.load`` for the rejection path.
 
-# Header names redacted at record time. Lowercased for comparison.
-SCRUBBED_REQUEST_HEADERS = frozenset(
+# Response-header names redacted at record time. Lowercased for comparison.
+# Request headers are NOT stored in the cassette today, so only response-side
+# names belong here. Common offenders: session cookies, OAuth scope leakage,
+# token expiry metadata.
+SCRUBBED_RESPONSE_HEADERS = frozenset(
     {
-        "authorization",
-        "cookie",
-        "proxy-authorization",
-        "x-api-token",
-        "x-api-key",
-        "x-auth-token",
+        "set-cookie",
+        "x-oauth-scopes",
+        "x-accepted-oauth-scopes",
+        "github-authentication-token-expiration",
+        "x-github-token",
     }
 )
 REDACTED = "***REDACTED***"
@@ -145,9 +150,6 @@ class Cassette:
     ignore_query_params: frozenset[str] = field(default_factory=frozenset)
     _next_index: Dict[tuple, int] = field(default_factory=dict)
 
-    def __post_init__(self) -> None:
-        pass
-
     @classmethod
     def load(cls, path: Path) -> "Cassette":
         with open(path, "r", encoding="utf-8") as f:
@@ -246,14 +248,33 @@ def body_sha256(body: Any) -> Optional[str]:
 
 
 def scrub_headers(headers: Dict[str, str]) -> Dict[str, str]:
-    """Return a copy of ``headers`` with sensitive values redacted."""
+    """Return a copy of ``headers`` with sensitive response-side values redacted."""
     out: Dict[str, str] = {}
     for k, v in (headers or {}).items():
-        if k.lower() in SCRUBBED_REQUEST_HEADERS:
+        if k.lower() in SCRUBBED_RESPONSE_HEADERS:
             out[k] = REDACTED
         else:
             out[k] = v
     return out
+
+
+# Matches email-shape strings. Conservative — alphanumerics + common local-part
+# chars, standard domain shape. Applied to response bodies at record time so
+# PII doesn't enter the cassette.
+_EMAIL_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9._+-]*@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+')
+
+
+def scrub_emails(text: Optional[str]) -> Optional[str]:
+    """Replace any email-shape substring in ``text`` with a synthetic address.
+
+    This is the minimum-viable PII scrub applied to response bodies on record.
+    Broader content scrubbing (names, free-text, identifiers) is a future
+    enhancement — for now, this targets the leak concretely observed in the
+    GitHub commits endpoint.
+    """
+    if text is None or not text:
+        return text
+    return _EMAIL_RE.sub("redacted@example.com", text)
 
 
 def encode_body(raw: bytes, encoding: Optional[str]) -> Tuple[Optional[str], Optional[str]]:

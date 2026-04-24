@@ -11,16 +11,17 @@ as varying; fields that stay constant are preserved as-is.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import random
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from tests.unit.sources.mock_framework.sampler import (
     RECORDS_KEY_HINTS,
-    _looks_like_records_list,  # noqa: F401  — intentionally reused
+    _looks_like_records_list,
 )
 
 _ISO_TIMESTAMP_RE = re.compile(
@@ -106,13 +107,19 @@ def _locate_records(payload: Any, records_key_hints: Tuple[str, ...]):
 def _expand_records(
     samples: List[dict], *, target_count: int, seed: int
 ) -> List[dict]:
-    """Return samples + synthesized records up to target_count."""
+    """Return samples + synthesized records up to target_count.
+
+    Deep-copies everything so that nested dicts aren't shared between
+    synthesized records (which would cause accumulating mutations) or
+    with the caller's input samples (which the caller doesn't expect
+    to be mutated).
+    """
     rng = random.Random(seed)
     varying_fields = _detect_varying_fields(samples)
 
-    out: List[dict] = [dict(s) for s in samples]
+    out: List[dict] = [copy.deepcopy(s) for s in samples]
     for i in range(target_count - len(samples)):
-        template = dict(samples[-1])  # clone of last real sample
+        template = copy.deepcopy(samples[-1])
         _mutate(template, varying_fields, rng=rng, index=i + 1)
         out.append(template)
     return out
@@ -181,9 +188,14 @@ def _shift_timestamp(ts: str, *, rng: random.Random, index: int) -> str:
     except ValueError:
         return ts
     shifted = dt + timedelta(seconds=rng.randint(1, 3600) + index * 60)
+    # Preserve the original format: separator (T vs space) and Z suffix.
+    separator = " " if len(ts) >= 11 and ts[10] == " " else "T"
     if ts.endswith("Z") or ts.endswith("z"):
-        return shifted.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return shifted.isoformat()
+        return shifted.astimezone(timezone.utc).strftime(f"%Y-%m-%d{separator}%H:%M:%SZ")
+    iso = shifted.isoformat()
+    if separator == " ":
+        iso = iso.replace("T", " ", 1)
+    return iso
 
 
 def _random_hex(length: int, *, rng: random.Random) -> str:

@@ -28,6 +28,7 @@ from tests.unit.sources.mock_framework.cassette import (
     ResponseRecord,
     body_sha256,
     encode_body,
+    scrub_emails,
     scrub_headers,
     split_url,
 )
@@ -239,9 +240,9 @@ class RecordReplayPatch:
         if self.mode == MODE_RECORD:
             resp = original_send(session, prep, **kwargs)
 
-            # Dedup: if we've already recorded this match-key, keep the live
-            # response live but don't append a duplicate. Pagination walks
-            # collapse to a single cassette entry this way.
+            # Dedup: if we've already recorded this match-key, don't append a
+            # second copy. (We still hand the live response to the connector
+            # so its pagination loop can keep going during recording.)
             if self.cassette.has_key(req_rec):
                 return resp
 
@@ -250,6 +251,9 @@ class RecordReplayPatch:
             resp_rec.body_text = sample_body(
                 resp_rec.body_text, max_records=self.sample_size
             )
+            # Scrub PII (email-shape strings) from the response body before
+            # persisting.
+            resp_rec.body_text = scrub_emails(resp_rec.body_text)
             # Strip Link-header "next" pagination, drop sensitive headers.
             resp_rec.headers = scrub_headers(strip_link_header_next(resp_rec.headers))
 
