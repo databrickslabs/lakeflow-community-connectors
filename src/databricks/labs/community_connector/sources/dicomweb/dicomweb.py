@@ -185,7 +185,12 @@ class DICOMwebLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         table_name: str,
         table_options: dict[str, str],
         start_offset: dict | None = None,
+        max_rows: int | None = None,
     ) -> dict:
+        # ``max_rows`` is an admission-control hint from the engine.  DICOMweb
+        # already bounds per micro-batch via ``window_days``, so we ignore it
+        # here — the window is the effective admission control.
+        del max_rows
         window_days = int(table_options.get("window_days", "0"))
         if window_days > 0:
             # Use start_offset if available, otherwise fall back to starting_date option.

@@ -87,6 +87,7 @@ class SupportsPartitionedStream(SupportsPartition):
         table_name: str,
         table_options: dict[str, str],
         start_offset: dict | None = None,
+        max_rows: int | None = None,
     ) -> dict:
         """Return the most recent offset available for the table.
 
@@ -95,11 +96,18 @@ class SupportsPartitionedStream(SupportsPartition):
         Args:
             table_name: The name of the table.
             table_options: A dictionary of options for accessing the table.
-            start_offset: The current start offset, or None on the first call.
-                PySpark's ``DataSourceStreamReader.latestOffset()`` does not
-                pass this yet, so the framework always sends None for now.
-                Connectors may use it to implement windowed batching when
-                called directly.
+            start_offset: The current committed offset.  ``{}`` on the very
+                first call (from ``initialOffset``), then the last returned
+                end_offset on each subsequent call.
+            max_rows: Optional admission-control hint from the engine.  When
+                set, the connector should cap the returned offset so that
+                reading the range ``(start_offset, returned_offset]`` yields
+                at most approximately ``max_rows`` records.  ``None`` means
+                no limit — return the full high-water mark (bounded by any
+                init-time cap the connector enforces).  See the skill
+                ``implement-partitioned-connector`` for guidance on how to
+                approximate this bound when the source API does not expose
+                record counts directly.
         Returns:
             A dict whose keys and values are primitive types (str, int, bool).
         """

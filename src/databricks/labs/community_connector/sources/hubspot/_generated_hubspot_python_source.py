@@ -455,6 +455,7 @@ def register_lakeflow_source(spark):
             table_name: str,
             table_options: dict[str, str],
             start_offset: dict | None = None,
+            max_rows: int | None = None,
         ) -> dict:
             """Return the most recent offset available for the table.
 
@@ -463,11 +464,18 @@ def register_lakeflow_source(spark):
             Args:
                 table_name: The name of the table.
                 table_options: A dictionary of options for accessing the table.
-                start_offset: The current start offset, or None on the first call.
-                    PySpark's ``DataSourceStreamReader.latestOffset()`` does not
-                    pass this yet, so the framework always sends None for now.
-                    Connectors may use it to implement windowed batching when
-                    called directly.
+                start_offset: The current committed offset.  ``{}`` on the very
+                    first call (from ``initialOffset``), then the last returned
+                    end_offset on each subsequent call.
+                max_rows: Optional admission-control hint from the engine.  When
+                    set, the connector should cap the returned offset so that
+                    reading the range ``(start_offset, returned_offset]`` yields
+                    at most approximately ``max_rows`` records.  ``None`` means
+                    no limit — return the full high-water mark (bounded by any
+                    init-time cap the connector enforces).  See the skill
+                    ``implement-partitioned-connector`` for guidance on how to
+                    approximate this bound when the source API does not expose
+                    record counts directly.
             Returns:
                 A dict whose keys and values are primitive types (str, int, bool).
             """
@@ -1208,6 +1216,28 @@ def register_lakeflow_source(spark):
     # src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py
     ########################################################
 
+    try:
+        from pyspark.sql.streaming.datasource import ReadAllAvailable, ReadMaxRows
+    except ImportError:  # pragma: no cover - older PySpark
+        ReadAllAvailable = None
+        ReadMaxRows = None
+
+
+    # =============================================================================
+    # TEMPORARY WORKAROUND: Placeholder for merge script replacement
+    # =============================================================================
+    # Due to current Spark Declarative Pipeline (SDP) limitations, Python Data Source
+    # implementations cannot use module imports. The merge script (tools/scripts/
+    # merge_python_source.py) combines this file with source connector implementations
+    # into a single deployable file.
+    #
+    # The line below is replaced during merge:
+    #   - The marker `# __LAKEFLOW_CONNECT_IMPL__` is detected by the merge script
+    #   - `LakeflowConnect` is replaced with the actual implementation class name
+    #     (e.g., GithubLakeflowConnect, or the source's own LakeflowConnect class)
+    #
+    # This workaround will be removed once SDP supports proper module imports.
+    # =============================================================================
     LakeflowConnectImpl = HubspotLakeflowConnect
     # Constant option or column names
     METADATA_TABLE = "_lakeflow_metadata"
@@ -1291,10 +1321,25 @@ def register_lakeflow_source(spark):
         def initialOffset(self):
             return {}
 
-        def latestOffset(self):
-            # PySpark does not pass the current offset to latestOffset() yet,
-            # so we forward None.  Once PySpark supports it, pass the real value.
-            return self.lakeflow_connect.latest_offset(self.table_name, self.table_options, None)
+        def getDefaultReadLimit(self):
+            # We currently let the engine read everything available per micro-batch.
+            # Individual connectors can still cap internally (e.g. via window_days
+            # or _init_time).  Override if per-connector admission control is needed.
+            if ReadAllAvailable is None:
+                # Older PySpark: the base class provides a default.
+                return super().getDefaultReadLimit()
+            return ReadAllAvailable()
+
+        def latestOffset(self, start: dict, limit) -> dict:
+            # PySpark 4.2+ calls latestOffset(start, limit).  Translate the
+            # pyspark-specific ReadLimit into a plain max_rows int for the
+            # connector interface so connector authors do not depend on pyspark.
+            max_rows = None
+            if ReadMaxRows is not None and isinstance(limit, ReadMaxRows):
+                max_rows = limit.maxRows
+            return self.lakeflow_connect.latest_offset(
+                self.table_name, self.table_options, start, max_rows
+            )
 
         def partitions(self, start: dict, end: dict):
             partition_descs = self.lakeflow_connect.get_partitions(

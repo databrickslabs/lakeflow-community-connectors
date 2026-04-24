@@ -16,6 +16,14 @@ from databricks.labs.community_connector.interface import (
 )
 from databricks.labs.community_connector.libs.utils import parse_value
 
+# ReadLimit admission-control classes were added in PySpark 4.2.  Fall back
+# to None on older versions so this module still imports cleanly.
+try:
+    from pyspark.sql.streaming.datasource import ReadAllAvailable, ReadMaxRows
+except ImportError:  # pragma: no cover - older PySpark
+    ReadAllAvailable = None
+    ReadMaxRows = None
+
 
 # =============================================================================
 # TEMPORARY WORKAROUND: Placeholder for merge script replacement
@@ -118,10 +126,25 @@ class LakeflowPartitionedStreamReader(DataSourceStreamReader, SupportsTriggerAva
     def initialOffset(self):
         return {}
 
-    def latestOffset(self):
-        # PySpark does not pass the current offset to latestOffset() yet,
-        # so we forward None.  Once PySpark supports it, pass the real value.
-        return self.lakeflow_connect.latest_offset(self.table_name, self.table_options, None)
+    def getDefaultReadLimit(self):
+        # We currently let the engine read everything available per micro-batch.
+        # Individual connectors can still cap internally (e.g. via window_days
+        # or _init_time).  Override if per-connector admission control is needed.
+        if ReadAllAvailable is None:
+            # Older PySpark: the base class provides a default.
+            return super().getDefaultReadLimit()
+        return ReadAllAvailable()
+
+    def latestOffset(self, start: dict, limit) -> dict:
+        # PySpark 4.2+ calls latestOffset(start, limit).  Translate the
+        # pyspark-specific ReadLimit into a plain max_rows int for the
+        # connector interface so connector authors do not depend on pyspark.
+        max_rows = None
+        if ReadMaxRows is not None and isinstance(limit, ReadMaxRows):
+            max_rows = limit.maxRows
+        return self.lakeflow_connect.latest_offset(
+            self.table_name, self.table_options, start, max_rows
+        )
 
     def partitions(self, start: dict, end: dict):
         partition_descs = self.lakeflow_connect.get_partitions(
