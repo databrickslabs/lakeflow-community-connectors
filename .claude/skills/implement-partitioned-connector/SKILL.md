@@ -49,7 +49,7 @@ class MyLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
 
 ### Additional from SupportsPartitionedStream (streaming partitioning)
 
-- **`latest_offset(table_name, table_options, start_offset=None, max_rows=None)`** — Return the most recent offset available. Called by Spark every micro-batch. `start_offset` is the current committed offset (`{}` on the first call). `max_rows` is an optional admission-control hint: when set, the connector should cap the returned offset so that reading `(start_offset, returned_offset]` yields at most ~`max_rows` records; when `None`, return the full high-water mark (bounded by any init-time cap). Return a dict with primitive values (str, int, bool).
+- **`latest_offset(table_name, table_options, start_offset=None)`** — Return the most recent offset available. Called by Spark every micro-batch. `start_offset` is the current committed offset (`{}` on the first call). Return a dict with primitive values (str, int, bool). Micro-batch sizing (rows per batch, time window, etc.) is the connector's responsibility — use table_options (e.g. `window_days`, `max_records_per_batch`) to control it. The engine always requests "all available" and does not pass an admission-control hint.
 - **`get_partitions(table_name, table_options, start_offset=None, end_offset=None)`** — Overrides the batch version with optional offset params. When `start_offset` and `end_offset` are both `None`, behave as batch (partition the entire table). When offsets are provided, partition only the given range. Return an empty list when `start_offset == end_offset`.
 - **`is_partitioned(table_name)`** *(optional override)* — Return `False` for tables that should fall back to `simpleStreamReader`. Default is `True`.
 
@@ -78,7 +78,7 @@ def __init__(self, options):
     super().__init__(options)
     self._init_time = datetime.now(timezone.utc).isoformat()
 
-def latest_offset(self, table_name, table_options, start_offset=None, max_rows=None):
+def latest_offset(self, table_name, table_options, start_offset=None):
     source_max = self._query_source_high_water_mark(table_name)  # e.g. max updated_at
     capped = min(source_max, self._init_time) if source_max else self._init_time
     return {"cursor": capped}

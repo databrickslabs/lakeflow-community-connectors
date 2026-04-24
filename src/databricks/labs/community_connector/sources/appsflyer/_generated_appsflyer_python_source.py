@@ -467,11 +467,16 @@ def register_lakeflow_source(spark):
             table_name: str,
             table_options: dict[str, str],
             start_offset: dict | None = None,
-            max_rows: int | None = None,
         ) -> dict:
             """Return the most recent offset available for the table.
 
             Called by Spark on every micro-batch to discover new data.
+
+            Micro-batch sizing (by row count, time window, etc.) is entirely the
+            connector's responsibility — use table_options (e.g. ``window_days``,
+            ``max_records_per_batch``) to control it.  The framework always
+            requests "all available" and does not pass an admission-control
+            hint here.
 
             Args:
                 table_name: The name of the table.
@@ -479,15 +484,6 @@ def register_lakeflow_source(spark):
                 start_offset: The current committed offset.  ``{}`` on the very
                     first call (from ``initialOffset``), then the last returned
                     end_offset on each subsequent call.
-                max_rows: Optional admission-control hint from the engine.  When
-                    set, the connector should cap the returned offset so that
-                    reading the range ``(start_offset, returned_offset]`` yields
-                    at most approximately ``max_rows`` records.  ``None`` means
-                    no limit — return the full high-water mark (bounded by any
-                    init-time cap the connector enforces).  See the skill
-                    ``implement-partitioned-connector`` for guidance on how to
-                    approximate this bound when the source API does not expose
-                    record counts directly.
             Returns:
                 A dict whose keys and values are primitive types (str, int, bool).
             """
@@ -1170,10 +1166,9 @@ def register_lakeflow_source(spark):
     ########################################################
 
     try:
-        from pyspark.sql.streaming.datasource import ReadAllAvailable, ReadMaxRows
+        from pyspark.sql.streaming.datasource import ReadAllAvailable
     except ImportError:  # pragma: no cover - older PySpark
         ReadAllAvailable = None
-        ReadMaxRows = None
 
 
     # =============================================================================
@@ -1275,23 +1270,26 @@ def register_lakeflow_source(spark):
             return {}
 
         def getDefaultReadLimit(self):
-            # We currently let the engine read everything available per micro-batch.
-            # Individual connectors can still cap internally (e.g. via window_days
-            # or _init_time).  Override if per-connector admission control is needed.
+            # Admission control is the connector's responsibility (e.g. via
+            # window_days, max_records_per_batch), not the engine's.  Always
+            # ask the engine for ReadAllAvailable.
             if ReadAllAvailable is None:
-                # Older PySpark: the base class provides a default.
+                # Older PySpark: the base class default is ReadAllAvailable.
                 return super().getDefaultReadLimit()
             return ReadAllAvailable()
 
         def latestOffset(self, start: dict, limit) -> dict:
-            # PySpark 4.2+ calls latestOffset(start, limit).  Translate the
-            # pyspark-specific ReadLimit into a plain max_rows int for the
-            # connector interface so connector authors do not depend on pyspark.
-            max_rows = None
-            if ReadMaxRows is not None and isinstance(limit, ReadMaxRows):
-                max_rows = limit.maxRows
+            # We declared ReadAllAvailable via getDefaultReadLimit; the engine
+            # must respect it.  Anything else means admission-control expectations
+            # we do not support — fail loudly rather than silently ignore.
+            if ReadAllAvailable is not None and not isinstance(limit, ReadAllAvailable):
+                raise ValueError(
+                    f"LakeflowPartitionedStreamReader only supports ReadAllAvailable; "
+                    f"got {type(limit).__name__}. Micro-batch sizing must be controlled "
+                    f"by the connector implementation (table_options), not the engine."
+                )
             return self.lakeflow_connect.latest_offset(
-                self.table_name, self.table_options, start, max_rows
+                self.table_name, self.table_options, start
             )
 
         def partitions(self, start: dict, end: dict):

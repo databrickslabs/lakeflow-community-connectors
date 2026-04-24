@@ -87,11 +87,16 @@ class SupportsPartitionedStream(SupportsPartition):
         table_name: str,
         table_options: dict[str, str],
         start_offset: dict | None = None,
-        max_rows: int | None = None,
     ) -> dict:
         """Return the most recent offset available for the table.
 
         Called by Spark on every micro-batch to discover new data.
+
+        Micro-batch sizing (by row count, time window, etc.) is entirely the
+        connector's responsibility — use table_options (e.g. ``window_days``,
+        ``max_records_per_batch``) to control it.  The framework always
+        requests "all available" and does not pass an admission-control
+        hint here.
 
         Args:
             table_name: The name of the table.
@@ -99,15 +104,6 @@ class SupportsPartitionedStream(SupportsPartition):
             start_offset: The current committed offset.  ``{}`` on the very
                 first call (from ``initialOffset``), then the last returned
                 end_offset on each subsequent call.
-            max_rows: Optional admission-control hint from the engine.  When
-                set, the connector should cap the returned offset so that
-                reading the range ``(start_offset, returned_offset]`` yields
-                at most approximately ``max_rows`` records.  ``None`` means
-                no limit — return the full high-water mark (bounded by any
-                init-time cap the connector enforces).  See the skill
-                ``implement-partitioned-connector`` for guidance on how to
-                approximate this bound when the source API does not expose
-                record counts directly.
         Returns:
             A dict whose keys and values are primitive types (str, int, bool).
         """
