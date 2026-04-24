@@ -1,8 +1,8 @@
 name: Verify Dependency Locks
 
-# Regenerates requirements/*.txt and warns (without failing) if the
-# committed locks differ from a fresh regeneration. Warn-only per repo
-# policy; flip the final line to `exit 1` to make it blocking.
+# Regenerates requirements/*.txt and fails if the committed locks differ
+# from a fresh regeneration. Enforces the internal guidance's "strongly
+# recommended" assertion that running uv pip compile produces no diff.
 
 on:
   pull_request:
@@ -65,5 +65,5 @@ jobs:
             echo "</details>"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          echo "::warning title=Lock drift::Dependency locks are out of date. See job summary for regeneration steps."
-          # Warn only. Change to `exit 1` to enforce strictly.
+          echo "::error title=Lock drift::Dependency locks are out of date. See job summary for regeneration steps."
+          exit 1
