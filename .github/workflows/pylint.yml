@@ -7,7 +7,9 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.10"]
@@ -20,9 +22,17 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pylint
-        pip install -e ".[dev]"
-        pip install -e "./tools/community_connector[dev]"
+        LOCK="requirements/pylint.txt"
+        if [ -f "$LOCK" ]; then
+          pip install -r "$LOCK"
+          pip install -e . --no-deps
+          pip install -e ./tools/community_connector --no-deps
+        else
+          echo "::warning title=Unpinned install::$LOCK missing; falling back to live PyPI resolution. Run tools/scripts/regenerate-locks.sh on arca and commit requirements/."
+          pip install pylint
+          pip install -e ".[dev]"
+          pip install -e "./tools/community_connector[dev]"
+        fi
     - name: Analysing the code with pylint
       run: |
         # Lint source files (excluding tests directory and generated files)
