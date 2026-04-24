@@ -153,7 +153,14 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          LOCK="requirements/root.txt"
+          if [ -f "$LOCK" ]; then
+            pip install -r "$LOCK"
+            pip install -e . --no-deps
+          else
+            echo "::warning title=Unpinned install::$LOCK missing; falling back to live PyPI resolution."
+            pip install -e ".[dev]"
+          fi
       - name: Run libs tests
         run: |
           pytest tests/unit/libs/ -v
@@ -175,7 +182,14 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          LOCK="requirements/root.txt"
+          if [ -f "$LOCK" ]; then
+            pip install -r "$LOCK"
+            pip install -e . --no-deps
+          else
+            echo "::warning title=Unpinned install::$LOCK missing; falling back to live PyPI resolution."
+            pip install -e ".[dev]"
+          fi
       - name: Run pipeline tests
         run: |
           pytest tests/unit/pipeline/ -v
@@ -197,7 +211,14 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          LOCK="requirements/root.txt"
+          if [ -f "$LOCK" ]; then
+            pip install -r "$LOCK"
+            pip install -e . --no-deps
+          else
+            echo "::warning title=Unpinned install::$LOCK missing; falling back to live PyPI resolution."
+            pip install -e ".[dev]"
+          fi
       - name: Run example tests
         run: |
           pytest tests/unit/sources/example/ -v
@@ -219,8 +240,15 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          cd tools/community_connector
-          pip install -e ".[dev]"
+          LOCK="requirements/tools.txt"
+          if [ -f "$LOCK" ]; then
+            pip install -r "$LOCK"
+            pip install -e ./tools/community_connector --no-deps
+          else
+            echo "::warning title=Unpinned install::$LOCK missing; falling back to live PyPI resolution."
+            cd tools/community_connector
+            pip install -e ".[dev]"
+          fi
       - name: Run community connector tests
         run: |
           cd tools/community_connector
