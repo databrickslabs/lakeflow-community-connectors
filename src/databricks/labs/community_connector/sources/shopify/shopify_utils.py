@@ -96,3 +96,29 @@ def nullify_empty(record: dict, *keys: str) -> None:
     for key in keys:
         if key not in record or record[key] == {}:
             record[key] = None
+
+
+def paginate_get(
+    session: requests.Session,
+    initial_url: str,
+    initial_params: dict[str, str] | None,
+    label: str,
+    response_key: str,
+):
+    """Yield records by following Shopify Link-header cursor pagination.
+
+    Initial call uses *initial_url* + *initial_params*. Subsequent
+    calls follow the next-page URL from the Link header verbatim
+    (Shopify's docs are explicit: only ``limit`` and ``fields`` are
+    permitted alongside a ``page_info`` cursor; all original filter
+    params are encoded in the cursor itself).
+    """
+    url, params = initial_url, initial_params
+    while url:
+        data, response = api_get(session, url, params, label)
+        for record in data.get(response_key, []):
+            yield record
+        url = extract_next_link(response)
+        # After the first page the cursor URL embeds all filter params,
+        # so subsequent calls pass no params of their own.
+        params = None

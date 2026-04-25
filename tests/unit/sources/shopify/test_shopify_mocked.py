@@ -164,3 +164,156 @@ def test_read_locations_propagates_api_error(conn):
     # api_get raises RuntimeError on non-200
     with pytest.raises(RuntimeError, match="locations"):
         conn._read_locations({}, {})
+
+
+# ---------------------------------------------------------------------------
+# Generic CDC reader (customers / products / orders share this code path)
+# ---------------------------------------------------------------------------
+
+
+def test_cdc_initial_fetch_sets_watermark_from_max_updated_at(conn):
+    """First run (no offset) returns records and a watermark."""
+    conn._session.get.return_value = _response(
+        json_body={
+            "customers": [
+                {"id": 1, "updated_at": "2026-04-20T10:00:00Z"},
+                {"id": 2, "updated_at": "2026-04-21T11:00:00Z"},
+            ]
+        }
+    )
+
+    records, offset = conn._read_customers({}, {})
+    records = list(records)
+    assert len(records) == 2
+    assert records[0]["shop"] == "lakeflow-test-store"
+    # Watermark = max updated_at across batch
+    assert offset == {"updated_at": "2026-04-21T11:00:00Z"}
+
+
+def test_cdc_incremental_passes_updated_at_min(conn):
+    """Subsequent run with prior offset must send updated_at_min filter."""
+    conn._session.get.return_value = _response(
+        json_body={"customers": []}
+    )
+    conn._read_customers(
+        {"updated_at": "2026-04-19T00:00:00Z"}, {}
+    )
+
+    params = conn._session.get.call_args.kwargs["params"]
+    assert params["updated_at_min"] == "2026-04-19T00:00:00Z"
+    assert params["limit"] == "250"
+
+
+def test_cdc_strict_dedup_drops_boundary_records(conn):
+    """Inclusive server filter + client-side > = strict overall.
+    Records exactly at the watermark must be dropped (Shopify's
+    updated_at_min is inclusive and would otherwise re-emit them)."""
+    conn._session.get.return_value = _response(
+        json_body={
+            "customers": [
+                # At watermark — must be filtered out client-side
+                {"id": 1, "updated_at": "2026-04-20T00:00:00Z"},
+                # After watermark — keep
+                {"id": 2, "updated_at": "2026-04-21T00:00:00Z"},
+            ]
+        }
+    )
+
+    prior = {"updated_at": "2026-04-20T00:00:00Z"}
+    records, offset = conn._read_customers(prior, {})
+    records = list(records)
+
+    assert len(records) == 1
+    assert records[0]["id"] == 2
+    assert offset == {"updated_at": "2026-04-21T00:00:00Z"}
+
+
+def test_cdc_stable_offset_when_no_changes(conn):
+    """No new records ⇒ end_offset == start_offset (terminates)."""
+    conn._session.get.return_value = _response(
+        json_body={"customers": []}
+    )
+
+    prior = {"updated_at": "2026-04-21T00:00:00Z"}
+    records, offset = conn._read_customers(prior, {})
+    assert list(records) == []
+    assert offset == prior
+
+
+def test_cdc_link_header_pagination_follows_next(conn):
+    """When the Link header contains rel=next, the helper follows it
+    until exhausted — even though the URL params differ on subsequent
+    calls (page_info cursor encodes original filters)."""
+    next_url = (
+        "https://lakeflow-test-store.myshopify.com/admin/api/2026-04"
+        "/customers.json?page_info=cursor2&limit=250"
+    )
+    conn._session.get.side_effect = [
+        _response(
+            json_body={
+                "customers": [
+                    {"id": 1, "updated_at": "2026-04-20T10:00:00Z"}
+                ]
+            },
+            headers={"Link": f'<{next_url}>; rel="next"'},
+        ),
+        _response(
+            json_body={
+                "customers": [
+                    {"id": 2, "updated_at": "2026-04-21T11:00:00Z"}
+                ]
+            },
+            headers={},  # no next, drained
+        ),
+    ]
+
+    records, offset = conn._read_customers({}, {})
+    records = list(records)
+
+    assert [r["id"] for r in records] == [1, 2]
+    # Two HTTP calls: initial + follow-link
+    assert conn._session.get.call_count == 2
+    # Second call uses the URL from Link header verbatim, no params
+    second_call = conn._session.get.call_args_list[1]
+    assert second_call.args[0] == next_url
+    assert second_call.kwargs.get("params") is None
+
+
+def test_orders_passes_status_any(conn):
+    """orders endpoint defaults to status=open and silently drops
+    cancelled/closed; we must explicitly pass status=any."""
+    conn._session.get.return_value = _response(
+        json_body={"orders": []}
+    )
+    conn._read_orders({}, {})
+
+    params = conn._session.get.call_args.kwargs["params"]
+    assert params.get("status") == "any"
+
+
+def test_orders_records_enriched_with_shop(conn):
+    conn._session.get.return_value = _response(
+        json_body={
+            "orders": [
+                {
+                    "id": 1001,
+                    "order_number": 1001,
+                    "updated_at": "2026-04-21T11:00:00Z",
+                    "financial_status": "paid",
+                }
+            ]
+        }
+    )
+    records, _ = conn._read_orders({}, {})
+    records = list(records)
+    assert records[0]["shop"] == "lakeflow-test-store"
+    assert records[0]["financial_status"] == "paid"
+
+
+def test_products_uses_correct_endpoint(conn):
+    conn._session.get.return_value = _response(
+        json_body={"products": []}
+    )
+    conn._read_products({}, {})
+    called_url = conn._session.get.call_args[0][0]
+    assert called_url.endswith("/products.json")
