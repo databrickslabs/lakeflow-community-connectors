@@ -1,0 +1,43 @@
+# shopify Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: Shopify
+connection:
+  parameters:
+    - name: shop
+      type: string
+      required: true
+      description: >
+        Shopify shop subdomain. The portion before ".myshopify.com" in the
+        store URL — e.g. "lakeflow-test-store" for
+        https://lakeflow-test-store.myshopify.com.
+
+    - name: access_token
+      type: string
+      required: true
+      secret: true
+      description: >
+        Admin API access token for the custom app installed on the shop.
+        Token format starts with "shpat_". Required scopes:
+        read_products, read_customers, read_orders, read_inventory,
+        read_locations, read_fulfillments.
+
+    - name: api_version
+      type: string
+      required: false
+      description: >
+        Shopify Admin REST API version (e.g. "2026-04"). Defaults to the
+        latest stable version supported by the connector.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# ============================================================================
+external_options_allowlist: "since_id,status,fulfillment_status,financial_status"
