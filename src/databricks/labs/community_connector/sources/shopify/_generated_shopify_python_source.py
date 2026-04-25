@@ -651,6 +651,20 @@ def register_lakeflow_source(spark):
         ]
     )
 
+    # Slim refund line item — drops the deeply-nested ``line_item`` mirror
+    # (use ``line_item_id`` to join back to ``orders.line_items``).
+    REFUND_LINE_ITEM_STRUCT = StructType(
+        [
+            StructField("id", LongType(), False),
+            StructField("line_item_id", LongType(), True),
+            StructField("location_id", LongType(), True),
+            StructField("quantity", LongType(), True),
+            StructField("restock_type", StringType(), True),
+            StructField("subtotal", DoubleType(), True),
+            StructField("total_tax", DoubleType(), True),
+        ]
+    )
+
 
     # =============================================================================
     # Table Schemas
@@ -740,6 +754,60 @@ def register_lakeflow_source(spark):
                     "images", ArrayType(PRODUCT_IMAGE_STRUCT), True
                 ),
                 StructField("image", PRODUCT_IMAGE_STRUCT, True),
+                StructField("shop", StringType(), False),
+            ]
+        ),
+        "refunds": StructType(
+            [
+                StructField("id", LongType(), False),
+                StructField("order_id", LongType(), False),
+                StructField("created_at", StringType(), True),
+                StructField("processed_at", StringType(), True),
+                StructField("note", StringType(), True),
+                StructField("user_id", LongType(), True),
+                StructField("restock", BooleanType(), True),
+                StructField("admin_graphql_api_id", StringType(), True),
+                StructField(
+                    "refund_line_items",
+                    ArrayType(REFUND_LINE_ITEM_STRUCT),
+                    True,
+                ),
+                StructField("shop", StringType(), False),
+            ]
+        ),
+        "fulfillments": StructType(
+            [
+                StructField("id", LongType(), False),
+                StructField("order_id", LongType(), False),
+                StructField("status", StringType(), True),
+                StructField("shipment_status", StringType(), True),
+                StructField("service", StringType(), True),
+                StructField("created_at", StringType(), True),
+                StructField("updated_at", StringType(), True),
+                StructField("location_id", LongType(), True),
+                StructField("tracking_company", StringType(), True),
+                StructField("tracking_number", StringType(), True),
+                StructField(
+                    "tracking_numbers", ArrayType(StringType()), True
+                ),
+                StructField("tracking_url", StringType(), True),
+                StructField(
+                    "tracking_urls", ArrayType(StringType()), True
+                ),
+                StructField("admin_graphql_api_id", StringType(), True),
+                StructField(
+                    "line_items", ArrayType(ORDER_LINE_ITEM_STRUCT), True
+                ),
+                StructField("shop", StringType(), False),
+            ]
+        ),
+        "inventory_levels": StructType(
+            [
+                StructField("inventory_item_id", LongType(), False),
+                StructField("location_id", LongType(), False),
+                StructField("available", LongType(), True),
+                StructField("updated_at", StringType(), True),
+                StructField("admin_graphql_api_id", StringType(), True),
                 StructField("shop", StringType(), False),
             ]
         ),
@@ -834,6 +902,21 @@ def register_lakeflow_source(spark):
         },
         "orders": {
             "primary_keys": ["id"],
+            "cursor_field": "updated_at",
+            "ingestion_type": "cdc",
+        },
+        "refunds": {
+            "primary_keys": ["id"],
+            "cursor_field": "created_at",
+            "ingestion_type": "append",
+        },
+        "fulfillments": {
+            "primary_keys": ["id"],
+            "cursor_field": "updated_at",
+            "ingestion_type": "cdc",
+        },
+        "inventory_levels": {
+            "primary_keys": ["inventory_item_id", "location_id"],
             "cursor_field": "updated_at",
             "ingestion_type": "cdc",
         },
@@ -1045,6 +1128,9 @@ def register_lakeflow_source(spark):
                 "customers": self._read_customers,
                 "products": self._read_products,
                 "orders": self._read_orders,
+                "refunds": self._read_refunds,
+                "fulfillments": self._read_fulfillments,
+                "inventory_levels": self._read_inventory_levels,
             }
             handler = dispatch.get(table_name)
             if handler is None:
@@ -1159,6 +1245,133 @@ def register_lakeflow_source(spark):
                 response_key="orders",
                 extra_params={"status": "any"},
             )
+
+        # -- Per-order child resources (refunds, fulfillments) ------------- #
+
+        def _read_per_order_table(
+            self,
+            start_offset: dict,
+            sub_resource: str,
+            cursor_field: str,
+        ) -> tuple[Iterator[dict], dict]:
+            """Read a per-order child resource using the parent-orders trick.
+
+            The /orders/{id}/{sub_resource}.json endpoints don't accept a
+            date filter, so we discover candidate orders via the orders
+            endpoint with ``updated_at_min=watermark`` (Shopify's order
+            ``updated_at`` advances when refunds/fulfillments are added),
+            then fetch the sub-resource for each candidate. Records are
+            finally filtered client-side by ``cursor_field > watermark``.
+            """
+            start_offset = start_offset or {}
+            since: str | None = start_offset.get(cursor_field)
+
+            orders_params: dict[str, str] = {
+                "limit": "250",
+                "status": "any",
+            }
+            if since:
+                orders_params["updated_at_min"] = since
+
+            all_records: list[dict[str, Any]] = []
+            max_seen: str | None = since
+
+            for order in paginate_get(
+                self._session,
+                f"{self.base_url}/orders.json",
+                orders_params,
+                f"{sub_resource}-discovery",
+                "orders",
+            ):
+                order_id = order.get("id")
+                if not order_id:
+                    continue
+                data, _ = api_get(
+                    self._session,
+                    f"{self.base_url}/orders/{order_id}/{sub_resource}.json",
+                    params=None,
+                    label=sub_resource,
+                )
+                for item in data.get(sub_resource, []):
+                    ts = item.get(cursor_field)
+                    if since and ts and ts <= since:
+                        continue
+                    rec = dict(item)
+                    rec["shop"] = self.shop
+                    all_records.append(rec)
+                    if ts and (max_seen is None or ts > max_seen):
+                        max_seen = ts
+
+            end_offset = {cursor_field: max_seen} if max_seen else {}
+            return iter(all_records), end_offset
+
+        def _read_refunds(
+            self, start_offset: dict, table_options: dict[str, str]
+        ) -> tuple[Iterator[dict], dict]:
+            return self._read_per_order_table(
+                start_offset,
+                sub_resource="refunds",
+                cursor_field="created_at",
+            )
+
+        def _read_fulfillments(
+            self, start_offset: dict, table_options: dict[str, str]
+        ) -> tuple[Iterator[dict], dict]:
+            return self._read_per_order_table(
+                start_offset,
+                sub_resource="fulfillments",
+                cursor_field="updated_at",
+            )
+
+        # -- Inventory ----------------------------------------------------- #
+
+        def _read_inventory_levels(
+            self, start_offset: dict, table_options: dict[str, str]
+        ) -> tuple[Iterator[dict], dict]:
+            """Read inventory levels across all locations.
+
+            The /inventory_levels.json endpoint requires ``location_ids``
+            or ``inventory_item_ids`` as a query param, so we first list
+            locations and then iterate. The endpoint has no date filter,
+            so we fetch all levels each run; the framework's CDC merge on
+            the composite ``(inventory_item_id, location_id)`` PK handles
+            deltas idempotently. Watermark advances to ``max(updated_at)``
+            across returned records to signal forward progress when data
+            actually changed.
+            """
+            start_offset = start_offset or {}
+            max_seen: str | None = start_offset.get("updated_at")
+
+            locs_data, _ = api_get(
+                self._session,
+                f"{self.base_url}/locations.json",
+                params=None,
+                label="locations",
+            )
+            location_ids = [
+                str(loc["id"])
+                for loc in locs_data.get("locations", [])
+                if loc.get("id") and loc.get("active")
+            ]
+
+            all_records: list[dict[str, Any]] = []
+            for loc_id in location_ids:
+                for level in paginate_get(
+                    self._session,
+                    f"{self.base_url}/inventory_levels.json",
+                    {"limit": "250", "location_ids": loc_id},
+                    "inventory_levels",
+                    "inventory_levels",
+                ):
+                    rec = dict(level)
+                    rec["shop"] = self.shop
+                    all_records.append(rec)
+                    ts = level.get("updated_at")
+                    if ts and (max_seen is None or ts > max_seen):
+                        max_seen = ts
+
+            end_offset = {"updated_at": max_seen} if max_seen else {}
+            return iter(all_records), end_offset
 
 
     ########################################################

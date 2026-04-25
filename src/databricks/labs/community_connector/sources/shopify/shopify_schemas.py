@@ -161,6 +161,20 @@ PRODUCT_IMAGE_STRUCT = StructType(
     ]
 )
 
+# Slim refund line item — drops the deeply-nested ``line_item`` mirror
+# (use ``line_item_id`` to join back to ``orders.line_items``).
+REFUND_LINE_ITEM_STRUCT = StructType(
+    [
+        StructField("id", LongType(), False),
+        StructField("line_item_id", LongType(), True),
+        StructField("location_id", LongType(), True),
+        StructField("quantity", LongType(), True),
+        StructField("restock_type", StringType(), True),
+        StructField("subtotal", DoubleType(), True),
+        StructField("total_tax", DoubleType(), True),
+    ]
+)
+
 
 # =============================================================================
 # Table Schemas
@@ -250,6 +264,60 @@ TABLE_SCHEMAS: dict[str, StructType] = {
                 "images", ArrayType(PRODUCT_IMAGE_STRUCT), True
             ),
             StructField("image", PRODUCT_IMAGE_STRUCT, True),
+            StructField("shop", StringType(), False),
+        ]
+    ),
+    "refunds": StructType(
+        [
+            StructField("id", LongType(), False),
+            StructField("order_id", LongType(), False),
+            StructField("created_at", StringType(), True),
+            StructField("processed_at", StringType(), True),
+            StructField("note", StringType(), True),
+            StructField("user_id", LongType(), True),
+            StructField("restock", BooleanType(), True),
+            StructField("admin_graphql_api_id", StringType(), True),
+            StructField(
+                "refund_line_items",
+                ArrayType(REFUND_LINE_ITEM_STRUCT),
+                True,
+            ),
+            StructField("shop", StringType(), False),
+        ]
+    ),
+    "fulfillments": StructType(
+        [
+            StructField("id", LongType(), False),
+            StructField("order_id", LongType(), False),
+            StructField("status", StringType(), True),
+            StructField("shipment_status", StringType(), True),
+            StructField("service", StringType(), True),
+            StructField("created_at", StringType(), True),
+            StructField("updated_at", StringType(), True),
+            StructField("location_id", LongType(), True),
+            StructField("tracking_company", StringType(), True),
+            StructField("tracking_number", StringType(), True),
+            StructField(
+                "tracking_numbers", ArrayType(StringType()), True
+            ),
+            StructField("tracking_url", StringType(), True),
+            StructField(
+                "tracking_urls", ArrayType(StringType()), True
+            ),
+            StructField("admin_graphql_api_id", StringType(), True),
+            StructField(
+                "line_items", ArrayType(ORDER_LINE_ITEM_STRUCT), True
+            ),
+            StructField("shop", StringType(), False),
+        ]
+    ),
+    "inventory_levels": StructType(
+        [
+            StructField("inventory_item_id", LongType(), False),
+            StructField("location_id", LongType(), False),
+            StructField("available", LongType(), True),
+            StructField("updated_at", StringType(), True),
+            StructField("admin_graphql_api_id", StringType(), True),
             StructField("shop", StringType(), False),
         ]
     ),
@@ -344,6 +412,21 @@ TABLE_METADATA: dict[str, dict] = {
     },
     "orders": {
         "primary_keys": ["id"],
+        "cursor_field": "updated_at",
+        "ingestion_type": "cdc",
+    },
+    "refunds": {
+        "primary_keys": ["id"],
+        "cursor_field": "created_at",
+        "ingestion_type": "append",
+    },
+    "fulfillments": {
+        "primary_keys": ["id"],
+        "cursor_field": "updated_at",
+        "ingestion_type": "cdc",
+    },
+    "inventory_levels": {
+        "primary_keys": ["inventory_item_id", "location_id"],
         "cursor_field": "updated_at",
         "ingestion_type": "cdc",
     },
