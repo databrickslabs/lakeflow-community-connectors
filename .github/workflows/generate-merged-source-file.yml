@@ -11,7 +11,7 @@ on:
       - '!src/databricks/labs/community_connector/sources/**/test/**'
   push:
     branches:
-      - main
+      - master
     paths:
       - 'src/databricks/labs/community_connector/sources/**/*.py'
       - 'src/databricks/labs/community_connector/libs/utils.py'
