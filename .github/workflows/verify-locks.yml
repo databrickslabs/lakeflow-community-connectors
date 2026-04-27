@@ -9,6 +9,7 @@ on:
     paths:
       - 'pyproject.toml'
       - 'tools/community_connector/pyproject.toml'
+      - 'src/databricks/labs/community_connector/sources/**/pyproject.toml'
       - 'requirements/**'
       - 'tools/scripts/regenerate-locks.sh'
       - '.github/workflows/verify-locks.yml'
@@ -17,6 +18,7 @@ on:
     paths:
       - 'pyproject.toml'
       - 'tools/community_connector/pyproject.toml'
+      - 'src/databricks/labs/community_connector/sources/**/pyproject.toml'
       - 'requirements/**'
       - 'tools/scripts/regenerate-locks.sh'
 
