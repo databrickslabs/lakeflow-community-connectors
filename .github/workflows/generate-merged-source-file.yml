@@ -30,31 +30,70 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          # Need full history so the diff between base and head SHAs is
+          # reachable (the default shallow clone does not include the base).
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
           python-version: '3.10'
 
-      - name: Get changed source files
+      - name: Compute changed files
         id: changed-files
-        uses: tj-actions/changed-files@22103cc46bda19c2b464ffe86db46df6922fd323  # v47.0.5
-        with:
-          files: |
-            src/databricks/labs/community_connector/sources/**/*.py
-            src/databricks/labs/community_connector/libs/utils.py
-            src/databricks/labs/community_connector/interface/lakeflow_connect.py
-            src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py
-          files_ignore: |
-            src/databricks/labs/community_connector/sources/**/_generated_*.py
-            src/databricks/labs/community_connector/sources/**/test/**
+        env:
+          # Route github.event values through env to prevent expression
+          # interpolation directly into the run block. Same defense-in-depth
+          # pattern used elsewhere in this repo.
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_AFTER_SHA: ${{ github.event.after }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            BASE_SHA="$PR_BASE_SHA"
+            HEAD_SHA="$PR_HEAD_SHA"
+          else
+            BASE_SHA="$PUSH_BEFORE_SHA"
+            HEAD_SHA="$PUSH_AFTER_SHA"
+          fi
 
-      - name: Get changed generated files
-        id: changed-generated
-        uses: tj-actions/changed-files@22103cc46bda19c2b464ffe86db46df6922fd323  # v47.0.5
-        with:
-          files: |
-            src/databricks/labs/community_connector/sources/**/_generated_*.py
+          # Handle initial commit or force push where BASE_SHA is unreachable.
+          if ! git cat-file -e "$BASE_SHA" 2>/dev/null; then
+            BASE_SHA=$(git rev-parse HEAD~1 2>/dev/null || echo "")
+          fi
+
+          if [ -z "$BASE_SHA" ]; then
+            DIFF=$(git ls-files)
+          else
+            DIFF=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          fi
+
+          # Mirror the path filters previously enforced by
+          # tj-actions/changed-files: source/library/interface/registration .py
+          # files, excluding generated outputs and test directories.
+          all_changed=$(echo "$DIFF" | grep -E '^src/databricks/labs/community_connector/(sources/.+\.py|libs/utils\.py|interface/lakeflow_connect\.py|sparkpds/lakeflow_datasource\.py)$' \
+              | grep -vE '/sources/.*/_generated_.*\.py$' \
+              | grep -vE '/sources/.*/test/' || true)
+
+          all_generated=$(echo "$DIFF" | grep -E '^src/databricks/labs/community_connector/sources/.*/_generated_.*\.py$' || true)
+
+          # Multi-line outputs use the heredoc form per GitHub Actions docs.
+          {
+            echo "all_changed_files<<EOF"
+            echo "$all_changed"
+            echo "EOF"
+            echo "all_changed_generated<<EOF"
+            echo "$all_generated"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Source files changed:"
+          echo "$all_changed"
+          echo "Generated files changed:"
+          echo "$all_generated"
 
       - name: Determine sources to regenerate
         id: sources
@@ -62,7 +101,7 @@ jobs:
           # Read step outputs via env to prevent shell injection from filenames
           # chosen by PR authors (e.g. `foo;evil.py`).
           ALL_CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
-          ALL_CHANGED_GENERATED: ${{ steps.changed-generated.outputs.all_changed_files }}
+          ALL_CHANGED_GENERATED: ${{ steps.changed-files.outputs.all_changed_generated }}
         run: |
           SOURCES_TO_REGENERATE=""
           SOURCES_DIR="src/databricks/labs/community_connector/sources"

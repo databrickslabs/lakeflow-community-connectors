@@ -288,11 +288,20 @@ jobs:
           SOURCE: ${{ matrix.source }}
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          # Install source-specific dependencies if the source has its own pyproject.toml
           SOURCE_DIR="src/databricks/labs/community_connector/sources/${SOURCE}"
-          if [ -f "$SOURCE_DIR/pyproject.toml" ]; then
-            pip install -e "$SOURCE_DIR"
+          LOCK="requirements/sources.txt"
+          if [ -f "$LOCK" ]; then
+            pip install -r "$LOCK"
+            pip install -e . --no-deps
+            if [ -f "$SOURCE_DIR/pyproject.toml" ]; then
+              pip install -e "$SOURCE_DIR" --no-deps
+            fi
+          else
+            echo "::warning title=Unpinned install::$LOCK missing; falling back to live PyPI resolution. Run tools/scripts/regenerate-locks.sh and commit requirements/."
+            pip install -e ".[dev]"
+            if [ -f "$SOURCE_DIR/pyproject.toml" ]; then
+              pip install -e "$SOURCE_DIR"
+            fi
           fi
       - name: Run ${{ matrix.source }} tests
         env:

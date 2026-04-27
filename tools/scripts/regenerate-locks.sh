@@ -64,4 +64,38 @@ compile "${REQ_DIR}/pylint.txt" \
     "${REQ_DIR}/_pylint-extras.in" \
     --extra dev
 
+# Combined source-connector lock — shared across the test-source matrix in
+# .github/workflows/tests.yml. Unions third-party runtime deps from every
+# `sources/*/pyproject.toml` and resolves them together with the root
+# pyproject's deps + dev extra (pytest, pytest-cov), so transitive
+# resolution is fully pinned. Without this lock, test-source falls back to
+# live PyPI against ranged constraints.
+#
+# A single union lock matches the one-lock-per-CI-job-context pattern of
+# root.txt / tools.txt / pylint.txt. Each connector job installs a
+# superset of what it strictly needs, but every job installs the same
+# pinned transitive set, which is the supply-chain control that matters.
+#
+# We strip the `lakeflow-community-connectors` self-reference (not on
+# PyPI; installed editable from the local checkout via `pip install -e .
+# --no-deps`) and pipe the union via stdin (`-`) so the autogen header
+# records a deterministic input path — a `mktemp` path here would change
+# every run and trigger spurious lock-drift warnings.
+SOURCES_DIR="src/databricks/labs/community_connector/sources"
+for src_pyproject in "${SOURCES_DIR}"/*/pyproject.toml; do
+    sed -n '/^dependencies *= *\[/,/^\]/{
+        s/^[[:space:]]*"//
+        s/",\?[[:space:]]*$//
+        /^lakeflow-community-connectors/d
+        /^dependencies/d
+        /^\]/d
+        /^[[:space:]]*$/d
+        /^[[:space:]]*#/d
+        p
+    }' "${src_pyproject}"
+done | sort -u | compile "${REQ_DIR}/sources.txt" \
+    pyproject.toml \
+    - \
+    --extra dev
+
 printf '\nDone. Review with: git diff %s/\n' "${REQ_DIR}"
