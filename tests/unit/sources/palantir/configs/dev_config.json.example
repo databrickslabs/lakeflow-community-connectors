@@ -1,0 +1,5 @@
+{
+  "token": "YOUR_PALANTIR_BEARER_TOKEN",
+  "hostname": "yourcompany.palantirfoundry.com",
+  "ontology_api_name": "ontology-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+}
