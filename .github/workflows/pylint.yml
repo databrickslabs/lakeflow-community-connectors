@@ -25,18 +25,14 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
         LOCK="requirements/pylint.txt"
-        if [ -f "$LOCK" ]; then
-          pip install -r "$LOCK"
-          pip install -e . --no-deps
-          pip install -e ./tools/community_connector --no-deps
-        else
-          echo "::warning title=Unpinned install::$LOCK missing; falling back to live PyPI resolution. Run tools/scripts/regenerate-locks.sh on arca and commit requirements/."
-          pip install pylint
-          pip install -e ".[dev]"
-          pip install -e "./tools/community_connector[dev]"
+        if [ ! -f "$LOCK" ]; then
+          echo "::error title=Missing lock::$LOCK is required. Run tools/scripts/regenerate-locks.sh and commit requirements/."
+          exit 1
         fi
+        pip install -r "$LOCK"
+        pip install -e . --no-deps
+        pip install -e ./tools/community_connector --no-deps
     - name: Analysing the code with pylint
       run: |
         # Lint source files (excluding tests directory and generated files)
