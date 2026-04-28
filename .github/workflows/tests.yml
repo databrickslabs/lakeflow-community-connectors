@@ -6,10 +6,15 @@ on:
   pull_request:
     branches: [master]
 
+permissions:
+  contents: read
+
 jobs:
   # Detect which paths changed
   changes:
-    runs-on: ubuntu-latest
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
     outputs:
       libs: ${{ steps.check.outputs.libs }}
       pipeline: ${{ steps.check.outputs.pipeline }}
@@ -137,7 +142,9 @@ jobs:
   test-libs:
     needs: changes
     if: ${{ needs.changes.outputs.libs == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.10"]
@@ -150,7 +157,14 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          LOCK="requirements/root.txt"
+          if [ -f "$LOCK" ]; then
+            pip install -r "$LOCK"
+            pip install -e . --no-deps
+          else
+            echo "::warning title=Unpinned install::$LOCK missing; falling back to live PyPI resolution."
+            pip install -e ".[dev]"
+          fi
       - name: Run libs tests
         run: |
           pytest tests/unit/libs/ -v
@@ -159,7 +173,9 @@ jobs:
   test-pipeline:
     needs: changes
     if: ${{ needs.changes.outputs.pipeline == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.10"]
@@ -172,7 +188,14 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          LOCK="requirements/root.txt"
+          if [ -f "$LOCK" ]; then
+            pip install -r "$LOCK"
+            pip install -e . --no-deps
+          else
+            echo "::warning title=Unpinned install::$LOCK missing; falling back to live PyPI resolution."
+            pip install -e ".[dev]"
+          fi
       - name: Run pipeline tests
         run: |
           pytest tests/unit/pipeline/ -v
@@ -181,7 +204,9 @@ jobs:
   test-example:
     needs: changes
     if: ${{ needs.changes.outputs.example == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.10"]
@@ -194,7 +219,14 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          LOCK="requirements/root.txt"
+          if [ -f "$LOCK" ]; then
+            pip install -r "$LOCK"
+            pip install -e . --no-deps
+          else
+            echo "::warning title=Unpinned install::$LOCK missing; falling back to live PyPI resolution."
+            pip install -e ".[dev]"
+          fi
       - name: Run example tests
         run: |
           pytest tests/unit/sources/example/ -v
@@ -203,7 +235,9 @@ jobs:
   test-community-connector:
     needs: changes
     if: ${{ needs.changes.outputs.community_connector == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.10"]
@@ -216,8 +250,15 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          cd tools/community_connector
-          pip install -e ".[dev]"
+          LOCK="requirements/tools.txt"
+          if [ -f "$LOCK" ]; then
+            pip install -r "$LOCK"
+            pip install -e ./tools/community_connector --no-deps
+          else
+            echo "::warning title=Unpinned install::$LOCK missing; falling back to live PyPI resolution."
+            cd tools/community_connector
+            pip install -e ".[dev]"
+          fi
       - name: Run community connector tests
         run: |
           cd tools/community_connector
@@ -227,7 +268,9 @@ jobs:
   test-source:
     needs: changes
     if: ${{ needs.changes.outputs.sources != '[]' }}
-    runs-on: ubuntu-latest
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
     strategy:
       matrix:
         source: ${{ fromJson(needs.changes.outputs.sources) }}
@@ -239,15 +282,30 @@ jobs:
         with:
           python-version: "3.10"
       - name: Install dependencies
+        env:
+          # Read matrix value via env to prevent shell injection from source
+          # directory names (transitively PR-author controlled).
+          SOURCE: ${{ matrix.source }}
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          # Install source-specific dependencies if the source has its own pyproject.toml
-          SOURCE_DIR="src/databricks/labs/community_connector/sources/${{ matrix.source }}"
-          if [ -f "$SOURCE_DIR/pyproject.toml" ]; then
-            pip install -e "$SOURCE_DIR"
+          SOURCE_DIR="src/databricks/labs/community_connector/sources/${SOURCE}"
+          LOCK="requirements/sources.txt"
+          if [ -f "$LOCK" ]; then
+            pip install -r "$LOCK"
+            pip install -e . --no-deps
+            if [ -f "$SOURCE_DIR/pyproject.toml" ]; then
+              pip install -e "$SOURCE_DIR" --no-deps
+            fi
+          else
+            echo "::warning title=Unpinned install::$LOCK missing; falling back to live PyPI resolution. Run tools/scripts/regenerate-locks.sh and commit requirements/."
+            pip install -e ".[dev]"
+            if [ -f "$SOURCE_DIR/pyproject.toml" ]; then
+              pip install -e "$SOURCE_DIR"
+            fi
           fi
       - name: Run ${{ matrix.source }} tests
+        env:
+          SOURCE: ${{ matrix.source }}
         run: |
           IGNORE_FLAGS=""
           EXCLUDE_FILE=".github/workflows/test_exclude.txt"
@@ -257,10 +315,10 @@ jobs:
               [[ "$line" =~ ^[[:space:]]*# ]] && continue
               [[ -z "${line// }" ]] && continue
               # Add --ignore for excluded tests in this source's directory
-              if [[ "$line" == tests/unit/sources/${{ matrix.source }}/* ]]; then
+              if [[ "$line" == tests/unit/sources/${SOURCE}/* ]]; then
                 IGNORE_FLAGS="$IGNORE_FLAGS --ignore=$line"
               fi
             done < "$EXCLUDE_FILE"
           fi
           echo "Ignore flags: $IGNORE_FLAGS"
-          pytest tests/unit/sources/${{ matrix.source }}/ $IGNORE_FLAGS -v
+          pytest "tests/unit/sources/${SOURCE}/" $IGNORE_FLAGS -v

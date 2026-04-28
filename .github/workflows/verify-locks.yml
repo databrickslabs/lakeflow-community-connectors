@@ -1,0 +1,73 @@
+name: Verify Dependency Locks
+
+# Regenerates requirements/*.txt and fails if the committed locks differ
+# from a fresh regeneration. Enforces the internal guidance's "strongly
+# recommended" assertion that running uv pip compile produces no diff.
+
+on:
+  pull_request:
+    paths:
+      - 'pyproject.toml'
+      - 'tools/community_connector/pyproject.toml'
+      - 'src/databricks/labs/community_connector/sources/**/pyproject.toml'
+      - 'requirements/**'
+      - 'tools/scripts/regenerate-locks.sh'
+      - '.github/workflows/verify-locks.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'pyproject.toml'
+      - 'tools/community_connector/pyproject.toml'
+      - 'src/databricks/labs/community_connector/sources/**/pyproject.toml'
+      - 'requirements/**'
+      - 'tools/scripts/regenerate-locks.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc  # v6.4.3
+        with:
+          version: "0.11.7"
+          checksum: "6681d691eb7f9c00ac6a3af54252f7ab29ae72f0c8f95bdc7f9d1401c23ea868"
+
+      - name: Regenerate locks
+        run: ./tools/scripts/regenerate-locks.sh
+
+      - name: Check for drift
+        run: |
+          if git diff --quiet requirements/; then
+            echo "✅ Lock files are up to date."
+            exit 0
+          fi
+
+          {
+            echo "### ⚠️ Dependency lock drift detected"
+            echo ""
+            echo "The committed \`requirements/*.txt\` files do not match a fresh regeneration."
+            echo "Regenerate on arca (per internal guidance) and commit:"
+            echo ""
+            echo '```sh'
+            echo './tools/scripts/regenerate-locks.sh'
+            echo 'git add requirements/'
+            echo 'git commit -m "Regenerate dependency locks"'
+            echo '```'
+            echo ""
+            echo "<details><summary>Files that would change</summary>"
+            echo ""
+            echo '```'
+            git diff --name-only requirements/
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "::error title=Lock drift::Dependency locks are out of date. See job summary for regeneration steps."
+          exit 1

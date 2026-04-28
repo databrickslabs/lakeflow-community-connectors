@@ -1,0 +1,42 @@
+# azure_devops Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: Azure DevOps
+connection:
+  parameters:
+    - name: organization
+      type: string
+      required: true
+      description: >
+        Azure DevOps organization name. This is the organization segment
+        in the URL: https://dev.azure.com/{organization}.
+
+    - name: project
+      type: string
+      required: false
+      description: >
+        Project name or ID. If provided, scopes Git and Work Item
+        operations to this project. If omitted, tables can fetch from
+        all projects in the organization.
+
+    - name: personal_access_token
+      type: string
+      required: true
+      secret: true
+      description: >
+        Personal Access Token (PAT) for authentication with the Azure
+        DevOps Services REST API. Required scopes: Code (read),
+        Graph (read), Project and Team (read), Work Items (read).
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# ============================================================================
+external_options_allowlist: "project,repository_id,pullrequest_id,status_filter,filter,ids"
