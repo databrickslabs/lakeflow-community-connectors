@@ -161,8 +161,8 @@ jobs:
             echo "::error title=Missing lock::$LOCK is required. Run tools/scripts/regenerate-locks.sh and commit requirements/."
             exit 1
           fi
-          pip install --use-feature=truststore -r "$LOCK"
-          pip install --use-feature=truststore -e . --no-deps
+          pip install -r "$LOCK"
+          pip install -e . --no-deps
       - name: Run libs tests
         run: |
           pytest tests/unit/libs/ -v
@@ -190,8 +190,8 @@ jobs:
             echo "::error title=Missing lock::$LOCK is required. Run tools/scripts/regenerate-locks.sh and commit requirements/."
             exit 1
           fi
-          pip install --use-feature=truststore -r "$LOCK"
-          pip install --use-feature=truststore -e . --no-deps
+          pip install -r "$LOCK"
+          pip install -e . --no-deps
       - name: Run pipeline tests
         run: |
           pytest tests/unit/pipeline/ -v
@@ -219,8 +219,8 @@ jobs:
             echo "::error title=Missing lock::$LOCK is required. Run tools/scripts/regenerate-locks.sh and commit requirements/."
             exit 1
           fi
-          pip install --use-feature=truststore -r "$LOCK"
-          pip install --use-feature=truststore -e . --no-deps
+          pip install -r "$LOCK"
+          pip install -e . --no-deps
       - name: Run example tests
         run: |
           pytest tests/unit/sources/example/ -v
@@ -248,8 +248,8 @@ jobs:
             echo "::error title=Missing lock::$LOCK is required. Run tools/scripts/regenerate-locks.sh and commit requirements/."
             exit 1
           fi
-          pip install --use-feature=truststore -r "$LOCK"
-          pip install --use-feature=truststore -e ./tools/community_connector --no-deps
+          pip install -r "$LOCK"
+          pip install -e ./tools/community_connector --no-deps
       - name: Run community connector tests
         run: |
           cd tools/community_connector
@@ -284,10 +284,10 @@ jobs:
             echo "::error title=Missing lock::$LOCK is required. Run tools/scripts/regenerate-locks.sh and commit requirements/."
             exit 1
           fi
-          pip install --use-feature=truststore -r "$LOCK"
-          pip install --use-feature=truststore -e . --no-deps
+          pip install -r "$LOCK"
+          pip install -e . --no-deps
           if [ -f "$SOURCE_DIR/pyproject.toml" ]; then
-            pip install --use-feature=truststore -e "$SOURCE_DIR" --no-deps
+            pip install -e "$SOURCE_DIR" --no-deps
           fi
       - name: Run ${{ matrix.source }} tests
         env:
