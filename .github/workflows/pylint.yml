@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+# Use Databricks internal PyPI proxy. Direct egress to pypi.org from the
+# protected runner group hits a TLS-terminating appliance that drops the
+# handshake (SSL EOF). The proxy is allowlisted on these runners.
+env:
+  PIP_INDEX_URL: https://pypi-proxy.dev.databricks.com/simple
+
 jobs:
   build:
     runs-on:
