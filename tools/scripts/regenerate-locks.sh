@@ -61,11 +61,15 @@ compile() {
 
 printf 'Regenerating locks (cutoff: %s, python: %s)...\n' "${CUTOFF}" "${PYTHON_VERSION}"
 
+# Pip is pinned into every lock via `_pip.in` so the install step that
+# enforces --require-hashes is itself a hash-verified package, not whatever
+# the runner image happens to ship. See requirements/_pip.in for rationale.
+
 # Root package [dev] — test-libs, test-pipeline, test-example.
-compile "${REQ_DIR}/root.txt" pyproject.toml --extra dev
+compile "${REQ_DIR}/root.txt" pyproject.toml "${REQ_DIR}/_pip.in" --extra dev
 
 # tools/community_connector [dev] — test-community-connector.
-compile "${REQ_DIR}/tools.txt" tools/community_connector/pyproject.toml --extra dev
+compile "${REQ_DIR}/tools.txt" tools/community_connector/pyproject.toml "${REQ_DIR}/_pip.in" --extra dev
 
 # Pylint runs against root + tools, and also installs pylint itself. The
 # extras file is tracked in the repo so the path baked into the generated
@@ -75,6 +79,7 @@ compile "${REQ_DIR}/pylint.txt" \
     pyproject.toml \
     tools/community_connector/pyproject.toml \
     "${REQ_DIR}/_pylint-extras.in" \
+    "${REQ_DIR}/_pip.in" \
     --extra dev
 
 # Combined source-connector lock — shared across the test-source matrix in
@@ -108,6 +113,7 @@ for src_pyproject in "${SOURCES_DIR}"/*/pyproject.toml; do
     }' "${src_pyproject}"
 done | sort -u | compile "${REQ_DIR}/sources.txt" \
     pyproject.toml \
+    "${REQ_DIR}/_pip.in" \
     - \
     --extra dev
 
