@@ -7,8 +7,11 @@
 # published before that timestamp, so a post-cutoff compromise cannot be
 # resolved into the lock.
 #
-# No hashes (per the current internal guidance). PyPI's re-upload
-# prohibition for existing versions is the assumed integrity guarantee.
+# Hashes (`--generate-hashes`) are emitted for every pin. When pip sees a
+# requirements file with hashes, it implicitly enables --require-hashes,
+# refusing any install whose artifact does not match. This fails closed on
+# a registry-side swap or a compromised mirror, instead of trusting PyPI's
+# re-upload prohibition as the sole integrity guarantee.
 #
 # RUN ON A LINUX HOST with PyPI access (e.g. arca). Running on macOS will
 # resolve different wheels than CI uses. Running off the corp network may
@@ -40,6 +43,7 @@ compile() {
     shift
     printf '  %s\n' "${out}"
     uv pip compile "$@" \
+        --generate-hashes \
         --exclude-newer "${CUTOFF}" \
         --python-version "${PYTHON_VERSION}" \
         --output-file "${out}" \
