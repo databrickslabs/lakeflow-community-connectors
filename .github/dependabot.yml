@@ -1,12 +1,16 @@
-# Keeps GitHub Actions SHA pins current via weekly PRs. We deliberately
-# do NOT enable the `pip` ecosystem here: requirements/*.txt are generated
-# deterministically by tools/scripts/regenerate-locks.sh from pyproject.toml
-# plus the CUTOFF trust horizon, and individual-package PRs from Dependabot
-# would conflict with that design (verify-locks.yml would fail). pip
-# updates instead happen via CUTOFF bumps documented in regenerate-locks.sh.
+# Keeps GitHub Actions SHA pins current via monthly PRs. Cadence aligns with
+# the monthly CUTOFF bump policy in tools/scripts/regenerate-locks.sh, so
+# action and pip review cycles land in the same window.
+#
+# We deliberately do NOT enable the `pip` ecosystem here: requirements/*.txt
+# are generated deterministically by tools/scripts/regenerate-locks.sh from
+# pyproject.toml plus the CUTOFF trust horizon, and individual-package PRs
+# from Dependabot would conflict with that design (verify-locks.yml would
+# fail). pip updates instead happen via CUTOFF bumps documented in
+# regenerate-locks.sh.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
