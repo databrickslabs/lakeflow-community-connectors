@@ -20,6 +20,8 @@ from databricks.labs.community_connector.source_simulator.endpoint_spec import (
     EndpointSpec,
     FilterOp,
     ParamRole,
+    ResponseShape,
+    ResponseWrapper,
     load_specs,
     match_endpoint,
 )
@@ -64,6 +66,8 @@ __all__ = [
     "PaginationStyle",
     "ParamRole",
     "RecordReplayPatch",
+    "ResponseShape",
+    "ResponseWrapper",
     "RequestRecord",
     "ResponseRecord",
     "SimulateHandler",

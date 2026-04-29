@@ -88,10 +88,28 @@ class LimitParam:
 
 
 @dataclass
+class ResponseWrapper:
+    """Optional response-body wrapper.
+
+    Many APIs wrap record arrays in a dict, e.g. zendesk:
+        {"tickets": [...], "next_page": null, "count": 42}
+    Or oData:
+        {"value": [...], "@odata.nextLink": null}
+
+    ``records_key`` is the field name that holds the records array.
+    ``extras`` is a dict of fixed fields to include in the wrapper.
+    """
+
+    records_key: str
+    extras: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class ResponseShape:
     pagination_style: str = "none"
     default_sort: Optional[Tuple[str, str]] = None  # (field, "asc"|"desc")
     single_entity: bool = False
+    wrapper: Optional[ResponseWrapper] = None
 
 
 @dataclass
@@ -203,10 +221,22 @@ def _parse_response(raw: dict) -> ResponseShape:
             default_sort = (parts[0], order)
         else:
             raise ValueError(f"default_sort: expected 'field [asc|desc]', got {default_sort_raw!r}")
+
+    wrapper: Optional[ResponseWrapper] = None
+    raw_wrapper = raw.get("wrapper")
+    if raw_wrapper:
+        if not isinstance(raw_wrapper, dict) or "records_key" not in raw_wrapper:
+            raise ValueError("response.wrapper requires a 'records_key' field")
+        wrapper = ResponseWrapper(
+            records_key=str(raw_wrapper["records_key"]),
+            extras=dict(raw_wrapper.get("extras", {})),
+        )
+
     return ResponseShape(
         pagination_style=str(raw.get("pagination_style", "none")),
         default_sort=default_sort,
         single_entity=bool(raw.get("single_entity", False)),
+        wrapper=wrapper,
     )
 
 

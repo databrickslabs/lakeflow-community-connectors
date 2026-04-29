@@ -111,6 +111,14 @@ class SimulateHandler:
             page, total=len(sorted_records), offset=offset, limit=limit,
             request_url=request_url,
         )
+
+        # Wrap the body if the spec asks for it.
+        wrapper = spec.response.wrapper
+        if wrapper is not None and isinstance(body, list):
+            wrapped: Dict[str, Any] = {wrapper.records_key: body}
+            wrapped.update(wrapper.extras)
+            body = wrapped
+
         return body, headers
 
 
