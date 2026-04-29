@@ -31,9 +31,9 @@ from databricks.labs.community_connector.interface.supports_partition import (
     SupportsPartitionedStream,
 )
 from databricks.labs.community_connector.libs.utils import parse_value
-from tests.unit.sources.mock_framework import (
+from databricks.labs.community_connector.source_simulator import (
     MODE_REPLAY,
-    RecordReplayPatch,
+    Simulator,
     get_mode,
 )
 
@@ -134,7 +134,7 @@ class LakeflowConnectTests:
         # Install the HTTP record/replay patch BEFORE creating the connector
         # so any HTTP in __init__ is captured / replayed too. In live mode
         # (the default) this is a no-op context.
-        cls._record_replay_patch = RecordReplayPatch(
+        cls._record_replay_patch = Simulator(
             mode=get_mode(),
             cassette_path=cls._cassette_path(),
             source=cls.__module__.split(".")[-2] if "." in cls.__module__ else "",

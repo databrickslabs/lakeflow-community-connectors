@@ -169,7 +169,7 @@ from pyspark.sql.types import LongType, StringType, StructField, StructType
 from databricks.labs.community_connector.interface import LakeflowConnect
 from tests.unit.sources.test_suite import LakeflowConnectTests
 
-from tests.unit.sources.mock_framework.test_harness_integration import ToyLakeflowConnect
+from tests.unit.source_simulator.test_harness_integration import ToyLakeflowConnect
 
 
 class TestToyConnector(LakeflowConnectTests):
@@ -210,7 +210,7 @@ class TestHarnessIntegration:
     """End-to-end: record a cassette from the toy server, then replay offline."""
 
     def test_record_then_replay(self, toy_server: _ServerHandle, tmp_path: Path):
-        repo_root = Path(__file__).resolve().parents[4]
+        repo_root = Path(__file__).resolve().parents[3]
         assert (repo_root / "pyproject.toml").exists(), f"repo root wrong: {repo_root}"
 
         test_dir = _scaffold_connector_test_dir(tmp_path, base_url=toy_server.url)

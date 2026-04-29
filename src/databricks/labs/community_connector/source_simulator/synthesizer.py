@@ -19,7 +19,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional, Tuple
 
-from tests.unit.sources.mock_framework.sampler import (
+from databricks.labs.community_connector.source_simulator.sampler import (
     RECORDS_KEY_HINTS,
     _looks_like_records_list,
 )
