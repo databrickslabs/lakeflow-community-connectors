@@ -6,7 +6,7 @@
 # ==============================================================================
 
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import (
     Any,
@@ -26,6 +26,7 @@ from pyspark.sql.datasource import (
     InputPartition,
     SimpleDataSourceStreamReader,
 )
+from pyspark.sql.streaming.datasource import ReadAllAvailable, SupportsTriggerAvailableNow
 from pyspark.sql.types import (
     ArrayType,
     BinaryType,
@@ -476,14 +477,18 @@ def register_lakeflow_source(spark):
 
             Called by Spark on every micro-batch to discover new data.
 
+            Micro-batch sizing (by row count, time window, etc.) is entirely the
+            connector's responsibility — use table_options (e.g. ``window_days``,
+            ``max_records_per_batch``) to control it.  The framework always
+            requests "all available" and does not pass an admission-control
+            hint here.
+
             Args:
                 table_name: The name of the table.
                 table_options: A dictionary of options for accessing the table.
-                start_offset: The current start offset, or None on the first call.
-                    PySpark's ``DataSourceStreamReader.latestOffset()`` does not
-                    pass this yet, so the framework always sends None for now.
-                    Connectors may use it to implement windowed batching when
-                    called directly.
+                start_offset: The current committed offset.  ``{}`` on the very
+                    first call (from ``initialOffset``), then the last returned
+                    end_offset on each subsequent call.
             Returns:
                 A dict whose keys and values are primitive types (str, int, bool).
             """
@@ -1218,6 +1223,7 @@ def register_lakeflow_source(spark):
             super().__init__(client)
             self._modules_cache: Optional[list[dict]] = None
             self._fields_cache: dict[str, list[dict]] = {}
+            self._init_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
         def get_modules(self) -> list[dict]:
             """
@@ -1347,77 +1353,85 @@ def register_lakeflow_source(spark):
                 "ingestion_type": "cdc",
             }
 
-        def read(
+        def read(  # pylint: disable=too-many-locals,too-many-branches
             self,
             table_name: str,
             config: dict,
             start_offset: dict,
         ) -> tuple[Iterator[dict], dict]:
             """
-            Read records from a standard CRM module.
+            Read records from a standard CRM module with bounded batch size.
 
-            Supports incremental reads using Modified_Time cursor with a 5-minute
-            lookback window to catch late updates. For CDC modules, also fetches
-            deleted records via the Deleted Records API.
+            Each call fetches up to ``max_records_per_batch`` records (default
+            100 000).  Records are sorted by Modified_Time ASC, so the cursor
+            naturally advances with each batch.  The cursor is capped at
+            ``_init_time`` to guarantee termination for ``availableNow`` triggers.
 
-            Args:
-                table_name: Name of the Zoho CRM module
-                config: Table configuration with optional initial_load_start_date
-                start_offset: Dictionary with cursor_time for incremental reads
-
-            Returns:
-                Tuple of (records iterator, next offset dictionary)
+            Lookback is applied at read time — the stored offset always holds the
+            raw max Modified_Time so the cursor never drifts backward.
             """
-            # Determine cursor time for incremental reads
+            max_records = config.get("max_records_per_batch", 100_000)
+
             cursor_time = start_offset.get("cursor_time") if start_offset else None
             initial_load_start_date = config.get("initial_load_start_date")
 
             if not cursor_time and initial_load_start_date:
                 cursor_time = initial_load_start_date
 
-            # Apply 5-minute lookback window to catch late updates
-            if cursor_time:
-                cursor_dt = datetime.fromisoformat(cursor_time.replace("Z", "+00:00"))
-                lookback_dt = cursor_dt - timedelta(minutes=5)
-                cursor_time = lookback_dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
-
-            # Check if this is a snapshot table (no cursor support)
             metadata = self.get_metadata(table_name, config)
             if metadata.get("ingestion_type") == "snapshot":
                 cursor_time = None
 
-            # Track max modified time for next offset
+            # Apply lookback at read time — widen the API filter without
+            # affecting the stored offset so the cursor never drifts.
+            since_time = None
+            if cursor_time:
+                cursor_dt = datetime.fromisoformat(cursor_time.replace("Z", "+00:00"))
+                lookback_dt = cursor_dt - timedelta(minutes=5)
+                since_time = lookback_dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+
             max_modified_time = cursor_time
 
-            def records_generator():
-                nonlocal max_modified_time
-                json_fields = self.get_json_fields(table_name)
-                fields = self.get_fields(table_name)
-                field_names = [f["api_name"] for f in fields] if fields else []
+            json_fields = self.get_json_fields(table_name)
+            fields = self.get_fields(table_name)
+            field_names = [f["api_name"] for f in fields] if fields else []
 
-                # Read regular records
-                for record in self._read_records(table_name, field_names, cursor_time, json_fields):
-                    modified_time = record.get("Modified_Time")
-                    if modified_time and (not max_modified_time or modified_time > max_modified_time):
-                        max_modified_time = modified_time
-                    yield record
+            all_records: list[dict] = []
+            main_exhausted = True
 
-                # Read deleted records for CDC
-                if metadata.get("ingestion_type") == "cdc" and cursor_time:
-                    for record in self._read_deleted_records(table_name, cursor_time):
-                        deleted_time = record.get("deleted_time")
-                        if deleted_time and (not max_modified_time or deleted_time > max_modified_time):
-                            max_modified_time = deleted_time
-                        yield record
+            for record in self._read_records(table_name, field_names, since_time, json_fields):
+                modified_time = record.get("Modified_Time")
+                if modified_time and (not max_modified_time or modified_time > max_modified_time):
+                    max_modified_time = modified_time
+                all_records.append(record)
+                if len(all_records) >= max_records:
+                    main_exhausted = False
+                    break
 
-            # Materialize generator to get final max_modified_time
-            records = list(records_generator())
+            deletes_exhausted = True
+            if main_exhausted and metadata.get("ingestion_type") == "cdc" and since_time:
+                for record in self._read_deleted_records(table_name, since_time):
+                    deleted_time = record.get("deleted_time")
+                    if deleted_time and (not max_modified_time or deleted_time > max_modified_time):
+                        max_modified_time = deleted_time
+                    all_records.append(record)
+                    if len(all_records) >= max_records:
+                        deletes_exhausted = False
+                        break
+
+            if not all_records:
+                return iter([]), start_offset or {}
+
+            pages_exhausted = main_exhausted and deletes_exhausted
 
             if max_modified_time:
+                if pages_exhausted and max_modified_time > self._init_time:
+                    max_modified_time = self._init_time
                 next_offset = {"cursor_time": max_modified_time}
             else:
                 next_offset = start_offset or {}
-            return iter(records), next_offset
+
+            return iter(all_records), next_offset
 
         def _read_records(
             self,
@@ -2028,6 +2042,9 @@ def register_lakeflow_source(spark):
             """Read records from a Zoho CRM table."""
             self._validate_table_exists(table_name)
             handler, config = self._get_handler_and_config(table_name)
+            config["max_records_per_batch"] = int(
+                table_options.get("max_records_per_batch", 100_000)
+            )
             return handler.read(table_name, config, start_offset)
 
         def _validate_table_exists(self, table_name: str) -> None:
@@ -2056,7 +2073,10 @@ def register_lakeflow_source(spark):
     IS_DELETE_FLOW = "isDeleteFlow"
 
 
-    class LakeflowStreamReader(SimpleDataSourceStreamReader):
+    # PySpark's DataSource API requires camelCase method names and inherits
+    # semantics from the parent class, so per-method docstrings are redundant.
+    # pylint: disable=invalid-name,missing-function-docstring
+    class LakeflowStreamReader(SimpleDataSourceStreamReader, SupportsTriggerAvailableNow):
         """
         Implements a data source stream reader for Lakeflow Connect.
         Currently, only the simpleStreamReader is implemented, which uses a
@@ -2103,8 +2123,12 @@ def register_lakeflow_source(spark):
             # are missed in the returned records.
             return self.read(start)[0]
 
+        def prepareForTriggerAvailableNow(self) -> None:
+            # No need to do anything special here. Everything is handled in the __init__ method.
+            pass
 
-    class LakeflowPartitionedStreamReader(DataSourceStreamReader):
+
+    class LakeflowPartitionedStreamReader(DataSourceStreamReader, SupportsTriggerAvailableNow):
         """Proxy that bridges SupportsPartitionedStream to PySpark's DataSourceStreamReader.
 
         Used when a connector implements the SupportsPartitionedStream mixin to
@@ -2126,10 +2150,25 @@ def register_lakeflow_source(spark):
         def initialOffset(self):
             return {}
 
-        def latestOffset(self):
-            # PySpark does not pass the current offset to latestOffset() yet,
-            # so we forward None.  Once PySpark supports it, pass the real value.
-            return self.lakeflow_connect.latest_offset(self.table_name, self.table_options, None)
+        def getDefaultReadLimit(self):
+            # Admission control is the connector's responsibility (e.g. via
+            # window_days, max_records_per_batch), not the engine's.  Always
+            # ask the engine for ReadAllAvailable.
+            return ReadAllAvailable()
+
+        def latestOffset(self, start: dict, limit) -> dict:
+            # We declared ReadAllAvailable via getDefaultReadLimit; the engine
+            # must respect it.  Anything else means admission-control expectations
+            # we do not support — fail loudly rather than silently ignore.
+            if not isinstance(limit, ReadAllAvailable):
+                raise ValueError(
+                    f"LakeflowPartitionedStreamReader only supports ReadAllAvailable; "
+                    f"got {type(limit).__name__}. Micro-batch sizing must be controlled "
+                    f"by the connector implementation (table_options), not the engine."
+                )
+            return self.lakeflow_connect.latest_offset(
+                self.table_name, self.table_options, start
+            )
 
         def partitions(self, start: dict, end: dict):
             partition_descs = self.lakeflow_connect.get_partitions(
@@ -2143,6 +2182,10 @@ def register_lakeflow_source(spark):
                 self.table_name, partition_desc, self.table_options
             )
             return map(lambda x: parse_value(x, self.schema), records)
+
+        def prepareForTriggerAvailableNow(self) -> None:
+            # No need to do anything special here. Everything is handled in the __init__ method.
+            pass
 
 
     class LakeflowBatchReader(DataSourceReader):

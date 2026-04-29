@@ -33,7 +33,7 @@ set -eu
 #     published after the current CUTOFF.
 #   - The PR description must state the new CUTOFF value and the reason
 #     for the bump (cadence vs. CVE — link the advisory).
-CUTOFF="2026-03-19T00:00:00Z"
+CUTOFF="2026-04-22T00:00:00Z"
 PYTHON_VERSION="3.10"
 REQ_DIR="requirements"
 
@@ -51,9 +51,16 @@ compile() {
     out="$1"
     shift
     printf '  %s\n' "${out}"
+    # `--exclude-newer-package pip=...` exempts pip from the global cutoff.
+    # Required when resolving via JFrog Artifactory: its PyPI proxy strips
+    # upload-time metadata for some versions, so uv cannot validate them
+    # against `--exclude-newer` and refuses every pip version. Pip is the
+    # bootstrap and is hash-pinned in the resulting lock — the cutoff is
+    # not the integrity control, the hash is. No-op on arca/direct PyPI.
     uv pip compile "$@" \
         --generate-hashes \
         --exclude-newer "${CUTOFF}" \
+        --exclude-newer-package pip=2030-01-01T00:00:00Z \
         --python-version "${PYTHON_VERSION}" \
         --output-file "${out}" \
         --quiet

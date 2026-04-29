@@ -125,7 +125,7 @@ Table-specific options are passed via the pipeline spec under `table_configurati
   - `start_date` (ISO 8601 string, optional; for `cdc` tables): Initial cursor used when there is no stored offset yet.
   - `lookback_seconds` (integer, optional; for `cdc` tables): Lookback window when computing the next cursor to handle late updates. Defaults to `300`.
   - `max_records_per_batch` (integer, optional; for incremental tables): Caps the number of records per `read_table` call. For CDC tables, records are strictly truncated. For append-only tables using a sliding window (`commits`), this is best-effort. Does not apply to snapshot tables.
-  - `window_seconds` (integer, optional; for `commits`): Size of the sliding time-window in seconds. Defaults to `86400` (1 day).
+  - `window_seconds` (integer, optional; for `commits`): Size of the sliding time-window in seconds. Defaults to `604800` (7 days).
 - **`repositories`**:
   - `owner` (string, optional): User/organization login.
   - `org` (string, optional): Organization login.
