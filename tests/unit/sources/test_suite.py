@@ -32,10 +32,13 @@ from databricks.labs.community_connector.interface.supports_partition import (
 )
 from databricks.labs.community_connector.libs.utils import parse_value
 from databricks.labs.community_connector.source_simulator import (
+    MODE_LIVE,
     MODE_REPLAY,
+    MODE_SIMULATE,
     Simulator,
     get_mode,
 )
+from databricks.labs.community_connector import source_simulator as _source_simulator_pkg
 
 VALID_INGESTION_TYPES = {"snapshot", "cdc", "cdc_with_deletes", "append"}
 _INVALID_TABLE_NAME = "__nonexistent_table_$$_9z9z9z__"
@@ -80,6 +83,14 @@ class LakeflowConnectTests:
     # than the sample size provides.
     record_replay_synthesize_count: int = 0
 
+    # If set, the test runs in simulate mode against
+    # ``source_simulator/specs/<simulator_source>/``. Picks up endpoints.yaml
+    # + corpus/ from that directory. When set, ``CONNECTOR_TEST_MODE=replay``
+    # is interpreted as "use simulate mode" — i.e. simulate is the default
+    # stand-in posture once a spec exists, replay against a cassette is the
+    # fallback when no spec is provided.
+    simulator_source: Optional[str] = None
+
     # ------------------------------------------------------------------
     # Setup
     # ------------------------------------------------------------------
@@ -99,10 +110,57 @@ class LakeflowConnectTests:
         return cls._cassette_dir() / f"{cls.__name__}.json"
 
     @classmethod
+    def _simulator_specs_root(cls) -> Path:
+        """Path to ``source_simulator/specs/`` — the home for all per-source specs."""
+        return Path(_source_simulator_pkg.__file__).parent / "specs"
+
+    @classmethod
+    def _simulator_spec_path(cls) -> Optional[Path]:
+        if not cls.simulator_source:
+            return None
+        return cls._simulator_specs_root() / cls.simulator_source / "endpoints.yaml"
+
+    @classmethod
+    def _simulator_corpus_dir(cls) -> Optional[Path]:
+        if not cls.simulator_source:
+            return None
+        return cls._simulator_specs_root() / cls.simulator_source / "corpus"
+
+    @classmethod
+    def _resolve_mode_and_simulator_args(cls) -> dict:
+        """Pick the right Simulator() kwargs based on env var + simulator_source.
+
+        With ``simulator_source`` set:
+            CONNECTOR_TEST_MODE unset / replay  -> Mode.SIMULATE (default)
+            CONNECTOR_TEST_MODE=live / record   -> Mode.LIVE (refresh corpus)
+
+        Without ``simulator_source`` (legacy cassette-only):
+            Mode follows CONNECTOR_TEST_MODE directly (live / replay / record).
+        """
+        env_mode = get_mode()
+        if cls.simulator_source and env_mode != MODE_LIVE:
+            return {
+                "mode": MODE_SIMULATE,
+                "spec_path": cls._simulator_spec_path(),
+                "corpus_dir": cls._simulator_corpus_dir(),
+                "ignore_query_params": frozenset(cls.record_replay_ignore_query_params),
+            }
+        return {
+            "mode": env_mode,
+            "cassette_path": cls._cassette_path(),
+            "source": cls.__module__.split(".")[-2] if "." in cls.__module__ else "",
+            "ignore_query_params": frozenset(cls.record_replay_ignore_query_params),
+            "sample_size": cls.record_replay_sample_size,
+            "synthesize_count": cls.record_replay_synthesize_count,
+        }
+
+    @classmethod
     def _load_config(cls) -> dict:
-        """Load ``dev_config.json`` — or ``replay_config.json`` in replay mode."""
+        """Load ``dev_config.json`` — or ``replay_config.json`` for stand-in modes."""
         mode = get_mode()
-        if mode == MODE_REPLAY:
+        # In stand-in postures (replay or simulate), prefer replay_config.json
+        # so contributors don't need real creds.
+        if mode in (MODE_REPLAY,) or cls.simulator_source:
             replay_path = cls._config_dir() / "replay_config.json"
             if replay_path.exists():
                 with open(replay_path, "r") as f:
@@ -111,7 +169,7 @@ class LakeflowConnectTests:
         assert path.exists(), (
             f"Config file not found: {path}\n"
             "  Fix: Create dev_config.json with connector credentials "
-            "(or replay_config.json for replay-mode fake credentials)."
+            "(or replay_config.json for replay/simulate-mode fake credentials)."
         )
         with open(path, "r") as f:
             return json.load(f)
@@ -131,17 +189,11 @@ class LakeflowConnectTests:
             "Set connector_class in your test subclass"
         )
 
-        # Install the HTTP record/replay patch BEFORE creating the connector
-        # so any HTTP in __init__ is captured / replayed too. In live mode
-        # (the default) this is a no-op context.
-        cls._record_replay_patch = Simulator(
-            mode=get_mode(),
-            cassette_path=cls._cassette_path(),
-            source=cls.__module__.split(".")[-2] if "." in cls.__module__ else "",
-            ignore_query_params=frozenset(cls.record_replay_ignore_query_params),
-            sample_size=cls.record_replay_sample_size,
-            synthesize_count=cls.record_replay_synthesize_count,
-        )
+        # Install the simulator BEFORE creating the connector so any HTTP in
+        # __init__ is intercepted too. In live mode this is a proxy that
+        # forwards to the real source (and appends to the cassette by default);
+        # in replay/simulate it's a stand-in served from cassette/corpus.
+        cls._record_replay_patch = Simulator(**cls._resolve_mode_and_simulator_args())
         cls._record_replay_patch.__enter__()
 
         try:
