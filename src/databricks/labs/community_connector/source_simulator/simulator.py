@@ -192,8 +192,12 @@ class Simulator:
             self._interceptor = None
         if self.mode == MODE_LIVE and self.record and self.cassette is not None:
             # Save even on test failure so partial recordings are inspectable.
-            self.cassette.save()
-            self.coverage.save(self.coverage_path)
+            # Skip writing entirely when no traffic was intercepted — connectors
+            # that don't use ``requests`` (e.g. in-memory simulated sources)
+            # otherwise leave empty cassettes lying around.
+            if self.cassette.interactions:
+                self.cassette.save()
+                self.coverage.save(self.coverage_path)
 
     def _handle_send(
         self,
