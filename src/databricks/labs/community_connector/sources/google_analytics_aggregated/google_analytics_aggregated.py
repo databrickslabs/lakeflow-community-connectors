@@ -1,6 +1,6 @@
 import json
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 import requests
@@ -61,7 +61,7 @@ class GoogleAnalyticsAggregatedLakeflowConnect(LakeflowConnect):
         # return a stable cursor across microbatches in a single
         # Trigger.AvailableNow trigger.  Without this, GA's "today" literal
         # would flip at UTC midnight and prevent termination.
-        self._init_date = datetime.utcnow().strftime("%Y-%m-%d")
+        self._init_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     @staticmethod
     def _parse_property_ids(options):

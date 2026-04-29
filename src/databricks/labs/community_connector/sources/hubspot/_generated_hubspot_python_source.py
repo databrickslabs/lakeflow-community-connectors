@@ -704,6 +704,21 @@ def register_lakeflow_source(spark):
 
             return schema
 
+        @staticmethod
+        def _parse_max_records(table_options: Dict[str, str] | None) -> int | None:
+            """Read max_records_per_batch from table options. None means no cap
+            (opt-in admission control)."""
+            if not table_options:
+                return None
+            raw = table_options.get("max_records_per_batch")
+            if raw is None:
+                return None
+            try:
+                value = int(raw)
+            except (TypeError, ValueError):
+                return None
+            return value if value > 0 else None
+
         def read_table_metadata(
             self, table_name: str, table_options: Dict[str, str]
         ) -> dict:
@@ -919,6 +934,8 @@ def register_lakeflow_source(spark):
             metadata = self.read_table_metadata(table_name, table_options)
             property_names = metadata.get("property_names", [])
 
+            max_records = self._parse_max_records(table_options)
+
             all_records = []
             after = None
             # Use updatedAt from offset (which stores archivedAt values for delete flow)
@@ -954,6 +971,11 @@ def register_lakeflow_source(spark):
                 if not after:
                     break
 
+                # Stop if we've hit the per-microbatch record cap. The next
+                # microbatch resumes from latest_archived via the cursor filter.
+                if max_records is not None and len(all_records) >= max_records:
+                    break
+
                 # Rate limiting
                 time.sleep(0.1)
 
@@ -986,6 +1008,10 @@ def register_lakeflow_source(spark):
             property_names = metadata.get("property_names", [])
             cursor_property_field = metadata.get("cursor_property_field")
             associations = metadata.get("associations", [])
+
+            # Only cap on the incremental path — full-refresh snapshots need
+            # to drain everything in a single call to keep the snapshot atomic.
+            max_records = self._parse_max_records(table_options) if incremental else None
 
             all_records = []
             after = None
@@ -1026,6 +1052,11 @@ def register_lakeflow_source(spark):
                         latest_updated = updated_at
 
                 if not after:
+                    break
+
+                # Stop if we've hit the per-microbatch record cap. The next
+                # microbatch resumes from latest_updated via the cursor filter.
+                if max_records is not None and len(all_records) >= max_records:
                     break
 
                 # Rate limiting

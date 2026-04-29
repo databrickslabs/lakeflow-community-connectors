@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Iterator, Any
 import csv
 import io
@@ -55,9 +55,8 @@ class AppsflyerLakeflowConnect(LakeflowConnect):
 
         # Freeze the upper date bound at init time so event-report reads
         # return a stable cursor across microbatches in a single
-        # Trigger.AvailableNow trigger.  Without this, datetime.utcnow()
-        # advances between calls and prevents termination.
-        self._init_date = datetime.utcnow().strftime("%Y-%m-%d")
+        # Trigger.AvailableNow trigger.
+        self._init_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     def _request_with_retry(self, method: str, url: str, **kwargs) -> requests.Response:
         """Make an HTTP request with retry on transient errors and rate limiting."""

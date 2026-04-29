@@ -7,7 +7,7 @@ record serialization used across the connector.
 
 import json
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import requests
@@ -38,7 +38,7 @@ class MicrosoftGraphClient:
         if (
             self._access_token
             and self._token_expiry
-            and datetime.utcnow() < self._token_expiry
+            and datetime.now(timezone.utc) < self._token_expiry
         ):
             return self._access_token
 
@@ -71,7 +71,7 @@ class MicrosoftGraphClient:
             self._access_token = token_data["access_token"]
 
             expires_in = token_data.get("expires_in", 3600)
-            self._token_expiry = datetime.utcnow() + timedelta(
+            self._token_expiry = datetime.now(timezone.utc) + timedelta(
                 seconds=expires_in - 300
             )
 

@@ -6,7 +6,7 @@
 # ==============================================================================
 
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Iterator, Sequence
 import io
@@ -560,9 +560,8 @@ def register_lakeflow_source(spark):
 
             # Freeze the upper date bound at init time so event-report reads
             # return a stable cursor across microbatches in a single
-            # Trigger.AvailableNow trigger.  Without this, datetime.utcnow()
-            # advances between calls and prevents termination.
-            self._init_date = datetime.utcnow().strftime("%Y-%m-%d")
+            # Trigger.AvailableNow trigger.
+            self._init_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
         def _request_with_retry(self, method: str, url: str, **kwargs) -> requests.Response:
             """Make an HTTP request with retry on transient errors and rate limiting."""

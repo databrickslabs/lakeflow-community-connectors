@@ -49,7 +49,7 @@ def _build_deleted_record(
         "channel_id": channel_id,
         "_deleted": True,
         "lastModifiedDateTime": (
-            datetime.now().isoformat().replace("+00:00", "Z")
+            datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         ),
     }
 
@@ -382,14 +382,26 @@ class MicrosoftTeamsLakeflowConnect(LakeflowConnect):
         max_pages = parse_int_option(
             table_options, "max_pages_per_batch", 100,
         )
+        max_records = parse_int_option(
+            table_options, "max_records_per_batch", 0,
+        )
         pairs = resolve_team_channel_pairs(
             self._client, table_options, "messages", max_pages,
         )
 
         records = []
-        delta_links = {}
+        # Seed with prior deltaLinks so channels we skip (because the cap was
+        # hit) keep their pre-existing cursor and resume on the next microbatch.
+        prior_links = (
+            start_offset.get("deltaLinks", {})
+            if start_offset and isinstance(start_offset, dict)
+            else {}
+        )
+        delta_links = dict(prior_links)
 
         for team_id, channel_id in pairs:
+            if max_records > 0 and len(records) >= max_records:
+                break
             try:
                 ch_recs, ch_key, ch_delta = (
                     self._fetch_channel_delta(
@@ -416,14 +428,14 @@ class MicrosoftTeamsLakeflowConnect(LakeflowConnect):
         """Fetch delta messages for a single channel."""
         channel_key = f"{team_id}/{channel_id}"
 
-        delta_link = None
+        prev_delta_link = None
         if start_offset and isinstance(start_offset, dict):
-            delta_link = start_offset.get(
+            prev_delta_link = start_offset.get(
                 "deltaLinks", {},
             ).get(channel_key)
 
         base = self._client.base_url
-        url = delta_link or (
+        url = prev_delta_link or (
             f"{base}/teams/{team_id}"
             f"/channels/{channel_id}/messages/delta"
         )
@@ -458,6 +470,14 @@ class MicrosoftTeamsLakeflowConnect(LakeflowConnect):
             pages_fetched += 1
             if url:
                 time.sleep(0.1)
+
+        # Graph rotates @odata.deltaLink on every response, even when no
+        # messages changed, so the new link alone is not a progress signal.
+        # If we had a prior cursor and produced no records, return the prior
+        # link unchanged so AvailableNow sees end_offset == start_offset and
+        # terminates.
+        if prev_delta_link is not None and not records:
+            return records, channel_key, prev_delta_link
 
         return records, channel_key, new_delta_link
 
@@ -585,6 +605,9 @@ class MicrosoftTeamsLakeflowConnect(LakeflowConnect):
         max_pages = parse_int_option(
             table_options, "max_pages_per_batch", 100,
         )
+        max_records = parse_int_option(
+            table_options, "max_records_per_batch", 0,
+        )
         pairs = resolve_team_channel_pairs(
             self._client, table_options,
             "message_replies", max_pages,
@@ -594,9 +617,18 @@ class MicrosoftTeamsLakeflowConnect(LakeflowConnect):
         )
 
         records: list[dict[str, Any]] = []
-        delta_links = {}
+        # Seed with prior deltaLinks so messages we skip (cap hit) keep their
+        # cursor and resume on the next microbatch.
+        prior_links = (
+            start_offset.get("deltaLinks", {})
+            if start_offset and isinstance(start_offset, dict)
+            else {}
+        )
+        delta_links = dict(prior_links)
 
         for tid, cid, mid in triples:
+            if max_records > 0 and len(records) >= max_records:
+                break
             try:
                 r, key, delta = self._fetch_reply_delta(
                     (tid, cid, mid), start_offset, max_pages,
@@ -623,14 +655,14 @@ class MicrosoftTeamsLakeflowConnect(LakeflowConnect):
             f"{team_id}/{channel_id}/{message_id}"
         )
 
-        delta_link = (
+        prev_delta_link = (
             start_offset.get("deltaLinks", {}).get(message_key)
             if start_offset
             else None
         )
 
         base = self._client.base_url
-        url = delta_link or (
+        url = prev_delta_link or (
             f"{base}/teams/{team_id}/channels/"
             f"{channel_id}/messages/{message_id}"
             f"/replies/delta"
@@ -668,6 +700,11 @@ class MicrosoftTeamsLakeflowConnect(LakeflowConnect):
             pages_fetched += 1
             if url:
                 time.sleep(0.1)
+
+        # See _fetch_channel_delta: Graph rotates @odata.deltaLink on every
+        # response. Without this guard, a quiet thread would never converge.
+        if prev_delta_link is not None and not records:
+            return records, message_key, prev_delta_link
 
         return records, message_key, new_delta_link
 

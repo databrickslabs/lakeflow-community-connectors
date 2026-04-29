@@ -1671,9 +1671,14 @@ def register_lakeflow_source(spark):
             window_cursor = cursor
 
             while window_cursor < self._init_time:
-                window_end_dt = datetime.strptime(window_cursor, ts_fmt) + timedelta(
-                    seconds=window_seconds
-                )
+                window_dt = self._parse_ts(window_cursor)
+                if window_dt is None:
+                    raise ValueError(
+                        f"start_date / cursor {window_cursor!r} is not a valid "
+                        "ISO 8601 timestamp (e.g. '2024-01-01' or "
+                        "'2024-01-01T00:00:00Z')."
+                    )
+                window_end_dt = window_dt + timedelta(seconds=window_seconds)
                 window_end = min(window_end_dt.strftime(ts_fmt), self._init_time)
 
                 params: dict[str, Any] = {

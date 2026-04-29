@@ -6,7 +6,7 @@
 # ==============================================================================
 
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterator, Sequence
@@ -567,7 +567,7 @@ def register_lakeflow_source(spark):
             # return a stable cursor across microbatches in a single
             # Trigger.AvailableNow trigger.  Without this, GA's "today" literal
             # would flip at UTC midnight and prevent termination.
-            self._init_date = datetime.utcnow().strftime("%Y-%m-%d")
+            self._init_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
         @staticmethod
         def _parse_property_ids(options):

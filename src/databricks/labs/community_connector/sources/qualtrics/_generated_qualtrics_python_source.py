@@ -1184,9 +1184,9 @@ def register_lakeflow_source(spark):
                             max_date = self._init_time
                         new_offset[cursor_field] = max_date
                     elif cursor_value:
-                        new_offset[cursor_field] = cursor_value
+                        new_offset[cursor_field] = min(cursor_value, self._init_time)
                 elif cursor_value:
-                    new_offset[cursor_field] = cursor_value
+                    new_offset[cursor_field] = min(cursor_value, self._init_time)
 
             normalized = (normalize_keys(item) for item in all_items)
             return normalized, new_offset
@@ -1631,7 +1631,9 @@ def register_lakeflow_source(spark):
 
             # Single survey (no comma) - use simple offset structure for backward compatibility
             if survey_id_input and "," not in survey_id_input:
-                return self._read_single_survey_responses(survey_id_input.strip(), start_offset)
+                return self._read_single_survey_responses(
+                    survey_id_input.strip(), start_offset, max_records,
+                )
 
             # Multiple surveys (comma-separated) or all surveys -
             # use consolidated path with per-survey offsets
@@ -1645,7 +1647,8 @@ def register_lakeflow_source(spark):
             return self._read_all_survey_responses(start_offset, table_options, max_records)
 
         def _read_single_survey_responses(
-            self, survey_id: str, start_offset: dict
+            self, survey_id: str, start_offset: dict,
+            max_records: int = None,
         ) -> (Iterator[dict], dict):
             """
             Read survey responses for a single survey using the Qualtrics export API.
@@ -1653,21 +1656,33 @@ def register_lakeflow_source(spark):
             Args:
                 survey_id: The survey ID to export responses from
                 start_offset: Dictionary containing cursor timestamp
+                max_records: Maximum number of records to return per call
 
             Returns:
                 Tuple of (iterator of response records, new offset)
             """
             recorded_date_cursor = start_offset.get("recordedDate") if start_offset else None
 
+            # Already drained up to the init-time cap — return empty for AvailableNow termination.
+            if recorded_date_cursor and recorded_date_cursor >= self._init_time:
+                return iter([]), {"recordedDate": recorded_date_cursor}
+
             # Step 1: Create export
             # Note: useLabels parameter cannot be used with JSON format per Qualtrics API
             export_body = {
-                "format": "json"
+                "format": "json",
+                # Cap export at init-time so the trigger sees a stable endpoint.
+                "endDate": self._init_time,
             }
 
             # Add incremental filter if cursor exists
             if recorded_date_cursor:
                 export_body["startDate"] = recorded_date_cursor
+
+            # Ask the server to limit the export. Request +1 so we can detect
+            # whether more records are available beyond the budget.
+            if max_records is not None:
+                export_body["limit"] = max_records + 1
 
             progress_id = self._create_response_export(survey_id, export_body)
 
@@ -1677,7 +1692,14 @@ def register_lakeflow_source(spark):
             # Step 3: Download and parse
             responses = self._download_response_export(survey_id, file_id)
 
-            # Calculate new offset with _init_time cap for termination
+            # Truncate if we exceeded the budget; sort first so the boundary is well-defined.
+            truncated = False
+            if max_records is not None and len(responses) > max_records:
+                responses.sort(key=lambda r: r.get("recordedDate") or "")
+                responses = responses[:max_records]
+                truncated = True
+
+            # Calculate new offset
             new_offset = {}
             if responses:
                 recorded_dates = [
@@ -1686,12 +1708,18 @@ def register_lakeflow_source(spark):
                     if resp.get("recordedDate")
                 ]
                 if recorded_dates:
-                    max_recorded_date = min(max(recorded_dates), self._init_time)
+                    max_recorded_date = max(recorded_dates)
+                    if not truncated:
+                        # Drained the export; cap at init-time for termination.
+                        max_recorded_date = min(max_recorded_date, self._init_time)
                     new_offset["recordedDate"] = max_recorded_date
                 elif recorded_date_cursor:
                     new_offset["recordedDate"] = recorded_date_cursor
             elif recorded_date_cursor:
                 new_offset["recordedDate"] = recorded_date_cursor
+            else:
+                # Empty initial run — cap at init-time so subsequent triggers converge.
+                new_offset["recordedDate"] = self._init_time
 
             return iter(responses), new_offset
 

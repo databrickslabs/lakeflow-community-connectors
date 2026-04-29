@@ -453,10 +453,35 @@ class LakeflowConnectTests:
                 "  Fix: read_table() must handle its own offset as start_offset."
             )
 
-        _, offset2 = result2
+        iter2, offset2 = result2
+        # Drain so the read fully completes — some connectors finalize the
+        # offset only after iterator consumption.
+        self._consume(iter2)
+
         if offset2 is not None and not isinstance(offset2, dict):
             return (
                 f"[{table}] Second offset must be dict or None, got {type(offset2).__name__}."
+            )
+
+        # Convergence: passing offset1 back must produce offset2 == offset1
+        # whenever no new source-side data has arrived between the two calls.
+        # Trigger.AvailableNow termination depends on this — if a connector
+        # advances its cursor on every call (e.g. unbounded Graph deltaLink
+        # rotation, mailbox historyId, or a non-frozen now()), AvailableNow
+        # will spin microbatches forever.
+        try:
+            o1_json = json.dumps(offset1, sort_keys=True)
+            o2_json = json.dumps(offset2, sort_keys=True)
+        except (TypeError, ValueError):
+            o1_json, o2_json = repr(offset1), repr(offset2)
+        if o1_json != o2_json:
+            return (
+                f"[{table}] Offset did not converge: first call returned "
+                f"{o1_json}, second call (with the first offset replayed) "
+                f"returned {o2_json}.\n"
+                "  Fix: cap the cursor at an init-time snapshot so successive "
+                "calls with the same input return the same offset. "
+                "Trigger.AvailableNow termination depends on this."
             )
 
         return None

@@ -2,7 +2,7 @@ import requests
 import base64
 import json
 from pyspark.sql.types import *
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Iterator, Any
 import time
 from databricks.labs.community_connector.interface import LakeflowConnect
@@ -33,7 +33,6 @@ class MixpanelLakeflowConnect(LakeflowConnect):
                 "Authorization": "Basic " + base64.b64encode(auth_str.encode()).decode(),
                 "Content-Type": "application/json",
             }
-            print(self.auth_header)
         else:
             raise ValueError("Authentication credentials required: either (username, secret) or api_secret")
         
@@ -57,11 +56,13 @@ class MixpanelLakeflowConnect(LakeflowConnect):
 
         # Freeze the upper cursor bounds at init time so read_table returns
         # stable offsets across microbatches in a single Trigger.AvailableNow
-        # trigger.  Without this, datetime.now() calls in the read paths
-        # would advance between calls and prevent termination.
-        now = datetime.now()
-        self._init_date = now.strftime("%Y-%m-%d")
-        self._init_ts = now.isoformat()
+        # trigger.  Use UTC wall-clock — the cluster's local TZ is not
+        # guaranteed to match the project's configured timezone.  Strip the
+        # tzinfo before isoformat() so the string compares equal in shape to
+        # the naive isoformats produced by _parse_datetime in the read paths.
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        self._init_date = now_utc.strftime("%Y-%m-%d")
+        self._init_ts = now_utc.isoformat()
 
     def _parse_datetime(self, datetime_str: str) -> datetime:
         """
@@ -331,17 +332,34 @@ class MixpanelLakeflowConnect(LakeflowConnect):
             start_offset = {}
             
         if table_name == "events":
-            return self._read_events_table(start_offset)
+            return self._read_events_table(start_offset, table_options)
         elif table_name == "cohorts":
             return self._read_cohorts_table(start_offset)
         elif table_name == "cohort_members":
             return self._read_cohort_members_table(start_offset)
         elif table_name == "engage":
-            return self._read_engage_table(start_offset)
+            return self._read_engage_table(start_offset, table_options)
         else:
             raise ValueError(f"Unknown table: {table_name}")
 
-    def _read_events_table(self, start_offset: dict) -> (Iterator[dict], dict):
+    @staticmethod
+    def _parse_max_records(table_options: dict[str, str] | None) -> int | None:
+        """Read max_records_per_batch from table options. Returns None when unset
+        or not parseable, meaning no cap (opt-in admission control)."""
+        if not table_options:
+            return None
+        raw = table_options.get("max_records_per_batch")
+        if raw is None:
+            return None
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+
+    def _read_events_table(
+        self, start_offset: dict, table_options: dict[str, str] | None = None,
+    ) -> (Iterator[dict], dict):
         """
         Read ALL events data from start_date to init_date using multiple 7-day API calls
         """
@@ -365,6 +383,8 @@ class MixpanelLakeflowConnect(LakeflowConnect):
         if start_date > today:
             print(f"Start date {start_date} is ahead of today {today}, setting start date to today")
             start_date = today
+
+        max_records = self._parse_max_records(table_options)
 
         all_records = []
         current_start = start_date
@@ -436,6 +456,13 @@ class MixpanelLakeflowConnect(LakeflowConnect):
 
             # Move to next chunk
             current_start = (datetime.strptime(chunk_end, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+
+            # Stop if we've hit the per-microbatch record cap. Resume on next
+            # microbatch from current_start (the next unread chunk).
+            if max_records is not None and len(all_records) >= max_records:
+                next_offset = {"start_date": current_start}
+                print(f"Total: {total_api_calls} API calls, {len(all_records)} events from {start_date} to {chunk_end} (cap hit)")
+                return iter(all_records), next_offset
 
         # All data fetched successfully - set up incremental mode for tomorrow
         next_start_date = (datetime.strptime(today, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -548,7 +575,9 @@ class MixpanelLakeflowConnect(LakeflowConnect):
         # For snapshot tables, return the same offset (no incremental cursor)
         return iter(records), start_offset if start_offset else {}
 
-    def _read_engage_table(self, start_offset: dict) -> (Iterator[dict], dict):
+    def _read_engage_table(
+        self, start_offset: dict, table_options: dict[str, str] | None = None,
+    ) -> (Iterator[dict], dict):
         """
         Read engage (people profiles) data with incremental loading and pagination
         """
@@ -559,6 +588,8 @@ class MixpanelLakeflowConnect(LakeflowConnect):
         last_seen_cursor = start_offset.get("last_seen") if start_offset else None
         current_page = start_offset.get("page", 0) if start_offset else 0
         session_id = start_offset.get("session_id") if start_offset else None
+
+        max_records = self._parse_max_records(table_options)
 
         # Short-circuit once the cursor has caught up to the init-time cap,
         # so Trigger.AvailableNow can terminate.
@@ -640,6 +671,20 @@ class MixpanelLakeflowConnect(LakeflowConnect):
                 # Check if we have more pages
                 if len(data.get("results", [])) < data.get("page_size", 1000):
                     break
+
+                # Stop if we've hit the per-microbatch record cap. Preserve
+                # page+session_id so the next microbatch resumes mid-walk.
+                if max_records is not None and len(records) >= max_records:
+                    capped_last_seen = latest_last_seen
+                    if capped_last_seen and capped_last_seen > self._init_ts:
+                        capped_last_seen = self._init_ts
+                    next_offset = {
+                        "last_seen": capped_last_seen if capped_last_seen else last_seen_cursor,
+                        "page": page,
+                        "session_id": current_session_id,
+                    }
+                    print(f"Fetched {len(records)} engage records (cap hit at page {page})")
+                    return iter(records), next_offset
 
             except requests.exceptions.RequestException as e:
                 raise
