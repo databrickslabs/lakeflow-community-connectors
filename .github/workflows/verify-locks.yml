@@ -45,10 +45,25 @@ jobs:
         with:
           index_var: UV_INDEX_URL
 
+      # The whole job is informational, not blocking. Two reasons it can
+      # produce noise that we don't want to fail PRs on:
+      #   1. JFrog Artifactory's PyPI proxy strips upload-time metadata for
+      #      some packages, breaking `uv pip compile --exclude-newer` even
+      #      when no actual drift exists. Tracked in
+      #      #unblock-github-action-for-eng.
+      #   2. PySpark is intentionally pinned to a prerelease floor
+      #      (>=4.2.0.dev0) so the lock can track upstream eagerly. New
+      #      pyspark dev/RC releases legitimately trigger drift between
+      #      regenerations on arca; we don't want PRs blocked on that — the
+      #      author who wants a fresh pyspark just re-runs the regen script.
+      # The drift summary is still emitted to the job step summary for
+      # anyone who wants to investigate.
       - name: Regenerate locks
+        continue-on-error: true
         run: ./tools/scripts/regenerate-locks.sh
 
       - name: Check for drift
+        continue-on-error: true
         run: |
           if git diff --quiet requirements/; then
             echo "✅ Lock files are up to date."
