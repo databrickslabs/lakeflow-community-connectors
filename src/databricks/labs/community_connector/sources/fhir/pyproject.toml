@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "FHIR R4 connector for Lakeflow Community Connectors"
 requires-python = ">=3.10"
 dependencies = [
-    "pyspark>=3.5.0,<4.0",
+    "pyspark>=4.2,<5.0",
     "requests>=2.28.0,<3.0",
     "PyJWT[cryptography]>=2.8.0,<3.0",
     "lakeflow-community-connectors>=0.1.0",

@@ -21,17 +21,9 @@ from pyspark.sql.types import (
     DateType,
     TimestampType,
     BinaryType,
+    VariantType,
+    VariantVal,
 )
-
-# VariantType / VariantVal were introduced in PySpark 4.0. The CI test
-# environment pins pyspark==3.5.8, so import them defensively to keep
-# unit tests collectable.  Connectors that actually declare VariantType
-# columns (e.g. dicomweb) require a runtime with PySpark 4.x.
-try:
-    from pyspark.sql.types import VariantType, VariantVal  # pylint: disable=no-name-in-module
-except ImportError:  # pragma: no cover
-    VariantType = None  # type: ignore[assignment]
-    VariantVal = None  # type: ignore[assignment]
 
 
 def _parse_struct(value: Any, field_type: StructType) -> Row:
@@ -198,8 +190,8 @@ def parse_value(value: Any, field_type: DataType) -> Any:  # pylint: disable=too
     if isinstance(field_type, MapType):
         return _parse_map(value, field_type)
 
-    # Handle VariantType (PySpark 4.0+; absent on 3.5)
-    if VariantType is not None and isinstance(field_type, VariantType):
+    # Handle VariantType
+    if isinstance(field_type, VariantType):
         return VariantVal.parseJson(value) if isinstance(value, str) else value
 
     # Handle primitive types via type-based lookup

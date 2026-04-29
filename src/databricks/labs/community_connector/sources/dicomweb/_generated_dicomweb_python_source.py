@@ -20,14 +20,16 @@ import time
 
 from pyspark.sql import Row
 from pyspark.sql.datasource import (
-    DataSource,
+    # pylint: disable=import-error,
     DataSourceReader,
     DataSourceStreamReader,
     InputPartition,
     SimpleDataSourceStreamReader,
+    no-name-in-module DataSource,
 )
-from pyspark.sql.streaming.datasource import ReadAllAvailable, SupportsTriggerAvailableNow
+from pyspark.sql.streaming.datasource import # pylint: disable=import-error, SupportsTriggerAvailableNow, no-name-in-module ReadAllAvailable
 from pyspark.sql.types import (
+    # pylint: disable=no-name-in-module ArrayType,
     ArrayType,
     BinaryType,
     BooleanType,
@@ -44,6 +46,7 @@ from pyspark.sql.types import (
     StructType,
     TimestampType,
     VariantType,
+    VariantVal,
 )
 from urllib.error import HTTPError
 import base64
@@ -59,13 +62,6 @@ def register_lakeflow_source(spark):
     ########################################################
     # src/databricks/labs/community_connector/libs/utils.py
     ########################################################
-
-    try:
-        from pyspark.sql.types import VariantType, VariantVal
-    except ImportError:  # pragma: no cover
-        VariantType = None  # type: ignore[assignment]
-        VariantVal = None  # type: ignore[assignment]
-
 
     def _parse_struct(value: Any, field_type: StructType) -> Row:
         """Parse a dictionary into a PySpark Row based on StructType schema."""
@@ -231,8 +227,8 @@ def register_lakeflow_source(spark):
         if isinstance(field_type, MapType):
             return _parse_map(value, field_type)
 
-        # Handle VariantType (PySpark 4.0+; absent on 3.5)
-        if VariantType is not None and isinstance(field_type, VariantType):
+        # Handle VariantType
+        if isinstance(field_type, VariantType):
             return VariantVal.parseJson(value) if isinstance(value, str) else value
 
         # Handle primitive types via type-based lookup

@@ -9,7 +9,7 @@ description = "Lakeflow community connectors built on Spark Python Data Source A
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "pyspark>=3.5.0,<4.0",
+    "pyspark>=4.2,<5.0",
     "pydantic>=2.0.0,<3.0",
     "pyyaml>=6.0,<7.0",
 ]
