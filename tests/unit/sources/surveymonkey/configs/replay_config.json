@@ -1,4 +1,4 @@
 {
   "access_token": "simulator-fake-access-token",
-  "base_url": "https://simulator.example.com"
+  "base_url": "https://simulator.example.com/v3"
 }
