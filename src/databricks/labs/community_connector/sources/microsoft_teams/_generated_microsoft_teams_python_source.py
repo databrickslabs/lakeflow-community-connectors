@@ -1493,7 +1493,7 @@ def register_lakeflow_source(spark):
             delta_links = dict(prior_links)
 
             for team_id, channel_id in pairs:
-                if max_records > 0 and len(records) >= max_records:
+                if 0 < max_records <= len(records):
                     break
                 try:
                     ch_recs, ch_key, ch_delta = (
@@ -1720,7 +1720,7 @@ def register_lakeflow_source(spark):
             delta_links = dict(prior_links)
 
             for tid, cid, mid in triples:
-                if max_records > 0 and len(records) >= max_records:
+                if 0 < max_records <= len(records):
                     break
                 try:
                     r, key, delta = self._fetch_reply_delta(

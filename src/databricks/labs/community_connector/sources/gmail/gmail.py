@@ -193,6 +193,21 @@ class GmailLakeflowConnect(LakeflowConnect):
                 f"Unsupported table: '{table_name}'. Supported tables are: {SUPPORTED_TABLES}"
             )
 
+    def _pin_to_init_offset(self, latest_history_id) -> Dict[str, str]:
+        """Return the next offset, pinned to the init-time historyId snapshot.
+
+        Pinning to ``self._init_history_id`` lets the next microbatch enter
+        ``_read_*_incremental`` with ``start == cap`` and short-circuit, so
+        Trigger.AvailableNow terminates.  Falls back to the highest
+        historyId seen on this drain only when the ``__init__`` profile
+        call failed; in that mode termination is best-effort.
+        """
+        if self._init_history_id:
+            return {"historyId": str(self._init_history_id)}
+        if latest_history_id:
+            return {"historyId": str(latest_history_id)}
+        return {}
+
     # ─── Table Readers ────────────────────────────────────────────────────────
 
     def _read_messages(
@@ -267,17 +282,7 @@ class GmailLakeflowConnect(LakeflowConnect):
             if not page_token:
                 break
 
-        # Pin the offset to the init-time snapshot so the next microbatch
-        # enters _read_messages_incremental with start == cap and short-circuits.
-        # If we never saw a snapshot at __init__ (profile call failed), fall
-        # back to the highest historyId seen on this drain.
-        if self._init_history_id:
-            next_offset = {"historyId": str(self._init_history_id)}
-        elif state["latest_history_id"]:
-            next_offset = {"historyId": state["latest_history_id"]}
-        else:
-            next_offset = {}
-        return iter(all_messages), next_offset
+        return iter(all_messages), self._pin_to_init_offset(state["latest_history_id"])
 
     def _read_messages_incremental(
         self, start_history_id: str, table_options: Dict[str, str]
@@ -417,14 +422,7 @@ class GmailLakeflowConnect(LakeflowConnect):
             if not page_token:
                 break
 
-        # Pin the offset to the init-time snapshot — see _read_messages_streaming.
-        if self._init_history_id:
-            next_offset = {"historyId": str(self._init_history_id)}
-        elif state["latest_history_id"]:
-            next_offset = {"historyId": state["latest_history_id"]}
-        else:
-            next_offset = {}
-        return iter(all_threads), next_offset
+        return iter(all_threads), self._pin_to_init_offset(state["latest_history_id"])
 
     def _read_threads_incremental(
         self, start_history_id: str, table_options: Dict[str, str]
