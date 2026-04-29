@@ -2,10 +2,22 @@
 
 ## Status
 
-**Phase 1 (move + rename) complete.** Code lives at this path; class is
-`Simulator`; existing cassette/replay behavior unchanged. Phase 2 (always-on
-recording in `live` + corpus mode) is up next; see the migration plan at the
-end of this doc.
+All phases complete. Current state:
+
+- Framework: `Simulator` class with three operating modes (live / replay /
+  simulate). Phase 2a's always-on recording, phase 2b's spec+corpus mode,
+  and phase 2c's `cassette_to_corpus` extractor all live in this package.
+- Corpus generator: `tools.corpus_from_schema` synthesizes records from a
+  connector's StructType, used to bootstrap new connectors without a live
+  recording.
+- Connector adoption: 11 connectors wired to `simulator_source` and at
+  majority-pass. `sap_successfactors` uses an older test pattern and is
+  not yet wired. Three connectors (`fhir`, `hubspot`, `zoho_crm`) error at
+  setup and need hand-tuning of their replay_config or connector init.
+- E2E example at `examples/run_connector_against_simulator.py`.
+
+See ``Bootstrapping a connector without live access`` below for the
+no-creds workflow.
 
 ## Purpose
 
@@ -494,16 +506,19 @@ separate "recording session".
 
 ## Tools
 
-Two helpers ship with the simulator package; both are thin wrappers around the
-core types.
+Three helpers ship with the simulator package.
 
 - **`cassette_to_corpus`** — reads a cassette + an endpoint spec, walks each
-  interaction, extracts the records, deduplicates across pages, and writes one
-  JSON file per `corpus:` referenced in the spec. Output is a draft the
+  interaction, extracts the records, deduplicates across pages, and writes
+  one JSON file per `corpus:` referenced in the spec. Output is a draft the
   developer can hand-edit (e.g. add edge-case records).
-- **Coverage reporter** — built into `live` mode; not a standalone tool. After
-  a live run, dumps which endpoints were hit, how many times, with which
-  param shapes. Cross-references against the spec to surface gaps:
+- **`corpus_from_schema`** — synthesizes records from a connector's
+  StructType. Used to bootstrap connectors that don't have a live recording
+  to extract from. Records are plausible enough to pass shape-level
+  validations (correct types, monotonic cursor, unique PKs).
+- **Coverage reporter** — built into `live` mode; not a standalone tool.
+  After a live run, dumps which endpoints were hit, how many times, with
+  which param shapes. Cross-references against the spec to surface gaps:
   - In spec, never hit → "no test exercises this endpoint"
   - Hit, missing from spec → "spec doesn't model this endpoint"
 
@@ -511,6 +526,33 @@ A standalone live-vs-simulate diffing tool was considered and **dropped** —
 the connector test suite is the validator. If a test passes against
 `simulate` but fails against `live`, that's the same signal a separate
 diffing tool would emit, and it costs no extra infrastructure.
+
+## Bootstrapping a connector without live access
+
+When credentials aren't available for a connector but you still want
+simulate-mode tests, the workflow is:
+
+1. **Generate corpus from schema.** Use `corpus_from_schema.write_corpus`
+   with the connector's `TABLE_SCHEMAS` (or by calling
+   `connector.get_table_schema(t, {})` for each table). Writes one
+   synthetic JSON file per table.
+2. **Author endpoints.yaml.** Read the connector's HTTP layer to identify
+   the URL pattern per table. Use `pagination_style: none` with a
+   `wrapper` block matching the connector's expected response shape
+   (e.g. `{records_key: result.elements, extras: {nextPage: null}}` for
+   nested wrappers). One endpoint entry per table.
+3. **Add `replay_config.json`.** A placeholder credentials file in
+   `tests/unit/sources/<source>/configs/` so the connector can construct
+   itself without a real `dev_config.json`.
+4. **Wire the test class.** Add `simulator_source = "<source>"` to the
+   connector's `LakeflowConnectTests` subclass.
+5. **Run the tests.** Failures will tell you which spec entries need
+   tuning (URL mismatch, missing fields, wrong wrapper shape).
+6. **Iterate** until the basic harness passes.
+
+This assumes the connector's HTTP code is correct (no live validation
+performed). If reality drifts from the spec, that surfaces only when
+someone runs the same tests with `CONNECTOR_TEST_MODE=live`.
 
 ## Migration plan
 
