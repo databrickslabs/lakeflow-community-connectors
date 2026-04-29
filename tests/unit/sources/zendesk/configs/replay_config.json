@@ -1,0 +1,5 @@
+{
+  "subdomain": "simulator",
+  "email": "simulator@example.com",
+  "api_token": "simulator-fake-token"
+}

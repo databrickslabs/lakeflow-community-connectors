@@ -1,0 +1,93 @@
+[
+  {
+    "id": 1000,
+    "url": "yankee-657",
+    "external_id": "yankee-653",
+    "name": "alpha-983",
+    "created_at": "hotel-194",
+    "updated_at": "2024-01-01T00:00:00Z",
+    "domain_names": [
+      "november-518"
+    ],
+    "details": "zulu-984",
+    "notes": "victor-608",
+    "group_id": 99455,
+    "shared_tickets": false,
+    "shared_comments": true,
+    "tags": [
+      "quebec-418"
+    ],
+    "organization_fields": {
+      "key_0": "echo-829",
+      "key_1": "xray-143"
+    }
+  },
+  {
+    "id": 1001,
+    "url": "zulu-257",
+    "external_id": "november-255",
+    "name": "charlie-388",
+    "created_at": "kilo-854",
+    "updated_at": "2024-01-01T01:00:00Z",
+    "domain_names": [
+      "mike-704"
+    ],
+    "details": "november-744",
+    "notes": "zulu-683",
+    "group_id": 77087,
+    "shared_tickets": false,
+    "shared_comments": false,
+    "tags": [],
+    "organization_fields": {
+      "key_0": "mike-201"
+    }
+  },
+  {
+    "id": 1002,
+    "url": "bravo-989",
+    "external_id": "uniform-637",
+    "name": "bravo-106",
+    "created_at": "mike-891",
+    "updated_at": "2024-01-01T02:00:00Z",
+    "domain_names": [
+      "whiskey-536"
+    ],
+    "details": "kilo-381",
+    "notes": "delta-896",
+    "group_id": 20568,
+    "shared_tickets": true,
+    "shared_comments": false,
+    "tags": [
+      "uniform-447",
+      "india-870"
+    ],
+    "organization_fields": {
+      "key_0": "november-887",
+      "key_1": "india-526"
+    }
+  },
+  {
+    "id": 1003,
+    "url": "romeo-870",
+    "external_id": "golf-395",
+    "name": "bravo-212",
+    "created_at": "tango-949",
+    "updated_at": "2024-01-01T03:00:00Z",
+    "domain_names": [
+      "papa-158",
+      "india-133"
+    ],
+    "details": "echo-295",
+    "notes": "bravo-454",
+    "group_id": 15063,
+    "shared_tickets": false,
+    "shared_comments": true,
+    "tags": [
+      "golf-880"
+    ],
+    "organization_fields": {
+      "key_0": "echo-923",
+      "key_1": "quebec-937"
+    }
+  }
+]

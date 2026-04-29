@@ -177,18 +177,22 @@ def generate_records(
     pagination terminates in a finite number of steps). Primary key fields
     are unique across the generated records.
     """
-    rng = random.Random(seed)
     base_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    cursor_dt = _resolve_field_type(schema, cursor_field) if cursor_field else None
 
     records: List[Dict[str, Any]] = []
     for i in range(count):
         record_rng = random.Random(seed + i)
         record = _gen_struct(schema, rng=record_rng, depth=0)
-        # Force cursor field to advance monotonically (overrides whatever
-        # the random generator produced).
+        # Force cursor field to advance monotonically. Type depends on the
+        # schema's declared type for that field — Long → unix-seconds int,
+        # everything else → ISO timestamp string.
         if cursor_field:
-            ts = (base_time + timedelta(hours=i)).isoformat().replace("+00:00", "Z")
-            _set_field(record, cursor_field, ts)
+            if isinstance(cursor_dt, (LongType, IntegerType, ShortType)):
+                _set_field(record, cursor_field, int((base_time + timedelta(hours=i)).timestamp()))
+            else:
+                ts = (base_time + timedelta(hours=i)).isoformat().replace("+00:00", "Z")
+                _set_field(record, cursor_field, ts)
         for pk in primary_key_fields:
             existing = _get_field(record, pk)
             if isinstance(existing, int):
@@ -197,6 +201,19 @@ def generate_records(
                 _set_field(record, pk, f"{existing[:8]}-pk{i}")
         records.append(record)
     return records
+
+
+def _resolve_field_type(schema: StructType, path: str) -> Optional[DataType]:
+    """Walk a dotted-path through nested StructTypes; return the leaf DataType."""
+    cur: DataType = schema
+    for part in path.split("."):
+        if not isinstance(cur, StructType):
+            return None
+        match = next((f for f in cur.fields if f.name == part), None)
+        if match is None:
+            return None
+        cur = match.dataType
+    return cur
 
 
 # ----- internals --------------------------------------------------------
