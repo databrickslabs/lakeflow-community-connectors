@@ -38,8 +38,6 @@ from pyspark.sql.types import (
     StructField,
     StructType,
     TimestampType,
-    VariantType,
-    VariantVal,
 )
 import base64
 
@@ -50,6 +48,13 @@ def register_lakeflow_source(spark):
     ########################################################
     # src/databricks/labs/community_connector/libs/utils.py
     ########################################################
+
+    try:
+        from pyspark.sql.types import VariantType, VariantVal
+    except ImportError:  # pragma: no cover
+        VariantType = None  # type: ignore[assignment]
+        VariantVal = None  # type: ignore[assignment]
+
 
     def _parse_struct(value: Any, field_type: StructType) -> Row:
         """Parse a dictionary into a PySpark Row based on StructType schema."""
@@ -215,8 +220,8 @@ def register_lakeflow_source(spark):
         if isinstance(field_type, MapType):
             return _parse_map(value, field_type)
 
-        # Handle VariantType
-        if isinstance(field_type, VariantType):
+        # Handle VariantType (PySpark 4.0+; absent on 3.5)
+        if VariantType is not None and isinstance(field_type, VariantType):
             return VariantVal.parseJson(value) if isinstance(value, str) else value
 
         # Handle primitive types via type-based lookup
