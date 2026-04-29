@@ -124,23 +124,35 @@ def _extract_records(body: Any) -> List[dict]:
 
 
 def _record_key(record: dict, spec: EndpointSpec) -> str:
-    """Best-effort uniqueness key. Prefer eq-filter fields (likely PKs);
-    fall back to a sorted JSON serialization."""
+    """Best-effort uniqueness key.
+
+    Prefers stable, conventional PK fields (``id``, ``sha``, ``uuid``,
+    ``node_id``) over spec-declared eq filters — eq filters often target
+    *related* fields (like ``author.login``) that can be null on some
+    records, which causes false-distinct keys for records that are
+    actually duplicates.
+    """
+    from databricks.labs.community_connector.source_simulator.corpus import (
+        get_field,
+    )
+    from databricks.labs.community_connector.source_simulator.endpoint_spec import (
+        FilterOp,
+    )
+
+    # 1) Common PK names — most reliable, present on virtually every REST
+    #    record we'd extract.
+    for k in ("id", "sha", "uuid", "node_id", "name"):
+        if k in record and record[k] is not None:
+            return f"{k}={record[k]!r}"
+
+    # 2) Spec-declared eq filters as a fallback for unusual schemas.
     for fp in spec.filters:
-        from databricks.labs.community_connector.source_simulator.endpoint_spec import (
-            FilterOp,
-        )
         if fp.op == FilterOp.EQ:
-            from databricks.labs.community_connector.source_simulator.corpus import (
-                get_field,
-            )
             v = get_field(record, fp.field)
             if v is not None:
                 return f"{fp.field}={v!r}"
-    # Common PK names across REST APIs.
-    for k in ("id", "uuid", "node_id", "sha"):
-        if k in record:
-            return f"{k}={record[k]!r}"
+
+    # 3) Final fallback: serialize the whole record. Slow, but never wrong.
     return json.dumps(record, sort_keys=True)
 
 
