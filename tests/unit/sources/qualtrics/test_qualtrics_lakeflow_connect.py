@@ -6,3 +6,4 @@ from tests.unit.sources.test_suite import LakeflowConnectTests
 class TestQualtricsConnector(LakeflowConnectTests):
     connector_class = QualtricsLakeflowConnect
     test_utils_class = LakeflowConnectWriteTestUtils
+    simulator_source = "qualtrics"

@@ -112,11 +112,16 @@ class SimulateHandler:
             request_url=request_url,
         )
 
-        # Wrap the body if the spec asks for it.
+        # Wrap the body if the spec asks for it. Supports dotted records_key
+        # for nested wrappers like ``result.elements``.
         wrapper = spec.response.wrapper
         if wrapper is not None and isinstance(body, list):
-            wrapped: Dict[str, Any] = {wrapper.records_key: body}
-            wrapped.update(wrapper.extras)
+            parts = wrapper.records_key.split(".")
+            inner: Dict[str, Any] = {parts[-1]: body}
+            inner.update(wrapper.extras)
+            wrapped: Dict[str, Any] = inner
+            for key in reversed(parts[:-1]):
+                wrapped = {key: wrapped}
             body = wrapped
 
         return body, headers

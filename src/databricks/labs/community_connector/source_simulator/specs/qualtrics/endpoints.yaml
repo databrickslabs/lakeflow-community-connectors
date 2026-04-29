@@ -1,0 +1,80 @@
+# Qualtrics REST API.
+#
+# Response shape across all paginated endpoints:
+#   {"result": {"elements": [...], "nextPage": null|<url-with-skipToken>}}
+# We always emit nextPage: null so the connector stops after one page.
+
+endpoints:
+  - path: "/API/v3/surveys"
+    method: GET
+    corpus: surveys
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: result.elements
+        extras:
+          nextPage: null
+
+  - path: "/API/v3/distributions"
+    method: GET
+    corpus: distributions
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: result.elements
+        extras:
+          nextPage: null
+
+  - path: "/API/v3/directories"
+    method: GET
+    corpus: directories
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: result.elements
+        extras:
+          nextPage: null
+
+  - path: "/API/v3/users"
+    method: GET
+    corpus: users
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: result.elements
+        extras:
+          nextPage: null
+
+  - path: "/API/v3/directories/{directory_id}/mailinglists"
+    method: GET
+    corpus: mailing_lists
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: result.elements
+        extras:
+          nextPage: null
+
+  - path: "/API/v3/directories/{directory_id}/contacts"
+    method: GET
+    corpus: directory_contacts
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: result.elements
+        extras:
+          nextPage: null
+
+  - path: "/API/v3/directories/{directory_id}/mailinglists/{mailing_list_id}/contacts"
+    method: GET
+    corpus: mailing_list_contacts
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: result.elements
+        extras:
+          nextPage: null
+
+  # /API/v3/survey-definitions/{id} — single-entity per survey.
+  # We don't include this; it's typically called per survey ID,
+  # which doesn't fit the simulator's pattern matching cleanly.
