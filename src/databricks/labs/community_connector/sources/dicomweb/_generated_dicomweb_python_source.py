@@ -20,16 +20,14 @@ import time
 
 from pyspark.sql import Row
 from pyspark.sql.datasource import (
-    # pylint: disable=import-error,
+    DataSource,
     DataSourceReader,
     DataSourceStreamReader,
     InputPartition,
     SimpleDataSourceStreamReader,
-    no-name-in-module DataSource,
 )
-from pyspark.sql.streaming.datasource import # pylint: disable=import-error, SupportsTriggerAvailableNow, no-name-in-module ReadAllAvailable
+from pyspark.sql.streaming.datasource import ReadAllAvailable, SupportsTriggerAvailableNow
 from pyspark.sql.types import (
-    # pylint: disable=no-name-in-module ArrayType,
     ArrayType,
     BinaryType,
     BooleanType,

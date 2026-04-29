@@ -15,14 +15,13 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pyspark.sql import Row
 from pyspark.sql.datasource import (
-    # pylint: disable=import-error,
+    DataSource,
     DataSourceReader,
     DataSourceStreamReader,
     InputPartition,
     SimpleDataSourceStreamReader,
-    no-name-in-module DataSource,
 )
-from pyspark.sql.streaming.datasource import # pylint: disable=import-error, SupportsTriggerAvailableNow, no-name-in-module ReadAllAvailable
+from pyspark.sql.streaming.datasource import ReadAllAvailable, SupportsTriggerAvailableNow
 from pyspark.sql.types import (
     ArrayType,
     BinaryType,
