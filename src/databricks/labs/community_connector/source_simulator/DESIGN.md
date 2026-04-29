@@ -2,11 +2,10 @@
 
 ## Status
 
-Design phase. **No implementation yet at this path.** The current implementation
-lives at `tests/unit/sources/mock_framework/` under the names
-`RecordReplayPatch`, `Cassette`, etc. This document describes the target shape
-once that code is moved here, renamed to `Simulator`, and extended with active
-simulation against a record corpus.
+**Phase 1 (move + rename) complete.** Code lives at this path; class is
+`Simulator`; existing cassette/replay behavior unchanged. Phase 2 (always-on
+recording in `live` + corpus mode) is up next; see the migration plan at the
+end of this doc.
 
 ## Purpose
 
@@ -53,20 +52,87 @@ simulator.
   connectors (e.g. `google-api-python-client`) need a separate adapter; not in
   scope for this design.
 
+## When the simulator is active
+
+The simulator is **opt-in**. It does nothing unless something explicitly
+enters a `Simulator(...)` context manager. Outside that context,
+`requests.sessions.Session.send` is the unpatched stdlib version and
+connector HTTP calls go directly to the real source — zero overhead, zero
+behavior change.
+
+| Who runs the connector | Simulator state | API calls go to |
+|---|---|---|
+| Production user (SDP / pipeline / job) | **Not active** — no context manager entered | Real source |
+| Unit tests (`LakeflowConnectTests`) | Active — the test harness enters it | Cassette / corpus / live, per mode |
+| E2E pipeline test | Active on each worker — the orchestrator enters it | Cassette / corpus / live, per mode |
+
+The simulator code lives under `src/databricks/labs/community_connector/`
+and ships with the connector package so it's **importable** in any Python
+process that imports the connector — including Spark workers. Importable
+≠ active. The connector itself never imports the simulator at runtime;
+only test/e2e drivers do.
+
+## Two postures
+
+The simulator has two fundamental postures:
+
+- **Proxy** — forwards requests to the real source, observes everything that
+  passes through. Used when you want truth + want to capture / track what the
+  connector did.
+- **Stand-in** — serves responses itself; the real source isn't touched. Used
+  when you want speed + isolation, or when you don't have credentials.
+
+All modes are one of these two postures with different policies on top.
+
 ## Operating modes
 
-| Mode | Inputs | Behavior | Primary use |
-|---|---|---|---|
-| `live` | — | No-op patch; calls hit the real API | Validate the connector and the spec against truth |
-| `record` | cassette path | Pass through to live; trim + scrub + persist responses | One-time bootstrap to seed a cassette or corpus |
-| `replay` | cassette.json | Verbatim playback of recorded responses | Tests pinned to specific recorded data |
-| `simulate` | endpoints.yaml + corpus/ | Active filter / sort / paginate against records | Most unit tests + e2e pipelines + varied scenarios |
+| Mode | Posture | Inputs | Behavior | Primary use |
+|---|---|---|---|---|
+| `live` | Proxy | (cassette path) | Calls go to the real source. Responses are **also appended to the cassette** (sample + scrub + dedup) and the simulator emits an endpoint coverage report at the end of the run. | Author/refresh: occasionally run live to keep the cassette current; the cassette is a free side-effect, not a separate operation. |
+| `replay` | Stand-in | cassette.json | Verbatim playback of recorded responses. | Tests pinned to specific recorded data — fast, offline, deterministic. |
+| `simulate` | Stand-in | endpoints.yaml + corpus/ | Active filter / sort / paginate against records. | Most unit tests + e2e pipelines + varied scenarios. |
 
-A **hybrid** form of `simulate` is also supported: simulate where a spec covers
-the endpoint, fall back to a cassette for endpoints the spec doesn't model.
-This lets a connector adopt the simulator incrementally — model the most-used
-endpoints first, let the cassette cover the long tail, eventually drop the
-cassette altogether.
+The earlier separate `record` mode is collapsed into `live`: the cassette is a
+free output of any live run, not a deliberate choice. (`record` is kept as a
+deprecated alias of `live` for one release if anyone scripts around it.)
+
+A **hybrid** form of `simulate` is also supported: simulate where a spec
+covers the endpoint, fall back to a cassette for endpoints the spec doesn't
+model. This lets a connector adopt the simulator incrementally — model the
+most-used endpoints first, let the cassette cover the long tail, eventually
+drop the cassette altogether.
+
+### Why merge `live` and `record`?
+
+The two were always doing the same proxy work; the only difference was
+"persist or don't." Keeping them separate forced contributors to choose
+between "test against live without recording" and "test against live and also
+record" — a false choice. Recording during a live run is essentially free
+(the patch already sees every response), and the cassette + coverage report
+are exactly what's needed to seed `simulate` and spot drift, so making them
+an automatic side-effect removes a knob without losing any capability.
+
+### Validation philosophy
+
+The simulator is a **believable stand-in**, not a faithful replica of the
+live API. Its job is to produce sensible responses for whatever filter / sort
+/ paginate combinations the connector throws at it — using a corpus of
+records that is "realistic enough" to exercise connector logic.
+
+That means **the connector test suite is the validator.** Tests run against
+`simulate` mode with varied params; if a test fails, the connector mishandled
+some response. We don't ship a separate live-vs-simulator diffing tool — if
+reality drifts from the spec, the symptom is "tests pass against simulate but
+fail when run live", and the response is to refresh the cassette + corpus and
+update the spec.
+
+Live runs serve two purposes:
+
+1. **Seeding** — record a cassette, extract a corpus.
+2. **Sanity** — occasionally re-run tests live to confirm the simulated world
+   still looks like the real one.
+
+Neither is continuous; both are developer-driven, on demand.
 
 ## Architecture
 
@@ -395,13 +461,66 @@ but the synthesized output is committed to a file and reused — never
 regenerated per test run. This also means the cassette and corpus formats
 remain hand-inspectable and diffable.
 
+## Workflow
+
+How a connector developer uses the simulator end-to-end:
+
+```
+   1. Author connector + endpoints.yaml from API docs
+                    │
+                    ▼
+   2. Run tests in `live` mode  ───── hits real source
+                                      cassette appended automatically (free)
+                                      coverage report emitted (free)
+                    │
+                    ▼
+   3. cassette_to_corpus tool   ───── extracts corpus/*.json from cassette
+                                      (one-time per connector; re-run when
+                                       reality drifts)
+                    │
+                    ▼
+   4. Run tests in `simulate`   ───── fast, offline iteration
+                                      tests vary params widely
+                                      pass/fail = connector correctness
+                    │
+                    ▼
+   5. Occasional `live` re-run  ───── refresh cassette + corpus
+                                      detect drift if simulate-pass /
+                                      live-fail diverges
+```
+
+Live runs do *both* sanity-check and recording in one pass — there is no
+separate "recording session".
+
+## Tools
+
+Two helpers ship with the simulator package; both are thin wrappers around the
+core types.
+
+- **`cassette_to_corpus`** — reads a cassette + an endpoint spec, walks each
+  interaction, extracts the records, deduplicates across pages, and writes one
+  JSON file per `corpus:` referenced in the spec. Output is a draft the
+  developer can hand-edit (e.g. add edge-case records).
+- **Coverage reporter** — built into `live` mode; not a standalone tool. After
+  a live run, dumps which endpoints were hit, how many times, with which
+  param shapes. Cross-references against the spec to surface gaps:
+  - In spec, never hit → "no test exercises this endpoint"
+  - Hit, missing from spec → "spec doesn't model this endpoint"
+
+A standalone live-vs-simulate diffing tool was considered and **dropped** —
+the connector test suite is the validator. If a test passes against
+`simulate` but fails against `live`, that's the same signal a separate
+diffing tool would emit, and it costs no extra infrastructure.
+
 ## Migration plan
 
 | Phase | Scope | Risk | Mergeable independently? |
 |---|---|---|---|
-| **1. Move + rename** | `tests/unit/sources/mock_framework/` → `src/.../source_simulator/`. `RecordReplayPatch` → `Simulator`. All imports updated. Behavior unchanged. | Low — purely mechanical. | Yes |
-| **2. Add corpus mode** | New modules: `endpoint_spec.py`, `corpus.py`, `handler.py`, `pagination.py`. New `Mode.SIMULATE`. Unit and integration tests for each new module. | Medium — new code, but additive (cassette mode untouched). | Yes |
-| **3. Convert GitHub** | Author `endpoints.yaml`. Generate synthetic `corpus/*.json` (no PII, deterministic). Switch `TestGithubConnector` to simulate mode. Delete the cassette. | Medium — touches one consumer; proves the design. | Yes |
+| **1. Move + rename** *(done)* | `tests/unit/sources/mock_framework/` → `src/.../source_simulator/`. `RecordReplayPatch` → `Simulator`. All imports updated. Behavior unchanged. | Low — purely mechanical. | Yes |
+| **2a. Always-on recording in live** | Collapse the old `record` mode into `live`; live runs append+dedup into the cassette and emit a coverage report. Keep `record` as a deprecated alias for one release. | Low — a small change to mode dispatch. | Yes |
+| **2b. Add simulate mode** | New modules: `endpoint_spec.py`, `corpus.py`, `handler.py`, `pagination.py`. New `Mode.SIMULATE`. Unit + integration tests for each. | Medium — new code, additive. | Yes |
+| **2c. cassette_to_corpus tool** | Extract `corpus/*.json` from a cassette + spec. Required before any meaningful authoring of corpora. | Low — pure read/transform. | Yes (after 2b) |
+| **3. Convert GitHub** | Author `endpoints.yaml`. Run `cassette_to_corpus` to seed `corpus/*.json` from the existing recorded cassette (synthesizer fills any gaps). Switch `TestGithubConnector` to `simulate`. Delete the cassette. | Medium — touches one consumer; proves the design. | Yes |
 | **4. E2E example** | Standalone script or notebook running an SDP pipeline against the simulator in-process. Documents the e2e workflow. | Higher — new territory. | Yes |
 
 ## Open questions
