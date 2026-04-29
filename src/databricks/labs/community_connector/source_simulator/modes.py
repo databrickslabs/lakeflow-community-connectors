@@ -1,14 +1,21 @@
 """Operating modes for the source simulator.
 
-Three modes today:
+Two modes today:
 
-    live    — no-op patch; calls hit the real API
-    record  — pass-through to live, persist responses to a cassette
-    replay  — verbatim playback of recorded responses
+    live    — proxy posture; calls go to the real source. By default also
+              appends responses into the cassette and tracks per-endpoint
+              coverage (free side-effects of any live run). Pass
+              ``record=False`` to keep coverage-only behavior.
+    replay  — stand-in posture; verbatim playback of recorded responses.
 
-A future ``simulate`` mode will read an endpoint spec + record corpus and
-serve responses with real query semantics (filter, sort, paginate). See
-DESIGN.md for the bigger picture.
+A future ``simulate`` mode (stand-in posture) will read an endpoint spec +
+record corpus and serve responses with real query semantics (filter, sort,
+paginate). See DESIGN.md.
+
+``record`` is accepted as a deprecated alias of ``live`` — kept for one
+release while callers migrate. The earlier separate "record" mode collapses
+into ``live`` because the only difference between them was "persist or
+don't", and persisting during a live run is essentially free.
 """
 
 from __future__ import annotations

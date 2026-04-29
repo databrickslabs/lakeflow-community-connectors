@@ -154,13 +154,76 @@ class TestCassetteRoundTrip:
 
 
 class TestRecordReplay:
-    def test_live_mode_is_noop(self, http_server: str, tmp_path: Path):
+    def test_live_mode_records_by_default(self, http_server: str, tmp_path: Path):
+        """Live mode is the proxy posture: forwards to live AND appends to the cassette."""
         path = tmp_path / "live.json"
         with Simulator(mode=MODE_LIVE, cassette_path=path):
             resp = requests.get(f"{http_server}/ping?x=1")
             assert resp.status_code == 200
             assert resp.json() == {"pong": True, "path": "/ping?x=1"}
-        assert not path.exists()  # nothing written in live mode
+
+        assert path.exists(), "live mode should write a cassette by default"
+        data = json.loads(path.read_text())
+        assert len(data["interactions"]) == 1
+        assert data["interactions"][0]["request"]["method"] == "GET"
+
+    def test_live_mode_record_false_skips_write(
+        self, http_server: str, tmp_path: Path
+    ):
+        """record=False keeps the proxy posture but doesn't persist the cassette."""
+        path = tmp_path / "live.json"
+        with Simulator(mode=MODE_LIVE, cassette_path=path, record=False):
+            resp = requests.get(f"{http_server}/ping?x=1")
+            assert resp.status_code == 200
+        assert not path.exists()
+
+    def test_live_mode_appends_and_dedups(
+        self, http_server: str, tmp_path: Path
+    ):
+        """Re-running live mode against the same cassette path appends new
+        interactions and dedups already-seen ones."""
+        path = tmp_path / "live.json"
+        # First run: hit /ping?x=1
+        with Simulator(mode=MODE_LIVE, cassette_path=path):
+            requests.get(f"{http_server}/ping?x=1")
+        first = json.loads(path.read_text())
+        assert len(first["interactions"]) == 1
+
+        # Second run: hit the same URL + a new one
+        with Simulator(mode=MODE_LIVE, cassette_path=path):
+            requests.get(f"{http_server}/ping?x=1")  # already on tape
+            requests.get(f"{http_server}/ping?x=2")  # new
+
+        second = json.loads(path.read_text())
+        assert len(second["interactions"]) == 2  # one new, dedup the other
+
+    def test_live_mode_emits_coverage_report(
+        self, http_server: str, tmp_path: Path
+    ):
+        """Coverage report is written next to the cassette in live mode."""
+        path = tmp_path / "live.json"
+        with Simulator(mode=MODE_LIVE, cassette_path=path) as sim:
+            requests.get(f"{http_server}/ping?x=1")
+            requests.get(f"{http_server}/ping?x=1")  # same URL, count=2
+            requests.post(f"{http_server}/ping", json={"a": 1})
+
+        coverage_path = path.with_suffix(".json.coverage.json")
+        assert coverage_path.exists()
+        report = json.loads(coverage_path.read_text())
+        endpoints = {(e["method"], e["url"]): e for e in report["endpoints"]}
+        get_url = next((u for m, u in endpoints if m == "GET"), None)
+        post_url = next((u for m, u in endpoints if m == "POST"), None)
+        assert endpoints[("GET", get_url)]["count"] == 2
+        assert endpoints[("POST", post_url)]["count"] == 1
+
+    def test_record_mode_is_alias_for_live(self, http_server: str, tmp_path: Path):
+        """The old MODE_RECORD value is accepted but treated as MODE_LIVE."""
+        path = tmp_path / "rec.json"
+        sim = Simulator(mode=MODE_RECORD, cassette_path=path)
+        assert sim.mode == MODE_LIVE
+        with sim:
+            requests.get(f"{http_server}/ping")
+        assert path.exists()
 
     def test_record_writes_cassette(self, http_server: str, tmp_path: Path):
         path = tmp_path / "rec.json"

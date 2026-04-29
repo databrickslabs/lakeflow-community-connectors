@@ -12,6 +12,10 @@ from databricks.labs.community_connector.source_simulator.cassette import (
     RequestRecord,
     ResponseRecord,
 )
+from databricks.labs.community_connector.source_simulator.coverage import (
+    CoverageTracker,
+    EndpointHit,
+)
 from databricks.labs.community_connector.source_simulator.modes import (
     MODE_ENV,
     MODE_LIVE,
@@ -28,6 +32,8 @@ from databricks.labs.community_connector.source_simulator.simulator import (
 
 __all__ = [
     "Cassette",
+    "CoverageTracker",
+    "EndpointHit",
     "Interaction",
     "MODE_ENV",
     "MODE_LIVE",
