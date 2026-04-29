@@ -33,7 +33,7 @@ set -eu
 #     published after the current CUTOFF.
 #   - The PR description must state the new CUTOFF value and the reason
 #     for the bump (cadence vs. CVE — link the advisory).
-CUTOFF="2026-03-19T00:00:00Z"
+CUTOFF="2026-04-22T00:00:00Z"
 PYTHON_VERSION="3.10"
 REQ_DIR="requirements"
 
