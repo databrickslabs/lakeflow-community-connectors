@@ -8,13 +8,7 @@ on:
 
 permissions:
   contents: read
-
-# Use Databricks internal PyPI proxy. Direct egress to pypi.org from the
-# protected runner group hits a TLS-terminating appliance that drops the
-# handshake (SSL EOF). The proxy is allowlisted on these runners.
-env:
-  PIP_INDEX_URL: https://pypi-proxy.dev.databricks.com/simple
-  PIP_DEFAULT_TIMEOUT: "60"
+  id-token: write  # Required for JFrog OIDC token exchange (see .github/actions/configure-jfrog-pypi).
 
 jobs:
   # Detect which paths changed
@@ -161,6 +155,8 @@ jobs:
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Configure pip via JFrog proxy
+        uses: ./.github/actions/configure-jfrog-pypi
       - name: Install dependencies
         run: |
           LOCK="requirements/root.txt"
@@ -190,6 +186,8 @@ jobs:
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Configure pip via JFrog proxy
+        uses: ./.github/actions/configure-jfrog-pypi
       - name: Install dependencies
         run: |
           LOCK="requirements/root.txt"
@@ -219,6 +217,8 @@ jobs:
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Configure pip via JFrog proxy
+        uses: ./.github/actions/configure-jfrog-pypi
       - name: Install dependencies
         run: |
           LOCK="requirements/root.txt"
@@ -248,6 +248,8 @@ jobs:
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Configure pip via JFrog proxy
+        uses: ./.github/actions/configure-jfrog-pypi
       - name: Install dependencies
         run: |
           LOCK="requirements/tools.txt"
@@ -279,6 +281,8 @@ jobs:
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
           python-version: "3.10"
+      - name: Configure pip via JFrog proxy
+        uses: ./.github/actions/configure-jfrog-pypi
       - name: Install dependencies
         env:
           # Read matrix value via env to prevent shell injection from source

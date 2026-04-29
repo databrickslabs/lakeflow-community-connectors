@@ -24,14 +24,7 @@ on:
 
 permissions:
   contents: read
-
-# Use Databricks internal PyPI proxy for uv resolution. Direct egress to
-# pypi.org from the protected runner group hits a TLS-terminating appliance
-# that drops the handshake (SSL EOF). The proxy is allowlisted on these
-# runners.
-env:
-  UV_INDEX_URL: https://pypi-proxy.dev.databricks.com/simple
-  UV_HTTP_TIMEOUT: "60"
+  id-token: write  # Required for JFrog OIDC token exchange (see .github/actions/configure-jfrog-pypi).
 
 jobs:
   verify:
@@ -46,6 +39,11 @@ jobs:
         with:
           version: "0.11.7"
           checksum: "6681d691eb7f9c00ac6a3af54252f7ab29ae72f0c8f95bdc7f9d1401c23ea868"
+
+      - name: Configure uv via JFrog proxy
+        uses: ./.github/actions/configure-jfrog-pypi
+        with:
+          index_var: UV_INDEX_URL
 
       - name: Regenerate locks
         run: ./tools/scripts/regenerate-locks.sh
