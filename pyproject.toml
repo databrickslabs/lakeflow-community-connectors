@@ -41,6 +41,12 @@ line-length = 100
 [tool.ruff]
 line-length = 100
 
+[tool.ruff.lint]
+# Default ruff rules (E, F) plus:
+#   I       — isort: import order / grouping (pylint C0411/C0412)
+#   PLR1730 — consider-using-min-builtin (pylint R1730)
+select = ["E", "F", "I", "PLR1730"]
+
 [tool.pyrefly]
 project-includes = ["**/*.py"]
 project-excludes = []
