@@ -18,6 +18,7 @@ Then run::
 
 import inspect
 import json
+import os
 import traceback
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Type
@@ -42,6 +43,23 @@ from databricks.labs.community_connector import source_simulator as _source_simu
 
 VALID_INGESTION_TYPES = {"snapshot", "cdc", "cdc_with_deletes", "append"}
 _INVALID_TABLE_NAME = "__nonexistent_table_$$_9z9z9z__"
+
+
+def _resolve_env_mode_for_simulator(simulator_source: Optional[str]) -> str:
+    """When a simulator spec exists, simulate is the default (fast, offline).
+
+    Without an env var the harness picks SIMULATE; explicit ``replay`` is
+    aliased to SIMULATE for backward compat with the cassette-era flag.
+    Explicit ``live`` opts in to refreshing the corpus from the real source.
+    Without a simulator spec, behavior follows the env var directly with
+    ``live`` as the default.
+    """
+    raw_env = os.environ.get("CONNECTOR_TEST_MODE", "").strip().lower()
+    if simulator_source:
+        if raw_env in ("", "simulate", "replay"):
+            return MODE_SIMULATE
+        return get_mode()
+    return get_mode()
 
 
 class LakeflowConnectTests:
@@ -131,14 +149,17 @@ class LakeflowConnectTests:
         """Pick the right Simulator() kwargs based on env var + simulator_source.
 
         With ``simulator_source`` set:
-            CONNECTOR_TEST_MODE unset / replay  -> Mode.SIMULATE (default)
-            CONNECTOR_TEST_MODE=live / record   -> Mode.LIVE (refresh corpus)
+            CONNECTOR_TEST_MODE unset / replay / simulate -> Mode.SIMULATE
+                (the default — fast, offline, no creds)
+            CONNECTOR_TEST_MODE=live    -> Mode.LIVE (refresh corpus from
+                real source; needs dev_config.json with valid creds)
 
         Without ``simulator_source`` (legacy cassette-only):
-            Mode follows CONNECTOR_TEST_MODE directly (live / replay / record).
+            Mode follows CONNECTOR_TEST_MODE directly. Default = live.
         """
-        env_mode = get_mode()
-        if cls.simulator_source and env_mode != MODE_LIVE:
+        env_mode = _resolve_env_mode_for_simulator(cls.simulator_source)
+
+        if cls.simulator_source and env_mode == MODE_SIMULATE:
             return {
                 "mode": MODE_SIMULATE,
                 "spec_path": cls._simulator_spec_path(),
