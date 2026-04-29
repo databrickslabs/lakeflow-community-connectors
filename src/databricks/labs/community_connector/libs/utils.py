@@ -28,7 +28,7 @@ from pyspark.sql.types import (
 # unit tests collectable.  Connectors that actually declare VariantType
 # columns (e.g. dicomweb) require a runtime with PySpark 4.x.
 try:
-    from pyspark.sql.types import VariantType, VariantVal
+    from pyspark.sql.types import VariantType, VariantVal  # pylint: disable=no-name-in-module
 except ImportError:  # pragma: no cover
     VariantType = None  # type: ignore[assignment]
     VariantVal = None  # type: ignore[assignment]

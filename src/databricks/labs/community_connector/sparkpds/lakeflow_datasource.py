@@ -1,14 +1,17 @@
 from typing import Iterator
 import json
 from pyspark.sql.types import StructType, StructField, StringType, ArrayType
-from pyspark.sql.datasource import (
+from pyspark.sql.datasource import (  # pylint: disable=import-error,no-name-in-module
     DataSource,
     DataSourceStreamReader,
     InputPartition,
     SimpleDataSourceStreamReader,
     DataSourceReader,
 )
-from pyspark.sql.streaming.datasource import ReadAllAvailable, SupportsTriggerAvailableNow
+from pyspark.sql.streaming.datasource import (  # pylint: disable=import-error,no-name-in-module
+    ReadAllAvailable,
+    SupportsTriggerAvailableNow,
+)
 from databricks.labs.community_connector.interface import (
     LakeflowConnect,
     SupportsPartition,
