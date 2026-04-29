@@ -27,10 +27,9 @@ MODE_ENV = "CONNECTOR_TEST_MODE"
 MODE_LIVE = "live"
 MODE_RECORD = "record"
 MODE_REPLAY = "replay"
-# Reserved for phase 2; not yet wired into Simulator dispatch.
 MODE_SIMULATE = "simulate"
 
-_VALID_MODES = {MODE_LIVE, MODE_RECORD, MODE_REPLAY}
+_VALID_MODES = {MODE_LIVE, MODE_RECORD, MODE_REPLAY, MODE_SIMULATE}
 
 
 def get_mode() -> str:

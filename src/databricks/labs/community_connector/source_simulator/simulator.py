@@ -17,14 +17,22 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator, List, Optional
 
 import requests
 from requests.models import PreparedRequest, Response
 
 from databricks.labs.community_connector.source_simulator.cassette import Cassette
+from databricks.labs.community_connector.source_simulator.corpus import CorpusStore
 from databricks.labs.community_connector.source_simulator.coverage import (
     CoverageTracker,
+)
+from databricks.labs.community_connector.source_simulator.endpoint_spec import (
+    EndpointSpec,
+    load_specs,
+)
+from databricks.labs.community_connector.source_simulator.handler import (
+    SimulateHandler,
 )
 from databricks.labs.community_connector.source_simulator.interceptor import (
     Interceptor,
@@ -35,6 +43,7 @@ from databricks.labs.community_connector.source_simulator.modes import (
     MODE_LIVE,
     MODE_RECORD,
     MODE_REPLAY,
+    MODE_SIMULATE,
     _VALID_MODES,
 )
 from databricks.labs.community_connector.source_simulator.recorder import Recorder
@@ -80,21 +89,35 @@ class Simulator:
     def __init__(
         self,
         mode: str,
-        cassette_path: Path,
+        cassette_path: Optional[Path] = None,
         source: str = "",
         allow_missing_cassette: bool = False,
         ignore_query_params: frozenset = frozenset(),
         sample_size: int = 5,
         synthesize_count: int = 0,
         record: bool = True,
+        spec_path: Optional[Path] = None,
+        corpus_dir: Optional[Path] = None,
     ) -> None:
         if mode not in _VALID_MODES:
             raise ValueError(f"Invalid mode: {mode!r}")
         # ``record`` is treated identically to ``live`` (deprecated alias).
         if mode == MODE_RECORD:
             mode = MODE_LIVE
+
+        if mode == MODE_SIMULATE:
+            if spec_path is None or corpus_dir is None:
+                raise ValueError(
+                    f"{mode!r} mode requires spec_path and corpus_dir"
+                )
+        else:
+            if cassette_path is None:
+                raise ValueError(f"{mode!r} mode requires cassette_path")
+
         self.mode = mode
-        self.cassette_path = Path(cassette_path)
+        self.cassette_path = Path(cassette_path) if cassette_path else None
+        self.spec_path = Path(spec_path) if spec_path else None
+        self.corpus_dir = Path(corpus_dir) if corpus_dir else None
         self.source = source
         self.allow_missing_cassette = allow_missing_cassette
         self.ignore_query_params = frozenset(ignore_query_params)
@@ -103,10 +126,13 @@ class Simulator:
         self.record = record
 
         self.cassette: Optional[Cassette] = None
+        self.specs: Optional[List[EndpointSpec]] = None
+        self.corpus: Optional[CorpusStore] = None
         self.coverage = CoverageTracker()
         self._interceptor: Optional[Interceptor] = None
         self._recorder: Optional[Recorder] = None
         self._replayer: Optional[Replayer] = None
+        self._handler: Optional[SimulateHandler] = None
 
     @property
     def coverage_path(self) -> Path:
@@ -129,7 +155,7 @@ class Simulator:
             self._interceptor.install()
             return self
 
-        # Replay (stand-in posture).
+        # Replay (stand-in posture, cassette source).
         if self.mode == MODE_REPLAY:
             if not self.cassette_path.exists():
                 if self.allow_missing_cassette:
@@ -147,6 +173,16 @@ class Simulator:
             )
             self._interceptor = Interceptor(handler=self._handle_send)
             self._interceptor.install()
+            return self
+
+        # Simulate (stand-in posture, spec+corpus source).
+        if self.mode == MODE_SIMULATE:
+            self.specs = load_specs(self.spec_path)
+            self.corpus = CorpusStore.load(self.corpus_dir)
+            self._handler = SimulateHandler(specs=self.specs, corpus=self.corpus)
+            self._interceptor = Interceptor(handler=self._handle_send)
+            self._interceptor.install()
+            return self
 
         return self
 
@@ -172,6 +208,11 @@ class Simulator:
             if self._recorder is not None:
                 self._recorder.record(prep, resp)
             return resp
+
+        if self.mode == MODE_SIMULATE:
+            assert self._handler is not None
+            self.coverage.observe(request_record_from_prepared(prep))
+            return self._handler.handle(prep)
 
         # MODE_REPLAY
         assert self._replayer is not None
