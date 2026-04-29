@@ -64,6 +64,20 @@ class SimulateHandler:
             # Custom handler escape hatch — defer to the user-supplied function.
             return _invoke_custom_handler(spec.handler, prep, spec, self.corpus)
 
+        # Strict-params validation: reject unknown query params just like a
+        # real server would. Off by default; opt in per endpoint.
+        if spec.strict_params:
+            unknown = sorted(set(req_rec.query.keys()) - spec.known_param_names())
+            if unknown:
+                return _build_error_response(
+                    prep,
+                    status_code=400,
+                    message=(
+                        f"Unknown query parameter(s): {unknown}. "
+                        f"Allowed: {sorted(spec.known_param_names())}"
+                    ),
+                )
+
         body, headers = self._serve(spec, req_rec.query, prep.url or "")
         body_bytes, content_type = _encode_body(body)
         resp_headers = {"Content-Type": content_type, **headers}
@@ -159,6 +173,26 @@ def _encode_body(body: Any) -> Tuple[bytes, str]:
     if body is None:
         return b"", "application/json"
     return str(body).encode("utf-8"), "text/plain"
+
+
+def _build_error_response(
+    prep: PreparedRequest, *, status_code: int, message: str
+) -> Response:
+    """Synthesize an HTTP error response with a JSON-encoded ``error`` body.
+
+    Mirrors the shape most REST APIs use for client-error responses; lets the
+    connector surface it via standard ``response.raise_for_status()`` flows.
+    """
+    body = json.dumps({"error": message, "status": status_code}).encode("utf-8")
+    rec = ResponseRecord(
+        status_code=status_code,
+        headers={"Content-Type": "application/json"},
+        body_text=body.decode("utf-8"),
+        body_b64=None,
+        encoding="utf-8",
+        url=prep.url,
+    )
+    return response_from_record(rec, prep)
 
 
 def _invoke_custom_handler(

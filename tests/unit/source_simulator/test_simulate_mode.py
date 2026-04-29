@@ -454,3 +454,45 @@ endpoints:
         ):
             with pytest.raises(UnknownEndpoint):
                 requests.get("https://api.example/nope")
+
+    def test_strict_params_rejects_unknown_query_param(self, tmp_path: Path):
+        """When ``strict_params: true``, an unknown query param produces 400."""
+        spec_path = tmp_path / "endpoints.yaml"
+        corpus_dir = tmp_path / "corpus"
+        corpus_dir.mkdir()
+        spec_path.write_text(
+            """
+endpoints:
+  - path: "/things"
+    method: GET
+    corpus: things
+    strict_params: true
+    response:
+      pagination_style: none
+    params:
+      page:     {role: page}
+      per_page: {role: per_page, default: 5, max: 100}
+"""
+        )
+        (corpus_dir / "things.json").write_text('[{"id": 1}]')
+
+        with Simulator(
+            mode=MODE_SIMULATE, spec_path=spec_path, corpus_dir=corpus_dir
+        ):
+            ok = requests.get("https://api.example/things?page=1")
+            bad = requests.get("https://api.example/things?bogus=value")
+        assert ok.status_code == 200
+        assert bad.status_code == 400
+        assert "Unknown query parameter" in bad.json()["error"]
+        assert "bogus" in bad.json()["error"]
+
+    def test_strict_params_off_by_default_accepts_extras(self, tmp_path: Path):
+        """Default (strict_params off) ignores unknown params silently."""
+        spec_path, corpus_dir = self._setup(tmp_path)
+        with Simulator(
+            mode=MODE_SIMULATE, spec_path=spec_path, corpus_dir=corpus_dir
+        ):
+            resp = requests.get(
+                "https://api.example/things?total_random_param=1"
+            )
+        assert resp.status_code == 200

@@ -122,6 +122,10 @@ class EndpointSpec:
     corpus: Optional[str]  # name of corpus table; None for endpoints with no records
     response: ResponseShape
     handler: Optional[str] = None  # "module.path:function" — escape hatch
+    # When True, requests with query params not declared in this spec are
+    # rejected with a 400 response — mirrors how a real API rejects unknown
+    # params. Default False for backward compat with permissive specs.
+    strict_params: bool = False
     # Param buckets, populated at load time:
     filters: List[FilterParam] = field(default_factory=list)
     sort_by: Optional[SortByParam] = None
@@ -131,6 +135,26 @@ class EndpointSpec:
     offset: Optional[OffsetParam] = None
     limit: Optional[LimitParam] = None
     ignored: List[str] = field(default_factory=list)
+
+    def known_param_names(self) -> set:
+        """All query-param names this endpoint declares."""
+        names: set = set()
+        for fp in self.filters:
+            names.add(fp.name)
+        if self.sort_by:
+            names.add(self.sort_by.name)
+        if self.sort_order:
+            names.add(self.sort_order.name)
+        if self.page:
+            names.add(self.page.name)
+        if self.per_page:
+            names.add(self.per_page.name)
+        if self.offset:
+            names.add(self.offset.name)
+        if self.limit:
+            names.add(self.limit.name)
+        names.update(self.ignored)
+        return names
 
 
 def load_specs(path: Path) -> List[EndpointSpec]:
@@ -199,6 +223,7 @@ def _parse_endpoint(raw: dict) -> EndpointSpec:
         corpus=corpus,
         response=response,
         handler=handler,
+        strict_params=bool(raw.get("strict_params", False)),
     )
 
     for name, info in (raw.get("params") or {}).items():
