@@ -31,6 +31,11 @@ from databricks.labs.community_connector.interface.supports_partition import (
     SupportsPartitionedStream,
 )
 from databricks.labs.community_connector.libs.utils import parse_value
+from tests.unit.sources.mock_framework import (
+    MODE_REPLAY,
+    RecordReplayPatch,
+    get_mode,
+)
 
 VALID_INGESTION_TYPES = {"snapshot", "cdc", "cdc_with_deletes", "append"}
 _INVALID_TABLE_NAME = "__nonexistent_table_$$_9z9z9z__"
@@ -57,6 +62,24 @@ class LakeflowConnectTests:
     sample_records: int = 50
     test_utils_class = None
 
+    # Query-param names whose values are non-deterministic (e.g. now()-based
+    # timestamps, request IDs, nonces). The mock framework ignores these when
+    # matching recorded interactions against incoming requests. Setting this
+    # affects both record and replay modes.
+    record_replay_ignore_query_params: frozenset = frozenset()
+
+    # Records-per-response kept in the cassette at record time. Each response
+    # body's records array is truncated to this many, and pagination pointers
+    # are stripped so connectors stop after one page. Keep small (≤10) to
+    # avoid bloating git history with real API data.
+    record_replay_sample_size: int = 5
+
+    # At replay time, expand each response's records up to this many via
+    # type-aware variation (ints, ISO timestamps, UUIDs, strings). 0 = return
+    # responses exactly as recorded. Use this when tests need more records
+    # than the sample size provides.
+    record_replay_synthesize_count: int = 0
+
     # ------------------------------------------------------------------
     # Setup
     # ------------------------------------------------------------------
@@ -67,12 +90,28 @@ class LakeflowConnectTests:
         return Path(inspect.getfile(cls)).parent / "configs"
 
     @classmethod
+    def _cassette_dir(cls) -> Path:
+        """Return the ``cassettes/`` directory next to the subclass test file."""
+        return Path(inspect.getfile(cls)).parent / "cassettes"
+
+    @classmethod
+    def _cassette_path(cls) -> Path:
+        return cls._cassette_dir() / f"{cls.__name__}.json"
+
+    @classmethod
     def _load_config(cls) -> dict:
-        """Load ``dev_config.json`` from the config dir."""
+        """Load ``dev_config.json`` — or ``replay_config.json`` in replay mode."""
+        mode = get_mode()
+        if mode == MODE_REPLAY:
+            replay_path = cls._config_dir() / "replay_config.json"
+            if replay_path.exists():
+                with open(replay_path, "r") as f:
+                    return json.load(f)
         path = cls._config_dir() / "dev_config.json"
         assert path.exists(), (
             f"Config file not found: {path}\n"
-            "  Fix: Create dev_config.json with connector credentials."
+            "  Fix: Create dev_config.json with connector credentials "
+            "(or replay_config.json for replay-mode fake credentials)."
         )
         with open(path, "r") as f:
             return json.load(f)
@@ -91,17 +130,43 @@ class LakeflowConnectTests:
         assert cls.connector_class is not None, (
             "Set connector_class in your test subclass"
         )
-        if cls.config is None:
-            cls.config = cls._load_config()
-        if cls.table_configs is None:
-            cls.table_configs = cls._load_table_configs()
-        cls.connector = cls.connector_class(cls.config)
-        cls.test_utils = None
-        if cls.test_utils_class:
-            try:
-                cls.test_utils = cls.test_utils_class(cls.config)
-            except Exception:
-                pass
+
+        # Install the HTTP record/replay patch BEFORE creating the connector
+        # so any HTTP in __init__ is captured / replayed too. In live mode
+        # (the default) this is a no-op context.
+        cls._record_replay_patch = RecordReplayPatch(
+            mode=get_mode(),
+            cassette_path=cls._cassette_path(),
+            source=cls.__module__.split(".")[-2] if "." in cls.__module__ else "",
+            ignore_query_params=frozenset(cls.record_replay_ignore_query_params),
+            sample_size=cls.record_replay_sample_size,
+            synthesize_count=cls.record_replay_synthesize_count,
+        )
+        cls._record_replay_patch.__enter__()
+
+        try:
+            if cls.config is None:
+                cls.config = cls._load_config()
+            if cls.table_configs is None:
+                cls.table_configs = cls._load_table_configs()
+            cls.connector = cls.connector_class(cls.config)
+            cls.test_utils = None
+            if cls.test_utils_class:
+                try:
+                    cls.test_utils = cls.test_utils_class(cls.config)
+                except Exception:
+                    pass
+        except Exception:
+            # Don't leave the patch installed if setup fails.
+            cls._record_replay_patch.__exit__(None, None, None)
+            raise
+
+    @classmethod
+    def teardown_class(cls):
+        patch = getattr(cls, "_record_replay_patch", None)
+        if patch is not None:
+            patch.__exit__(None, None, None)
+            cls._record_replay_patch = None
 
     # ------------------------------------------------------------------
     # Helpers
