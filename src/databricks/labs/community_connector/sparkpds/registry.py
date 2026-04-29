@@ -10,7 +10,7 @@ import inspect
 from types import ModuleType
 from typing import Type, Union
 from pyspark.sql import SparkSession
-from pyspark.sql.datasource import DataSource  # pylint: disable=import-error,no-name-in-module
+from pyspark.sql.datasource import DataSource
 
 from databricks.labs.community_connector.interface import LakeflowConnect
 from databricks.labs.community_connector.sparkpds.lakeflow_datasource import LakeflowSource

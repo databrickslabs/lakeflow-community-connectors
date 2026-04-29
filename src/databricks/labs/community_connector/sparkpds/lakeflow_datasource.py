@@ -1,14 +1,14 @@
 from typing import Iterator
 import json
 from pyspark.sql.types import StructType, StructField, StringType, ArrayType
-from pyspark.sql.datasource import (  # pylint: disable=import-error,no-name-in-module
+from pyspark.sql.datasource import (
     DataSource,
     DataSourceStreamReader,
     InputPartition,
     SimpleDataSourceStreamReader,
     DataSourceReader,
 )
-from pyspark.sql.streaming.datasource import (  # pylint: disable=import-error,no-name-in-module
+from pyspark.sql.streaming.datasource import (
     ReadAllAvailable,
     SupportsTriggerAvailableNow,
 )

@@ -5,7 +5,7 @@ These schemas align with the DICOM Information Object hierarchy:
     Study → Series → Instance (SOP)
 """
 
-from pyspark.sql.types import (  # pylint: disable=no-name-in-module
+from pyspark.sql.types import (
     ArrayType,
     LongType,
     StringType,
