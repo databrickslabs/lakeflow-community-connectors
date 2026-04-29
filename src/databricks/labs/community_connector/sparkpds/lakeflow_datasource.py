@@ -8,15 +8,13 @@ from pyspark.sql.datasource import (
     SimpleDataSourceStreamReader,
     DataSourceReader,
 )
-from pyspark.sql.streaming.datasource import SupportsTriggerAvailableNow
+from pyspark.sql.streaming.datasource import ReadAllAvailable, SupportsTriggerAvailableNow
 from databricks.labs.community_connector.interface import (
     LakeflowConnect,
     SupportsPartition,
     SupportsPartitionedStream,
 )
 from databricks.labs.community_connector.libs.utils import parse_value
-
-from pyspark.sql.streaming.datasource import ReadAllAvailable
 
 
 # =============================================================================
@@ -46,6 +44,9 @@ TABLE_CONFIGS = "tableConfigs"
 IS_DELETE_FLOW = "isDeleteFlow"
 
 
+# PySpark's DataSource API requires camelCase method names and inherits
+# semantics from the parent class, so per-method docstrings are redundant.
+# pylint: disable=invalid-name,missing-function-docstring
 class LakeflowStreamReader(SimpleDataSourceStreamReader, SupportsTriggerAvailableNow):
     """
     Implements a data source stream reader for Lakeflow Connect.

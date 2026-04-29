@@ -1155,8 +1155,7 @@ def register_lakeflow_source(spark):
             # once it reaches self._init_date).  Cap at self._init_date.
             if not max_cursor or max_cursor < to_date:
                 max_cursor = to_date
-            if max_cursor > self._init_date:
-                max_cursor = self._init_date
+            max_cursor = min(max_cursor, self._init_date)
 
             return iter(data), {"cursor": max_cursor}
 
@@ -1174,6 +1173,9 @@ def register_lakeflow_source(spark):
     IS_DELETE_FLOW = "isDeleteFlow"
 
 
+    # PySpark's DataSource API requires camelCase method names and inherits
+    # semantics from the parent class, so per-method docstrings are redundant.
+    # pylint: disable=invalid-name,missing-function-docstring
     class LakeflowStreamReader(SimpleDataSourceStreamReader, SupportsTriggerAvailableNow):
         """
         Implements a data source stream reader for Lakeflow Connect.

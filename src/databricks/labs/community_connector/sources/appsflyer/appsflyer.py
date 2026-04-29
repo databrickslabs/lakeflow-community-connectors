@@ -650,7 +650,6 @@ class AppsflyerLakeflowConnect(LakeflowConnect):
         # once it reaches self._init_date).  Cap at self._init_date.
         if not max_cursor or max_cursor < to_date:
             max_cursor = to_date
-        if max_cursor > self._init_date:
-            max_cursor = self._init_date
+        max_cursor = min(max_cursor, self._init_date)
 
         return iter(data), {"cursor": max_cursor}

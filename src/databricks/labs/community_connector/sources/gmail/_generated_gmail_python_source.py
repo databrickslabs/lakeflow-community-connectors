@@ -1636,6 +1636,9 @@ def register_lakeflow_source(spark):
     IS_DELETE_FLOW = "isDeleteFlow"
 
 
+    # PySpark's DataSource API requires camelCase method names and inherits
+    # semantics from the parent class, so per-method docstrings are redundant.
+    # pylint: disable=invalid-name,missing-function-docstring
     class LakeflowStreamReader(SimpleDataSourceStreamReader, SupportsTriggerAvailableNow):
         """
         Implements a data source stream reader for Lakeflow Connect.
