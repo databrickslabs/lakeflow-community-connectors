@@ -1,0 +1,354 @@
+# Auto-generated stub spec. URL paths are placeholder guesses;
+# tune to match the actual connector if tests fail.
+endpoints:
+- path: /piwebapi/pi_af_hierarchy
+  method: GET
+  corpus: pi_af_hierarchy
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_af_hierarchy
+      extras:
+        next_page: null
+- path: /piwebapi/pi_af_table_rows
+  method: GET
+  corpus: pi_af_table_rows
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_af_table_rows
+      extras:
+        next_page: null
+- path: /piwebapi/pi_af_tables
+  method: GET
+  corpus: pi_af_tables
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_af_tables
+      extras:
+        next_page: null
+- path: /piwebapi/pi_analyses
+  method: GET
+  corpus: pi_analyses
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_analyses
+      extras:
+        next_page: null
+- path: /piwebapi/pi_analysis_templates
+  method: GET
+  corpus: pi_analysis_templates
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_analysis_templates
+      extras:
+        next_page: null
+- path: /piwebapi/pi_assetdatabases
+  method: GET
+  corpus: pi_assetdatabases
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_assetdatabases
+      extras:
+        next_page: null
+- path: /piwebapi/pi_assetservers
+  method: GET
+  corpus: pi_assetservers
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_assetservers
+      extras:
+        next_page: null
+- path: /piwebapi/pi_attribute_templates
+  method: GET
+  corpus: pi_attribute_templates
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_attribute_templates
+      extras:
+        next_page: null
+- path: /piwebapi/pi_calculated
+  method: GET
+  corpus: pi_calculated
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_calculated
+      extras:
+        next_page: null
+- path: /piwebapi/pi_categories
+  method: GET
+  corpus: pi_categories
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_categories
+      extras:
+        next_page: null
+- path: /piwebapi/pi_current_value
+  method: GET
+  corpus: pi_current_value
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_current_value
+      extras:
+        next_page: null
+- path: /piwebapi/pi_dataservers
+  method: GET
+  corpus: pi_dataservers
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_dataservers
+      extras:
+        next_page: null
+- path: /piwebapi/pi_element_attributes
+  method: GET
+  corpus: pi_element_attributes
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_element_attributes
+      extras:
+        next_page: null
+- path: /piwebapi/pi_element_template_attributes
+  method: GET
+  corpus: pi_element_template_attributes
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_element_template_attributes
+      extras:
+        next_page: null
+- path: /piwebapi/pi_element_templates
+  method: GET
+  corpus: pi_element_templates
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_element_templates
+      extras:
+        next_page: null
+- path: /piwebapi/pi_end
+  method: GET
+  corpus: pi_end
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_end
+      extras:
+        next_page: null
+- path: /piwebapi/pi_event_frames
+  method: GET
+  corpus: pi_event_frames
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_event_frames
+      extras:
+        next_page: null
+- path: /piwebapi/pi_eventframe_acknowledgements
+  method: GET
+  corpus: pi_eventframe_acknowledgements
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_eventframe_acknowledgements
+      extras:
+        next_page: null
+- path: /piwebapi/pi_eventframe_annotations
+  method: GET
+  corpus: pi_eventframe_annotations
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_eventframe_annotations
+      extras:
+        next_page: null
+- path: /piwebapi/pi_eventframe_attributes
+  method: GET
+  corpus: pi_eventframe_attributes
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_eventframe_attributes
+      extras:
+        next_page: null
+- path: /piwebapi/pi_eventframe_referenced_elements
+  method: GET
+  corpus: pi_eventframe_referenced_elements
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_eventframe_referenced_elements
+      extras:
+        next_page: null
+- path: /piwebapi/pi_eventframe_template_attributes
+  method: GET
+  corpus: pi_eventframe_template_attributes
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_eventframe_template_attributes
+      extras:
+        next_page: null
+- path: /piwebapi/pi_eventframe_templates
+  method: GET
+  corpus: pi_eventframe_templates
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_eventframe_templates
+      extras:
+        next_page: null
+- path: /piwebapi/pi_interpolated
+  method: GET
+  corpus: pi_interpolated
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_interpolated
+      extras:
+        next_page: null
+- path: /piwebapi/pi_links
+  method: GET
+  corpus: pi_links
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_links
+      extras:
+        next_page: null
+- path: /piwebapi/pi_plot
+  method: GET
+  corpus: pi_plot
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_plot
+      extras:
+        next_page: null
+- path: /piwebapi/pi_point_attributes
+  method: GET
+  corpus: pi_point_attributes
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_point_attributes
+      extras:
+        next_page: null
+- path: /piwebapi/pi_point_type_catalog
+  method: GET
+  corpus: pi_point_type_catalog
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_point_type_catalog
+      extras:
+        next_page: null
+- path: /piwebapi/pi_points
+  method: GET
+  corpus: pi_points
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_points
+      extras:
+        next_page: null
+- path: /piwebapi/pi_recorded_at_time
+  method: GET
+  corpus: pi_recorded_at_time
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_recorded_at_time
+      extras:
+        next_page: null
+- path: /piwebapi/pi_streamset_end
+  method: GET
+  corpus: pi_streamset_end
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_streamset_end
+      extras:
+        next_page: null
+- path: /piwebapi/pi_streamset_interpolated
+  method: GET
+  corpus: pi_streamset_interpolated
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_streamset_interpolated
+      extras:
+        next_page: null
+- path: /piwebapi/pi_streamset_plot
+  method: GET
+  corpus: pi_streamset_plot
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_streamset_plot
+      extras:
+        next_page: null
+- path: /piwebapi/pi_streamset_recorded
+  method: GET
+  corpus: pi_streamset_recorded
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_streamset_recorded
+      extras:
+        next_page: null
+- path: /piwebapi/pi_streamset_summary
+  method: GET
+  corpus: pi_streamset_summary
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_streamset_summary
+      extras:
+        next_page: null
+- path: /piwebapi/pi_summary
+  method: GET
+  corpus: pi_summary
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_summary
+      extras:
+        next_page: null
+- path: /piwebapi/pi_timeseries
+  method: GET
+  corpus: pi_timeseries
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_timeseries
+      extras:
+        next_page: null
+- path: /piwebapi/pi_units_of_measure
+  method: GET
+  corpus: pi_units_of_measure
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_units_of_measure
+      extras:
+        next_page: null
+- path: /piwebapi/pi_value_at_time
+  method: GET
+  corpus: pi_value_at_time
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pi_value_at_time
+      extras:
+        next_page: null

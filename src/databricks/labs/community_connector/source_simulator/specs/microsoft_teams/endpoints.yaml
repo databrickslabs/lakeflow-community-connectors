@@ -1,0 +1,48 @@
+# Auto-generated stub spec. URL paths are placeholder guesses;
+# tune to match the actual connector if tests fail.
+endpoints:
+- path: /v1.0/channels
+  method: GET
+  corpus: channels
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: channels
+      extras:
+        next_page: null
+- path: /v1.0/members
+  method: GET
+  corpus: members
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: members
+      extras:
+        next_page: null
+- path: /v1.0/message_replies
+  method: GET
+  corpus: message_replies
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: message_replies
+      extras:
+        next_page: null
+- path: /v1.0/messages
+  method: GET
+  corpus: messages
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: messages
+      extras:
+        next_page: null
+- path: /v1.0/teams
+  method: GET
+  corpus: teams
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: teams
+      extras:
+        next_page: null

@@ -1,0 +1,129 @@
+# Auto-generated stub spec. URL paths are placeholder guesses;
+# tune to match the actual connector if tests fail.
+endpoints:
+- path: /_apis/commits
+  method: GET
+  corpus: commits
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: commits
+      extras:
+        next_page: null
+- path: /_apis/projects
+  method: GET
+  corpus: projects
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: projects
+      extras:
+        next_page: null
+- path: /_apis/pullrequest_commits
+  method: GET
+  corpus: pullrequest_commits
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pullrequest_commits
+      extras:
+        next_page: null
+- path: /_apis/pullrequest_reviewers
+  method: GET
+  corpus: pullrequest_reviewers
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pullrequest_reviewers
+      extras:
+        next_page: null
+- path: /_apis/pullrequest_threads
+  method: GET
+  corpus: pullrequest_threads
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pullrequest_threads
+      extras:
+        next_page: null
+- path: /_apis/pullrequest_workitems
+  method: GET
+  corpus: pullrequest_workitems
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pullrequest_workitems
+      extras:
+        next_page: null
+- path: /_apis/pullrequests
+  method: GET
+  corpus: pullrequests
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pullrequests
+      extras:
+        next_page: null
+- path: /_apis/pushes
+  method: GET
+  corpus: pushes
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pushes
+      extras:
+        next_page: null
+- path: /_apis/refs
+  method: GET
+  corpus: refs
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: refs
+      extras:
+        next_page: null
+- path: /_apis/repositories
+  method: GET
+  corpus: repositories
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: repositories
+      extras:
+        next_page: null
+- path: /_apis/users
+  method: GET
+  corpus: users
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: users
+      extras:
+        next_page: null
+- path: /_apis/workitem_revisions
+  method: GET
+  corpus: workitem_revisions
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: workitem_revisions
+      extras:
+        next_page: null
+- path: /_apis/workitem_types
+  method: GET
+  corpus: workitem_types
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: workitem_types
+      extras:
+        next_page: null
+- path: /_apis/workitems
+  method: GET
+  corpus: workitems
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: workitems
+      extras:
+        next_page: null

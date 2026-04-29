@@ -29,6 +29,7 @@ from tests.unit.sources.test_suite import LakeflowConnectTests
 
 class TestDICOMwebConnector(LakeflowConnectTests, SupportsPartitionedStreamTests):
     connector_class = DICOMwebLakeflowConnect
+    simulator_source = "dicomweb"
     sample_records = 10
 
     @classmethod

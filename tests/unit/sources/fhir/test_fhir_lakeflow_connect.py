@@ -14,4 +14,5 @@ from tests.unit.sources.test_suite import LakeflowConnectTests
 
 class TestFhirConnector(LakeflowConnectTests):
     connector_class = FhirLakeflowConnect
+    simulator_source = "fhir"
     sample_records = 5  # HAPI FHIR is a public server, be considerate.

@@ -4,3 +4,4 @@ from tests.unit.sources.test_suite import LakeflowConnectTests
 
 class TestMicrosoftTeamsConnector(LakeflowConnectTests):
     connector_class = MicrosoftTeamsLakeflowConnect
+    simulator_source = "microsoft_teams"

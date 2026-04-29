@@ -1,0 +1,38 @@
+# Auto-generated stub spec.
+endpoints:
+- path: /api/2.0/cohort_members
+  method: GET
+  corpus: cohort_members
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: cohort_members
+      extras:
+        next_page: null
+- path: /api/2.0/cohorts
+  method: GET
+  corpus: cohorts
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: cohorts
+      extras:
+        next_page: null
+- path: /api/2.0/engage
+  method: GET
+  corpus: engage
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: engage
+      extras:
+        next_page: null
+- path: /api/2.0/events
+  method: GET
+  corpus: events
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: events
+      extras:
+        next_page: null

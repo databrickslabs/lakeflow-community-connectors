@@ -4,3 +4,4 @@ from tests.unit.sources.test_suite import LakeflowConnectTests
 
 class TestSurveymonkeyConnector(LakeflowConnectTests):
     connector_class = SurveymonkeyLakeflowConnect
+    simulator_source = "surveymonkey"

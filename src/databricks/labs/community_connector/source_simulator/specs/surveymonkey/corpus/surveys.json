@@ -1,0 +1,122 @@
+[
+  {
+    "id": "mike-481",
+    "title": "zulu-666",
+    "nickname": "charlie-216",
+    "href": "juliet-394",
+    "folder_id": "hotel-995",
+    "category": "echo-268",
+    "language": "oscar-907",
+    "question_count": 37381,
+    "page_count": 66922,
+    "date_created": "delta-706",
+    "date_modified": "foxtrot-717",
+    "response_count": 44736,
+    "buttons_text": {
+      "next_button": "sierra-212",
+      "prev_button": "mike-474",
+      "done_button": "zulu-103",
+      "exit_button": "juliet-316"
+    },
+    "is_owner": false,
+    "footer": false,
+    "custom_variables": {
+      "key_0": "charlie-971",
+      "key_1": "uniform-495"
+    },
+    "preview": "papa-207",
+    "edit_url": "foxtrot-189",
+    "collect_url": "quebec-822",
+    "analyze_url": "papa-911",
+    "summary_url": "bravo-719"
+  },
+  {
+    "id": "lima-633",
+    "title": "juliet-730",
+    "nickname": "sierra-264",
+    "href": "lima-170",
+    "folder_id": "papa-206",
+    "category": "victor-556",
+    "language": "tango-660",
+    "question_count": 5049,
+    "page_count": 28325,
+    "date_created": "sierra-592",
+    "date_modified": "papa-772",
+    "response_count": 15545,
+    "buttons_text": {
+      "next_button": "romeo-469",
+      "prev_button": "yankee-214",
+      "done_button": "yankee-633",
+      "exit_button": "papa-538"
+    },
+    "is_owner": false,
+    "footer": false,
+    "custom_variables": {
+      "key_0": "charlie-679"
+    },
+    "preview": "india-930",
+    "edit_url": "mike-506",
+    "collect_url": "india-243",
+    "analyze_url": "delta-495",
+    "summary_url": "whiskey-354"
+  },
+  {
+    "id": "foxtrot-606",
+    "title": "foxtrot-758",
+    "nickname": "juliet-935",
+    "href": "victor-316",
+    "folder_id": "sierra-620",
+    "category": "uniform-207",
+    "language": "echo-129",
+    "question_count": 7333,
+    "page_count": 16732,
+    "date_created": "kilo-785",
+    "date_modified": "alpha-258",
+    "response_count": 11504,
+    "buttons_text": {
+      "next_button": "romeo-407",
+      "prev_button": "alpha-625",
+      "done_button": "papa-963",
+      "exit_button": "november-411"
+    },
+    "is_owner": true,
+    "footer": true,
+    "custom_variables": {},
+    "preview": "bravo-111",
+    "edit_url": "charlie-700",
+    "collect_url": "romeo-296",
+    "analyze_url": "foxtrot-670",
+    "summary_url": "delta-841"
+  },
+  {
+    "id": "sierra-197",
+    "title": "echo-656",
+    "nickname": "quebec-943",
+    "href": "mike-575",
+    "folder_id": "papa-243",
+    "category": "romeo-289",
+    "language": "victor-960",
+    "question_count": 10171,
+    "page_count": 44142,
+    "date_created": "golf-898",
+    "date_modified": "papa-903",
+    "response_count": 70558,
+    "buttons_text": {
+      "next_button": "lima-555",
+      "prev_button": "uniform-122",
+      "done_button": "lima-476",
+      "exit_button": "sierra-655"
+    },
+    "is_owner": false,
+    "footer": true,
+    "custom_variables": {
+      "key_0": "whiskey-857",
+      "key_1": "sierra-920"
+    },
+    "preview": "charlie-489",
+    "edit_url": "lima-270",
+    "collect_url": "oscar-610",
+    "analyze_url": "hotel-718",
+    "summary_url": "papa-817"
+  }
+]

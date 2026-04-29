@@ -4,3 +4,4 @@ from tests.unit.sources.test_suite import LakeflowConnectTests
 
 class TestOsipiConnector(LakeflowConnectTests):
     connector_class = OsipiLakeflowConnect
+    simulator_source = "osipi"

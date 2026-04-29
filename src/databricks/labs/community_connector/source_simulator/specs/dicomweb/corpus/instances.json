@@ -1,0 +1,54 @@
+[
+  {
+    "sop_instance_uid": "tango-382",
+    "series_instance_uid": "juliet-817",
+    "study_instance_uid": "charlie-629",
+    "sop_class_uid": "charlie-565",
+    "instance_number": 17370,
+    "study_date": "oscar-399",
+    "content_date": "india-686",
+    "content_time": "hotel-256",
+    "dicom_file_path": "tango-111",
+    "metadata": null,
+    "connection_name": "papa-633"
+  },
+  {
+    "sop_instance_uid": "hotel-493",
+    "series_instance_uid": "bravo-104",
+    "study_instance_uid": "papa-360",
+    "sop_class_uid": "whiskey-996",
+    "instance_number": 27152,
+    "study_date": "charlie-181",
+    "content_date": "zulu-714",
+    "content_time": "mike-822",
+    "dicom_file_path": "romeo-608",
+    "metadata": null,
+    "connection_name": "sierra-165"
+  },
+  {
+    "sop_instance_uid": "romeo-371",
+    "series_instance_uid": "alpha-834",
+    "study_instance_uid": "foxtrot-587",
+    "sop_class_uid": "juliet-922",
+    "instance_number": 63979,
+    "study_date": "victor-596",
+    "content_date": "foxtrot-530",
+    "content_time": "whiskey-914",
+    "dicom_file_path": "kilo-239",
+    "metadata": null,
+    "connection_name": "whiskey-339"
+  },
+  {
+    "sop_instance_uid": "alpha-780",
+    "series_instance_uid": "victor-862",
+    "study_instance_uid": "sierra-614",
+    "sop_class_uid": "delta-838",
+    "instance_number": 90776,
+    "study_date": "juliet-407",
+    "content_date": "kilo-393",
+    "content_time": "kilo-814",
+    "dicom_file_path": "echo-758",
+    "metadata": null,
+    "connection_name": "india-255"
+  }
+]

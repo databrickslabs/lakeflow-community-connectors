@@ -1,0 +1,46 @@
+[
+  {
+    "series_instance_uid": "oscar-750",
+    "study_instance_uid": "uniform-993",
+    "study_date": "alpha-181",
+    "series_number": 91582,
+    "series_description": "alpha-626",
+    "modality": "lima-498",
+    "body_part_examined": "papa-672",
+    "series_date": "zulu-838",
+    "connection_name": "kilo-736"
+  },
+  {
+    "series_instance_uid": "uniform-174",
+    "study_instance_uid": "yankee-873",
+    "study_date": "kilo-308",
+    "series_number": 27496,
+    "series_description": "india-470",
+    "modality": "november-163",
+    "body_part_examined": "sierra-278",
+    "series_date": "hotel-527",
+    "connection_name": "november-855"
+  },
+  {
+    "series_instance_uid": "tango-827",
+    "study_instance_uid": "tango-974",
+    "study_date": "delta-988",
+    "series_number": 25518,
+    "series_description": "oscar-883",
+    "modality": "kilo-869",
+    "body_part_examined": "yankee-526",
+    "series_date": "alpha-852",
+    "connection_name": "bravo-981"
+  },
+  {
+    "series_instance_uid": "sierra-390",
+    "study_instance_uid": "lima-769",
+    "study_date": "victor-307",
+    "series_number": 51571,
+    "series_description": "zulu-374",
+    "modality": "romeo-869",
+    "body_part_examined": "juliet-291",
+    "series_date": "kilo-788",
+    "connection_name": "alpha-334"
+  }
+]

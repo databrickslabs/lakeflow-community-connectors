@@ -1,0 +1,26 @@
+[
+  {
+    "entity_type": "delta-865",
+    "webid": "charlie-228",
+    "rel": "victor-570",
+    "href": "foxtrot-676"
+  },
+  {
+    "entity_type": "tango-110",
+    "webid": "zulu-622",
+    "rel": "victor-513",
+    "href": "xray-416"
+  },
+  {
+    "entity_type": "golf-358",
+    "webid": "charlie-715",
+    "rel": "zulu-761",
+    "href": "oscar-751"
+  },
+  {
+    "entity_type": "foxtrot-898",
+    "webid": "lima-391",
+    "rel": "oscar-539",
+    "href": "lima-580"
+  }
+]

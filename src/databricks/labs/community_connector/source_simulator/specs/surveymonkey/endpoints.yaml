@@ -1,0 +1,165 @@
+# Auto-generated stub spec. URL paths are placeholder guesses;
+# tune to match the actual connector if tests fail.
+endpoints:
+- path: /v3/benchmark_bundles
+  method: GET
+  corpus: benchmark_bundles
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: benchmark_bundles
+      extras:
+        next_page: null
+- path: /v3/collectors
+  method: GET
+  corpus: collectors
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: collectors
+      extras:
+        next_page: null
+- path: /v3/contact_lists
+  method: GET
+  corpus: contact_lists
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: contact_lists
+      extras:
+        next_page: null
+- path: /v3/contacts
+  method: GET
+  corpus: contacts
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: contacts
+      extras:
+        next_page: null
+- path: /v3/group_members
+  method: GET
+  corpus: group_members
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: group_members
+      extras:
+        next_page: null
+- path: /v3/groups
+  method: GET
+  corpus: groups
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: groups
+      extras:
+        next_page: null
+- path: /v3/survey_categories
+  method: GET
+  corpus: survey_categories
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: survey_categories
+      extras:
+        next_page: null
+- path: /v3/survey_folders
+  method: GET
+  corpus: survey_folders
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: survey_folders
+      extras:
+        next_page: null
+- path: /v3/survey_languages
+  method: GET
+  corpus: survey_languages
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: survey_languages
+      extras:
+        next_page: null
+- path: /v3/survey_pages
+  method: GET
+  corpus: survey_pages
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: survey_pages
+      extras:
+        next_page: null
+- path: /v3/survey_questions
+  method: GET
+  corpus: survey_questions
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: survey_questions
+      extras:
+        next_page: null
+- path: /v3/survey_responses
+  method: GET
+  corpus: survey_responses
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: survey_responses
+      extras:
+        next_page: null
+- path: /v3/survey_rollups
+  method: GET
+  corpus: survey_rollups
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: survey_rollups
+      extras:
+        next_page: null
+- path: /v3/survey_templates
+  method: GET
+  corpus: survey_templates
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: survey_templates
+      extras:
+        next_page: null
+- path: /v3/surveys
+  method: GET
+  corpus: surveys
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: surveys
+      extras:
+        next_page: null
+- path: /v3/users
+  method: GET
+  corpus: users
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: users
+      extras:
+        next_page: null
+- path: /v3/webhooks
+  method: GET
+  corpus: webhooks
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: webhooks
+      extras:
+        next_page: null
+- path: /v3/workgroups
+  method: GET
+  corpus: workgroups
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: workgroups
+      extras:
+        next_page: null

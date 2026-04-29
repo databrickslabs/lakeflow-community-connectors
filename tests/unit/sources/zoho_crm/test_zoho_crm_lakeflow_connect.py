@@ -4,3 +4,4 @@ from tests.unit.sources.test_suite import LakeflowConnectTests
 
 class TestZohoCrmConnector(LakeflowConnectTests):
     connector_class = ZohoCRMLakeflowConnect
+    simulator_source = "zoho_crm"

@@ -1,0 +1,2397 @@
+# Auto-generated stub spec. URL paths are placeholder guesses;
+# tune to match the actual connector if tests fail.
+endpoints:
+- path: /odata/v2/Advance
+  method: GET
+  corpus: Advance
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: Advance
+      extras:
+        next_page: null
+- path: /odata/v2/AdvancesAccumulation
+  method: GET
+  corpus: AdvancesAccumulation
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: AdvancesAccumulation
+      extras:
+        next_page: null
+- path: /odata/v2/AdvancesEligibility
+  method: GET
+  corpus: AdvancesEligibility
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: AdvancesEligibility
+      extras:
+        next_page: null
+- path: /odata/v2/AdvancesInstallments
+  method: GET
+  corpus: AdvancesInstallments
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: AdvancesInstallments
+      extras:
+        next_page: null
+- path: /odata/v2/AssignedComplianceForm
+  method: GET
+  corpus: AssignedComplianceForm
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: AssignedComplianceForm
+      extras:
+        next_page: null
+- path: /odata/v2/Attachment
+  method: GET
+  corpus: Attachment
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: Attachment
+      extras:
+        next_page: null
+- path: /odata/v2/Bank
+  method: GET
+  corpus: Bank
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: Bank
+      extras:
+        next_page: null
+- path: /odata/v2/Benefit
+  method: GET
+  corpus: Benefit
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: Benefit
+      extras:
+        next_page: null
+- path: /odata/v2/BudgetGroup
+  method: GET
+  corpus: BudgetGroup
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: BudgetGroup
+      extras:
+        next_page: null
+- path: /odata/v2/CalibrationSession
+  method: GET
+  corpus: CalibrationSession
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: CalibrationSession
+      extras:
+        next_page: null
+- path: /odata/v2/CalibrationSessionSubject
+  method: GET
+  corpus: CalibrationSessionSubject
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: CalibrationSessionSubject
+      extras:
+        next_page: null
+- path: /odata/v2/CalibrationSubjectRank
+  method: GET
+  corpus: CalibrationSubjectRank
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: CalibrationSubjectRank
+      extras:
+        next_page: null
+- path: /odata/v2/CalibrationTemplate
+  method: GET
+  corpus: CalibrationTemplate
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: CalibrationTemplate
+      extras:
+        next_page: null
+- path: /odata/v2/Candidate
+  method: GET
+  corpus: Candidate
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: Candidate
+      extras:
+        next_page: null
+- path: /odata/v2/CandidateBackground_Certificates
+  method: GET
+  corpus: CandidateBackground_Certificates
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: CandidateBackground_Certificates
+      extras:
+        next_page: null
+- path: /odata/v2/CandidateBackground_Education
+  method: GET
+  corpus: CandidateBackground_Education
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: CandidateBackground_Education
+      extras:
+        next_page: null
+- path: /odata/v2/CandidateBackground_InsideWorkExperience
+  method: GET
+  corpus: CandidateBackground_InsideWorkExperience
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: CandidateBackground_InsideWorkExperience
+      extras:
+        next_page: null
+- path: /odata/v2/CandidateBackground_Languages
+  method: GET
+  corpus: CandidateBackground_Languages
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: CandidateBackground_Languages
+      extras:
+        next_page: null
+- path: /odata/v2/CandidateBackground_OutsideWorkExperience
+  method: GET
+  corpus: CandidateBackground_OutsideWorkExperience
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: CandidateBackground_OutsideWorkExperience
+      extras:
+        next_page: null
+- path: /odata/v2/CandidateBackground_TalentPool
+  method: GET
+  corpus: CandidateBackground_TalentPool
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: CandidateBackground_TalentPool
+      extras:
+        next_page: null
+- path: /odata/v2/CandidateBackground_TalentPoolcorp
+  method: GET
+  corpus: CandidateBackground_TalentPoolcorp
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: CandidateBackground_TalentPoolcorp
+      extras:
+        next_page: null
+- path: /odata/v2/CandidateComments
+  method: GET
+  corpus: CandidateComments
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: CandidateComments
+      extras:
+        next_page: null
+- path: /odata/v2/CandidateLight
+  method: GET
+  corpus: CandidateLight
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: CandidateLight
+      extras:
+        next_page: null
+- path: /odata/v2/CompetencyEntity
+  method: GET
+  corpus: CompetencyEntity
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: CompetencyEntity
+      extras:
+        next_page: null
+- path: /odata/v2/ComplianceDocumentFlow
+  method: GET
+  corpus: ComplianceDocumentFlow
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: ComplianceDocumentFlow
+      extras:
+        next_page: null
+- path: /odata/v2/ComplianceFormData
+  method: GET
+  corpus: ComplianceFormData
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: ComplianceFormData
+      extras:
+        next_page: null
+- path: /odata/v2/ComplianceFormSignature
+  method: GET
+  corpus: ComplianceFormSignature
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: ComplianceFormSignature
+      extras:
+        next_page: null
+- path: /odata/v2/ComplianceProcess
+  method: GET
+  corpus: ComplianceProcess
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: ComplianceProcess
+      extras:
+        next_page: null
+- path: /odata/v2/ComplianceProcessTask
+  method: GET
+  corpus: ComplianceProcessTask
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: ComplianceProcessTask
+      extras:
+        next_page: null
+- path: /odata/v2/Country
+  method: GET
+  corpus: Country
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: Country
+      extras:
+        next_page: null
+- path: /odata/v2/CurrencyConversion
+  method: GET
+  corpus: CurrencyConversion
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: CurrencyConversion
+      extras:
+        next_page: null
+- path: /odata/v2/CustomPayType
+  method: GET
+  corpus: CustomPayType
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: CustomPayType
+      extras:
+        next_page: null
+- path: /odata/v2/CustomPayTypeAssignment
+  method: GET
+  corpus: CustomPayTypeAssignment
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: CustomPayTypeAssignment
+      extras:
+        next_page: null
+- path: /odata/v2/DGExpression
+  method: GET
+  corpus: DGExpression
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: DGExpression
+      extras:
+        next_page: null
+- path: /odata/v2/DGField
+  method: GET
+  corpus: DGField
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: DGField
+      extras:
+        next_page: null
+- path: /odata/v2/DGFieldOperator
+  method: GET
+  corpus: DGFieldOperator
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: DGFieldOperator
+      extras:
+        next_page: null
+- path: /odata/v2/DGFieldValue
+  method: GET
+  corpus: DGFieldValue
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: DGFieldValue
+      extras:
+        next_page: null
+- path: /odata/v2/DGFilter
+  method: GET
+  corpus: DGFilter
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: DGFilter
+      extras:
+        next_page: null
+- path: /odata/v2/DGPeoplePool
+  method: GET
+  corpus: DGPeoplePool
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: DGPeoplePool
+      extras:
+        next_page: null
+- path: /odata/v2/DeductionScreenId
+  method: GET
+  corpus: DeductionScreenId
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: DeductionScreenId
+      extras:
+        next_page: null
+- path: /odata/v2/DevLearningCertifications
+  method: GET
+  corpus: DevLearningCertifications
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: DevLearningCertifications
+      extras:
+        next_page: null
+- path: /odata/v2/DevLearning_4201
+  method: GET
+  corpus: DevLearning_4201
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: DevLearning_4201
+      extras:
+        next_page: null
+- path: /odata/v2/DynamicGroup
+  method: GET
+  corpus: DynamicGroup
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: DynamicGroup
+      extras:
+        next_page: null
+- path: /odata/v2/DynamicGroupDefinition
+  method: GET
+  corpus: DynamicGroupDefinition
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: DynamicGroupDefinition
+      extras:
+        next_page: null
+- path: /odata/v2/EMEvent
+  method: GET
+  corpus: EMEvent
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EMEvent
+      extras:
+        next_page: null
+- path: /odata/v2/EMEventAttribute
+  method: GET
+  corpus: EMEventAttribute
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EMEventAttribute
+      extras:
+        next_page: null
+- path: /odata/v2/EMEventPayload
+  method: GET
+  corpus: EMEventPayload
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EMEventPayload
+      extras:
+        next_page: null
+- path: /odata/v2/EMMonitoredProcess
+  method: GET
+  corpus: EMMonitoredProcess
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EMMonitoredProcess
+      extras:
+        next_page: null
+- path: /odata/v2/EmpBeneficiary
+  method: GET
+  corpus: EmpBeneficiary
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EmpBeneficiary
+      extras:
+        next_page: null
+- path: /odata/v2/EmpCompensation
+  method: GET
+  corpus: EmpCompensation
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EmpCompensation
+      extras:
+        next_page: null
+- path: /odata/v2/EmpCompensationCalculated
+  method: GET
+  corpus: EmpCompensationCalculated
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EmpCompensationCalculated
+      extras:
+        next_page: null
+- path: /odata/v2/EmpCompensationGroupSumCalculated
+  method: GET
+  corpus: EmpCompensationGroupSumCalculated
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EmpCompensationGroupSumCalculated
+      extras:
+        next_page: null
+- path: /odata/v2/EmpCostAssignment
+  method: GET
+  corpus: EmpCostAssignment
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EmpCostAssignment
+      extras:
+        next_page: null
+- path: /odata/v2/EmpEmployment
+  method: GET
+  corpus: EmpEmployment
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EmpEmployment
+      extras:
+        next_page: null
+- path: /odata/v2/EmpEmploymentHigherDuty
+  method: GET
+  corpus: EmpEmploymentHigherDuty
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EmpEmploymentHigherDuty
+      extras:
+        next_page: null
+- path: /odata/v2/EmpEmploymentTermination
+  method: GET
+  corpus: EmpEmploymentTermination
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EmpEmploymentTermination
+      extras:
+        next_page: null
+- path: /odata/v2/EmpJob
+  method: GET
+  corpus: EmpJob
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EmpJob
+      extras:
+        next_page: null
+- path: /odata/v2/EmpJobRelationships
+  method: GET
+  corpus: EmpJobRelationships
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EmpJobRelationships
+      extras:
+        next_page: null
+- path: /odata/v2/EmpPayCompNonRecurring
+  method: GET
+  corpus: EmpPayCompNonRecurring
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EmpPayCompNonRecurring
+      extras:
+        next_page: null
+- path: /odata/v2/EmpPayCompRecurring
+  method: GET
+  corpus: EmpPayCompRecurring
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EmpPayCompRecurring
+      extras:
+        next_page: null
+- path: /odata/v2/EmpPensionPayout
+  method: GET
+  corpus: EmpPensionPayout
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EmpPensionPayout
+      extras:
+        next_page: null
+- path: /odata/v2/EmpWorkPermit
+  method: GET
+  corpus: EmpWorkPermit
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EmpWorkPermit
+      extras:
+        next_page: null
+- path: /odata/v2/EmployeeCompensation
+  method: GET
+  corpus: EmployeeCompensation
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EmployeeCompensation
+      extras:
+        next_page: null
+- path: /odata/v2/EmployeeDismissalProtection
+  method: GET
+  corpus: EmployeeDismissalProtection
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EmployeeDismissalProtection
+      extras:
+        next_page: null
+- path: /odata/v2/EmployeeDismissalProtectionDetail
+  method: GET
+  corpus: EmployeeDismissalProtectionDetail
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EmployeeDismissalProtectionDetail
+      extras:
+        next_page: null
+- path: /odata/v2/EmployeePayrollRunResults
+  method: GET
+  corpus: EmployeePayrollRunResults
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EmployeePayrollRunResults
+      extras:
+        next_page: null
+- path: /odata/v2/EmployeePayrollRunResultsItems
+  method: GET
+  corpus: EmployeePayrollRunResultsItems
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: EmployeePayrollRunResultsItems
+      extras:
+        next_page: null
+- path: /odata/v2/ExternalUser
+  method: GET
+  corpus: ExternalUser
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: ExternalUser
+      extras:
+        next_page: null
+- path: /odata/v2/FOBusinessUnit
+  method: GET
+  corpus: FOBusinessUnit
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOBusinessUnit
+      extras:
+        next_page: null
+- path: /odata/v2/FOCompany
+  method: GET
+  corpus: FOCompany
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOCompany
+      extras:
+        next_page: null
+- path: /odata/v2/FOCorporateAddressDEFLT
+  method: GET
+  corpus: FOCorporateAddressDEFLT
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOCorporateAddressDEFLT
+      extras:
+        next_page: null
+- path: /odata/v2/FOCostCenter
+  method: GET
+  corpus: FOCostCenter
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOCostCenter
+      extras:
+        next_page: null
+- path: /odata/v2/FODepartment
+  method: GET
+  corpus: FODepartment
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FODepartment
+      extras:
+        next_page: null
+- path: /odata/v2/FODivision
+  method: GET
+  corpus: FODivision
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FODivision
+      extras:
+        next_page: null
+- path: /odata/v2/FODynamicRole
+  method: GET
+  corpus: FODynamicRole
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FODynamicRole
+      extras:
+        next_page: null
+- path: /odata/v2/FOEventReason
+  method: GET
+  corpus: FOEventReason
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOEventReason
+      extras:
+        next_page: null
+- path: /odata/v2/FOFrequency
+  method: GET
+  corpus: FOFrequency
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOFrequency
+      extras:
+        next_page: null
+- path: /odata/v2/FOGeozone
+  method: GET
+  corpus: FOGeozone
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOGeozone
+      extras:
+        next_page: null
+- path: /odata/v2/FOJobClassLocalAUS
+  method: GET
+  corpus: FOJobClassLocalAUS
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOJobClassLocalAUS
+      extras:
+        next_page: null
+- path: /odata/v2/FOJobClassLocalBRA
+  method: GET
+  corpus: FOJobClassLocalBRA
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOJobClassLocalBRA
+      extras:
+        next_page: null
+- path: /odata/v2/FOJobClassLocalCAN
+  method: GET
+  corpus: FOJobClassLocalCAN
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOJobClassLocalCAN
+      extras:
+        next_page: null
+- path: /odata/v2/FOJobClassLocalDEFLT
+  method: GET
+  corpus: FOJobClassLocalDEFLT
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOJobClassLocalDEFLT
+      extras:
+        next_page: null
+- path: /odata/v2/FOJobClassLocalFRA
+  method: GET
+  corpus: FOJobClassLocalFRA
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOJobClassLocalFRA
+      extras:
+        next_page: null
+- path: /odata/v2/FOJobClassLocalGBR
+  method: GET
+  corpus: FOJobClassLocalGBR
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOJobClassLocalGBR
+      extras:
+        next_page: null
+- path: /odata/v2/FOJobClassLocalITA
+  method: GET
+  corpus: FOJobClassLocalITA
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOJobClassLocalITA
+      extras:
+        next_page: null
+- path: /odata/v2/FOJobClassLocalUSA
+  method: GET
+  corpus: FOJobClassLocalUSA
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOJobClassLocalUSA
+      extras:
+        next_page: null
+- path: /odata/v2/FOJobCode
+  method: GET
+  corpus: FOJobCode
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOJobCode
+      extras:
+        next_page: null
+- path: /odata/v2/FOJobFunction
+  method: GET
+  corpus: FOJobFunction
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOJobFunction
+      extras:
+        next_page: null
+- path: /odata/v2/FOLocation
+  method: GET
+  corpus: FOLocation
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOLocation
+      extras:
+        next_page: null
+- path: /odata/v2/FOLocationGroup
+  method: GET
+  corpus: FOLocationGroup
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOLocationGroup
+      extras:
+        next_page: null
+- path: /odata/v2/FOPayComponent
+  method: GET
+  corpus: FOPayComponent
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOPayComponent
+      extras:
+        next_page: null
+- path: /odata/v2/FOPayComponentGroup
+  method: GET
+  corpus: FOPayComponentGroup
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOPayComponentGroup
+      extras:
+        next_page: null
+- path: /odata/v2/FOPayGrade
+  method: GET
+  corpus: FOPayGrade
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOPayGrade
+      extras:
+        next_page: null
+- path: /odata/v2/FOPayGroup
+  method: GET
+  corpus: FOPayGroup
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOPayGroup
+      extras:
+        next_page: null
+- path: /odata/v2/FOPayRange
+  method: GET
+  corpus: FOPayRange
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: FOPayRange
+      extras:
+        next_page: null
+- path: /odata/v2/HireDateChange
+  method: GET
+  corpus: HireDateChange
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: HireDateChange
+      extras:
+        next_page: null
+- path: /odata/v2/InterviewIndividualAssessment
+  method: GET
+  corpus: InterviewIndividualAssessment
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: InterviewIndividualAssessment
+      extras:
+        next_page: null
+- path: /odata/v2/InterviewOverallAssessment
+  method: GET
+  corpus: InterviewOverallAssessment
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: InterviewOverallAssessment
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplication
+  method: GET
+  corpus: JobApplication
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplication
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationAssessmentOrder
+  method: GET
+  corpus: JobApplicationAssessmentOrder
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationAssessmentOrder
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationAssessmentReport
+  method: GET
+  corpus: JobApplicationAssessmentReport
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationAssessmentReport
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationAssessmentReportDetail
+  method: GET
+  corpus: JobApplicationAssessmentReportDetail
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationAssessmentReportDetail
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationAudit
+  method: GET
+  corpus: JobApplicationAudit
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationAudit
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationBackgroundCheckRequest
+  method: GET
+  corpus: JobApplicationBackgroundCheckRequest
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationBackgroundCheckRequest
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationBackgroundCheckResult
+  method: GET
+  corpus: JobApplicationBackgroundCheckResult
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationBackgroundCheckResult
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationComments
+  method: GET
+  corpus: JobApplicationComments
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationComments
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationInterview
+  method: GET
+  corpus: JobApplicationInterview
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationInterview
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationOnboardingData
+  method: GET
+  corpus: JobApplicationOnboardingData
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationOnboardingData
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationOnboardingStatus
+  method: GET
+  corpus: JobApplicationOnboardingStatus
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationOnboardingStatus
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationQuestionResponse
+  method: GET
+  corpus: JobApplicationQuestionResponse
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationQuestionResponse
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationSnapshot_Certificates
+  method: GET
+  corpus: JobApplicationSnapshot_Certificates
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationSnapshot_Certificates
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationSnapshot_Education
+  method: GET
+  corpus: JobApplicationSnapshot_Education
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationSnapshot_Education
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationSnapshot_InsideWorkExperience
+  method: GET
+  corpus: JobApplicationSnapshot_InsideWorkExperience
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationSnapshot_InsideWorkExperience
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationSnapshot_Languages
+  method: GET
+  corpus: JobApplicationSnapshot_Languages
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationSnapshot_Languages
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationSnapshot_OutsideWorkExperience
+  method: GET
+  corpus: JobApplicationSnapshot_OutsideWorkExperience
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationSnapshot_OutsideWorkExperience
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationSnapshot_TalentPool
+  method: GET
+  corpus: JobApplicationSnapshot_TalentPool
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationSnapshot_TalentPool
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationSnapshot_TalentPoolcorp
+  method: GET
+  corpus: JobApplicationSnapshot_TalentPoolcorp
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationSnapshot_TalentPoolcorp
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationStatus
+  method: GET
+  corpus: JobApplicationStatus
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationStatus
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationStatusAuditTrail
+  method: GET
+  corpus: JobApplicationStatusAuditTrail
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationStatusAuditTrail
+      extras:
+        next_page: null
+- path: /odata/v2/JobApplicationStatusLabel
+  method: GET
+  corpus: JobApplicationStatusLabel
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobApplicationStatusLabel
+      extras:
+        next_page: null
+- path: /odata/v2/JobOffer
+  method: GET
+  corpus: JobOffer
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobOffer
+      extras:
+        next_page: null
+- path: /odata/v2/JobOfferApprover
+  method: GET
+  corpus: JobOfferApprover
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobOfferApprover
+      extras:
+        next_page: null
+- path: /odata/v2/JobReqFwdCandidates
+  method: GET
+  corpus: JobReqFwdCandidates
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobReqFwdCandidates
+      extras:
+        next_page: null
+- path: /odata/v2/JobReqQuestion
+  method: GET
+  corpus: JobReqQuestion
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobReqQuestion
+      extras:
+        next_page: null
+- path: /odata/v2/JobReqScreeningQuestion
+  method: GET
+  corpus: JobReqScreeningQuestion
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobReqScreeningQuestion
+      extras:
+        next_page: null
+- path: /odata/v2/JobReqScreeningQuestionChoice
+  method: GET
+  corpus: JobReqScreeningQuestionChoice
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobReqScreeningQuestionChoice
+      extras:
+        next_page: null
+- path: /odata/v2/JobRequisition
+  method: GET
+  corpus: JobRequisition
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobRequisition
+      extras:
+        next_page: null
+- path: /odata/v2/JobRequisitionGroupOperator
+  method: GET
+  corpus: JobRequisitionGroupOperator
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobRequisitionGroupOperator
+      extras:
+        next_page: null
+- path: /odata/v2/JobRequisitionLocale
+  method: GET
+  corpus: JobRequisitionLocale
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobRequisitionLocale
+      extras:
+        next_page: null
+- path: /odata/v2/JobRequisitionOperator
+  method: GET
+  corpus: JobRequisitionOperator
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobRequisitionOperator
+      extras:
+        next_page: null
+- path: /odata/v2/JobRequisitionPosting
+  method: GET
+  corpus: JobRequisitionPosting
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JobRequisitionPosting
+      extras:
+        next_page: null
+- path: /odata/v2/JourneyDetails
+  method: GET
+  corpus: JourneyDetails
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: JourneyDetails
+      extras:
+        next_page: null
+- path: /odata/v2/LegacyPositionEntity
+  method: GET
+  corpus: LegacyPositionEntity
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: LegacyPositionEntity
+      extras:
+        next_page: null
+- path: /odata/v2/LocalizedData
+  method: GET
+  corpus: LocalizedData
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: LocalizedData
+      extras:
+        next_page: null
+- path: /odata/v2/MDFEnumValue
+  method: GET
+  corpus: MDFEnumValue
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: MDFEnumValue
+      extras:
+        next_page: null
+- path: /odata/v2/MDFLocalizedValue
+  method: GET
+  corpus: MDFLocalizedValue
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: MDFLocalizedValue
+      extras:
+        next_page: null
+- path: /odata/v2/NominationTarget
+  method: GET
+  corpus: NominationTarget
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: NominationTarget
+      extras:
+        next_page: null
+- path: /odata/v2/NomineeHistory
+  method: GET
+  corpus: NomineeHistory
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: NomineeHistory
+      extras:
+        next_page: null
+- path: /odata/v2/ONB2EquipmentActivity
+  method: GET
+  corpus: ONB2EquipmentActivity
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: ONB2EquipmentActivity
+      extras:
+        next_page: null
+- path: /odata/v2/ONB2EquipmentType
+  method: GET
+  corpus: ONB2EquipmentType
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: ONB2EquipmentType
+      extras:
+        next_page: null
+- path: /odata/v2/ONB2EquipmentTypeValue
+  method: GET
+  corpus: ONB2EquipmentTypeValue
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: ONB2EquipmentTypeValue
+      extras:
+        next_page: null
+- path: /odata/v2/ONB2Process
+  method: GET
+  corpus: ONB2Process
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: ONB2Process
+      extras:
+        next_page: null
+- path: /odata/v2/ONB2ProcessTask
+  method: GET
+  corpus: ONB2ProcessTask
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: ONB2ProcessTask
+      extras:
+        next_page: null
+- path: /odata/v2/ONB2ProcessTrigger
+  method: GET
+  corpus: ONB2ProcessTrigger
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: ONB2ProcessTrigger
+      extras:
+        next_page: null
+- path: /odata/v2/OfferLetter
+  method: GET
+  corpus: OfferLetter
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: OfferLetter
+      extras:
+        next_page: null
+- path: /odata/v2/OnboardingCandidateInfo
+  method: GET
+  corpus: OnboardingCandidateInfo
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: OnboardingCandidateInfo
+      extras:
+        next_page: null
+- path: /odata/v2/OnboardingEquipment
+  method: GET
+  corpus: OnboardingEquipment
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: OnboardingEquipment
+      extras:
+        next_page: null
+- path: /odata/v2/OnboardingEquipmentActivity
+  method: GET
+  corpus: OnboardingEquipmentActivity
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: OnboardingEquipmentActivity
+      extras:
+        next_page: null
+- path: /odata/v2/OnboardingEquipmentType
+  method: GET
+  corpus: OnboardingEquipmentType
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: OnboardingEquipmentType
+      extras:
+        next_page: null
+- path: /odata/v2/OnboardingEquipmentTypeValue
+  method: GET
+  corpus: OnboardingEquipmentTypeValue
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: OnboardingEquipmentTypeValue
+      extras:
+        next_page: null
+- path: /odata/v2/OnboardingGoal
+  method: GET
+  corpus: OnboardingGoal
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: OnboardingGoal
+      extras:
+        next_page: null
+- path: /odata/v2/OnboardingGoalActivity
+  method: GET
+  corpus: OnboardingGoalActivity
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: OnboardingGoalActivity
+      extras:
+        next_page: null
+- path: /odata/v2/OnboardingGoalCategory
+  method: GET
+  corpus: OnboardingGoalCategory
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: OnboardingGoalCategory
+      extras:
+        next_page: null
+- path: /odata/v2/OnboardingMeetingActivity
+  method: GET
+  corpus: OnboardingMeetingActivity
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: OnboardingMeetingActivity
+      extras:
+        next_page: null
+- path: /odata/v2/OnboardingMeetingEvent
+  method: GET
+  corpus: OnboardingMeetingEvent
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: OnboardingMeetingEvent
+      extras:
+        next_page: null
+- path: /odata/v2/OnboardingNewHireActivitiesStep
+  method: GET
+  corpus: OnboardingNewHireActivitiesStep
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: OnboardingNewHireActivitiesStep
+      extras:
+        next_page: null
+- path: /odata/v2/OnboardingProcess
+  method: GET
+  corpus: OnboardingProcess
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: OnboardingProcess
+      extras:
+        next_page: null
+- path: /odata/v2/OneTimeDeduction
+  method: GET
+  corpus: OneTimeDeduction
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: OneTimeDeduction
+      extras:
+        next_page: null
+- path: /odata/v2/PaymentInformationDetailV3
+  method: GET
+  corpus: PaymentInformationDetailV3
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: PaymentInformationDetailV3
+      extras:
+        next_page: null
+- path: /odata/v2/PaymentInformationDetailV3USA
+  method: GET
+  corpus: PaymentInformationDetailV3USA
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: PaymentInformationDetailV3USA
+      extras:
+        next_page: null
+- path: /odata/v2/PaymentInformationV3
+  method: GET
+  corpus: PaymentInformationV3
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: PaymentInformationV3
+      extras:
+        next_page: null
+- path: /odata/v2/PaymentMethodAssignmentV3
+  method: GET
+  corpus: PaymentMethodAssignmentV3
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: PaymentMethodAssignmentV3
+      extras:
+        next_page: null
+- path: /odata/v2/PaymentMethodV3
+  method: GET
+  corpus: PaymentMethodV3
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: PaymentMethodV3
+      extras:
+        next_page: null
+- path: /odata/v2/PersonEmpTerminationInfo
+  method: GET
+  corpus: PersonEmpTerminationInfo
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: PersonEmpTerminationInfo
+      extras:
+        next_page: null
+- path: /odata/v2/Photo
+  method: GET
+  corpus: Photo
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: Photo
+      extras:
+        next_page: null
+- path: /odata/v2/PickListV2
+  method: GET
+  corpus: PickListV2
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: PickListV2
+      extras:
+        next_page: null
+- path: /odata/v2/PickListValueV2
+  method: GET
+  corpus: PickListValueV2
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: PickListValueV2
+      extras:
+        next_page: null
+- path: /odata/v2/PicklistOption
+  method: GET
+  corpus: PicklistOption
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: PicklistOption
+      extras:
+        next_page: null
+- path: /odata/v2/RBPBasicPermission
+  method: GET
+  corpus: RBPBasicPermission
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: RBPBasicPermission
+      extras:
+        next_page: null
+- path: /odata/v2/RBPRole
+  method: GET
+  corpus: RBPRole
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: RBPRole
+      extras:
+        next_page: null
+- path: /odata/v2/RBPRule
+  method: GET
+  corpus: RBPRule
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: RBPRule
+      extras:
+        next_page: null
+- path: /odata/v2/RCMAdminReassignOfferApprover
+  method: GET
+  corpus: RCMAdminReassignOfferApprover
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: RCMAdminReassignOfferApprover
+      extras:
+        next_page: null
+- path: /odata/v2/RcmCompetency
+  method: GET
+  corpus: RcmCompetency
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: RcmCompetency
+      extras:
+        next_page: null
+- path: /odata/v2/RecurringDeduction
+  method: GET
+  corpus: RecurringDeduction
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: RecurringDeduction
+      extras:
+        next_page: null
+- path: /odata/v2/RecurringDeductionItem
+  method: GET
+  corpus: RecurringDeductionItem
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: RecurringDeductionItem
+      extras:
+        next_page: null
+- path: /odata/v2/ScimGroup
+  method: GET
+  corpus: ScimGroup
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: ScimGroup
+      extras:
+        next_page: null
+- path: /odata/v2/ScimUser
+  method: GET
+  corpus: ScimUser
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: ScimUser
+      extras:
+        next_page: null
+- path: /odata/v2/Successor
+  method: GET
+  corpus: Successor
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: Successor
+      extras:
+        next_page: null
+- path: /odata/v2/TalentGraphicOption
+  method: GET
+  corpus: TalentGraphicOption
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: TalentGraphicOption
+      extras:
+        next_page: null
+- path: /odata/v2/TalentPool
+  method: GET
+  corpus: TalentPool
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: TalentPool
+      extras:
+        next_page: null
+- path: /odata/v2/TalentRatings
+  method: GET
+  corpus: TalentRatings
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: TalentRatings
+      extras:
+        next_page: null
+- path: /odata/v2/Territory
+  method: GET
+  corpus: Territory
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: Territory
+      extras:
+        next_page: null
+- path: /odata/v2/User
+  method: GET
+  corpus: User
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: User
+      extras:
+        next_page: null
+- path: /odata/v2/UserPermissions
+  method: GET
+  corpus: UserPermissions
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: UserPermissions
+      extras:
+        next_page: null
+- path: /odata/v2/achievement
+  method: GET
+  corpus: achievement
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: achievement
+      extras:
+        next_page: null
+- path: /odata/v2/activity
+  method: GET
+  corpus: activity
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: activity
+      extras:
+        next_page: null
+- path: /odata/v2/available_time_types
+  method: GET
+  corpus: available_time_types
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: available_time_types
+      extras:
+        next_page: null
+- path: /odata/v2/budget_period
+  method: GET
+  corpus: budget_period
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: budget_period
+      extras:
+        next_page: null
+- path: /odata/v2/calibration_competency_rating
+  method: GET
+  corpus: calibration_competency_rating
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: calibration_competency_rating
+      extras:
+        next_page: null
+- path: /odata/v2/calibration_executive_reviewer
+  method: GET
+  corpus: calibration_executive_reviewer
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: calibration_executive_reviewer
+      extras:
+        next_page: null
+- path: /odata/v2/calibration_rating
+  method: GET
+  corpus: calibration_rating
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: calibration_rating
+      extras:
+        next_page: null
+- path: /odata/v2/calibration_rating_option
+  method: GET
+  corpus: calibration_rating_option
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: calibration_rating_option
+      extras:
+        next_page: null
+- path: /odata/v2/calibration_session
+  method: GET
+  corpus: calibration_session
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: calibration_session
+      extras:
+        next_page: null
+- path: /odata/v2/calibration_session_reviewer
+  method: GET
+  corpus: calibration_session_reviewer
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: calibration_session_reviewer
+      extras:
+        next_page: null
+- path: /odata/v2/calibration_subject
+  method: GET
+  corpus: calibration_subject
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: calibration_subject
+      extras:
+        next_page: null
+- path: /odata/v2/calibration_subject_comment
+  method: GET
+  corpus: calibration_subject_comment
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: calibration_subject_comment
+      extras:
+        next_page: null
+- path: /odata/v2/clock_in_clock_out_groups
+  method: GET
+  corpus: clock_in_clock_out_groups
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: clock_in_clock_out_groups
+      extras:
+        next_page: null
+- path: /odata/v2/clock_in_clock_out_time_events
+  method: GET
+  corpus: clock_in_clock_out_time_events
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: clock_in_clock_out_time_events
+      extras:
+        next_page: null
+- path: /odata/v2/continuous_performance_user_permission
+  method: GET
+  corpus: continuous_performance_user_permission
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: continuous_performance_user_permission
+      extras:
+        next_page: null
+- path: /odata/v2/cpm_achievements
+  method: GET
+  corpus: cpm_achievements
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: cpm_achievements
+      extras:
+        next_page: null
+- path: /odata/v2/cpm_activities
+  method: GET
+  corpus: cpm_activities
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: cpm_activities
+      extras:
+        next_page: null
+- path: /odata/v2/cpm_activity_status
+  method: GET
+  corpus: cpm_activity_status
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: cpm_activity_status
+      extras:
+        next_page: null
+- path: /odata/v2/cpm_activity_updates
+  method: GET
+  corpus: cpm_activity_updates
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: cpm_activity_updates
+      extras:
+        next_page: null
+- path: /odata/v2/cpm_user_permissions
+  method: GET
+  corpus: cpm_user_permissions
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: cpm_user_permissions
+      extras:
+        next_page: null
+- path: /odata/v2/cust_CommutingAllowance
+  method: GET
+  corpus: cust_CommutingAllowance
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: cust_CommutingAllowance
+      extras:
+        next_page: null
+- path: /odata/v2/cust_ProgressiveDisciplinaryAction
+  method: GET
+  corpus: cust_ProgressiveDisciplinaryAction
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: cust_ProgressiveDisciplinaryAction
+      extras:
+        next_page: null
+- path: /odata/v2/cust_auth_sign
+  method: GET
+  corpus: cust_auth_sign
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: cust_auth_sign
+      extras:
+        next_page: null
+- path: /odata/v2/cust_grievances
+  method: GET
+  corpus: cust_grievances
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: cust_grievances
+      extras:
+        next_page: null
+- path: /odata/v2/cust_voluntarySeparationRequest
+  method: GET
+  corpus: cust_voluntarySeparationRequest
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: cust_voluntarySeparationRequest
+      extras:
+        next_page: null
+- path: /odata/v2/custom_nav
+  method: GET
+  corpus: custom_nav
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: custom_nav
+      extras:
+        next_page: null
+- path: /odata/v2/custom_tasks
+  method: GET
+  corpus: custom_tasks
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: custom_tasks
+      extras:
+        next_page: null
+- path: /odata/v2/dpcs_acknowledgement
+  method: GET
+  corpus: dpcs_acknowledgement
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: dpcs_acknowledgement
+      extras:
+        next_page: null
+- path: /odata/v2/dpcs_statement
+  method: GET
+  corpus: dpcs_statement
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: dpcs_statement
+      extras:
+        next_page: null
+- path: /odata/v2/extension_point_task
+  method: GET
+  corpus: extension_point_task
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: extension_point_task
+      extras:
+        next_page: null
+- path: /odata/v2/feedback
+  method: GET
+  corpus: feedback
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: feedback
+      extras:
+        next_page: null
+- path: /odata/v2/feedback_requests
+  method: GET
+  corpus: feedback_requests
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: feedback_requests
+      extras:
+        next_page: null
+- path: /odata/v2/fmla_request
+  method: GET
+  corpus: fmla_request
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: fmla_request
+      extras:
+        next_page: null
+- path: /odata/v2/form360_participant_detail
+  method: GET
+  corpus: form360_participant_detail
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: form360_participant_detail
+      extras:
+        next_page: null
+- path: /odata/v2/form_competency
+  method: GET
+  corpus: form_competency
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: form_competency
+      extras:
+        next_page: null
+- path: /odata/v2/form_customized_weighted_rating_section
+  method: GET
+  corpus: form_customized_weighted_rating_section
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: form_customized_weighted_rating_section
+      extras:
+        next_page: null
+- path: /odata/v2/form_folder
+  method: GET
+  corpus: form_folder
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: form_folder
+      extras:
+        next_page: null
+- path: /odata/v2/form_header
+  method: GET
+  corpus: form_header
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: form_header
+      extras:
+        next_page: null
+- path: /odata/v2/form_objective
+  method: GET
+  corpus: form_objective
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: form_objective
+      extras:
+        next_page: null
+- path: /odata/v2/form_perf_pot_summary_section
+  method: GET
+  corpus: form_perf_pot_summary_section
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: form_perf_pot_summary_section
+      extras:
+        next_page: null
+- path: /odata/v2/form_review_feedback
+  method: GET
+  corpus: form_review_feedback
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: form_review_feedback
+      extras:
+        next_page: null
+- path: /odata/v2/form_template
+  method: GET
+  corpus: form_template
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: form_template
+      extras:
+        next_page: null
+- path: /odata/v2/functional_area
+  method: GET
+  corpus: functional_area
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: functional_area
+      extras:
+        next_page: null
+- path: /odata/v2/fund
+  method: GET
+  corpus: fund
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: fund
+      extras:
+        next_page: null
+- path: /odata/v2/fund_center
+  method: GET
+  corpus: fund_center
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: fund_center
+      extras:
+        next_page: null
+- path: /odata/v2/goal_1
+  method: GET
+  corpus: goal_1
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: goal_1
+      extras:
+        next_page: null
+- path: /odata/v2/goal_comment_1
+  method: GET
+  corpus: goal_comment_1
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: goal_comment_1
+      extras:
+        next_page: null
+- path: /odata/v2/goal_permission_1
+  method: GET
+  corpus: goal_permission_1
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: goal_permission_1
+      extras:
+        next_page: null
+- path: /odata/v2/goal_plan_state
+  method: GET
+  corpus: goal_plan_state
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: goal_plan_state
+      extras:
+        next_page: null
+- path: /odata/v2/goal_plan_template
+  method: GET
+  corpus: goal_plan_template
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: goal_plan_template
+      extras:
+        next_page: null
+- path: /odata/v2/goal_task_1
+  method: GET
+  corpus: goal_task_1
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: goal_task_1
+      extras:
+        next_page: null
+- path: /odata/v2/goal_weight
+  method: GET
+  corpus: goal_weight
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: goal_weight
+      extras:
+        next_page: null
+- path: /odata/v2/grant
+  method: GET
+  corpus: grant
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: grant
+      extras:
+        next_page: null
+- path: /odata/v2/i9_audit_trail_record
+  method: GET
+  corpus: i9_audit_trail_record
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: i9_audit_trail_record
+      extras:
+        next_page: null
+- path: /odata/v2/instructional_text
+  method: GET
+  corpus: instructional_text
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: instructional_text
+      extras:
+        next_page: null
+- path: /odata/v2/pbc_employee_financing
+  method: GET
+  corpus: pbc_employee_financing
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pbc_employee_financing
+      extras:
+        next_page: null
+- path: /odata/v2/pbc_employee_grouping
+  method: GET
+  corpus: pbc_employee_grouping
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pbc_employee_grouping
+      extras:
+        next_page: null
+- path: /odata/v2/pbc_symbolic_account
+  method: GET
+  corpus: pbc_symbolic_account
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: pbc_symbolic_account
+      extras:
+        next_page: null
+- path: /odata/v2/project_controlling_object
+  method: GET
+  corpus: project_controlling_object
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: project_controlling_object
+      extras:
+        next_page: null
+- path: /odata/v2/rbp_groups
+  method: GET
+  corpus: rbp_groups
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: rbp_groups
+      extras:
+        next_page: null
+- path: /odata/v2/rbp_permissions
+  method: GET
+  corpus: rbp_permissions
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: rbp_permissions
+      extras:
+        next_page: null
+- path: /odata/v2/rbp_roles
+  method: GET
+  corpus: rbp_roles
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: rbp_roles
+      extras:
+        next_page: null
+- path: /odata/v2/review_route_map
+  method: GET
+  corpus: review_route_map
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: review_route_map
+      extras:
+        next_page: null
+- path: /odata/v2/scim_group
+  method: GET
+  corpus: scim_group
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: scim_group
+      extras:
+        next_page: null
+- path: /odata/v2/scim_user
+  method: GET
+  corpus: scim_user
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: scim_user
+      extras:
+        next_page: null
+- path: /odata/v2/sp_metadata
+  method: GET
+  corpus: sp_metadata
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: sp_metadata
+      extras:
+        next_page: null
+- path: /odata/v2/success_store_content
+  method: GET
+  corpus: success_store_content
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: success_store_content
+      extras:
+        next_page: null
+- path: /odata/v2/success_store_content_blob
+  method: GET
+  corpus: success_store_content_blob
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: success_store_content_blob
+      extras:
+        next_page: null
+- path: /odata/v2/supporter_feedback
+  method: GET
+  corpus: supporter_feedback
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: supporter_feedback
+      extras:
+        next_page: null
+- path: /odata/v2/termination_time_account_balances
+  method: GET
+  corpus: termination_time_account_balances
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: termination_time_account_balances
+      extras:
+        next_page: null
+- path: /odata/v2/theme_config
+  method: GET
+  corpus: theme_config
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: theme_config
+      extras:
+        next_page: null
+- path: /odata/v2/theme_info
+  method: GET
+  corpus: theme_info
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: theme_info
+      extras:
+        next_page: null
+- path: /odata/v2/theme_template
+  method: GET
+  corpus: theme_template
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: theme_template
+      extras:
+        next_page: null
+- path: /odata/v2/time_account_balances
+  method: GET
+  corpus: time_account_balances
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: time_account_balances
+      extras:
+        next_page: null
+- path: /odata/v2/time_event_delete_response
+  method: GET
+  corpus: time_event_delete_response
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: time_event_delete_response
+      extras:
+        next_page: null
+- path: /odata/v2/time_event_types
+  method: GET
+  corpus: time_event_types
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: time_event_types
+      extras:
+        next_page: null
+- path: /odata/v2/time_events
+  method: GET
+  corpus: time_events
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: time_events
+      extras:
+        next_page: null
+- path: /odata/v2/time_off_events
+  method: GET
+  corpus: time_off_events
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: time_off_events
+      extras:
+        next_page: null
+- path: /odata/v2/time_type_balances
+  method: GET
+  corpus: time_type_balances
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: time_type_balances
+      extras:
+        next_page: null
+- path: /odata/v2/todo
+  method: GET
+  corpus: todo
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: todo
+      extras:
+        next_page: null
+- path: /odata/v2/todo_entry_v2
+  method: GET
+  corpus: todo_entry_v2
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: todo_entry_v2
+      extras:
+        next_page: null
+- path: /odata/v2/user_capabilities
+  method: GET
+  corpus: user_capabilities
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: user_capabilities
+      extras:
+        next_page: null

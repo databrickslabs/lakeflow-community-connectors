@@ -1,0 +1,65 @@
+# Auto-generated stub spec.
+endpoints:
+- path: /api/apps
+  method: GET
+  corpus: apps
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: apps
+      extras:
+        next_page: null
+- path: /api/in_app_events_report
+  method: GET
+  corpus: in_app_events_report
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: in_app_events_report
+      extras:
+        next_page: null
+- path: /api/installs_report
+  method: GET
+  corpus: installs_report
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: installs_report
+      extras:
+        next_page: null
+- path: /api/organic_in_app_events_report
+  method: GET
+  corpus: organic_in_app_events_report
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: organic_in_app_events_report
+      extras:
+        next_page: null
+- path: /api/organic_installs_report
+  method: GET
+  corpus: organic_installs_report
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: organic_installs_report
+      extras:
+        next_page: null
+- path: /api/organic_uninstall_events_report
+  method: GET
+  corpus: organic_uninstall_events_report
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: organic_uninstall_events_report
+      extras:
+        next_page: null
+- path: /api/uninstall_events_report
+  method: GET
+  corpus: uninstall_events_report
+  response:
+    pagination_style: none
+    wrapper:
+      records_key: uninstall_events_report
+      extras:
+        next_page: null

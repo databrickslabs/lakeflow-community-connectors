@@ -1,0 +1,58 @@
+[
+  {
+    "code": "juliet-231",
+    "effectiveStartDate": "alpha-852",
+    "baseCurrency": "mike-781",
+    "conversionRate": 370.32,
+    "createdBy": "xray-883",
+    "createdDateTime": "echo-771",
+    "effectiveEndDate": "papa-535",
+    "effectiveStatus": "lima-629",
+    "exchangeRateType": "zulu-708",
+    "lastModifiedBy": "lima-549",
+    "lastModifiedDateTime": "quebec-846",
+    "toCurrency": "papa-883"
+  },
+  {
+    "code": "whiskey-979",
+    "effectiveStartDate": "whiskey-480",
+    "baseCurrency": "lima-913",
+    "conversionRate": 447.78,
+    "createdBy": "quebec-234",
+    "createdDateTime": "juliet-913",
+    "effectiveEndDate": "lima-918",
+    "effectiveStatus": "golf-343",
+    "exchangeRateType": "golf-200",
+    "lastModifiedBy": "hotel-849",
+    "lastModifiedDateTime": "echo-217",
+    "toCurrency": "juliet-250"
+  },
+  {
+    "code": "juliet-126",
+    "effectiveStartDate": "hotel-213",
+    "baseCurrency": "echo-411",
+    "conversionRate": 898.79,
+    "createdBy": "november-925",
+    "createdDateTime": "xray-586",
+    "effectiveEndDate": "foxtrot-353",
+    "effectiveStatus": "lima-810",
+    "exchangeRateType": "hotel-430",
+    "lastModifiedBy": "alpha-279",
+    "lastModifiedDateTime": "papa-939",
+    "toCurrency": "bravo-120"
+  },
+  {
+    "code": "charlie-959",
+    "effectiveStartDate": "victor-133",
+    "baseCurrency": "oscar-532",
+    "conversionRate": 608.53,
+    "createdBy": "echo-536",
+    "createdDateTime": "alpha-958",
+    "effectiveEndDate": "november-877",
+    "effectiveStatus": "yankee-475",
+    "exchangeRateType": "echo-627",
+    "lastModifiedBy": "bravo-294",
+    "lastModifiedDateTime": "mike-394",
+    "toCurrency": "november-697"
+  }
+]

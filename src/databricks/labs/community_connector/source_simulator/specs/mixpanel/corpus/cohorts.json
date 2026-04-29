@@ -1,0 +1,46 @@
+[
+  {
+    "id": 1000,
+    "name": "oscar-738",
+    "description": "uniform-597",
+    "count": 63629,
+    "is_visible": false,
+    "is_dynamic": true,
+    "created": "juliet-642",
+    "project_id": 42920,
+    "generated_timestamp": 18270
+  },
+  {
+    "id": 1001,
+    "name": "bravo-668",
+    "description": "xray-796",
+    "count": 97981,
+    "is_visible": false,
+    "is_dynamic": true,
+    "created": "juliet-137",
+    "project_id": 55860,
+    "generated_timestamp": 68009
+  },
+  {
+    "id": 1002,
+    "name": "sierra-375",
+    "description": "quebec-171",
+    "count": 39024,
+    "is_visible": true,
+    "is_dynamic": true,
+    "created": "whiskey-948",
+    "project_id": 52365,
+    "generated_timestamp": 61372
+  },
+  {
+    "id": 1003,
+    "name": "foxtrot-603",
+    "description": "november-241",
+    "count": 37595,
+    "is_visible": true,
+    "is_dynamic": false,
+    "created": "oscar-412",
+    "project_id": 28317,
+    "generated_timestamp": 94281
+  }
+]

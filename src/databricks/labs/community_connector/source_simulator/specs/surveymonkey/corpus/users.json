@@ -1,0 +1,123 @@
+[
+  {
+    "id": "india-768",
+    "username": "sierra-340",
+    "first_name": "victor-758",
+    "last_name": "mike-144",
+    "email": "delta-545",
+    "email_verified": true,
+    "account_type": "november-279",
+    "language": "echo-853",
+    "date_created": "tango-124",
+    "date_last_login": "india-426",
+    "question_types": {
+      "available": []
+    },
+    "scopes": {
+      "available": [],
+      "granted": [
+        "quebec-996",
+        "oscar-606"
+      ]
+    },
+    "sso_connections": [
+      "india-186"
+    ],
+    "features": {
+      "collector_create_limit": 40125,
+      "email_enabled": false
+    },
+    "href": "romeo-575"
+  },
+  {
+    "id": "victor-149",
+    "username": "mike-538",
+    "first_name": "yankee-907",
+    "last_name": "juliet-165",
+    "email": "oscar-172",
+    "email_verified": true,
+    "account_type": "tango-154",
+    "language": "kilo-654",
+    "date_created": "kilo-892",
+    "date_last_login": "sierra-772",
+    "question_types": {
+      "available": [
+        "romeo-737"
+      ]
+    },
+    "scopes": {
+      "available": [
+        "bravo-166"
+      ],
+      "granted": [
+        "xray-899"
+      ]
+    },
+    "sso_connections": [],
+    "features": {
+      "collector_create_limit": 8552,
+      "email_enabled": false
+    },
+    "href": "sierra-564"
+  },
+  {
+    "id": "xray-376",
+    "username": "kilo-743",
+    "first_name": "golf-584",
+    "last_name": "hotel-556",
+    "email": "quebec-222",
+    "email_verified": false,
+    "account_type": "oscar-426",
+    "language": "mike-277",
+    "date_created": "oscar-918",
+    "date_last_login": "papa-881",
+    "question_types": {
+      "available": [
+        "victor-933",
+        "bravo-713"
+      ]
+    },
+    "scopes": {
+      "available": [],
+      "granted": [
+        "yankee-188"
+      ]
+    },
+    "sso_connections": [],
+    "features": {
+      "collector_create_limit": 78840,
+      "email_enabled": false
+    },
+    "href": "hotel-183"
+  },
+  {
+    "id": "victor-119",
+    "username": "sierra-956",
+    "first_name": "kilo-298",
+    "last_name": "juliet-358",
+    "email": "uniform-310",
+    "email_verified": true,
+    "account_type": "romeo-948",
+    "language": "alpha-468",
+    "date_created": "charlie-855",
+    "date_last_login": "bravo-793",
+    "question_types": {
+      "available": []
+    },
+    "scopes": {
+      "available": [
+        "charlie-580"
+      ],
+      "granted": [
+        "xray-907",
+        "oscar-948"
+      ]
+    },
+    "sso_connections": [],
+    "features": {
+      "collector_create_limit": 3437,
+      "email_enabled": true
+    },
+    "href": "bravo-555"
+  }
+]
