@@ -1,38 +1,24 @@
-# Auto-generated stub spec.
+# Mixpanel.
+#
+# Three distinct base URLs / patterns:
+# * GET /api/2.0/export — events; returns NDJSON. Empty body → 0 events.
+# * POST /api/query/cohorts/list — cohorts; returns either a list directly
+#   or {"cohorts": [...]}. Empty list works.
+# * POST /api/query/engage — engage profiles + cohort members; returns
+#   {"results": [...], "page_size": N}.
+
 endpoints:
-- path: /api/2.0/cohort_members
-  method: GET
-  corpus: cohort_members
-  response:
-    pagination_style: none
-    wrapper:
-      records_key: cohort_members
-      extras:
-        next_page: null
-- path: /api/2.0/cohorts
-  method: GET
-  corpus: cohorts
-  response:
-    pagination_style: none
-    wrapper:
-      records_key: cohorts
-      extras:
-        next_page: null
-- path: /api/2.0/engage
-  method: GET
-  corpus: engage
-  response:
-    pagination_style: none
-    wrapper:
-      records_key: engage
-      extras:
-        next_page: null
-- path: /api/2.0/events
-  method: GET
-  corpus: events
-  response:
-    pagination_style: none
-    wrapper:
-      records_key: events
-      extras:
-        next_page: null
+  - path: /api/2.0/export
+    method: GET
+    corpus: __empty_text__
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /api/query/cohorts/list
+    method: POST
+    corpus: cohorts
+    response: {pagination_style: none}
+
+  - path: /api/query/engage
+    method: POST
+    corpus: __empty_engage__
+    response: {pagination_style: none, single_entity: true}

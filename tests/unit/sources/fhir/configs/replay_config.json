@@ -1,0 +1,4 @@
+{
+  "base_url": "https://simulator-fhir.example.com/fhir",
+  "auth_type": "none"
+}

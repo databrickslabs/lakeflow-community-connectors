@@ -1,4 +1,4 @@
 {
-  "pi_base_url": "simulator-pi_base_url",
+  "pi_base_url": "https://simulator-pi.example.com",
   "access_token": "simulator-fake-access-token"
 }
