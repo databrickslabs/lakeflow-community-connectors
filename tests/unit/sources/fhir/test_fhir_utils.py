@@ -1,11 +1,24 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from databricks.labs.community_connector.sources.fhir.fhir_utils import (
     SmartAuthClient, FhirHttpClient, iter_bundle_pages, extract_record,
 )
 
 CONFIG_PATH = Path(__file__).parent / "configs" / "dev_config.json"
+
+requires_live_fhir = pytest.mark.skipif(
+    not CONFIG_PATH.exists(),
+    reason=(
+        "Integration tests in this file talk to a live FHIR server "
+        "(see comment below). Add tests/unit/sources/fhir/configs/dev_config.json "
+        "(the connector README has an example pointing at the public HAPI server) "
+        "to run them."
+    ),
+)
+
 
 def load_config():
     with open(CONFIG_PATH) as f:
@@ -91,6 +104,7 @@ def test_extract_record_unknown_resource_returns_common_only():
 
 # --- Integration tests (hit live HAPI FHIR server) ---
 
+@requires_live_fhir
 def test_fhir_client_get_patient_bundle():
     client = make_client()
     resp = client.get("Patient", params={"_count": "3"})
@@ -99,6 +113,7 @@ def test_fhir_client_get_patient_bundle():
     assert body["resourceType"] == "Bundle"
     assert body["type"] == "searchset"
 
+@requires_live_fhir
 def test_iter_bundle_pages_yields_patient_resources():
     client = make_client()
     resources = list(iter_bundle_pages(client, "Patient", {"_count": "5"}, max_records=5))
@@ -107,6 +122,7 @@ def test_iter_bundle_pages_yields_patient_resources():
         assert r["resourceType"] == "Patient"
         assert "id" in r
 
+@requires_live_fhir
 def test_iter_bundle_pages_respects_max_records():
     client = make_client()
     resources = list(iter_bundle_pages(client, "Patient", {"_count": "10"}, max_records=3))
