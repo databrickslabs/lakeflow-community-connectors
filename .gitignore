@@ -49,3 +49,8 @@ Thumbs.db
 
 # Dev config
 tests/unit/sources/*/configs/dev_config.json
+
+# Source-simulator artifacts written by live runs (cassette, coverage report,
+# spec-validation report). Regenerated each time and not part of the source
+# of truth — the corpus under source_simulator/specs/<source>/ is.
+tests/unit/sources/*/cassettes/

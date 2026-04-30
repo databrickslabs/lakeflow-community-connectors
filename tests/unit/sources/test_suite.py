@@ -166,7 +166,8 @@ class LakeflowConnectTests:
                 "corpus_dir": cls._simulator_corpus_dir(),
                 "ignore_query_params": frozenset(cls.record_replay_ignore_query_params),
             }
-        return {
+
+        kwargs = {
             "mode": env_mode,
             "cassette_path": cls._cassette_path(),
             "source": cls.__module__.split(".")[-2] if "." in cls.__module__ else "",
@@ -174,6 +175,14 @@ class LakeflowConnectTests:
             "sample_size": cls.record_replay_sample_size,
             "synthesize_count": cls.record_replay_synthesize_count,
         }
+        # Live runs of a connector that has a simulator_source authored
+        # double as spec validation: each live response is diffed against
+        # what the spec+corpus would produce, and the result is logged.
+        # Drift between live and spec surfaces immediately.
+        if cls.simulator_source and env_mode == MODE_LIVE:
+            kwargs["spec_path"] = cls._simulator_spec_path()
+            kwargs["corpus_dir"] = cls._simulator_corpus_dir()
+        return kwargs
 
     @classmethod
     def _load_config(cls) -> dict:

@@ -48,6 +48,9 @@ from databricks.labs.community_connector.source_simulator.modes import (
 )
 from databricks.labs.community_connector.source_simulator.recorder import Recorder
 from databricks.labs.community_connector.source_simulator.replayer import Replayer
+from databricks.labs.community_connector.source_simulator.validator import (
+    LiveValidator,
+)
 
 
 class Simulator:
@@ -113,6 +116,11 @@ class Simulator:
         else:
             if cassette_path is None:
                 raise ValueError(f"{mode!r} mode requires cassette_path")
+            # In live mode, spec_path + corpus_dir are optional. When both
+            # are provided, the simulator also runs the spec validator: each
+            # live response is diffed against what the spec would produce,
+            # and the per-endpoint validation report is written next to the
+            # cassette at the end of the run.
 
         self.mode = mode
         self.cassette_path = Path(cassette_path) if cassette_path else None
@@ -133,11 +141,19 @@ class Simulator:
         self._recorder: Optional[Recorder] = None
         self._replayer: Optional[Replayer] = None
         self._handler: Optional[SimulateHandler] = None
+        # In live mode, when spec_path + corpus_dir are also provided, this
+        # validates each live response against what the spec would produce.
+        self._validator: Optional[LiveValidator] = None
 
     @property
     def coverage_path(self) -> Path:
         """Where the per-endpoint coverage report is written, next to the cassette."""
         return self.cassette_path.with_suffix(self.cassette_path.suffix + ".coverage.json")
+
+    @property
+    def validation_path(self) -> Path:
+        """Where the per-endpoint validation report is written, next to the cassette."""
+        return self.cassette_path.with_suffix(self.cassette_path.suffix + ".validation.json")
 
     def __enter__(self) -> "Simulator":
         # Live (proxy posture): load existing cassette so we append, not
@@ -151,6 +167,16 @@ class Simulator:
                     self.cassette = Cassette.empty(self.cassette_path, self.source)
                 self.cassette.ignore_query_params = self.ignore_query_params
                 self._recorder = Recorder(self.cassette, sample_size=self.sample_size)
+
+            # When spec_path + corpus_dir are also given in live mode, set
+            # up the spec validator. Each live request gets a free
+            # spec-vs-reality diff; results are written next to the cassette
+            # on __exit__.
+            if self.spec_path is not None and self.corpus_dir is not None:
+                self.specs = load_specs(self.spec_path)
+                self.corpus = CorpusStore.load(self.corpus_dir)
+                self._validator = LiveValidator(specs=self.specs, corpus=self.corpus)
+
             self._interceptor = Interceptor(handler=self._handle_send)
             self._interceptor.install()
             return self
@@ -198,6 +224,8 @@ class Simulator:
             if self.cassette.interactions:
                 self.cassette.save()
                 self.coverage.save(self.coverage_path)
+                if self._validator is not None:
+                    self._validator.save(self.validation_path)
 
     def _handle_send(
         self,
@@ -211,6 +239,8 @@ class Simulator:
             self.coverage.observe(request_record_from_prepared(prep))
             if self._recorder is not None:
                 self._recorder.record(prep, resp)
+            if self._validator is not None:
+                self._validator.observe(prep, resp)
             return resp
 
         if self.mode == MODE_SIMULATE:
