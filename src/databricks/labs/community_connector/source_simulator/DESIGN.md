@@ -64,6 +64,40 @@ simulator.
   connectors (e.g. `google-api-python-client`) need a separate adapter; not in
   scope for this design.
 
+## Coverage contract: every HTTP call, no exceptions
+
+The simulator's contract is total: while a `Simulator(...)` context is
+active, **every** HTTP call the connector makes — through `requests` —
+must be handled by the simulator. There are no carve-outs for
+"infrastructure" calls vs "data" calls.
+
+Examples that must be modeled in `endpoints.yaml`, even when they feel
+like setup/auxiliary work:
+
+- **Connector `__init__`-time calls.** Some connectors validate
+  credentials up front by hitting the source. The simulator is installed
+  *before* the connector is constructed (in `LakeflowConnectTests.setup_class`),
+  so the spec must include those validation endpoints.
+- **Lazy OAuth refresh.** Connectors that defer token refresh to the
+  first real API call (zoho, microsoft_teams) still need
+  `/oauth/v2/token`-style endpoints in the spec, returning a stub
+  `{"access_token": "...", "expires_in": ...}`. Without it, the
+  connector's first read fails with `UnknownEndpoint`.
+- **Schema-discovery endpoints** (hubspot's `/properties/v2/...`,
+  zoho's `/crm/v8/settings/fields`). The connector calls these to
+  build a `StructType` at `get_table_schema` time. They need stub
+  responses too — usually a small empty array suffices, which makes the
+  connector fall back to a minimal base schema.
+- **List-tables endpoints** (hubspot's `/crm/v3/schemas`, zoho's
+  `/crm/v8/settings/modules`). Even returning an empty result is fine;
+  the call has to succeed.
+
+The simplest mental model: **if the connector has a code path that
+reaches `requests.get/post/...`, the spec needs an entry for that URL,
+or a custom handler.** A lazy approach to spec authoring (only model
+"data" endpoints) reliably fails at one of the steps above — the
+auth refresh is the most common surprise.
+
 ## When the simulator is active
 
 The simulator is **opt-in**. It does nothing unless something explicitly
