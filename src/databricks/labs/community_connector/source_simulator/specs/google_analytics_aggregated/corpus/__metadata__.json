@@ -12,6 +12,11 @@
       "category": "Misc"
     },
     {
+      "apiName": "city",
+      "uiName": "city",
+      "category": "Misc"
+    },
+    {
       "apiName": "country",
       "uiName": "country",
       "category": "Misc"

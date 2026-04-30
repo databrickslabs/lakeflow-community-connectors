@@ -17,9 +17,10 @@ endpoints:
     corpus: __metadata__
     response: {single_entity: true, pagination_style: none}
 
-  # runReport — POST that returns aggregated rows. Empty rows is fine
-  # for harness validation (no schema mismatch on zero records).
+  # runReport — POST whose body's dimensions/metrics determine the response
+  # shape, so a static corpus can't satisfy it. The handler reads the body,
+  # builds matching headers, and emits stub rows. It also enforces the GA4
+  # ``dateRanges <= 4`` limit by returning 400 when exceeded.
   - path: /v1beta/properties/{property_id}:runReport
     method: POST
-    corpus: __empty_report__
-    response: {single_entity: true, pagination_style: none}
+    handler: databricks.labs.community_connector.source_simulator.specs.google_analytics_aggregated.handlers.run_report:serve_run_report
