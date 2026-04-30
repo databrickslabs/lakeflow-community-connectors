@@ -10,11 +10,17 @@ from tests.unit.sources.test_suite import LakeflowConnectTests
 
 class TestGoogleSheetsDocsConnector(LakeflowConnectTests):
     connector_class = GoogleSheetsDocsLakeflowConnect
+    simulator_source = "google_sheets_docs"
 
     @classmethod
     def setup_class(cls):
-        if not (cls._config_dir() / "dev_config.json").exists():
+        config_dir = cls._config_dir()
+        if not (
+            (config_dir / "dev_config.json").exists()
+            or (config_dir / "replay_config.json").exists()
+        ):
             pytest.skip(
-                "dev_config.json not found; add it locally with OAuth2 credentials to run this test"
+                "Neither dev_config.json nor replay_config.json found; "
+                "add one with OAuth2 credentials (real or simulator placeholder)."
             )
         super().setup_class()

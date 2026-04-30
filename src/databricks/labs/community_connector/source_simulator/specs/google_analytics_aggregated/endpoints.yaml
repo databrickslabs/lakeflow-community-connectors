@@ -1,0 +1,25 @@
+# Google Analytics Data API v1beta.
+#
+# Two hosts:
+# * https://oauth2.googleapis.com/token — service account JWT-bearer flow
+# * https://analyticsdata.googleapis.com/v1beta/...
+
+endpoints:
+  # OAuth token (service account JWT exchange).
+  - path: /token
+    method: POST
+    corpus: __oauth_token__
+    response: {single_entity: true, pagination_style: none}
+
+  # Property metadata — dimensions and metrics catalog.
+  - path: /v1beta/properties/{property_id}/metadata
+    method: GET
+    corpus: __metadata__
+    response: {single_entity: true, pagination_style: none}
+
+  # runReport — POST that returns aggregated rows. Empty rows is fine
+  # for harness validation (no schema mismatch on zero records).
+  - path: /v1beta/properties/{property_id}:runReport
+    method: POST
+    corpus: __empty_report__
+    response: {single_entity: true, pagination_style: none}

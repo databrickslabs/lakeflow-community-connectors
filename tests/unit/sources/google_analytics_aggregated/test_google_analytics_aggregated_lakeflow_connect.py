@@ -1,11 +1,59 @@
+import json
+from pathlib import Path
+
 import pytest
 
 from databricks.labs.community_connector.sources.google_analytics_aggregated.google_analytics_aggregated import GoogleAnalyticsAggregatedLakeflowConnect
 from tests.unit.sources.test_suite import LakeflowConnectTests
 
 
+def _ensure_replay_config(config_dir: Path) -> None:
+    """Create replay_config.json with a freshly-generated RSA key.
+
+    Google's ``service_account.Credentials.from_service_account_info`` parses
+    the private_key as PEM RSA, so a real key shape is required. We generate
+    one locally — never used to sign anything since the simulator returns a
+    canned access token. Gitignored: see .gitignore.
+    """
+    out = config_dir / "replay_config.json"
+    if out.exists():
+        return
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives import serialization
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode()
+    creds = {
+        "type": "service_account",
+        "project_id": "simulator-project",
+        "private_key_id": "simulator-key-id",
+        "private_key": pem,
+        "client_email": "simulator@simulator-project.iam.gserviceaccount.com",
+        "client_id": "0",
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+    }
+    out.write_text(
+        json.dumps(
+            {"property_ids": "[\"123456789\"]", "credentials_json": json.dumps(creds)},
+            indent=2,
+        )
+        + "\n"
+    )
+
+
 class TestGoogleAnalyticsAggregatedConnector(LakeflowConnectTests):
     connector_class = GoogleAnalyticsAggregatedLakeflowConnect
+    simulator_source = "google_analytics_aggregated"
+
+    @classmethod
+    def setup_class(cls):
+        _ensure_replay_config(cls._config_dir())
+        super().setup_class()
 
     # Extra Google Analytics Aggregated specific integration tests.
 

@@ -54,3 +54,8 @@ tests/unit/sources/*/configs/dev_config.json
 # spec-validation report). Regenerated each time and not part of the source
 # of truth — the corpus under source_simulator/specs/<source>/ is.
 tests/unit/sources/*/cassettes/
+
+# google_analytics_aggregated needs a real-shaped RSA key in replay_config.json
+# for the google-auth library to parse credentials. Generated at test setup
+# time (see test class's setup_class), never checked in.
+tests/unit/sources/google_analytics_aggregated/configs/replay_config.json

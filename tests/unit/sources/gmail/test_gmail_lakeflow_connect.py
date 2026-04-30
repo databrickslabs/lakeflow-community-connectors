@@ -8,6 +8,7 @@ from tests.unit.sources.test_suite import LakeflowConnectTests
 
 class TestGmailConnector(LakeflowConnectTests):
     connector_class = GmailLakeflowConnect
+    simulator_source = "gmail"
 
     # Extra Gamil specific integration tests.
     def test_read_profile(self):
