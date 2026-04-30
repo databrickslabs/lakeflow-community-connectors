@@ -7,8 +7,7 @@
 endpoints:
   - path: /fhir/Patient
     method: GET
-    corpus: __patient_bundle__
-    response: {pagination_style: none, single_entity: true}
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.patient_bundle:serve_patient_bundle
   - path: /fhir/Observation
     method: GET
     corpus: __empty_bundle__
