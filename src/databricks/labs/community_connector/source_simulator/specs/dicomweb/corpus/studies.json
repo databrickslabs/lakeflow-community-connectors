@@ -1,62 +1,18 @@
 [
   {
-    "study_instance_uid": "yankee-954",
-    "patient_id": "lima-650",
-    "patient_name": "india-822",
-    "study_date": "yankee-167",
-    "study_time": "alpha-101",
-    "accession_number": "golf-560",
-    "study_description": "charlie-856",
-    "modalities_in_study": [],
-    "number_of_study_related_series": 43709,
-    "number_of_study_related_instances": 24339,
-    "connection_name": "whiskey-261"
+    "0020000D": {"vr": "UI", "Value": ["1.2.3.4.5.1"]},
+    "00100010": {"vr": "PN", "Value": [{"Alphabetic": "Sim^Patient"}]},
+    "00100020": {"vr": "LO", "Value": ["SIM-PAT-001"]},
+    "00080020": {"vr": "DA", "Value": ["20240101"]},
+    "00080030": {"vr": "TM", "Value": ["120000"]},
+    "00200010": {"vr": "SH", "Value": ["STUDY001"]}
   },
   {
-    "study_instance_uid": "papa-991",
-    "patient_id": "sierra-698",
-    "patient_name": "oscar-119",
-    "study_date": "alpha-486",
-    "study_time": "november-333",
-    "accession_number": "november-363",
-    "study_description": "uniform-247",
-    "modalities_in_study": [
-      "romeo-811",
-      "golf-664"
-    ],
-    "number_of_study_related_series": 75402,
-    "number_of_study_related_instances": 91872,
-    "connection_name": "alpha-966"
-  },
-  {
-    "study_instance_uid": "whiskey-488",
-    "patient_id": "oscar-797",
-    "patient_name": "xray-245",
-    "study_date": "xray-737",
-    "study_time": "lima-634",
-    "accession_number": "mike-824",
-    "study_description": "foxtrot-866",
-    "modalities_in_study": [
-      "romeo-358",
-      "hotel-589"
-    ],
-    "number_of_study_related_series": 32999,
-    "number_of_study_related_instances": 17643,
-    "connection_name": "echo-742"
-  },
-  {
-    "study_instance_uid": "papa-225",
-    "patient_id": "hotel-526",
-    "patient_name": "victor-245",
-    "study_date": "india-828",
-    "study_time": "xray-330",
-    "accession_number": "whiskey-866",
-    "study_description": "delta-942",
-    "modalities_in_study": [
-      "mike-494"
-    ],
-    "number_of_study_related_series": 79757,
-    "number_of_study_related_instances": 87815,
-    "connection_name": "papa-444"
+    "0020000D": {"vr": "UI", "Value": ["1.2.3.4.5.2"]},
+    "00100010": {"vr": "PN", "Value": [{"Alphabetic": "Sim^Patient2"}]},
+    "00100020": {"vr": "LO", "Value": ["SIM-PAT-002"]},
+    "00080020": {"vr": "DA", "Value": ["20240102"]},
+    "00080030": {"vr": "TM", "Value": ["130000"]},
+    "00200010": {"vr": "SH", "Value": ["STUDY002"]}
   }
 ]

@@ -1,39 +1,42 @@
-# Auto-generated stub spec. URL paths are placeholder guesses;
-# tune to match the actual connector if tests fail.
+# DICOMweb (QIDO-RS + WADO-RS).
+#
+# Connector uses urllib (not requests) — works because the Interceptor
+# patches both. Endpoints return raw arrays; QIDO-RS treats an empty
+# response as "no records", which is exactly what we want for offline
+# tests.
+
 endpoints:
-- path: /studies/diagnostics
-  method: GET
-  corpus: diagnostics
-  response:
-    pagination_style: none
-    wrapper:
-      records_key: diagnostics
-      extras:
-        next_page: null
-- path: /studies/instances
-  method: GET
-  corpus: instances
-  response:
-    pagination_style: none
-    wrapper:
-      records_key: instances
-      extras:
-        next_page: null
-- path: /studies/series
-  method: GET
-  corpus: series
-  response:
-    pagination_style: none
-    wrapper:
-      records_key: series
-      extras:
-        next_page: null
-- path: /studies/studies
-  method: GET
-  corpus: studies
-  response:
-    pagination_style: none
-    wrapper:
-      records_key: studies
-      extras:
-        next_page: null
+  - path: /studies
+    method: GET
+    corpus: studies
+    response:
+      pagination_style: none
+      single_entity: true
+
+  - path: /studies/{study_uid}/series
+    method: GET
+    corpus: series
+    response:
+      pagination_style: none
+      single_entity: true
+
+  - path: /studies/{study_uid}/series/{series_uid}/instances
+    method: GET
+    corpus: instances
+    response:
+      pagination_style: none
+      single_entity: true
+
+  - path: /studies/{study_uid}/series/{series_uid}/metadata
+    method: GET
+    corpus: instances
+    response:
+      pagination_style: none
+      single_entity: true
+
+  - path: /studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/metadata
+    method: GET
+    corpus: instances
+    response:
+      pagination_style: none
+      single_entity: true
