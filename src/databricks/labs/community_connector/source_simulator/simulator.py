@@ -101,7 +101,6 @@ class Simulator:
         record: bool = True,
         spec_path: Optional[Path] = None,
         corpus_dir: Optional[Path] = None,
-        inject_future_records: bool = False,
     ) -> None:
         if mode not in _VALID_MODES:
             raise ValueError(f"Invalid mode: {mode!r}")
@@ -133,7 +132,6 @@ class Simulator:
         self.sample_size = sample_size
         self.synthesize_count = synthesize_count
         self.record = record
-        self.inject_future_records = inject_future_records
 
         self.cassette: Optional[Cassette] = None
         self.specs: Optional[List[EndpointSpec]] = None
@@ -207,11 +205,15 @@ class Simulator:
         if self.mode == MODE_SIMULATE:
             self.specs = load_specs(self.spec_path)
             self.corpus = CorpusStore.load(self.corpus_dir)
-            if self.inject_future_records:
-                from databricks.labs.community_connector.source_simulator.corpus import (
-                    inject_future_records as _inject_future_records,
-                )
-                _inject_future_records(self.corpus, self.specs)
+            # Apply ``synthesize_future_records`` directives from the spec.
+            # No-op when no spec declares them. When present, the directive
+            # strengthens ``test_read_terminates`` into an explicit cap
+            # check: future records leak through if the connector's
+            # ``until=`` filter is missing or wrong.
+            from databricks.labs.community_connector.source_simulator.corpus import (
+                inject_future_records as _inject_future_records,
+            )
+            _inject_future_records(self.corpus, self.specs)
             self._handler = SimulateHandler(specs=self.specs, corpus=self.corpus)
             self._interceptor = Interceptor(handler=self._handle_send)
             self._interceptor.install()

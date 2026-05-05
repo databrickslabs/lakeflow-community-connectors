@@ -91,16 +91,6 @@ class LakeflowConnectTests:
     # Replaces per-source committed ``configs/replay_config.json`` files.
     replay_config: Optional[Dict[str, Any]] = None
 
-    # Activate cap-validation: at simulator startup, clone records into
-    # corpora that declare a ``synthesize_future_records`` directive in
-    # ``endpoints.yaml``, with the cursor field set to timestamps past
-    # wall-clock now(). A correctly-capped connector excludes them via
-    # its ``until=<init_time>`` filter; an uncapped one leaks them and
-    # ``test_read_terminates`` detects the non-convergence. Opt-in
-    # because connectors without an ``until=`` filter would (correctly)
-    # surface the future records and break ``test_read_table``.
-    inject_future_records: bool = False
-
     # Query-param names whose values are non-deterministic (e.g. now()-based
     # timestamps, request IDs, nonces). The mock framework ignores these when
     # matching recorded interactions against incoming requests. Setting this
@@ -183,7 +173,6 @@ class LakeflowConnectTests:
                 "spec_path": cls._simulator_spec_path(),
                 "corpus_dir": cls._simulator_corpus_dir(),
                 "ignore_query_params": frozenset(cls.record_replay_ignore_query_params),
-                "inject_future_records": cls.inject_future_records,
             }
 
         kwargs = {
