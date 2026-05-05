@@ -574,9 +574,9 @@ simulate-mode tests, the workflow is:
    `wrapper` block matching the connector's expected response shape
    (e.g. `{records_key: result.elements, extras: {nextPage: null}}` for
    nested wrappers). One endpoint entry per table.
-3. **Add `replay_config.json`.** A placeholder credentials file in
-   `tests/unit/sources/<source>/configs/` so the connector can construct
-   itself without a real `dev_config.json`.
+3. **Set ``replay_config`` on the test class.** A dict of placeholder
+   credentials of the right shape so the connector can construct itself
+   without a live source. The simulator never validates them.
 4. **Wire the test class.** Add `simulator_source = "<source>"` to the
    connector's `LakeflowConnectTests` subclass.
 5. **Run the tests.** Failures will tell you which spec entries need

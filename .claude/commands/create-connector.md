@@ -50,7 +50,8 @@ Gate: verify implementation file(s) exist.
 ## Step 4 — Testing & Fixes
 Subagent: `connector-tester` → `{TESTS}/test_{source_name}_lakeflow_connect.py` (all passing)
 
-Prompt: source name, implementation path, `dev_config.json` path.
+Prompt: source name, implementation path, the credentials path (any
+local JSON file the user picked when running ``collect-credentials``).
 After subagent: run `pytest {TESTS}/ -v --tb=short` yourself using a **synchronous** Bash call with `timeout=60000` (60s). Never run pytest in background. Never use `sleep`, `tail`, `wc -l`, or `ps aux` to monitor it. If pytest times out, do NOT increase the timeout — instead tighten `dev_table_config.json` (halve `window_hours`, `lookback_days`, or `max_records_per_batch`) and retry. If tests fail, do NOT proceed — report failure to user.
 Gate: confirm all tests pass.
 

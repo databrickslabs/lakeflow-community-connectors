@@ -8,14 +8,17 @@ disable-model-invocation: true
 
 ## Goal
 
-Generate and run an authentication verification test for the **{{source_name}}** connector to confirm that the credentials in `dev_config.json` are valid.
+Generate and run an authentication verification test for the **{{source_name}}** connector to confirm that the supplied credentials are valid.
 
 ## Prerequisites
 
 - API doc must exist at `src/databricks/labs/community_connector/sources/{{source_name}}/{{source_name}}_api_doc.md`
-- `dev_config.json` must exist at `tests/unit/sources/{{source_name}}/configs/dev_config.json`. 
+- Credentials must be supplied via one of:
+  - ``CONNECTOR_TEST_CONFIG_JSON`` env var — inline JSON.
+  - ``CONNECTOR_TEST_CONFIG_PATH`` env var — path to a JSON file.
+  - A local file at any path the developer chooses, passed to ``load_config``.
 
-If `dev_config.json` does not exist, stop and report that credentials have not been collected yet and ask user to provide.
+If no credentials resolve, stop and report that credentials have not been collected yet and ask user to provide.
 
 ## Output
 
@@ -30,7 +33,7 @@ Check if `tests/unit/sources/{{source_name}}/auth_test.py` already exists.
 - **If it exists:** skip to Step 3 — just run the existing test to validate credentials. Do not regenerate.
 - **If it does not exist:** proceed to Step 1.
 
-**Do NOT search for file locations** — all paths are known. Do not run Glob/Search to discover files. Do not read `dev_config.json` directly — credential field names come from `connector_spec.yaml` (connection_parameters section), not from the config file itself.
+**Do NOT search for file locations** — all paths are known. Do not run Glob/Search to discover files. Credential field names come from `connector_spec.yaml` (connection_parameters section), not from any specific on-disk config file.
 
 ### Step 1: Read the API Doc and Spec for Auth Details
 
@@ -58,7 +61,13 @@ Auth verification test for {SourceName} connector.
 Run this script to verify your credentials are correctly configured.
 
 Usage:
-    python tests/unit/sources/{source_name}/auth_test.py
+    # via env var (inline JSON):
+    CONNECTOR_TEST_CONFIG_JSON='{"token":"..."}' \\
+        python tests/unit/sources/{source_name}/auth_test.py
+
+    # via env var (path to a JSON file at any location):
+    CONNECTOR_TEST_CONFIG_PATH=~/secrets/{source_name}.json \\
+        python tests/unit/sources/{source_name}/auth_test.py
 """
 import sys
 import os
@@ -70,8 +79,8 @@ import requests
 
 
 def test_auth():
-    """Verify that credentials in dev_config.json are valid by making a simple API call."""
-    config = load_config("{source_name}")
+    """Verify supplied credentials are valid by making a simple API call."""
+    config = load_config()  # honors CONNECTOR_TEST_CONFIG_JSON / _PATH env vars
 
     # Build auth headers/params from config — customize based on auth method
     # Example for Bearer token:
@@ -93,7 +102,8 @@ def test_auth():
         return True
     elif response.status_code == 401:
         print(f"Authentication failed: Invalid credentials (HTTP 401).")
-        print(f"   Check your credentials in tests/unit/sources/{source_name}/configs/dev_config.json")
+        print(f"   Check the credentials supplied via CONNECTOR_TEST_CONFIG_JSON / "
+              f"CONNECTOR_TEST_CONFIG_PATH.")
         return False
     elif response.status_code == 403:
         print(f"Authorization failed: Insufficient permissions (HTTP 403).")
@@ -138,6 +148,6 @@ Debug if authentication fails and report the issue clearly.
 
 ## Edge Cases
 
-- **OAuth 2.0**: The `dev_config.json` may contain `refresh_token`, `client_id`, `client_secret`. The auth test may need to exchange the refresh token for an access token first.
+- **OAuth 2.0**: The supplied config may contain `refresh_token`, `client_id`, `client_secret`. The auth test may need to exchange the refresh token for an access token first.
 - **Subdomain-based URLs**: Build the base URL from the `subdomain` field in config.
-- **Multiple auth methods**: Use whichever method's credentials are present in `dev_config.json`.
+- **Multiple auth methods**: Use whichever method's credentials are present in the supplied config.

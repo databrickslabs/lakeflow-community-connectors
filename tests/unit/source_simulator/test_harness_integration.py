@@ -183,18 +183,25 @@ def _scaffold_connector_test_dir(
 ) -> Path:
     """Build a throw-away {tmp}/toy_source/ tree that looks like a real connector test."""
     src = tmp_path / "toy_source"
-    (src / "configs").mkdir(parents=True)
+    src.mkdir(parents=True)
     (src / "__init__.py").write_text("")
-    (src / "configs" / "dev_config.json").write_text(
-        json.dumps({"base_url": base_url, "token": token})
-    )
+    # Credentials are passed via CONNECTOR_TEST_CONFIG_PATH; write the JSON
+    # to a tmp location outside the test dir to mirror how real consumers
+    # handle the env-var path.
+    creds_path = tmp_path / "creds.json"
+    creds_path.write_text(json.dumps({"base_url": base_url, "token": token}))
     (src / "test_toy.py").write_text(_TEST_MODULE)
     return src
 
 
-def _run_pytest(test_dir: Path, mode: str, repo_root: Path) -> subprocess.CompletedProcess:
+def _run_pytest(
+    test_dir: Path, mode: str, repo_root: Path
+) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env["CONNECTOR_TEST_MODE"] = mode
+    # Pass credentials via env var (the canonical mechanism since the
+    # legacy ``configs/dev_config.json`` per-source convention was removed).
+    env["CONNECTOR_TEST_CONFIG_PATH"] = str(test_dir.parent / "creds.json")
     # Make the tmp test module importable under its real path.
     env["PYTHONPATH"] = f"{repo_root}:{env.get('PYTHONPATH', '')}"
     return subprocess.run(

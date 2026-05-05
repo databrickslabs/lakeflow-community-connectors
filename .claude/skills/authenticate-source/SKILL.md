@@ -65,7 +65,9 @@ Use `AskUserQuestion` to show the user the URL and ask them to:
 Wait for the user to explicitly confirm before proceeding. If the user reports an error, help them debug.
 
 
-2e. After confirmation, verify `tests/unit/sources/{{source_name}}/configs/dev_config.json` exists.
+2e. After confirmation, verify the user's chosen credentials JSON file
+exists at the path they picked. Remember the path — it gets passed as
+``CONNECTOR_TEST_CONFIG_PATH`` in subsequent steps.
 
 ---
 

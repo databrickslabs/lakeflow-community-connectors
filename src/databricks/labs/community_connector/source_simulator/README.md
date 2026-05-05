@@ -46,12 +46,11 @@ One cassette per test class, next to the test file:
 
 ```
 tests/unit/sources/qualtrics/
-├── configs/
-│   ├── dev_config.json           # live credentials (gitignored)
-│   └── replay_config.json        # optional: fake creds for replay mode (gitignored)
 └── cassettes/
     └── TestQualtricsConnector.json
 ```
+
+Credentials are not stored in the repo — see the next section.
 
 ## Credentials
 
@@ -66,7 +65,7 @@ shape works. Two ways to supply them:
   the test class. Used uniformly across all simulate/replay runs;
   no on-disk file required.
 - **Per-run override.** Drop a ``configs/replay_config.json`` next
-  to the test file. Gitignored. Takes precedence only when
+  to the test file (gitignored). Takes precedence only when
   ``replay_config`` is unset; useful for one-off local experimentation.
 
 A connector whose ``__init__`` parses a credential field at runtime
@@ -77,7 +76,7 @@ for the canonical pattern.
 
 ### Live / record modes
 
-Credentials are looked up in this order — first match wins:
+Credentials are not stored in the repo. Supply them per run via:
 
 1. **`CONNECTOR_TEST_CONFIG_JSON` env var** — inline JSON. Best for
    CI runners that pull from a secret store and inject the value
@@ -89,22 +88,19 @@ Credentials are looked up in this order — first match wins:
      pytest tests/unit/sources/qualtrics/
    ```
 
-2. **`CONNECTOR_TEST_CONFIG_PATH` env var** — path to a JSON file.
-   Useful when the secret store materializes a temp file (e.g.
-   tmpfs-backed or a sealed-secret mount).
+2. **`CONNECTOR_TEST_CONFIG_PATH` env var** — path to a JSON file
+   at any local path the developer chooses (typically outside the
+   repo, e.g. ``~/secrets/qualtrics.json``). Useful when the secret
+   store materializes a temp file or for repeated local invocations.
 
    ```bash
    CONNECTOR_TEST_MODE=live \
-     CONNECTOR_TEST_CONFIG_PATH=/run/secrets/qualtrics.json \
+     CONNECTOR_TEST_CONFIG_PATH=~/secrets/qualtrics.json \
      pytest tests/unit/sources/qualtrics/
    ```
 
-3. **`configs/dev_config.json`** next to the test file. The
-   contributor-friendly default — drop a JSON file at the path
-   above (gitignored) and run pytest with no extra env vars.
-
-If none of the three resolve, the test fails at setup with a
-message listing all three options.
+If neither resolves, the test fails at setup with a message naming
+both env vars.
 
 ## How it works
 

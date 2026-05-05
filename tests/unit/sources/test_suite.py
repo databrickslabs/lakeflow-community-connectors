@@ -6,9 +6,12 @@ Usage — each connector test file subclasses ``LakeflowConnectTests``::
     class TestMyConnector(LakeflowConnectTests):
         connector_class = MyLakeflowConnect
 
-Config and table_configs are auto-loaded from a ``configs/`` directory next to
-the test file (``dev_config.json`` and ``dev_table_config.json``).  Override
-the class attributes to supply them explicitly.
+Stand-in (simulate / replay) credentials are declared on the test class via
+``replay_config = {...}``. Live / record credentials are passed per run via
+``CONNECTOR_TEST_CONFIG_JSON`` or ``CONNECTOR_TEST_CONFIG_PATH`` env vars.
+``table_configs`` is auto-loaded from a ``dev_table_config.json`` next to
+the test file when present (optional). Override the class attributes to
+supply any of these explicitly.
 
 Then run::
 
@@ -160,7 +163,8 @@ class LakeflowConnectTests:
             CONNECTOR_TEST_MODE unset / replay / simulate -> Mode.SIMULATE
                 (the default — fast, offline, no creds)
             CONNECTOR_TEST_MODE=live    -> Mode.LIVE (refresh corpus from
-                real source; needs dev_config.json with valid creds)
+                real source; needs valid creds via CONNECTOR_TEST_CONFIG_JSON
+                or CONNECTOR_TEST_CONFIG_PATH)
 
         Without ``simulator_source`` (legacy cassette-only):
             Mode follows CONNECTOR_TEST_MODE directly. Default = live.
@@ -203,43 +207,48 @@ class LakeflowConnectTests:
     def _load_config(cls) -> dict:
         """Load credentials for the connector.
 
-        Stand-in modes (simulate / replay) prefer the in-class
-        ``replay_config`` (or ``_replay_config()`` override) — uniform
-        across all connectors, no per-source committed JSON file. As a
-        backstop, a locally-placed (gitignored)
-        ``configs/replay_config.json`` is honored so contributors can
-        override creds for a single run.
+        Precedence (first match wins, mode-independent):
 
-        Live / record modes resolve credentials via, in order:
+        1. ``CONNECTOR_TEST_CONFIG_JSON`` env var — inline JSON. Runtime
+           override; lets a CI runner inject creds from a secret store
+           without staging anything to the filesystem.
+        2. ``CONNECTOR_TEST_CONFIG_PATH`` env var — path to a JSON file
+           at any location the developer chooses.
+        3. ``cls._replay_config()`` — class-declared stand-in creds.
+           The simulator never validates them, so any string of the
+           right shape works. This is the path most simulate/replay
+           tests take.
+        4. ``configs/replay_config.json`` — locally-placed (gitignored)
+           override file next to the test.
 
-        1. ``CONNECTOR_TEST_CONFIG_JSON`` env var — inline JSON string.
-        2. ``CONNECTOR_TEST_CONFIG_PATH`` env var — path to a JSON file.
-        3. ``configs/dev_config.json`` next to the test file.
-
-        The env-var mechanisms let CI inject credentials from a secret
-        store without committing or staging anything to the working
-        tree.
+        The legacy ``configs/dev_config.json`` per-source convention
+        has been removed in favor of the env-var mechanisms (1 and 2).
         """
-        mode = get_mode()
-        if mode in (MODE_REPLAY,) or cls.simulator_source:
-            cfg = cls._replay_config()
-            if cfg is not None:
-                return cfg
-            replay_path = cls._config_dir() / "replay_config.json"
-            if replay_path.exists():
-                with open(replay_path, "r") as f:
-                    return json.load(f)
-        return cls._load_live_config()
+        env_cfg = cls._try_env_config()
+        if env_cfg is not None:
+            return env_cfg
+
+        cfg = cls._replay_config()
+        if cfg is not None:
+            return cfg
+
+        replay_path = cls._config_dir() / "replay_config.json"
+        if replay_path.exists():
+            with open(replay_path, "r") as f:
+                return json.load(f)
+
+        raise AssertionError(
+            "No credentials provided.\n"
+            "  Fix: for simulate/replay tests, set ``replay_config`` on "
+            "the test class. For live runs against a real source, set "
+            "CONNECTOR_TEST_CONFIG_PATH=<path> or "
+            "CONNECTOR_TEST_CONFIG_JSON=<inline JSON>."
+        )
 
     @classmethod
-    def _load_live_config(cls) -> dict:
-        """Resolve live / record-mode credentials.
-
-        Precedence:
-        1. ``CONNECTOR_TEST_CONFIG_JSON`` (inline JSON wins — most specific).
-        2. ``CONNECTOR_TEST_CONFIG_PATH`` (path to JSON file).
-        3. ``configs/dev_config.json`` next to the test file.
-        """
+    def _try_env_config(cls) -> Optional[dict]:
+        """Return credentials from CONNECTOR_TEST_CONFIG_JSON / _PATH if set,
+        else None. Inline JSON wins over the path."""
         inline = os.environ.get("CONNECTOR_TEST_CONFIG_JSON", "").strip()
         if inline:
             try:
@@ -258,16 +267,7 @@ class LakeflowConnectTests:
             with open(path, "r") as f:
                 return json.load(f)
 
-        path = cls._config_dir() / "dev_config.json"
-        assert path.exists(), (
-            f"Config file not found: {path}\n"
-            "  Fix: create dev_config.json with connector credentials, "
-            "or set CONNECTOR_TEST_CONFIG_PATH=<path>, "
-            "or CONNECTOR_TEST_CONFIG_JSON=<inline JSON>, "
-            "or set ``replay_config`` on the test class for simulate mode."
-        )
-        with open(path, "r") as f:
-            return json.load(f)
+        return None
 
     @classmethod
     def _load_table_configs(cls) -> Dict[str, Dict[str, Any]]:

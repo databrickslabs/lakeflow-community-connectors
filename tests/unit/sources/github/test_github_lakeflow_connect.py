@@ -12,3 +12,4 @@ class TestGithubConnector(LakeflowConnectTests):
     # which makes ``test_read_terminates`` an explicit cap check — future
     # commits leak through if ``until=<init_time>`` is missing or wrong.
     simulator_source = "github"
+    replay_config = {"token": "simulator-fake-token"}

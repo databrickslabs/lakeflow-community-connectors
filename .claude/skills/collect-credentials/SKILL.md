@@ -16,7 +16,9 @@ Run the `authenticate.py` script to collect credentials for the **{{source_name}
 
 ## Output
 
-- `tests/unit/sources/{{source_name}}/configs/dev_config.json` — credentials file
+- A JSON credentials file at a local path **the user picks**, outside
+  the repo. Tests read it via ``CONNECTOR_TEST_CONFIG_PATH=<that path>``
+  or by inlining its contents into ``CONNECTOR_TEST_CONFIG_JSON``.
 
 ## Steps
 
@@ -25,10 +27,18 @@ Run the `authenticate.py` script to collect credentials for the **{{source_name}
 python3.10 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
 ```
 
-2. Run the authenticate script in background (Bash with `timeout: 0`) because it blocks until the user submits the form:
+2. Ask the user where they want the credentials saved (any local
+   path; conventionally outside the repo, e.g.
+   ``~/secrets/{{source_name}}.json``). Pass that path as ``-o``:
 ```bash
-source .venv/bin/activate && python tools/scripts/authenticate.py -s {{source_name}} -m browser
+source .venv/bin/activate && \
+  python tools/scripts/authenticate.py -s {{source_name}} -m browser \
+    -o ~/secrets/{{source_name}}.json
 ```
+
+   The ``-o`` flag is required for this skill — never write into the
+   repo. Run the script in background (Bash with ``timeout: 0``)
+   because it blocks until the user submits the form.
 
 3. Read the background Bash output to extract the URL. The script prints a line like:
 ```
@@ -44,7 +54,11 @@ The port may differ from 9876 if that port is already in use.
 
 5. Wait for the user to explicitly confirm before proceeding. If the user reports an error, help them debug.
 
-6. After confirmation, verify that `tests/unit/sources/{{source_name}}/configs/dev_config.json` exists.
+6. After confirmation, verify that the chosen output file exists.
+   Tell the user how to point tests at it:
+   ```bash
+   CONNECTOR_TEST_CONFIG_PATH=<their chosen path> pytest tests/unit/sources/{{source_name}}/
+   ```
 
 ## Important Notes
 

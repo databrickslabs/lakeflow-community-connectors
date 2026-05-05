@@ -171,10 +171,12 @@ Verify that passing a midpoint cursor value filters records correctly.
 ### 3.1 Setup
 
 ```python
-import json
+from tests.unit.sources.test_utils import load_config
 from databricks.labs.community_connector.sources.{source}.{source} import LakeflowConnect
 
-config = json.load(open('tests/unit/sources/{source}/configs/dev_config.json'))
+# Honors CONNECTOR_TEST_CONFIG_JSON / CONNECTOR_TEST_CONFIG_PATH env vars.
+# Pass an explicit fallback path if you want one.
+config = load_config()
 connector = LakeflowConnect(config)
 ```
 
@@ -347,11 +349,11 @@ python3.10 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
 ```
 
 ```python
-import json
+from tests.unit.sources.test_utils import load_config
 from databricks.labs.community_connector.sources.{source}.{source} import LakeflowConnect
 
-# Load config and create connector
-config = json.load(open('tests/unit/sources/{source}/configs/dev_config.json'))
+# Load config (honors CONNECTOR_TEST_CONFIG_JSON / _PATH env vars).
+config = load_config()
 connector = LakeflowConnect(config)
 
 # List tables

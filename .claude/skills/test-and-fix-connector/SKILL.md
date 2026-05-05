@@ -16,24 +16,26 @@ Validate the generated connector for **{{source_name}}** by executing the provid
 
 ## 1. Setup Test Files
 Create a `test_{source_name}_lakeflow_connect.py` under the `tests/unit/sources/{source_name}/` directory.
-**Always follow `tests/unit/sources/example/test_example_lakeflow_connect.py` as the primary example** — it shows the correct pattern: load both `dev_config.json` and `dev_table_config.json`, pass `table_config` and a small `sample_records` (e.g. 5) to `LakeflowConnectTester`.
+**Always follow `tests/unit/sources/example/test_example_lakeflow_connect.py` as the primary example** — it shows the correct pattern: subclass `LakeflowConnectTests`, set `connector_class`, set `simulator_source = "{source_name}"`, set `replay_config = {...}` with stand-in credentials, and pass a small `sample_records` (e.g. 5).
 
 ### Partitioned Connector Tests
 If the connector implements `SupportsPartition` or `SupportsPartitionedStream` (check the connector class definition for these mixins), the test class **must** also inherit from `SupportsPartitionedStreamTests` alongside `LakeflowConnectTests`. This adds partition-specific test coverage (partition key validation, partitioned reads, micro-batch convergence, etc.).
 
 ## 2. Test Configuration (Credentials & Bounds)
-Use the configuration files in `tests/unit/sources/{source_name}/configs/` to initialize your tests. Do **not** mock data; tests must connect to an actual instance.
 
-### A. Authentication (`dev_config.json`)
-If `dev_config.json` does not exist, create it and ask the developers to provide the required parameters to connect to a test instance of the source.
-Example:
-```json
-{
-  "user": "YOUR_USER_NAME",
-  "password": "YOUR_PASSWORD",
-  "token": "YOUR_TOKEN"
-}
-```
+### A. Authentication
+The test class declares stand-in credentials via the ``replay_config``
+class attribute (used in simulate / replay modes). For live or record
+runs against a real source instance, credentials are passed at run time
+via one of:
+
+- ``CONNECTOR_TEST_CONFIG_JSON`` env var — inline JSON, e.g.
+  ``CONNECTOR_TEST_CONFIG_JSON='{"token":"..."}' pytest ...``
+- ``CONNECTOR_TEST_CONFIG_PATH`` env var — path to a JSON file at any
+  location on the developer's machine.
+
+Do not commit credential files to the repo. There is no canonical
+on-disk credentials path any more.
 
 ### B. Table Options (`dev_table_config.json`)
 If it does not exist, create `dev_table_config.json` and supply the necessary `table_options` parameters for testing different cases.

@@ -8,6 +8,13 @@ class TestExampleConnector(LakeflowConnectTests):
     connector_class = ExampleLakeflowConnect
     test_utils_class = LakeflowConnectWriteTestUtils
     sample_records = 100
+    # The example connector wraps an in-process simulated source — no real
+    # creds required at any point. These two values key the in-memory
+    # API store seeded by ``reset_api`` below.
+    replay_config = {
+        "username": "simulator-user",
+        "password": "simulator-fake-password",
+    }
 
     @classmethod
     def setup_class(cls):
