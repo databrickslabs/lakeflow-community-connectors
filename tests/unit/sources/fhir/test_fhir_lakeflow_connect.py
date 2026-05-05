@@ -16,3 +16,7 @@ class TestFhirConnector(LakeflowConnectTests):
     connector_class = FhirLakeflowConnect
     simulator_source = "fhir"
     sample_records = 5  # HAPI FHIR is a public server, be considerate.
+    replay_config = {
+        "base_url": "https://simulator-fhir.example.com/fhir",
+        "auth_type": "none",
+    }

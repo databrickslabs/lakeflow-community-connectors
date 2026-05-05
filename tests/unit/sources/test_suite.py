@@ -83,6 +83,14 @@ class LakeflowConnectTests:
     sample_records: int = 50
     test_utils_class = None
 
+    # Stand-in credentials used in simulate/replay mode. The simulator
+    # doesn't validate these, so any string of the right shape works.
+    # Subclasses set this directly for static creds, or override
+    # ``_replay_config()`` to compute dynamically (e.g. generate an RSA
+    # private key for a connector that PEM-parses ``private_key``).
+    # Replaces per-source committed ``configs/replay_config.json`` files.
+    replay_config: Optional[Dict[str, Any]] = None
+
     # Query-param names whose values are non-deterministic (e.g. now()-based
     # timestamps, request IDs, nonces). The mock framework ignores these when
     # matching recorded interactions against incoming requests. Setting this
@@ -185,12 +193,29 @@ class LakeflowConnectTests:
         return kwargs
 
     @classmethod
+    def _replay_config(cls) -> Optional[Dict[str, Any]]:
+        """Hook for subclasses. Default returns the class attribute as-is.
+        Override to compute dynamically (e.g. generate an RSA key for a
+        connector whose ``__init__`` PEM-parses a credential field)."""
+        return cls.replay_config
+
+    @classmethod
     def _load_config(cls) -> dict:
-        """Load ``dev_config.json`` — or ``replay_config.json`` for stand-in modes."""
+        """Load credentials for the connector.
+
+        In stand-in modes (simulate/replay), prefer the in-class
+        ``replay_config`` (or ``_replay_config()`` override) — uniform
+        across all connectors, no per-source committed JSON file. As a
+        backstop, a locally-placed (gitignored) ``configs/replay_config.json``
+        is honored so contributors can override creds for a single run.
+
+        In live mode, ``configs/dev_config.json`` is required.
+        """
         mode = get_mode()
-        # In stand-in postures (replay or simulate), prefer replay_config.json
-        # so contributors don't need real creds.
         if mode in (MODE_REPLAY,) or cls.simulator_source:
+            cfg = cls._replay_config()
+            if cfg is not None:
+                return cfg
             replay_path = cls._config_dir() / "replay_config.json"
             if replay_path.exists():
                 with open(replay_path, "r") as f:
@@ -198,8 +223,8 @@ class LakeflowConnectTests:
         path = cls._config_dir() / "dev_config.json"
         assert path.exists(), (
             f"Config file not found: {path}\n"
-            "  Fix: Create dev_config.json with connector credentials "
-            "(or replay_config.json for replay/simulate-mode fake credentials)."
+            "  Fix: Create dev_config.json with connector credentials, "
+            "or set ``replay_config`` on the test class for simulate mode."
         )
         with open(path, "r") as f:
             return json.load(f)

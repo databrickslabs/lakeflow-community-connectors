@@ -31,6 +31,7 @@ class TestDICOMwebConnector(LakeflowConnectTests, SupportsPartitionedStreamTests
     connector_class = DICOMwebLakeflowConnect
     simulator_source = "dicomweb"
     sample_records = 10
+    replay_config = {"base_url": "https://simulator.example.com"}
 
     @classmethod
     def setup_class(cls):

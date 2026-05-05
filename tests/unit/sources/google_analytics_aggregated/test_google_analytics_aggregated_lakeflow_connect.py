@@ -1,5 +1,5 @@
 import json
-from pathlib import Path
+from typing import Any, Dict, Optional
 
 import pytest
 
@@ -7,17 +7,14 @@ from databricks.labs.community_connector.sources.google_analytics_aggregated.goo
 from tests.unit.sources.test_suite import LakeflowConnectTests
 
 
-def _ensure_replay_config(config_dir: Path) -> None:
-    """Create replay_config.json with a freshly-generated RSA key.
+def _build_simulator_creds() -> Dict[str, Any]:
+    """Build a fake service-account config with a real-shaped RSA key.
 
     Google's ``service_account.Credentials.from_service_account_info`` parses
     the private_key as PEM RSA, so a real key shape is required. We generate
-    one locally — never used to sign anything since the simulator returns a
-    canned access token. Gitignored: see .gitignore.
+    one in-process — never used to sign anything since the simulator returns
+    a canned access token.
     """
-    out = config_dir / "replay_config.json"
-    if out.exists():
-        return
     from cryptography.hazmat.primitives.asymmetric import rsa
     from cryptography.hazmat.primitives import serialization
 
@@ -37,23 +34,23 @@ def _ensure_replay_config(config_dir: Path) -> None:
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
         "token_uri": "https://oauth2.googleapis.com/token",
     }
-    out.write_text(
-        json.dumps(
-            {"property_ids": "[\"123456789\"]", "credentials_json": json.dumps(creds)},
-            indent=2,
-        )
-        + "\n"
-    )
+    return {
+        "property_ids": '["123456789"]',
+        "credentials_json": json.dumps(creds),
+    }
 
 
 class TestGoogleAnalyticsAggregatedConnector(LakeflowConnectTests):
     connector_class = GoogleAnalyticsAggregatedLakeflowConnect
     simulator_source = "google_analytics_aggregated"
+    _generated_replay_config: Optional[Dict[str, Any]] = None
 
     @classmethod
-    def setup_class(cls):
-        _ensure_replay_config(cls._config_dir())
-        super().setup_class()
+    def _replay_config(cls) -> Optional[Dict[str, Any]]:
+        # Cache across the test class — RSA generation is non-trivial.
+        if cls._generated_replay_config is None:
+            cls._generated_replay_config = _build_simulator_creds()
+        return cls._generated_replay_config
 
     def test_invalid_table_name(self):
         """GA4 accepts arbitrary table names by design (custom reports built

@@ -7,3 +7,7 @@ class TestQualtricsConnector(LakeflowConnectTests):
     connector_class = QualtricsLakeflowConnect
     test_utils_class = LakeflowConnectWriteTestUtils
     simulator_source = "qualtrics"
+    replay_config = {
+        "api_token": "simulator-fake-token",
+        "datacenter_id": "iad1",
+    }

@@ -23,6 +23,11 @@ _INCOMPATIBLE_SHADOW_TABLES = {
 class TestSapSuccessFactorsConnector(LakeflowConnectTests):
     connector_class = SapSuccessFactorsLakeflowConnect
     simulator_source = "sap_successfactors"
+    replay_config = {
+        "endpoint_url": "https://simulator.example.com",
+        "username": "simulator-user",
+        "password": "simulator-fake-password",
+    }
 
     def test_read_table(self):
         """Same as the harness contract, but skips the snake_case shadow tables
