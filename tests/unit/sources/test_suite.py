@@ -771,8 +771,23 @@ class LakeflowConnectTests:
         if errors:
             pytest.fail("\n\n".join(errors))
 
+    @classmethod
+    def _skip_if_simulate_mode(cls) -> None:
+        """Write-back tests POST/PUT/DELETE against the source. In simulate
+        mode there's no real source to mutate (and stubbed write endpoints
+        aren't authored in the spec), so skip. ``CONNECTOR_TEST_MODE=live``
+        opts back in by routing requests to the real source."""
+        if cls.simulator_source and _resolve_env_mode_for_simulator(
+            cls.simulator_source
+        ) != MODE_LIVE:
+            pytest.skip(
+                "Write-back test requires a real source; "
+                "set CONNECTOR_TEST_MODE=live to run."
+            )
+
     def test_write_to_source(self):  # pylint: disable=too-many-branches
         """generate_rows_and_write works on each insertable table."""
+        self._skip_if_simulate_mode()
         if not self.test_utils:
             pytest.skip("No test_utils_class configured")
 
@@ -809,6 +824,7 @@ class LakeflowConnectTests:
 
     def test_incremental_after_write(self):  # pylint: disable=too-many-branches
         """Incremental read after write returns the written row."""
+        self._skip_if_simulate_mode()
         if not self.test_utils:
             pytest.skip("No test_utils_class configured")
 
@@ -888,6 +904,7 @@ class LakeflowConnectTests:
 
     def test_delete_and_read_deletes(self):
         """Delete a row and verify it appears in read_table_deletes."""
+        self._skip_if_simulate_mode()
         if not self.test_utils:
             pytest.skip("No test_utils_class configured")
         if not hasattr(self.test_utils, "delete_rows"):
