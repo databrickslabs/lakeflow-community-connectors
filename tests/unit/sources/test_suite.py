@@ -91,6 +91,16 @@ class LakeflowConnectTests:
     # Replaces per-source committed ``configs/replay_config.json`` files.
     replay_config: Optional[Dict[str, Any]] = None
 
+    # Activate cap-validation: at simulator startup, clone records into
+    # corpora that declare a ``synthesize_future_records`` directive in
+    # ``endpoints.yaml``, with the cursor field set to timestamps past
+    # wall-clock now(). A correctly-capped connector excludes them via
+    # its ``until=<init_time>`` filter; an uncapped one leaks them and
+    # ``test_read_terminates`` detects the non-convergence. Opt-in
+    # because connectors without an ``until=`` filter would (correctly)
+    # surface the future records and break ``test_read_table``.
+    inject_future_records: bool = False
+
     # Query-param names whose values are non-deterministic (e.g. now()-based
     # timestamps, request IDs, nonces). The mock framework ignores these when
     # matching recorded interactions against incoming requests. Setting this
@@ -173,6 +183,7 @@ class LakeflowConnectTests:
                 "spec_path": cls._simulator_spec_path(),
                 "corpus_dir": cls._simulator_corpus_dir(),
                 "ignore_query_params": frozenset(cls.record_replay_ignore_query_params),
+                "inject_future_records": cls.inject_future_records,
             }
 
         kwargs = {
@@ -554,14 +565,30 @@ class LakeflowConnectTests:
             pytest.fail("\n\n".join(errors))
 
     # ------------------------------------------------------------------
-    # test_micro_batch_offset_contract  (per-table, collected)
+    # test_read_terminates  (per-table, collected)
     # ------------------------------------------------------------------
 
-    def test_micro_batch_offset_contract(self):
-        """read_table handles the micro-batch offset round-trip.
+    # Maximum read_table iterations before the termination test gives up.
+    # Sized for connectors that walk daily/weekly windows over multi-month
+    # ranges (e.g. appsflyer at 7 days/window from a fixed start_date).
+    # Subclasses can raise this further if needed.
+    read_termination_max_iterations: int = 50
 
-        The framework calls read_table repeatedly, passing the previous offset
-        back. This test makes two calls per table to verify the contract.
+    def test_read_terminates(self):
+        """read_table eventually converges to a stable offset.
+
+        Trigger.AvailableNow termination requires that, with no new
+        source-side data, successive read_table calls feeding the previous
+        offset back eventually produce identical offsets. The test loops
+        up to ``read_termination_max_iterations`` calls and asserts
+        convergence — pass = two consecutive calls returned the same
+        offset, fail = still advancing after K iterations (would
+        microbatch forever in production).
+
+        This subsumes the older two-call ``offset contract`` check while
+        accommodating connectors that legitimately advance per microbatch
+        under ``max_records_per_batch`` admission control: those drain
+        the corpus over a few iterations and then converge naturally.
         """
         tables = self._non_partitioned_tables()
         if not tables:
@@ -569,94 +596,73 @@ class LakeflowConnectTests:
         errors = []
         for table in tables:
             try:
-                err = self._validate_offset_contract(table)
+                err = self._validate_termination(table)
                 if err:
                     errors.append(err)
             except Exception as e:
                 errors.append(
-                    f"[{table}] Offset contract error: {e}\n"
-                    "  Fix: read_table() must handle receiving its own previously-returned offset."
+                    f"[{table}] Termination test error: {e}\n"
+                    "  Fix: read_table() must handle receiving its own "
+                    "previously-returned offset."
                 )
         if errors:
             pytest.fail("\n\n".join(errors))
 
-    def _validate_offset_contract(self, table: str) -> Optional[str]:
-        """Two-call offset round-trip check. Returns error string or None."""
-        # Call 1
-        result1 = self.connector.read_table(table, {}, self._opts(table))
-        if not isinstance(result1, tuple) or len(result1) != 2:
-            return (
-                f"[{table}] read_table returned {type(result1).__name__}, expected 2-tuple.\n"
-                "  Fix: read_table() must return (iterator, offset_dict)."
-            )
+    def _validate_termination(self, table: str) -> Optional[str]:
+        """Loop read_table feeding the offset back until two consecutive
+        calls return the same offset. Returns error string or None."""
+        offset: Any = {}
+        prev_json: Optional[str] = None
+        max_iter = self.read_termination_max_iterations
 
-        iter1, offset1 = result1
-        self._consume(iter1)
-
-        if offset1 is not None and not isinstance(offset1, dict):
-            return (
-                f"[{table}] Offset must be dict or None, got {type(offset1).__name__}.\n"
-                "  Fix: Return a dict as the offset."
-            )
-
-        ingestion_type = self._ingestion_type(table)
-        if offset1 is None:
-            if ingestion_type != "snapshot":
+        for i in range(max_iter):
+            result = self.connector.read_table(table, offset, self._opts(table))
+            if not isinstance(result, tuple) or len(result) != 2:
                 return (
-                    f"[{table}] Offset is None but ingestion_type is '{ingestion_type}'.\n"
-                    "  Fix: read_table() must return a non-None offset dict for "
-                    "non-snapshot tables so the framework can track micro-batch progress."
+                    f"[{table}] read_table call {i + 1} returned "
+                    f"{type(result).__name__}, expected 2-tuple.\n"
+                    "  Fix: read_table() must return (iterator, offset_dict)."
                 )
-            return None  # Snapshot table, nothing more to test.
+            iterator, offset = result
+            self._consume(iterator)
 
-        try:
-            json.dumps(offset1)
-        except (TypeError, ValueError) as e:
-            return (
-                f"[{table}] Offset not JSON-serializable: {e}\n"
-                "  Fix: Use only strings/numbers/booleans/None in the offset dict."
-            )
+            if offset is not None and not isinstance(offset, dict):
+                return (
+                    f"[{table}] Offset must be dict or None, got "
+                    f"{type(offset).__name__}."
+                )
 
-        # Call 2 — pass offset1 back
-        result2 = self.connector.read_table(table, offset1, self._opts(table))
-        if not isinstance(result2, tuple) or len(result2) != 2:
-            return (
-                f"[{table}] Second read_table call returned invalid format.\n"
-                "  Fix: read_table() must handle its own offset as start_offset."
-            )
+            if i == 0:
+                ingestion_type = self._ingestion_type(table)
+                if offset is None:
+                    if ingestion_type != "snapshot":
+                        return (
+                            f"[{table}] Offset is None but ingestion_type is "
+                            f"'{ingestion_type}'.\n"
+                            "  Fix: read_table() must return a non-None offset "
+                            "dict for non-snapshot tables."
+                        )
+                    return None  # Snapshot — nothing else to test.
 
-        iter2, offset2 = result2
-        # Drain so the read fully completes — some connectors finalize the
-        # offset only after iterator consumption.
-        self._consume(iter2)
+            try:
+                cur_json = json.dumps(offset, sort_keys=True)
+            except (TypeError, ValueError) as e:
+                return (
+                    f"[{table}] Offset not JSON-serializable: {e}\n"
+                    "  Fix: Use only strings/numbers/booleans/None in the offset dict."
+                )
 
-        if offset2 is not None and not isinstance(offset2, dict):
-            return (
-                f"[{table}] Second offset must be dict or None, got {type(offset2).__name__}."
-            )
+            if prev_json is not None and cur_json == prev_json:
+                return None  # Converged.
+            prev_json = cur_json
 
-        # Convergence: passing offset1 back must produce offset2 == offset1
-        # whenever no new source-side data has arrived between the two calls.
-        # Trigger.AvailableNow termination depends on this — if a connector
-        # advances its cursor on every call (e.g. unbounded Graph deltaLink
-        # rotation, mailbox historyId, or a non-frozen now()), AvailableNow
-        # will spin microbatches forever.
-        try:
-            o1_json = json.dumps(offset1, sort_keys=True)
-            o2_json = json.dumps(offset2, sort_keys=True)
-        except (TypeError, ValueError):
-            o1_json, o2_json = repr(offset1), repr(offset2)
-        if o1_json != o2_json:
-            return (
-                f"[{table}] Offset did not converge: first call returned "
-                f"{o1_json}, second call (with the first offset replayed) "
-                f"returned {o2_json}.\n"
-                "  Fix: cap the cursor at an init-time snapshot so successive "
-                "calls with the same input return the same offset. "
-                "Trigger.AvailableNow termination depends on this."
-            )
-
-        return None
+        return (
+            f"[{table}] read_table did not converge in {max_iter} iterations "
+            f"(last offset: {prev_json}).\n"
+            "  Fix: cap the cursor at an init-time snapshot or a known upper "
+            "bound so successive calls with the same input eventually return "
+            "the same offset. Trigger.AvailableNow termination depends on this."
+        )
 
     # ------------------------------------------------------------------
     # Shared read-validation helper

@@ -3,8 +3,8 @@
 # Common patterns:
 #   * Pagination is page_number_with_link_header (page, per_page, max 100,
 #     defaults vary per endpoint — 30 is the GitHub default for most).
-#   * "since" / "until" filters use ISO timestamps; we ignore them in match
-#     but accept them in simulate mode (they just narrow the corpus).
+#   * "since" / "until" filters use ISO timestamps; the simulator subsets
+#     the corpus by these (commit.author.date for /commits, etc.).
 #   * `state`, `sort`, `direction` are common filter/sort params on issue-
 #     and pull-request-shaped endpoints.
 
@@ -24,6 +24,13 @@ endpoints:
       sha:      {role: filter, field: sha, op: eq}
       page:     {role: page}
       per_page: {role: per_page, default: 30, max: 100}
+    # Cap-validation: when the test class opts in via inject_future_records,
+    # clone commits with commit.author.date set to ``now() + N hours``. The
+    # connector's ``until=<init_time>`` filter must exclude them; if it
+    # doesn't, ``test_read_terminates`` won't converge and the bug surfaces.
+    synthesize_future_records:
+      cursor_field: commit.author.date
+      count: 3
 
   # GitHub also serves /repositories/{repo_id}/commits — alias the same corpus.
   - path: "/repositories/{repo_id}/commits"

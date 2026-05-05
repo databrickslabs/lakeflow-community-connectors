@@ -113,6 +113,23 @@ class ResponseShape:
 
 
 @dataclass
+class FutureRecordsSynthesis:
+    """Spec directive for injecting cap-validation records into a corpus.
+
+    When the simulator runs with future-record injection enabled, the
+    corpus for this endpoint is augmented with ``count`` clones of an
+    existing record whose ``cursor_field`` (dotted path) is rewritten to
+    ISO-8601 timestamps strictly past wall-clock now(). A connector with
+    correct ``until=<init_time>`` cap behavior will exclude these from
+    its returned offset; an uncapped connector will leak them and the
+    termination test will detect non-convergence.
+    """
+
+    cursor_field: str
+    count: int = 3
+
+
+@dataclass
 class EndpointSpec:
     """A single endpoint's spec entry, post-load."""
 
@@ -135,6 +152,8 @@ class EndpointSpec:
     offset: Optional[OffsetParam] = None
     limit: Optional[LimitParam] = None
     ignored: List[str] = field(default_factory=list)
+    # Optional cap-validation directive — see ``FutureRecordsSynthesis``.
+    synthesize_future_records: Optional[FutureRecordsSynthesis] = None
 
     def known_param_names(self) -> set:
         """All query-param names this endpoint declares."""
@@ -228,6 +247,17 @@ def _parse_endpoint(raw: dict) -> EndpointSpec:
 
     for name, info in (raw.get("params") or {}).items():
         _attach_param(spec, name, info)
+
+    sfr_raw = raw.get("synthesize_future_records")
+    if sfr_raw is not None:
+        if not isinstance(sfr_raw, dict) or "cursor_field" not in sfr_raw:
+            raise ValueError(
+                "synthesize_future_records requires a 'cursor_field' field"
+            )
+        spec.synthesize_future_records = FutureRecordsSynthesis(
+            cursor_field=str(sfr_raw["cursor_field"]),
+            count=int(sfr_raw.get("count", 3)),
+        )
 
     return spec
 

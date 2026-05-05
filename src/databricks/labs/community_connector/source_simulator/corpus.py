@@ -11,8 +11,10 @@ lookup uses dotted paths for nested records (``commit.author.date``).
 
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -62,6 +64,67 @@ def get_field(record: Dict[str, Any], path: str) -> Any:
         else:
             return None
     return cur
+
+
+def set_field(record: Dict[str, Any], path: str, value: Any) -> None:
+    """Write a dotted-path field on a record, creating intermediate dicts if missing."""
+    cur: Any = record
+    parts = path.split(".")
+    for part in parts[:-1]:
+        nxt = cur.get(part)
+        if not isinstance(nxt, dict):
+            nxt = {}
+            cur[part] = nxt
+        cur = nxt
+    cur[parts[-1]] = value
+
+
+def inject_future_records(corpus: "CorpusStore", specs: List[EndpointSpec]) -> None:
+    """For every endpoint spec with a ``synthesize_future_records`` directive,
+    clone records into the target corpus with cursor fields rewritten to
+    timestamps strictly past wall-clock ``now()``. A correctly-capped
+    connector will exclude these via its ``until=<init_time>`` filter,
+    making the termination test detect cap bugs.
+
+    Idempotent per ``(corpus_key, cursor_field)``: a directive is a no-op
+    if at least one existing record already has the cursor field set to a
+    future timestamp (e.g. when called twice).
+    """
+    now = datetime.now(timezone.utc)
+    for spec in specs:
+        directive = spec.synthesize_future_records
+        if directive is None or spec.corpus is None:
+            continue
+        records = corpus.get(spec.corpus)
+        if not isinstance(records, list) or not records:
+            # Need at least one template record to clone.
+            continue
+        # Idempotency check: skip if any existing record already has a
+        # post-now timestamp at the cursor field.
+        already_seeded = any(
+            _is_future_iso(get_field(r, directive.cursor_field), now) for r in records
+        )
+        if already_seeded:
+            continue
+        template = records[-1]
+        for i in range(directive.count):
+            future_ts = (now + timedelta(hours=i + 1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            clone = copy.deepcopy(template)
+            set_field(clone, directive.cursor_field, future_ts)
+            records.append(clone)
+
+
+def _is_future_iso(value: Any, now: datetime) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        # Accept "2026-05-05T12:00:00Z" and "2026-05-05T12:00:00+00:00".
+        ts = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts > now
 
 
 def apply_filters(
