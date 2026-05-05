@@ -14,7 +14,6 @@ All phases complete. Current state:
   majority-pass. `sap_successfactors` uses an older test pattern and is
   not yet wired. Three connectors (`fhir`, `hubspot`, `zoho_crm`) error at
   setup and need hand-tuning of their replay_config or connector init.
-- E2E example at `examples/run_connector_against_simulator.py`.
 
 See ``Bootstrapping a connector without live access`` below for the
 no-creds workflow.
