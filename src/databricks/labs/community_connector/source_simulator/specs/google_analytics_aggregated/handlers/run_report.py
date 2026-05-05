@@ -49,7 +49,7 @@ def _stub_metric_value(metric_type: str, idx: int) -> str:
 
 
 def _metric_type_for(name: str, corpus) -> str:
-    metadata = corpus.get("__metadata__") or {}
+    metadata = corpus.get("metadata") or {}
     for entry in metadata.get("metrics", []) or []:
         if entry.get("apiName") == name:
             return entry.get("type", "TYPE_INTEGER")

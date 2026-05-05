@@ -8,13 +8,13 @@ endpoints:
   # OAuth token (service account JWT exchange).
   - path: /token
     method: POST
-    corpus: __oauth_token__
+    corpus: oauth_token
     response: {single_entity: true, pagination_style: none}
 
   # Property metadata — dimensions and metrics catalog.
   - path: /v1beta/properties/{property_id}/metadata
     method: GET
-    corpus: __metadata__
+    corpus: metadata
     response: {single_entity: true, pagination_style: none}
 
   # runReport — POST whose body's dimensions/metrics determine the response

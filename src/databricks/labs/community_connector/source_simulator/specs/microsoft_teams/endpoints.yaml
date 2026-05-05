@@ -10,7 +10,7 @@ endpoints:
   # OAuth token endpoint (called at request time, not __init__).
   - path: /{tenant_id}/oauth2/v2.0/token
     method: POST
-    corpus: __auth_token__
+    corpus: auth_token
     response:
       pagination_style: none
       single_entity: true

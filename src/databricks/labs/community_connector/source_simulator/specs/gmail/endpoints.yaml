@@ -8,7 +8,7 @@ endpoints:
   # ---- OAuth refresh (lazy; first API call triggers it) ----
   - path: /token
     method: POST
-    corpus: __oauth_token__
+    corpus: oauth_token
     response: {single_entity: true, pagination_style: none}
 
   # ---- Batch endpoint — force fallback to sequential ----
@@ -19,48 +19,48 @@ endpoints:
   # ---- Listing endpoints ----
   - path: /gmail/v1/users/{user_id}/messages
     method: GET
-    corpus: __empty_messages__
+    corpus: empty_messages
     response: {single_entity: true, pagination_style: none}
 
   - path: /gmail/v1/users/{user_id}/threads
     method: GET
-    corpus: __empty_threads__
+    corpus: empty_threads
     response: {single_entity: true, pagination_style: none}
 
   - path: /gmail/v1/users/{user_id}/labels
     method: GET
-    corpus: __labels_list__
+    corpus: labels_list
     response: {single_entity: true, pagination_style: none}
 
   - path: /gmail/v1/users/{user_id}/drafts
     method: GET
-    corpus: __empty_drafts__
+    corpus: empty_drafts
     response: {single_entity: true, pagination_style: none}
 
   - path: /gmail/v1/users/{user_id}/history
     method: GET
-    corpus: __empty_history__
+    corpus: empty_history
     response: {single_entity: true, pagination_style: none}
 
   # ---- Single-record / per-id endpoints ----
   - path: /gmail/v1/users/{user_id}/messages/{message_id}
     method: GET
-    corpus: __message_detail__
+    corpus: message_detail
     response: {single_entity: true, pagination_style: none}
 
   - path: /gmail/v1/users/{user_id}/threads/{thread_id}
     method: GET
-    corpus: __thread_detail__
+    corpus: thread_detail
     response: {single_entity: true, pagination_style: none}
 
   - path: /gmail/v1/users/{user_id}/labels/{label_id}
     method: GET
-    corpus: __label_detail__
+    corpus: label_detail
     response: {single_entity: true, pagination_style: none}
 
   - path: /gmail/v1/users/{user_id}/drafts/{draft_id}
     method: GET
-    corpus: __draft_detail__
+    corpus: draft_detail
     response: {single_entity: true, pagination_style: none}
 
   - path: /gmail/v1/users/{user_id}/profile
@@ -71,45 +71,45 @@ endpoints:
   # ---- Settings endpoints ----
   - path: /gmail/v1/users/{user_id}/settings/filters
     method: GET
-    corpus: __empty_filters__
+    corpus: empty_filters
     response: {single_entity: true, pagination_style: none}
 
   - path: /gmail/v1/users/{user_id}/settings/forwardingAddresses
     method: GET
-    corpus: __empty_forwarding__
+    corpus: empty_forwarding
     response: {single_entity: true, pagination_style: none}
 
   - path: /gmail/v1/users/{user_id}/settings/sendAs
     method: GET
-    corpus: __empty_send_as__
+    corpus: empty_send_as
     response: {single_entity: true, pagination_style: none}
 
   - path: /gmail/v1/users/{user_id}/settings/delegates
     method: GET
-    corpus: __empty_delegates__
+    corpus: empty_delegates
     response: {single_entity: true, pagination_style: none}
 
   - path: /gmail/v1/users/{user_id}/settings/autoForwarding
     method: GET
-    corpus: __auto_forwarding__
+    corpus: auto_forwarding
     response: {single_entity: true, pagination_style: none}
 
   - path: /gmail/v1/users/{user_id}/settings/imap
     method: GET
-    corpus: __imap_settings__
+    corpus: imap_settings
     response: {single_entity: true, pagination_style: none}
 
   - path: /gmail/v1/users/{user_id}/settings/pop
     method: GET
-    corpus: __pop_settings__
+    corpus: pop_settings
     response: {single_entity: true, pagination_style: none}
 
   - path: /gmail/v1/users/{user_id}/settings/language
     method: GET
-    corpus: __language_settings__
+    corpus: language_settings
     response: {single_entity: true, pagination_style: none}
 
   - path: /gmail/v1/users/{user_id}/settings/vacation
     method: GET
-    corpus: __vacation_settings__
+    corpus: vacation_settings
     response: {single_entity: true, pagination_style: none}

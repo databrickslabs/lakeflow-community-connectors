@@ -79,7 +79,7 @@ endpoints:
   # Returns ``{"result": {}}`` so connector falls into "no definition" path.
   - path: "/API/v3/survey-definitions/{survey_id}"
     method: GET
-    corpus: __empty_survey_definition__
+    corpus: empty_survey_definition
     response:
       single_entity: true
       pagination_style: none
@@ -88,14 +88,14 @@ endpoints:
   # Three steps: POST to start export → GET to poll progress → GET file.
   - path: "/API/v3/surveys/{survey_id}/export-responses"
     method: POST
-    corpus: __export_progress__
+    corpus: export_progress
     response:
       single_entity: true
       pagination_style: none
 
   - path: "/API/v3/surveys/{survey_id}/export-responses/{progress_id}"
     method: GET
-    corpus: __export_complete__
+    corpus: export_complete
     response:
       single_entity: true
       pagination_style: none

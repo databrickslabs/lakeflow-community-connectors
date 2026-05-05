@@ -10,7 +10,7 @@
 endpoints:
   - path: /api/2.0/export
     method: GET
-    corpus: __empty_text__
+    corpus: empty_text
     response: {pagination_style: none, single_entity: true}
 
   - path: /api/query/cohorts/list
@@ -20,5 +20,5 @@ endpoints:
 
   - path: /api/query/engage
     method: POST
-    corpus: __empty_engage__
+    corpus: empty_engage
     response: {pagination_style: none, single_entity: true}

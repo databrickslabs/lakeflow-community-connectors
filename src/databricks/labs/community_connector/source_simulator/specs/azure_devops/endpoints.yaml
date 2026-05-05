@@ -107,7 +107,7 @@ endpoints:
 
   - path: /{organization}/{project}/_apis/wit/wiql
     method: POST
-    corpus: __wiql_empty__
+    corpus: wiql_empty
     response:
       pagination_style: none
       single_entity: true

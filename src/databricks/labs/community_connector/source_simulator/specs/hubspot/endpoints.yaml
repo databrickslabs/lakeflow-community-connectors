@@ -17,7 +17,7 @@ endpoints:
   # Discovery — empty schemas → no custom objects.
   - path: /crm/v3/schemas
     method: GET
-    corpus: __schemas__
+    corpus: schemas
     response:
       single_entity: true
       pagination_style: none
@@ -26,7 +26,7 @@ endpoints:
   # list by building the minimal base schema.
   - path: /properties/v2/{object_type}/properties
     method: GET
-    corpus: __properties__
+    corpus: properties
     response:
       pagination_style: none
 

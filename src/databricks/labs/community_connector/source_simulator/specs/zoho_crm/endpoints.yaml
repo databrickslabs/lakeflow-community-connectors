@@ -19,7 +19,7 @@ endpoints:
   # OAuth refresh (lazy — first real request triggers it).
   - path: /oauth/v2/token
     method: POST
-    corpus: __oauth_token__
+    corpus: oauth_token
     response:
       single_entity: true
       pagination_style: none
@@ -28,14 +28,14 @@ endpoints:
   # hand-coded "derived" ones survive.
   - path: /crm/v8/settings/modules
     method: GET
-    corpus: __modules__
+    corpus: modules
     response:
       single_entity: true
       pagination_style: none
 
   - path: /crm/v8/settings/fields
     method: GET
-    corpus: __fields__
+    corpus: fields
     response:
       single_entity: true
       pagination_style: none
