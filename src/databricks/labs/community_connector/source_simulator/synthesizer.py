@@ -70,20 +70,13 @@ def _locate_records(payload: Any, records_key_hints: Tuple[str, ...]):
     """Return ``(records_list, setter_fn)`` — ``setter_fn(new_list)`` replaces it in place."""
     if isinstance(payload, list) and _looks_like_records_list(payload):
         # Top-level list: re-build the outer wrapper by mutating slice.
-        def _setter(new: list) -> None:
-            payload[:] = new
-
-        return payload, _setter
+        return payload, lambda new: payload.__setitem__(slice(None), new)
 
     if isinstance(payload, dict):
         for hint in records_key_hints:
             if hint in payload and _looks_like_records_list(payload[hint]):
                 key = hint
-
-                def _setter(new: list, _key=key) -> None:
-                    payload[_key] = new
-
-                return payload[key], _setter
+                return payload[key], lambda new, _k=key: payload.__setitem__(_k, new)
 
         # Fallback: largest list-of-dicts field.
         candidates = [
@@ -92,11 +85,7 @@ def _locate_records(payload: Any, records_key_hints: Tuple[str, ...]):
         if candidates:
             candidates.sort(key=lambda kv: len(kv[1]), reverse=True)
             key, value = candidates[0]
-
-            def _setter(new: list, _key=key) -> None:
-                payload[_key] = new
-
-            return value, _setter
+            return value, lambda new, _k=key: payload.__setitem__(_k, new)
 
     return None, lambda _new: None
 

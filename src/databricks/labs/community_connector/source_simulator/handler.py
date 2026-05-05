@@ -84,7 +84,11 @@ class SimulateHandler:
         rec = ResponseRecord(
             status_code=200,
             headers=resp_headers,
-            body_text=body_bytes.decode("utf-8") if content_type.startswith("application/json") else None,
+            body_text=(
+                body_bytes.decode("utf-8")
+                if content_type.startswith("application/json")
+                else None
+            ),
             body_b64=None,
             encoding="utf-8",
             url=prep.url,

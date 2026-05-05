@@ -275,11 +275,12 @@ class ZendeskLakeflowConnect(LakeflowConnect):
         """
         # Tables backed by Zendesk's incremental API are cdc; the rest are
         # plain paginated snapshots.
+        cdc = {"primary_keys": ["id"], "cursor_field": "updated_at", "ingestion_type": "cdc"}
         metadata = {
-            "tickets": {"primary_keys": ["id"], "cursor_field": "updated_at", "ingestion_type": "cdc"},
-            "organizations": {"primary_keys": ["id"], "cursor_field": "updated_at", "ingestion_type": "cdc"},
-            "ticket_comments": {"primary_keys": ["id"], "cursor_field": "updated_at", "ingestion_type": "cdc"},
-            "users": {"primary_keys": ["id"], "cursor_field": "updated_at", "ingestion_type": "cdc"},
+            "tickets": cdc,
+            "organizations": cdc,
+            "ticket_comments": cdc,
+            "users": cdc,
             "articles": {"primary_keys": ["id"], "ingestion_type": "snapshot"},
             "brands": {"primary_keys": ["id"], "ingestion_type": "snapshot"},
             "groups": {"primary_keys": ["id"], "ingestion_type": "snapshot"},

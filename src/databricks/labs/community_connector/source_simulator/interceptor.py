@@ -278,7 +278,7 @@ def _requests_response_from_urllib(urllib_resp: Any, prep: PreparedRequest) -> R
     headers = {}
     if hasattr(urllib_resp, "headers"):
         try:
-            headers = {k: v for k, v in urllib_resp.headers.items()}
+            headers = dict(urllib_resp.headers.items())
         except Exception:  # email.message.Message edge cases
             headers = dict(urllib_resp.headers or {})
     resp = Response()

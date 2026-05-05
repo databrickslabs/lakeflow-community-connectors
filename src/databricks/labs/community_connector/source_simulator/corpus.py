@@ -165,8 +165,7 @@ def slice_page(
     records: List[Dict[str, Any]], offset: int, limit: int
 ) -> List[Dict[str, Any]]:
     """Slice ``records`` into a page. Out-of-range offset returns an empty list."""
-    if offset < 0:
-        offset = 0
+    offset = max(offset, 0)
     if limit <= 0:
         return []
     return records[offset : offset + limit]
