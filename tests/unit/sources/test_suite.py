@@ -203,13 +203,22 @@ class LakeflowConnectTests:
     def _load_config(cls) -> dict:
         """Load credentials for the connector.
 
-        In stand-in modes (simulate/replay), prefer the in-class
+        Stand-in modes (simulate / replay) prefer the in-class
         ``replay_config`` (or ``_replay_config()`` override) — uniform
         across all connectors, no per-source committed JSON file. As a
-        backstop, a locally-placed (gitignored) ``configs/replay_config.json``
-        is honored so contributors can override creds for a single run.
+        backstop, a locally-placed (gitignored)
+        ``configs/replay_config.json`` is honored so contributors can
+        override creds for a single run.
 
-        In live mode, ``configs/dev_config.json`` is required.
+        Live / record modes resolve credentials via, in order:
+
+        1. ``CONNECTOR_TEST_CONFIG_JSON`` env var — inline JSON string.
+        2. ``CONNECTOR_TEST_CONFIG_PATH`` env var — path to a JSON file.
+        3. ``configs/dev_config.json`` next to the test file.
+
+        The env-var mechanisms let CI inject credentials from a secret
+        store without committing or staging anything to the working
+        tree.
         """
         mode = get_mode()
         if mode in (MODE_REPLAY,) or cls.simulator_source:
@@ -220,10 +229,41 @@ class LakeflowConnectTests:
             if replay_path.exists():
                 with open(replay_path, "r") as f:
                     return json.load(f)
+        return cls._load_live_config()
+
+    @classmethod
+    def _load_live_config(cls) -> dict:
+        """Resolve live / record-mode credentials.
+
+        Precedence:
+        1. ``CONNECTOR_TEST_CONFIG_JSON`` (inline JSON wins — most specific).
+        2. ``CONNECTOR_TEST_CONFIG_PATH`` (path to JSON file).
+        3. ``configs/dev_config.json`` next to the test file.
+        """
+        inline = os.environ.get("CONNECTOR_TEST_CONFIG_JSON", "").strip()
+        if inline:
+            try:
+                return json.loads(inline)
+            except json.JSONDecodeError as e:
+                raise AssertionError(
+                    f"CONNECTOR_TEST_CONFIG_JSON is not valid JSON: {e}"
+                ) from e
+
+        path_env = os.environ.get("CONNECTOR_TEST_CONFIG_PATH", "").strip()
+        if path_env:
+            path = Path(path_env)
+            assert path.exists(), (
+                f"CONNECTOR_TEST_CONFIG_PATH points to a non-existent file: {path}"
+            )
+            with open(path, "r") as f:
+                return json.load(f)
+
         path = cls._config_dir() / "dev_config.json"
         assert path.exists(), (
             f"Config file not found: {path}\n"
-            "  Fix: Create dev_config.json with connector credentials, "
+            "  Fix: create dev_config.json with connector credentials, "
+            "or set CONNECTOR_TEST_CONFIG_PATH=<path>, "
+            "or CONNECTOR_TEST_CONFIG_JSON=<inline JSON>, "
             "or set ``replay_config`` on the test class for simulate mode."
         )
         with open(path, "r") as f:
