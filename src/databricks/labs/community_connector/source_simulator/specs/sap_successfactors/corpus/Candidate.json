@@ -30,8 +30,7 @@
     "lastModifiedDateTime": "charlie-339",
     "lastLoginDateTime": "bravo-553",
     "dateofAvailability": "yankee-927",
-    "privacyAcceptDateTime": "echo-402",
-    "password": "foxtrot-246"
+    "privacyAcceptDateTime": "echo-402"
   },
   {
     "candidateId": 19743,
@@ -64,8 +63,7 @@
     "lastModifiedDateTime": "alpha-373",
     "lastLoginDateTime": "charlie-270",
     "dateofAvailability": "oscar-825",
-    "privacyAcceptDateTime": "delta-692",
-    "password": "quebec-575"
+    "privacyAcceptDateTime": "delta-692"
   },
   {
     "candidateId": 54858,
@@ -98,8 +96,7 @@
     "lastModifiedDateTime": "zulu-882",
     "lastLoginDateTime": "papa-573",
     "dateofAvailability": "yankee-310",
-    "privacyAcceptDateTime": "oscar-273",
-    "password": "echo-346"
+    "privacyAcceptDateTime": "oscar-273"
   },
   {
     "candidateId": 18990,
@@ -132,7 +129,6 @@
     "lastModifiedDateTime": "kilo-828",
     "lastLoginDateTime": "papa-921",
     "dateofAvailability": "zulu-627",
-    "privacyAcceptDateTime": "papa-991",
-    "password": "tango-495"
+    "privacyAcceptDateTime": "papa-991"
   }
 ]
