@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write  # Required for JFrog OIDC token exchange (see .github/actions/configure-jfrog-pypi).
 
 jobs:
   build:
@@ -23,6 +24,8 @@ jobs:
       uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
       with:
         python-version: ${{ matrix.python-version }}
+    - name: Configure pip via JFrog proxy
+      uses: ./.github/actions/configure-jfrog-pypi
     - name: Install dependencies
       run: |
         LOCK="requirements/pylint.txt"
@@ -39,6 +42,7 @@ jobs:
         pylint \
         --max-line-length=100 \
         --max-locals=20 \
+        --max-module-lines=1500 \
         --disable=W,C0114,C0115,R0801,R1705 \
         --ignore-long-lines='^\s*(#|f?".*"|f?'\''.*'\'')$' \
         $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py' | grep -v 'pipeline_spec.example.py' | grep -v 'tools/scripts/merge_python_source.py' | grep -v 'community_connector_cli/templates/ingest_template' | grep -v 'community_connector/sources/hubspot/' | grep -v 'community_connector/sources/stripe/' | grep -v 'community_connector/sources/mixpanel/' | grep -v 'microsoft_teams/sample-ingest.py' | grep -v '^tests/')
