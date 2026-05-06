@@ -17,6 +17,8 @@ Before starting, verify Phase 1 artifacts exist:
 - `{SRC}/{source_name}_api_doc.md`
 - `{SRC}/{source_name}.py`
 - `{SRC}/connector_spec.yaml`
+- `src/databricks/labs/community_connector/source_simulator/specs/{source_name}/endpoints.yaml`
+- `{TESTS}/test_{source_name}_lakeflow_connect.py`
 
 If any are missing, tell the developer which files are absent and that they should run `/develop-connector {source_name}` first. Stop.
 
@@ -31,17 +33,35 @@ Gate: confirm `{TESTS}/configs/dev_config.json` exists and auth test passes befo
 
 ---
 
-## Step 2 — Live Testing & Fixes
+## Step 2 — Record-Mode Tests & Fixes
 
-Subagent: `connector-tester` (foreground, wait for completion)
+Subagent: `connector-tester` (foreground, wait for completion).
 
-Prompt: source name, implementation path `{SRC}/{source_name}.py`, `dev_config.json` path `{TESTS}/configs/dev_config.json`.
+Prompt:
+- `mode=record`
+- Source name, implementation path `{SRC}/{source_name}.py`, simulator spec path `src/databricks/labs/community_connector/source_simulator/specs/{source_name}/endpoints.yaml`
+- Test path `{TESTS}/test_{source_name}_lakeflow_connect.py`
+- Live credentials path `{TESTS}/configs/dev_config.json` (passed via `CONNECTOR_TEST_CONFIG_PATH`)
 
-After subagent: run `pytest {TESTS}/ -v --tb=short` yourself using a **synchronous** Bash call with `timeout=60000` (60s). Never run pytest in background.
+The agent will:
+1. Run pytest in `CONNECTOR_TEST_MODE=record` against the live source.
+2. Inspect the live validator's drift report and fix the simulator spec/corpus first; only fix the connector when an actual API call fails.
+3. Re-seed the corpus from the cassette via `tools.cassette_to_corpus`.
+4. Re-run in default simulate mode to confirm everything still works offline.
 
-If tests fail, do NOT proceed — report failures to the developer.
+After the subagent returns, run a final synchronous record-mode pass yourself to confirm:
 
-Gate: confirm all tests pass.
+```bash
+CONNECTOR_TEST_MODE=record \
+  CONNECTOR_TEST_CONFIG_PATH={TESTS}/configs/dev_config.json \
+  pytest {TESTS}/ -v --tb=short
+```
+
+Use a synchronous Bash call. Never run pytest in background.
+
+If tests fail or the validator still reports drift, do NOT proceed — report to the developer.
+
+Gate: confirm all tests pass and validator drift is resolved.
 
 ---
 

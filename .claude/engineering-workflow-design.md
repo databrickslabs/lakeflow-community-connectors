@@ -13,11 +13,12 @@ The existing 6-step workflow splits cleanly into two phases at the credential bo
 
 | Phase | Steps | Credentials? | Blocking? |
 |---|---|---|---|
-| **Develop** | Research → Implement → Spec → Docs → Contract tests | No | No |
-| **Validate** | Auth → Live tests + fixes → Deploy | Yes | Yes (browser form) |
+| **Develop** | Research → Implement (connector + simulator spec) → Spec → Docs → Simulate-mode tests | No | No |
+| **Validate** | Auth → Record-mode tests + fixes → Deploy | Yes | Yes (browser form) |
 
-The existing `test-and-fix-connector` skill already documents this boundary:
-> *"Run contract tests first — no credentials needed. These catch structural issues before hitting the live API."*
+The split is enforced by `CONNECTOR_TEST_MODE`:
+- **simulate**: corpus is synthesized from `TABLE_SCHEMAS`; the test suite drives the connector through a fake source built from `endpoints.yaml`. No network, no credentials.
+- **record**: tests hit the real source and write a cassette; the live validator diffs every response against what the spec + corpus would produce, surfacing simulator drift.
 
 Phase 1 can run fully automated, in parallel, across many connectors. Phase 2 is interactive and must be triggered by a developer with credentials.
 
@@ -42,10 +43,10 @@ Processes connectors **one at a time**, completing the full Phase 1 pipeline for
 
 For each connector (stripe, then github, then linear):
   1. spawn source-api-researcher   → wait → verify output
-  2. spawn connector-dev           → wait → verify output
+  2. spawn connector-dev           → wait → verify connector + endpoints.yaml exist
   3. spawn connector-spec-generator → wait → verify output
   4. spawn connector-doc-writer    → wait → verify output
-  5. run contract tests (sync Bash) → pass or stop
+  5. spawn connector-tester (mode=simulate) → corpus_from_schema bootstrap, simulate-mode tests pass
   6. git commit + open PR          → labeled "needs-live-testing"
   → move to next connector
 ```
@@ -55,7 +56,7 @@ If a step fails for a connector, log the failure and **skip to the next connecto
 **Final summary format:**
 
 ```
-Connector     Status      PR       Contract Tests
+Connector     Status      PR       Simulate Tests
 -----------   ---------   -------  ---------------
 stripe        ✓ done      #42      8/8 passed
 github        ✓ done      #43      6/6 passed
@@ -93,12 +94,12 @@ The interactive Phase 2 command. Picks up exactly where Phase 1 left off.
 **Steps:**
 
 ```
-1. authenticate-source skill  → dev_config.json (browser form)
-2. connector-tester agent     → all live tests passing
-3. deploy-connector skill     → pipeline deployed (optional)
+1. authenticate-source skill        → dev_config.json (browser form)
+2. connector-tester (mode=record)   → cassette written, live-validator drift addressed, all tests passing
+3. deploy-connector skill           → pipeline deployed (optional)
 ```
 
-This is almost identical to steps 2, 4, and 6 of the existing `create-connector`, just extracted into a standalone command. The `authenticate-source` skill and `connector-tester` agent are reused unchanged.
+This is almost identical to steps 2, 4, and 6 of the existing `create-connector`, just extracted into a standalone command. The `authenticate-source` skill is reused unchanged; `connector-tester` is invoked with `mode=record` so the same agent handles both phases (see below).
 
 **Entry check:** Before starting, verify that Phase 1 artifacts exist:
 - `src/.../sources/{source_name}/{source_name}_api_doc.md`
@@ -150,10 +151,11 @@ gh pr merge 42             # merge when done
 | Component | Status | Notes |
 |---|---|---|
 | `source-api-researcher` agent | **Unchanged** | Already supports `tell it not to ask the user` instruction |
-| `connector-dev` agent | **Unchanged** | Already batch-capable internally |
+| `connector-dev` agent | **Updated** | Also produces `source_simulator/specs/{source}/endpoints.yaml` so simulate-mode tests run immediately |
 | `connector-spec-generator` agent | **Unchanged** | |
 | `connector-doc-writer` agent | **Unchanged** | |
-| `connector-tester` agent | **Unchanged** | Phase 2 only; contract tests run directly via Bash |
+| `connector-tester` agent | **Updated** | Accepts `mode={simulate\|record}`; iteration guidance branches by mode |
+| `test-and-fix-connector` skill | **Updated** | Same `mode` param; simulate fixes either side, record treats live-validator drift as primary fix target |
 | `authenticate-source` skill | **Unchanged** | Phase 2 only |
 | `deploy-connector` skill | **Unchanged** | Phase 2 only |
 | `create-connector` command | **Unchanged** | Still the end-user path |
@@ -161,18 +163,31 @@ gh pr merge 42             # merge when done
 | `develop-connector` command | **New** | Single-source foreground version |
 | `validate-connector` command | **New** | Phase 2 interactive entry point |
 
-**Total new files: 3** (all commands). No new agents. No existing files modified.
-
 ---
 
-## Contract Test as Quality Gate
+## Simulate-Mode Tests as Quality Gate
 
-The contract test (`tests/unit/sources/test_contract.py`) is the automated quality gate for Phase 1. It validates:
-- All required interface methods are implemented with correct signatures
-- `connector_spec.yaml` is well-formed
-- Tables listed in the spec match tables in the implementation
+The Phase 1 quality gate is the existing per-connector test suite (`tests/unit/sources/{source}/test_{source}_lakeflow_connect.py`) run in **simulate mode**:
 
-If contract tests fail, the `connector-pipeline` agent does NOT open a PR. Instead it reports the failure and leaves the branch in place so the developer can investigate.
+```
+CONNECTOR_TEST_MODE=replay pytest tests/unit/sources/{source}/ -v
+```
+
+For this to work without credentials, two artifacts must exist:
+1. `endpoints.yaml` (produced by `connector-dev` from the API research doc).
+2. A corpus under `source_simulator/specs/{source}/corpus/` — the `connector-tester` agent bootstraps this from the connector's `TABLE_SCHEMAS` via `tools.corpus_from_schema.write_corpus_from_schemas`.
+
+This catches:
+- Wrong/missing interface methods (the harness invokes them).
+- Incorrect parameter wiring or pagination logic (the simulator returns shaped responses).
+- Schema regressions (records are typed against `TABLE_SCHEMAS`).
+- Malformed `connector_spec.yaml`.
+
+What it does NOT catch (deferred to record mode):
+- Drift between `endpoints.yaml` and the real API.
+- Auth, rate-limit, and side-effect issues that only surface against live hosts.
+
+If simulate tests fail, the Phase 1 agent does NOT open a PR. Instead it reports the failure and leaves the branch in place so the developer can investigate.
 
 This prevents broken connectors from entering the `needs-live-testing` queue.
 

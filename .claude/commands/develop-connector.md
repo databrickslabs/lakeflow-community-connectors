@@ -1,4 +1,4 @@
-Run Phase 1 (research, implement, spec, docs, contract tests, PR) for a single connector without any user interaction or credentials.
+Run Phase 1 (research, implement, spec, docs, simulate-mode tests, PR) for a single connector without any user interaction or credentials.
 
 Usage: /develop-connector <source_name> [tables=t1,t2,...] [doc=<url_or_path>]
 
@@ -32,11 +32,13 @@ Verify: `{SRC}/{source_name}_api_doc.md` exists.
 
 ## Step 2 — Implementation
 
-Subagent: `connector-dev` → python files under `{SRC}/`
+Subagent: `connector-dev` → python files under `{SRC}/` AND `endpoints.yaml` under the simulator spec dir.
 
-Prompt: source name, API doc path, tables to implement.
+Prompt: source name, API doc path, tables to implement. Tell it explicitly that both the connector and `src/databricks/labs/community_connector/source_simulator/specs/{source_name}/endpoints.yaml` are required outputs.
 
-Verify: `{SRC}/{source_name}.py` exists.
+Verify (both must exist):
+- `{SRC}/{source_name}.py`
+- `src/databricks/labs/community_connector/source_simulator/specs/{source_name}/endpoints.yaml`
 
 ---
 
@@ -60,16 +62,24 @@ Verify: `{SRC}/README.md` exists.
 
 ---
 
-## Step 5 — Contract Tests
+## Step 5 — Simulate-Mode Tests
 
-Run contract tests synchronously — never in background. No credentials needed.
+Subagent: `connector-tester` (foreground, wait for completion).
+
+Prompt:
+- `mode=simulate` (no credentials, no live calls)
+- Source name, implementation path `{SRC}/{source_name}.py`, simulator spec path `src/databricks/labs/community_connector/source_simulator/specs/{source_name}/endpoints.yaml`
+- Test path `{TESTS}/test_{source_name}_lakeflow_connect.py` (the agent will create it)
+- Tell the agent to bootstrap the corpus from `TABLE_SCHEMAS` via `tools.corpus_from_schema.write_corpus_from_schemas` before running pytest.
+
+After the subagent returns, run a final synchronous verification yourself:
 
 ```bash
-python3.10 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]" -q
-pytest tests/unit/sources/test_contract.py -k {source_name} -v --tb=short
+source .venv/bin/activate
+pytest tests/unit/sources/{source_name}/ -v --tb=short
 ```
 
-If contract tests fail, do NOT open a PR. Report the failures clearly so the developer can investigate and rerun. Stop here.
+If any test still fails, do NOT open a PR. Report the failures clearly so the developer can investigate and rerun. Stop here.
 
 ---
 
@@ -92,11 +102,14 @@ Open a GitHub PR using `gh pr create`:
 ## What's included
 - API research doc: `{SRC}/{source_name}_api_doc.md`
 - Implementation: `{SRC}/{source_name}.py`
+- Simulator spec: `source_simulator/specs/{source_name}/endpoints.yaml`
 - Connector spec: `{SRC}/connector_spec.yaml`
 - Documentation: `{SRC}/README.md`
 
-## Contract test results
+## Simulate-mode test results
 <paste pytest output summary>
+
+The simulator spec and corpus have not yet been validated against the live API.
 
 ## Next step: live testing
 Check out this branch and run:
@@ -111,10 +124,11 @@ Check out this branch and run:
 Connector: {source_name}
 Branch:    feat/connector-{source_name}
 PR:        <url>
-Contract:  <N>/<N> passed
+Simulate:  <N>/<N> passed
 Files:
   {SRC}/{source_name}_api_doc.md
   {SRC}/{source_name}.py
+  src/databricks/labs/community_connector/source_simulator/specs/{source_name}/endpoints.yaml
   {SRC}/connector_spec.yaml
   {SRC}/README.md
 ```
