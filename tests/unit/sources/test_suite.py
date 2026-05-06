@@ -83,7 +83,10 @@ class LakeflowConnectTests:
     connector_class: Type[LakeflowConnect] = None  # type: ignore[assignment]
     config: dict = None  # type: ignore[assignment]
     table_configs: Dict[str, Dict[str, Any]] = None  # type: ignore[assignment]
-    sample_records: int = 50
+    # Cap on records consumed per table during read tests. Sized for thorough
+    # simulator validation; in live mode this is the upper bound on records
+    # pulled from the real source per test method.
+    sample_records: int = 200
     test_utils_class = None
 
     # Stand-in credentials used in simulate/replay mode. The simulator
@@ -119,6 +122,15 @@ class LakeflowConnectTests:
     # stand-in posture once a spec exists, replay against a cassette is the
     # fallback when no spec is provided.
     simulator_source: Optional[str] = None
+
+    # Tables for which an empty first ``read_table`` call is acceptable in
+    # simulate mode. Use sparingly — an empty first read almost always means
+    # the simulator corpus and the connector's first query window are out of
+    # alignment (e.g. a fixed start_date that predates corpus timestamps,
+    # an init-time cap that excludes all corpus records, or a missing
+    # auto-discovery fallback). Override in the test subclass only when the
+    # mismatch is a known fixture limitation, not a connector bug.
+    allow_empty_first_read: frozenset = frozenset()
 
     # ------------------------------------------------------------------
     # Setup
@@ -342,17 +354,6 @@ class LakeflowConnectTests:
         return [t for t in self._tables() if self._is_partitioned(t)]
 
     # ------------------------------------------------------------------
-    # test_initialization
-    # ------------------------------------------------------------------
-
-    def test_initialization(self):
-        """Connector was created successfully in setup_class."""
-        assert self.connector is not None, (
-            "Connector is None after __init__.\n"
-            "  Fix: __init__ must not return None."
-        )
-
-    # ------------------------------------------------------------------
     # test_partition_suite
     # ------------------------------------------------------------------
 
@@ -423,7 +424,7 @@ class LakeflowConnectTests:
     # ------------------------------------------------------------------
 
     def test_get_table_schema(self):
-        """get_table_schema returns a valid StructType for every table."""
+        """get_table_schema returns a valid, deterministic StructType for every table."""
         errors = []
         for table in self._tables():
             try:
@@ -446,6 +447,20 @@ class LakeflowConnectTests:
                     errors.append(
                         f"[{table}] Duplicate field names: {sorted(set(dupes))}.\n"
                         "  Fix: Schema field names must be unique."
+                    )
+                    continue
+                # Stability: the same call must produce the same schema. A
+                # non-deterministic schema (e.g. driven by current data) breaks
+                # downstream Delta merge plans.
+                schema2 = self.connector.get_table_schema(table, self._opts(table))
+                if schema != schema2:
+                    errors.append(
+                        f"[{table}] Schema is non-deterministic across calls.\n"
+                        f"  First:  {schema.simpleString()}\n"
+                        f"  Second: {schema2.simpleString()}\n"
+                        "  Fix: get_table_schema() must be a pure function of "
+                        "(table_name, table_options). Do not derive the schema "
+                        "from current data or wall-clock state."
                     )
             except Exception as e:
                 errors.append(f"[{table}] get_table_schema raised: {e}")
@@ -476,6 +491,19 @@ class LakeflowConnectTests:
             return (
                 f"[{table}] Expected dict, got {type(metadata).__name__}.\n"
                 "  Fix: read_table_metadata() must return a dict."
+            )
+
+        # Stability: a second call with the same args must return the same
+        # metadata. Drift here changes ingestion_type / cursor_field /
+        # primary_keys mid-run and corrupts pipeline state.
+        metadata2 = self.connector.read_table_metadata(table, self._opts(table))
+        if metadata != metadata2:
+            return (
+                f"[{table}] Metadata is non-deterministic across calls.\n"
+                f"  First:  {metadata}\n"
+                f"  Second: {metadata2}\n"
+                "  Fix: read_table_metadata() must be a pure function of "
+                "(table_name, table_options)."
             )
 
         # ingestion_type
@@ -606,18 +634,23 @@ class LakeflowConnectTests:
     def test_read_terminates(self):
         """read_table eventually converges to a stable offset.
 
-        Trigger.AvailableNow termination requires that, with no new
-        source-side data, successive read_table calls feeding the previous
-        offset back eventually produce identical offsets. The test loops
-        up to ``read_termination_max_iterations`` calls and asserts
-        convergence — pass = two consecutive calls returned the same
-        offset, fail = still advancing after K iterations (would
-        microbatch forever in production).
+        Verifies two properties that together support
+        ``Trigger.AvailableNow`` termination:
 
-        This subsumes the older two-call ``offset contract`` check while
-        accommodating connectors that legitimately advance per microbatch
-        under ``max_records_per_batch`` admission control: those drain
-        the corpus over a few iterations and then converge naturally.
+        1. **Convergence under finite source.** Successive read_table
+           calls feeding the previous offset back must produce identical
+           offsets within ``read_termination_max_iterations`` calls.
+        2. **Monotonic offsets.** Scalar values in the offset dict must
+           never go backwards across iterations — backwards = data loss.
+
+        **Cap-mechanism testing.** Termination under genuinely-unbounded
+        source data depends on the connector's init-time cap (``_init_ts``).
+        This test only verifies cap engagement when the simulator spec
+        includes ``synthesize_future_records`` for the relevant endpoints
+        with ``count`` large enough that natural drain takes more than
+        ``read_termination_max_iterations`` iterations — at which point a
+        non-capping connector fails to converge. Authors of non-snapshot
+        connectors should configure that directive in their endpoints.yaml.
         """
         tables = self._non_partitioned_tables()
         if not tables:
@@ -637,11 +670,19 @@ class LakeflowConnectTests:
         if errors:
             pytest.fail("\n\n".join(errors))
 
-    def _validate_termination(self, table: str) -> Optional[str]:
+    def _validate_termination(self, table: str) -> Optional[str]:  # pylint: disable=too-many-return-statements,too-many-branches
         """Loop read_table feeding the offset back until two consecutive
-        calls return the same offset. Returns error string or None."""
+        calls return the same offset. Returns error string or None.
+
+        Enforces convergence and cursor monotonicity. Cap-based
+        termination under unbounded source data is exercised
+        indirectly: configure ``synthesize_future_records`` in the
+        simulator spec with ``count`` larger than the iteration limit,
+        and a non-capping connector will fail the convergence check.
+        """
         offset: Any = {}
         prev_json: Optional[str] = None
+        prev_scalars: Optional[dict] = None
         max_iter = self.read_termination_max_iterations
 
         for i in range(max_iter):
@@ -681,9 +722,28 @@ class LakeflowConnectTests:
                     "  Fix: Use only strings/numbers/booleans/None in the offset dict."
                 )
 
+            cur_scalars = {
+                k: v for k, v in (offset or {}).items()
+                if isinstance(v, (str, int, float)) and not isinstance(v, bool)
+            }
+            if prev_scalars is not None:
+                for key, val in cur_scalars.items():
+                    if key not in prev_scalars:
+                        continue
+                    prev_val = prev_scalars[key]
+                    if type(val) is type(prev_val) and val < prev_val:
+                        return (
+                            f"[{table}] Offset key {key!r} went backwards on "
+                            f"iteration {i + 1}: {prev_val!r} -> {val!r}.\n"
+                            "  Fix: cursor offsets must be monotonically "
+                            "non-decreasing. Going backwards causes data loss "
+                            "on the next pipeline trigger."
+                        )
+
             if prev_json is not None and cur_json == prev_json:
                 return None  # Converged.
             prev_json = cur_json
+            prev_scalars = cur_scalars
 
         return (
             f"[{table}] read_table did not converge in {max_iter} iterations "
@@ -755,6 +815,39 @@ class LakeflowConnectTests:
                     f"  Fix: The iterator from {method_name}() must not raise during iteration."
                 )
 
+            # Look up metadata up front so the non-empty and PK checks below
+            # can act on it.
+            try:
+                meta = self.connector.read_table_metadata(table, self._opts(table))
+            except Exception:
+                meta = {}
+            ingestion_type = meta.get("ingestion_type")
+            pks = meta.get("primary_keys", []) or []
+
+            # Non-empty check: a seeded simulator corpus should always yield
+            # at least one record on the first read of an incremental table.
+            # Empty here almost always means a real bug — over-aggressive
+            # init-time cap, wrong query params, mis-parsed pagination.
+            # Skip outside simulate mode (live accounts may legitimately be
+            # empty), skip snapshot tables (can be empty by design), and
+            # skip tables explicitly opted out via ``allow_empty_first_read``.
+            if (
+                is_read_table
+                and not records
+                and self.simulator_source
+                and ingestion_type in ("cdc", "cdc_with_deletes", "append")
+                and table not in self.allow_empty_first_read
+                and _resolve_env_mode_for_simulator(self.simulator_source) == MODE_SIMULATE
+            ):
+                return (
+                    f"[{table}] {method_name}() returned no records on the first call "
+                    f"(start_offset={{}}) in simulate mode under ingestion_type='{ingestion_type}'.\n"
+                    "  Fix: confirm the corpus has records and that the connector's "
+                    "first-call query is not over-filtered (e.g. an init-time cap that "
+                    "predates corpus timestamps, a missing 'since' fallback, or a "
+                    "wrong pagination terminator)."
+                )
+
             # Parse with schema
             try:
                 schema = self.connector.get_table_schema(table, self._opts(table))
@@ -771,39 +864,65 @@ class LakeflowConnectTests:
                         f"with get_table_schema('{table}'). The framework handles type conversion."
                     )
 
-            # Field-level checks
             for rec in records:
-                if is_read_table:
-                    violations = self._check_non_nullable(rec, schema)
-                    if violations:
-                        return (
-                            f"[{table}] Non-nullable field(s) are None: {violations}\n"
-                            f"  Fix: Make these fields nullable=True in schema, or populate them in {method_name}()."
-                        )
-
-                if self._all_null(rec, schema):
-                    return (
-                        f"[{table}] All columns are null in a record.\n"
-                        f"  Fix: API response is likely not being parsed correctly in {method_name}()."
-                    )
-
-                if not is_read_table:
-                    try:
-                        meta = self.connector.read_table_metadata(table, self._opts(table))
-                        pks = meta.get("primary_keys", [])
-                        missing = [pk for pk in pks if self._nested_get(rec, pk) is None]
-                        if missing:
-                            return (
-                                f"[{table}] Deleted record missing primary key(s): {missing}\n"
-                                "  Fix: read_table_deletes() must include primary keys in every record."
-                            )
-                    except Exception:
-                        pass
+                err = self._validate_record_fields(
+                    table, rec, schema, ingestion_type, pks, method_name, is_read_table
+                )
+                if err:
+                    return err
 
             return None
 
         except Exception as e:
             return f"[{table}] {method_name}() raised: {e}\n{traceback.format_exc()}"
+
+    # Shared field-level checks used by both the simple-reader read path
+    # (_validate_read) and the partitioned-reader read path
+    # (_validate_partition_records). Centralised so the two stay in sync.
+    def _validate_record_fields(  # pylint: disable=too-many-return-statements
+        self,
+        table: str,
+        record: dict,
+        schema: StructType,
+        ingestion_type: Optional[str],
+        pks: List[str],
+        method_name: str,
+        is_read_table: bool = True,
+    ) -> Optional[str]:
+        if is_read_table:
+            violations = self._check_non_nullable(record, schema)
+            if violations:
+                return (
+                    f"[{table}] Non-nullable field(s) are None: {violations}\n"
+                    f"  Fix: Make these fields nullable=True in schema, or populate them in {method_name}()."
+                )
+
+        if self._all_null(record, schema):
+            return (
+                f"[{table}] All columns are null in a record.\n"
+                f"  Fix: API response is likely not being parsed correctly in {method_name}()."
+            )
+
+        # Primary keys must be populated for records driving an upsert (CDC)
+        # or for tombstones emitted by the deletes path. Schemas commonly set
+        # nullable=True for convenience, so this check stands on metadata.
+        if pks and (
+            not is_read_table or ingestion_type in ("cdc", "cdc_with_deletes")
+        ):
+            missing = [pk for pk in pks if self._nested_get(record, pk) is None]
+            if missing:
+                if is_read_table:
+                    return (
+                        f"[{table}] Record has null primary key(s) {missing} "
+                        f"under ingestion_type='{ingestion_type}'.\n"
+                        "  Fix: PK fields must be populated for cdc / "
+                        "cdc_with_deletes — null PKs break the merge upsert."
+                    )
+                return (
+                    f"[{table}] Deleted record missing primary key(s): {missing}\n"
+                    "  Fix: read_table_deletes() must include primary keys in every record."
+                )
+        return None
 
     # ------------------------------------------------------------------
     # Write-back tests

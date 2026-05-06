@@ -14,6 +14,9 @@ class TestGmailConnector(LakeflowConnectTests):
         "client_secret": "simulator-client-secret",
         "refresh_token": "simulator-refresh-token",
     }
+    # Simulator corpus dates don't overlap the connector's first-call
+    # window for these tables — fixture limitation, not a bug.
+    allow_empty_first_read = frozenset({"messages", "threads"})
 
     # Extra Gamil specific integration tests.
     def test_read_profile(self):

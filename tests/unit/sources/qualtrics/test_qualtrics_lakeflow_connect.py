@@ -11,3 +11,6 @@ class TestQualtricsConnector(LakeflowConnectTests):
         "api_token": "simulator-fake-token",
         "datacenter_id": "iad1",
     }
+    # Simulator corpus dates don't overlap the connector's first-call
+    # window for these tables — fixture limitation, not a connector bug.
+    allow_empty_first_read = frozenset({"survey_definitions", "survey_responses"})
