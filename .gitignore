@@ -60,3 +60,7 @@ tests/unit/sources/*/configs/replay_config.json
 # spec-validation report). Regenerated each time and not part of the source
 # of truth — the corpus under source_simulator/specs/<source>/ is.
 tests/unit/sources/*/cassettes/
+
+# Self-review reports (output of the self-review-connector skill). Local
+# checkpoint for a developer; not committed by default.
+tests/unit/sources/*/SELF_REVIEW.md
