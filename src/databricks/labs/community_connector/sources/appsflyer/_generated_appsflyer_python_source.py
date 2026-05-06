@@ -6,7 +6,7 @@
 # ==============================================================================
 
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Iterator, Sequence
 import io
@@ -21,6 +21,7 @@ from pyspark.sql.datasource import (
     InputPartition,
     SimpleDataSourceStreamReader,
 )
+from pyspark.sql.streaming.datasource import ReadAllAvailable, SupportsTriggerAvailableNow
 from pyspark.sql.types import (
     ArrayType,
     BinaryType,
@@ -471,14 +472,18 @@ def register_lakeflow_source(spark):
 
             Called by Spark on every micro-batch to discover new data.
 
+            Micro-batch sizing (by row count, time window, etc.) is entirely the
+            connector's responsibility — use table_options (e.g. ``window_days``,
+            ``max_records_per_batch``) to control it.  The framework always
+            requests "all available" and does not pass an admission-control
+            hint here.
+
             Args:
                 table_name: The name of the table.
                 table_options: A dictionary of options for accessing the table.
-                start_offset: The current start offset, or None on the first call.
-                    PySpark's ``DataSourceStreamReader.latestOffset()`` does not
-                    pass this yet, so the framework always sends None for now.
-                    Connectors may use it to implement windowed batching when
-                    called directly.
+                start_offset: The current committed offset.  ``{}`` on the very
+                    first call (from ``initialOffset``), then the last returned
+                    end_offset on each subsequent call.
             Returns:
                 A dict whose keys and values are primitive types (str, int, bool).
             """
@@ -552,6 +557,11 @@ def register_lakeflow_source(spark):
                     "Accept": "application/json",
                 }
             )
+
+            # Freeze the upper date bound at init time so event-report reads
+            # return a stable cursor across microbatches in a single
+            # Trigger.AvailableNow trigger.
+            self._init_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
         def _request_with_retry(self, method: str, url: str, **kwargs) -> requests.Response:
             """Make an HTTP request with retry on transient errors and rate limiting."""
@@ -1044,6 +1054,14 @@ def register_lakeflow_source(spark):
             if not cursor:
                 cursor = table_options.get("start_date")
 
+            # Short-circuit once the cursor has caught up to the init-time cap,
+            # so Trigger.AvailableNow can terminate.
+            if cursor and cursor >= self._init_date:
+                return iter([]), start_offset or {}
+
+            # Freeze "now" at init-time so to_dt is stable across microbatches.
+            init_dt = datetime.strptime(self._init_date, "%Y-%m-%d")
+
             # Calculate date range
             if cursor:
                 # Parse cursor and apply lookback
@@ -1052,12 +1070,12 @@ def register_lakeflow_source(spark):
                     from_dt = cursor_dt - timedelta(hours=lookback_hours)
                 except (ValueError, TypeError):
                     # If cursor is not a valid date, default to 7 days ago
-                    from_dt = datetime.utcnow() - timedelta(days=7)
+                    from_dt = init_dt - timedelta(days=7)
             else:
                 # No cursor, default to 7 days ago
-                from_dt = datetime.utcnow() - timedelta(days=7)
+                from_dt = init_dt - timedelta(days=7)
 
-            to_dt = datetime.utcnow()
+            to_dt = init_dt
 
             # Limit to max_days_per_batch
             if (to_dt - from_dt).days > max_days_per_batch:
@@ -1089,9 +1107,10 @@ def register_lakeflow_source(spark):
             # Raw Data Export API returns CSV with UTF-8 BOM
             text = response.content.decode('utf-8-sig')
             if not text or not text.strip():
-                # Empty response, return empty iterator
+                # Empty response, advance the cursor to the queried upper bound
+                # so the next call short-circuits (end_offset == start_offset).
                 print(f"[AppsFlyer] No data for {report_type}: {from_date} to {to_date}")
-                return iter([]), cursor
+                return iter([]), {"cursor": to_date}
 
             # Parse CSV into list of dictionaries
             csv_reader = csv.DictReader(io.StringIO(text))
@@ -1123,18 +1142,21 @@ def register_lakeflow_source(spark):
                     if max_cursor is None or record_time > max_cursor:
                         max_cursor = record_time
 
-            # Compute next offset
-            if max_cursor:
-                # For event_time (ISO datetime), extract just the date part
-                if not is_aggregated and max_cursor:
-                    try:
-                        max_cursor = max_cursor[:10]  # Extract YYYY-MM-DD
-                    except:
-                        pass
+            # For event_time (ISO datetime), extract just the date part
+            if max_cursor and not is_aggregated:
+                try:
+                    max_cursor = max_cursor[:10]  # Extract YYYY-MM-DD
+                except:
+                    pass
 
-            # Return records and next offset
-            next_offset = {"cursor": max_cursor} if max_cursor else {}
-            return iter(data), next_offset
+            # Advance the cursor at least to the queried upper bound so the
+            # next call makes forward progress (and eventually short-circuits
+            # once it reaches self._init_date).  Cap at self._init_date.
+            if not max_cursor or max_cursor < to_date:
+                max_cursor = to_date
+            max_cursor = min(max_cursor, self._init_date)
+
+            return iter(data), {"cursor": max_cursor}
 
 
     ########################################################
@@ -1150,7 +1172,10 @@ def register_lakeflow_source(spark):
     IS_DELETE_FLOW = "isDeleteFlow"
 
 
-    class LakeflowStreamReader(SimpleDataSourceStreamReader):
+    # PySpark's DataSource API requires camelCase method names and inherits
+    # semantics from the parent class, so per-method docstrings are redundant.
+    # pylint: disable=invalid-name,missing-function-docstring
+    class LakeflowStreamReader(SimpleDataSourceStreamReader, SupportsTriggerAvailableNow):
         """
         Implements a data source stream reader for Lakeflow Connect.
         Currently, only the simpleStreamReader is implemented, which uses a
@@ -1197,8 +1222,12 @@ def register_lakeflow_source(spark):
             # are missed in the returned records.
             return self.read(start)[0]
 
+        def prepareForTriggerAvailableNow(self) -> None:
+            # No need to do anything special here. Everything is handled in the __init__ method.
+            pass
 
-    class LakeflowPartitionedStreamReader(DataSourceStreamReader):
+
+    class LakeflowPartitionedStreamReader(DataSourceStreamReader, SupportsTriggerAvailableNow):
         """Proxy that bridges SupportsPartitionedStream to PySpark's DataSourceStreamReader.
 
         Used when a connector implements the SupportsPartitionedStream mixin to
@@ -1220,10 +1249,25 @@ def register_lakeflow_source(spark):
         def initialOffset(self):
             return {}
 
-        def latestOffset(self):
-            # PySpark does not pass the current offset to latestOffset() yet,
-            # so we forward None.  Once PySpark supports it, pass the real value.
-            return self.lakeflow_connect.latest_offset(self.table_name, self.table_options, None)
+        def getDefaultReadLimit(self):
+            # Admission control is the connector's responsibility (e.g. via
+            # window_days, max_records_per_batch), not the engine's.  Always
+            # ask the engine for ReadAllAvailable.
+            return ReadAllAvailable()
+
+        def latestOffset(self, start: dict, limit) -> dict:
+            # We declared ReadAllAvailable via getDefaultReadLimit; the engine
+            # must respect it.  Anything else means admission-control expectations
+            # we do not support — fail loudly rather than silently ignore.
+            if not isinstance(limit, ReadAllAvailable):
+                raise ValueError(
+                    f"LakeflowPartitionedStreamReader only supports ReadAllAvailable; "
+                    f"got {type(limit).__name__}. Micro-batch sizing must be controlled "
+                    f"by the connector implementation (table_options), not the engine."
+                )
+            return self.lakeflow_connect.latest_offset(
+                self.table_name, self.table_options, start
+            )
 
         def partitions(self, start: dict, end: dict):
             partition_descs = self.lakeflow_connect.get_partitions(
@@ -1237,6 +1281,10 @@ def register_lakeflow_source(spark):
                 self.table_name, partition_desc, self.table_options
             )
             return map(lambda x: parse_value(x, self.schema), records)
+
+        def prepareForTriggerAvailableNow(self) -> None:
+            # No need to do anything special here. Everything is handled in the __init__ method.
+            pass
 
 
     class LakeflowBatchReader(DataSourceReader):

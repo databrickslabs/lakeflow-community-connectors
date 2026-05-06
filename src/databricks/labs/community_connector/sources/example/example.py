@@ -377,6 +377,7 @@ class ExampleLakeflowConnect(LakeflowConnect):
 
         records = []
         page = 1
+        window_drained = False
         while len(records) < max_records:
             params["page"] = str(page)
             resp = self._request_with_retry("GET", f"/tables/{table_name}/records", params=params)
@@ -386,24 +387,27 @@ class ExampleLakeflowConnect(LakeflowConnect):
             body = resp.json()
             batch = body["records"]
             if not batch:
+                window_drained = True
                 break
 
             records.extend(batch)
 
             if body["next_page"] is None:
+                window_drained = True
                 break
             page = body["next_page"]
 
-        if not records:
+        # When the window is fully drained, advance the cursor to window_end
+        # rather than the last record's cursor.  Otherwise a follow-up call
+        # would re-scan the empty tail of the window and return a different
+        # offset, breaking Trigger.AvailableNow convergence.
+        if window_drained:
             end_offset = {"cursor": window_end}
-            if start_offset and start_offset == end_offset:
-                return iter([]), start_offset
-            return iter([]), end_offset
+        else:
+            # max_records cap hit mid-window — resume from the last record.
+            end_offset = {"cursor": records[-1][cursor_field]}
 
-        # Records are sorted ascending by cursor — last record has the max.
-        last_cursor = records[-1][cursor_field]
-        end_offset = {"cursor": last_cursor}
         if start_offset and start_offset == end_offset:
             return iter([]), start_offset
 
-        return iter(records), end_offset
+        return iter(records) if records else iter([]), end_offset

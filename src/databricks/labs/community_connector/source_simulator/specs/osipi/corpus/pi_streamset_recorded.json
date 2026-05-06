@@ -1,0 +1,46 @@
+[
+  {
+    "tag_webid": "quebec-895",
+    "timestamp": "2024-01-18T15:44:54Z",
+    "value": 584.49,
+    "good": false,
+    "questionable": false,
+    "substituted": true,
+    "annotated": true,
+    "units": "hotel-779",
+    "ingestion_timestamp": "2024-01-31T02:36:45Z"
+  },
+  {
+    "tag_webid": "juliet-484",
+    "timestamp": "2024-01-05T09:03:57Z",
+    "value": 37.04,
+    "good": false,
+    "questionable": false,
+    "substituted": true,
+    "annotated": false,
+    "units": "xray-609",
+    "ingestion_timestamp": "2024-01-04T06:46:38Z"
+  },
+  {
+    "tag_webid": "lima-221",
+    "timestamp": "2024-01-04T15:56:58Z",
+    "value": 54.84,
+    "good": false,
+    "questionable": true,
+    "substituted": false,
+    "annotated": false,
+    "units": "bravo-115",
+    "ingestion_timestamp": "2024-01-14T22:36:55Z"
+  },
+  {
+    "tag_webid": "romeo-607",
+    "timestamp": "2024-01-25T13:44:56Z",
+    "value": 392.35,
+    "good": false,
+    "questionable": false,
+    "substituted": false,
+    "annotated": false,
+    "units": "bravo-602",
+    "ingestion_timestamp": "2024-01-14T05:09:30Z"
+  }
+]

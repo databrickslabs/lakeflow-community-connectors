@@ -8,8 +8,20 @@ class TestGmailConnectorUnit:
     """Unit tests that validate connector structure without API calls."""
 
     @pytest.fixture
-    def connector(self):
-        """Create connector with dummy credentials for structure tests."""
+    def connector(self, monkeypatch):
+        """Create connector with dummy credentials for structure tests.
+
+        ``__init__`` snapshots the mailbox ``historyId`` via the profile
+        endpoint (admission-control cap for AvailableNow termination), so
+        constructing the connector requires either real OAuth credentials
+        or a mocked HTTP layer.  Patch ``make_request`` so structural
+        tests stay offline.
+        """
+        monkeypatch.setattr(
+            "databricks.labs.community_connector.sources.gmail.gmail_utils."
+            "GmailApiClient.make_request",
+            lambda self, method, path, **kwargs: {"historyId": "1"},
+        )
         return GmailLakeflowConnect(
             {
                 "client_id": "dummy_client_id",

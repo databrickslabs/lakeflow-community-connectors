@@ -7,7 +7,7 @@ record serialization used across the connector.
 
 import json
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import requests
@@ -38,7 +38,7 @@ class MicrosoftGraphClient:
         if (
             self._access_token
             and self._token_expiry
-            and datetime.utcnow() < self._token_expiry
+            and datetime.now(timezone.utc) < self._token_expiry
         ):
             return self._access_token
 
@@ -71,7 +71,7 @@ class MicrosoftGraphClient:
             self._access_token = token_data["access_token"]
 
             expires_in = token_data.get("expires_in", 3600)
-            self._token_expiry = datetime.utcnow() + timedelta(
+            self._token_expiry = datetime.now(timezone.utc) + timedelta(
                 seconds=expires_in - 300
             )
 
@@ -275,18 +275,29 @@ def parse_int_option(
 def compute_next_cursor(
     max_modified: str | None,
     current_cursor: str | None,
+) -> str | None:
+    """Return the next cursor value to checkpoint.
+
+    Stores the raw max observed timestamp. Lookback is applied separately
+    at read time via ``apply_lookback``.
+    """
+    return max_modified if max_modified else current_cursor
+
+
+def apply_lookback(
+    cursor: str | None,
     lookback_seconds: int,
 ) -> str | None:
-    """Compute the next cursor value with a lookback window."""
-    if not max_modified:
-        return current_cursor
+    """Subtract a lookback window from a cursor timestamp at read time."""
+    if not cursor or lookback_seconds <= 0:
+        return cursor
 
     try:
-        dt = datetime.fromisoformat(max_modified.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(cursor.replace("Z", "+00:00"))
         dt_with_lookback = dt - timedelta(seconds=lookback_seconds)
         return dt_with_lookback.isoformat().replace("+00:00", "Z")
     except Exception:
-        return max_modified
+        return cursor
 
 
 def get_cursor_from_offset(

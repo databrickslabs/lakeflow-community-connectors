@@ -1,0 +1,58 @@
+[
+  {
+    "directory_id": "victor-908",
+    "name": "golf-846",
+    "contact_count": 6496,
+    "is_default": true,
+    "deduplication_criteria": {
+      "email": true,
+      "first_name": true,
+      "last_name": true,
+      "external_data_reference": true,
+      "phone": false
+    },
+    "creationDate": "2024-01-01T00:00:00Z"
+  },
+  {
+    "directory_id": "papa-243",
+    "name": "india-445",
+    "contact_count": 56357,
+    "is_default": false,
+    "deduplication_criteria": {
+      "email": false,
+      "first_name": false,
+      "last_name": true,
+      "external_data_reference": false,
+      "phone": false
+    },
+    "creationDate": "2024-01-01T01:00:00Z"
+  },
+  {
+    "directory_id": "november-475",
+    "name": "papa-390",
+    "contact_count": 21495,
+    "is_default": false,
+    "deduplication_criteria": {
+      "email": false,
+      "first_name": true,
+      "last_name": false,
+      "external_data_reference": false,
+      "phone": false
+    },
+    "creationDate": "2024-01-01T02:00:00Z"
+  },
+  {
+    "directory_id": "quebec-473",
+    "name": "foxtrot-990",
+    "contact_count": 88168,
+    "is_default": false,
+    "deduplication_criteria": {
+      "email": true,
+      "first_name": false,
+      "last_name": false,
+      "external_data_reference": true,
+      "phone": true
+    },
+    "creationDate": "2024-01-01T03:00:00Z"
+  }
+]

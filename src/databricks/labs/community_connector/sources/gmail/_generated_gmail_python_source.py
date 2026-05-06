@@ -29,6 +29,7 @@ from pyspark.sql.datasource import (
     InputPartition,
     SimpleDataSourceStreamReader,
 )
+from pyspark.sql.streaming.datasource import ReadAllAvailable, SupportsTriggerAvailableNow
 from pyspark.sql.types import (
     ArrayType,
     BinaryType,
@@ -478,14 +479,18 @@ def register_lakeflow_source(spark):
 
             Called by Spark on every micro-batch to discover new data.
 
+            Micro-batch sizing (by row count, time window, etc.) is entirely the
+            connector's responsibility — use table_options (e.g. ``window_days``,
+            ``max_records_per_batch``) to control it.  The framework always
+            requests "all available" and does not pass an admission-control
+            hint here.
+
             Args:
                 table_name: The name of the table.
                 table_options: A dictionary of options for accessing the table.
-                start_offset: The current start offset, or None on the first call.
-                    PySpark's ``DataSourceStreamReader.latestOffset()`` does not
-                    pass this yet, so the framework always sends None for now.
-                    Connectors may use it to implement windowed batching when
-                    called directly.
+                start_offset: The current committed offset.  ``{}`` on the very
+                    first call (from ``initialOffset``), then the last returned
+                    end_offset on each subsequent call.
             Returns:
                 A dict whose keys and values are primitive types (str, int, bool).
             """
@@ -1071,6 +1076,17 @@ def register_lakeflow_source(spark):
                 self.client_id, self.client_secret, self.refresh_token, self.user_id
             )
 
+            # Snapshot the mailbox historyId at init time. Gmail's mailbox
+            # historyId advances on every write (new mail, reads, label edits),
+            # so without an init-time cap, _read_messages_incremental would keep
+            # returning a higher offset every microbatch on an active mailbox
+            # and Trigger.AvailableNow would never terminate. The next pipeline
+            # update creates a fresh source and picks up a new snapshot.
+            profile = self.api.make_request(
+                "GET", f"/users/{self.user_id}/profile",
+            )
+            self._init_history_id = profile.get("historyId") if profile else None
+
         # ─── Interface Methods ────────────────────────────────────────────────────
 
         def list_tables(self) -> list[str]:
@@ -1205,6 +1221,21 @@ def register_lakeflow_source(spark):
                     f"Unsupported table: '{table_name}'. Supported tables are: {SUPPORTED_TABLES}"
                 )
 
+        def _pin_to_init_offset(self, latest_history_id) -> Dict[str, str]:
+            """Return the next offset, pinned to the init-time historyId snapshot.
+
+            Pinning to ``self._init_history_id`` lets the next microbatch enter
+            ``_read_*_incremental`` with ``start == cap`` and short-circuit, so
+            Trigger.AvailableNow terminates.  Falls back to the highest
+            historyId seen on this drain only when the ``__init__`` profile
+            call failed; in that mode termination is best-effort.
+            """
+            if self._init_history_id:
+                return {"historyId": str(self._init_history_id)}
+            if latest_history_id:
+                return {"historyId": str(latest_history_id)}
+            return {}
+
         # ─── Table Readers ────────────────────────────────────────────────────────
 
         def _read_messages(
@@ -1279,17 +1310,20 @@ def register_lakeflow_source(spark):
                 if not page_token:
                     break
 
-            next_offset = (
-                {"historyId": state["latest_history_id"]}
-                if state["latest_history_id"]
-                else {}
-            )
-            return iter(all_messages), next_offset
+            return iter(all_messages), self._pin_to_init_offset(state["latest_history_id"])
 
         def _read_messages_incremental(
             self, start_history_id: str, table_options: Dict[str, str]
         ) -> (Iterator[dict], dict):
             """Read messages incrementally using History API with batch fetching."""
+            # Already at or past the init-time snapshot — return empty so
+            # AvailableNow sees end_offset == start_offset and terminates.
+            if (
+                self._init_history_id
+                and int(start_history_id) >= int(self._init_history_id)
+            ):
+                return iter([]), {"historyId": str(self._init_history_id)}
+
             params = {
                 "startHistoryId": start_history_id,
                 "maxResults": 500,
@@ -1333,6 +1367,16 @@ def register_lakeflow_source(spark):
 
                 batch_results = self.api.make_batch_request(endpoints, params_list)
                 all_messages.extend([r for r in batch_results if r])
+
+            # Cap the cursor at the init-time snapshot. Gmail's History API returns
+            # the *current* mailbox historyId in `response.historyId`, which advances
+            # on every mailbox write. Without this cap, an active mailbox would keep
+            # producing strictly higher offsets and AvailableNow would never terminate.
+            if (
+                self._init_history_id
+                and int(latest_history_id) > int(self._init_history_id)
+            ):
+                latest_history_id = str(self._init_history_id)
 
             next_offset = {"historyId": latest_history_id}
             return iter(all_messages), next_offset
@@ -1406,17 +1450,20 @@ def register_lakeflow_source(spark):
                 if not page_token:
                     break
 
-            next_offset = (
-                {"historyId": state["latest_history_id"]}
-                if state["latest_history_id"]
-                else {}
-            )
-            return iter(all_threads), next_offset
+            return iter(all_threads), self._pin_to_init_offset(state["latest_history_id"])
 
         def _read_threads_incremental(
             self, start_history_id: str, table_options: Dict[str, str]
         ) -> (Iterator[dict], dict):
             """Read threads incrementally using History API."""
+            # Already at or past the init-time snapshot — return empty so
+            # AvailableNow sees end_offset == start_offset and terminates.
+            if (
+                self._init_history_id
+                and int(start_history_id) >= int(self._init_history_id)
+            ):
+                return iter([]), {"historyId": str(self._init_history_id)}
+
             params = {
                 "startHistoryId": start_history_id,
                 "maxResults": 500,
@@ -1460,6 +1507,13 @@ def register_lakeflow_source(spark):
 
                 batch_results = self.api.make_batch_request(endpoints, params_list)
                 all_threads.extend([r for r in batch_results if r])
+
+            # Cap at init-time snapshot — see _read_messages_incremental.
+            if (
+                self._init_history_id
+                and int(latest_history_id) > int(self._init_history_id)
+            ):
+                latest_history_id = str(self._init_history_id)
 
             next_offset = {"historyId": latest_history_id}
             return iter(all_threads), next_offset
@@ -1631,7 +1685,10 @@ def register_lakeflow_source(spark):
     IS_DELETE_FLOW = "isDeleteFlow"
 
 
-    class LakeflowStreamReader(SimpleDataSourceStreamReader):
+    # PySpark's DataSource API requires camelCase method names and inherits
+    # semantics from the parent class, so per-method docstrings are redundant.
+    # pylint: disable=invalid-name,missing-function-docstring
+    class LakeflowStreamReader(SimpleDataSourceStreamReader, SupportsTriggerAvailableNow):
         """
         Implements a data source stream reader for Lakeflow Connect.
         Currently, only the simpleStreamReader is implemented, which uses a
@@ -1678,8 +1735,12 @@ def register_lakeflow_source(spark):
             # are missed in the returned records.
             return self.read(start)[0]
 
+        def prepareForTriggerAvailableNow(self) -> None:
+            # No need to do anything special here. Everything is handled in the __init__ method.
+            pass
 
-    class LakeflowPartitionedStreamReader(DataSourceStreamReader):
+
+    class LakeflowPartitionedStreamReader(DataSourceStreamReader, SupportsTriggerAvailableNow):
         """Proxy that bridges SupportsPartitionedStream to PySpark's DataSourceStreamReader.
 
         Used when a connector implements the SupportsPartitionedStream mixin to
@@ -1701,10 +1762,25 @@ def register_lakeflow_source(spark):
         def initialOffset(self):
             return {}
 
-        def latestOffset(self):
-            # PySpark does not pass the current offset to latestOffset() yet,
-            # so we forward None.  Once PySpark supports it, pass the real value.
-            return self.lakeflow_connect.latest_offset(self.table_name, self.table_options, None)
+        def getDefaultReadLimit(self):
+            # Admission control is the connector's responsibility (e.g. via
+            # window_days, max_records_per_batch), not the engine's.  Always
+            # ask the engine for ReadAllAvailable.
+            return ReadAllAvailable()
+
+        def latestOffset(self, start: dict, limit) -> dict:
+            # We declared ReadAllAvailable via getDefaultReadLimit; the engine
+            # must respect it.  Anything else means admission-control expectations
+            # we do not support — fail loudly rather than silently ignore.
+            if not isinstance(limit, ReadAllAvailable):
+                raise ValueError(
+                    f"LakeflowPartitionedStreamReader only supports ReadAllAvailable; "
+                    f"got {type(limit).__name__}. Micro-batch sizing must be controlled "
+                    f"by the connector implementation (table_options), not the engine."
+                )
+            return self.lakeflow_connect.latest_offset(
+                self.table_name, self.table_options, start
+            )
 
         def partitions(self, start: dict, end: dict):
             partition_descs = self.lakeflow_connect.get_partitions(
@@ -1718,6 +1794,10 @@ def register_lakeflow_source(spark):
                 self.table_name, partition_desc, self.table_options
             )
             return map(lambda x: parse_value(x, self.schema), records)
+
+        def prepareForTriggerAvailableNow(self) -> None:
+            # No need to do anything special here. Everything is handled in the __init__ method.
+            pass
 
 
     class LakeflowBatchReader(DataSourceReader):

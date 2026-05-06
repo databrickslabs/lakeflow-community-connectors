@@ -1,0 +1,70 @@
+[
+  {
+    "timeAccount": {
+      "externalCode": "victor-550",
+      "externalName": "papa-393",
+      "unit": "golf-358"
+    },
+    "balance": {
+      "value": 567.57,
+      "formattedWithUnit": "quebec-753",
+      "formattedWithUnitRoundedDown": "echo-304"
+    },
+    "accrualSeparatedBalance": {
+      "value": 253.18,
+      "formattedWithUnit": "zulu-359",
+      "formattedWithUnitRoundedDown": "whiskey-391"
+    }
+  },
+  {
+    "timeAccount": {
+      "externalCode": "india-299",
+      "externalName": "uniform-383",
+      "unit": "juliet-673"
+    },
+    "balance": {
+      "value": 869.05,
+      "formattedWithUnit": "echo-776",
+      "formattedWithUnitRoundedDown": "victor-335"
+    },
+    "accrualSeparatedBalance": {
+      "value": 417.94,
+      "formattedWithUnit": "mike-518",
+      "formattedWithUnitRoundedDown": "papa-723"
+    }
+  },
+  {
+    "timeAccount": {
+      "externalCode": "quebec-805",
+      "externalName": "bravo-154",
+      "unit": "yankee-772"
+    },
+    "balance": {
+      "value": 877.13,
+      "formattedWithUnit": "alpha-536",
+      "formattedWithUnitRoundedDown": "golf-944"
+    },
+    "accrualSeparatedBalance": {
+      "value": 30.51,
+      "formattedWithUnit": "hotel-715",
+      "formattedWithUnitRoundedDown": "papa-754"
+    }
+  },
+  {
+    "timeAccount": {
+      "externalCode": "xray-613",
+      "externalName": "charlie-416",
+      "unit": "foxtrot-219"
+    },
+    "balance": {
+      "value": 545.44,
+      "formattedWithUnit": "kilo-967",
+      "formattedWithUnitRoundedDown": "november-302"
+    },
+    "accrualSeparatedBalance": {
+      "value": 517.92,
+      "formattedWithUnit": "foxtrot-465",
+      "formattedWithUnitRoundedDown": "quebec-162"
+    }
+  }
+]

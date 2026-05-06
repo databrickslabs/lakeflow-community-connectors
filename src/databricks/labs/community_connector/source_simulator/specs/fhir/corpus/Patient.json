@@ -1,0 +1,7 @@
+[
+  {"resourceType": "Patient", "id": "p1", "meta": {"lastUpdated": "2024-01-01T00:00:00+00:00"}, "gender": "female", "birthDate": "1985-03-12"},
+  {"resourceType": "Patient", "id": "p2", "meta": {"lastUpdated": "2024-01-02T00:00:00+00:00"}, "gender": "male", "birthDate": "1990-06-15"},
+  {"resourceType": "Patient", "id": "p3", "meta": {"lastUpdated": "2024-01-03T00:00:00+00:00"}, "gender": "female", "birthDate": "1978-11-30"},
+  {"resourceType": "Patient", "id": "p4", "meta": {"lastUpdated": "2024-01-04T00:00:00+00:00"}, "gender": "male", "birthDate": "2001-04-22"},
+  {"resourceType": "Patient", "id": "p5", "meta": {"lastUpdated": "2024-01-05T00:00:00+00:00"}, "gender": "female", "birthDate": "1965-09-10"}
+]

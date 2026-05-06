@@ -1,0 +1,26 @@
+[
+  {
+    "groupId": 34385,
+    "groupName": "xray-832",
+    "groupType": "mike-359",
+    "permissionId": 28133
+  },
+  {
+    "groupId": 88043,
+    "groupName": "romeo-100",
+    "groupType": "sierra-442",
+    "permissionId": 36091
+  },
+  {
+    "groupId": 24015,
+    "groupName": "victor-730",
+    "groupType": "whiskey-459",
+    "permissionId": 11508
+  },
+  {
+    "groupId": 27530,
+    "groupName": "yankee-889",
+    "groupType": "echo-770",
+    "permissionId": 17415
+  }
+]

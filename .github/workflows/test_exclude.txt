@@ -6,6 +6,7 @@
 # Lines starting with '#' and blank lines are ignored.
 
 tests/unit/sources/appsflyer/test_appsflyer_lakeflow_connect.py
+tests/unit/sources/azure_devops/test_azure_devops_lakeflow_connect.py
 tests/unit/sources/example/test_example_lakeflow_connect.py
 tests/unit/sources/github/test_github_lakeflow_connect.py
 tests/unit/sources/google_analytics_aggregated/test_google_analytics_aggregated_lakeflow_connect.py
@@ -21,3 +22,5 @@ tests/unit/sources/stripe/test_stripe_lakeflow_connect.py
 tests/unit/sources/surveymonkey/test_surveymonkey_lakeflow_connect.py
 tests/unit/sources/zendesk/test_zendesk_lakeflow_connect.py
 tests/unit/sources/zoho_crm/test_zoho_crm_lakeflow_connect.py
+tests/unit/sources/fhir/test_fhir_lakeflow_connect.py
+tests/unit/sources/fhir/test_fhir_utils.py

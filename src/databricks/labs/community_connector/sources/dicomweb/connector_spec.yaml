@@ -70,4 +70,4 @@ connection:
         Set this when ingesting from multiple DICOMweb sources into the same
         Delta tables so records can be traced back to their origin connection.
 
-external_options_allowlist: "fetch_dicom_files,dicom_volume_path,lookback_days,page_size,max_records_per_batch,fetch_metadata,wado_mode,dicom_batch_size"
+external_options_allowlist: "fetch_dicom_files,dicom_volume_path,lookback_days,page_size,fetch_metadata,wado_mode,window_days,starting_date,num_partitions"

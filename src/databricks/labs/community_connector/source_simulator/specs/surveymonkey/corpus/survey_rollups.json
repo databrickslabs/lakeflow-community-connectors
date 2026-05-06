@@ -1,0 +1,53 @@
+[
+  {
+    "id": "romeo-771",
+    "survey_id": "november-547",
+    "family": "papa-640",
+    "subtype": "hotel-572",
+    "href": "delta-276",
+    "summary": []
+  },
+  {
+    "id": "india-213",
+    "survey_id": "romeo-253",
+    "family": "whiskey-336",
+    "subtype": "sierra-323",
+    "href": "oscar-833",
+    "summary": [
+      {
+        "key_0": "oscar-381",
+        "key_1": "golf-348"
+      }
+    ]
+  },
+  {
+    "id": "lima-253",
+    "survey_id": "victor-660",
+    "family": "india-340",
+    "subtype": "oscar-577",
+    "href": "xray-586",
+    "summary": [
+      {
+        "key_0": "whiskey-173",
+        "key_1": "lima-711"
+      }
+    ]
+  },
+  {
+    "id": "lima-564",
+    "survey_id": "quebec-751",
+    "family": "alpha-607",
+    "subtype": "juliet-667",
+    "href": "sierra-289",
+    "summary": [
+      {
+        "key_0": "hotel-711",
+        "key_1": "bravo-245"
+      },
+      {
+        "key_0": "sierra-818",
+        "key_1": "quebec-301"
+      }
+    ]
+  }
+]

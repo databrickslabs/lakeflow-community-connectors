@@ -1,0 +1,50 @@
+[
+  {
+    "event_time": "tango-251",
+    "event_name": "oscar-970",
+    "appsflyer_id": "echo-234",
+    "customer_user_id": "tango-446",
+    "install_time": "juliet-654",
+    "media_source": "quebec-245",
+    "campaign": "juliet-790",
+    "platform": "golf-360",
+    "app_id": "bravo-608",
+    "country_code": "yankee-318"
+  },
+  {
+    "event_time": "papa-189",
+    "event_name": "delta-737",
+    "appsflyer_id": "foxtrot-180",
+    "customer_user_id": "charlie-689",
+    "install_time": "lima-250",
+    "media_source": "hotel-314",
+    "campaign": "india-127",
+    "platform": "foxtrot-695",
+    "app_id": "kilo-176",
+    "country_code": "sierra-742"
+  },
+  {
+    "event_time": "echo-770",
+    "event_name": "oscar-355",
+    "appsflyer_id": "xray-269",
+    "customer_user_id": "romeo-328",
+    "install_time": "romeo-687",
+    "media_source": "xray-669",
+    "campaign": "papa-782",
+    "platform": "november-275",
+    "app_id": "hotel-774",
+    "country_code": "papa-983"
+  },
+  {
+    "event_time": "papa-992",
+    "event_name": "foxtrot-478",
+    "appsflyer_id": "alpha-284",
+    "customer_user_id": "mike-462",
+    "install_time": "golf-884",
+    "media_source": "xray-762",
+    "campaign": "november-607",
+    "platform": "victor-303",
+    "app_id": "hotel-872",
+    "country_code": "zulu-510"
+  }
+]

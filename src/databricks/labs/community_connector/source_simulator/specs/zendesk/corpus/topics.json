@@ -1,0 +1,64 @@
+[
+  {
+    "id": 1000,
+    "url": "zulu-671",
+    "html_url": "november-640",
+    "name": "uniform-987",
+    "description": "victor-614",
+    "position": 82926,
+    "follower_count": 54300,
+    "community_id": 31231,
+    "created_at": "uniform-442",
+    "updated_at": "india-312",
+    "user_segment_id": 50198,
+    "manageable_by": "lima-803",
+    "user_segment_ids": []
+  },
+  {
+    "id": 1001,
+    "url": "alpha-351",
+    "html_url": "india-330",
+    "name": "papa-675",
+    "description": "romeo-998",
+    "position": 2802,
+    "follower_count": 46761,
+    "community_id": 20653,
+    "created_at": "lima-313",
+    "updated_at": "echo-661",
+    "user_segment_id": 72910,
+    "manageable_by": "yankee-768",
+    "user_segment_ids": []
+  },
+  {
+    "id": 1002,
+    "url": "juliet-570",
+    "html_url": "foxtrot-357",
+    "name": "sierra-315",
+    "description": "xray-101",
+    "position": 64222,
+    "follower_count": 96042,
+    "community_id": 23920,
+    "created_at": "oscar-859",
+    "updated_at": "quebec-803",
+    "user_segment_id": 36004,
+    "manageable_by": "lima-686",
+    "user_segment_ids": []
+  },
+  {
+    "id": 1003,
+    "url": "juliet-128",
+    "html_url": "foxtrot-989",
+    "name": "juliet-577",
+    "description": "uniform-438",
+    "position": 6644,
+    "follower_count": 45285,
+    "community_id": 85566,
+    "created_at": "alpha-102",
+    "updated_at": "yankee-949",
+    "user_segment_id": 69787,
+    "manageable_by": "xray-911",
+    "user_segment_ids": [
+      4655
+    ]
+  }
+]

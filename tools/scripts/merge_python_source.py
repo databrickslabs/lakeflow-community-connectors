@@ -394,12 +394,44 @@ def extract_imports_and_code(content: str) -> tuple:
     return import_lines, "\n".join(code_lines)
 
 
-def deduplicate_imports(import_lists: List[List[str]]) -> List[str]:
+def _collect_alias_assignments(imp_stripped: str, alias_assignments: List[str]) -> None:
+    """Extract ``as`` aliases from a skipped internal import and append assignment lines.
+
+    For an import like ``from ...base_r4 import _patient as _base_patient, FOO as BAR``
+    this appends ``_base_patient = _patient`` and ``BAR = FOO`` to *alias_assignments*.
+    Non-aliased names are ignored since they are already available by their original name
+    once the defining module is inlined.
+    """
+    imp_normalized = " ".join(imp_stripped.split())
+    if " import " not in imp_normalized:
+        return
+    imports_part = imp_normalized.split(" import ", 1)[1].strip()
+    if imports_part.startswith("(") and imports_part.endswith(")"):
+        imports_part = imports_part[1:-1].strip()
+    for name in imports_part.split(","):
+        name = re.sub(r"#.*", "", name).strip()
+        if not name:
+            continue
+        if " as " in name:
+            original, alias = name.split(" as ", 1)
+            alias_assignments.append(f"{alias.strip()} = {original.strip()}")
+
+
+def deduplicate_imports(
+    import_lists: List[List[str]],
+) -> tuple:
     """
     Deduplicate and merge imports from multiple sources.
 
     Merges imports from the same module (e.g., 'from x import a' and 'from x import b'
     becomes 'from x import a, b') and sorts by module name.
+
+    Returns:
+        Tuple of (list of import lines, list of alias assignment lines).
+        Alias assignments are needed when a skipped internal import used an
+        ``as`` alias (e.g., ``from ...base_r4 import _patient as _base_patient``).
+        The caller should emit these as code lines (e.g., ``_base_patient = _patient``)
+        so the alias remains available at runtime.
     """
     # Imports to skip (internal imports that won't work in merged file)
     skip_patterns = [
@@ -414,6 +446,8 @@ def deduplicate_imports(import_lists: List[List[str]]) -> List[str]:
     # Track 'import X' style imports and wildcard imports separately
     simple_imports = set()
     wildcard_imports = {}  # module -> full import statement
+    # Alias assignments from skipped internal imports
+    alias_assignments = []
 
     for import_list in import_lists:
         for imp in import_list:
@@ -426,6 +460,7 @@ def deduplicate_imports(import_lists: List[List[str]]) -> List[str]:
                 imp_stripped.startswith(pattern) for pattern in skip_patterns
             )
             if should_skip:
+                _collect_alias_assignments(imp_stripped, alias_assignments)
                 continue
 
             # Handle 'from X import Y' style imports
@@ -564,7 +599,7 @@ def deduplicate_imports(import_lists: List[List[str]]) -> List[str]:
         result.extend(thirdparty_from_imports)
         result.extend(thirdparty_simple_imports)
 
-    return result
+    return result, alias_assignments
 
 
 def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
@@ -682,7 +717,7 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     for _, lib_imports, _ in lib_imports_and_code:
         all_import_lists.append(lib_imports)
     all_import_lists.extend([source_imports, lakeflow_imports])
-    all_imports = deduplicate_imports(all_import_lists)
+    all_imports, alias_assignments = deduplicate_imports(all_import_lists)
 
     # Build the merged content
     merged_lines = []
@@ -787,6 +822,21 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
             merged_lines.append("")
     merged_lines.append("")
     merged_lines.append("")
+
+    # Emit alias assignments from skipped internal imports that used ``as``.
+    # Placed here so all inlined definitions are available.
+    # Only emit an assignment if the alias is actually referenced elsewhere
+    # in the merged code (avoids broken assignments for module-level
+    # side-effect imports like ``from ...profiles import base_r4 as _base_r4``).
+    if alias_assignments:
+        merged_code_so_far = "\n".join(merged_lines)
+        for assignment in alias_assignments:
+            alias_name = assignment.split("=", 1)[0].strip()
+            if re.search(rf"\b{re.escape(alias_name)}\b", merged_code_so_far):
+                merged_lines.append(f"    {assignment}")
+        if merged_lines[-1].strip():
+            merged_lines.append("")
+            merged_lines.append("")
 
     # Final section: Spark DataSource registration
     merged_lines.append("    " + "#" * 56)

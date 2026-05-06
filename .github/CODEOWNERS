@@ -1,0 +1,19 @@
+# CODEOWNERS for lakeflow-community-connectors
+#
+# Syntax: https://docs.github.com/en/repositories/managing-your-repositories-settings-and-customizations/customizing-your-repository/about-code-owners
+#
+# Combined with a branch-protection rule that requires code-owner review and
+# `required_approving_review_count >= 1`, this prevents unreviewed merges to
+# the default branch. The repo ruleset must be updated separately — this file
+# on its own does not enforce review.
+#
+# NOTE: GitHub silently ignores entries that don't resolve to a real user or
+# team at review time. Verify every handle here actually has push access to
+# the repo before relying on it.
+
+# Default owner for everything in the repo.
+# TODO: replace with a GitHub team handle (e.g.
+# @databrickslabs/lakeflow-community-connectors-maintainers) once the team
+# exists, so review load rotates and individual unavailability does not
+# block merges.
+* @yyoli-db

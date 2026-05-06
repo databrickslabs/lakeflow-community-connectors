@@ -8,6 +8,10 @@ from pyspark.sql.datasource import (
     SimpleDataSourceStreamReader,
     DataSourceReader,
 )
+from pyspark.sql.streaming.datasource import (
+    ReadAllAvailable,
+    SupportsTriggerAvailableNow,
+)
 from databricks.labs.community_connector.interface import (
     LakeflowConnect,
     SupportsPartition,
@@ -43,7 +47,10 @@ TABLE_CONFIGS = "tableConfigs"
 IS_DELETE_FLOW = "isDeleteFlow"
 
 
-class LakeflowStreamReader(SimpleDataSourceStreamReader):
+# PySpark's DataSource API requires camelCase method names and inherits
+# semantics from the parent class, so per-method docstrings are redundant.
+# pylint: disable=invalid-name,missing-function-docstring
+class LakeflowStreamReader(SimpleDataSourceStreamReader, SupportsTriggerAvailableNow):
     """
     Implements a data source stream reader for Lakeflow Connect.
     Currently, only the simpleStreamReader is implemented, which uses a
@@ -90,8 +97,12 @@ class LakeflowStreamReader(SimpleDataSourceStreamReader):
         # are missed in the returned records.
         return self.read(start)[0]
 
+    def prepareForTriggerAvailableNow(self) -> None:
+        # No need to do anything special here. Everything is handled in the __init__ method.
+        pass
 
-class LakeflowPartitionedStreamReader(DataSourceStreamReader):
+
+class LakeflowPartitionedStreamReader(DataSourceStreamReader, SupportsTriggerAvailableNow):
     """Proxy that bridges SupportsPartitionedStream to PySpark's DataSourceStreamReader.
 
     Used when a connector implements the SupportsPartitionedStream mixin to
@@ -113,10 +124,25 @@ class LakeflowPartitionedStreamReader(DataSourceStreamReader):
     def initialOffset(self):
         return {}
 
-    def latestOffset(self):
-        # PySpark does not pass the current offset to latestOffset() yet,
-        # so we forward None.  Once PySpark supports it, pass the real value.
-        return self.lakeflow_connect.latest_offset(self.table_name, self.table_options, None)
+    def getDefaultReadLimit(self):
+        # Admission control is the connector's responsibility (e.g. via
+        # window_days, max_records_per_batch), not the engine's.  Always
+        # ask the engine for ReadAllAvailable.
+        return ReadAllAvailable()
+
+    def latestOffset(self, start: dict, limit) -> dict:
+        # We declared ReadAllAvailable via getDefaultReadLimit; the engine
+        # must respect it.  Anything else means admission-control expectations
+        # we do not support — fail loudly rather than silently ignore.
+        if not isinstance(limit, ReadAllAvailable):
+            raise ValueError(
+                f"LakeflowPartitionedStreamReader only supports ReadAllAvailable; "
+                f"got {type(limit).__name__}. Micro-batch sizing must be controlled "
+                f"by the connector implementation (table_options), not the engine."
+            )
+        return self.lakeflow_connect.latest_offset(
+            self.table_name, self.table_options, start
+        )
 
     def partitions(self, start: dict, end: dict):
         partition_descs = self.lakeflow_connect.get_partitions(
@@ -130,6 +156,10 @@ class LakeflowPartitionedStreamReader(DataSourceStreamReader):
             self.table_name, partition_desc, self.table_options
         )
         return map(lambda x: parse_value(x, self.schema), records)
+
+    def prepareForTriggerAvailableNow(self) -> None:
+        # No need to do anything special here. Everything is handled in the __init__ method.
+        pass
 
 
 class LakeflowBatchReader(DataSourceReader):

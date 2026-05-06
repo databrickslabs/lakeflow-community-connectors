@@ -1,0 +1,42 @@
+[
+  {
+    "rcmCompetencyId": 44815,
+    "commonCompetencyId": 63154,
+    "name": "papa-275",
+    "desc": "delta-228",
+    "category": "foxtrot-386",
+    "type": "quebec-414",
+    "source": "sierra-956",
+    "locale": "yankee-770"
+  },
+  {
+    "rcmCompetencyId": 49481,
+    "commonCompetencyId": 17827,
+    "name": "mike-304",
+    "desc": "victor-986",
+    "category": "charlie-241",
+    "type": "bravo-153",
+    "source": "charlie-593",
+    "locale": "kilo-678"
+  },
+  {
+    "rcmCompetencyId": 38302,
+    "commonCompetencyId": 89578,
+    "name": "lima-832",
+    "desc": "sierra-165",
+    "category": "whiskey-697",
+    "type": "tango-506",
+    "source": "xray-924",
+    "locale": "golf-437"
+  },
+  {
+    "rcmCompetencyId": 25472,
+    "commonCompetencyId": 1589,
+    "name": "papa-964",
+    "desc": "bravo-499",
+    "category": "whiskey-437",
+    "type": "oscar-442",
+    "source": "tango-333",
+    "locale": "kilo-213"
+  }
+]
