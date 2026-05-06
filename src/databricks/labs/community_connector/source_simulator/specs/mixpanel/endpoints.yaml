@@ -1,0 +1,24 @@
+# Mixpanel.
+#
+# Three distinct base URLs / patterns:
+# * GET /api/2.0/export — events; returns NDJSON. Empty body → 0 events.
+# * POST /api/query/cohorts/list — cohorts; returns either a list directly
+#   or {"cohorts": [...]}. Empty list works.
+# * POST /api/query/engage — engage profiles + cohort members; returns
+#   {"results": [...], "page_size": N}.
+
+endpoints:
+  - path: /api/2.0/export
+    method: GET
+    corpus: empty_text
+    response: {pagination_style: none, single_entity: true}
+
+  - path: /api/query/cohorts/list
+    method: POST
+    corpus: cohorts
+    response: {pagination_style: none}
+
+  - path: /api/query/engage
+    method: POST
+    corpus: empty_engage
+    response: {pagination_style: none, single_entity: true}

@@ -1,0 +1,62 @@
+[
+  {
+    "jobReqLocalId": 16967,
+    "jobReqId": 22525,
+    "locale": "romeo-987",
+    "status": "romeo-803",
+    "jobTitle": "alpha-657",
+    "externalTitle": "bravo-780",
+    "jobDescription": "juliet-710",
+    "externalJobDescription": "xray-548",
+    "intJobDescHeader": "mike-980",
+    "intJobDescFooter": "sierra-398",
+    "extJobDescHeader": "charlie-425",
+    "extJobDescFooter": "india-832",
+    "templateHeaderFooter": "india-850"
+  },
+  {
+    "jobReqLocalId": 77811,
+    "jobReqId": 78766,
+    "locale": "romeo-507",
+    "status": "sierra-494",
+    "jobTitle": "kilo-256",
+    "externalTitle": "india-920",
+    "jobDescription": "alpha-206",
+    "externalJobDescription": "echo-155",
+    "intJobDescHeader": "mike-842",
+    "intJobDescFooter": "mike-911",
+    "extJobDescHeader": "uniform-817",
+    "extJobDescFooter": "bravo-476",
+    "templateHeaderFooter": "bravo-872"
+  },
+  {
+    "jobReqLocalId": 24638,
+    "jobReqId": 64654,
+    "locale": "alpha-358",
+    "status": "yankee-386",
+    "jobTitle": "papa-598",
+    "externalTitle": "victor-883",
+    "jobDescription": "whiskey-968",
+    "externalJobDescription": "zulu-651",
+    "intJobDescHeader": "echo-171",
+    "intJobDescFooter": "lima-788",
+    "extJobDescHeader": "bravo-685",
+    "extJobDescFooter": "juliet-584",
+    "templateHeaderFooter": "juliet-339"
+  },
+  {
+    "jobReqLocalId": 63009,
+    "jobReqId": 96251,
+    "locale": "tango-170",
+    "status": "delta-272",
+    "jobTitle": "oscar-158",
+    "externalTitle": "oscar-632",
+    "jobDescription": "hotel-876",
+    "externalJobDescription": "hotel-627",
+    "intJobDescHeader": "oscar-788",
+    "intJobDescFooter": "india-618",
+    "extJobDescHeader": "foxtrot-418",
+    "extJobDescFooter": "echo-567",
+    "templateHeaderFooter": "mike-408"
+  }
+]

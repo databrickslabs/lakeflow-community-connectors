@@ -774,15 +774,17 @@ def register_lakeflow_source(spark):
             """
             Fetch the metadata of a table.
             """
+            # Tables backed by Zendesk's incremental API are cdc; the rest are
+            # plain paginated snapshots.
             metadata = {
-                "tickets": {"primary_keys": ["id"], "cursor_field": "updated_at"},
-                "organizations": {"primary_keys": ["id"], "cursor_field": "updated_at"},
-                "articles": {"primary_keys": ["id"], "cursor_field": "updated_at"},
-                "brands": {"primary_keys": ["id"], "cursor_field": "updated_at"},
-                "groups": {"primary_keys": ["id"], "cursor_field": "updated_at"},
-                "ticket_comments": {"primary_keys": ["id"], "cursor_field": "updated_at"},
-                "topics": {"primary_keys": ["id"], "cursor_field": "updated_at"},
-                "users": {"primary_keys": ["id"], "cursor_field": "updated_at"},
+                "tickets": {"primary_keys": ["id"], "cursor_field": "updated_at", "ingestion_type": "cdc"},
+                "organizations": {"primary_keys": ["id"], "cursor_field": "updated_at", "ingestion_type": "cdc"},
+                "ticket_comments": {"primary_keys": ["id"], "cursor_field": "updated_at", "ingestion_type": "cdc"},
+                "users": {"primary_keys": ["id"], "cursor_field": "updated_at", "ingestion_type": "cdc"},
+                "articles": {"primary_keys": ["id"], "ingestion_type": "snapshot"},
+                "brands": {"primary_keys": ["id"], "ingestion_type": "snapshot"},
+                "groups": {"primary_keys": ["id"], "ingestion_type": "snapshot"},
+                "topics": {"primary_keys": ["id"], "ingestion_type": "snapshot"},
             }
 
             if table_name not in metadata:

@@ -6,9 +6,12 @@ Usage — each connector test file subclasses ``LakeflowConnectTests``::
     class TestMyConnector(LakeflowConnectTests):
         connector_class = MyLakeflowConnect
 
-Config and table_configs are auto-loaded from a ``configs/`` directory next to
-the test file (``dev_config.json`` and ``dev_table_config.json``).  Override
-the class attributes to supply them explicitly.
+Stand-in (simulate / replay) credentials are declared on the test class via
+``replay_config = {...}``. Live / record credentials are passed per run via
+``CONNECTOR_TEST_CONFIG_JSON`` or ``CONNECTOR_TEST_CONFIG_PATH`` env vars.
+``table_configs`` is auto-loaded from a ``dev_table_config.json`` next to
+the test file when present (optional). Override the class attributes to
+supply any of these explicitly.
 
 Then run::
 
@@ -18,6 +21,7 @@ Then run::
 
 import inspect
 import json
+import os
 import traceback
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Type
@@ -31,9 +35,34 @@ from databricks.labs.community_connector.interface.supports_partition import (
     SupportsPartitionedStream,
 )
 from databricks.labs.community_connector.libs.utils import parse_value
+from databricks.labs.community_connector.source_simulator import (
+    MODE_LIVE,
+    MODE_REPLAY,
+    MODE_SIMULATE,
+    Simulator,
+    get_mode,
+)
+from databricks.labs.community_connector import source_simulator as _source_simulator_pkg
 
 VALID_INGESTION_TYPES = {"snapshot", "cdc", "cdc_with_deletes", "append"}
 _INVALID_TABLE_NAME = "__nonexistent_table_$$_9z9z9z__"
+
+
+def _resolve_env_mode_for_simulator(simulator_source: Optional[str]) -> str:
+    """When a simulator spec exists, simulate is the default (fast, offline).
+
+    Without an env var the harness picks SIMULATE; explicit ``replay`` is
+    aliased to SIMULATE for backward compat with the cassette-era flag.
+    Explicit ``live`` opts in to refreshing the corpus from the real source.
+    Without a simulator spec, behavior follows the env var directly with
+    ``live`` as the default.
+    """
+    raw_env = os.environ.get("CONNECTOR_TEST_MODE", "").strip().lower()
+    if simulator_source:
+        if raw_env in ("", "simulate", "replay"):
+            return MODE_SIMULATE
+        return get_mode()
+    return get_mode()
 
 
 class LakeflowConnectTests:
@@ -57,6 +86,40 @@ class LakeflowConnectTests:
     sample_records: int = 50
     test_utils_class = None
 
+    # Stand-in credentials used in simulate/replay mode. The simulator
+    # doesn't validate these, so any string of the right shape works.
+    # Subclasses set this directly for static creds, or override
+    # ``_replay_config()`` to compute dynamically (e.g. generate an RSA
+    # private key for a connector that PEM-parses ``private_key``).
+    # Replaces per-source committed ``configs/replay_config.json`` files.
+    replay_config: Optional[Dict[str, Any]] = None
+
+    # Query-param names whose values are non-deterministic (e.g. now()-based
+    # timestamps, request IDs, nonces). The mock framework ignores these when
+    # matching recorded interactions against incoming requests. Setting this
+    # affects both record and replay modes.
+    record_replay_ignore_query_params: frozenset = frozenset()
+
+    # Records-per-response kept in the cassette at record time. Each response
+    # body's records array is truncated to this many, and pagination pointers
+    # are stripped so connectors stop after one page. Keep small (≤10) to
+    # avoid bloating git history with real API data.
+    record_replay_sample_size: int = 5
+
+    # At replay time, expand each response's records up to this many via
+    # type-aware variation (ints, ISO timestamps, UUIDs, strings). 0 = return
+    # responses exactly as recorded. Use this when tests need more records
+    # than the sample size provides.
+    record_replay_synthesize_count: int = 0
+
+    # If set, the test runs in simulate mode against
+    # ``source_simulator/specs/<simulator_source>/``. Picks up endpoints.yaml
+    # + corpus/ from that directory. When set, ``CONNECTOR_TEST_MODE=replay``
+    # is interpreted as "use simulate mode" — i.e. simulate is the default
+    # stand-in posture once a spec exists, replay against a cassette is the
+    # fallback when no spec is provided.
+    simulator_source: Optional[str] = None
+
     # ------------------------------------------------------------------
     # Setup
     # ------------------------------------------------------------------
@@ -67,15 +130,144 @@ class LakeflowConnectTests:
         return Path(inspect.getfile(cls)).parent / "configs"
 
     @classmethod
+    def _cassette_dir(cls) -> Path:
+        """Return the ``cassettes/`` directory next to the subclass test file."""
+        return Path(inspect.getfile(cls)).parent / "cassettes"
+
+    @classmethod
+    def _cassette_path(cls) -> Path:
+        return cls._cassette_dir() / f"{cls.__name__}.json"
+
+    @classmethod
+    def _simulator_specs_root(cls) -> Path:
+        """Path to ``source_simulator/specs/`` — the home for all per-source specs."""
+        return Path(_source_simulator_pkg.__file__).parent / "specs"
+
+    @classmethod
+    def _simulator_spec_path(cls) -> Optional[Path]:
+        if not cls.simulator_source:
+            return None
+        return cls._simulator_specs_root() / cls.simulator_source / "endpoints.yaml"
+
+    @classmethod
+    def _simulator_corpus_dir(cls) -> Optional[Path]:
+        if not cls.simulator_source:
+            return None
+        return cls._simulator_specs_root() / cls.simulator_source / "corpus"
+
+    @classmethod
+    def _resolve_mode_and_simulator_args(cls) -> dict:
+        """Pick the right Simulator() kwargs based on env var + simulator_source.
+
+        With ``simulator_source`` set:
+            CONNECTOR_TEST_MODE unset / replay / simulate -> Mode.SIMULATE
+                (the default — fast, offline, no creds)
+            CONNECTOR_TEST_MODE=live    -> Mode.LIVE (refresh corpus from
+                real source; needs valid creds via CONNECTOR_TEST_CONFIG_JSON
+                or CONNECTOR_TEST_CONFIG_PATH)
+
+        Without ``simulator_source`` (legacy cassette-only):
+            Mode follows CONNECTOR_TEST_MODE directly. Default = live.
+        """
+        env_mode = _resolve_env_mode_for_simulator(cls.simulator_source)
+
+        if cls.simulator_source and env_mode == MODE_SIMULATE:
+            return {
+                "mode": MODE_SIMULATE,
+                "spec_path": cls._simulator_spec_path(),
+                "corpus_dir": cls._simulator_corpus_dir(),
+                "ignore_query_params": frozenset(cls.record_replay_ignore_query_params),
+            }
+
+        kwargs = {
+            "mode": env_mode,
+            "cassette_path": cls._cassette_path(),
+            "source": cls.__module__.split(".")[-2] if "." in cls.__module__ else "",
+            "ignore_query_params": frozenset(cls.record_replay_ignore_query_params),
+            "sample_size": cls.record_replay_sample_size,
+            "synthesize_count": cls.record_replay_synthesize_count,
+        }
+        # Live runs of a connector that has a simulator_source authored
+        # double as spec validation: each live response is diffed against
+        # what the spec+corpus would produce, and the result is logged.
+        # Drift between live and spec surfaces immediately.
+        if cls.simulator_source and env_mode == MODE_LIVE:
+            kwargs["spec_path"] = cls._simulator_spec_path()
+            kwargs["corpus_dir"] = cls._simulator_corpus_dir()
+        return kwargs
+
+    @classmethod
+    def _replay_config(cls) -> Optional[Dict[str, Any]]:
+        """Hook for subclasses. Default returns the class attribute as-is.
+        Override to compute dynamically (e.g. generate an RSA key for a
+        connector whose ``__init__`` PEM-parses a credential field)."""
+        return cls.replay_config
+
+    @classmethod
     def _load_config(cls) -> dict:
-        """Load ``dev_config.json`` from the config dir."""
-        path = cls._config_dir() / "dev_config.json"
-        assert path.exists(), (
-            f"Config file not found: {path}\n"
-            "  Fix: Create dev_config.json with connector credentials."
+        """Load credentials for the connector.
+
+        Precedence (first match wins, mode-independent):
+
+        1. ``CONNECTOR_TEST_CONFIG_JSON`` env var — inline JSON. Runtime
+           override; lets a CI runner inject creds from a secret store
+           without staging anything to the filesystem.
+        2. ``CONNECTOR_TEST_CONFIG_PATH`` env var — path to a JSON file
+           at any location the developer chooses.
+        3. ``cls._replay_config()`` — class-declared stand-in creds.
+           The simulator never validates them, so any string of the
+           right shape works. This is the path most simulate/replay
+           tests take.
+        4. ``configs/replay_config.json`` — locally-placed (gitignored)
+           override file next to the test.
+
+        The legacy ``configs/dev_config.json`` per-source convention
+        has been removed in favor of the env-var mechanisms (1 and 2).
+        """
+        env_cfg = cls._try_env_config()
+        if env_cfg is not None:
+            return env_cfg
+
+        cfg = cls._replay_config()
+        if cfg is not None:
+            return cfg
+
+        replay_path = cls._config_dir() / "replay_config.json"
+        if replay_path.exists():
+            with open(replay_path, "r") as f:
+                return json.load(f)
+
+        raise AssertionError(
+            "No credentials provided.\n"
+            "  Fix: for simulate/replay tests, set ``replay_config`` on "
+            "the test class. For live runs against a real source, set "
+            "CONNECTOR_TEST_CONFIG_PATH=<path> or "
+            "CONNECTOR_TEST_CONFIG_JSON=<inline JSON>."
         )
-        with open(path, "r") as f:
-            return json.load(f)
+
+    @classmethod
+    def _try_env_config(cls) -> Optional[dict]:
+        """Return credentials from CONNECTOR_TEST_CONFIG_JSON / _PATH if set,
+        else None. Inline JSON wins over the path."""
+        inline = os.environ.get("CONNECTOR_TEST_CONFIG_JSON", "").strip()
+        if inline:
+            try:
+                return json.loads(inline)
+            except json.JSONDecodeError as e:
+                raise AssertionError(
+                    f"CONNECTOR_TEST_CONFIG_JSON is not valid JSON: {e}"
+                ) from e
+
+        path_env = os.environ.get("CONNECTOR_TEST_CONFIG_PATH", "").strip()
+        if path_env:
+            path = Path(path_env)
+            assert path.exists(), (
+                f"CONNECTOR_TEST_CONFIG_PATH points to a non-existent file: {path}"
+            )
+            with open(path, "r") as f:
+                return json.load(f)
+
+        return None
 
     @classmethod
     def _load_table_configs(cls) -> Dict[str, Dict[str, Any]]:
@@ -91,17 +283,37 @@ class LakeflowConnectTests:
         assert cls.connector_class is not None, (
             "Set connector_class in your test subclass"
         )
-        if cls.config is None:
-            cls.config = cls._load_config()
-        if cls.table_configs is None:
-            cls.table_configs = cls._load_table_configs()
-        cls.connector = cls.connector_class(cls.config)
-        cls.test_utils = None
-        if cls.test_utils_class:
-            try:
-                cls.test_utils = cls.test_utils_class(cls.config)
-            except Exception:
-                pass
+
+        # Install the simulator BEFORE creating the connector so any HTTP in
+        # __init__ is intercepted too. In live mode this is a proxy that
+        # forwards to the real source (and appends to the cassette by default);
+        # in replay/simulate it's a stand-in served from cassette/corpus.
+        cls._record_replay_patch = Simulator(**cls._resolve_mode_and_simulator_args())
+        cls._record_replay_patch.__enter__()
+
+        try:
+            if cls.config is None:
+                cls.config = cls._load_config()
+            if cls.table_configs is None:
+                cls.table_configs = cls._load_table_configs()
+            cls.connector = cls.connector_class(cls.config)
+            cls.test_utils = None
+            if cls.test_utils_class:
+                try:
+                    cls.test_utils = cls.test_utils_class(cls.config)
+                except Exception:
+                    pass
+        except Exception:
+            # Don't leave the patch installed if setup fails.
+            cls._record_replay_patch.__exit__(None, None, None)
+            raise
+
+    @classmethod
+    def teardown_class(cls):
+        patch = getattr(cls, "_record_replay_patch", None)
+        if patch is not None:
+            patch.__exit__(None, None, None)
+            cls._record_replay_patch = None
 
     # ------------------------------------------------------------------
     # Helpers
@@ -382,14 +594,30 @@ class LakeflowConnectTests:
             pytest.fail("\n\n".join(errors))
 
     # ------------------------------------------------------------------
-    # test_micro_batch_offset_contract  (per-table, collected)
+    # test_read_terminates  (per-table, collected)
     # ------------------------------------------------------------------
 
-    def test_micro_batch_offset_contract(self):
-        """read_table handles the micro-batch offset round-trip.
+    # Maximum read_table iterations before the termination test gives up.
+    # Sized for connectors that walk daily/weekly windows over multi-month
+    # ranges (e.g. appsflyer at 7 days/window from a fixed start_date).
+    # Subclasses can raise this further if needed.
+    read_termination_max_iterations: int = 50
 
-        The framework calls read_table repeatedly, passing the previous offset
-        back. This test makes two calls per table to verify the contract.
+    def test_read_terminates(self):
+        """read_table eventually converges to a stable offset.
+
+        Trigger.AvailableNow termination requires that, with no new
+        source-side data, successive read_table calls feeding the previous
+        offset back eventually produce identical offsets. The test loops
+        up to ``read_termination_max_iterations`` calls and asserts
+        convergence — pass = two consecutive calls returned the same
+        offset, fail = still advancing after K iterations (would
+        microbatch forever in production).
+
+        This subsumes the older two-call ``offset contract`` check while
+        accommodating connectors that legitimately advance per microbatch
+        under ``max_records_per_batch`` admission control: those drain
+        the corpus over a few iterations and then converge naturally.
         """
         tables = self._non_partitioned_tables()
         if not tables:
@@ -397,94 +625,73 @@ class LakeflowConnectTests:
         errors = []
         for table in tables:
             try:
-                err = self._validate_offset_contract(table)
+                err = self._validate_termination(table)
                 if err:
                     errors.append(err)
             except Exception as e:
                 errors.append(
-                    f"[{table}] Offset contract error: {e}\n"
-                    "  Fix: read_table() must handle receiving its own previously-returned offset."
+                    f"[{table}] Termination test error: {e}\n"
+                    "  Fix: read_table() must handle receiving its own "
+                    "previously-returned offset."
                 )
         if errors:
             pytest.fail("\n\n".join(errors))
 
-    def _validate_offset_contract(self, table: str) -> Optional[str]:
-        """Two-call offset round-trip check. Returns error string or None."""
-        # Call 1
-        result1 = self.connector.read_table(table, {}, self._opts(table))
-        if not isinstance(result1, tuple) or len(result1) != 2:
-            return (
-                f"[{table}] read_table returned {type(result1).__name__}, expected 2-tuple.\n"
-                "  Fix: read_table() must return (iterator, offset_dict)."
-            )
+    def _validate_termination(self, table: str) -> Optional[str]:
+        """Loop read_table feeding the offset back until two consecutive
+        calls return the same offset. Returns error string or None."""
+        offset: Any = {}
+        prev_json: Optional[str] = None
+        max_iter = self.read_termination_max_iterations
 
-        iter1, offset1 = result1
-        self._consume(iter1)
-
-        if offset1 is not None and not isinstance(offset1, dict):
-            return (
-                f"[{table}] Offset must be dict or None, got {type(offset1).__name__}.\n"
-                "  Fix: Return a dict as the offset."
-            )
-
-        ingestion_type = self._ingestion_type(table)
-        if offset1 is None:
-            if ingestion_type != "snapshot":
+        for i in range(max_iter):
+            result = self.connector.read_table(table, offset, self._opts(table))
+            if not isinstance(result, tuple) or len(result) != 2:
                 return (
-                    f"[{table}] Offset is None but ingestion_type is '{ingestion_type}'.\n"
-                    "  Fix: read_table() must return a non-None offset dict for "
-                    "non-snapshot tables so the framework can track micro-batch progress."
+                    f"[{table}] read_table call {i + 1} returned "
+                    f"{type(result).__name__}, expected 2-tuple.\n"
+                    "  Fix: read_table() must return (iterator, offset_dict)."
                 )
-            return None  # Snapshot table, nothing more to test.
+            iterator, offset = result
+            self._consume(iterator)
 
-        try:
-            json.dumps(offset1)
-        except (TypeError, ValueError) as e:
-            return (
-                f"[{table}] Offset not JSON-serializable: {e}\n"
-                "  Fix: Use only strings/numbers/booleans/None in the offset dict."
-            )
+            if offset is not None and not isinstance(offset, dict):
+                return (
+                    f"[{table}] Offset must be dict or None, got "
+                    f"{type(offset).__name__}."
+                )
 
-        # Call 2 — pass offset1 back
-        result2 = self.connector.read_table(table, offset1, self._opts(table))
-        if not isinstance(result2, tuple) or len(result2) != 2:
-            return (
-                f"[{table}] Second read_table call returned invalid format.\n"
-                "  Fix: read_table() must handle its own offset as start_offset."
-            )
+            if i == 0:
+                ingestion_type = self._ingestion_type(table)
+                if offset is None:
+                    if ingestion_type != "snapshot":
+                        return (
+                            f"[{table}] Offset is None but ingestion_type is "
+                            f"'{ingestion_type}'.\n"
+                            "  Fix: read_table() must return a non-None offset "
+                            "dict for non-snapshot tables."
+                        )
+                    return None  # Snapshot — nothing else to test.
 
-        iter2, offset2 = result2
-        # Drain so the read fully completes — some connectors finalize the
-        # offset only after iterator consumption.
-        self._consume(iter2)
+            try:
+                cur_json = json.dumps(offset, sort_keys=True)
+            except (TypeError, ValueError) as e:
+                return (
+                    f"[{table}] Offset not JSON-serializable: {e}\n"
+                    "  Fix: Use only strings/numbers/booleans/None in the offset dict."
+                )
 
-        if offset2 is not None and not isinstance(offset2, dict):
-            return (
-                f"[{table}] Second offset must be dict or None, got {type(offset2).__name__}."
-            )
+            if prev_json is not None and cur_json == prev_json:
+                return None  # Converged.
+            prev_json = cur_json
 
-        # Convergence: passing offset1 back must produce offset2 == offset1
-        # whenever no new source-side data has arrived between the two calls.
-        # Trigger.AvailableNow termination depends on this — if a connector
-        # advances its cursor on every call (e.g. unbounded Graph deltaLink
-        # rotation, mailbox historyId, or a non-frozen now()), AvailableNow
-        # will spin microbatches forever.
-        try:
-            o1_json = json.dumps(offset1, sort_keys=True)
-            o2_json = json.dumps(offset2, sort_keys=True)
-        except (TypeError, ValueError):
-            o1_json, o2_json = repr(offset1), repr(offset2)
-        if o1_json != o2_json:
-            return (
-                f"[{table}] Offset did not converge: first call returned "
-                f"{o1_json}, second call (with the first offset replayed) "
-                f"returned {o2_json}.\n"
-                "  Fix: cap the cursor at an init-time snapshot so successive "
-                "calls with the same input return the same offset. "
-                "Trigger.AvailableNow termination depends on this."
-            )
-
-        return None
+        return (
+            f"[{table}] read_table did not converge in {max_iter} iterations "
+            f"(last offset: {prev_json}).\n"
+            "  Fix: cap the cursor at an init-time snapshot or a known upper "
+            "bound so successive calls with the same input eventually return "
+            "the same offset. Trigger.AvailableNow termination depends on this."
+        )
 
     # ------------------------------------------------------------------
     # Shared read-validation helper
@@ -649,8 +856,23 @@ class LakeflowConnectTests:
         if errors:
             pytest.fail("\n\n".join(errors))
 
+    @classmethod
+    def _skip_if_simulate_mode(cls) -> None:
+        """Write-back tests POST/PUT/DELETE against the source. In simulate
+        mode there's no real source to mutate (and stubbed write endpoints
+        aren't authored in the spec), so skip. ``CONNECTOR_TEST_MODE=live``
+        opts back in by routing requests to the real source."""
+        if cls.simulator_source and _resolve_env_mode_for_simulator(
+            cls.simulator_source
+        ) != MODE_LIVE:
+            pytest.skip(
+                "Write-back test requires a real source; "
+                "set CONNECTOR_TEST_MODE=live to run."
+            )
+
     def test_write_to_source(self):  # pylint: disable=too-many-branches
         """generate_rows_and_write works on each insertable table."""
+        self._skip_if_simulate_mode()
         if not self.test_utils:
             pytest.skip("No test_utils_class configured")
 
@@ -687,6 +909,7 @@ class LakeflowConnectTests:
 
     def test_incremental_after_write(self):  # pylint: disable=too-many-branches
         """Incremental read after write returns the written row."""
+        self._skip_if_simulate_mode()
         if not self.test_utils:
             pytest.skip("No test_utils_class configured")
 
@@ -766,6 +989,7 @@ class LakeflowConnectTests:
 
     def test_delete_and_read_deletes(self):
         """Delete a row and verify it appears in read_table_deletes."""
+        self._skip_if_simulate_mode()
         if not self.test_utils:
             pytest.skip("No test_utils_class configured")
         if not hasattr(self.test_utils, "delete_rows"):

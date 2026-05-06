@@ -49,3 +49,14 @@ Thumbs.db
 
 # Dev config
 tests/unit/sources/*/configs/dev_config.json
+
+# Replay config — fake credentials for simulate/replay mode. The canonical
+# source is the ``replay_config`` class attribute on each test class
+# (``LakeflowConnectTests`` writes them there); this glob lets contributors
+# drop a local override JSON next to a connector to override per run.
+tests/unit/sources/*/configs/replay_config.json
+
+# Source-simulator artifacts written by live runs (cassette, coverage report,
+# spec-validation report). Regenerated each time and not part of the source
+# of truth — the corpus under source_simulator/specs/<source>/ is.
+tests/unit/sources/*/cassettes/

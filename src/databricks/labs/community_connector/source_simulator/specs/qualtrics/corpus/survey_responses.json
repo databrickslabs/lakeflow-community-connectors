@@ -1,0 +1,131 @@
+[
+  {
+    "response_id": "whiskey-417",
+    "survey_id": "mike-653",
+    "recorded_date": "delta-395",
+    "start_date": "oscar-323",
+    "end_date": "victor-799",
+    "status": 83164,
+    "ip_address": "golf-689",
+    "progress": 25349,
+    "duration": 70474,
+    "finished": true,
+    "distribution_channel": "kilo-528",
+    "user_language": "november-852",
+    "location_latitude": "oscar-119",
+    "location_longitude": "hotel-194",
+    "values": {},
+    "labels": {},
+    "displayed_fields": [
+      "zulu-696"
+    ],
+    "displayed_values": {
+      "key_0": "juliet-625"
+    },
+    "embedded_data": {
+      "key_0": "juliet-587"
+    }
+  },
+  {
+    "response_id": "sierra-323",
+    "survey_id": "bravo-524",
+    "recorded_date": "whiskey-316",
+    "start_date": "victor-197",
+    "end_date": "zulu-754",
+    "status": 16986,
+    "ip_address": "hotel-557",
+    "progress": 28881,
+    "duration": 99337,
+    "finished": false,
+    "distribution_channel": "india-619",
+    "user_language": "juliet-333",
+    "location_latitude": "delta-128",
+    "location_longitude": "uniform-303",
+    "values": {
+      "key_0": {
+        "choice_text": "papa-212",
+        "choice_id": "sierra-720",
+        "text_entry": "juliet-276"
+      },
+      "key_1": {
+        "choice_text": "quebec-613",
+        "choice_id": "juliet-429",
+        "text_entry": "echo-225"
+      }
+    },
+    "labels": {
+      "key_0": "quebec-156"
+    },
+    "displayed_fields": [
+      "alpha-847",
+      "victor-821"
+    ],
+    "displayed_values": {
+      "key_0": "uniform-567",
+      "key_1": "whiskey-753"
+    },
+    "embedded_data": {
+      "key_0": "juliet-847",
+      "key_1": "yankee-684"
+    }
+  },
+  {
+    "response_id": "tango-210",
+    "survey_id": "hotel-384",
+    "recorded_date": "quebec-154",
+    "start_date": "xray-952",
+    "end_date": "zulu-623",
+    "status": 46258,
+    "ip_address": "xray-921",
+    "progress": 33964,
+    "duration": 62457,
+    "finished": true,
+    "distribution_channel": "november-543",
+    "user_language": "whiskey-451",
+    "location_latitude": "xray-183",
+    "location_longitude": "kilo-415",
+    "values": {
+      "key_0": {
+        "choice_text": "charlie-244",
+        "choice_id": "echo-919",
+        "text_entry": "delta-858"
+      }
+    },
+    "labels": {},
+    "displayed_fields": [
+      "hotel-676"
+    ],
+    "displayed_values": {
+      "key_0": "mike-670"
+    },
+    "embedded_data": {
+      "key_0": "victor-892"
+    }
+  },
+  {
+    "response_id": "whiskey-228",
+    "survey_id": "zulu-185",
+    "recorded_date": "kilo-413",
+    "start_date": "papa-690",
+    "end_date": "golf-797",
+    "status": 84218,
+    "ip_address": "tango-886",
+    "progress": 50934,
+    "duration": 65932,
+    "finished": false,
+    "distribution_channel": "uniform-886",
+    "user_language": "echo-291",
+    "location_latitude": "alpha-706",
+    "location_longitude": "oscar-422",
+    "values": {},
+    "labels": {},
+    "displayed_fields": [
+      "charlie-169"
+    ],
+    "displayed_values": {},
+    "embedded_data": {
+      "key_0": "romeo-525",
+      "key_1": "yankee-278"
+    }
+  }
+]

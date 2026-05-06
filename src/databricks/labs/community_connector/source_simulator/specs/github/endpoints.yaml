@@ -1,0 +1,154 @@
+# GitHub REST API endpoints exercised by the connector tests.
+#
+# Common patterns:
+#   * Pagination is page_number_with_link_header (page, per_page, max 100,
+#     defaults vary per endpoint — 30 is the GitHub default for most).
+#   * "since" / "until" filters use ISO timestamps; the simulator subsets
+#     the corpus by these (commit.author.date for /commits, etc.).
+#   * `state`, `sort`, `direction` are common filter/sort params on issue-
+#     and pull-request-shaped endpoints.
+
+endpoints:
+  # ---- repository-scoped collections ----
+
+  - path: "/repos/{owner}/{repo}/commits"
+    method: GET
+    corpus: commits
+    response:
+      pagination_style: page_number_with_link_header
+      default_sort: "commit.author.date desc"
+    params:
+      since:    {role: filter, field: commit.author.date, op: gte}
+      until:    {role: filter, field: commit.author.date, op: lte}
+      author:   {role: filter, field: author.login, op: eq}
+      sha:      {role: filter, field: sha, op: eq}
+      page:     {role: page}
+      per_page: {role: per_page, default: 30, max: 100}
+    # Cap-validation: when the test class opts in via inject_future_records,
+    # clone commits with commit.author.date set to ``now() + N hours``. The
+    # connector's ``until=<init_time>`` filter must exclude them; if it
+    # doesn't, ``test_read_terminates`` won't converge and the bug surfaces.
+    synthesize_future_records:
+      cursor_field: commit.author.date
+      count: 3
+
+  # GitHub also serves /repositories/{repo_id}/commits — alias the same corpus.
+  - path: "/repositories/{repo_id}/commits"
+    method: GET
+    corpus: commits
+    response:
+      pagination_style: page_number_with_link_header
+      default_sort: "commit.author.date desc"
+    params:
+      since:    {role: filter, field: commit.author.date, op: gte}
+      until:    {role: filter, field: commit.author.date, op: lte}
+      page:     {role: page}
+      per_page: {role: per_page, default: 30, max: 100}
+
+  - path: "/repos/{owner}/{repo}/issues"
+    method: GET
+    corpus: issues
+    response:
+      pagination_style: page_number_with_link_header
+      default_sort: "updated_at desc"
+    params:
+      state:     {role: filter, field: state, op: eq}
+      since:     {role: filter, field: updated_at, op: gte}
+      sort:      {role: sort_by, options: [created, updated, comments]}
+      direction: {role: sort_order, options: [asc, desc]}
+      page:      {role: page}
+      per_page:  {role: per_page, default: 30, max: 100}
+
+  - path: "/repos/{owner}/{repo}/issues/comments"
+    method: GET
+    corpus: issue_comments
+    response:
+      pagination_style: page_number_with_link_header
+      default_sort: "updated_at desc"
+    params:
+      since:     {role: filter, field: updated_at, op: gte}
+      sort:      {role: sort_by, options: [created, updated]}
+      direction: {role: sort_order, options: [asc, desc]}
+      page:      {role: page}
+      per_page:  {role: per_page, default: 30, max: 100}
+
+  - path: "/repos/{owner}/{repo}/pulls"
+    method: GET
+    corpus: pulls
+    response:
+      pagination_style: page_number_with_link_header
+      default_sort: "created_at desc"
+    params:
+      state:     {role: filter, field: state, op: eq}
+      sort:      {role: sort_by, options: [created, updated, popularity, long-running]}
+      direction: {role: sort_order, options: [asc, desc]}
+      page:      {role: page}
+      per_page:  {role: per_page, default: 30, max: 100}
+
+  - path: "/repos/{owner}/{repo}/branches"
+    method: GET
+    corpus: branches
+    response:
+      pagination_style: page_number_with_link_header
+    params:
+      page:     {role: page}
+      per_page: {role: per_page, default: 30, max: 100}
+
+  - path: "/repos/{owner}/{repo}/assignees"
+    method: GET
+    corpus: assignees
+    response:
+      pagination_style: page_number_with_link_header
+    params:
+      page:     {role: page}
+      per_page: {role: per_page, default: 30, max: 100}
+
+  - path: "/repos/{owner}/{repo}/collaborators"
+    method: GET
+    corpus: collaborators
+    response:
+      pagination_style: page_number_with_link_header
+    params:
+      page:     {role: page}
+      per_page: {role: per_page, default: 30, max: 100}
+
+  # ---- user-scoped collections ----
+
+  - path: "/users/{user}/repos"
+    method: GET
+    corpus: repositories
+    response:
+      pagination_style: page_number_with_link_header
+      default_sort: "updated_at desc"
+    params:
+      type:      {role: filter, field: type, op: eq}
+      sort:      {role: sort_by, options: [created, updated, pushed, full_name]}
+      direction: {role: sort_order, options: [asc, desc]}
+      page:      {role: page}
+      per_page:  {role: per_page, default: 30, max: 100}
+
+  - path: "/user/orgs"
+    method: GET
+    corpus: organizations
+    response:
+      pagination_style: page_number_with_link_header
+    params:
+      page:     {role: page}
+      per_page: {role: per_page, default: 30, max: 100}
+
+  - path: "/user/teams"
+    method: GET
+    corpus: teams
+    response:
+      pagination_style: page_number_with_link_header
+    params:
+      page:     {role: page}
+      per_page: {role: per_page, default: 30, max: 100}
+
+  # ---- single-entity endpoints ----
+
+  - path: "/user"
+    method: GET
+    corpus: user
+    response:
+      single_entity: true

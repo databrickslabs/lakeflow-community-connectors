@@ -24,6 +24,11 @@ dependencies = [
     "pyspark>=4.2.0.dev0",
     "pydantic>=2.0.0,<3.0",
     "pyyaml>=6.0,<7.0",
+    "pyjwt[crypto]>=2.4.0,<3.0",
+    # source_simulator intercepts ``requests.Session.send`` to stand in for
+    # live source APIs in tests. Matches the floor used by every per-source
+    # pyproject.toml that depends on ``requests``.
+    "requests>=2.28.0,<3.0",
 ]
 
 [project.optional-dependencies]

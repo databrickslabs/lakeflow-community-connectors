@@ -1,0 +1,30 @@
+[
+  {
+    "code": "uniform-553",
+    "active": false,
+    "event": "papa-718",
+    "name": "sierra-284",
+    "description": "romeo-478"
+  },
+  {
+    "code": "bravo-865",
+    "active": true,
+    "event": "lima-629",
+    "name": "charlie-453",
+    "description": "alpha-518"
+  },
+  {
+    "code": "tango-248",
+    "active": false,
+    "event": "victor-841",
+    "name": "uniform-945",
+    "description": "romeo-887"
+  },
+  {
+    "code": "delta-414",
+    "active": false,
+    "event": "juliet-281",
+    "name": "echo-302",
+    "description": "sierra-787"
+  }
+]

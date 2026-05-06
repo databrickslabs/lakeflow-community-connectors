@@ -1,0 +1,30 @@
+[
+  {
+    "targetUserAssignmentUUID": "lima-131",
+    "canGiveFeedback": false,
+    "canGiveFeedbackToTargetUser": false,
+    "canRequestFeedbackFromTargetUser": true,
+    "canRequestFeedbackAboutTargetUser": true
+  },
+  {
+    "targetUserAssignmentUUID": "mike-554",
+    "canGiveFeedback": false,
+    "canGiveFeedbackToTargetUser": true,
+    "canRequestFeedbackFromTargetUser": true,
+    "canRequestFeedbackAboutTargetUser": true
+  },
+  {
+    "targetUserAssignmentUUID": "whiskey-619",
+    "canGiveFeedback": true,
+    "canGiveFeedbackToTargetUser": false,
+    "canRequestFeedbackFromTargetUser": true,
+    "canRequestFeedbackAboutTargetUser": true
+  },
+  {
+    "targetUserAssignmentUUID": "bravo-260",
+    "canGiveFeedback": true,
+    "canGiveFeedbackToTargetUser": true,
+    "canRequestFeedbackFromTargetUser": false,
+    "canRequestFeedbackAboutTargetUser": true
+  }
+]
