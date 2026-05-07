@@ -26,6 +26,9 @@ Create a `test_{source_name}_lakeflow_connect.py` under the `tests/unit/sources/
 ### Partitioned Connector Tests
 If the connector implements `SupportsPartition` or `SupportsPartitionedStream` (check the connector class definition for these mixins), the test class **must** also inherit from `SupportsPartitionedStreamTests` alongside `LakeflowConnectTests`. This adds partition-specific test coverage (partition key validation, partitioned reads, micro-batch convergence, etc.).
 
+### Write-back Tests (opt-in)
+Write-back tests live in a **separate mixin** (`tests/unit/sources/test_write_back_suite.LakeflowConnectWriteBackTests`) and require `CONNECTOR_TEST_MODE=live` against a real source. Do **not** mix it in for read-only connectors — the default `LakeflowConnectTests` is enough. Write-back support is set up in a different step (see `write-back-testing` skill).
+
 ## 2. Author the Simulator Spec
 
 Tests run against an in-process simulator by default — no network, no

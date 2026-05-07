@@ -1,9 +1,10 @@
 from databricks.labs.community_connector.sources.qualtrics.qualtrics import QualtricsLakeflowConnect
 from tests.unit.sources.qualtrics.qualtrics_test_utils import LakeflowConnectWriteTestUtils
 from tests.unit.sources.test_suite import LakeflowConnectTests
+from tests.unit.sources.test_write_back_suite import LakeflowConnectWriteBackTests
 
 
-class TestQualtricsConnector(LakeflowConnectTests):
+class TestQualtricsConnector(LakeflowConnectWriteBackTests, LakeflowConnectTests):
     connector_class = QualtricsLakeflowConnect
     test_utils_class = LakeflowConnectWriteTestUtils
     simulator_source = "qualtrics"
