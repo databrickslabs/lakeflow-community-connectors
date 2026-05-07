@@ -600,13 +600,6 @@ def register_lakeflow_source(spark):
                     "associations": ["contacts", "companies", "deals", "tickets"],
                     "supports_deletes": True,
                 },
-                "deal_split": {
-                    "primary_keys": ["id"],
-                    "cursor_field": "updatedAt",
-                    "cursor_property_field": "hs_lastmodifieddate",
-                    "associations": [],
-                    "supports_deletes": False,
-                },
             }
 
             # Default config for custom objects
@@ -650,7 +643,7 @@ def register_lakeflow_source(spark):
             """
             try:
                 url = f"{self.base_url}/crm/v3/schemas"
-                resp = requests.get(url, headers=self.auth_header)
+                resp = requests.get(url, headers=self.auth_header, timeout=60)
 
                 if resp.status_code != 200:
                     return []
@@ -844,7 +837,7 @@ def register_lakeflow_source(spark):
             url = f"{self.base_url}/properties/v2/{object_type}/properties"
 
             try:
-                resp = requests.get(url, headers=self.auth_header)
+                resp = requests.get(url, headers=self.auth_header, timeout=60)
                 if resp.status_code != 200:
                     raise Exception("API error: {resp.status_code} {resp.text}")
 
@@ -1089,7 +1082,7 @@ def register_lakeflow_source(spark):
             if associations:
                 url += f"&associations={','.join(associations)}"
 
-            resp = requests.get(url, headers=self.auth_header)
+            resp = requests.get(url, headers=self.auth_header, timeout=60)
             if resp.status_code != 200:
                 raise Exception(
                     f"HubSpot API error for {table_name}: {resp.status_code} {resp.text}"
@@ -1144,7 +1137,7 @@ def register_lakeflow_source(spark):
                 search_body["after"] = after
 
             url = f"{self.base_url}/crm/v3/objects/{table_name}/search"
-            resp = requests.post(url, headers=self.auth_header, json=search_body)
+            resp = requests.post(url, headers=self.auth_header, json=search_body, timeout=60)
 
             if resp.status_code != 200:
                 raise Exception(
@@ -1226,7 +1219,7 @@ def register_lakeflow_source(spark):
             """Test the connection to HubSpot API"""
             try:
                 url = f"{self.base_url}/crm/v3/objects/contacts?limit=1"
-                resp = requests.get(url, headers=self.auth_header)
+                resp = requests.get(url, headers=self.auth_header, timeout=60)
 
                 if resp.status_code == 200:
                     return {"status": "success", "message": "Connection successful"}

@@ -19,6 +19,19 @@ from databricks.labs.community_connector.sources.gmail.gmail_utils import (
 )
 
 
+def _parse_max_per_batch(table_options: Dict[str, str] | None) -> int:
+    if not table_options:
+        return 0
+    raw = table_options.get("max_records_per_batch")
+    if raw is None:
+        return 0
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 0
+    return value if value > 0 else 0
+
+
 class GmailLakeflowConnect(LakeflowConnect):
     """Gmail connector implementing the LakeflowConnect interface with 100% API coverage."""
 
@@ -152,6 +165,14 @@ class GmailLakeflowConnect(LakeflowConnect):
             page_token = response.get("nextPageToken")
             if not page_token:
                 break
+
+        # Mirror the _init_history_id cap from the incremental readers so the
+        # deletes path also terminates under Trigger.AvailableNow.
+        if (
+            self._init_history_id
+            and int(latest_history_id) > int(self._init_history_id)
+        ):
+            latest_history_id = str(self._init_history_id)
 
         next_offset = {"historyId": latest_history_id}
         return iter(deleted_records), next_offset
@@ -296,6 +317,8 @@ class GmailLakeflowConnect(LakeflowConnect):
         ):
             return iter([]), {"historyId": str(self._init_history_id)}
 
+        max_per_batch = _parse_max_per_batch(table_options)
+
         params = {
             "startHistoryId": start_history_id,
             "maxResults": 500,
@@ -324,6 +347,8 @@ class GmailLakeflowConnect(LakeflowConnect):
                     if msg_id:
                         all_message_ids.add(msg_id)
 
+            if max_per_batch and len(all_message_ids) >= max_per_batch:
+                break
             page_token = response.get("nextPageToken")
             if not page_token:
                 break
@@ -436,6 +461,8 @@ class GmailLakeflowConnect(LakeflowConnect):
         ):
             return iter([]), {"historyId": str(self._init_history_id)}
 
+        max_per_batch = _parse_max_per_batch(table_options)
+
         params = {
             "startHistoryId": start_history_id,
             "maxResults": 500,
@@ -464,6 +491,8 @@ class GmailLakeflowConnect(LakeflowConnect):
                     if thread_id:
                         all_thread_ids.add(thread_id)
 
+            if max_per_batch and len(all_thread_ids) >= max_per_batch:
+                break
             page_token = response.get("nextPageToken")
             if not page_token:
                 break
