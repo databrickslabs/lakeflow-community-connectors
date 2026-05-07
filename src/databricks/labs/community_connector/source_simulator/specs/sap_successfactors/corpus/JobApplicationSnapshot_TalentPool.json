@@ -1,0 +1,30 @@
+[
+  {
+    "applicationId": 37803,
+    "backgroundElementId": 35771,
+    "candidateId": 67800,
+    "bgOrderPos": 36050,
+    "lastModifiedDateTime": "kilo-910"
+  },
+  {
+    "applicationId": 64375,
+    "backgroundElementId": 13487,
+    "candidateId": 85221,
+    "bgOrderPos": 88889,
+    "lastModifiedDateTime": "charlie-389"
+  },
+  {
+    "applicationId": 71325,
+    "backgroundElementId": 46420,
+    "candidateId": 14710,
+    "bgOrderPos": 97700,
+    "lastModifiedDateTime": "tango-377"
+  },
+  {
+    "applicationId": 60809,
+    "backgroundElementId": 82404,
+    "candidateId": 80975,
+    "bgOrderPos": 26385,
+    "lastModifiedDateTime": "yankee-372"
+  }
+]

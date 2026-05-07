@@ -1,0 +1,38 @@
+[
+  {
+    "id": 5220,
+    "applicationId": 5053,
+    "vendorCode": "golf-228",
+    "createdBy": "lima-191",
+    "createdDateTime": "echo-341",
+    "lastModifiedBy": "golf-495",
+    "lastModifiedDateTime": "xray-149"
+  },
+  {
+    "id": 78698,
+    "applicationId": 38931,
+    "vendorCode": "oscar-231",
+    "createdBy": "juliet-408",
+    "createdDateTime": "delta-248",
+    "lastModifiedBy": "mike-869",
+    "lastModifiedDateTime": "tango-951"
+  },
+  {
+    "id": 55017,
+    "applicationId": 14029,
+    "vendorCode": "kilo-677",
+    "createdBy": "foxtrot-386",
+    "createdDateTime": "tango-647",
+    "lastModifiedBy": "november-220",
+    "lastModifiedDateTime": "bravo-389"
+  },
+  {
+    "id": 23770,
+    "applicationId": 33577,
+    "vendorCode": "quebec-977",
+    "createdBy": "zulu-180",
+    "createdDateTime": "hotel-634",
+    "lastModifiedBy": "zulu-380",
+    "lastModifiedDateTime": "oscar-781"
+  }
+]

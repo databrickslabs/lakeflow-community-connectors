@@ -144,7 +144,7 @@ databricks connections delete "sap_successfactors_connection"
 
 ## Supported Objects
 
-This connector supports **149 tables** across 9 SAP SuccessFactors modules. Tables support either **CDC (Change Data Capture)** for incremental synchronization or **Snapshot** mode for full refresh.
+This connector supports **250 tables** across SAP SuccessFactors modules. Tables support either **CDC (Change Data Capture)** for incremental synchronization or **Snapshot** mode for full refresh. The full table list is in [`sap_successfactors_api_doc.md`](sap_successfactors_api_doc.md).
 
 ### 1. Employee Central Core (27 tables)
 

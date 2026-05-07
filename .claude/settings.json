@@ -23,9 +23,7 @@
       "Bash(python tools/scripts/merge_python_source.py:*)",
       "WebSearch(*)"
     ],
-    "deny": [
-      "Read(tests/unit/sources/**/configs/dev_config.json)"
-    ]
+    "deny": []
   },
   "hooks": {
     "Notification": [

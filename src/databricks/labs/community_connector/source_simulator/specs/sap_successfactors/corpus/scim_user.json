@@ -1,0 +1,203 @@
+[
+  {
+    "id": "kilo-630",
+    "userUuid": "foxtrot-248",
+    "userName": "juliet-459",
+    "displayName": "uniform-159",
+    "nickName": "quebec-955",
+    "title": "juliet-340",
+    "userType": "bravo-586",
+    "active": true,
+    "externalId": "uniform-562",
+    "type": "kilo-795",
+    "name": {
+      "formatted": "whiskey-495",
+      "familyName": "zulu-486",
+      "givenName": "november-821",
+      "middleName": "echo-945",
+      "honorificPrefix": "tango-161",
+      "honorificSuffix": "victor-746"
+    },
+    "meta": {
+      "resourceType": "alpha-537",
+      "created": "november-720",
+      "lastModified": "juliet-810",
+      "location": "india-306",
+      "version": "sierra-156"
+    },
+    "Schemas": [
+      "november-996",
+      "lima-850"
+    ],
+    "emails": [],
+    "phoneNumbers": [],
+    "groups": {
+      "value": "delta-737",
+      "type": "foxtrot-167",
+      "display": "golf-452",
+      "ref": "victor-107"
+    }
+  },
+  {
+    "id": "lima-115",
+    "userUuid": "oscar-874",
+    "userName": "lima-967",
+    "displayName": "november-303",
+    "nickName": "romeo-748",
+    "title": "yankee-805",
+    "userType": "oscar-988",
+    "active": false,
+    "externalId": "charlie-803",
+    "type": "bravo-672",
+    "name": {
+      "formatted": "lima-729",
+      "familyName": "lima-967",
+      "givenName": "india-466",
+      "middleName": "sierra-501",
+      "honorificPrefix": "juliet-488",
+      "honorificSuffix": "victor-448"
+    },
+    "meta": {
+      "resourceType": "mike-972",
+      "created": "papa-623",
+      "lastModified": "oscar-932",
+      "location": "echo-271",
+      "version": "zulu-832"
+    },
+    "Schemas": [
+      "hotel-352"
+    ],
+    "emails": [
+      {
+        "value": "foxtrot-609",
+        "type": "oscar-529",
+        "primary": true
+      },
+      {
+        "value": "november-691",
+        "type": "yankee-455",
+        "primary": true
+      }
+    ],
+    "phoneNumbers": [
+      {
+        "value": "mike-425",
+        "type": "romeo-467",
+        "display": "delta-974",
+        "primary": "hotel-812"
+      }
+    ],
+    "groups": {
+      "value": "kilo-749",
+      "type": "mike-606",
+      "display": "xray-270",
+      "ref": "golf-455"
+    }
+  },
+  {
+    "id": "november-140",
+    "userUuid": "whiskey-756",
+    "userName": "echo-445",
+    "displayName": "golf-512",
+    "nickName": "delta-599",
+    "title": "whiskey-338",
+    "userType": "whiskey-383",
+    "active": false,
+    "externalId": "quebec-988",
+    "type": "echo-989",
+    "name": {
+      "formatted": "whiskey-594",
+      "familyName": "juliet-180",
+      "givenName": "mike-933",
+      "middleName": "oscar-833",
+      "honorificPrefix": "kilo-116",
+      "honorificSuffix": "romeo-448"
+    },
+    "meta": {
+      "resourceType": "yankee-833",
+      "created": "victor-708",
+      "lastModified": "delta-805",
+      "location": "delta-247",
+      "version": "hotel-732"
+    },
+    "Schemas": [],
+    "emails": [],
+    "phoneNumbers": [
+      {
+        "value": "lima-415",
+        "type": "golf-542",
+        "display": "golf-769",
+        "primary": "uniform-985"
+      }
+    ],
+    "groups": {
+      "value": "zulu-652",
+      "type": "romeo-768",
+      "display": "sierra-207",
+      "ref": "hotel-962"
+    }
+  },
+  {
+    "id": "romeo-587",
+    "userUuid": "echo-216",
+    "userName": "uniform-979",
+    "displayName": "sierra-277",
+    "nickName": "kilo-530",
+    "title": "tango-922",
+    "userType": "delta-977",
+    "active": true,
+    "externalId": "bravo-668",
+    "type": "mike-969",
+    "name": {
+      "formatted": "alpha-712",
+      "familyName": "alpha-746",
+      "givenName": "delta-237",
+      "middleName": "charlie-717",
+      "honorificPrefix": "romeo-654",
+      "honorificSuffix": "oscar-915"
+    },
+    "meta": {
+      "resourceType": "yankee-380",
+      "created": "foxtrot-991",
+      "lastModified": "november-415",
+      "location": "victor-654",
+      "version": "charlie-498"
+    },
+    "Schemas": [
+      "foxtrot-227",
+      "november-582"
+    ],
+    "emails": [
+      {
+        "value": "hotel-613",
+        "type": "papa-565",
+        "primary": false
+      },
+      {
+        "value": "yankee-336",
+        "type": "lima-872",
+        "primary": true
+      }
+    ],
+    "phoneNumbers": [
+      {
+        "value": "india-776",
+        "type": "bravo-408",
+        "display": "zulu-582",
+        "primary": "golf-737"
+      },
+      {
+        "value": "oscar-575",
+        "type": "oscar-107",
+        "display": "quebec-547",
+        "primary": "echo-551"
+      }
+    ],
+    "groups": {
+      "value": "alpha-996",
+      "type": "juliet-868",
+      "display": "whiskey-235",
+      "ref": "papa-487"
+    }
+  }
+]

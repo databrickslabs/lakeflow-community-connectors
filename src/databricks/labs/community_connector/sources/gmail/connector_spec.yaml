@@ -53,7 +53,7 @@ connection:
 # parameter of the UC connection to allow them to be passed through.
 # Use a comma-separated string of option names.
 # ============================================================================
-external_options_allowlist: "q,labelIds,maxResults,includeSpamTrash,format"
+external_options_allowlist: "q,labelIds,maxResults,includeSpamTrash,format,max_records_per_batch"
 
 # ============================================================================
 # Supported Tables (10 tables - 100% Gmail API coverage)

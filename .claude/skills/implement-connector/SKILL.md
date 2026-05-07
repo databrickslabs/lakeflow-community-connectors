@@ -18,17 +18,18 @@ For simple connectors, keeping everything in a single `{source_name}.py` file is
 
 ## Implementation Requirements
 
-- **Interface:** Implement all methods declared in the `LakeflowConnect` interface. Do not add an extra main function.
 - **Schema:** In `get_table_schema`, prefer `StructType` over `MapType` to enforce explicit typing. Avoid flattening nested fields. Prefer `LongType` over `IntegerType` to avoid overflow. Do not convert the JSON into dictionaries based on the schema before returning in `read_table`; return the raw parsed JSON and let the framework handle type coercion.
 - **Metadata:** If `ingestion_type` returned from `read_table_metadata` is `cdc` or `cdc_with_deletes`, both `primary_keys` and `cursor_field` are required.
 - **Deletes:** If `ingestion_type` is `cdc_with_deletes`, you must implement `read_table_deletes()`. This method should return records with at minimum the primary key fields and cursor field populated.
-- **Data Processing:** If a StructType field is absent in the response, assign `None` as the default value instead of an empty dictionary `{}`. Avoid creating mock objects.
-- **Table Options:** The functions `get_table_schema`, `read_table_metadata`, and `read_table` accept a `table_options` dictionary. Do not include parameters required by individual tables in the global connection options; rely on `table_options` instead.
+- **Data Processing:** If a StructType field is absent in the response, assign `None` as the default value instead of an empty dictionary `{}`.
+- **Table Options:** Do not include parameters required by individual tables in the global connection options; rely on `table_options` instead.
 - **API Usage:** If a data source provides both a list API and a get API for the same object, always use the list API. Only call the get API for individual entries if explicitly requested. For child objects that require a parent identifier, list the parent objects first, then list child objects for each parent, and combine the results.
 
 ## Incremental read_table with offsets 
 
 For incremental ingestion of tables (`cdc` and `append_only`), the framework calls `read_table` repeatedly within a single trigger run. Each call produces one microbatch. A trigger run stops when the returned `end_offset` equals `start_offset`.
+
+**This termination condition is critical for Trigger AvailableNow.** The connector runs under `Trigger.AvailableNow`, which issues microbatches until the source reports "no more data available" — signalled by `read_table` returning `end_offset == start_offset`. If the connector keeps advancing the offset (e.g. by chasing continuously-arriving new data), the trigger never terminates and the pipeline hangs. Every incremental connector must guarantee this condition is reached — see **Guaranteeing Termination** below.
 
 ### Admission Control: `max_records_per_batch` 
 
@@ -36,7 +37,7 @@ Every incremental table **must** support a `max_records_per_batch` table option.
 
 This is **orthogonal** to the query-scoping strategies below. Regardless of whether you use a sliding window, a server-side limit, or neither, you must still respect `max_records_per_batch` by stopping record accumulation once the count is reached.
 
-**Exception — best-effort enforcement:** When the API does not support ascending sort and a sliding time-window is used (see below), `max_records_per_batch` becomes best-effort. The window must be drained completely to avoid skipping or duplicating records, so the actual batch size is governed by the window size rather than a strict record count.
+**Exception — best-effort enforcement:** When the API does not support ascending sort and a sliding time-window is used (see below), `max_records_per_batch` becomes best-effort. The window must be drained completely to avoid skipping or duplicating records, so the actual batch size is governed by `window_seconds` rather than a strict record count.
 
 ### Ascending Sort Order Requirement
 

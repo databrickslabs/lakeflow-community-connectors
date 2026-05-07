@@ -19,6 +19,19 @@ from databricks.labs.community_connector.sources.gmail.gmail_utils import (
 )
 
 
+def _parse_max_per_batch(table_options: Dict[str, str] | None) -> int:
+    if not table_options:
+        return 0
+    raw = table_options.get("max_records_per_batch")
+    if raw is None:
+        return 0
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 0
+    return value if value > 0 else 0
+
+
 class GmailLakeflowConnect(LakeflowConnect):
     """Gmail connector implementing the LakeflowConnect interface with 100% API coverage."""
 
@@ -47,6 +60,17 @@ class GmailLakeflowConnect(LakeflowConnect):
         self.api = GmailApiClient(
             self.client_id, self.client_secret, self.refresh_token, self.user_id
         )
+
+        # Snapshot the mailbox historyId at init time. Gmail's mailbox
+        # historyId advances on every write (new mail, reads, label edits),
+        # so without an init-time cap, _read_messages_incremental would keep
+        # returning a higher offset every microbatch on an active mailbox
+        # and Trigger.AvailableNow would never terminate. The next pipeline
+        # update creates a fresh source and picks up a new snapshot.
+        profile = self.api.make_request(
+            "GET", f"/users/{self.user_id}/profile",
+        )
+        self._init_history_id = profile.get("historyId") if profile else None
 
     # ─── Interface Methods ────────────────────────────────────────────────────
 
@@ -142,6 +166,14 @@ class GmailLakeflowConnect(LakeflowConnect):
             if not page_token:
                 break
 
+        # Mirror the _init_history_id cap from the incremental readers so the
+        # deletes path also terminates under Trigger.AvailableNow.
+        if (
+            self._init_history_id
+            and int(latest_history_id) > int(self._init_history_id)
+        ):
+            latest_history_id = str(self._init_history_id)
+
         next_offset = {"historyId": latest_history_id}
         return iter(deleted_records), next_offset
 
@@ -181,6 +213,21 @@ class GmailLakeflowConnect(LakeflowConnect):
             raise ValueError(
                 f"Unsupported table: '{table_name}'. Supported tables are: {SUPPORTED_TABLES}"
             )
+
+    def _pin_to_init_offset(self, latest_history_id) -> Dict[str, str]:
+        """Return the next offset, pinned to the init-time historyId snapshot.
+
+        Pinning to ``self._init_history_id`` lets the next microbatch enter
+        ``_read_*_incremental`` with ``start == cap`` and short-circuit, so
+        Trigger.AvailableNow terminates.  Falls back to the highest
+        historyId seen on this drain only when the ``__init__`` profile
+        call failed; in that mode termination is best-effort.
+        """
+        if self._init_history_id:
+            return {"historyId": str(self._init_history_id)}
+        if latest_history_id:
+            return {"historyId": str(latest_history_id)}
+        return {}
 
     # ─── Table Readers ────────────────────────────────────────────────────────
 
@@ -256,17 +303,22 @@ class GmailLakeflowConnect(LakeflowConnect):
             if not page_token:
                 break
 
-        next_offset = (
-            {"historyId": state["latest_history_id"]}
-            if state["latest_history_id"]
-            else {}
-        )
-        return iter(all_messages), next_offset
+        return iter(all_messages), self._pin_to_init_offset(state["latest_history_id"])
 
     def _read_messages_incremental(
         self, start_history_id: str, table_options: Dict[str, str]
     ) -> (Iterator[dict], dict):
         """Read messages incrementally using History API with batch fetching."""
+        # Already at or past the init-time snapshot — return empty so
+        # AvailableNow sees end_offset == start_offset and terminates.
+        if (
+            self._init_history_id
+            and int(start_history_id) >= int(self._init_history_id)
+        ):
+            return iter([]), {"historyId": str(self._init_history_id)}
+
+        max_per_batch = _parse_max_per_batch(table_options)
+
         params = {
             "startHistoryId": start_history_id,
             "maxResults": 500,
@@ -295,6 +347,8 @@ class GmailLakeflowConnect(LakeflowConnect):
                     if msg_id:
                         all_message_ids.add(msg_id)
 
+            if max_per_batch and len(all_message_ids) >= max_per_batch:
+                break
             page_token = response.get("nextPageToken")
             if not page_token:
                 break
@@ -310,6 +364,16 @@ class GmailLakeflowConnect(LakeflowConnect):
 
             batch_results = self.api.make_batch_request(endpoints, params_list)
             all_messages.extend([r for r in batch_results if r])
+
+        # Cap the cursor at the init-time snapshot. Gmail's History API returns
+        # the *current* mailbox historyId in `response.historyId`, which advances
+        # on every mailbox write. Without this cap, an active mailbox would keep
+        # producing strictly higher offsets and AvailableNow would never terminate.
+        if (
+            self._init_history_id
+            and int(latest_history_id) > int(self._init_history_id)
+        ):
+            latest_history_id = str(self._init_history_id)
 
         next_offset = {"historyId": latest_history_id}
         return iter(all_messages), next_offset
@@ -383,17 +447,22 @@ class GmailLakeflowConnect(LakeflowConnect):
             if not page_token:
                 break
 
-        next_offset = (
-            {"historyId": state["latest_history_id"]}
-            if state["latest_history_id"]
-            else {}
-        )
-        return iter(all_threads), next_offset
+        return iter(all_threads), self._pin_to_init_offset(state["latest_history_id"])
 
     def _read_threads_incremental(
         self, start_history_id: str, table_options: Dict[str, str]
     ) -> (Iterator[dict], dict):
         """Read threads incrementally using History API."""
+        # Already at or past the init-time snapshot — return empty so
+        # AvailableNow sees end_offset == start_offset and terminates.
+        if (
+            self._init_history_id
+            and int(start_history_id) >= int(self._init_history_id)
+        ):
+            return iter([]), {"historyId": str(self._init_history_id)}
+
+        max_per_batch = _parse_max_per_batch(table_options)
+
         params = {
             "startHistoryId": start_history_id,
             "maxResults": 500,
@@ -422,6 +491,8 @@ class GmailLakeflowConnect(LakeflowConnect):
                     if thread_id:
                         all_thread_ids.add(thread_id)
 
+            if max_per_batch and len(all_thread_ids) >= max_per_batch:
+                break
             page_token = response.get("nextPageToken")
             if not page_token:
                 break
@@ -437,6 +508,13 @@ class GmailLakeflowConnect(LakeflowConnect):
 
             batch_results = self.api.make_batch_request(endpoints, params_list)
             all_threads.extend([r for r in batch_results if r])
+
+        # Cap at init-time snapshot — see _read_messages_incremental.
+        if (
+            self._init_history_id
+            and int(latest_history_id) > int(self._init_history_id)
+        ):
+            latest_history_id = str(self._init_history_id)
 
         next_offset = {"historyId": latest_history_id}
         return iter(all_threads), next_offset

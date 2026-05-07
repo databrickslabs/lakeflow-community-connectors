@@ -1,0 +1,58 @@
+[
+  {
+    "userId": "xray-846",
+    "defaultLocale": "oscar-914",
+    "is_deleted": false,
+    "lastModifiedDateTime": "romeo-653",
+    "loginMethod": "whiskey-342",
+    "personGUID": "oscar-763",
+    "personId": 547.91,
+    "personIdExternal": "whiskey-198",
+    "productName": "uniform-639",
+    "status": "yankee-115",
+    "timeZone": "golf-680",
+    "userName": "mike-637"
+  },
+  {
+    "userId": "bravo-905",
+    "defaultLocale": "quebec-320",
+    "is_deleted": false,
+    "lastModifiedDateTime": "charlie-246",
+    "loginMethod": "delta-817",
+    "personGUID": "echo-877",
+    "personId": 76.72,
+    "personIdExternal": "alpha-310",
+    "productName": "whiskey-573",
+    "status": "bravo-800",
+    "timeZone": "foxtrot-334",
+    "userName": "mike-197"
+  },
+  {
+    "userId": "kilo-485",
+    "defaultLocale": "papa-563",
+    "is_deleted": true,
+    "lastModifiedDateTime": "xray-315",
+    "loginMethod": "charlie-500",
+    "personGUID": "india-942",
+    "personId": 798.52,
+    "personIdExternal": "kilo-945",
+    "productName": "juliet-845",
+    "status": "quebec-703",
+    "timeZone": "charlie-665",
+    "userName": "zulu-970"
+  },
+  {
+    "userId": "zulu-119",
+    "defaultLocale": "delta-573",
+    "is_deleted": true,
+    "lastModifiedDateTime": "yankee-440",
+    "loginMethod": "alpha-312",
+    "personGUID": "india-422",
+    "personId": 574.82,
+    "personIdExternal": "hotel-607",
+    "productName": "india-774",
+    "status": "zulu-668",
+    "timeZone": "juliet-815",
+    "userName": "foxtrot-124"
+  }
+]

@@ -16,6 +16,13 @@ You are an expert Python developer specializing in building Lakeflow Community C
 
 Implement the connector using either the **implement-connector** skill or the **implement-partitioned-connector** skill, depending on the source API characteristics. Both skills have been loaded into your context.
 
+**Two outputs are required**:
+
+1. The connector implementation under `src/databricks/labs/community_connector/sources/{source_name}/`.
+2. A simulator endpoint spec at `src/databricks/labs/community_connector/source_simulator/specs/{source_name}/endpoints.yaml`.
+
+Both are required because the eng-driven Phase 1 flow (`/develop-connector` and `/batch-develop-connectors`) must run the test suite in **simulate mode** without credentials right after you finish — and that needs the spec. See "Simulator Spec" below for what to produce.
+
 ## Choosing Between Standard and Partitioned Implementation
 
 After reading the source API doc, evaluate the API's capabilities and choose the right approach:
@@ -59,13 +66,34 @@ When the table set is large or heterogeneous (very different API patterns), spli
 
 If all tables share similar API patterns, implement them all in a single pass.
 
+## Simulator Spec
+
+After the connector compiles and you have a clear picture of every URL, query param, and response shape it relies on, author `src/databricks/labs/community_connector/source_simulator/specs/{source_name}/endpoints.yaml`.
+
+One entry per URL the connector hits. For each entry capture:
+
+- `path` and `method`
+- Per-param `role` (`filter` / `sort` / `page` / `per_page` / `offset` / `limit` / `ignore`), and where applicable `op` and `field`
+- `response.wrapper.records_key` (use dotted form like `d.results` for OData) and any `extras`
+- `response.pagination_style`: `none`, `page_number`, `page_number_with_link_header`, or `offset_limit`. If the API doesn't fit, fall back to a `handler:` reference
+
+Reference patterns (read at least one before writing):
+
+- `src/databricks/labs/community_connector/source_simulator/DESIGN.md` — full spec syntax
+- `source_simulator/specs/github/endpoints.yaml`, `qualtrics/endpoints.yaml`, `sap_successfactors/endpoints.yaml` — REST + OData v2 examples
+
+If the connector caps its returned cursor at an init-time snapshot (admission-control pattern), add `synthesize_future_records: {cursor_field: <dotted path>, count: 3}` to that endpoint so simulate-mode termination tests converge.
+
+You do NOT need to author a corpus — `connector-tester` will bootstrap one from `TABLE_SCHEMAS` via `tools.corpus_from_schema.write_corpus_from_schemas`.
+
 ## Key References
 
 - **Skills**: implement-connector, implement-partitioned-connector (both loaded above)
 - **Interface**: `src/databricks/labs/community_connector/interface/lakeflow_connect.py`
 - **Partition interface**: `src/databricks/labs/community_connector/interface/supports_partition.py`
 - **Primary reference implementation**: `src/databricks/labs/community_connector/sources/example/example.py` — this is the best reference; always start here and prefer it over other connectors.
+- **Simulator spec reference**: `src/databricks/labs/community_connector/source_simulator/DESIGN.md`
 
 ## Scope Boundaries
 
-Your job is **implementation only**. Do NOT read test files (e.g. `tests/unit/sources/test_suite.py`, `test_example_lakeflow_connect.py`). Tests are written by the connector-tester agent in a separate step.
+Your job is **implementation + simulator spec**. Do NOT read test files (e.g. `tests/unit/sources/test_suite.py`, `test_example_lakeflow_connect.py`) or write tests. Tests are written by the connector-tester agent in a separate step. Do NOT write a corpus — that is also `connector-tester`'s job.

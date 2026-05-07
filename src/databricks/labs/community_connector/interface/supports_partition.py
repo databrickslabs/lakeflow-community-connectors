@@ -92,14 +92,18 @@ class SupportsPartitionedStream(SupportsPartition):
 
         Called by Spark on every micro-batch to discover new data.
 
+        Micro-batch sizing (by row count, time window, etc.) is entirely the
+        connector's responsibility — use table_options (e.g. ``window_days``,
+        ``max_records_per_batch``) to control it.  The framework always
+        requests "all available" and does not pass an admission-control
+        hint here.
+
         Args:
             table_name: The name of the table.
             table_options: A dictionary of options for accessing the table.
-            start_offset: The current start offset, or None on the first call.
-                PySpark's ``DataSourceStreamReader.latestOffset()`` does not
-                pass this yet, so the framework always sends None for now.
-                Connectors may use it to implement windowed batching when
-                called directly.
+            start_offset: The current committed offset.  ``{}`` on the very
+                first call (from ``initialOffset``), then the last returned
+                end_offset on each subsequent call.
         Returns:
             A dict whose keys and values are primitive types (str, int, bool).
         """

@@ -54,6 +54,12 @@ The Gmail API provides the following objects/resources. The object list is **sta
 | `threads` | Email conversation threads | ✅ Yes |
 | `labels` | Labels/folders for organizing emails | ✅ Yes |
 | `drafts` | Draft messages | Optional |
+| `profile` | Mailbox profile (email address, totals) | ✅ Yes |
+| `settings` | IMAP/POP/auto-forwarding/language/vacation settings | ✅ Yes |
+| `filters` | Server-side mail filter rules | ✅ Yes |
+| `forwarding_addresses` | Verified forwarding destinations | ✅ Yes |
+| `send_as` | Send-as identities (alias from-addresses) | ✅ Yes |
+| `delegates` | Mailbox delegation grants | ✅ Yes |
 | `history` | Mailbox change history (for incremental sync) | Used internally |
 
 ### Object Hierarchy
@@ -129,6 +135,83 @@ Retrieved via `GET /gmail/v1/users/{userId}/drafts/{id}`
 | `id` | string | Immutable draft ID |
 | `message` | object | The message content of the draft |
 
+### Profile Schema
+
+Retrieved via `GET /gmail/v1/users/{userId}/profile`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `emailAddress` | string | The user's email address (primary key) |
+| `messagesTotal` | integer | Total number of messages in the mailbox |
+| `threadsTotal` | integer | Total number of threads in the mailbox |
+| `historyId` | string | The mailbox's current history ID |
+
+### Settings Schema
+
+Retrieved via the `users.settings.*` API surface (IMAP, POP, auto-forwarding,
+language, vacation responder). The connector packs these into a single
+`settings` row keyed by `userId`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `userId` | string | Mailbox owner identifier (primary key) |
+| `imap` | struct | IMAP settings (`enabled`, `autoExpunge`, `expungeBehavior`, `maxFolderSize`) |
+| `pop` | struct | POP settings (`accessWindow`, `disposition`) |
+| `autoForwarding` | struct | Auto-forwarding settings (`enabled`, `emailAddress`, `disposition`) |
+| `language` | struct | Display language (`displayLanguage`) |
+| `vacation` | struct | Vacation responder (`enableAutoReply`, `responseSubject`, `responseBodyPlainText`, `restrictToContacts`, `restrictToDomain`, `startTime`, `endTime`) |
+
+Source endpoints:
+- `GET /gmail/v1/users/{userId}/settings/imap`
+- `GET /gmail/v1/users/{userId}/settings/pop`
+- `GET /gmail/v1/users/{userId}/settings/autoForwarding`
+- `GET /gmail/v1/users/{userId}/settings/language`
+- `GET /gmail/v1/users/{userId}/settings/vacation`
+
+### Filters Schema
+
+Retrieved via `GET /gmail/v1/users/{userId}/settings/filters`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Filter identifier (primary key) |
+| `criteria` | struct | Match criteria (`from`, `to`, `subject`, `query`, `negatedQuery`, `hasAttachment`, `excludeChats`, `size`, `sizeComparison`) |
+| `action` | struct | Filter action (`addLabelIds`, `removeLabelIds`, `forward`) |
+
+### Forwarding Addresses Schema
+
+Retrieved via `GET /gmail/v1/users/{userId}/settings/forwardingAddresses`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `forwardingEmail` | string | Verified forwarding destination (primary key) |
+| `verificationStatus` | string | `pending`, `accepted`, `verificationStatusUnspecified` |
+
+### Send-As Schema
+
+Retrieved via `GET /gmail/v1/users/{userId}/settings/sendAs`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sendAsEmail` | string | Send-as identity address (primary key) |
+| `displayName` | string | Display name shown to recipients |
+| `replyToAddress` | string | Reply-to address |
+| `signature` | string | HTML signature for this identity |
+| `isPrimary` | boolean | Whether this is the primary identity |
+| `isDefault` | boolean | Whether this is the default identity |
+| `treatAsAlias` | boolean | Whether the address is treated as an alias |
+| `verificationStatus` | string | Verification status |
+| `smtpMsa` | struct | SMTP MSA settings (`host`, `port`, `username`, `securityMode`) |
+
+### Delegates Schema
+
+Retrieved via `GET /gmail/v1/users/{userId}/settings/delegates`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `delegateEmail` | string | Delegate's email address (primary key) |
+| `verificationStatus` | string | `pending`, `accepted`, `rejected`, `expired` |
+
 ## Get Object Primary Keys
 
 Primary keys are **static** and defined by the API structure:
@@ -139,15 +222,27 @@ Primary keys are **static** and defined by the API structure:
 | `threads` | `id` | Immutable thread identifier |
 | `labels` | `id` | Immutable label identifier |
 | `drafts` | `id` | Immutable draft identifier |
+| `profile` | `emailAddress` | One row per mailbox, keyed by user email |
+| `settings` | `userId` | One row per mailbox, packs all settings sub-resources |
+| `filters` | `id` | Server-assigned filter identifier |
+| `forwarding_addresses` | `forwardingEmail` | The verified forwarding destination |
+| `send_as` | `sendAsEmail` | The send-as identity address |
+| `delegates` | `delegateEmail` | The delegate's email address |
 
 ## Object's Ingestion Type
 
 | Object | Ingestion Type | Rationale |
 |--------|----------------|-----------|
-| `messages` | `cdc` | Can use `historyId` for incremental sync; deleted messages returned via history API |
-| `threads` | `cdc` | Threads modified when messages change; use history for incremental |
+| `messages` | `cdc_with_deletes` | Can use `historyId` for incremental sync; deleted messages returned via history API |
+| `threads` | `cdc_with_deletes` | Threads modified when messages change; use history for incremental |
 | `labels` | `snapshot` | Labels change infrequently; full refresh recommended |
 | `drafts` | `snapshot` | Drafts change frequently via user edits; snapshot safer |
+| `profile` | `snapshot` | Single-row mailbox summary; refreshes on every microbatch |
+| `settings` | `snapshot` | Settings change rarely; snapshot per microbatch |
+| `filters` | `snapshot` | List endpoint returns all filters; no incremental cursor available |
+| `forwarding_addresses` | `snapshot` | List endpoint returns all addresses; small set |
+| `send_as` | `snapshot` | List endpoint returns all identities; small set |
+| `delegates` | `snapshot` | List endpoint returns all delegates; small set |
 
 **History API for Incremental Sync:**
 The `users.history.list` endpoint returns changes since a given `historyId`:

@@ -8,6 +8,15 @@ from tests.unit.sources.test_suite import LakeflowConnectTests
 
 class TestGmailConnector(LakeflowConnectTests):
     connector_class = GmailLakeflowConnect
+    simulator_source = "gmail"
+    replay_config = {
+        "client_id": "simulator-client-id",
+        "client_secret": "simulator-client-secret",
+        "refresh_token": "simulator-refresh-token",
+    }
+    # Simulator corpus dates don't overlap the connector's first-call
+    # window for these tables — fixture limitation, not a bug.
+    allow_empty_first_read = frozenset({"messages", "threads"})
 
     # Extra Gamil specific integration tests.
     def test_read_profile(self):

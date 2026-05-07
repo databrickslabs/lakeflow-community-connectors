@@ -1,0 +1,109 @@
+[
+  {
+    "id": "alpha-245",
+    "name": "zulu-997",
+    "description": "hotel-123",
+    "is_visible": false,
+    "metadata": {
+      "key": "november-408",
+      "value": "xray-646"
+    },
+    "created_at": "hotel-296",
+    "updated_at": "kilo-824",
+    "members": [],
+    "members_count": 6209,
+    "shares_count": 18016,
+    "default_role": {
+      "id": "mike-119",
+      "name": "juliet-161"
+    },
+    "organization_id": "alpha-706",
+    "href": "sierra-247"
+  },
+  {
+    "id": "quebec-372",
+    "name": "zulu-735",
+    "description": "delta-490",
+    "is_visible": true,
+    "metadata": {
+      "key": "november-972",
+      "value": "whiskey-182"
+    },
+    "created_at": "delta-250",
+    "updated_at": "tango-588",
+    "members": [
+      {
+        "id": "echo-109",
+        "user_id": "romeo-311",
+        "email": "romeo-387"
+      },
+      {
+        "id": "delta-393",
+        "user_id": "charlie-156",
+        "email": "hotel-820"
+      }
+    ],
+    "members_count": 23360,
+    "shares_count": 645,
+    "default_role": {
+      "id": "whiskey-663",
+      "name": "yankee-501"
+    },
+    "organization_id": "victor-540",
+    "href": "alpha-984"
+  },
+  {
+    "id": "yankee-166",
+    "name": "zulu-479",
+    "description": "india-807",
+    "is_visible": true,
+    "metadata": {
+      "key": "lima-906",
+      "value": "delta-297"
+    },
+    "created_at": "golf-917",
+    "updated_at": "mike-391",
+    "members": [
+      {
+        "id": "delta-610",
+        "user_id": "mike-800",
+        "email": "hotel-186"
+      }
+    ],
+    "members_count": 71185,
+    "shares_count": 58351,
+    "default_role": {
+      "id": "alpha-769",
+      "name": "november-900"
+    },
+    "organization_id": "romeo-474",
+    "href": "charlie-814"
+  },
+  {
+    "id": "juliet-393",
+    "name": "mike-700",
+    "description": "whiskey-377",
+    "is_visible": true,
+    "metadata": {
+      "key": "charlie-988",
+      "value": "xray-709"
+    },
+    "created_at": "quebec-138",
+    "updated_at": "kilo-449",
+    "members": [
+      {
+        "id": "kilo-418",
+        "user_id": "november-922",
+        "email": "tango-201"
+      }
+    ],
+    "members_count": 45383,
+    "shares_count": 22690,
+    "default_role": {
+      "id": "yankee-554",
+      "name": "quebec-752"
+    },
+    "organization_id": "romeo-832",
+    "href": "oscar-525"
+  }
+]

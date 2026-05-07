@@ -1,11 +1,62 @@
+import json
+from typing import Any, Dict, Optional
+
 import pytest
 
 from databricks.labs.community_connector.sources.google_analytics_aggregated.google_analytics_aggregated import GoogleAnalyticsAggregatedLakeflowConnect
 from tests.unit.sources.test_suite import LakeflowConnectTests
 
 
+def _build_simulator_creds() -> Dict[str, Any]:
+    """Build a fake service-account config with a real-shaped RSA key.
+
+    Google's ``service_account.Credentials.from_service_account_info`` parses
+    the private_key as PEM RSA, so a real key shape is required. We generate
+    one in-process — never used to sign anything since the simulator returns
+    a canned access token.
+    """
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives import serialization
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode()
+    creds = {
+        "type": "service_account",
+        "project_id": "simulator-project",
+        "private_key_id": "simulator-key-id",
+        "private_key": pem,
+        "client_email": "simulator@simulator-project.iam.gserviceaccount.com",
+        "client_id": "0",
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+    }
+    return {
+        "property_ids": '["123456789"]',
+        "credentials_json": json.dumps(creds),
+    }
+
+
 class TestGoogleAnalyticsAggregatedConnector(LakeflowConnectTests):
     connector_class = GoogleAnalyticsAggregatedLakeflowConnect
+    simulator_source = "google_analytics_aggregated"
+    _generated_replay_config: Optional[Dict[str, Any]] = None
+
+    @classmethod
+    def _replay_config(cls) -> Optional[Dict[str, Any]]:
+        # Cache across the test class — RSA generation is non-trivial.
+        if cls._generated_replay_config is None:
+            cls._generated_replay_config = _build_simulator_creds()
+        return cls._generated_replay_config
+
+    def test_invalid_table_name(self):
+        """GA4 accepts arbitrary table names by design (custom reports built
+        from request-time dimensions/metrics), so the harness's "must reject
+        unknown table" contract doesn't apply."""
+        pytest.skip("GA4 accepts arbitrary table names as custom report definitions.")
 
     # Extra Google Analytics Aggregated specific integration tests.
 
