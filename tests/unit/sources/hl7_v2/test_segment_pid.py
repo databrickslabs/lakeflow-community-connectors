@@ -17,9 +17,9 @@ class TestPIDExtraction:
     def test_adt_pid(self):
         msg = parse_first(load_sample("sample_adt.hl7"))
         row = extract_segment(msg, "PID", _extract_pid)
-        assert row["patient_id_value"] == "MRN12345"
-        assert row["patient_family_name"] == "Doe"
-        assert row["patient_given_name"] == "John"
+        assert row["patient_id"] == "MRN12345"
+        assert row["patient_names"][0]["family_name"] == "Doe"
+        assert row["patient_names"][0]["given_name"] == "John"
         assert row["date_of_birth"] is not None
         assert row["administrative_sex"] == "M"
         assert row["address_city"] == "Boston"
@@ -42,8 +42,8 @@ class TestPIDExtraction:
     def test_comprehensive_pid_full_fields(self):
         msg = parse_first(load_sample("sample_adt_comprehensive.hl7"))
         row = extract_segment(msg, "PID", _extract_pid)
-        assert row["patient_family_name"] == "Martinez"
-        assert row["patient_given_name"] == "Sofia"
+        assert row["patient_names"][0]["family_name"] == "Martinez"
+        assert row["patient_names"][0]["given_name"] == "Sofia"
         assert row["marital_status"] == "M"
         assert row["address_zip"] == "60614"
         assert row["ssn"] == "987-65-4321"
@@ -64,9 +64,7 @@ class TestPIDMissingFields:
         row = _extract_pid(msg.get_segment("PID"))
         assert row["set_id"] == 1
         assert row["patient_id"] is None
-        assert row["patient_id_value"] is None
-        assert row["patient_family_name"] is None
-        assert row["patient_given_name"] is None
+        assert row["patient_names"] is None
         assert row["date_of_birth"] is None
         assert row["administrative_sex"] is None
         assert row["race"] is None
@@ -79,10 +77,10 @@ class TestPIDMissingFields:
             "PID|1||MRN999^^^HOSP^MR"
         )
         row = _extract_pid(msg.get_segment("PID"))
-        assert row["patient_id_value"] == "MRN999"
+        assert row["patient_id"] == "MRN999"
         assert row["patient_id_assigning_authority"] == "HOSP"
         assert row["patient_id_type_code"] == "MR"
-        assert row["patient_family_name"] is None
+        assert row["patient_names"] is None
 
 
 class TestPIDEdgeCases:
@@ -92,5 +90,8 @@ class TestPIDEdgeCases:
             "PID|1||MRN^^^HOSP||Smith^John~Jones^John||19800101|M"
         )
         row = _extract_pid(msg.get_segment("PID"))
-        assert row["patient_family_name"] == "Smith"
-        assert row["patient_given_name"] == "John"
+        # Repeating XPN: both repetitions captured in the patient_names array.
+        assert row["patient_names"][0]["family_name"] == "Smith"
+        assert row["patient_names"][0]["given_name"] == "John"
+        assert row["patient_names"][1]["family_name"] == "Jones"
+        assert row["patient_names"][1]["given_name"] == "John"

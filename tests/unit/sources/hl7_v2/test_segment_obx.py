@@ -25,7 +25,7 @@ class TestOBXExtraction:
         assert na["observation_value"] == "138"
         assert na["units"] == "mEq/L"
         assert na["references_range"] == "136-145"
-        assert na["interpretation_codes"] == "N"
+        assert na["interpretation_codes"][0]["code"] == "N"
 
     def test_covid_obx_coded(self):
         msg = parse_first(load_sample("sample_oru_covid.hl7"))

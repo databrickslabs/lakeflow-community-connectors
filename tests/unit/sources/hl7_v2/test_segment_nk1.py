@@ -20,8 +20,8 @@ class TestNK1Extraction:
     def test_adt_nk1(self):
         msg = parse_first(load_sample("sample_adt.hl7"))
         row = extract_segment(msg, "NK1", _extract_nk1)
-        assert row["nk_names"][0][0] == "Doe"
-        assert row["nk_names"][0][1] == "Jane"
+        assert row["nk_names"][0]["family_name"] == "Doe"
+        assert row["nk_names"][0]["given_name"] == "Jane"
         assert row["relationship_code"] == "SPO"
 
     def test_comprehensive_multiple_nk1(self):
@@ -29,11 +29,11 @@ class TestNK1Extraction:
         segs = segments_of_type(msg, "NK1")
         assert len(segs) == 2
         row1 = _extract_nk1(segs[0])
-        assert row1["nk_names"][0][0] == "Martinez"
-        assert row1["nk_names"][0][1] == "Carlos"
+        assert row1["nk_names"][0]["family_name"] == "Martinez"
+        assert row1["nk_names"][0]["given_name"] == "Carlos"
         assert row1["relationship_code"] == "SPO"
         row2 = _extract_nk1(segs[1])
-        assert row2["nk_names"][0][0] == "Martinez"
+        assert row2["nk_names"][0]["family_name"] == "Martinez"
         assert row2["relationship_code"] == "MTH"
 
     def test_batch_nk1(self):
@@ -41,7 +41,7 @@ class TestNK1Extraction:
         msgs = _split_messages(raw)
         msg3 = parse_message(msgs[2])
         row = extract_segment(msg3, "NK1", _extract_nk1)
-        assert row["nk_names"][0][0] == "Batch"
+        assert row["nk_names"][0]["family_name"] == "Batch"
         assert row["relationship_code"] == "SPO"
 
 
@@ -64,6 +64,6 @@ class TestNK1MissingFields:
             "NK1|1|Smith^Jane"
         )
         row = _extract_nk1(msg.get_segment("NK1"))
-        assert row["nk_names"][0][0] == "Smith"
-        assert row["nk_names"][0][1] == "Jane"
+        assert row["nk_names"][0]["family_name"] == "Smith"
+        assert row["nk_names"][0]["given_name"] == "Jane"
         assert row["relationship_code"] is None

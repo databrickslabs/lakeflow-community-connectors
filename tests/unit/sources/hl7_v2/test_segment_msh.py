@@ -21,6 +21,7 @@ _METADATA = {
     "hl7_version",
     "source_file",
     "send_time",
+    "create_time",
     "raw_segment",
 }
 

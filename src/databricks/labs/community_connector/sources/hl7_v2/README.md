@@ -74,13 +74,14 @@ FROM read_files(
 
 ## Table-Level Options
 
-Set per table via `table_configuration`. The UC connection must include `externalOptionsAllowList` = `segment_type,window_seconds,start_timestamp` for these to take effect.
+Set per table via `table_configuration`. The UC connection must include `externalOptionsAllowList` = `segment_type,window_seconds,start_timestamp,max_records_per_batch` for these to take effect.
 
 | Option | Default | Description |
 |---|---|---|
 | `segment_type` | *(table name)* | Override the HL7 segment type to extract. Only needed for custom Z-segments (e.g., `ZPD`). |
 | `window_seconds` | `86400` | Sliding time window size in seconds. Use `3600` for high-volume sources, `86400` for low-volume. |
 | `start_timestamp` | *(auto-discovered)* | RFC 3339 timestamp to start reading from (e.g., `2024-01-01T00:00:00Z`). |
+| `max_records_per_batch` | *(unbounded)* | Hard upper bound on rows produced by a single micro-batch. When the window contains more rows than this, the iterator stops early and the cursor advances to the `create_time` of the last yielded message; the next batch resumes from there. Use to bound memory on busy stores. |
 
 ### Custom Z-Segments
 

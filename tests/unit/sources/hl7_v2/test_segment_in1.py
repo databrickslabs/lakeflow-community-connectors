@@ -22,7 +22,7 @@ class TestIN1Extraction:
         assert row["insurance_company_name"] == "Blue Cross Blue Shield of Illinois"
         assert row["group_number"] == "GRP7700"
         assert row["plan_type"] == "PPO"
-        assert row["insured_names"][0][0] == "Martinez"
+        assert row["insured_names"][0]["family_name"] == "Martinez"
         assert row["insureds_relationship_to_patient"] == "SEL"
 
     def test_dft_in1(self):

@@ -125,4 +125,4 @@ connection:
 # These table-specific options can be passed per-table in the pipeline
 # configuration via externalOptionsAllowList on the UC connection.
 # ============================================================================
-external_options_allowlist: "segment_type,window_seconds,start_timestamp"
+external_options_allowlist: "segment_type,window_seconds,start_timestamp,max_records_per_batch"

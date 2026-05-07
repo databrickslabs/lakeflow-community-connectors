@@ -22,7 +22,7 @@ class TestIAMExtraction:
         assert row["allergen_code_text"] == "Sulfonamides"
         assert row["allergy_severity_code"] == "SV"
         assert row["reported_datetime"] is not None
-        assert row["reported_by_names"][0][0] == "PRN001"
+        assert row["reported_by_id"] == "PRN001"
 
 
 class TestIAMMissingFields:
@@ -37,7 +37,7 @@ class TestIAMMissingFields:
         assert row["allergen_code"] is None
         assert row["allergy_severity_code"] is None
         assert row["reported_datetime"] is None
-        assert row["reported_by_names"] is None
+        assert row["reported_by_id"] is None
         assert row["allergy_clinical_status_code"] is None
 
     def test_iam_with_allergen_only(self):

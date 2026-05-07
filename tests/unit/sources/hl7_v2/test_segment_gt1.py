@@ -17,8 +17,8 @@ class TestGT1Extraction:
     def test_comprehensive_gt1(self):
         msg = parse_first(load_sample("sample_adt_comprehensive.hl7"))
         row = extract_segment(msg, "GT1", _extract_gt1)
-        assert row["guarantor_names"][0][0] == "Martinez"
-        assert row["guarantor_names"][0][1] == "Carlos"
+        assert row["guarantor_names"][0]["family_name"] == "Martinez"
+        assert row["guarantor_names"][0]["given_name"] == "Carlos"
         assert row["guarantor_administrative_sex"] == "M"
         assert row["guarantor_relationship"] == "SPO"
 
@@ -27,12 +27,14 @@ class TestGT1Extraction:
         segs = segments_of_type(msg, "GT1")
         assert len(segs) == 2
         row1 = _extract_gt1(segs[0])
-        assert row1["guarantor_names"][0][0] == "Wilson"
+        assert row1["guarantor_names"][0]["family_name"] == "Wilson"
         assert row1["guarantor_ssn"] == "111-22-3333"
-        assert row1["guarantor_employer_names"][0][0] == "TECH SOLUTIONS INC"
+        # guarantor_employer_names is built via _xpn_array_fields too —
+        # XPN.1 maps to "family_name" even when the source is an org name.
+        assert row1["guarantor_employer_names"][0]["family_name"] == "TECH SOLUTIONS INC"
         row2 = _extract_gt1(segs[1])
-        assert row2["guarantor_names"][0][0] == "Wilson"
-        assert row2["guarantor_names"][0][1] == "Sarah"
+        assert row2["guarantor_names"][0]["family_name"] == "Wilson"
+        assert row2["guarantor_names"][0]["given_name"] == "Sarah"
         assert row2["guarantor_administrative_sex"] == "F"
 
 
@@ -56,5 +58,5 @@ class TestGT1MissingFields:
             "GT1|1||Jones^Robert"
         )
         row = _extract_gt1(msg.get_segment("GT1"))
-        assert row["guarantor_names"][0][0] == "Jones"
-        assert row["guarantor_names"][0][1] == "Robert"
+        assert row["guarantor_names"][0]["family_name"] == "Jones"
+        assert row["guarantor_names"][0]["given_name"] == "Robert"

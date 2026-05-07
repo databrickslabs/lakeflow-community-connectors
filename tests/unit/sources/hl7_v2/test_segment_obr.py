@@ -34,7 +34,7 @@ class TestOBRExtraction:
         msg = parse_first(load_sample("sample_oru_lab_celr.hl7"))
         row = extract_segment(msg, "OBR", _extract_obr)
         assert row["service"] == "68991-9"
-        assert row["diagnostic_service_section_id"] == "LAB"
+        assert row["diagnostic_service_section"] == "LAB"
 
 
 class TestOBRMissingFields:
@@ -49,7 +49,7 @@ class TestOBRMissingFields:
         assert row["service_text"] is None
         assert row["result_status"] is None
         assert row["ordering_provider_id"] is None
-        assert row["diagnostic_service_section_id"] is None
+        assert row["diagnostic_service_section"] is None
 
     def test_obr_service_only(self):
         msg = parse_message(

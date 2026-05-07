@@ -1,0 +1,54 @@
+# HL7 v2 connector endpoints.
+#
+# GCP mode hits a single list endpoint (the per-store /messages collection)
+# with an AIP-160 ``filter`` expression that doesn't fit the simulator's
+# role-based ``params:`` map. A custom handler parses the filter and applies
+# pagination + ordering manually.
+#
+# Delta mode hits the Databricks SQL Statement Execution API with three
+# statement shapes (preload, per-window, peek-oldest). The submit endpoint
+# returns inline SUCCEEDED results so the SDK doesn't poll. The poll
+# endpoint is declared for safety but should never fire for these queries.
+
+endpoints:
+  # ------------------------------------------------------------------
+  # Google OAuth2 token endpoint — service-account JWT grant.
+  # The connector refreshes its access token in ``_init_gcp`` before
+  # any API call goes out.
+  # ------------------------------------------------------------------
+  - path: "/token"
+    method: POST
+    handler: databricks.labs.community_connector.source_simulator.specs.hl7_v2.handlers.oauth:serve_token
+
+  # ------------------------------------------------------------------
+  # GCP Healthcare API — HL7v2 messages list.
+  # ------------------------------------------------------------------
+  - path: "/v1/projects/{project}/locations/{location}/datasets/{dataset}/hl7V2Stores/{store}/messages"
+    method: GET
+    corpus: messages
+    handler: databricks.labs.community_connector.source_simulator.specs.hl7_v2.handlers.messages:serve_messages_list
+    # Cap-validation: clone records into the corpus with createTime set to
+    # ``now() + N hours``. The connector caps the right side of its window
+    # at ``self._init_ts``; any leakage means the cap is broken and
+    # ``test_read_terminates`` will detect non-convergence.
+    synthesize_future_records:
+      cursor_field: createTime
+      count: 3
+
+  # ------------------------------------------------------------------
+  # Databricks SQL Statement Execution API — Delta mode.
+  # ------------------------------------------------------------------
+  - path: "/api/2.0/sql/statements/"
+    method: POST
+    corpus: messages
+    handler: databricks.labs.community_connector.source_simulator.specs.hl7_v2.handlers.delta_sql:submit_statement
+
+  - path: "/api/2.0/sql/statements"
+    method: POST
+    corpus: messages
+    handler: databricks.labs.community_connector.source_simulator.specs.hl7_v2.handlers.delta_sql:submit_statement
+
+  - path: "/api/2.0/sql/statements/{statement_id}"
+    method: GET
+    corpus: messages
+    handler: databricks.labs.community_connector.source_simulator.specs.hl7_v2.handlers.delta_sql:poll_statement

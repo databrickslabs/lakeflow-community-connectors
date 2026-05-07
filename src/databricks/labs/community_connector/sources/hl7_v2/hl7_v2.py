@@ -1490,6 +1490,12 @@ class HL7V2LakeflowConnect(LakeflowConnect):
             (default 86400).  Smaller values produce smaller batches.
         start_timestamp (str): RFC3339 timestamp to start reading from when no
             prior offset exists and auto-discovery is not possible.
+        max_records_per_batch (str): Hard upper bound on rows yielded by a
+            single ``read_table`` call.  Once this many output rows are
+            produced, the iterator stops early and the cursor advances only
+            up to the last source ``createTime`` actually consumed, so the
+            next batch resumes from there.  Use this to bound memory when
+            ``window_seconds`` is large or messages are dense.
     """
 
     _GCP_REQUIRED_KEYS = ("project_id", "location", "dataset_id", "hl7v2_store_id", "service_account_json")
@@ -1711,6 +1717,8 @@ class HL7V2LakeflowConnect(LakeflowConnect):
             return iter([]), start_offset or {}
 
         window_seconds = int(table_options.get("window_seconds", str(_DEFAULT_WINDOW_SECONDS)))
+        max_records_raw = table_options.get("max_records_per_batch")
+        max_records = int(max_records_raw) if max_records_raw else None
 
         since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
         window_end_dt = since_dt + timedelta(seconds=window_seconds)
@@ -1727,6 +1735,28 @@ class HL7V2LakeflowConnect(LakeflowConnect):
         records = self._parse_api_messages(
             api_messages, segment_type, decode_base64=(self._source_type != "delta")
         )
+
+        # Admission control: cap rows yielded per batch.  Cuts only at
+        # message boundaries (one HL7 message can produce many rows when
+        # the requested segment repeats — e.g. several OBX per ORU), so
+        # rows from the same source message stay together.  The cursor
+        # rewinds to the createTime of the last fully-consumed message;
+        # the next batch resumes from there because the GCP / Delta
+        # filter is strict ``createTime > since``.
+        if max_records is not None and len(records) > max_records:
+            cut = max_records
+            # Walk forward until create_time changes — keep all rows
+            # belonging to the message that straddles ``max_records``.
+            straddle_ct = records[cut - 1].get("create_time")
+            while cut < len(records) and records[cut].get("create_time") == straddle_ct:
+                cut += 1
+            records = records[:cut]
+            last_ct = records[-1].get("create_time") if records else None
+            if last_ct and last_ct < window_end:
+                end_offset = {"cursor": last_ct}
+                if start_offset is not None and start_offset == end_offset:
+                    return iter([]), start_offset
+                return iter(records), end_offset
 
         end_offset = {"cursor": window_end}
         if start_offset is not None and start_offset == end_offset:

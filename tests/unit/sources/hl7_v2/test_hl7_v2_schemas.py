@@ -6,7 +6,13 @@ field types, and that extractor output keys align with schema field names.
 from __future__ import annotations
 
 import pytest
-from pyspark.sql.types import LongType, StringType, StructField, StructType
+from pyspark.sql.types import (
+    ArrayType,
+    LongType,
+    StringType,
+    StructField,
+    StructType,
+)
 
 from databricks.labs.community_connector.sources.hl7_v2.hl7_v2 import _EXTRACTORS
 from databricks.labs.community_connector.sources.hl7_v2.hl7_v2_schemas import (
@@ -22,6 +28,7 @@ METADATA_FIELD_NAMES = {
     "hl7_version",
     "source_file",
     "send_time",
+    "create_time",
     "raw_segment",
 }
 
@@ -60,12 +67,22 @@ class TestMetadataFields:
 
 class TestFieldTypes:
     @pytest.mark.parametrize("table", SEGMENT_TABLES)
-    def test_all_fields_are_string_or_long(self, table):
+    def test_all_fields_are_string_long_or_array(self, table):
+        # Most fields are StringType (HL7 strings) or LongType (set_id, counts).
+        # Repeating composite types (XPN names, CWE codes, EI ids) are stored
+        # as ArrayType(StructType(...)) or ArrayType(StringType()) so all
+        # repetitions are preserved without flattening.
         schema = get_schema(table)
         for field in schema.fields:
-            assert isinstance(field.dataType, (StringType, LongType)), (
+            dt = field.dataType
+            ok = isinstance(dt, (StringType, LongType))
+            if not ok and isinstance(dt, ArrayType):
+                element_type = dt.elementType
+                ok = isinstance(element_type, (StringType, StructType))
+            assert ok, (
                 f"Schema '{table}' field '{field.name}' has unexpected type "
-                f"{field.dataType}. Expected StringType or LongType."
+                f"{dt}. Expected StringType, LongType, or "
+                f"ArrayType of StringType/StructType."
             )
 
     @pytest.mark.parametrize("table", SEGMENT_TABLES)
