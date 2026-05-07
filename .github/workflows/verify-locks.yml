@@ -4,8 +4,9 @@ name: Verify Dependency Locks
 # from a fresh regeneration. Enforces the internal guidance's "strongly
 # recommended" assertion that running uv pip compile produces no diff.
 
+# Triggers: see pull_request_target rationale in .github/workflows/pylint.yml.
 on:
-  pull_request:
+  pull_request_target:
     paths:
       - 'pyproject.toml'
       - 'tools/community_connector/pyproject.toml'
@@ -33,6 +34,8 @@ jobs:
       labels: linux-ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Setup uv
         uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc  # v6.4.3

@@ -1,5 +1,15 @@
 name: Pylint
 
+# pull_request_target (instead of pull_request) is required so fork-PR
+# runs receive the OIDC token that configure-jfrog-pypi exchanges for a
+# JFrog Artifactory access token. With pull_request the fork's run gets
+# no OIDC, and the action fails with ACTIONS_ID_TOKEN_REQUEST_TOKEN
+# unbound.
+#
+# Untrusted code from fork PRs is gated by the repo's "Require approval
+# for outside collaborators" setting — fork-PR workflow runs are pending
+# until a maintainer explicitly approves them. The explicit head-SHA
+# checkout below is what actually exercises the PR's code.
 on:
   push:
     branches: [master]
@@ -8,7 +18,7 @@ on:
       - 'pyproject.toml'
       - 'requirements/**'
       - '.github/workflows/pylint.yml'
-  pull_request:
+  pull_request_target:
     branches: [master]
     paths:
       - '**/*.py'
@@ -30,6 +40,11 @@ jobs:
         python-version: ["3.10"]
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      with:
+        # pull_request_target defaults to checking out the base ref; we want
+        # to lint the PR's actual code. For push/same-repo events the empty
+        # fallback resolves to the workflow ref.
+        ref: ${{ github.event.pull_request.head.sha }}
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
       with:
