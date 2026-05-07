@@ -1,19 +1,15 @@
 name: Pylint
 
-# Triggers and label gating for fork PRs:
-#   - push to master                          → always runs.
-#   - PR from databrickslabs/* (same repo)    → always runs (synchronize, opened, etc.).
-#   - PR from a fork                          → runs only when a maintainer
-#                                               adds the `safe-to-test` label,
-#                                               and only on that label event.
-#                                               A subsequent fork push (synchronize)
-#                                               intentionally does NOT re-run; the
-#                                               maintainer must remove and re-add
-#                                               the label after reviewing the new
-#                                               commits. This blocks the
-#                                               "approval extends to attacker's
-#                                               next push" attack on
-#                                               pull_request_target.
+# pull_request_target (instead of pull_request) is required so fork-PR
+# runs receive the OIDC token that configure-jfrog-pypi exchanges for a
+# JFrog Artifactory access token. With pull_request the fork's run gets
+# no OIDC, and the action fails with ACTIONS_ID_TOKEN_REQUEST_TOKEN
+# unbound.
+#
+# Untrusted code from fork PRs is gated by the repo's "Require approval
+# for outside collaborators" setting — fork-PR workflow runs are pending
+# until a maintainer explicitly approves them. The explicit head-SHA
+# checkout below is what actually exercises the PR's code.
 on:
   push:
     branches: [master]
@@ -24,7 +20,6 @@ on:
       - '.github/workflows/pylint.yml'
   pull_request_target:
     branches: [master]
-    types: [labeled, synchronize, opened, reopened]
     paths:
       - '**/*.py'
       - 'pyproject.toml'
@@ -37,10 +32,6 @@ permissions:
 
 jobs:
   build:
-    if: |
-      github.event_name == 'push' ||
-      github.event.pull_request.head.repo.full_name == github.repository ||
-      (github.event.action == 'labeled' && github.event.label.name == 'safe-to-test')
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest

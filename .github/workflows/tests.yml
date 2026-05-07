@@ -1,12 +1,11 @@
 name: Tests
 
-# Triggers: see fork-PR label-gating note in .github/workflows/pylint.yml.
+# Triggers: see pull_request_target rationale in .github/workflows/pylint.yml.
 on:
   push:
     branches: [master]
   pull_request_target:
     branches: [master]
-    types: [labeled, synchronize, opened, reopened]
 
 permissions:
   contents: read
@@ -15,10 +14,6 @@ permissions:
 jobs:
   # Detect which paths changed
   changes:
-    if: |
-      github.event_name == 'push' ||
-      github.event.pull_request.head.repo.full_name == github.repository ||
-      (github.event.action == 'labeled' && github.event.label.name == 'safe-to-test')
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest

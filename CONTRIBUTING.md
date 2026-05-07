@@ -2,10 +2,8 @@ We happily welcome contributions to Lakeflow-Community-Connectors. We use GitHub
 
 ## CI on pull requests from forks
 
-CI for this repo runs on hardened runners that exchange a per-job OIDC token for a JFrog Artifactory access token. GitHub does not issue OIDC tokens to `pull_request` events from forks, so PRs opened from a fork need an explicit maintainer approval to run CI:
+CI for this repo runs on hardened runners that exchange a per-job OIDC token for a JFrog Artifactory access token. To make this work for fork PRs, the workflows are triggered with `pull_request_target` and explicitly check out the PR's head commit.
 
-1. A maintainer reviews the PR's diff (including any change under `requirements/` or `pyproject.toml`).
-2. The maintainer adds the `safe-to-test` label. CI runs against the labeled commit.
-3. If the contributor pushes new commits, CI does **not** auto-rerun. The maintainer reviews the new commits, removes `safe-to-test`, then re-adds it to retrigger CI.
+Workflow runs from outside collaborators are held pending until a maintainer approves them ("Require approval for outside collaborators" is enabled in the repo settings). Maintainers should review the diff — including any change under `requirements/`, `pyproject.toml`, or workflow files — before approving, since approved runs execute the PR's code with secrets available.
 
-This explicit toggle is intentional: it ensures every set of commits that runs against the privileged runner is reviewed by a maintainer first. Internal contributors pushing branches inside `databrickslabs/lakeflow-community-connectors` are not affected — their PRs run CI automatically on every push.
+Internal contributors pushing branches inside `databrickslabs/lakeflow-community-connectors` are not affected — their PRs run CI automatically on every push.

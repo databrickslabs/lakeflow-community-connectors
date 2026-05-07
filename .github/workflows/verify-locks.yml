@@ -4,10 +4,9 @@ name: Verify Dependency Locks
 # from a fresh regeneration. Enforces the internal guidance's "strongly
 # recommended" assertion that running uv pip compile produces no diff.
 
-# Triggers: see fork-PR label-gating note in .github/workflows/pylint.yml.
+# Triggers: see pull_request_target rationale in .github/workflows/pylint.yml.
 on:
   pull_request_target:
-    types: [labeled, synchronize, opened, reopened]
     paths:
       - 'pyproject.toml'
       - 'tools/community_connector/pyproject.toml'
@@ -30,10 +29,6 @@ permissions:
 
 jobs:
   verify:
-    if: |
-      github.event_name == 'push' ||
-      github.event.pull_request.head.repo.full_name == github.repository ||
-      (github.event.action == 'labeled' && github.event.label.name == 'safe-to-test')
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest
