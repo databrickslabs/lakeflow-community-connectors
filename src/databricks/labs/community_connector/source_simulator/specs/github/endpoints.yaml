@@ -85,6 +85,17 @@ endpoints:
       page:      {role: page}
       per_page:  {role: per_page, default: 30, max: 100}
 
+  # Per-PR review listing — fanned out by the connector after listing pulls.
+  - path: "/repos/{owner}/{repo}/pulls/{pull_number}/reviews"
+    method: GET
+    corpus: reviews
+    response:
+      pagination_style: page_number_with_link_header
+      default_sort: "submitted_at desc"
+    params:
+      page:     {role: page}
+      per_page: {role: per_page, default: 30, max: 100}
+
   - path: "/repos/{owner}/{repo}/branches"
     method: GET
     corpus: branches
@@ -127,6 +138,22 @@ endpoints:
       page:      {role: page}
       per_page:  {role: per_page, default: 30, max: 100}
 
+  # Org-scoped repo listing — used by _read_repositories when the table
+  # configuration sets ``org`` instead of ``owner``. Same shape as
+  # /users/{user}/repos.
+  - path: "/orgs/{org}/repos"
+    method: GET
+    corpus: repositories
+    response:
+      pagination_style: page_number_with_link_header
+      default_sort: "updated_at desc"
+    params:
+      type:      {role: filter, field: type, op: eq}
+      sort:      {role: sort_by, options: [created, updated, pushed, full_name]}
+      direction: {role: sort_order, options: [asc, desc]}
+      page:      {role: page}
+      per_page:  {role: per_page, default: 30, max: 100}
+
   - path: "/user/orgs"
     method: GET
     corpus: organizations
@@ -144,6 +171,15 @@ endpoints:
     params:
       page:     {role: page}
       per_page: {role: per_page, default: 30, max: 100}
+
+  # Team detail — fanned out by _read_teams after listing /user/teams.
+  # Backed by a single-entity corpus rather than indexed-by-slug since
+  # the simulator returns the same detail per call.
+  - path: "/orgs/{org}/teams/{team_slug}"
+    method: GET
+    corpus: team_detail
+    response:
+      single_entity: true
 
   # ---- single-entity endpoints ----
 

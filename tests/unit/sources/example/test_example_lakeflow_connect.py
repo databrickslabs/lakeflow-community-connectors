@@ -2,9 +2,10 @@ from databricks.labs.community_connector.libs.simulated_source.api import reset_
 from databricks.labs.community_connector.sources.example.example import ExampleLakeflowConnect
 from tests.unit.sources.example.example_test_utils import LakeflowConnectWriteTestUtils
 from tests.unit.sources.test_suite import LakeflowConnectTests
+from tests.unit.sources.test_write_back_suite import LakeflowConnectWriteBackTests
 
 
-class TestExampleConnector(LakeflowConnectTests):
+class TestExampleConnector(LakeflowConnectWriteBackTests, LakeflowConnectTests):
     connector_class = ExampleLakeflowConnect
     test_utils_class = LakeflowConnectWriteTestUtils
     sample_records = 100
