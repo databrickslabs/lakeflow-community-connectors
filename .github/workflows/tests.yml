@@ -1,10 +1,12 @@
 name: Tests
 
+# Triggers: see fork-PR label-gating note in .github/workflows/pylint.yml.
 on:
   push:
     branches: [master]
-  pull_request:
+  pull_request_target:
     branches: [master]
+    types: [labeled, synchronize, opened, reopened]
 
 permissions:
   contents: read
@@ -13,6 +15,10 @@ permissions:
 jobs:
   # Detect which paths changed
   changes:
+    if: |
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
+      (github.event.action == 'labeled' && github.event.label.name == 'safe-to-test')
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest
@@ -28,10 +34,11 @@ jobs:
       # - uses: dorny/paths-filter@v3
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Check changed paths
         id: check
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
+          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
             BASE_SHA="${{ github.event.pull_request.base.sha }}"
             HEAD_SHA="${{ github.event.pull_request.head.sha }}"
           else
@@ -151,6 +158,8 @@ jobs:
         python-version: ["3.10"]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
@@ -182,6 +191,8 @@ jobs:
         python-version: ["3.10"]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
@@ -213,6 +224,8 @@ jobs:
         python-version: ["3.10"]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
@@ -244,6 +257,8 @@ jobs:
         python-version: ["3.10"]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
@@ -277,6 +292,8 @@ jobs:
       fail-fast: false
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Set up Python 3.10
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
