@@ -634,23 +634,20 @@ class LakeflowConnectTests:
     def test_read_terminates(self):
         """read_table eventually converges to a stable offset.
 
-        Verifies two properties that together support
-        ``Trigger.AvailableNow`` termination:
-
-        1. **Convergence under finite source.** Successive read_table
-           calls feeding the previous offset back must produce identical
-           offsets within ``read_termination_max_iterations`` calls.
-        2. **Monotonic offsets.** Scalar values in the offset dict must
-           never go backwards across iterations — backwards = data loss.
+        ``Trigger.AvailableNow`` terminates when ``read_table`` returns
+        the same offset it was given. The contract is equality-only:
+        the framework never compares offsets ordinally, so the connector
+        is free to use any opaque shape it wants. This test loops up to
+        ``read_termination_max_iterations`` calls feeding the previous
+        offset back, and asserts equality is reached.
 
         **Cap-mechanism testing.** Termination under genuinely-unbounded
         source data depends on the connector's init-time cap (``_init_ts``).
-        This test only verifies cap engagement when the simulator spec
-        includes ``synthesize_future_records`` for the relevant endpoints
-        with ``count`` large enough that natural drain takes more than
+        Cap engagement is exercised only when the simulator spec includes
+        ``synthesize_future_records`` for the relevant endpoints with
+        ``count`` large enough that natural drain takes more than
         ``read_termination_max_iterations`` iterations — at which point a
-        non-capping connector fails to converge. Authors of non-snapshot
-        connectors should configure that directive in their endpoints.yaml.
+        non-capping connector fails to converge.
         """
         tables = self._non_partitioned_tables()
         if not tables:
@@ -674,15 +671,13 @@ class LakeflowConnectTests:
         """Loop read_table feeding the offset back until two consecutive
         calls return the same offset. Returns error string or None.
 
-        Enforces convergence and cursor monotonicity. Cap-based
-        termination under unbounded source data is exercised
-        indirectly: configure ``synthesize_future_records`` in the
-        simulator spec with ``count`` larger than the iteration limit,
-        and a non-capping connector will fail the convergence check.
+        The framework's termination contract is equality-only:
+        ``end_offset == start_offset`` signals "no more data." Offsets
+        are otherwise opaque to the framework — this helper does not
+        impose any ordering on them.
         """
         offset: Any = {}
         prev_json: Optional[str] = None
-        prev_scalars: Optional[dict] = None
         max_iter = self.read_termination_max_iterations
 
         for i in range(max_iter):
@@ -722,35 +717,15 @@ class LakeflowConnectTests:
                     "  Fix: Use only strings/numbers/booleans/None in the offset dict."
                 )
 
-            cur_scalars = {
-                k: v for k, v in (offset or {}).items()
-                if isinstance(v, (str, int, float)) and not isinstance(v, bool)
-            }
-            if prev_scalars is not None:
-                for key, val in cur_scalars.items():
-                    if key not in prev_scalars:
-                        continue
-                    prev_val = prev_scalars[key]
-                    if type(val) is type(prev_val) and val < prev_val:
-                        return (
-                            f"[{table}] Offset key {key!r} went backwards on "
-                            f"iteration {i + 1}: {prev_val!r} -> {val!r}.\n"
-                            "  Fix: cursor offsets must be monotonically "
-                            "non-decreasing. Going backwards causes data loss "
-                            "on the next pipeline trigger."
-                        )
-
             if prev_json is not None and cur_json == prev_json:
                 return None  # Converged.
             prev_json = cur_json
-            prev_scalars = cur_scalars
 
         return (
             f"[{table}] read_table did not converge in {max_iter} iterations "
             f"(last offset: {prev_json}).\n"
-            "  Fix: cap the cursor at an init-time snapshot or a known upper "
-            "bound so successive calls with the same input eventually return "
-            "the same offset. Trigger.AvailableNow termination depends on this."
+            "  Fix: read_table() must eventually return the same offset it "
+            "was given. Trigger.AvailableNow termination depends on this."
         )
 
     # ------------------------------------------------------------------

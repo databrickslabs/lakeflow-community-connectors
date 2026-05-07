@@ -367,17 +367,14 @@ class SupportsPartitionedStreamTests(SupportsPartitionTests):
 
         Simulates the Spark micro-batch loop: each iteration calls
         latest_offset(start_offset=previous), then get_partitions with the
-        resulting range. Verifies:
-
-        1. **Convergence under finite source.** ``end_offset ==
-           start_offset`` within ``max_microbatch_iterations`` calls.
-        2. **Monotonic offsets.** Scalar values in the offset dict must
-           never decrease across iterations.
+        resulting range. The contract is equality-only — Spark stops the
+        trigger when ``latest_offset(start_offset=X) == X``. Offsets are
+        otherwise opaque, so this test does not impose ordering on them.
 
         **Cap-mechanism testing.** Termination under genuinely-unbounded
         source data depends on the connector clamping ``latest_offset``
-        at ``self._init_time``. This test only forces a non-clamping
-        connector to fail when the simulator spec uses
+        at ``self._init_time``. A non-clamping connector is forced to
+        fail this test only when the simulator spec uses
         ``synthesize_future_records`` with ``count`` larger than the
         iteration limit (otherwise the corpus drains naturally and the
         cap path is unexercised).
@@ -397,10 +394,9 @@ class SupportsPartitionedStreamTests(SupportsPartitionTests):
     def _validate_offset_convergence(self, table: str) -> Optional[str]:  # pylint: disable=too-many-return-statements,too-many-branches
         """Run micro-batch iterations until offset converges or limit hit.
 
-        Also enforces cursor monotonicity: scalar values in the offset dict
-        must be non-decreasing from one ``latest_offset`` call to the next.
-        Going backwards causes data loss in production even when the test
-        eventually converges.
+        Convergence is equality-only — Spark stops when
+        ``latest_offset(start_offset=X) == X``. Offsets are opaque to
+        the framework; no ordering is imposed here.
         """
         opts = self._opts(table)
         try:
@@ -414,15 +410,11 @@ class SupportsPartitionedStreamTests(SupportsPartitionTests):
                 f"expected dict."
             )
 
-        prev_scalars = {
-            k: v for k, v in end_offset.items()
-            if isinstance(v, (str, int, float)) and not isinstance(v, bool)
-        }
         start_offset = None
         for iteration in range(self.max_microbatch_iterations):
             # Simulate Spark calling get_partitions for this micro-batch
             try:
-                partitions = self.connector.get_partitions(
+                self.connector.get_partitions(
                     table, opts,
                     start_offset=start_offset, end_offset=end_offset,
                 )
@@ -449,24 +441,6 @@ class SupportsPartitionedStreamTests(SupportsPartitionTests):
                     f"[{table}] latest_offset returned "
                     f"{type(end_offset).__name__} on iteration {iteration}."
                 )
-
-            cur_scalars = {
-                k: v for k, v in end_offset.items()
-                if isinstance(v, (str, int, float)) and not isinstance(v, bool)
-            }
-            for key, val in cur_scalars.items():
-                if key not in prev_scalars:
-                    continue
-                pv = prev_scalars[key]
-                if type(val) is type(pv) and val < pv:
-                    return (
-                        f"[{table}] latest_offset key {key!r} went backwards "
-                        f"on iteration {iteration}: {pv!r} -> {val!r}.\n"
-                        "  Fix: latest_offset must be monotonically "
-                        "non-decreasing. Going backwards loses data on the "
-                        "next pipeline trigger."
-                    )
-            prev_scalars = cur_scalars
 
             # Converged: no new data
             if end_offset == start_offset:
