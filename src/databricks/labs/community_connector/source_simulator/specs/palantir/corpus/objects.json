@@ -1,0 +1,58 @@
+[
+  {
+    "flightId": "sim-flight-001",
+    "flightNumber": "AA100",
+    "carrierCode": "AA",
+    "originAirport": "SFO",
+    "destinationAirport": "JFK",
+    "departureTimestamp": "2024-06-01T08:00:00Z",
+    "arrivalTimestamp": "2024-06-01T16:30:00Z",
+    "distance": 2586.0,
+    "airTime": 330,
+    "cancelled": false,
+    "__primaryKey": "sim-flight-001",
+    "__apiName": "ExampleFlight"
+  },
+  {
+    "flightId": "sim-flight-002",
+    "flightNumber": "UA200",
+    "carrierCode": "UA",
+    "originAirport": "LAX",
+    "destinationAirport": "ORD",
+    "departureTimestamp": "2024-06-02T10:00:00Z",
+    "arrivalTimestamp": "2024-06-02T16:15:00Z",
+    "distance": 1745.0,
+    "airTime": 255,
+    "cancelled": false,
+    "__primaryKey": "sim-flight-002",
+    "__apiName": "ExampleFlight"
+  },
+  {
+    "flightId": "sim-flight-003",
+    "flightNumber": "DL300",
+    "carrierCode": "DL",
+    "originAirport": "ATL",
+    "destinationAirport": "BOS",
+    "departureTimestamp": "2024-06-03T06:30:00Z",
+    "arrivalTimestamp": "2024-06-03T10:00:00Z",
+    "distance": 946.0,
+    "airTime": 150,
+    "cancelled": true,
+    "__primaryKey": "sim-flight-003",
+    "__apiName": "ExampleFlight"
+  },
+  {
+    "flightId": "sim-flight-004",
+    "flightNumber": "SW400",
+    "carrierCode": "WN",
+    "originAirport": "DEN",
+    "destinationAirport": "SEA",
+    "departureTimestamp": "2024-06-04T14:00:00Z",
+    "arrivalTimestamp": "2024-06-04T16:30:00Z",
+    "distance": 1024.0,
+    "airTime": 170,
+    "cancelled": false,
+    "__primaryKey": "sim-flight-004",
+    "__apiName": "ExampleFlight"
+  }
+]

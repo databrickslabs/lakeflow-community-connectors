@@ -1,0 +1,59 @@
+# Palantir Foundry Ontology v2 API endpoints.
+#
+# The connector uses three endpoint groups:
+# * **objectTypes** (GET): list and describe object types (tables).
+# * **loadObjects** (POST): paginated data fetch with snapshot consistency.
+# * **aggregate** (POST): lightweight max-cursor lookup.
+# * **search** (POST): fallback max-cursor lookup via orderBy.
+#
+# The simulator serves single-page responses (nextPageToken: null) so
+# the connector's pagination loop terminates after one page per call.
+
+endpoints:
+  # ---- schema / metadata ----
+
+  - path: "/api/v2/ontologies/{ontology}/objectTypes"
+    method: GET
+    corpus: object_types_list
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+
+  # ---- data fetch ----
+
+  - path: "/api/v2/ontologies/{ontology}/objectSets/loadObjects"
+    method: POST
+    corpus: objects
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          nextPageToken: null
+          totalCount: "4"
+
+  # ---- aggregate (max cursor lookup) ----
+
+  - path: "/api/v2/ontologies/{ontology}/objectSets/aggregate"
+    method: POST
+    corpus: aggregate
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          accuracy: ACCURATE
+
+  # ---- search (fallback max cursor) ----
+
+  - path: "/api/v2/ontologies/{ontology}/objects/{objectType}/search"
+    method: POST
+    corpus: objects
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          nextPageToken: null
+          totalCount: "4"

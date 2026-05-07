@@ -7,6 +7,7 @@ into Databricks using the LakeflowConnect interface.
 
 import requests
 import time
+from datetime import datetime, timezone
 from typing import Dict, List, Iterator, Any, Tuple
 from pyspark.sql.types import (
     StructType,
@@ -69,26 +70,29 @@ class PalantirLakeflowConnect(LakeflowConnect):
             "Content-Type": "application/json",
         })
 
+        # Admission control: cap cursor at init time so a single trigger
+        # run only drains data that existed when the connector started.
+        self._init_time = datetime.now(timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        self._default_max_records_per_batch = 100_000
+
         # Initialize caches for performance
         self._schema_cache: Dict[str, StructType] = {}
         self._metadata_cache: Dict[str, dict] = {}
-        self._object_types_cache: List[str] = None
+        self._object_types_cache: Dict[str, dict] = None
 
-    def list_tables(self) -> List[str]:
+    def _ensure_object_types_cached(self) -> None:
         """
-        List all object types (tables) available in the configured ontology.
+        Fetch all object type definitions from the Palantir API and cache
+        them. Called lazily on first access. Subsequent calls use the cache.
 
-        Returns:
-            List of object type API names (e.g., ["ExampleFlight", "ExampleRouteAlert"])
-
-        Raises:
-            Exception: If API request fails
+        Uses the list endpoint (GET /objectTypes) which returns full
+        definitions including properties and primaryKey for each type.
         """
-        # Return cached result if available
         if self._object_types_cache is not None:
-            return self._object_types_cache
+            return
 
-        # Fetch object types from Palantir API
         url = f"{self.base_url}/api/v2/ontologies/{self.ontology_api_name}/objectTypes"
 
         try:
@@ -101,11 +105,29 @@ class PalantirLakeflowConnect(LakeflowConnect):
             )
 
         data = response.json()
-        object_types = [obj["apiName"] for obj in data.get("data", [])]
+        self._object_types_cache = {
+            obj["apiName"]: obj for obj in data.get("data", [])
+        }
 
-        # Cache the result
-        self._object_types_cache = object_types
-        return object_types
+    def list_tables(self) -> List[str]:
+        """
+        List all object types (tables) available in the configured ontology.
+
+        Returns:
+            List of object type API names (e.g., ["ExampleFlight", "ExampleRouteAlert"])
+        """
+        self._ensure_object_types_cached()
+        return list(self._object_types_cache.keys())
+
+    def _get_object_type(self, table_name: str) -> dict:
+        """Get the cached object type definition for a table."""
+        self._ensure_object_types_cached()
+        if table_name not in self._object_types_cache:
+            raise ValueError(
+                f"Table '{table_name}' is not supported. "
+                f"Available tables: {self.list_tables()}"
+            )
+        return self._object_types_cache[table_name]
 
     def get_table_schema(
         self, table_name: str, table_options: Dict[str, str]
@@ -122,34 +144,13 @@ class PalantirLakeflowConnect(LakeflowConnect):
 
         Raises:
             ValueError: If table_name is not supported
-            Exception: If API request fails
         """
-        # Check cache first
         if table_name in self._schema_cache:
             return self._schema_cache[table_name]
 
-        # Validate table exists
-        if table_name not in self.list_tables():
-            raise ValueError(
-                f"Table '{table_name}' is not supported. "
-                f"Available tables: {self.list_tables()}"
-            )
-
-        # Fetch object type definition from Palantir API
-        url = f"{self.base_url}/api/v2/ontologies/{self.ontology_api_name}/objectTypes/{table_name}"
-
-        try:
-            response = self._session.get(url, timeout=30)
-            response.raise_for_status()
-        except requests.RequestException as e:
-            raise Exception(
-                f"Failed to get schema for table '{table_name}': {str(e)}"
-            )
-
-        obj_type = response.json()
+        obj_type = self._get_object_type(table_name)
         schema = self._build_schema_from_object_type(obj_type)
 
-        # Cache the result
         self._schema_cache[table_name] = schema
         return schema
 
@@ -259,35 +260,14 @@ class PalantirLakeflowConnect(LakeflowConnect):
 
         Raises:
             ValueError: If table_name is not supported
-            Exception: If API request fails
         """
-        # Create cache key based on table name and cursor field
         cursor_field = table_options.get("cursor_field")
         cache_key = f"{table_name}_{cursor_field or 'snapshot'}"
 
-        # Check cache first
         if cache_key in self._metadata_cache:
             return self._metadata_cache[cache_key]
 
-        # Validate table exists
-        if table_name not in self.list_tables():
-            raise ValueError(
-                f"Table '{table_name}' is not supported. "
-                f"Available tables: {self.list_tables()}"
-            )
-
-        # Fetch object type to get primary key information
-        url = f"{self.base_url}/api/v2/ontologies/{self.ontology_api_name}/objectTypes/{table_name}"
-
-        try:
-            response = self._session.get(url, timeout=30)
-            response.raise_for_status()
-        except requests.RequestException as e:
-            raise Exception(
-                f"Failed to get metadata for table '{table_name}': {str(e)}"
-            )
-
-        obj_type = response.json()
+        obj_type = self._get_object_type(table_name)
         primary_key = obj_type.get("primaryKey")
 
         # Determine primary key field(s)
@@ -352,18 +332,27 @@ class PalantirLakeflowConnect(LakeflowConnect):
     def _generate_all_pages(
         self, table_name: str, page_size: int,
         where_clause: dict = None,
+        max_records: int = 0,
     ) -> Iterator[dict]:
         """
         Generator that yields records page by page, keeping only one page
         in memory at a time. This avoids OOM when reading large datasets.
+
+        Args:
+            max_records: Cap on total records yielded (0 = unlimited).
         """
         object_set = self._build_object_set(table_name, where_clause)
         page_token = None
+        emitted = 0
         while True:
             records, next_page_token = self._fetch_page(
                 object_set, page_token, page_size
             )
-            yield from records
+            for record in records:
+                if max_records and emitted >= max_records:
+                    return
+                yield record
+                emitted += 1
 
             if not next_page_token:
                 break
@@ -377,6 +366,7 @@ class PalantirLakeflowConnect(LakeflowConnect):
 
         Yields records page by page to avoid loading the entire dataset
         into memory. Only one page (~10K records) is held at a time.
+        Respects ``max_records_per_batch`` for admission control.
 
         Args:
             table_name: Object type API name
@@ -387,13 +377,20 @@ class PalantirLakeflowConnect(LakeflowConnect):
             Tuple of (generator of all records, end offset dict)
         """
         page_size = int(table_options.get("page_size", "1000"))
+        max_records = int(
+            table_options.get(
+                "max_records_per_batch", self._default_max_records_per_batch
+            )
+        )
 
         if start_offset:
             next_offset = start_offset
         else:
             next_offset = {"done": "true"}
 
-        return self._generate_all_pages(table_name, page_size), next_offset
+        return self._generate_all_pages(
+            table_name, page_size, max_records=max_records
+        ), next_offset
 
     def _get_max_cursor_value(
         self, table_name: str, cursor_field: str
@@ -479,13 +476,16 @@ class PalantirLakeflowConnect(LakeflowConnect):
         Flow:
         1. Call the aggregate endpoint to get the current max cursor value
            (lightweight, no records fetched).
-        2. If max hasn't changed since checkpoint → return empty (no new data).
-        3. If this is an incremental run (prev checkpoint exists), use a
+        2. Cap the cursor at ``_init_time`` so a single trigger run only
+           drains data that existed when the connector started.
+        3. If max hasn't changed since checkpoint → return empty (no new data).
+        4. If this is an incremental run (prev checkpoint exists), use a
            server-side 'where: gt' filter so the API only returns records
            newer than the checkpoint — avoids full scan.
-        4. If this is the first run (no checkpoint), fetch all records
+        5. If this is the first run (no checkpoint), fetch all records
            (no where clause).
-        5. Yield records via generator, one page at a time.
+        6. Yield records via generator, one page at a time, respecting
+           ``max_records_per_batch``.
 
         Works with both SCD_TYPE_1 and SCD_TYPE_2 — the SCD type is
         handled by the framework's apply_changes, not by this method.
@@ -500,10 +500,20 @@ class PalantirLakeflowConnect(LakeflowConnect):
             Tuple of (generator of records, end offset dict)
         """
         page_size = int(table_options.get("page_size", "1000"))
+        max_records = int(
+            table_options.get(
+                "max_records_per_batch", self._default_max_records_per_batch
+            )
+        )
         prev_max_cursor = start_offset.get("max_cursor_value") if start_offset else None
 
         # Step 1: Get current max cursor via aggregate (lightweight).
         current_max_cursor = self._get_max_cursor_value(table_name, cursor_field)
+
+        # Step 2: Cap at _init_time so this trigger run doesn't chase
+        # data arriving after connector start.
+        if current_max_cursor and current_max_cursor > self._init_time:
+            current_max_cursor = self._init_time
 
         # Use whichever is greater: previous checkpoint or current max
         if prev_max_cursor and current_max_cursor:
@@ -511,14 +521,14 @@ class PalantirLakeflowConnect(LakeflowConnect):
         else:
             new_max_cursor = current_max_cursor or prev_max_cursor
 
-        # Step 2: Check if there's new data.
+        # Step 3: Check if there's new data.
         final_offset = {"max_cursor_value": new_max_cursor}
         if start_offset and final_offset == start_offset:
             # No new data — return empty iterator and same offset to stop.
             return iter([]), start_offset
         next_offset = final_offset
 
-        # Step 3: Build server-side where clause for incremental runs.
+        # Step 4: Build server-side where clause for incremental runs.
         # On first run (prev_max_cursor is None): no filter → full load.
         # On subsequent runs: gt filter → only new/updated records from API.
         where_clause = None
@@ -529,17 +539,22 @@ class PalantirLakeflowConnect(LakeflowConnect):
                 "value": prev_max_cursor,
             }
 
-        # Step 4: Generator that yields records page by page.
+        # Step 5: Generator that yields records page by page.
         # Records with null cursor_field are excluded (not yielded).
+        # Respects max_records_per_batch for admission control.
         def _filtered_pages() -> Iterator[dict]:
+            emitted = 0
             for record in self._generate_all_pages(
                 table_name, page_size, where_clause=where_clause
             ):
+                if max_records and emitted >= max_records:
+                    return
                 # Skip records with null cursor (server-side gt filter
                 # already excludes them on incremental runs, but on
                 # the first full load we need this client-side check).
                 if record.get(cursor_field) is not None:
                     yield record
+                    emitted += 1
 
         return _filtered_pages(), next_offset
 
