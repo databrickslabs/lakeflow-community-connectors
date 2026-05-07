@@ -3,8 +3,18 @@ name: Pylint
 on:
   push:
     branches: [master]
+    paths:
+      - '**/*.py'
+      - 'pyproject.toml'
+      - 'requirements/**'
+      - '.github/workflows/pylint.yml'
   pull_request:
     branches: [master]
+    paths:
+      - '**/*.py'
+      - 'pyproject.toml'
+      - 'requirements/**'
+      - '.github/workflows/pylint.yml'
 
 permissions:
   contents: read
