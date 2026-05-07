@@ -26,36 +26,68 @@ Build connectors with AI-assisted workflows using [Claude Code](https://docs.ant
 git clone https://github.com/databrickslabs/lakeflow-community-connectors.git
 ```
 
-### One-Command Agent
+### Recommended developer flow — two phases, no auth during development
 
-A single command orchestrates the entire workflow — API research through deployment:
+The primary developer experience is split into two commands. Phase 1 produces a complete connector — code, simulator spec, tests, docs — without ever asking for credentials. Phase 2 picks up later, on a different machine if you want, and validates the connector against the real source.
 
 ```
-/create-connector <source_name> [tables=t1,t2,...] [doc=<url_or_path>]
+# Phase 1: develop the connector (no credentials needed)
+/develop-connector <source_name> [tables=t1,t2,...] [doc=<url_or_path>]
+
+# Phase 2: authenticate, run live tests, optionally deploy
+/validate-connector <source_name>
 ```
 
-The agent pauses once to collect credentials for source authentication.
+`/develop-connector` runs research → implementation → simulator spec → docs → simulate-mode tests, then opens a PR labeled `needs-live-testing`. The simulate-mode test run uses an in-process fake source built from a hand-authored `endpoints.yaml` plus a corpus synthesized from the connector's `TABLE_SCHEMAS`. No network, no credentials.
 
-### Step-by-Step Skills
+`/validate-connector` is interactive: it collects credentials via a browser form, runs `CONNECTOR_TEST_MODE=record` against the live source, fixes any drift the live validator reports, and optionally deploys a pipeline.
 
-For more control, run each step individually. Replace `{source}` with your connector name.
+**Batch development.** To develop multiple connectors back-to-back without supervision:
+
+```
+/batch-develop-connectors source1 source2 source3 ...
+```
+
+Each connector lands as a separate PR; failures don't abort the rest of the batch.
+
+### Optional: self-review checkpoint
+
+Before requesting human review, run the self-review skill to get a scored audit of the connector — implementation, test coverage, simulator validation, security smells, doc consistency:
+
+```
+/self-review-connector for {source}
+```
+
+The skill writes a `SELF_REVIEW.md` next to the connector's tests, posts it as a sticky comment on the open PR (if any), and adds the `connector-self-reviewed` label. The repo's CI requires that label to merge. The skill does **not** modify connector code — its output is the input to a fix loop, not part of one.
+
+### Step-by-step skills (manual control)
+
+If you'd rather drive each step yourself instead of letting `/develop-connector` orchestrate, the underlying skills can be invoked individually. Replace `{source}` with your connector name.
 
 | Step | Command |
 |------|---------|
 | 1. Research source READ APIs | `/research-source-api for {source}` |
-| 2. Collect credentials | `/authenticate-source for {source}` |
-| 3. Implement connector | `/implement-connector for {source}` |
-| 4. Run tests and fix failures | `/test-and-fix-connector for {source}` |
-| 5a. Generate documentation | `/create-connector-document for {source}` |
-| 5b. Finalize connector spec | `/generate-connector-spec for {source}` |
+| 2. Implement connector | `/implement-connector for {source}` |
+| 3. Run tests and fix failures | `/test-and-fix-connector for {source}` |
+| 4a. Generate documentation | `/create-connector-document for {source}` |
+| 4b. Finalize connector spec | `/generate-connector-spec for {source}` |
+| 5. Collect credentials (Phase 2) | `/authenticate-source for {source}` |
 | 6. Build and deploy | `/deploy-connector for {source}` |
 
-**Optional: Write-Back Testing** — Run between steps 4 and 5. Skip for read-only sources or when writes are expensive/risky.
+**Optional: Write-Back Testing** — Run between steps 3 and 4. Skip for read-only sources or when writes are expensive/risky.
 
 | Step | Command |
 |------|---------|
 | Research write APIs | `/research-write-api-of-source for {source}` |
 | Implement write-back tests | `/write-back-testing for {source}` |
+
+### Experimental: end-user-oriented one-shot flow
+
+> **Not recommended for developers.** `/create-connector` blocks on credential collection between research and implementation, which prevents batch automation and forces the developer to be present throughout. It exists as a single-command option for end users who want to build, authenticate, validate, and deploy a connector in one continuous interactive session. For most development work, use `/develop-connector` + `/validate-connector` instead.
+
+```
+/create-connector <source_name> [tables=t1,t2,...] [doc=<url_or_path>]
+```
 
 ## Deploy and Run
 
@@ -95,5 +127,5 @@ lakeflow-community-connectors/
 |___ .claude/                    # AI-assisted development (auto-discovered by Claude Code and Cursor)
         |___ skills/             # Skill files for each workflow step
         |___ agents/             # Subagents for different development phases
-        |___ commands/           # Slash commands (e.g., /create-connector)
+        |___ commands/           # Slash commands (e.g., /develop-connector, /validate-connector)
 ```
