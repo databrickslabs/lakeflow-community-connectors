@@ -22,4 +22,11 @@ When developing a connector, only modify files under `src/databricks/labs/commun
 
 ## Workflow
 
-To create a connector end-to-end, follow `.claude/commands/create-connector.md`.
+The recommended developer flow is two-phase and decouples development from authentication:
+
+1. `/develop-connector <source_name>` — Phase 1: research, implementation, simulator spec, simulate-mode tests, docs, and a PR labeled `needs-live-testing`. No credentials required.
+2. `/validate-connector <source_name>` — Phase 2: collect credentials, run record-mode tests against the live source, optionally deploy.
+
+For batch development across many connectors, use `/batch-develop-connectors`. Before requesting human review, run `/self-review-connector for {source}` for a scored audit (the repo's CI requires the resulting `connector-self-reviewed` label to merge).
+
+The legacy `/create-connector` command still exists as a one-shot interactive flow for end users; it is **not recommended for developers** because it blocks on credential collection between research and implementation.
