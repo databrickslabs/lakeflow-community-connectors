@@ -1,11 +1,4 @@
-Build a new community connector end-to-end in a single interactive session (research → auth → implement → test → docs → deploy).
-
-> **Experimental — not recommended for developers.** This command is end-user-oriented: it blocks on credential collection between research and implementation, which prevents batch automation and forces the developer to be present throughout. For most development work, prefer the two-phase developer flow:
->
-> - `/develop-connector <source_name>` — research, implement, test in simulate mode, open a PR (no credentials needed).
-> - `/validate-connector <source_name>` — authenticate, run record-mode tests against the live source, optionally deploy.
->
-> Use `/create-connector` only when you intentionally want a one-shot interactive flow.
+Build a new community connector end-to-end.
 
 Usage: /create-connector <source_name> [tables=t1,t2,...] [doc=<url_or_path>]
 
