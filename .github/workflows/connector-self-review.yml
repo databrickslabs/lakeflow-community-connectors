@@ -1,0 +1,94 @@
+name: Connector Self-Review
+
+# This workflow is the merge gate for connector PRs. It does not run any
+# audit itself — that's the developer-invoked ``/self-review-connector``
+# skill's job. The skill posts a sticky comment to the PR and adds the
+# ``connector-self-reviewed`` label on pass.
+#
+# This workflow:
+#   * On every new push (``synchronize``): removes the label, forcing the
+#     developer to re-run the skill on the new commits.
+#   * On other PR events: checks if the label is present. If not, fails
+#     with a clear instruction to run the skill.
+#
+# Add this workflow's check to ``master``'s required status checks to
+# turn it into a real merge gate.
+#
+# Pattern adapted from databricks-eng/plugin-marketplace's
+# ``auto-request-reviewers.yml`` / ``/plugin-self-review`` skill.
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, reopened, ready_for_review, synchronize, labeled]
+    paths:
+      - 'src/databricks/labs/community_connector/sources/**'
+      - 'src/databricks/labs/community_connector/source_simulator/specs/**'
+      - 'tests/unit/sources/**'
+
+permissions:
+  contents: read
+  pull-requests: write    # required to add/remove labels
+
+# Single in-flight check per PR. A new push cancels any pending run for
+# the previous SHA so we don't race on label state.
+concurrency:
+  group: connector-self-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check-self-review-label:
+    if: ${{ !github.event.pull_request.draft &&
+            (github.event.action != 'labeled' ||
+             github.event.label.name == 'connector-self-reviewed') }}
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    steps:
+      - name: Remove self-review label on new pushes
+        if: github.event.action == 'synchronize'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # New commits invalidate any prior self-review. Strip the label
+          # silently if present; ignore "label not present" errors.
+          gh pr edit ${{ github.event.pull_request.number }} \
+            --repo ${{ github.repository }} \
+            --remove-label "connector-self-reviewed" 2>/dev/null || true
+
+      - name: Check for self-review label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # On 'synchronize' we just removed the label — fail immediately
+          # with the instruction to re-run the skill on the new commits.
+          if [ "${{ github.event.action }}" = "synchronize" ]; then
+            echo "::error::New commits invalidated the prior self-review. \
+            Run /self-review-connector --source <name> in Claude Code to \
+            re-review against the current head."
+            exit 1
+          fi
+
+          # On 'labeled' with the right label — short-circuit pass.
+          if [ "${{ github.event.action }}" = "labeled" ]; then
+            echo "Label 'connector-self-reviewed' was just added. Pass."
+            exit 0
+          fi
+
+          # On 'opened' / 'reopened' / 'ready_for_review' — check labels.
+          if gh pr view ${{ github.event.pull_request.number }} \
+              --repo ${{ github.repository }} \
+              --json labels --jq '.labels[].name' \
+            | grep -q '^connector-self-reviewed$'; then
+            echo "Label 'connector-self-reviewed' present. Pass."
+            exit 0
+          fi
+
+          echo "::error::The 'connector-self-reviewed' label is required \
+          to merge connector PRs. Run /self-review-connector --source <name> \
+          in Claude Code; it audits the connector and adds the label on \
+          pass. The skill is the merge gate; this workflow only checks \
+          that the gate has been satisfied."
+          exit 1
