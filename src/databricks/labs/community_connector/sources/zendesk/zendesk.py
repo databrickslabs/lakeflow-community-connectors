@@ -273,15 +273,18 @@ class ZendeskLakeflowConnect(LakeflowConnect):
         """
         Fetch the metadata of a table.
         """
+        # Tables backed by Zendesk's incremental API are cdc; the rest are
+        # plain paginated snapshots.
+        cdc = {"primary_keys": ["id"], "cursor_field": "updated_at", "ingestion_type": "cdc"}
         metadata = {
-            "tickets": {"primary_keys": ["id"], "cursor_field": "updated_at"},
-            "organizations": {"primary_keys": ["id"], "cursor_field": "updated_at"},
-            "articles": {"primary_keys": ["id"], "cursor_field": "updated_at"},
-            "brands": {"primary_keys": ["id"], "cursor_field": "updated_at"},
-            "groups": {"primary_keys": ["id"], "cursor_field": "updated_at"},
-            "ticket_comments": {"primary_keys": ["id"], "cursor_field": "updated_at"},
-            "topics": {"primary_keys": ["id"], "cursor_field": "updated_at"},
-            "users": {"primary_keys": ["id"], "cursor_field": "updated_at"},
+            "tickets": cdc,
+            "organizations": cdc,
+            "ticket_comments": cdc,
+            "users": cdc,
+            "articles": {"primary_keys": ["id"], "ingestion_type": "snapshot"},
+            "brands": {"primary_keys": ["id"], "ingestion_type": "snapshot"},
+            "groups": {"primary_keys": ["id"], "ingestion_type": "snapshot"},
+            "topics": {"primary_keys": ["id"], "ingestion_type": "snapshot"},
         }
 
         if table_name not in metadata:
@@ -469,19 +472,24 @@ class ZendeskLakeflowConnect(LakeflowConnect):
         return all_records, next_offset
 
     def _read_paginated(self, table_name: str, config: dict, start_offset: dict):
-        """Read data from paginated API endpoints"""
+        """Read data from paginated API endpoints.
+
+        These endpoints do not support incremental queries, so each call
+        reads a full snapshot.  We use a sentinel offset (``{"done": True}``)
+        to short-circuit on the second call within a Trigger.AvailableNow
+        trigger: the first call drains all pages and returns the sentinel;
+        the second call sees it and returns immediately, letting the
+        trigger terminate (end_offset == start_offset).
+        """
+        # Short-circuit on subsequent calls in the same trigger.
+        if start_offset and start_offset.get("done"):
+            return [], start_offset
+
         endpoint = config["endpoint"]
         response_key = config["response_key"]
 
-        # For paginated endpoints, use page number from offset
-        page = 1
-        if start_offset and "page" in start_offset:
-            page = start_offset["page"]
-
-        url = f"{self.base_url}/{endpoint}?page={page}&per_page=100"
-
         all_records = []
-        current_page = page
+        current_page = 1
 
         while True:
             current_url = f"{self.base_url}/{endpoint}?page={current_page}&per_page=100"
@@ -510,8 +518,8 @@ class ZendeskLakeflowConnect(LakeflowConnect):
 
             current_page += 1
 
-            # Optional: Add a reasonable limit to prevent infinite loops
-            if current_page > 1000:  # Adjust as needed
+            # Add a reasonable limit to prevent infinite loops
+            if current_page > 1000:
                 break
 
-        return all_records, {"page": current_page}
+        return all_records, {"done": True}

@@ -1,17 +1,33 @@
 import json
 from pathlib import Path
 
+import pytest
+
+from databricks.labs.community_connector import source_simulator as _sim_pkg
+from databricks.labs.community_connector.source_simulator import (
+    MODE_SIMULATE,
+    Simulator,
+)
 from databricks.labs.community_connector.sources.fhir.fhir_utils import (
     SmartAuthClient, FhirHttpClient, iter_bundle_pages, extract_record,
 )
 
 CONFIG_PATH = Path(__file__).parent / "configs" / "dev_config.json"
+_SIMULATOR_BASE_URL = "https://simulator-fhir.example.com/fhir"
+_FHIR_SPEC_DIR = Path(_sim_pkg.__file__).parent / "specs" / "fhir"
+
 
 def load_config():
     with open(CONFIG_PATH) as f:
         return json.load(f)
 
-def make_client():
+
+def make_client(base_url: str | None = None) -> FhirHttpClient:
+    """Build a FhirHttpClient. Default reads dev_config.json (live testing);
+    pass ``base_url`` directly to bypass config (e.g. simulator runs)."""
+    if base_url is not None:
+        auth = SmartAuthClient("", "", "none", "", "", "")
+        return FhirHttpClient(base_url=base_url, auth_client=auth)
     config = load_config()
     auth = SmartAuthClient(
         token_url=config.get("token_url", ""),
@@ -24,6 +40,18 @@ def make_client():
         private_key_algorithm=config.get("private_key_algorithm", "RS384"),
     )
     return FhirHttpClient(base_url=config["base_url"], auth_client=auth)
+
+
+@pytest.fixture
+def simulated_fhir_client():
+    """A FhirHttpClient pointing at the simulator. Spec/corpus live under
+    ``source_simulator/specs/fhir/``."""
+    with Simulator(
+        mode=MODE_SIMULATE,
+        spec_path=_FHIR_SPEC_DIR / "endpoints.yaml",
+        corpus_dir=_FHIR_SPEC_DIR / "corpus",
+    ):
+        yield make_client(base_url=_SIMULATOR_BASE_URL)
 
 
 # --- Pure unit tests (no network) ---
@@ -89,27 +117,35 @@ def test_extract_record_unknown_resource_returns_common_only():
     assert set(record.keys()) == {"id", "resourceType", "lastUpdated", "raw_json", "extension"}
 
 
-# --- Integration tests (hit live HAPI FHIR server) ---
+# --- Integration tests (driven via the simulator) ---
+#
+# These exercise the real FhirHttpClient + iter_bundle_pages helper end-to-end:
+# the request actually serializes through ``requests``, the simulator
+# intercepts it, serves the Bundle from the corpus, and the client + helper
+# parse it. No live FHIR server needed.
 
-def test_fhir_client_get_patient_bundle():
-    client = make_client()
-    resp = client.get("Patient", params={"_count": "3"})
+def test_fhir_client_get_patient_bundle(simulated_fhir_client):
+    resp = simulated_fhir_client.get("Patient", params={"_count": "3"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["resourceType"] == "Bundle"
     assert body["type"] == "searchset"
 
-def test_iter_bundle_pages_yields_patient_resources():
-    client = make_client()
-    resources = list(iter_bundle_pages(client, "Patient", {"_count": "5"}, max_records=5))
+
+def test_iter_bundle_pages_yields_patient_resources(simulated_fhir_client):
+    resources = list(
+        iter_bundle_pages(simulated_fhir_client, "Patient", {"_count": "5"}, max_records=5)
+    )
     assert len(resources) > 0
     for r in resources:
         assert r["resourceType"] == "Patient"
         assert "id" in r
 
-def test_iter_bundle_pages_respects_max_records():
-    client = make_client()
-    resources = list(iter_bundle_pages(client, "Patient", {"_count": "10"}, max_records=3))
+
+def test_iter_bundle_pages_respects_max_records(simulated_fhir_client):
+    resources = list(
+        iter_bundle_pages(simulated_fhir_client, "Patient", {"_count": "10"}, max_records=3)
+    )
     assert len(resources) <= 3
 
 

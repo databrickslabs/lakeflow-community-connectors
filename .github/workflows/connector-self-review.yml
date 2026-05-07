@@ -1,0 +1,164 @@
+name: Connector Self-Review
+
+# Merge gate for *significant* connector PRs. The audit itself is the
+# developer-invoked ``/self-review-connector`` skill; this workflow only
+# checks that the resulting label is present on the PR.
+#
+# Trigger scoping (two layers):
+#   1. ``paths`` filter — fires only when files under the connector
+#      source tree change. Pure test / doc / spec / workflow PRs never
+#      trigger this workflow at all.
+#   2. ``detect-significance`` job — within a triggered run, the gate
+#      is enforced only when the change is *significant*: a brand-new
+#      connector or a non-trivial source-code edit (>100 changed lines,
+#      excluding READMEs and pyproject.toml). Small touch-ups skip the
+#      gate by design.
+#
+# Behavior on PR events for significant PRs:
+#   * ``synchronize`` (new push): removes the label, forcing the
+#     developer to re-run the skill on the new commits.
+#   * Other PR events: checks the label and fails with an instruction
+#     if missing.
+#
+# Add this workflow's check to ``master``'s required status checks to
+# turn it into a real merge gate.
+#
+# Pattern adapted from databricks-eng/plugin-marketplace's
+# ``auto-request-reviewers.yml`` / ``/plugin-self-review`` skill.
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, reopened, ready_for_review, synchronize, labeled]
+    paths:
+      - 'src/databricks/labs/community_connector/sources/**'
+
+permissions:
+  contents: read
+  pull-requests: write    # required to add/remove labels
+
+# Single in-flight check per PR. A new push cancels any pending run for
+# the previous SHA so we don't race on label state.
+concurrency:
+  group: connector-self-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  detect-significance:
+    if: ${{ !github.event.pull_request.draft &&
+            (github.event.action != 'labeled' ||
+             github.event.label.name == 'connector-self-reviewed') }}
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    outputs:
+      significant: ${{ steps.check.outputs.significant }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Detect significant connector source changes
+        id: check
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          SOURCE_PATH="src/databricks/labs/community_connector/sources"
+
+          # New connector? Look for added paths under sources/ whose
+          # connector directory didn't exist in BASE.
+          NEW_CONNECTORS=""
+          while IFS= read -r added; do
+            [ -z "$added" ] && continue
+            conn=$(echo "$added" | awk -F/ '{print $6}')
+            [ -z "$conn" ] && continue
+            if ! git cat-file -e "${BASE_SHA}:${SOURCE_PATH}/${conn}" 2>/dev/null; then
+              NEW_CONNECTORS="${NEW_CONNECTORS} ${conn}"
+            fi
+          done < <(git diff --name-only --diff-filter=A "$BASE_SHA" "$HEAD_SHA" -- "${SOURCE_PATH}/")
+
+          NEW_CONNECTORS=$(echo "$NEW_CONNECTORS" | xargs -n1 | sort -u | xargs)
+          if [ -n "$NEW_CONNECTORS" ]; then
+            echo "New connector(s) detected: $NEW_CONNECTORS"
+            echo "significant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Otherwise count meaningful source lines changed. README.md
+          # and pyproject.toml are excluded so doc / packaging tweaks
+          # don't trip the gate.
+          LINES=$(git diff --shortstat "$BASE_SHA" "$HEAD_SHA" -- \
+            "${SOURCE_PATH}/" \
+            ":(exclude)${SOURCE_PATH}/*/README.md" \
+            ":(exclude)${SOURCE_PATH}/*/pyproject.toml" \
+            | grep -oE '[0-9]+ insertion|[0-9]+ deletion' \
+            | grep -oE '[0-9]+' \
+            | awk '{s+=$1} END {print s+0}')
+          LINES=${LINES:-0}
+          echo "Connector source lines changed (insertions + deletions): $LINES"
+
+          THRESHOLD=100
+          if [ "$LINES" -gt "$THRESHOLD" ]; then
+            echo "Significant change (>${THRESHOLD} lines); self-review required."
+            echo "significant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Minor change (≤${THRESHOLD} lines); self-review gate skipped."
+            echo "significant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  check-self-review-label:
+    needs: detect-significance
+    if: ${{ needs.detect-significance.outputs.significant == 'true' }}
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    steps:
+      - name: Remove self-review label on new pushes
+        if: github.event.action == 'synchronize'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # New commits invalidate any prior self-review. Strip the label
+          # silently if present; ignore "label not present" errors.
+          gh pr edit ${{ github.event.pull_request.number }} \
+            --repo ${{ github.repository }} \
+            --remove-label "connector-self-reviewed" 2>/dev/null || true
+
+      - name: Check for self-review label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # On 'synchronize' we just removed the label — fail immediately
+          # with the instruction to re-run the skill on the new commits.
+          if [ "${{ github.event.action }}" = "synchronize" ]; then
+            echo "::error::New commits invalidated the prior self-review. \
+            Run /self-review-connector --source <name> in Claude Code to \
+            re-review against the current head."
+            exit 1
+          fi
+
+          # On 'labeled' with the right label — short-circuit pass.
+          if [ "${{ github.event.action }}" = "labeled" ]; then
+            echo "Label 'connector-self-reviewed' was just added. Pass."
+            exit 0
+          fi
+
+          # On 'opened' / 'reopened' / 'ready_for_review' — check labels.
+          if gh pr view ${{ github.event.pull_request.number }} \
+              --repo ${{ github.repository }} \
+              --json labels --jq '.labels[].name' \
+            | grep -q '^connector-self-reviewed$'; then
+            echo "Label 'connector-self-reviewed' present. Pass."
+            exit 0
+          fi
+
+          echo "::error::The 'connector-self-reviewed' label is required \
+          to merge significant connector PRs. Run /self-review-connector \
+          --source <name> in Claude Code; it audits the connector and \
+          adds the label on pass. The skill is the merge gate; this \
+          workflow only checks that the gate has been satisfied."
+          exit 1

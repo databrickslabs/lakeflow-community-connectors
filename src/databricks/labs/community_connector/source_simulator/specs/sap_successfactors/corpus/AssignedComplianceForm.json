@@ -1,0 +1,34 @@
+[
+  {
+    "id": "foxtrot-759",
+    "createdBy": "romeo-526",
+    "createdDateTime": "alpha-180",
+    "lastModifiedBy": "foxtrot-595",
+    "lastModifiedDateTime": "sierra-833",
+    "mdfSystemRecordStatus": "victor-828"
+  },
+  {
+    "id": "mike-842",
+    "createdBy": "india-527",
+    "createdDateTime": "zulu-789",
+    "lastModifiedBy": "echo-402",
+    "lastModifiedDateTime": "echo-631",
+    "mdfSystemRecordStatus": "kilo-389"
+  },
+  {
+    "id": "charlie-681",
+    "createdBy": "uniform-711",
+    "createdDateTime": "xray-565",
+    "lastModifiedBy": "delta-287",
+    "lastModifiedDateTime": "tango-954",
+    "mdfSystemRecordStatus": "november-280"
+  },
+  {
+    "id": "quebec-811",
+    "createdBy": "kilo-891",
+    "createdDateTime": "quebec-110",
+    "lastModifiedBy": "whiskey-237",
+    "lastModifiedDateTime": "foxtrot-292",
+    "mdfSystemRecordStatus": "whiskey-514"
+  }
+]

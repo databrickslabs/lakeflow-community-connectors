@@ -1,0 +1,42 @@
+# DICOMweb (QIDO-RS + WADO-RS).
+#
+# Connector uses urllib (not requests) — works because the Interceptor
+# patches both. Endpoints return raw arrays; QIDO-RS treats an empty
+# response as "no records", which is exactly what we want for offline
+# tests.
+
+endpoints:
+  - path: /studies
+    method: GET
+    corpus: studies
+    response:
+      pagination_style: none
+      single_entity: true
+
+  - path: /studies/{study_uid}/series
+    method: GET
+    corpus: series
+    response:
+      pagination_style: none
+      single_entity: true
+
+  - path: /studies/{study_uid}/series/{series_uid}/instances
+    method: GET
+    corpus: instances
+    response:
+      pagination_style: none
+      single_entity: true
+
+  - path: /studies/{study_uid}/series/{series_uid}/metadata
+    method: GET
+    corpus: instances
+    response:
+      pagination_style: none
+      single_entity: true
+
+  - path: /studies/{study_uid}/series/{series_uid}/instances/{sop_uid}/metadata
+    method: GET
+    corpus: instances
+    response:
+      pagination_style: none
+      single_entity: true

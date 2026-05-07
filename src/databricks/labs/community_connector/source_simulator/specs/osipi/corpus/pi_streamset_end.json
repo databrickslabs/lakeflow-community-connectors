@@ -1,0 +1,46 @@
+[
+  {
+    "tag_webid": "mike-572",
+    "timestamp": "2024-01-25T19:06:53Z",
+    "value": 646.7,
+    "good": false,
+    "questionable": true,
+    "substituted": false,
+    "annotated": true,
+    "units": "charlie-429",
+    "ingestion_timestamp": "2024-01-08T07:49:51Z"
+  },
+  {
+    "tag_webid": "kilo-665",
+    "timestamp": "2024-01-05T02:24:25Z",
+    "value": 254.57,
+    "good": true,
+    "questionable": false,
+    "substituted": false,
+    "annotated": true,
+    "units": "uniform-768",
+    "ingestion_timestamp": "2024-01-10T14:16:17Z"
+  },
+  {
+    "tag_webid": "bravo-721",
+    "timestamp": "2024-01-11T16:57:19Z",
+    "value": 693.89,
+    "good": false,
+    "questionable": true,
+    "substituted": false,
+    "annotated": true,
+    "units": "papa-845",
+    "ingestion_timestamp": "2024-01-12T00:07:42Z"
+  },
+  {
+    "tag_webid": "sierra-837",
+    "timestamp": "2024-01-06T14:45:09Z",
+    "value": 716.93,
+    "good": false,
+    "questionable": false,
+    "substituted": true,
+    "annotated": false,
+    "units": "victor-640",
+    "ingestion_timestamp": "2024-01-18T01:20:50Z"
+  }
+]

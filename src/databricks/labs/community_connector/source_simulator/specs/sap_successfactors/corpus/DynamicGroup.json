@@ -1,0 +1,38 @@
+[
+  {
+    "groupID": 51812,
+    "groupName": "charlie-650",
+    "groupType": "echo-325",
+    "activeMembershipCount": 22951,
+    "lastModifiedDate": "lima-286",
+    "staticGroup": true,
+    "userType": "bravo-289"
+  },
+  {
+    "groupID": 33979,
+    "groupName": "zulu-142",
+    "groupType": "bravo-377",
+    "activeMembershipCount": 31021,
+    "lastModifiedDate": "sierra-993",
+    "staticGroup": false,
+    "userType": "quebec-844"
+  },
+  {
+    "groupID": 11362,
+    "groupName": "bravo-771",
+    "groupType": "juliet-996",
+    "activeMembershipCount": 67852,
+    "lastModifiedDate": "kilo-957",
+    "staticGroup": true,
+    "userType": "kilo-898"
+  },
+  {
+    "groupID": 18465,
+    "groupName": "alpha-631",
+    "groupType": "lima-174",
+    "activeMembershipCount": 87999,
+    "lastModifiedDate": "quebec-217",
+    "staticGroup": false,
+    "userType": "juliet-878"
+  }
+]

@@ -1,0 +1,169 @@
+[
+  {
+    "id": 13332,
+    "sessionName": "victor-282",
+    "sessionDate": "alpha-616",
+    "sessionLocation": "papa-960",
+    "status": 21424,
+    "activationDate": "india-684",
+    "approvalDateTime": "mike-463",
+    "createdByWorkAssignmentLegacyId": "lima-236",
+    "lastModifiedDateTime": "alpha-877",
+    "executiveReviewerList": [
+      {
+        "id": 59139,
+        "workAssignmentLegacyId": "echo-587"
+      },
+      {
+        "id": 73604,
+        "workAssignmentLegacyId": "oscar-563"
+      }
+    ],
+    "reviewerList": [
+      {
+        "id": 18693,
+        "workAssignmentLegacyId": "hotel-955",
+        "reviewerType": "juliet-189"
+      },
+      {
+        "id": 78124,
+        "workAssignmentLegacyId": "yankee-575",
+        "reviewerType": "india-600"
+      }
+    ],
+    "subjectList": [
+      {
+        "id": 58189,
+        "workAssignmentLegacyId": "yankee-546",
+        "calibrated": true,
+        "pmFormDataId": 31766,
+        "pmuDeeplink": "romeo-420",
+        "commentList": "echo-977",
+        "competencyRatingList": "zulu-917",
+        "ratingList": "delta-606"
+      }
+    ]
+  },
+  {
+    "id": 11886,
+    "sessionName": "yankee-421",
+    "sessionDate": "november-592",
+    "sessionLocation": "victor-882",
+    "status": 15190,
+    "activationDate": "golf-304",
+    "approvalDateTime": "charlie-514",
+    "createdByWorkAssignmentLegacyId": "lima-731",
+    "lastModifiedDateTime": "foxtrot-613",
+    "executiveReviewerList": [
+      {
+        "id": 67300,
+        "workAssignmentLegacyId": "zulu-540"
+      }
+    ],
+    "reviewerList": [
+      {
+        "id": 34282,
+        "workAssignmentLegacyId": "whiskey-593",
+        "reviewerType": "india-278"
+      }
+    ],
+    "subjectList": [
+      {
+        "id": 32420,
+        "workAssignmentLegacyId": "kilo-860",
+        "calibrated": false,
+        "pmFormDataId": 53623,
+        "pmuDeeplink": "whiskey-925",
+        "commentList": "papa-822",
+        "competencyRatingList": "tango-221",
+        "ratingList": "quebec-691"
+      },
+      {
+        "id": 90415,
+        "workAssignmentLegacyId": "uniform-374",
+        "calibrated": true,
+        "pmFormDataId": 12795,
+        "pmuDeeplink": "golf-700",
+        "commentList": "lima-952",
+        "competencyRatingList": "tango-755",
+        "ratingList": "juliet-458"
+      }
+    ]
+  },
+  {
+    "id": 45103,
+    "sessionName": "foxtrot-489",
+    "sessionDate": "lima-150",
+    "sessionLocation": "oscar-723",
+    "status": 47351,
+    "activationDate": "delta-775",
+    "approvalDateTime": "charlie-703",
+    "createdByWorkAssignmentLegacyId": "victor-495",
+    "lastModifiedDateTime": "juliet-411",
+    "executiveReviewerList": [
+      {
+        "id": 60970,
+        "workAssignmentLegacyId": "yankee-364"
+      }
+    ],
+    "reviewerList": [
+      {
+        "id": 48878,
+        "workAssignmentLegacyId": "mike-631",
+        "reviewerType": "hotel-300"
+      }
+    ],
+    "subjectList": [
+      {
+        "id": 94416,
+        "workAssignmentLegacyId": "victor-496",
+        "calibrated": true,
+        "pmFormDataId": 90490,
+        "pmuDeeplink": "kilo-675",
+        "commentList": "foxtrot-875",
+        "competencyRatingList": "uniform-323",
+        "ratingList": "yankee-636"
+      },
+      {
+        "id": 76955,
+        "workAssignmentLegacyId": "mike-695",
+        "calibrated": true,
+        "pmFormDataId": 17044,
+        "pmuDeeplink": "hotel-731",
+        "commentList": "quebec-799",
+        "competencyRatingList": "oscar-409",
+        "ratingList": "romeo-528"
+      }
+    ]
+  },
+  {
+    "id": 49381,
+    "sessionName": "uniform-925",
+    "sessionDate": "oscar-351",
+    "sessionLocation": "whiskey-657",
+    "status": 20522,
+    "activationDate": "zulu-389",
+    "approvalDateTime": "november-840",
+    "createdByWorkAssignmentLegacyId": "juliet-593",
+    "lastModifiedDateTime": "kilo-620",
+    "executiveReviewerList": [
+      {
+        "id": 51813,
+        "workAssignmentLegacyId": "delta-508"
+      }
+    ],
+    "reviewerList": [],
+    "subjectList": [
+      {
+        "id": 82929,
+        "workAssignmentLegacyId": "kilo-123",
+        "calibrated": true,
+        "pmFormDataId": 75733,
+        "pmuDeeplink": "tango-304",
+        "commentList": "mike-305",
+        "competencyRatingList": "bravo-438",
+        "ratingList": "november-888"
+      }
+    ]
+  }
+]

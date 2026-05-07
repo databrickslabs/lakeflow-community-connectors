@@ -1,0 +1,26 @@
+[
+  {
+    "backgroundElementId": 87182,
+    "candidateId": 35142,
+    "bgOrderPos": 68247,
+    "lastModifiedDateTime": "alpha-377"
+  },
+  {
+    "backgroundElementId": 20712,
+    "candidateId": 65566,
+    "bgOrderPos": 4423,
+    "lastModifiedDateTime": "foxtrot-775"
+  },
+  {
+    "backgroundElementId": 78790,
+    "candidateId": 78774,
+    "bgOrderPos": 30191,
+    "lastModifiedDateTime": "charlie-978"
+  },
+  {
+    "backgroundElementId": 78958,
+    "candidateId": 31550,
+    "bgOrderPos": 51127,
+    "lastModifiedDateTime": "bravo-253"
+  }
+]

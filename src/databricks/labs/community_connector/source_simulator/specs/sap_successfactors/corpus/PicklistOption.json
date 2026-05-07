@@ -1,0 +1,38 @@
+[
+  {
+    "id": 74804,
+    "externalCode": "xray-841",
+    "maxValue": 519.16,
+    "minValue": 973.74,
+    "optionValue": 632.43,
+    "sortOrder": 27783,
+    "status": "charlie-456"
+  },
+  {
+    "id": 74203,
+    "externalCode": "lima-126",
+    "maxValue": 203.97,
+    "minValue": 769.23,
+    "optionValue": 950.82,
+    "sortOrder": 85196,
+    "status": "charlie-128"
+  },
+  {
+    "id": 24516,
+    "externalCode": "delta-381",
+    "maxValue": 107.14,
+    "minValue": 142.88,
+    "optionValue": 749.99,
+    "sortOrder": 48242,
+    "status": "oscar-325"
+  },
+  {
+    "id": 15114,
+    "externalCode": "whiskey-150",
+    "maxValue": 741.17,
+    "minValue": 605.45,
+    "optionValue": 838.71,
+    "sortOrder": 26360,
+    "status": "zulu-164"
+  }
+]

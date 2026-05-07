@@ -30,14 +30,22 @@ Provide the following **connection-level** options when configuring the connecto
 
 **Required `externalOptionsAllowList` value:**
 ```
-tableName,tableNameList,tableConfigs,surveyId,mailingListId,directoryId
+tableName,tableNameList,tableConfigs,surveyId,mailingListId,directoryId,max_records_per_batch
 ```
 
 This list includes:
 - **Framework options** (required by the Lakeflow pipeline): `tableName`, `tableNameList`, `tableConfigs`
-- **Table-specific options** (used by Qualtrics tables): `surveyId`, `mailingListId`, `directoryId`
+- **Table-specific options** (used by Qualtrics tables): `surveyId`, `mailingListId`, `directoryId`, `max_records_per_batch`
 
 Table-specific options like `surveyId` are provided per-table via `table_configuration`, not at the connection level.
+
+### Table-Level Options
+
+The following options can be set per-table via the pipeline specification:
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `max_records_per_batch` | string (integer) | `100000` | Maximum number of records to return in a single microbatch. Limits memory usage and ensures bounded microbatch sizes during streaming ingestion. Lower values reduce memory pressure; higher values improve throughput. |
 
 ### Obtaining the Required Parameters
 

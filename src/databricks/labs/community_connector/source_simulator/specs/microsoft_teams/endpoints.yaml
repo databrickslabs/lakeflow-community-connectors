@@ -1,0 +1,90 @@
+# Microsoft Teams via Microsoft Graph API.
+#
+# Connector hits both:
+# * Azure AD OAuth token endpoint (POST) — needs a stub success response so
+#   the connector can construct an Authorization header.
+# * Graph API endpoints (GET) — wrapped responses with @odata.nextLink for
+#   pagination; we set it null so the connector stops after one page.
+
+endpoints:
+  # OAuth token endpoint (called at request time, not __init__).
+  - path: /{tenant_id}/oauth2/v2.0/token
+    method: POST
+    corpus: auth_token
+    response:
+      pagination_style: none
+      single_entity: true
+
+  # Graph API: list teams (the connector resolves teams via /groups,
+  # filtered to those with the Microsoft Teams resource provisioning).
+  - path: /v1.0/groups
+    method: GET
+    corpus: teams
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras:
+          '@odata.nextLink': null
+
+  - path: /v1.0/me/joinedTeams
+    method: GET
+    corpus: teams
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras:
+          '@odata.nextLink': null
+
+  - path: /v1.0/teams/{team_id}/channels
+    method: GET
+    corpus: channels
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras:
+          '@odata.nextLink': null
+
+  - path: /v1.0/teams/{team_id}/members
+    method: GET
+    corpus: members
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras:
+          '@odata.nextLink': null
+
+  - path: /v1.0/teams/{team_id}/channels/{channel_id}/messages
+    method: GET
+    corpus: messages
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras:
+          '@odata.nextLink': null
+
+  # Graph delta query — incremental message reads.
+  - path: /v1.0/teams/{team_id}/channels/{channel_id}/messages/delta
+    method: GET
+    corpus: messages
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras:
+          '@odata.nextLink': null
+          '@odata.deltaLink': null
+
+  - path: /v1.0/teams/{team_id}/channels/{channel_id}/messages/{message_id}/replies
+    method: GET
+    corpus: message_replies
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras:
+          '@odata.nextLink': null

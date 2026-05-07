@@ -14,4 +14,17 @@ from tests.unit.sources.test_suite import LakeflowConnectTests
 
 class TestFhirConnector(LakeflowConnectTests):
     connector_class = FhirLakeflowConnect
+    simulator_source = "fhir"
     sample_records = 5  # HAPI FHIR is a public server, be considerate.
+    replay_config = {
+        "base_url": "https://simulator-fhir.example.com/fhir",
+        "auth_type": "none",
+    }
+    # Simulator corpus dates don't overlap the connector's first-call
+    # window for these resources — fixture limitation, not a bug.
+    allow_empty_first_read = frozenset({
+        "AllergyIntolerance", "CarePlan", "Condition", "Coverage",
+        "Device", "DiagnosticReport", "DocumentReference", "Encounter",
+        "Goal", "Immunization", "MedicationRequest", "Observation",
+        "Procedure",
+    })

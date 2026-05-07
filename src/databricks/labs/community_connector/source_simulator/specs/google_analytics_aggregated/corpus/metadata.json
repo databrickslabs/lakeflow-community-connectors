@@ -1,0 +1,210 @@
+{
+  "name": "properties/123456789/metadata",
+  "dimensions": [
+    {
+      "apiName": "audienceName",
+      "uiName": "audienceName",
+      "category": "Misc"
+    },
+    {
+      "apiName": "browser",
+      "uiName": "browser",
+      "category": "Misc"
+    },
+    {
+      "apiName": "city",
+      "uiName": "city",
+      "category": "Misc"
+    },
+    {
+      "apiName": "country",
+      "uiName": "country",
+      "category": "Misc"
+    },
+    {
+      "apiName": "date",
+      "uiName": "date",
+      "category": "Misc"
+    },
+    {
+      "apiName": "defaultChannelGroup",
+      "uiName": "defaultChannelGroup",
+      "category": "Misc"
+    },
+    {
+      "apiName": "deviceCategory",
+      "uiName": "deviceCategory",
+      "category": "Misc"
+    },
+    {
+      "apiName": "eventName",
+      "uiName": "eventName",
+      "category": "Misc"
+    },
+    {
+      "apiName": "itemId",
+      "uiName": "itemId",
+      "category": "Misc"
+    },
+    {
+      "apiName": "itemName",
+      "uiName": "itemName",
+      "category": "Misc"
+    },
+    {
+      "apiName": "itemPromotionName",
+      "uiName": "itemPromotionName",
+      "category": "Misc"
+    },
+    {
+      "apiName": "landingPage",
+      "uiName": "landingPage",
+      "category": "Misc"
+    },
+    {
+      "apiName": "language",
+      "uiName": "language",
+      "category": "Misc"
+    },
+    {
+      "apiName": "newVsReturning",
+      "uiName": "newVsReturning",
+      "category": "Misc"
+    },
+    {
+      "apiName": "operatingSystem",
+      "uiName": "operatingSystem",
+      "category": "Misc"
+    },
+    {
+      "apiName": "pagePath",
+      "uiName": "pagePath",
+      "category": "Misc"
+    },
+    {
+      "apiName": "pageTitle",
+      "uiName": "pageTitle",
+      "category": "Misc"
+    },
+    {
+      "apiName": "sessionMedium",
+      "uiName": "sessionMedium",
+      "category": "Misc"
+    },
+    {
+      "apiName": "sessionSource",
+      "uiName": "sessionSource",
+      "category": "Misc"
+    }
+  ],
+  "metrics": [
+    {
+      "apiName": "activeUsers",
+      "uiName": "activeUsers",
+      "type": "TYPE_INTEGER",
+      "category": "Misc"
+    },
+    {
+      "apiName": "advertiserAdCost",
+      "uiName": "advertiserAdCost",
+      "type": "TYPE_FLOAT",
+      "category": "Misc"
+    },
+    {
+      "apiName": "averageSessionDuration",
+      "uiName": "averageSessionDuration",
+      "type": "TYPE_FLOAT",
+      "category": "Misc"
+    },
+    {
+      "apiName": "bounceRate",
+      "uiName": "bounceRate",
+      "type": "TYPE_FLOAT",
+      "category": "Misc"
+    },
+    {
+      "apiName": "engagedSessions",
+      "uiName": "engagedSessions",
+      "type": "TYPE_INTEGER",
+      "category": "Misc"
+    },
+    {
+      "apiName": "engagementRate",
+      "uiName": "engagementRate",
+      "type": "TYPE_FLOAT",
+      "category": "Misc"
+    },
+    {
+      "apiName": "eventCount",
+      "uiName": "eventCount",
+      "type": "TYPE_INTEGER",
+      "category": "Misc"
+    },
+    {
+      "apiName": "itemRevenue",
+      "uiName": "itemRevenue",
+      "type": "TYPE_FLOAT",
+      "category": "Misc"
+    },
+    {
+      "apiName": "itemsAddedToCart",
+      "uiName": "itemsAddedToCart",
+      "type": "TYPE_INTEGER",
+      "category": "Misc"
+    },
+    {
+      "apiName": "itemsClickedInPromotion",
+      "uiName": "itemsClickedInPromotion",
+      "type": "TYPE_INTEGER",
+      "category": "Misc"
+    },
+    {
+      "apiName": "itemsPurchased",
+      "uiName": "itemsPurchased",
+      "type": "TYPE_INTEGER",
+      "category": "Misc"
+    },
+    {
+      "apiName": "itemsViewed",
+      "uiName": "itemsViewed",
+      "type": "TYPE_INTEGER",
+      "category": "Misc"
+    },
+    {
+      "apiName": "itemsViewedInPromotion",
+      "uiName": "itemsViewedInPromotion",
+      "type": "TYPE_INTEGER",
+      "category": "Misc"
+    },
+    {
+      "apiName": "keyEvents",
+      "uiName": "keyEvents",
+      "type": "TYPE_INTEGER",
+      "category": "Misc"
+    },
+    {
+      "apiName": "newUsers",
+      "uiName": "newUsers",
+      "type": "TYPE_INTEGER",
+      "category": "Misc"
+    },
+    {
+      "apiName": "screenPageViews",
+      "uiName": "screenPageViews",
+      "type": "TYPE_INTEGER",
+      "category": "Misc"
+    },
+    {
+      "apiName": "sessions",
+      "uiName": "sessions",
+      "type": "TYPE_INTEGER",
+      "category": "Misc"
+    },
+    {
+      "apiName": "totalRevenue",
+      "uiName": "totalRevenue",
+      "type": "TYPE_FLOAT",
+      "category": "Misc"
+    }
+  ]
+}

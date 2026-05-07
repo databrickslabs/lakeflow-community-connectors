@@ -1,0 +1,170 @@
+[
+  {
+    "descriptor": "india-768",
+    "displayName": "sierra-340",
+    "mailAddress": "victor-758",
+    "principalName": "mike-144",
+    "origin": "delta-545",
+    "originId": "yankee-699",
+    "subjectKind": "quebec-101",
+    "domain": "november-279",
+    "directoryAlias": "echo-853",
+    "url": "tango-124",
+    "_links": {
+      "self": {
+        "href": "india-426"
+      },
+      "project": {
+        "href": "hotel-336"
+      },
+      "web": {
+        "href": "tango-622"
+      },
+      "ssh": {
+        "href": "oscar-606"
+      },
+      "commits": {
+        "href": "mike-964"
+      },
+      "refs": {
+        "href": "india-186"
+      },
+      "pullRequests": {
+        "href": "juliet-716"
+      },
+      "items": {
+        "href": "xray-884"
+      },
+      "pushes": {
+        "href": "india-675"
+      }
+    },
+    "organization": "oscar-163"
+  },
+  {
+    "descriptor": "victor-149",
+    "displayName": "mike-538",
+    "mailAddress": "yankee-907",
+    "principalName": "juliet-165",
+    "origin": "oscar-172",
+    "originId": "victor-622",
+    "subjectKind": "bravo-728",
+    "domain": "bravo-437",
+    "directoryAlias": "romeo-427",
+    "url": "yankee-700",
+    "_links": {
+      "self": {
+        "href": "victor-500"
+      },
+      "project": {
+        "href": "romeo-737"
+      },
+      "web": {
+        "href": "papa-155"
+      },
+      "ssh": {
+        "href": "charlie-365"
+      },
+      "commits": {
+        "href": "xray-899"
+      },
+      "refs": {
+        "href": "echo-166"
+      },
+      "pullRequests": {
+        "href": "india-687"
+      },
+      "items": {
+        "href": "oscar-946"
+      },
+      "pushes": {
+        "href": "tango-930"
+      }
+    },
+    "organization": "golf-637"
+  },
+  {
+    "descriptor": "xray-376",
+    "displayName": "kilo-743",
+    "mailAddress": "golf-584",
+    "principalName": "hotel-556",
+    "origin": "quebec-222",
+    "originId": "india-552",
+    "subjectKind": "kilo-487",
+    "domain": "foxtrot-965",
+    "directoryAlias": "oscar-918",
+    "url": "papa-881",
+    "_links": {
+      "self": {
+        "href": "victor-778"
+      },
+      "project": {
+        "href": "bravo-713"
+      },
+      "web": {
+        "href": "charlie-579"
+      },
+      "ssh": {
+        "href": "yankee-188"
+      },
+      "commits": {
+        "href": "bravo-883"
+      },
+      "refs": {
+        "href": "tango-593"
+      },
+      "pullRequests": {
+        "href": "hotel-183"
+      },
+      "items": {
+        "href": "hotel-918"
+      },
+      "pushes": {
+        "href": "romeo-642"
+      }
+    },
+    "organization": "tango-744"
+  },
+  {
+    "descriptor": "victor-119",
+    "displayName": "sierra-956",
+    "mailAddress": "kilo-298",
+    "principalName": "juliet-358",
+    "origin": "uniform-310",
+    "originId": "bravo-944",
+    "subjectKind": "romeo-948",
+    "domain": "alpha-468",
+    "directoryAlias": "charlie-855",
+    "url": "bravo-793",
+    "_links": {
+      "self": {
+        "href": "golf-525"
+      },
+      "project": {
+        "href": "charlie-580"
+      },
+      "web": {
+        "href": "xray-854"
+      },
+      "ssh": {
+        "href": "zulu-569"
+      },
+      "commits": {
+        "href": "yankee-211"
+      },
+      "refs": {
+        "href": "alpha-326"
+      },
+      "pullRequests": {
+        "href": "bravo-555"
+      },
+      "items": {
+        "href": "tango-962"
+      },
+      "pushes": {
+        "href": "delta-210"
+      }
+    },
+    "organization": "mike-824"
+  }
+]

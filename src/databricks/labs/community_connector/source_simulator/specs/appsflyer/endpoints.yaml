@@ -1,0 +1,54 @@
+# AppsFlyer API.
+#
+# Two endpoint patterns:
+# * GET /api/mng/apps — list apps; returns array of app dicts directly.
+# * GET /api/raw-data/export/app/{app_id}/{report_type}/v5 — CSV report data
+#   (we serve a small JSON array; the connector parses it). Each report_type
+#   maps to one of installs_report, in_app_events_report, etc.
+
+endpoints:
+  - path: /api/mng/apps
+    method: GET
+    corpus: apps
+    response:
+      pagination_style: none
+
+  # Report endpoints — one wildcard {report_type} segment routes all of
+  # them through a single spec. The corpus name has to be specific, so we
+  # add per-report_type entries below for explicit routing.
+
+  - path: /api/raw-data/export/app/{app_id}/installs_report/v5
+    method: GET
+    corpus: installs_report
+    response:
+      pagination_style: none
+
+  - path: /api/raw-data/export/app/{app_id}/in_app_events_report/v5
+    method: GET
+    corpus: in_app_events_report
+    response:
+      pagination_style: none
+
+  - path: /api/raw-data/export/app/{app_id}/uninstall_events_report/v5
+    method: GET
+    corpus: uninstall_events_report
+    response:
+      pagination_style: none
+
+  - path: /api/raw-data/export/app/{app_id}/organic_installs_report/v5
+    method: GET
+    corpus: organic_installs_report
+    response:
+      pagination_style: none
+
+  - path: /api/raw-data/export/app/{app_id}/organic_in_app_events_report/v5
+    method: GET
+    corpus: organic_in_app_events_report
+    response:
+      pagination_style: none
+
+  - path: /api/raw-data/export/app/{app_id}/organic_uninstall_events_report/v5
+    method: GET
+    corpus: organic_uninstall_events_report
+    response:
+      pagination_style: none

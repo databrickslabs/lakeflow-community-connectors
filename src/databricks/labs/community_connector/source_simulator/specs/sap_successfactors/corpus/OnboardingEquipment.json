@@ -1,0 +1,46 @@
+[
+  {
+    "OnboardingEquipmentActivity_activityId": 49046,
+    "OnboardingNewHireActivitiesStep_processStepId": 7858,
+    "OnboardingProcess_onboardingProcessId": 70636,
+    "equipmentId": 84191,
+    "createdBy": "foxtrot-682",
+    "createdDateTime": "foxtrot-852",
+    "lastModifiedBy": "tango-635",
+    "lastModifiedDateTime": "kilo-502",
+    "mdfSystemRecordStatus": "lima-999"
+  },
+  {
+    "OnboardingEquipmentActivity_activityId": 62521,
+    "OnboardingNewHireActivitiesStep_processStepId": 61021,
+    "OnboardingProcess_onboardingProcessId": 26291,
+    "equipmentId": 37638,
+    "createdBy": "juliet-752",
+    "createdDateTime": "quebec-919",
+    "lastModifiedBy": "golf-450",
+    "lastModifiedDateTime": "oscar-938",
+    "mdfSystemRecordStatus": "alpha-581"
+  },
+  {
+    "OnboardingEquipmentActivity_activityId": 25839,
+    "OnboardingNewHireActivitiesStep_processStepId": 92129,
+    "OnboardingProcess_onboardingProcessId": 55236,
+    "equipmentId": 4159,
+    "createdBy": "bravo-191",
+    "createdDateTime": "echo-666",
+    "lastModifiedBy": "romeo-568",
+    "lastModifiedDateTime": "whiskey-952",
+    "mdfSystemRecordStatus": "whiskey-196"
+  },
+  {
+    "OnboardingEquipmentActivity_activityId": 97722,
+    "OnboardingNewHireActivitiesStep_processStepId": 70931,
+    "OnboardingProcess_onboardingProcessId": 25287,
+    "equipmentId": 91196,
+    "createdBy": "zulu-176",
+    "createdDateTime": "quebec-135",
+    "lastModifiedBy": "delta-295",
+    "lastModifiedDateTime": "kilo-981",
+    "mdfSystemRecordStatus": "juliet-721"
+  }
+]

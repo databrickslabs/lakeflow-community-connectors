@@ -1,0 +1,62 @@
+# FHIR R4 server.
+#
+# Standard search response is a "Bundle" resource:
+#   {"resourceType": "Bundle", "type": "searchset", "entry": [...], "link": [...]}
+# Empty entry array → connector terminates.
+
+endpoints:
+  - path: /fhir/Patient
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.fhir.handlers.patient_bundle:serve_patient_bundle
+  - path: /fhir/Observation
+    method: GET
+    corpus: empty_bundle
+    response: {pagination_style: none, single_entity: true}
+  - path: /fhir/Condition
+    method: GET
+    corpus: empty_bundle
+    response: {pagination_style: none, single_entity: true}
+  - path: /fhir/Encounter
+    method: GET
+    corpus: empty_bundle
+    response: {pagination_style: none, single_entity: true}
+  - path: /fhir/Procedure
+    method: GET
+    corpus: empty_bundle
+    response: {pagination_style: none, single_entity: true}
+  - path: /fhir/MedicationRequest
+    method: GET
+    corpus: empty_bundle
+    response: {pagination_style: none, single_entity: true}
+  - path: /fhir/DiagnosticReport
+    method: GET
+    corpus: empty_bundle
+    response: {pagination_style: none, single_entity: true}
+  - path: /fhir/AllergyIntolerance
+    method: GET
+    corpus: empty_bundle
+    response: {pagination_style: none, single_entity: true}
+  - path: /fhir/Immunization
+    method: GET
+    corpus: empty_bundle
+    response: {pagination_style: none, single_entity: true}
+  - path: /fhir/Coverage
+    method: GET
+    corpus: empty_bundle
+    response: {pagination_style: none, single_entity: true}
+  - path: /fhir/CarePlan
+    method: GET
+    corpus: empty_bundle
+    response: {pagination_style: none, single_entity: true}
+  - path: /fhir/Goal
+    method: GET
+    corpus: empty_bundle
+    response: {pagination_style: none, single_entity: true}
+  - path: /fhir/Device
+    method: GET
+    corpus: empty_bundle
+    response: {pagination_style: none, single_entity: true}
+  - path: /fhir/DocumentReference
+    method: GET
+    corpus: empty_bundle
+    response: {pagination_style: none, single_entity: true}
