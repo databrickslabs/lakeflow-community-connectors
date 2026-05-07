@@ -11,3 +11,6 @@ class TestZohoCrmConnector(LakeflowConnectTests):
         "refresh_token": "simulator-fake-refresh-token",
         "base_url": "https://simulator.example.com",
     }
+    # Simulator corpus dates don't overlap the connector's first-call
+    # window for `Users` — fixture limitation, not a bug.
+    allow_empty_first_read = frozenset({"Users"})
