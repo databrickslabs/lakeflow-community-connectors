@@ -762,13 +762,13 @@ def register_lakeflow_source(spark):
             """
             method = method.upper()
             if method == "GET":
-                return self._session.get(url, headers=headers, params=params)
+                return self._session.get(url, headers=headers, params=params, timeout=60)
             elif method == "POST":
-                return self._session.post(url, headers=headers, json=data, params=params)
+                return self._session.post(url, headers=headers, json=data, params=params, timeout=60)
             elif method == "PUT":
-                return self._session.put(url, headers=headers, json=data, params=params)
+                return self._session.put(url, headers=headers, json=data, params=params, timeout=60)
             elif method == "DELETE":
-                return self._session.delete(url, headers=headers, params=params)
+                return self._session.delete(url, headers=headers, params=params, timeout=60)
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
 
@@ -1381,6 +1381,11 @@ def register_lakeflow_source(spark):
             metadata = self.get_metadata(table_name, config)
             if metadata.get("ingestion_type") == "snapshot":
                 cursor_time = None
+            elif cursor_time and cursor_time >= self._init_time:
+                # Already at or past the init-time snapshot — return empty so
+                # AvailableNow sees end_offset == start_offset and terminates
+                # without firing an API request.
+                return iter([]), start_offset or {"cursor_time": cursor_time}
 
             # Apply lookback at read time — widen the API filter without
             # affecting the stored offset so the cursor never drifts.

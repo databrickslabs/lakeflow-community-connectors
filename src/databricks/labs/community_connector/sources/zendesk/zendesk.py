@@ -421,6 +421,9 @@ class ZendeskLakeflowConnect(LakeflowConnect):
         resume_after = start_offset.get("resume_after") if start_offset else None
         endpoint = config["endpoint"]
 
+        if resume_after is None and start_time >= self._init_time:
+            return [], start_offset or {"start_time": start_time}
+
         api_cursor = resume_after if resume_after is not None else start_time
 
         all_records = []
@@ -432,7 +435,7 @@ class ZendeskLakeflowConnect(LakeflowConnect):
             if "include" in config:
                 url += f"&include={config['include']}"
 
-            resp = requests.get(url, headers=self.auth_header)
+            resp = requests.get(url, headers=self.auth_header, timeout=60)
             if resp.status_code != 200:
                 raise Exception(
                     f"Zendesk API error for {table_name}: {resp.status_code} {resp.text}"
@@ -493,7 +496,7 @@ class ZendeskLakeflowConnect(LakeflowConnect):
 
         while True:
             current_url = f"{self.base_url}/{endpoint}?page={current_page}&per_page=100"
-            resp = requests.get(current_url, headers=self.auth_header)
+            resp = requests.get(current_url, headers=self.auth_header, timeout=60)
 
             if resp.status_code != 200:
                 # Some endpoints might return 404 when no more pages
