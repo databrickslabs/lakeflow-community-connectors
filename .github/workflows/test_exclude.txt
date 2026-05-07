@@ -1,26 +1,20 @@
 # Test files excluded from auto-triggered CI tests.
-# These tests use LakeflowConnectTester which requires real API credentials
-# and cannot run in CI without proper secrets configured.
 #
-# Remove a test file from this list to enable auto-triggered testing for it.
+# Most connector tests run safely in CI via the in-process source
+# simulator (no credentials, no network) — those should NOT be listed
+# here. Only entries below are tests that genuinely cannot run without
+# real credentials, or have known unrelated failures pending fixes.
+#
 # Lines starting with '#' and blank lines are ignored.
 
-tests/unit/sources/appsflyer/test_appsflyer_lakeflow_connect.py
-tests/unit/sources/azure_devops/test_azure_devops_lakeflow_connect.py
+# Covered by the dedicated `test-example` job in tests.yml — listing here
+# avoids the `test-source` matrix from running it a second time.
 tests/unit/sources/example/test_example_lakeflow_connect.py
-tests/unit/sources/github/test_github_lakeflow_connect.py
-tests/unit/sources/google_analytics_aggregated/test_google_analytics_aggregated_lakeflow_connect.py
-tests/unit/sources/gmail/test_gmail_lakeflow_connect.py
-tests/unit/sources/hubspot/test_hubspot_lakeflow_connect.py
-tests/unit/sources/microsoft_teams/test_microsoft_teams_lakeflow_connect.py
-tests/unit/sources/mixpanel/test_mixpanel_lakeflow_connect.py
-tests/unit/sources/osipi/test_osipi_lakeflow_connect.py
-tests/unit/sources/qualtrics/test_qualtrics_lakeflow_connect.py
-tests/unit/sources/sap_successfactors/test_sap_successfactors_lakeflow_connect.py
+
+# Custom group-based runner that reads dev_config.json (real creds);
+# not yet wired up to the simulator.
 tests/unit/sources/sap_successfactors/test_group_runner.py
-tests/unit/sources/stripe/test_stripe_lakeflow_connect.py
-tests/unit/sources/surveymonkey/test_surveymonkey_lakeflow_connect.py
-tests/unit/sources/zendesk/test_zendesk_lakeflow_connect.py
-tests/unit/sources/zoho_crm/test_zoho_crm_lakeflow_connect.py
-tests/unit/sources/fhir/test_fhir_lakeflow_connect.py
+
+# Standalone FHIR utility tests have 2 pre-existing failures that are
+# unrelated to the simulator. Re-enable once those are fixed.
 tests/unit/sources/fhir/test_fhir_utils.py

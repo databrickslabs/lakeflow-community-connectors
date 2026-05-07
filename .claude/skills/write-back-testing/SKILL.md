@@ -57,30 +57,39 @@ Use dot notation for nested paths. The test suite resolves them by traversing ne
 
 ### Step 2: Update Test File
 
-Modify `tests/unit/sources/{source_name}/test_{source_name}_lakeflow_connect.py` to register your test utils class by setting the `test_utils_class` attribute:
+Modify `tests/unit/sources/{source_name}/test_{source_name}_lakeflow_connect.py` to mix in the write-back test class **before** the base class and set the `test_utils_class` attribute. The write-back tests live in their own suite (`test_write_back_suite.py`) so they only run when explicitly mixed in — and most of them auto-skip in simulate mode (the default), so they don't run in CI:
 
 ```python
 from databricks.labs.community_connector.sources.{source_name}.{source_name} import {SourceName}LakeflowConnect
 from tests.unit.sources.{source_name}.{source_name}_test_utils import LakeflowConnectWriteTestUtils
 from tests.unit.sources.test_suite import LakeflowConnectTests
+from tests.unit.sources.test_write_back_suite import LakeflowConnectWriteBackTests
 
 
-class Test{SourceName}Connector(LakeflowConnectTests):
+class Test{SourceName}Connector(LakeflowConnectWriteBackTests, LakeflowConnectTests):
     connector_class = {SourceName}LakeflowConnect
     test_utils_class = LakeflowConnectWriteTestUtils
 ```
+
+The MRO order matters — `LakeflowConnectWriteBackTests` must come first so its `setup_class` runs and chains via `super()` to the base.
 
 **Reference:** See `tests/unit/sources/example/test_example_lakeflow_connect.py`.
 
 ### Step 3: Run Tests
 
+Write-back tests that mutate the source (`test_write_to_source`,
+`test_incremental_after_write`, `test_delete_and_read_deletes`)
+auto-skip unless you set `CONNECTOR_TEST_MODE=live`. To run them
+against a real source:
+
 ```bash
-source .venv/bin/activate   # use existing venv, or create with: python3.10 -m venv .venv
-pip install -e ".[dev]"
-pytest tests/unit/sources/{source_name}/test_{source_name}_lakeflow_connect.py -v
+source .venv/bin/activate   # or: python3.10 -m venv .venv && pip install -e ".[dev]"
+CONNECTOR_TEST_MODE=live \
+  CONNECTOR_TEST_CONFIG_PATH=~/secrets/{source_name}.json \
+  pytest tests/unit/sources/{source_name}/test_{source_name}_lakeflow_connect.py -v
 ```
 
-When `test_utils_class` is set, the test suite automatically runs these additional tests (skipped otherwise):
+When `LakeflowConnectWriteBackTests` is mixed in and `test_utils_class` is set, these tests are added to the class:
 
 | Test | What it does |
 |------|-------------|
