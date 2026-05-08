@@ -167,6 +167,33 @@ class TestPalantirCursorTypes:
             list(records)
         assert offset == {"max_cursor_value": 99999}
 
+    def test_date_cursor_caps_to_date_not_timestamp(self):
+        """When cursor_field is a date (10-char ``YYYY-MM-DD``), the
+        cap value must preserve that shape — not silently widen the
+        offset to the full ``_init_time`` timestamp string. The
+        offset's shape should match the cursor field's type so
+        subsequent ``where: gt`` filters speak the same dialect as
+        the field."""
+        c = self._connector()
+        # Pin _init_time so the test is deterministic regardless of when
+        # the connector was instantiated.
+        c._init_time = "2026-05-09T13:30:00Z"
+        # Future date cursor: should cap to today's date (10 chars), not
+        # to the full timestamp (20 chars).
+        future_date = "2026-05-10"
+        with patch.object(
+            c, "_get_max_cursor_via_aggregate", return_value=future_date
+        ), patch.object(
+            c, "_fetch_page", return_value=([], None)
+        ):
+            records, offset = c.read_table(
+                "FlightsFinal", None, {"cursor_field": "date"}
+            )
+            list(records)
+        assert offset == {"max_cursor_value": "2026-05-09"}, (
+            f"Date cursor should cap to date-only string, got: {offset}"
+        )
+
     def test_type_mismatched_max_uses_current(self):
         """When prev/current cursor types differ (typically because the
         cursor field's type changed upstream), max() would raise. The

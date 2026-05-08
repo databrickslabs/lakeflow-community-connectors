@@ -541,7 +541,18 @@ class PalantirLakeflowConnect(LakeflowConnect):
         # meaningless results. Termination for those cases is bounded
         # by the offset-unchanged check at the end of this method.
         if current_max_cursor and self._is_iso_timestamp(current_max_cursor):
-            current_max_cursor = min(current_max_cursor, self._init_time)
+            # Truncate _init_time to the cursor's precision so the cap
+            # value preserves the cursor's shape. A date-only cursor
+            # (e.g. "2026-05-09") gets capped to a date, not the full
+            # timestamp; a full timestamp cursor caps to the full
+            # _init_time. Cursors with sub-second precision lose detail
+            # below the second — acceptable for the cap value.
+            cap_value = (
+                self._init_time[: len(current_max_cursor)]
+                if len(current_max_cursor) <= len(self._init_time)
+                else self._init_time
+            )
+            current_max_cursor = min(current_max_cursor, cap_value)
 
         # Use whichever is greater: previous checkpoint or current max.
         # max() is only safe when both values are the same type, so we
