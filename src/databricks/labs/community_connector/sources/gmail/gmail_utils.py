@@ -50,6 +50,7 @@ class GmailApiClient:
                 "refresh_token": self.refresh_token,
                 "grant_type": "refresh_token",
             },
+            timeout=30,
         )
         response.raise_for_status()
         data = response.json()
@@ -74,7 +75,7 @@ class GmailApiClient:
 
         for attempt in range(retry_count):
             response = self._session.request(
-                method, url, headers=self.get_headers(), params=params
+                method, url, headers=self.get_headers(), params=params, timeout=60
             )
 
             if response.status_code == 200:
@@ -131,7 +132,7 @@ class GmailApiClient:
         headers = self.get_headers()
         headers["Content-Type"] = f"multipart/mixed; boundary={boundary}"
 
-        response = self._session.post(self.BATCH_URL, headers=headers, data=body)
+        response = self._session.post(self.BATCH_URL, headers=headers, data=body, timeout=120)
 
         if response.status_code != 200:
             # Fall back to sequential requests on batch failure
