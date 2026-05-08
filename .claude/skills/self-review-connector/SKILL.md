@@ -78,7 +78,7 @@ report actionable.
 
 ---
 
-### Section A — Connector implementation (10 checks)
+### Section A — Connector implementation (11 checks)
 
 Source under audit:
 `src/databricks/labs/community_connector/sources/{{source_name}}/{{source_name}}.py`
@@ -95,6 +95,37 @@ Source under audit:
 | A8 | MINOR | Schemas use `LongType` not `IntegerType`; `StructType` not `MapType` | `grep -nE "IntegerType\\|MapType" ...` |
 | A9 | MINOR | `get_table_schema` does not flatten nested fields | spot-check schemas for `StructType` returns |
 | A10 | MAJOR | Imports clean — no imports outside `sources/{{source_name}}/`, `interface/`, `libs/`, `requests`, `pyspark`, std-lib | `grep -nE "^(from\\|import) " ...` |
+| A11 | MAJOR | Pylint clean on connector source — same gate as `.github/workflows/pylint.yml` and the `tools/scripts/precommit_pylint.sh` PreToolUse hook | see "Running pylint" below |
+
+#### Running pylint (A11)
+
+Run pylint against the connector source with the exact flag set used
+by CI and the precommit hook (keep them in sync — if CI changes,
+update here too):
+
+```bash
+files=$(git ls-files \
+  "src/databricks/labs/community_connector/sources/{{source_name}}/*.py" \
+  | grep -v '_generated_')
+
+.venv/bin/pylint \
+  --max-line-length=100 \
+  --max-locals=25 \
+  --max-branches=20 \
+  --max-module-lines=1500 \
+  --disable=W,C0114,C0115,C0116,C0415,R0801,R0902,R0903,R0911,R0913,R0917,R1705 \
+  --ignore-long-lines='^\s*(#|f?".*"|f?'"'"'.*'"'"')$' \
+  $files
+```
+
+Fall back to `pylint` on `PATH` if `.venv/bin/pylint` is absent. If
+pylint is not installed at all, mark A11 = `warn` with the install hint
+(`pip install -e ".[dev]"`) — do not fail the audit on a missing tool.
+
+Pylint emits findings as `path:line:col: message`. Each non-zero exit
+line is one finding; cite the first 5 verbatim in the section, and
+roll the rest into a count (`… and 7 more`). Any finding = `fail` for
+A11.
 
 ---
 
@@ -240,7 +271,7 @@ Run at: 2026-05-06T15:32:00Z
 4. **MINOR** — 3 `requests.get(...)` calls lack `timeout=` —
    `source.py:142, 178, 256`.
 
-## A. Connector implementation — 27 / 30
+## A. Connector implementation — 29 / 33
 - ✅ A1. Class extends LakeflowConnect — `source.py:34`
 - ✅ A2. All abstract methods implemented
 - ✅ A3. `read_table_deletes` implemented (1 cdc_with_deletes table)
@@ -250,6 +281,8 @@ Run at: 2026-05-06T15:32:00Z
 - ✅ A6. `max_records_per_batch` honored on all incremental tables
 - ⚠️ A7. 3 of 11 HTTP calls lack `timeout=` — see Top recommendations
 - ✅ A8–A10
+- ❌ A11. Pylint: 1 finding — `source.py:142: R0912 too-many-branches
+       (21/20)`. Same gate as CI; fix before merge.
 
 ## B. Testing & simulator validation — 22 / 26
 - ✅ B1–B7
