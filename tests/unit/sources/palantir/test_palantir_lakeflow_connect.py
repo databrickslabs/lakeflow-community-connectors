@@ -13,6 +13,29 @@ class TestPalantirConnector(LakeflowConnectTests):
         "ontology_api_name": "ontology-simulator",
     }
 
+    def test_search_endpoint_coverage(self):
+        """Directly exercise the search endpoint so live record runs
+        register a hit on it.
+
+        ``search`` is a fallback inside ``_get_max_cursor_via_search``
+        that only fires when ``aggregate`` returns ``None`` (e.g. for
+        aggregation-disabled or empty Palantir object types). For
+        tables that support aggregation (the common case), the
+        fallback is never reached via the normal read path, leaving
+        the endpoint un-hit in coverage reports. This test issues a
+        direct call so coverage is complete in both simulate and
+        live runs.
+        """
+        tables = self.connector.list_tables()
+        assert tables, "Palantir ontology returned no tables"
+        table = tables[0]
+        cursor_field = self.connector.get_table_schema(
+            table, {}
+        ).fieldNames()[0]
+        # Returns None or a value; either is acceptable — we only care
+        # that POST /objects/{table}/search was issued.
+        self.connector._get_max_cursor_via_search(table, cursor_field)
+
 
 class TestPalantirMaxCursorFallback:
     """Unit-level coverage for the aggregate→search fallback path that

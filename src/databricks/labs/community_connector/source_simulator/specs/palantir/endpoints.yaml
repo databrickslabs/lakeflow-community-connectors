@@ -32,6 +32,13 @@ endpoints:
         extras:
           nextPageToken: null
           totalCount: "4"
+    # Cap-validation: clone records with arrivalTimestamp = ``now() + N
+    # hours`` so the corpus contains records past the connector's
+    # ``_init_time``. ``test_read_terminates`` then exercises the cap
+    # genuinely instead of relying on the corpus being finite.
+    synthesize_future_records:
+      cursor_field: arrivalTimestamp
+      count: 3
 
   # ---- aggregate (max cursor lookup) ----
 
