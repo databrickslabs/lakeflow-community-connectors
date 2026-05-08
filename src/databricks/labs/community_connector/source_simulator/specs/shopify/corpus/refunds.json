@@ -8,6 +8,12 @@
     "user_id": 96000000001,
     "restock": true,
     "admin_graphql_api_id": "gid://shopify/Refund/944000000001",
+    "duties": [],
+    "order_adjustments": [],
+    "refund_shipping_lines": [],
+    "return": null,
+    "total_duties_set": null,
+    "transactions": [],
     "refund_line_items": [
       {
         "id": 478000000001,
