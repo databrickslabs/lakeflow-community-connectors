@@ -134,20 +134,64 @@ class TestPalantirCursorTypes:
         }
         return c
 
-    def test_iso_timestamp_detection(self):
+    def test_to_utc_datetime_parses_known_palantir_formats(self):
+        """``_to_utc_datetime`` must normalise every ISO 8601 form
+        Palantir is known to return into a tz-aware UTC datetime so
+        the cap comparison is correct regardless of the source's
+        format/timezone choice."""
+        from datetime import datetime as _dt, timezone as _tz
         c = self._connector()
-        assert c._is_iso_timestamp("2026-05-09T13:30:00Z") is True
-        assert c._is_iso_timestamp("2026-05-09T13:30:00.123456+00:00") is True
-        assert c._is_iso_timestamp("2026-05-09") is True
-        # Non-timestamp values
-        assert c._is_iso_timestamp(12345) is False
-        assert c._is_iso_timestamp(123.45) is False
-        assert c._is_iso_timestamp("abc-de-fg") is False
-        assert c._is_iso_timestamp("flight_id_123") is False
-        assert c._is_iso_timestamp("") is False
-        assert c._is_iso_timestamp(None) is False
-        # Plausible UUID-ish: not ISO-shaped
-        assert c._is_iso_timestamp("550e8400-e29b-41d4-a716-446655440000") is False
+
+        # Z suffix → UTC.
+        assert c._to_utc_datetime("2026-05-09T13:30:00Z") == _dt(
+            2026, 5, 9, 13, 30, tzinfo=_tz.utc
+        )
+        # Fractional seconds + Z.
+        assert c._to_utc_datetime("2026-05-09T13:30:00.500Z") == _dt(
+            2026, 5, 9, 13, 30, 0, 500_000, tzinfo=_tz.utc
+        )
+        # Explicit UTC offset.
+        assert c._to_utc_datetime("2026-05-09T13:30:00+00:00") == _dt(
+            2026, 5, 9, 13, 30, tzinfo=_tz.utc
+        )
+        # Non-UTC offset converts to UTC (EST = UTC-5).
+        assert c._to_utc_datetime("2026-05-09T08:30:00-05:00") == _dt(
+            2026, 5, 9, 13, 30, tzinfo=_tz.utc
+        )
+        # Naive string is assumed UTC.
+        assert c._to_utc_datetime("2026-05-09T13:30:00") == _dt(
+            2026, 5, 9, 13, 30, tzinfo=_tz.utc
+        )
+        # Date-only parses as midnight UTC.
+        assert c._to_utc_datetime("2026-05-09") == _dt(
+            2026, 5, 9, 0, 0, tzinfo=_tz.utc
+        )
+        # Non-strings and unparseable values return None so the cap
+        # branch silently skips for non-timestamp cursors.
+        assert c._to_utc_datetime(12345) is None
+        assert c._to_utc_datetime(None) is None
+        assert c._to_utc_datetime("flight_id_123") is None
+        assert c._to_utc_datetime("550e8400-e29b-41d4-a716-446655440000") is None
+
+    def test_cap_compares_across_timezone_offsets(self):
+        """A non-UTC cursor that resolves to a UTC time *past*
+        _init_time must trigger the cap, even though the raw string
+        compares lexicographically less than _init_time's Z form."""
+        c = self._connector()
+        c._init_time = "2026-05-09T13:30:00Z"
+        # 09:00 EST == 14:00 UTC — past _init_time (13:30 UTC).
+        future_in_est = "2026-05-09T09:00:00-05:00"
+        with patch.object(
+            c, "_get_max_cursor_via_aggregate", return_value=future_in_est
+        ), patch.object(c, "_fetch_page", return_value=([], None)):
+            records, offset = c.read_table(
+                "FlightsFinal", None, {"cursor_field": "arrivalTimestamp"}
+            )
+            list(records)
+        # The cap fires — offset is _init_time, not the EST string.
+        # (Lex compare on raw strings would have left the EST form,
+        # producing a wrong ``new_max < _init_time``.)
+        assert offset == {"max_cursor_value": "2026-05-09T13:30:00Z"}
 
     def test_numeric_cursor_does_not_crash_on_cap(self):
         """When cursor is an int (e.g. auto-incrementing ID), the cap

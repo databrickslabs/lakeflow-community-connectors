@@ -394,24 +394,33 @@ class PalantirLakeflowConnect(LakeflowConnect):
         ), next_offset
 
     @staticmethod
-    def _is_iso_timestamp(value: Any) -> bool:
-        """Best-effort ISO 8601 detection for cursor cap eligibility.
+    def _to_utc_datetime(value: Any) -> Any:
+        """Parse an ISO 8601 string into a tz-aware UTC ``datetime``.
 
-        Returns True for strings shaped ``YYYY-MM-DD...`` (date-only or
-        with a time component). Used to decide whether the
-        ``_init_time`` cap is meaningful for a given cursor value —
-        numeric IDs, UUIDs, and other non-timestamp cursors return
-        False so the cap is skipped.
+        Handles the formats Palantir is known to return — the ``Z``
+        suffix, explicit offsets like ``+00:00`` / ``-05:00``,
+        date-only strings, and optional fractional seconds — by
+        normalising to UTC. Naive strings (no tz) are assumed UTC.
+        Returns ``None`` for anything that does not parse, so the
+        cap logic can skip non-timestamp cursors silently.
+
+        Used instead of lexicographic comparison because string
+        ordering breaks across format/tz differences (e.g.
+        ``"...-05:00"`` < ``"...Z"`` lexically even when the actual
+        moments compare the other way).
         """
-        if not isinstance(value, str) or len(value) < 10:
-            return False
-        return (
-            value[4] == "-"
-            and value[7] == "-"
-            and value[:4].isdigit()
-            and value[5:7].isdigit()
-            and value[8:10].isdigit()
+        if not isinstance(value, str):
+            return None
+        normalised = (
+            value[:-1] + "+00:00" if value.endswith("Z") else value
         )
+        try:
+            parsed = datetime.fromisoformat(normalised)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
 
     def _get_max_cursor_value(
         self, table_name: str, cursor_field: str
@@ -534,25 +543,33 @@ class PalantirLakeflowConnect(LakeflowConnect):
         # Step 2: Cap at _init_time so this trigger run doesn't chase
         # data arriving after connector start.
         #
-        # The cap only applies to ISO 8601 timestamp cursors, where
-        # lexicographic comparison matches chronological order. For
-        # numeric IDs, UUIDs, or other non-timestamp cursors the
-        # comparison either raises TypeError (str vs int) or produces
-        # meaningless results. Termination for those cases is bounded
-        # by the offset-unchanged check at the end of this method.
-        if current_max_cursor and self._is_iso_timestamp(current_max_cursor):
-            # Truncate _init_time to the cursor's precision so the cap
-            # value preserves the cursor's shape. A date-only cursor
-            # (e.g. "2026-05-09") gets capped to a date, not the full
-            # timestamp; a full timestamp cursor caps to the full
-            # _init_time. Cursors with sub-second precision lose detail
-            # below the second — acceptable for the cap value.
-            cap_value = (
-                self._init_time[: len(current_max_cursor)]
-                if len(current_max_cursor) <= len(self._init_time)
-                else self._init_time
-            )
-            current_max_cursor = min(current_max_cursor, cap_value)
+        # Comparison is in tz-aware UTC datetime space, not on raw
+        # strings. Lex compare breaks when Palantir's response uses a
+        # different ISO 8601 form than _init_time (e.g. ``+00:00`` vs
+        # ``Z``, fractional seconds, non-UTC offsets). Parsing into
+        # datetimes normalises all of those before comparing.
+        #
+        # Non-timestamp cursors (numeric IDs, UUIDs) return None from
+        # the parse and the cap is skipped. Termination for those
+        # cases is bounded by the offset-unchanged check below.
+        if current_max_cursor:
+            cursor_dt = self._to_utc_datetime(current_max_cursor)
+            init_dt = self._to_utc_datetime(self._init_time)
+            if (
+                cursor_dt is not None
+                and init_dt is not None
+                and cursor_dt > init_dt
+            ):
+                # Preserve cursor shape: a date-only cursor caps to a
+                # date-only string; a full-timestamp cursor caps to the
+                # full _init_time. Truncates _init_time to the cursor's
+                # length when shorter, otherwise uses _init_time as-is.
+                current_max_cursor = (
+                    self._init_time[: len(current_max_cursor)]
+                    if isinstance(current_max_cursor, str)
+                    and len(current_max_cursor) <= len(self._init_time)
+                    else self._init_time
+                )
 
         # Use whichever is greater: previous checkpoint or current max.
         # max() is only safe when both values are the same type, so we
