@@ -393,6 +393,26 @@ class PalantirLakeflowConnect(LakeflowConnect):
             table_name, page_size, max_records=max_records
         ), next_offset
 
+    @staticmethod
+    def _is_iso_timestamp(value: Any) -> bool:
+        """Best-effort ISO 8601 detection for cursor cap eligibility.
+
+        Returns True for strings shaped ``YYYY-MM-DD...`` (date-only or
+        with a time component). Used to decide whether the
+        ``_init_time`` cap is meaningful for a given cursor value —
+        numeric IDs, UUIDs, and other non-timestamp cursors return
+        False so the cap is skipped.
+        """
+        if not isinstance(value, str) or len(value) < 10:
+            return False
+        return (
+            value[4] == "-"
+            and value[7] == "-"
+            and value[:4].isdigit()
+            and value[5:7].isdigit()
+            and value[8:10].isdigit()
+        )
+
     def _get_max_cursor_value(
         self, table_name: str, cursor_field: str
     ) -> Any:
@@ -513,12 +533,26 @@ class PalantirLakeflowConnect(LakeflowConnect):
 
         # Step 2: Cap at _init_time so this trigger run doesn't chase
         # data arriving after connector start.
-        if current_max_cursor and current_max_cursor > self._init_time:
-            current_max_cursor = self._init_time
+        #
+        # The cap only applies to ISO 8601 timestamp cursors, where
+        # lexicographic comparison matches chronological order. For
+        # numeric IDs, UUIDs, or other non-timestamp cursors the
+        # comparison either raises TypeError (str vs int) or produces
+        # meaningless results. Termination for those cases is bounded
+        # by the offset-unchanged check at the end of this method.
+        if current_max_cursor and self._is_iso_timestamp(current_max_cursor):
+            current_max_cursor = min(current_max_cursor, self._init_time)
 
-        # Use whichever is greater: previous checkpoint or current max
-        if prev_max_cursor and current_max_cursor:
-            new_max_cursor = max(prev_max_cursor, current_max_cursor)
+        # Use whichever is greater: previous checkpoint or current max.
+        # max() is only safe when both values are the same type, so we
+        # gate it on type equality. When types differ (typically because
+        # the upstream changed the cursor field's type), prefer the
+        # current value over the stale checkpoint.
+        if prev_max_cursor is not None and current_max_cursor is not None:
+            if type(prev_max_cursor) is type(current_max_cursor):
+                new_max_cursor = max(prev_max_cursor, current_max_cursor)
+            else:
+                new_max_cursor = current_max_cursor
         else:
             new_max_cursor = current_max_cursor or prev_max_cursor
 
