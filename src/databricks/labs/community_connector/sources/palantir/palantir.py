@@ -5,10 +5,11 @@ This connector enables ingestion of data from Palantir Foundry ontologies
 into Databricks using the LakeflowConnect interface.
 """
 
-import requests
 import time
 from datetime import datetime, timezone
 from typing import Dict, List, Iterator, Any, Tuple
+
+import requests
 from pyspark.sql.types import (
     StructType,
     StructField,

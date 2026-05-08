@@ -1,4 +1,5 @@
 # Databricks notebook source
+# pylint: skip-file
 # MAGIC %md
 # MAGIC # Palantir Foundry Ingestion Pipeline
 # MAGIC

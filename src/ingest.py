@@ -1,4 +1,5 @@
 # Databricks notebook source
+# pylint: skip-file
 from databricks.labs.community_connector import register
 from databricks.labs.community_connector.pipeline import ingest
 
