@@ -18,5 +18,25 @@
     },
     "rid": "ri.ontology.main.object-type.sim-flight",
     "status": "ACTIVE"
+  },
+  {
+    "apiName": "FlightsFinal",
+    "displayName": "Flights Final",
+    "description": "Mirrors the live ontology's FlightsFinal table so the same dev_table_config entry exercises CDC in simulate mode too.",
+    "primaryKey": "flightId",
+    "properties": {
+      "flightId": {"dataType": {"type": "string"}},
+      "flightNumber": {"dataType": {"type": "string"}},
+      "carrierCode": {"dataType": {"type": "string"}},
+      "originAirport": {"dataType": {"type": "string"}},
+      "destinationAirport": {"dataType": {"type": "string"}},
+      "departureTimestamp": {"dataType": {"type": "timestamp"}},
+      "arrivalTimestamp": {"dataType": {"type": "timestamp"}},
+      "distance": {"dataType": {"type": "double"}},
+      "airTime": {"dataType": {"type": "integer"}},
+      "cancelled": {"dataType": {"type": "boolean"}}
+    },
+    "rid": "ri.ontology.main.object-type.sim-flightsfinal",
+    "status": "ACTIVE"
   }
 ]
