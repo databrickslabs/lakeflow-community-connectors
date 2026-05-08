@@ -8,7 +8,7 @@
     "departureTimestamp": "2024-06-01T08:00:00Z",
     "arrivalTimestamp": "2024-06-01T16:30:00Z",
     "distance": 2586.0,
-    "airTime": 330,
+    "airTime": "330.0",
     "cancelled": false,
     "__primaryKey": "sim-flight-001",
     "__apiName": "ExampleFlight"
@@ -22,7 +22,7 @@
     "departureTimestamp": "2024-06-02T10:00:00Z",
     "arrivalTimestamp": "2024-06-02T16:15:00Z",
     "distance": 1745.0,
-    "airTime": 255,
+    "airTime": "255.0",
     "cancelled": false,
     "__primaryKey": "sim-flight-002",
     "__apiName": "ExampleFlight"
@@ -36,7 +36,7 @@
     "departureTimestamp": "2024-06-03T06:30:00Z",
     "arrivalTimestamp": "2024-06-03T10:00:00Z",
     "distance": 946.0,
-    "airTime": 150,
+    "airTime": "150.0",
     "cancelled": true,
     "__primaryKey": "sim-flight-003",
     "__apiName": "ExampleFlight"
@@ -50,7 +50,7 @@
     "departureTimestamp": "2024-06-04T14:00:00Z",
     "arrivalTimestamp": "2024-06-04T16:30:00Z",
     "distance": 1024.0,
-    "airTime": 170,
+    "airTime": "170.0",
     "cancelled": false,
     "__primaryKey": "sim-flight-004",
     "__apiName": "ExampleFlight"

@@ -1,0 +1,7 @@
+{
+    "FlightsFinal": {
+        "cursor_field": "date",
+        "page_size": "100",
+        "max_records_per_batch": "50"
+    }
+}

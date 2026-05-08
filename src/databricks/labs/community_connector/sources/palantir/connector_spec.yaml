@@ -25,4 +25,4 @@ connection:
         API name of the ontology to sync (e.g., ontology-282f1207-a9f0-408c-8820-741db4f051b1).
         Find this via GET /api/v2/ontologies or in Foundry's Ontology Manager.
 
-external_options_allowlist: "cursor_field,page_size"
+external_options_allowlist: "cursor_field,page_size,max_records_per_batch"
