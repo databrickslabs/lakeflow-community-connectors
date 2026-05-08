@@ -1040,8 +1040,7 @@ def register_lakeflow_source(spark):
         url, params = initial_url, initial_params
         while url:
             data, response = api_get(session, url, params, label)
-            for record in data.get(response_key, []):
-                yield record
+            yield from data.get(response_key, [])
             url = extract_next_link(response)
             # After the first page the cursor URL embeds all filter params,
             # so subsequent calls pass no params of their own.
