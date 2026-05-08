@@ -13,6 +13,46 @@ class TestPalantirConnector(LakeflowConnectTests):
         "ontology_api_name": "ontology-simulator",
     }
 
+    def test_where_clause_built_for_incremental_call(self):
+        """When ``start_offset`` carries a ``max_cursor_value`` older
+        than the value returned by the ``aggregate`` endpoint, the
+        connector's incremental path must build a server-side
+        ``where: gt`` filter on ``cursor_field`` and pass it to
+        ``loadObjects`` via ``_build_object_set``.
+
+        ``test_read_terminates`` does not exercise this branch in
+        simulate mode because the static ``aggregate`` corpus returns
+        the same value every call, so ``new_max_cursor == prev`` and
+        ``_read_incremental`` early-returns before reaching the
+        where-clause builder. This test forces the branch by handing
+        in a deliberately stale offset.
+        """
+        table = self.connector.list_tables()[0]
+        cursor_field = "arrivalTimestamp"
+        options = {"cursor_field": cursor_field, "page_size": "100"}
+        stale_offset = {"max_cursor_value": "1970-01-01T00:00:00Z"}
+
+        original = self.connector._fetch_page
+        with patch.object(
+            self.connector, "_fetch_page", wraps=original
+        ) as fetch_page_spy:
+            records, _ = self.connector.read_table(
+                table, stale_offset, options
+            )
+            list(records)  # drain generator so _fetch_page is called
+
+        assert fetch_page_spy.called, "_fetch_page was not invoked"
+        # First call's object_set should be the filter wrapper.
+        first_call = fetch_page_spy.call_args_list[0]
+        object_set = first_call.args[0]
+        assert object_set["type"] == "filter", (
+            f"Expected filter object_set with where:gt clause, got: {object_set}"
+        )
+        where = object_set["where"]
+        assert where["type"] == "gt"
+        assert where["field"] == cursor_field
+        assert where["value"] == "1970-01-01T00:00:00Z"
+
     def test_search_endpoint_coverage(self):
         """Directly exercise the search endpoint so live record runs
         register a hit on it.
