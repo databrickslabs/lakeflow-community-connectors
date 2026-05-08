@@ -6,7 +6,7 @@
 # ==============================================================================
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Iterator, Sequence
 import json
@@ -21,6 +21,7 @@ from pyspark.sql.datasource import (
     InputPartition,
     SimpleDataSourceStreamReader,
 )
+from pyspark.sql.streaming.datasource import ReadAllAvailable, SupportsTriggerAvailableNow
 from pyspark.sql.types import (
     ArrayType,
     BinaryType,
@@ -471,14 +472,18 @@ def register_lakeflow_source(spark):
 
             Called by Spark on every micro-batch to discover new data.
 
+            Micro-batch sizing (by row count, time window, etc.) is entirely the
+            connector's responsibility — use table_options (e.g. ``window_days``,
+            ``max_records_per_batch``) to control it.  The framework always
+            requests "all available" and does not pass an admission-control
+            hint here.
+
             Args:
                 table_name: The name of the table.
                 table_options: A dictionary of options for accessing the table.
-                start_offset: The current start offset, or None on the first call.
-                    PySpark's ``DataSourceStreamReader.latestOffset()`` does not
-                    pass this yet, so the framework always sends None for now.
-                    Connectors may use it to implement windowed batching when
-                    called directly.
+                start_offset: The current committed offset.  ``{}`` on the very
+                    first call (from ``initialOffset``), then the last returned
+                    end_offset on each subsequent call.
             Returns:
                 A dict whose keys and values are primitive types (str, int, bool).
             """
@@ -1052,6 +1057,21 @@ def register_lakeflow_source(spark):
     DEFAULT_API_VERSION = "2026-04"
 
 
+    def _parse_max_records(table_options: dict[str, str]) -> int | None:
+        """Parse the optional ``max_records_per_batch`` admission-control cap.
+
+        Returns ``None`` when unset or non-numeric (uncapped).
+        """
+        raw = table_options.get("max_records_per_batch")
+        if raw is None:
+            return None
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+
+
     class ShopifyLakeflowConnect(LakeflowConnect):
         """Shopify Admin REST API connector.
 
@@ -1094,6 +1114,14 @@ def register_lakeflow_source(spark):
                     "X-Shopify-Access-Token": access_token,
                     "Accept": "application/json",
                 }
+            )
+
+            # Cap incremental cursors at init time so a single trigger only
+            # drains data that existed when the connector started; later data
+            # is picked up by the next trigger with a fresh _init_time.
+            # This is the AvailableNow termination guard.
+            self._init_time = (
+                datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             )
 
         # ------------------------------------------------------------------ #
@@ -1169,40 +1197,62 @@ def register_lakeflow_source(spark):
         def _read_cdc_table(
             self,
             start_offset: dict,
+            table_options: dict[str, str],
             table_name: str,
             response_key: str,
             extra_params: dict[str, str] | None = None,
         ) -> tuple[Iterator[dict], dict]:
             """Generic CDC reader using ``updated_at`` watermark.
 
-            - Uses Shopify's ``updated_at_min`` server-side filter (inclusive)
-            - Client-side strict ``> watermark`` to make filter exclusive for
-              stable termination semantics
-            - Watermark advances to ``max(updated_at)`` across returned records,
-              so ``end_offset == start_offset`` exactly when no records have
-              changed since the last sync
-            - Pagination via Link-header cursor (``page_info``) — see utils
+            - Server-side filter via Shopify's ``updated_at_min`` (inclusive).
+            - Client-side strict ``>`` dedup to make the boundary exclusive.
+            - Cursor capped at ``self._init_time`` so AvailableNow terminates
+              even on a busy store. Records edited after init time are picked
+              up by the next trigger with a fresh ``_init_time``.
+            - Admission control via ``max_records_per_batch`` table option.
+              When set and reached mid-walk, returns a partial cursor at the
+              last-emitted record's ``updated_at`` so the next microbatch
+              resumes from there. Records are sorted ascending by
+              ``updated_at`` server-side, so the cap point is well-defined.
+            - Pagination via Link-header cursor (``page_info``) — see utils.
             """
             start_offset = start_offset or {}
             since: str | None = start_offset.get("updated_at")
 
-            params: dict[str, str] = {"limit": "250"}
+            # If we've already drained up to init_time, return stable offset
+            # so the framework terminates this microbatch.
+            if since and since >= self._init_time:
+                return iter([]), start_offset
+
+            max_records = _parse_max_records(table_options)
+
+            params: dict[str, str] = {
+                "limit": "250",
+                "order": "updated_at asc",  # ensures admission-cap boundary
+            }
             if extra_params:
                 params.update(extra_params)
             if since:
                 params["updated_at_min"] = since
+            # Cap server-side at init_time so the page never includes records
+            # edited after the connector started.
+            params["updated_at_max"] = self._init_time
 
             url = f"{self.base_url}/{table_name}.json"
 
             records: list[dict[str, Any]] = []
             max_seen: str | None = since
+            cap_hit = False
             for raw in paginate_get(
                 self._session, url, params, table_name, response_key
             ):
                 rec_updated = raw.get("updated_at")
-                # Strict `>` to keep boundary records from re-emitting on
-                # every run (Shopify's filter is inclusive).
+                # Strict `>` to make Shopify's inclusive filter exclusive.
                 if since and rec_updated and rec_updated <= since:
+                    continue
+                # Defensive: drop anything past the init-time cap that may
+                # have slipped through if the server ignored updated_at_max.
+                if rec_updated and rec_updated > self._init_time:
                     continue
                 rec = dict(raw)
                 rec["shop"] = self.shop
@@ -1211,15 +1261,28 @@ def register_lakeflow_source(spark):
                     max_seen is None or rec_updated > max_seen
                 ):
                     max_seen = rec_updated
+                if max_records is not None and len(records) >= max_records:
+                    cap_hit = True
+                    break
 
-            end_offset = {"updated_at": max_seen} if max_seen else {}
-            return iter(records), end_offset
+            if cap_hit:
+                # Resume from the last emitted record on the next call.
+                return iter(records), {"updated_at": max_seen}
+
+            # Window fully drained — advance to init_time so a follow-up
+            # call with this offset terminates immediately via the early
+            # exit above. Without this, drained-but-empty windows would keep
+            # the offset at `since` forever and AvailableNow wouldn't see
+            # forward progress between non-empty trigger windows.
+            end_cursor = max_seen if max_seen and max_seen >= self._init_time else self._init_time
+            return iter(records), {"updated_at": end_cursor}
 
         def _read_customers(
             self, start_offset: dict, table_options: dict[str, str]
         ) -> tuple[Iterator[dict], dict]:
             return self._read_cdc_table(
                 start_offset,
+                table_options,
                 table_name="customers",
                 response_key="customers",
             )
@@ -1229,6 +1292,7 @@ def register_lakeflow_source(spark):
         ) -> tuple[Iterator[dict], dict]:
             return self._read_cdc_table(
                 start_offset,
+                table_options,
                 table_name="products",
                 response_key="products",
             )
@@ -1241,6 +1305,7 @@ def register_lakeflow_source(spark):
             # drop them. See shopify_api_doc.md for the gotcha.
             return self._read_cdc_table(
                 start_offset,
+                table_options,
                 table_name="orders",
                 response_key="orders",
                 extra_params={"status": "any"},
@@ -1251,30 +1316,44 @@ def register_lakeflow_source(spark):
         def _read_per_order_table(
             self,
             start_offset: dict,
+            table_options: dict[str, str],
             sub_resource: str,
             cursor_field: str,
         ) -> tuple[Iterator[dict], dict]:
             """Read a per-order child resource using the parent-orders trick.
 
-            The /orders/{id}/{sub_resource}.json endpoints don't accept a
-            date filter, so we discover candidate orders via the orders
-            endpoint with ``updated_at_min=watermark`` (Shopify's order
-            ``updated_at`` advances when refunds/fulfillments are added),
-            then fetch the sub-resource for each candidate. Records are
-            finally filtered client-side by ``cursor_field > watermark``.
+            Discovers candidate orders via the orders endpoint
+            (``updated_at_min=watermark``, Shopify's order ``updated_at``
+            advances when refunds/fulfillments are added), then fetches the
+            sub-resource per order. Records are filtered client-side by
+            ``cursor_field > watermark`` and capped at ``self._init_time``.
+
+            Honors ``max_records_per_batch`` for admission control: when
+            reached mid-walk, stops at the next order boundary and returns
+            a partial cursor at the last-emitted record's cursor.
             """
             start_offset = start_offset or {}
             since: str | None = start_offset.get(cursor_field)
 
+            # Already drained up to init_time — nothing to do.
+            if since and since >= self._init_time:
+                return iter([]), start_offset
+
+            max_records = _parse_max_records(table_options)
+
             orders_params: dict[str, str] = {
                 "limit": "250",
                 "status": "any",
+                # Cap the parent walk at init_time so we don't chase orders
+                # that arrived after the connector started.
+                "updated_at_max": self._init_time,
             }
             if since:
                 orders_params["updated_at_min"] = since
 
             all_records: list[dict[str, Any]] = []
             max_seen: str | None = since
+            cap_hit = False
 
             for order in paginate_get(
                 self._session,
@@ -1305,20 +1384,36 @@ def register_lakeflow_source(spark):
                     ts = item.get(cursor_field)
                     if since and ts and ts <= since:
                         continue
+                    # Defensive: drop records past init_time cap.
+                    if ts and ts > self._init_time:
+                        continue
                     rec = dict(item)
                     rec["shop"] = self.shop
                     all_records.append(rec)
                     if ts and (max_seen is None or ts > max_seen):
                         max_seen = ts
+                if max_records is not None and len(all_records) >= max_records:
+                    cap_hit = True
+                    break
 
-            end_offset = {cursor_field: max_seen} if max_seen else {}
-            return iter(all_records), end_offset
+            if cap_hit:
+                return iter(all_records), {cursor_field: max_seen}
+
+            # Window fully drained — advance to init_time so next call sees
+            # `since >= self._init_time` and terminates immediately.
+            end_cursor = (
+                max_seen
+                if max_seen and max_seen >= self._init_time
+                else self._init_time
+            )
+            return iter(all_records), {cursor_field: end_cursor}
 
         def _read_refunds(
             self, start_offset: dict, table_options: dict[str, str]
         ) -> tuple[Iterator[dict], dict]:
             return self._read_per_order_table(
                 start_offset,
+                table_options,
                 sub_resource="refunds",
                 cursor_field="created_at",
             )
@@ -1328,6 +1423,7 @@ def register_lakeflow_source(spark):
         ) -> tuple[Iterator[dict], dict]:
             return self._read_per_order_table(
                 start_offset,
+                table_options,
                 sub_resource="fulfillments",
                 cursor_field="updated_at",
             )
@@ -1344,12 +1440,22 @@ def register_lakeflow_source(spark):
             locations and then iterate. The endpoint has no date filter,
             so we fetch all levels each run; the framework's CDC merge on
             the composite ``(inventory_item_id, location_id)`` PK handles
-            deltas idempotently. Watermark advances to ``max(updated_at)``
-            across returned records to signal forward progress when data
-            actually changed.
+            deltas idempotently.
+
+            Watermark is capped at ``self._init_time`` and advanced to it
+            on every call. This guarantees AvailableNow termination even
+            when stock is updated continuously: the trigger only ingests
+            the snapshot that existed at connector init.
+
+            Honors ``max_records_per_batch`` for admission control: when
+            the cap is hit mid-walk we stop and emit the location ID we
+            were on so the next microbatch resumes from there.
             """
             start_offset = start_offset or {}
-            max_seen: str | None = start_offset.get("updated_at")
+            # Resume cursor: for in-flight microbatches we track which
+            # location index we last finished. None = start from the top.
+            resume_loc = start_offset.get("location_id")
+            max_records = _parse_max_records(table_options)
 
             locs_data, _ = api_get(
                 self._session,
@@ -1357,14 +1463,24 @@ def register_lakeflow_source(spark):
                 params=None,
                 label="locations",
             )
-            location_ids = [
+            active_locs = sorted(
                 str(loc["id"])
                 for loc in locs_data.get("locations", [])
                 if loc.get("id") and loc.get("active")
-            ]
+            )
+
+            # Find resume point if this is a continuation microbatch.
+            try:
+                start_idx = (
+                    active_locs.index(resume_loc) if resume_loc else 0
+                )
+            except ValueError:
+                start_idx = 0
 
             all_records: list[dict[str, Any]] = []
-            for loc_id in location_ids:
+            last_loc: str | None = resume_loc
+            cap_hit = False
+            for loc_id in active_locs[start_idx:]:
                 for level in paginate_get(
                     self._session,
                     f"{self.base_url}/inventory_levels.json",
@@ -1375,12 +1491,18 @@ def register_lakeflow_source(spark):
                     rec = dict(level)
                     rec["shop"] = self.shop
                     all_records.append(rec)
-                    ts = level.get("updated_at")
-                    if ts and (max_seen is None or ts > max_seen):
-                        max_seen = ts
+                last_loc = loc_id
+                if max_records is not None and len(all_records) >= max_records:
+                    cap_hit = True
+                    break
 
-            end_offset = {"updated_at": max_seen} if max_seen else {}
-            return iter(all_records), end_offset
+            if cap_hit:
+                return iter(all_records), {"location_id": last_loc}
+
+            # All locations drained — return a stable terminal offset that
+            # signals "done for this trigger". Anchored to init_time so a
+            # subsequent trigger with a fresh _init_time supersedes it.
+            return iter(all_records), {"updated_at": self._init_time}
 
 
     ########################################################
@@ -1396,7 +1518,10 @@ def register_lakeflow_source(spark):
     IS_DELETE_FLOW = "isDeleteFlow"
 
 
-    class LakeflowStreamReader(SimpleDataSourceStreamReader):
+    # PySpark's DataSource API requires camelCase method names and inherits
+    # semantics from the parent class, so per-method docstrings are redundant.
+    # pylint: disable=invalid-name,missing-function-docstring
+    class LakeflowStreamReader(SimpleDataSourceStreamReader, SupportsTriggerAvailableNow):
         """
         Implements a data source stream reader for Lakeflow Connect.
         Currently, only the simpleStreamReader is implemented, which uses a
@@ -1443,8 +1568,12 @@ def register_lakeflow_source(spark):
             # are missed in the returned records.
             return self.read(start)[0]
 
+        def prepareForTriggerAvailableNow(self) -> None:
+            # No need to do anything special here. Everything is handled in the __init__ method.
+            pass
 
-    class LakeflowPartitionedStreamReader(DataSourceStreamReader):
+
+    class LakeflowPartitionedStreamReader(DataSourceStreamReader, SupportsTriggerAvailableNow):
         """Proxy that bridges SupportsPartitionedStream to PySpark's DataSourceStreamReader.
 
         Used when a connector implements the SupportsPartitionedStream mixin to
@@ -1466,10 +1595,25 @@ def register_lakeflow_source(spark):
         def initialOffset(self):
             return {}
 
-        def latestOffset(self):
-            # PySpark does not pass the current offset to latestOffset() yet,
-            # so we forward None.  Once PySpark supports it, pass the real value.
-            return self.lakeflow_connect.latest_offset(self.table_name, self.table_options, None)
+        def getDefaultReadLimit(self):
+            # Admission control is the connector's responsibility (e.g. via
+            # window_days, max_records_per_batch), not the engine's.  Always
+            # ask the engine for ReadAllAvailable.
+            return ReadAllAvailable()
+
+        def latestOffset(self, start: dict, limit) -> dict:
+            # We declared ReadAllAvailable via getDefaultReadLimit; the engine
+            # must respect it.  Anything else means admission-control expectations
+            # we do not support — fail loudly rather than silently ignore.
+            if not isinstance(limit, ReadAllAvailable):
+                raise ValueError(
+                    f"LakeflowPartitionedStreamReader only supports ReadAllAvailable; "
+                    f"got {type(limit).__name__}. Micro-batch sizing must be controlled "
+                    f"by the connector implementation (table_options), not the engine."
+                )
+            return self.lakeflow_connect.latest_offset(
+                self.table_name, self.table_options, start
+            )
 
         def partitions(self, start: dict, end: dict):
             partition_descs = self.lakeflow_connect.get_partitions(
@@ -1483,6 +1627,10 @@ def register_lakeflow_source(spark):
                 self.table_name, partition_desc, self.table_options
             )
             return map(lambda x: parse_value(x, self.schema), records)
+
+        def prepareForTriggerAvailableNow(self) -> None:
+            # No need to do anything special here. Everything is handled in the __init__ method.
+            pass
 
 
     class LakeflowBatchReader(DataSourceReader):

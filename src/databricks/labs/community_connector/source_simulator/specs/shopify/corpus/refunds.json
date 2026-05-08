@@ -1,0 +1,23 @@
+[
+  {
+    "id": 944000000001,
+    "order_id": 7100000000001,
+    "created_at": "2024-05-20T11:00:00-07:00",
+    "processed_at": "2024-05-20T11:00:00-07:00",
+    "note": "Customer requested refund.",
+    "user_id": 96000000001,
+    "restock": true,
+    "admin_graphql_api_id": "gid://shopify/Refund/944000000001",
+    "refund_line_items": [
+      {
+        "id": 478000000001,
+        "line_item_id": 15000000001,
+        "location_id": 81201397911,
+        "quantity": 1,
+        "restock_type": "return",
+        "subtotal": 89.95,
+        "total_tax": 10.00
+      }
+    ]
+  }
+]

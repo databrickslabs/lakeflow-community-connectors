@@ -1,0 +1,19 @@
+[
+  {
+    "id": 6067000000001,
+    "order_id": 7100000000002,
+    "status": "success",
+    "shipment_status": "delivered",
+    "service": "manual",
+    "created_at": "2024-07-23T08:00:00-07:00",
+    "updated_at": "2024-07-25T14:00:00-07:00",
+    "location_id": 81201397911,
+    "tracking_company": "USPS",
+    "tracking_number": "9400111202555842761540",
+    "tracking_numbers": ["9400111202555842761540"],
+    "tracking_url": "https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111202555842761540",
+    "tracking_urls": ["https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111202555842761540"],
+    "admin_graphql_api_id": "gid://shopify/Fulfillment/6067000000001",
+    "line_items": []
+  }
+]
