@@ -27,9 +27,33 @@ class TestPalantirConnector(LakeflowConnectTests):
         where-clause builder. This test forces the branch by handing
         in a deliberately stale offset.
         """
-        table = self.connector.list_tables()[0]
+        # Pick a table that actually carries ``arrivalTimestamp`` — in
+        # simulate mode both ``ExampleFlight`` and ``FlightsFinal`` do.
+        # ``list_tables()[0]`` in live mode could land on a non-flight
+        # table whose aggregate query for that field 404s, causing the
+        # connector to early-return before reaching the where-clause
+        # branch this test is asserting on.
         cursor_field = "arrivalTimestamp"
-        options = {"cursor_field": cursor_field, "page_size": "100"}
+        candidate = next(
+            (
+                t for t in self.connector.list_tables()
+                if cursor_field in self.connector.get_table_schema(t, {}).fieldNames()
+            ),
+            None,
+        )
+        assert candidate is not None, (
+            f"No table in ontology has '{cursor_field}' — adjust test to a "
+            f"different field present in the live or simulate ontology."
+        )
+        table = candidate
+        # Cap reads — in live mode the table can be millions of rows;
+        # we only need _fetch_page invoked once to verify the
+        # where:gt argument shape.
+        options = {
+            "cursor_field": cursor_field,
+            "page_size": "100",
+            "max_records_per_batch": "5",
+        }
         stale_offset = {"max_cursor_value": "1970-01-01T00:00:00Z"}
 
         original = self.connector._fetch_page
@@ -39,7 +63,7 @@ class TestPalantirConnector(LakeflowConnectTests):
             records, _ = self.connector.read_table(
                 table, stale_offset, options
             )
-            list(records)  # drain generator so _fetch_page is called
+            list(records)  # drain (capped) generator so _fetch_page is called
 
         assert fetch_page_spy.called, "_fetch_page was not invoked"
         # First call's object_set should be the filter wrapper.
