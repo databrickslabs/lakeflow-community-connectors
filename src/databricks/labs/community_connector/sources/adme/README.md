@@ -4,6 +4,14 @@ Ingest OSDU master-data records from **Azure Data Manager for Energy (ADME)** in
 
 ADME is Microsoft's managed implementation of the OSDU Data Platform. This connector reads from the **OSDU Search Service** (`/api/search/v2/query_with_cursor`) and currently exposes three master-data record kinds: **Wellbore**, **Reservoir**, and **Rock_and_Fluid** (mapped to OSDU's `master-data--Sample`).
 
+## Live validation status
+
+This connector's offline test suite (16 simulate-mode tests) passes end-to-end against an in-process source simulator that replays a corpus seeded from the OSDU master-data schemas. **It has not yet been exercised against a live ADME instance** by this repository's CI — provisioning ADME requires an Azure subscription and a service principal with `users.datalake.viewers` entitlement, which the open-source maintainers do not have access to.
+
+The OSDU Search Service surface and Azure AD client-credentials auth flow this connector relies on **are exercised end-to-end against live ADME** by a sister Databricks reference codebase, [`databricks-industry-solutions/energy-sandbox/osdu-app-with-connector`](https://github.com/databricks-industry-solutions/energy-sandbox/tree/main/osdu-app-with-connector), notably its `notebooks/00_smoke_test.py` smoke-test notebook. Both codebases hit the same `POST /api/search/v2/query*` endpoints, use the same `data-partition-id` header, and use the same client-credentials token flow against `login.microsoftonline.com`. That cross-validation is **not a substitute for record-mode testing of this connector**, but it is meaningful evidence that the API contract this connector is built against is real and stable.
+
+If you have ADME access and run this connector live, please [open a PR](https://github.com/databrickslabs/lakeflow-community-connectors/pulls) updating this section with the instance/data-partition you tested against and any drift observed.
+
 ## Prerequisites
 
 - **An ADME instance**, provisioned in your Azure subscription, with at least one data partition (e.g. `opendes`). The connector reads from one data partition per Unity Catalog connection.
