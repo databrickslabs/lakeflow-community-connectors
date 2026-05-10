@@ -172,8 +172,10 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         page_size            Search page size (default 1000, max 1000)
 
     Recognised per-table options:
-        window_days          Partition size in days (default 1)
-        lookback_minutes     Lookback applied to start cursor (default 5)
+        window_days            Partition size in days (default 1)
+        lookback_minutes       Lookback applied to start cursor (default 5)
+        max_records_per_batch  Cap on records yielded per partition /
+                               read_table call. Unset or 0 = uncapped.
     """
 
     def __init__(self, options: dict[str, str]) -> None:
@@ -351,15 +353,25 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         ``self.options`` (set by the LakeflowConnect base ``__init__``)
         through the existing ``_session``/``_token_cache`` instance
         attributes that get pickled with the connector.
+
+        Honors ``max_records_per_batch`` for admission control: when
+        set, stops yielding once the cap is reached so a single
+        partition cannot blow up driver/executor memory.
         """
         self._validate_table(table_name)
 
         since = partition["since"]
         until = partition["until"]
         kind_query = TABLE_TO_KIND_QUERY[table_name]
+        cap = _parse_max_records(table_options)
 
         lucene = self._build_lucene_range(since, until)
-        yield from self._search_paginated(kind_query, lucene)
+        yielded = 0
+        for record in self._search_paginated(kind_query, lucene):
+            if cap is not None and yielded >= cap:
+                return
+            yield record
+            yielded += 1
 
     # ------------------------------------------------------------------
     # LakeflowConnect.read_table — fallback for non-partitioned reads
@@ -377,6 +389,10 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         (``is_partitioned`` returns True), so this method is only used
         if the engine deliberately bypasses partitioning. We honour the
         contract by paginating sequentially and capping at init time.
+
+        Honors ``max_records_per_batch``: when set, returns at most that
+        many records and an offset that lets the next call resume mid-
+        window from the same ``modifyTime`` lower bound.
         """
         self._validate_table(table_name)
 
@@ -387,9 +403,21 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             return iter([]), start_offset or {"cursor": self._init_time}
 
         kind_query = TABLE_TO_KIND_QUERY[table_name]
+        cap = _parse_max_records(table_options)
         lucene = self._build_lucene_range(since, self._init_time)
-        records = list(self._search_paginated(kind_query, lucene))
-        end_offset = {"cursor": self._init_time}
+
+        records: list[dict] = []
+        capped = False
+        for record in self._search_paginated(kind_query, lucene):
+            if cap is not None and len(records) >= cap:
+                capped = True
+                break
+            records.append(record)
+
+        # When the cap fires mid-window, hold the lower bound so the
+        # next batch picks up the rest of the same window. When we drain
+        # the window naturally, advance the cursor to init_time.
+        end_offset = {"cursor": since if capped else self._init_time}
         return iter(records), end_offset
 
     # ------------------------------------------------------------------
@@ -538,6 +566,21 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
 # ---------------------------------------------------------------------------
 # Record flattening
 # ---------------------------------------------------------------------------
+
+
+def _parse_max_records(table_options: dict[str, str]) -> int | None:
+    """Parse the optional ``max_records_per_batch`` admission-control cap.
+
+    Returns ``None`` when unset or non-numeric (uncapped).
+    """
+    raw = table_options.get("max_records_per_batch")
+    if raw is None:
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
 
 
 def _flatten_record(raw: dict[str, Any]) -> dict[str, Any]:

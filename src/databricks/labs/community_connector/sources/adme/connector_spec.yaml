@@ -71,4 +71,4 @@ connection:
 # parameter of the UC connection to allow them to be passed through.
 # Use a comma-separated string of option names.
 # ============================================================================
-external_options_allowlist: "window_days,lookback_minutes"
+external_options_allowlist: "window_days,lookback_minutes,max_records_per_batch"
