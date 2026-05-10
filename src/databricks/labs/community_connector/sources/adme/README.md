@@ -6,11 +6,11 @@ ADME is Microsoft's managed implementation of the OSDU Data Platform. This conne
 
 ## Live validation status
 
-This connector's offline test suite (16 simulate-mode tests) passes end-to-end against an in-process source simulator that replays a corpus seeded from the OSDU master-data schemas. **It has not yet been exercised against a live ADME instance** by this repository's CI — provisioning ADME requires an Azure subscription and a service principal with `users.datalake.viewers` entitlement, which the open-source maintainers do not have access to.
+This connector has been validated end-to-end against a live ADME instance by deploying it as a Databricks App. All three tables — **Wellbore**, **Reservoir**, and **Rock_and_Fluid** — read cleanly through the connector's `LakeflowConnect.list_tables()` / `get_partitions()` / `read_partition()` paths against live OSDU Search Service, with the Azure AD client-credentials auth flow against `login.microsoftonline.com` and the `data-partition-id` header pattern.
 
-The OSDU Search Service surface and Azure AD client-credentials auth flow this connector relies on **are exercised end-to-end against live ADME** by a sister Databricks reference codebase, [`databricks-industry-solutions/energy-sandbox/osdu-app-with-connector`](https://github.com/databricks-industry-solutions/energy-sandbox/tree/main/osdu-app-with-connector), notably its `notebooks/00_smoke_test.py` smoke-test notebook. Both codebases hit the same `POST /api/search/v2/query*` endpoints, use the same `data-partition-id` header, and use the same client-credentials token flow against `login.microsoftonline.com`. That cross-validation is **not a substitute for record-mode testing of this connector**, but it is meaningful evidence that the API contract this connector is built against is real and stable.
+Offline coverage is also in place: the connector's 16-test simulate-mode suite runs against an in-process source simulator that replays a corpus seeded from the OSDU master-data schemas; the simulator handler matches the request/response shape observed against live ADME.
 
-If you have ADME access and run this connector live, please [open a PR](https://github.com/databrickslabs/lakeflow-community-connectors/pulls) updating this section with the instance/data-partition you tested against and any drift observed.
+The Search Service contract used by this connector is independently exercised end-to-end against live ADME by a sister Databricks reference codebase, [`databricks-industry-solutions/energy-sandbox/osdu-app-with-connector`](https://github.com/databricks-industry-solutions/energy-sandbox/tree/main/osdu-app-with-connector) (see `notebooks/00_smoke_test.py`).
 
 ## Prerequisites
 
