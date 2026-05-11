@@ -1282,14 +1282,24 @@ def register_lakeflow_source(spark):
                 records = self._unwrap_records(body, key="items")
                 if not records:
                     break
+                # actiTIME may cap the page size below the requested ``limit`` (the
+                # envelope's ``limit`` field reports the server-applied value). To
+                # detect end-of-stream we compare against that applied page size,
+                # not the requested one, otherwise a server cap below ``page_size``
+                # would terminate the loop after the very first page.
+                applied_page_size = page_size
+                if isinstance(body, dict):
+                    server_limit = body.get("limit")
+                    if isinstance(server_limit, int) and server_limit > 0:
+                        applied_page_size = server_limit
                 for raw in records:
                     yield raw if _raw else self._map_record(table_name, raw)
                     emitted += 1
                     if emitted >= max_records:
                         return
-                if len(records) < page_size:
+                if len(records) < applied_page_size:
                     break
-                offset += page_size
+                offset += len(records)
 
         # ------------------------------------------------------------------
         # Validation & field mapping

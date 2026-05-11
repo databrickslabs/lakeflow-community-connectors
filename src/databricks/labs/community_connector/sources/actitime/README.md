@@ -67,12 +67,12 @@ The actiTIME connector exposes a **static list of 16 tables**. Names must be use
 
 | Table | Description | Ingestion Type | Primary Key | Incremental Cursor |
 |---|---|---|---|---|
-| `customers` | Customer/client entities | `cdc` | `id` | full-list refresh (see note below) |
-| `projects` | Projects belonging to customers | `cdc` | `id` | full-list refresh |
-| `tasks` | Tasks within projects | `cdc` | `id` | full-list refresh |
-| `users` | User accounts | `cdc` | `id` | full-list refresh |
-| `timetrack` | Time-track entries per user per date | `append` | `id` | `date` (sliding window) |
-| `leavetime` | Leave-time entries per user per date | `append` | `id` | `date` (sliding window) |
+| `customers` | Customer/client entities | `cdc` | `id` | `created` (proxy; full-list refresh — see note below) |
+| `projects` | Projects belonging to customers | `cdc` | `id` | `created` (proxy; full-list refresh) |
+| `tasks` | Tasks within projects | `cdc` | `id` | `created` (proxy; full-list refresh) |
+| `users` | User accounts | `snapshot` | `id` | n/a |
+| `timetrack` | Time-track entries per user per date | `append` | `["user_id", "date", "task_id"]` | `date` (sliding window) |
+| `leavetime` | Leave-time entries per user per date | `append` | `["user_id", "date", "leave_type_id"]` | `date` (sliding window) |
 | `approvalStatus` | Per-user-week time approval status | `append` | `["user_id", "week_start_date"]` | `week_start_date` (sliding window) |
 | `departments` | Organizational departments | `snapshot` | `id` | n/a |
 | `userGroups` | User groups (permission groupings) | `snapshot` | `id` | n/a |
@@ -86,13 +86,15 @@ The actiTIME connector exposes a **static list of 16 tables**. Names must be use
 
 ### CDC tables: full-refresh with upsert (important)
 
-The actiTIME REST API **does not expose a `modifiedAt` field** on `customers`, `projects`, `tasks`, or `users`, and there is no "modified since" filter. A strict incremental sync is therefore not possible. On every trigger, the connector performs a **full list refresh** of each CDC table and relies on **upsert on the primary key (`id`)** downstream:
+The actiTIME REST API **does not expose a `modifiedAt` field** on `customers`, `projects`, or `tasks`, and there is no "modified since" filter. A strict incremental sync is therefore not possible. On every trigger, the connector performs a **full list refresh** of each CDC table and relies on **upsert on the primary key (`id`)** downstream:
 
 - New rows appear.
 - Updates and archive flips are picked up because the connector re-lists everything.
 - **Deletes are not surfaced** — actiTIME has no delete feed. Hard-deleted rows simply stop appearing, but their previous version remains in the destination table.
 
 If physical delete tracking is essential, schedule a periodic reconciliation against the latest full snapshot.
+
+`users` is treated as a `snapshot` table rather than CDC because the actiTIME API does not expose any timestamp field on a user (no `created`, no `modifiedAt`). The same full-refresh + upsert-on-`id` behaviour applies, and the same deletes-not-surfaced caveat holds.
 
 ### Append tables: sliding date window
 
@@ -114,9 +116,9 @@ Snapshot tables are full-refresh on every run. `userRates` is a per-user sub-res
 - Calendar dates (`date`, `dateFrom`, `deadline`, `hired`, `release_date`, `week_start_date`) are kept as `DateType`.
 - `allowedActions.*` API objects are flattened to `allowed_actions_can_modify`, `allowed_actions_can_delete`, and (for `tasks`) `allowed_actions_can_complete` / (for `users`) `allowed_actions_can_submit_timetrack`.
 - camelCase API field names are renamed to snake_case in the output schema.
-- `users.user_groups` and `users.user_roles` are kept as arrays; they are not exploded.
-- `userRates.leave_rates` is a `map<string, decimal(18,4)>` keyed by `leaveTypeId` (as string).
+- `userRates.leave_rates` is an `array<struct<leave_type_id: long, rate: decimal(18,4)>>` — the API returns the rates as an array of `{leaveTypeId, rate}` objects, not a map.
 - `settings` is a singleton; the connector assigns `id = 1` so the row is addressable downstream.
+- `timetrack` and `leavetime` rows do not carry a record-level id on the API; the connector exposes them with composite primary keys (`user_id, date, task_id` and `user_id, date, leave_type_id` respectively) and adds a `day_offset` column reflecting the day's position inside the response window.
 
 ## Table Configurations
 
@@ -179,14 +181,12 @@ actiTIME JSON fields are mapped to Spark types as follows:
 | actiTIME JSON Type | Example Fields | Connector Spark Type | Notes |
 |---|---|---|---|
 | integer | `id`, `customerId`, `projectId`, `time`, `estimatedTime` | `LongType` | All numeric identifiers are stored as 64-bit integers for safety. Durations such as `time` and `estimated_time` are kept in seconds. |
-| string | `name`, `description`, `username`, `email`, `comment`, `url` | `StringType` | UTF-8. |
-| boolean | `archived`, `active`, `approved`, `locked`, `billable`, `paidLeave`, `autoAccrual` | `BooleanType` | |
+| string | `name`, `description`, `username`, `email`, `url`, `status` | `StringType` | UTF-8. |
+| boolean | `archived`, `active`, `billable`, `paid_leave`, `auto_accrual`, `workflow_enabled` | `BooleanType` | |
 | long (epoch ms) | `created`, `submittedAt`, `approvedAt` | `TimestampType` | Connector converts epoch-ms longs to ISO-8601 UTC timestamps. |
 | string (ISO date) | `date`, `dateFrom`, `deadline`, `hired`, `releaseDate`, `weekStartDate` | `DateType` | `YYYY-MM-DD`. |
-| array<integer> | `userGroups` | `ArrayType(LongType)` | |
-| array<string> | `userRoles` | `ArrayType(StringType)` | |
 | object | `allowedActions` | Flattened to scalar booleans | E.g. `allowed_actions_can_modify`, `allowed_actions_can_delete`. |
-| object (map) | `leaveRates` | `MapType(StringType, DecimalType(18, 4))` | Keys are `leaveTypeId` as string. |
+| array<object> | `leaveRates` (inside `/userRates/{id}`) | `ArrayType(StructType([leave_type_id: LongType, rate: DecimalType(18,4)]))` | Modelled as an array of structs, not a map. |
 | decimal | `regularRate`, `overtimeRate` | `DecimalType(18, 4)` | |
 | null / absent | optional fields | nullable target type | Missing keys and explicit `null` are both treated as SQL `NULL`. |
 
@@ -280,7 +280,7 @@ Run the pipeline using your standard Lakeflow / Databricks orchestration (e.g. a
 
 - On the **first run** of `timetrack`, `leavetime`, or `approvalStatus`, set `start_date` to a recent cutoff to limit history. Without `start_date`, the connector defaults to 30 days before pipeline init time.
 - On **subsequent runs**, the connector advances the stored cursor automatically and applies `lookback_days` at read time to re-fetch the recent past for late edits.
-- CDC tables (`customers`, `projects`, `tasks`, `users`) and all snapshot tables refresh fully on every trigger.
+- CDC tables (`customers`, `projects`, `tasks`) and all snapshot tables (including `users`) refresh fully on every trigger.
 
 #### Best Practices
 
