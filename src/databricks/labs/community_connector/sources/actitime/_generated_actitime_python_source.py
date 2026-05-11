@@ -17,7 +17,6 @@ from typing import Any, Iterator, Sequence
 import json
 import time
 
-from __future__ import annotations
 from pyspark.sql import Row
 from pyspark.sql.datasource import (
     DataSource,
@@ -819,10 +818,13 @@ def register_lakeflow_source(spark):
             # Required connection parameters. ``base_url`` should look like
             # ``https://online.actitime.com/<tenant>`` or
             # ``https://<self-hosted-host>``. The connector appends ``/api/v1``.
-            base_url = options.get("base_url") or options.get("host")
+            base_url = options.get("base_url")
             if not base_url:
-                raise ValueError("actiTIME connector requires 'base_url' option (e.g. 'https://online.actitime.com/<tenant>').")
-            username = options.get("username") or options.get("email")
+                raise ValueError(
+                    "actiTIME connector requires 'base_url' option "
+                    "(e.g. 'https://online.actitime.com/<tenant>')."
+                )
+            username = options.get("username")
             password = options.get("password")
             if not username or not password:
                 raise ValueError("actiTIME connector requires 'username' and 'password' options.")
@@ -1153,9 +1155,7 @@ def register_lakeflow_source(spark):
             # The actiTIME range is inclusive of both endpoints, so we request
             # [read_from, window_end_date - 1 day] to avoid double-fetching the
             # boundary day across consecutive windows.
-            window_end_inclusive = window_end_date - timedelta(days=1)
-            if window_end_inclusive < read_from:
-                window_end_inclusive = read_from
+            window_end_inclusive = max(window_end_date - timedelta(days=1), read_from)
 
             params = {
                 "dateFrom": read_from.isoformat(),
@@ -1224,9 +1224,7 @@ def register_lakeflow_source(spark):
             window_end_date = min(
                 cursor_date + timedelta(days=window_days), self._init_date
             )
-            window_end_inclusive = window_end_date - timedelta(days=1)
-            if window_end_inclusive < read_from:
-                window_end_inclusive = read_from
+            window_end_inclusive = max(window_end_date - timedelta(days=1), read_from)
 
             params = {
                 "dateFrom": read_from.isoformat(),
@@ -1507,7 +1505,9 @@ def register_lakeflow_source(spark):
         if not value:
             raise ValueError("empty date string")
         # Accept both bare dates ("2026-01-01") and timestamps ("2026-01-01T00:00:00+00:00").
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).date() if "T" in value else date.fromisoformat(value)
+        if "T" in value:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+        return date.fromisoformat(value)
 
 
     ########################################################

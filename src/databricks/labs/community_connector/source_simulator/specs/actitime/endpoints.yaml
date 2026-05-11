@@ -249,8 +249,7 @@ endpoints:
     corpus: userRates
     response:
       pagination_style: none
-      wrapper:
-        records_key: items
+      # Bare-array response (per-user fan-out endpoint — no pagination wrapper).
 
   # ---- time-windowed tables ----
   # Live envelope: {"dateFrom": ..., "dateTo": ..., "data": [...]}
