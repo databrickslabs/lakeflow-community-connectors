@@ -14,6 +14,7 @@ from typing import (
     Iterator,
     List,
     Sequence,
+    Set,
     Tuple,
 )
 import json
@@ -48,6 +49,7 @@ from pyspark.sql.types import (
     VariantVal,
 )
 import base64
+import logging
 import requests
 
 
@@ -527,6 +529,9 @@ def register_lakeflow_source(spark):
     # src/databricks/labs/community_connector/sources/palantir/palantir.py
     ########################################################
 
+    logger = logging.getLogger(__name__)
+
+
     class PalantirLakeflowConnect(LakeflowConnect):
         """
         Palantir Foundry connector implementing the LakeflowConnect interface.
@@ -585,6 +590,11 @@ def register_lakeflow_source(spark):
             self._schema_cache: Dict[str, StructType] = {}
             self._metadata_cache: Dict[str, dict] = {}
             self._object_types_cache: Dict[str, dict] = None
+            # Tables for which the aggregate endpoint returned 404 (not
+            # supported by the object type). Avoids re-issuing the same
+            # doomed call on every CDC tick — saves one HTTP call per
+            # read for tables that don't aggregate.
+            self._aggregate_unsupported: Set[str] = set()
 
         def _ensure_object_types_cached(self) -> None:
             """
@@ -943,7 +953,24 @@ def register_lakeflow_source(spark):
         def _get_max_cursor_via_aggregate(
             self, table_name: str, cursor_field: str
         ) -> Any:
-            """Get max cursor value using the aggregate endpoint."""
+            """Get max cursor value using the aggregate endpoint.
+
+            Returns ``None`` when the aggregate call fails or its response
+            does not contain a ``max_cursor`` metric. Caller falls back to
+            :meth:`_get_max_cursor_via_search` in that case.
+
+            Failure modes are observable rather than silent:
+
+            * 404 → table doesn't support aggregation. Cached so subsequent
+              CDC ticks skip the doomed call entirely (saves 1 HTTP call
+              per read for the lifetime of the connector instance).
+            * Other ``RequestException`` (auth, network, 5xx) → logged at
+              ``warning`` so operators can grep for it; not cached so
+              transient failures retry on the next call.
+            """
+            if table_name in self._aggregate_unsupported:
+                return None
+
             url = (
                 f"{self.base_url}/api/v2/ontologies/{self.ontology_api_name}"
                 f"/objectSets/aggregate"
@@ -957,8 +984,23 @@ def register_lakeflow_source(spark):
             }
             try:
                 response = self._session.post(url, json=body, timeout=30)
+                if response.status_code == 404:
+                    self._aggregate_unsupported.add(table_name)
+                    logger.debug(
+                        "aggregate not supported for %s.%s (404); "
+                        "falling back to search for the lifetime of this connector",
+                        table_name,
+                        cursor_field,
+                    )
+                    return None
                 response.raise_for_status()
-            except requests.RequestException:
+            except requests.RequestException as e:
+                logger.warning(
+                    "aggregate failed for %s.%s: %s; falling back to search",
+                    table_name,
+                    cursor_field,
+                    e,
+                )
                 return None
 
             data = response.json()
@@ -972,7 +1014,12 @@ def register_lakeflow_source(spark):
         def _get_max_cursor_via_search(
             self, table_name: str, cursor_field: str
         ) -> Any:
-            """Fallback: get max cursor value using orderBy desc, limit 1."""
+            """Fallback: get max cursor value using orderBy desc, limit 1.
+
+            Returns ``None`` if the call fails (logged at ``warning``) or
+            the response has no records. Caller treats ``None`` as ``no
+            new data`` and the offset-unchanged termination check kicks in.
+            """
             url = (
                 f"{self.base_url}/api/v2/ontologies/{self.ontology_api_name}"
                 f"/objects/{table_name}/search"
@@ -986,7 +1033,14 @@ def register_lakeflow_source(spark):
             try:
                 response = self._session.post(url, json=body, timeout=30)
                 response.raise_for_status()
-            except requests.RequestException:
+            except requests.RequestException as e:
+                logger.warning(
+                    "search fallback failed for %s.%s: %s; "
+                    "cursor will not advance this tick",
+                    table_name,
+                    cursor_field,
+                    e,
+                )
                 return None
 
             data = response.json()

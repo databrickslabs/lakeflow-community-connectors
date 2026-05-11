@@ -1,5 +1,7 @@
 from unittest.mock import patch
 
+import requests
+
 from databricks.labs.community_connector.sources.palantir.palantir import PalantirLakeflowConnect
 from tests.unit.sources.test_suite import LakeflowConnectTests
 
@@ -132,6 +134,47 @@ class TestPalantirMaxCursorFallback:
         assert result == "2026-02-02"
         agg.assert_called_once_with("FlightsFinal", "date")
         srch.assert_not_called()
+
+    def test_aggregate_404_caches_unsupported_table(self):
+        """A 404 from /objectSets/aggregate means the table doesn't
+        support aggregation. The connector should cache that fact and
+        skip the doomed call on subsequent reads — saves one HTTP
+        round-trip per CDC tick for the lifetime of the connector."""
+        c = self._connector()
+        mock_404 = type("R", (), {"status_code": 404})()
+
+        with patch.object(c._session, "post", return_value=mock_404) as post:
+            assert c._get_max_cursor_via_aggregate("ExampleAircraft", "acquisitionDate") is None
+            assert "ExampleAircraft" in c._aggregate_unsupported
+            assert post.call_count == 1
+
+            # Second call: cached, no HTTP issued.
+            assert c._get_max_cursor_via_aggregate("ExampleAircraft", "acquisitionDate") is None
+            assert post.call_count == 1, (
+                f"Cached unsupported table should skip the HTTP call; "
+                f"got {post.call_count} total calls"
+            )
+
+    def test_aggregate_transient_failure_does_not_cache(self):
+        """A transient 5xx or network error must not be cached as
+        ``unsupported``. The next call should retry."""
+        c = self._connector()
+
+        # First call: 503 (transient).
+        bad_response = type("R", (), {"status_code": 503})()
+
+        def raise_503(*_args, **_kwargs):
+            err = requests.HTTPError("503 service unavailable")
+            err.response = bad_response
+            raise err
+
+        with patch.object(c._session, "post", side_effect=raise_503):
+            assert c._get_max_cursor_via_aggregate("FlightsFinal", "date") is None
+
+        # Should not be cached.
+        assert "FlightsFinal" not in c._aggregate_unsupported, (
+            "Transient errors must not poison the unsupported cache"
+        )
 
 
 class TestPalantirCursorTypes:
