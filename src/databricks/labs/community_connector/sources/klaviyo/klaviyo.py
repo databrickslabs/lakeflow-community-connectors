@@ -19,10 +19,11 @@ to the single-driver ``read_table`` path.  Two tables opt in:
   so the connector can split the cursor range into windows and read
   each one on a different executor.
 * ``campaigns`` is partitioned by channel.  Klaviyo *requires* the
-  ``messages.channel`` filter on every campaign request, so the three
-  channel values (email, sms, mobile_push) form a natural partition.
-  Each channel still uses ordinary cursor pagination inside its
-  partition.
+  ``messages.channel`` filter on every campaign request.  On API
+  revision 2024-10-15 the filter accepts ``email`` and ``sms`` only
+  (verified live — ``mobile_push`` returns HTTP 400), so the
+  connector fans out across those two channels.  Each channel still
+  uses ordinary cursor pagination inside its partition.
 
 Schema / Record shape
 ---------------------
@@ -234,9 +235,11 @@ class KlaviyoLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         * ``events`` — XL rate limit (350/s), high volume, supports
           ``greater-or-equal(datetime,...) AND less-than(datetime,...)``
           which we use to split the cursor range into windows.
-        * ``campaigns`` — three required channel filters (email, sms,
-          mobile_push) form a natural three-way partition; each
-          executor handles one channel's cursor-paginated walk.
+        * ``campaigns`` — the required ``messages.channel`` filter on
+          revision 2024-10-15 only accepts ``email`` and ``sms`` (see
+          ``CAMPAIGN_CHANNELS`` for the live-verified set), so this is
+          a two-way partition; each executor handles one channel's
+          cursor-paginated walk.
 
         Every other table falls back to the single-driver
         ``read_table`` path: their per-second budgets are too low to
@@ -612,16 +615,16 @@ class KlaviyoLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
 
         Klaviyo requires a ``messages.channel`` filter on every request,
         so we make one paginated request per channel and union the
-        results.  The cursor is a per-channel bag::
+        results.  The cursor is a per-channel bag, e.g.::
 
-            {"updated_at__email": "...", "updated_at__sms": "...",
-             "updated_at__mobile_push": "..."}
+            {"updated_at__email": "...", "updated_at__sms": "..."}
 
-        Each channel terminates independently at ``_init_ts``.  The
-        microbatch terminates only when every channel has drained.
-        Dedup-by-id is unnecessary because a campaign belongs to
-        exactly one channel — the filter is mutually exclusive across
-        the three values.
+        On revision 2024-10-15 the filter accepts ``email`` and ``sms``
+        only; see ``CAMPAIGN_CHANNELS``.  Each channel terminates
+        independently at ``_init_ts``; the microbatch terminates only
+        when every channel has drained.  Dedup-by-id is unnecessary
+        because a campaign belongs to exactly one channel — the filter
+        is mutually exclusive across the active values.
         """
         max_records = parse_int_option(table_options, "max_records_per_batch")
 
@@ -775,11 +778,19 @@ class KlaviyoLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         """Return the per-page params for a paginated request.
 
         Applies ``page[size]`` based on ``page_size`` from
-        ``table_options`` clamped to the endpoint's max.  The metrics
-        endpoint doesn't document a default but we still send
-        ``page[size]`` for consistency.
+        ``table_options`` clamped to the endpoint's max.
+
+        ``metrics`` and ``campaigns`` reject the ``page[size]`` parameter
+        at runtime with HTTP 400 (``'page_size' is not a valid field for
+        the resource ...``) — verified live against the 2024-10-15 API
+        revision.  Both still support ``page[cursor]`` for pagination,
+        so we just omit ``page[size]`` and let the server use its
+        default page size.  ``MAX_PAGE_SIZE`` is set to 0 for these
+        tables to opt them out cleanly.
         """
         max_size = MAX_PAGE_SIZE.get(table_name, 100)
+        if max_size <= 0:
+            return {}
         requested = parse_int_option(table_options, "page_size", max_size)
         size = max(1, min(requested or max_size, max_size))
         return {"page[size]": str(size)}

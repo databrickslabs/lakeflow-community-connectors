@@ -1,66 +1,101 @@
 [
   {
-    "id": "hotel-57-pk0",
-    "type": "whiskey-317",
-    "name": "kilo-226",
-    "created": "whiskey-611",
-    "updated": "2024-01-01T00:00:00Z",
-    "opt_in_process": "xray-213"
+    "type": "list",
+    "id": "XHmvHL",
+    "attributes": {
+      "name": "SMS List",
+      "created": "2025-12-28T21:51:50+00:00",
+      "updated": "2025-12-28T21:51:50+00:00",
+      "opt_in_process": "double_opt_in"
+    },
+    "relationships": {
+      "profiles": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/lists/XHmvHL/relationships/profiles/",
+          "related": "https://a.klaviyo.com/api/lists/XHmvHL/profiles/"
+        }
+      },
+      "tags": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/lists/XHmvHL/relationships/tags/",
+          "related": "https://a.klaviyo.com/api/lists/XHmvHL/tags/"
+        }
+      },
+      "flow-triggers": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/lists/XHmvHL/relationships/flow-triggers/",
+          "related": "https://a.klaviyo.com/api/lists/XHmvHL/flow-triggers/"
+        }
+      }
+    },
+    "links": {
+      "self": "https://a.klaviyo.com/api/lists/XHmvHL/"
+    }
   },
   {
-    "id": "oscar-87-pk1",
-    "type": "oscar-805",
-    "name": "alpha-911",
-    "created": "bravo-871",
-    "updated": "2024-01-01T01:00:00Z",
-    "opt_in_process": "uniform-907"
+    "type": "list",
+    "id": "R63KX5",
+    "attributes": {
+      "name": "Email List",
+      "created": "2025-12-28T21:51:50+00:00",
+      "updated": "2025-12-28T22:32:32+00:00",
+      "opt_in_process": "single_opt_in"
+    },
+    "relationships": {
+      "profiles": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/lists/R63KX5/relationships/profiles/",
+          "related": "https://a.klaviyo.com/api/lists/R63KX5/profiles/"
+        }
+      },
+      "tags": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/lists/R63KX5/relationships/tags/",
+          "related": "https://a.klaviyo.com/api/lists/R63KX5/tags/"
+        }
+      },
+      "flow-triggers": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/lists/R63KX5/relationships/flow-triggers/",
+          "related": "https://a.klaviyo.com/api/lists/R63KX5/flow-triggers/"
+        }
+      }
+    },
+    "links": {
+      "self": "https://a.klaviyo.com/api/lists/R63KX5/"
+    }
   },
   {
-    "id": "victor-7-pk2",
-    "type": "delta-656",
-    "name": "foxtrot-571",
-    "created": "xray-986",
-    "updated": "2024-01-01T02:00:00Z",
-    "opt_in_process": "mike-579"
-  },
-  {
-    "id": "tango-86-pk3",
-    "type": "foxtrot-412",
-    "name": "xray-188",
-    "created": "tango-563",
-    "updated": "2024-01-01T03:00:00Z",
-    "opt_in_process": "juliet-418"
-  },
-  {
-    "id": "hotel-15-pk4",
-    "type": "mike-542",
-    "name": "golf-373",
-    "created": "papa-229",
-    "updated": "2024-01-01T04:00:00Z",
-    "opt_in_process": "echo-723"
-  },
-  {
-    "id": "sierra-5-pk5",
-    "type": "yankee-288",
-    "name": "zulu-740",
-    "created": "yankee-131",
-    "updated": "2024-01-01T05:00:00Z",
-    "opt_in_process": "alpha-741"
-  },
-  {
-    "id": "juliet-3-pk6",
-    "type": "whiskey-740",
-    "name": "charlie-664",
-    "created": "zulu-816",
-    "updated": "2024-01-01T06:00:00Z",
-    "opt_in_process": "oscar-718"
-  },
-  {
-    "id": "yankee-9-pk7",
-    "type": "quebec-307",
-    "name": "zulu-104",
-    "created": "mike-681",
-    "updated": "2024-01-01T07:00:00Z",
-    "opt_in_process": "hotel-141"
+    "type": "list",
+    "id": "VQimRT",
+    "attributes": {
+      "name": "Preview List",
+      "created": "2025-12-28T21:51:50+00:00",
+      "updated": "2025-12-28T22:32:32+00:00",
+      "opt_in_process": "single_opt_in"
+    },
+    "relationships": {
+      "profiles": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/lists/VQimRT/relationships/profiles/",
+          "related": "https://a.klaviyo.com/api/lists/VQimRT/profiles/"
+        }
+      },
+      "tags": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/lists/VQimRT/relationships/tags/",
+          "related": "https://a.klaviyo.com/api/lists/VQimRT/tags/"
+        }
+      },
+      "flow-triggers": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/lists/VQimRT/relationships/flow-triggers/",
+          "related": "https://a.klaviyo.com/api/lists/VQimRT/flow-triggers/"
+        }
+      }
+    },
+    "links": {
+      "self": "https://a.klaviyo.com/api/lists/VQimRT/"
+    }
   }
 ]

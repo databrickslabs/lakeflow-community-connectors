@@ -1,305 +1,64 @@
 [
   {
-    "id": "alpha-12-pk0",
-    "type": "kilo-759",
-    "channel": "sierra-371",
-    "name": "india-545",
-    "status": "november-582",
-    "archived": false,
-    "audiences": {
-      "included": [
-        "november-414",
-        "uniform-967"
-      ],
-      "excluded": [
-        "hotel-670",
-        "lima-185"
-      ]
-    },
-    "send_options": {
-      "use_smart_sending": false,
-      "ignore_unsubscribes": true
-    },
-    "tracking_options": {
-      "is_add_utm": true,
-      "utm_params": [],
-      "is_tracking_clicks": true,
-      "is_tracking_opens": true
-    },
-    "send_strategy": {
-      "method": "juliet-545",
-      "datetime": "golf-967"
-    },
-    "created_at": "uniform-319",
-    "scheduled_at": "delta-183",
-    "updated_at": "2024-01-01T00:00:00Z",
-    "send_time": "papa-724"
-  },
-  {
-    "id": "kilo-669-pk1",
-    "type": "echo-482",
-    "channel": "xray-255",
-    "name": "india-223",
-    "status": "uniform-143",
-    "archived": false,
-    "audiences": {
-      "included": [
-        "kilo-647"
-      ],
-      "excluded": []
-    },
-    "send_options": {
-      "use_smart_sending": true,
-      "ignore_unsubscribes": true
-    },
-    "tracking_options": {
-      "is_add_utm": false,
-      "utm_params": [
-        {
-          "name": "mike-660",
-          "value": "romeo-230"
+    "type": "campaign",
+    "id": "01KEHJR78C97SRDZ65QKW082EH",
+    "attributes": {
+      "name": "Email 1",
+      "status": "Sent",
+      "archived": false,
+      "audiences": {
+        "included": [
+          "Vdhjfg"
+        ],
+        "excluded": []
+      },
+      "send_options": {
+        "use_smart_sending": true,
+        "ignore_unsubscribes": false
+      },
+      "tracking_options": {
+        "add_tracking_params": false,
+        "custom_tracking_params": [],
+        "is_tracking_clicks": true,
+        "is_tracking_opens": true
+      },
+      "send_strategy": {
+        "method": "static",
+        "options_static": {
+          "datetime": "2026-01-10T15:32:00+00:00",
+          "is_local": true,
+          "send_past_recipients_immediately": true
         },
-        {
-          "name": "oscar-117",
-          "value": "lima-187"
+        "options_throttled": null,
+        "options_sto": null
+      },
+      "created_at": "2026-01-09T14:32:15.887765+00:00",
+      "scheduled_at": "2026-01-09T14:33:42.857565+00:00",
+      "updated_at": "2026-01-10T15:33:30.871961+00:00",
+      "send_time": "2026-01-10T15:32:00+00:00"
+    },
+    "relationships": {
+      "campaign-messages": {
+        "data": [
+          {
+            "type": "campaign-message",
+            "id": "01KEHJR78V7FZER3YH6S33ZGP0"
+          }
+        ],
+        "links": {
+          "self": "https://a.klaviyo.com/api/campaigns/01KEHJR78C97SRDZ65QKW082EH/relationships/campaign-messages/",
+          "related": "https://a.klaviyo.com/api/campaigns/01KEHJR78C97SRDZ65QKW082EH/campaign-messages/"
         }
-      ],
-      "is_tracking_clicks": false,
-      "is_tracking_opens": true
-    },
-    "send_strategy": {
-      "method": "oscar-132",
-      "datetime": "echo-825"
-    },
-    "created_at": "india-928",
-    "scheduled_at": "romeo-938",
-    "updated_at": "2024-01-01T01:00:00Z",
-    "send_time": "alpha-399"
-  },
-  {
-    "id": "oscar-47-pk2",
-    "type": "november-744",
-    "channel": "xray-714",
-    "name": "sierra-855",
-    "status": "delta-129",
-    "archived": false,
-    "audiences": {
-      "included": [
-        "alpha-531",
-        "sierra-275"
-      ],
-      "excluded": [
-        "charlie-650",
-        "delta-259"
-      ]
-    },
-    "send_options": {
-      "use_smart_sending": true,
-      "ignore_unsubscribes": false
-    },
-    "tracking_options": {
-      "is_add_utm": true,
-      "utm_params": [],
-      "is_tracking_clicks": false,
-      "is_tracking_opens": false
-    },
-    "send_strategy": {
-      "method": "papa-644",
-      "datetime": "juliet-213"
-    },
-    "created_at": "hotel-586",
-    "scheduled_at": "bravo-361",
-    "updated_at": "2024-01-01T02:00:00Z",
-    "send_time": "quebec-590"
-  },
-  {
-    "id": "echo-768-pk3",
-    "type": "sierra-507",
-    "channel": "uniform-121",
-    "name": "november-319",
-    "status": "golf-144",
-    "archived": false,
-    "audiences": {
-      "included": [
-        "india-137",
-        "bravo-809"
-      ],
-      "excluded": [
-        "uniform-270"
-      ]
-    },
-    "send_options": {
-      "use_smart_sending": false,
-      "ignore_unsubscribes": true
-    },
-    "tracking_options": {
-      "is_add_utm": true,
-      "utm_params": [
-        {
-          "name": "lima-143",
-          "value": "victor-981"
+      },
+      "tags": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/campaigns/01KEHJR78C97SRDZ65QKW082EH/relationships/tags/",
+          "related": "https://a.klaviyo.com/api/campaigns/01KEHJR78C97SRDZ65QKW082EH/tags/"
         }
-      ],
-      "is_tracking_clicks": false,
-      "is_tracking_opens": false
+      }
     },
-    "send_strategy": {
-      "method": "november-590",
-      "datetime": "papa-939"
-    },
-    "created_at": "india-154",
-    "scheduled_at": "oscar-667",
-    "updated_at": "2024-01-01T03:00:00Z",
-    "send_time": "echo-447"
-  },
-  {
-    "id": "foxtrot--pk4",
-    "type": "zulu-898",
-    "channel": "victor-513",
-    "name": "zulu-127",
-    "status": "victor-511",
-    "archived": true,
-    "audiences": {
-      "included": [],
-      "excluded": [
-        "foxtrot-251",
-        "victor-984"
-      ]
-    },
-    "send_options": {
-      "use_smart_sending": false,
-      "ignore_unsubscribes": true
-    },
-    "tracking_options": {
-      "is_add_utm": true,
-      "utm_params": [
-        {
-          "name": "sierra-119",
-          "value": "alpha-438"
-        },
-        {
-          "name": "november-706",
-          "value": "lima-206"
-        }
-      ],
-      "is_tracking_clicks": false,
-      "is_tracking_opens": true
-    },
-    "send_strategy": {
-      "method": "xray-828",
-      "datetime": "echo-755"
-    },
-    "created_at": "romeo-282",
-    "scheduled_at": "golf-245",
-    "updated_at": "2024-01-01T04:00:00Z",
-    "send_time": "kilo-823"
-  },
-  {
-    "id": "whiskey--pk5",
-    "type": "mike-675",
-    "channel": "oscar-210",
-    "name": "echo-164",
-    "status": "november-376",
-    "archived": true,
-    "audiences": {
-      "included": [],
-      "excluded": []
-    },
-    "send_options": {
-      "use_smart_sending": true,
-      "ignore_unsubscribes": true
-    },
-    "tracking_options": {
-      "is_add_utm": true,
-      "utm_params": [
-        {
-          "name": "xray-300",
-          "value": "juliet-316"
-        }
-      ],
-      "is_tracking_clicks": true,
-      "is_tracking_opens": false
-    },
-    "send_strategy": {
-      "method": "echo-541",
-      "datetime": "charlie-994"
-    },
-    "created_at": "romeo-873",
-    "scheduled_at": "yankee-852",
-    "updated_at": "2024-01-01T05:00:00Z",
-    "send_time": "uniform-165"
-  },
-  {
-    "id": "mike-626-pk6",
-    "type": "lima-411",
-    "channel": "foxtrot-385",
-    "name": "echo-576",
-    "status": "juliet-891",
-    "archived": true,
-    "audiences": {
-      "included": [],
-      "excluded": []
-    },
-    "send_options": {
-      "use_smart_sending": false,
-      "ignore_unsubscribes": true
-    },
-    "tracking_options": {
-      "is_add_utm": false,
-      "utm_params": [
-        {
-          "name": "mike-610",
-          "value": "papa-583"
-        }
-      ],
-      "is_tracking_clicks": false,
-      "is_tracking_opens": true
-    },
-    "send_strategy": {
-      "method": "mike-831",
-      "datetime": "echo-756"
-    },
-    "created_at": "zulu-471",
-    "scheduled_at": "india-381",
-    "updated_at": "2024-01-01T06:00:00Z",
-    "send_time": "papa-367"
-  },
-  {
-    "id": "yankee-5-pk7",
-    "type": "xray-285",
-    "channel": "hotel-598",
-    "name": "whiskey-135",
-    "status": "alpha-888",
-    "archived": true,
-    "audiences": {
-      "included": [],
-      "excluded": [
-        "quebec-214",
-        "charlie-300"
-      ]
-    },
-    "send_options": {
-      "use_smart_sending": false,
-      "ignore_unsubscribes": true
-    },
-    "tracking_options": {
-      "is_add_utm": false,
-      "utm_params": [
-        {
-          "name": "xray-134",
-          "value": "romeo-897"
-        }
-      ],
-      "is_tracking_clicks": false,
-      "is_tracking_opens": true
-    },
-    "send_strategy": {
-      "method": "kilo-748",
-      "datetime": "juliet-102"
-    },
-    "created_at": "hotel-441",
-    "scheduled_at": "whiskey-499",
-    "updated_at": "2024-01-01T07:00:00Z",
-    "send_time": "tango-408"
+    "links": {
+      "self": "https://a.klaviyo.com/api/campaigns/01KEHJR78C97SRDZ65QKW082EH/"
+    }
   }
 ]

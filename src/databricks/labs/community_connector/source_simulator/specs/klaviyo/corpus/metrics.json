@@ -1,98 +1,137 @@
 [
   {
-    "id": "xray-659-pk0",
-    "type": "mike-591",
-    "name": "whiskey-716",
-    "created": "juliet-207",
-    "updated": "echo-293",
-    "integration": {
-      "id": "golf-614",
-      "name": "tango-189",
-      "category": "foxtrot-759"
+    "type": "metric",
+    "id": "RH4NzG",
+    "attributes": {
+      "name": "Received SMS",
+      "created": "2025-12-28T21:51:50+00:00",
+      "updated": "2025-12-28T21:51:50+00:00",
+      "integration": {
+        "object": "integration",
+        "id": "0rG4eQ",
+        "key": "klaviyo",
+        "name": "Klaviyo",
+        "category": "Internal"
+      }
+    },
+    "relationships": {
+      "flow-triggers": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/metrics/RH4NzG/relationships/flow-triggers/",
+          "related": "https://a.klaviyo.com/api/metrics/RH4NzG/flow-triggers/"
+        }
+      }
+    },
+    "links": {
+      "self": "https://a.klaviyo.com/api/metrics/RH4NzG/"
     }
   },
   {
-    "id": "delta-77-pk1",
-    "type": "november-700",
-    "name": "mike-556",
-    "created": "hotel-816",
-    "updated": "whiskey-769",
-    "integration": {
-      "id": "echo-419",
-      "name": "whiskey-388",
-      "category": "alpha-528"
+    "type": "metric",
+    "id": "RMG4V6",
+    "attributes": {
+      "name": "Clicked Email",
+      "created": "2025-12-28T21:51:46+00:00",
+      "updated": "2025-12-28T21:51:46+00:00",
+      "integration": {
+        "object": "integration",
+        "id": "0rG4eQ",
+        "key": "klaviyo",
+        "name": "Klaviyo",
+        "category": "Internal"
+      }
+    },
+    "relationships": {
+      "flow-triggers": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/metrics/RMG4V6/relationships/flow-triggers/",
+          "related": "https://a.klaviyo.com/api/metrics/RMG4V6/flow-triggers/"
+        }
+      }
+    },
+    "links": {
+      "self": "https://a.klaviyo.com/api/metrics/RMG4V6/"
     }
   },
   {
-    "id": "kilo-927-pk2",
-    "type": "golf-677",
-    "name": "kilo-444",
-    "created": "juliet-916",
-    "updated": "charlie-300",
-    "integration": {
-      "id": "india-162",
-      "name": "romeo-246",
-      "category": "papa-192"
+    "type": "metric",
+    "id": "RaF2it",
+    "attributes": {
+      "name": "Dropped Email",
+      "created": "2025-12-28T21:51:46+00:00",
+      "updated": "2025-12-28T21:51:46+00:00",
+      "integration": {
+        "object": "integration",
+        "id": "0rG4eQ",
+        "key": "klaviyo",
+        "name": "Klaviyo",
+        "category": "Internal"
+      }
+    },
+    "relationships": {
+      "flow-triggers": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/metrics/RaF2it/relationships/flow-triggers/",
+          "related": "https://a.klaviyo.com/api/metrics/RaF2it/flow-triggers/"
+        }
+      }
+    },
+    "links": {
+      "self": "https://a.klaviyo.com/api/metrics/RaF2it/"
     }
   },
   {
-    "id": "mike-177-pk3",
-    "type": "delta-504",
-    "name": "victor-535",
-    "created": "juliet-215",
-    "updated": "india-793",
-    "integration": {
-      "id": "kilo-681",
-      "name": "uniform-603",
-      "category": "zulu-753"
+    "type": "metric",
+    "id": "SStDty",
+    "attributes": {
+      "name": "Subscribed to SMS Marketing",
+      "created": "2025-12-28T21:51:50+00:00",
+      "updated": "2025-12-28T21:51:50+00:00",
+      "integration": {
+        "object": "integration",
+        "id": "0rG4eQ",
+        "key": "klaviyo",
+        "name": "Klaviyo",
+        "category": "Internal"
+      }
+    },
+    "relationships": {
+      "flow-triggers": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/metrics/SStDty/relationships/flow-triggers/",
+          "related": "https://a.klaviyo.com/api/metrics/SStDty/flow-triggers/"
+        }
+      }
+    },
+    "links": {
+      "self": "https://a.klaviyo.com/api/metrics/SStDty/"
     }
   },
   {
-    "id": "tango-30-pk4",
-    "type": "papa-849",
-    "name": "charlie-536",
-    "created": "india-680",
-    "updated": "juliet-406",
-    "integration": {
-      "id": "hotel-178",
-      "name": "charlie-957",
-      "category": "mike-791"
-    }
-  },
-  {
-    "id": "uniform--pk5",
-    "type": "victor-369",
-    "name": "alpha-534",
-    "created": "papa-443",
-    "updated": "romeo-461",
-    "integration": {
-      "id": "quebec-291",
-      "name": "mike-139",
-      "category": "tango-654"
-    }
-  },
-  {
-    "id": "hotel-88-pk6",
-    "type": "kilo-742",
-    "name": "november-414",
-    "created": "juliet-179",
-    "updated": "tango-201",
-    "integration": {
-      "id": "alpha-312",
-      "name": "charlie-246",
-      "category": "foxtrot-347"
-    }
-  },
-  {
-    "id": "juliet-1-pk7",
-    "type": "foxtrot-759",
-    "name": "charlie-752",
-    "created": "uniform-441",
-    "updated": "hotel-468",
-    "integration": {
-      "id": "hotel-464",
-      "name": "november-678",
-      "category": "alpha-464"
+    "type": "metric",
+    "id": "SfsAQV",
+    "attributes": {
+      "name": "Relayed SMS",
+      "created": "2025-12-28T21:51:50+00:00",
+      "updated": "2025-12-28T21:51:50+00:00",
+      "integration": {
+        "object": "integration",
+        "id": "0rG4eQ",
+        "key": "klaviyo",
+        "name": "Klaviyo",
+        "category": "Internal"
+      }
+    },
+    "relationships": {
+      "flow-triggers": {
+        "links": {
+          "self": "https://a.klaviyo.com/api/metrics/SfsAQV/relationships/flow-triggers/",
+          "related": "https://a.klaviyo.com/api/metrics/SfsAQV/flow-triggers/"
+        }
+      }
+    },
+    "links": {
+      "self": "https://a.klaviyo.com/api/metrics/SfsAQV/"
     }
   }
 ]

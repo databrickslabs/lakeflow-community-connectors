@@ -84,36 +84,101 @@ CAMPAIGN_SEND_OPTIONS_STRUCT = StructType(
     ]
 )
 
-# campaigns.tracking_options.utm_params[*]
-UTM_PARAM_STRUCT = StructType(
+# campaigns.tracking_options.custom_tracking_params[*]
+#
+# Verified live against API revision 2024-10-15: the field is
+# ``custom_tracking_params``, not ``utm_params``.  Each entry has
+# ``type`` ("static" or "dynamic") and ``value``; ``name`` is only
+# present on dynamic entries.  We keep ``name`` nullable to cover both.
+CUSTOM_TRACKING_PARAM_STRUCT = StructType(
     [
+        StructField("type", StringType(), True),
         StructField("name", StringType(), True),
         StructField("value", StringType(), True),
     ]
 )
 
-# campaigns.tracking_options — booleans plus optional UTM array.
+# campaigns.tracking_options — booleans plus optional tracking-param array.
+#
+# Verified live: the boolean field is ``add_tracking_params`` (not
+# ``is_add_utm``) and the array field is ``custom_tracking_params``
+# (not ``utm_params``).  The Klaviyo docs mis-document this; the real
+# response shape comes straight from the 2024-10-15 cassette.
 CAMPAIGN_TRACKING_OPTIONS_STRUCT = StructType(
     [
-        StructField("is_add_utm", BooleanType(), True),
-        StructField("utm_params", ArrayType(UTM_PARAM_STRUCT), True),
+        StructField("add_tracking_params", BooleanType(), True),
+        StructField(
+            "custom_tracking_params",
+            ArrayType(CUSTOM_TRACKING_PARAM_STRUCT),
+            True,
+        ),
         StructField("is_tracking_clicks", BooleanType(), True),
         StructField("is_tracking_opens", BooleanType(), True),
     ]
 )
 
+# campaigns.send_strategy.options_static
+CAMPAIGN_SEND_STRATEGY_OPTIONS_STATIC_STRUCT = StructType(
+    [
+        StructField("datetime", StringType(), True),
+        StructField("is_local", BooleanType(), True),
+        StructField("send_past_recipients_immediately", BooleanType(), True),
+    ]
+)
+
+# campaigns.send_strategy.options_throttled
+CAMPAIGN_SEND_STRATEGY_OPTIONS_THROTTLED_STRUCT = StructType(
+    [
+        StructField("datetime", StringType(), True),
+        StructField("throttle_percentage", LongType(), True),
+    ]
+)
+
+# campaigns.send_strategy.options_sto (send-time optimization)
+CAMPAIGN_SEND_STRATEGY_OPTIONS_STO_STRUCT = StructType(
+    [
+        StructField("date", StringType(), True),
+    ]
+)
+
 # campaigns.send_strategy
+#
+# Verified live: ``send_strategy`` is a discriminated container, not a
+# flat ``{method, datetime}`` pair.  ``method`` selects one of
+# ``options_static`` / ``options_throttled`` / ``options_sto``; the
+# inactive options are present but set to null.  This matches the
+# 2024-10-15 response shape exactly.
 CAMPAIGN_SEND_STRATEGY_STRUCT = StructType(
     [
         StructField("method", StringType(), True),
-        StructField("datetime", StringType(), True),
+        StructField(
+            "options_static",
+            CAMPAIGN_SEND_STRATEGY_OPTIONS_STATIC_STRUCT,
+            True,
+        ),
+        StructField(
+            "options_throttled",
+            CAMPAIGN_SEND_STRATEGY_OPTIONS_THROTTLED_STRUCT,
+            True,
+        ),
+        StructField(
+            "options_sto",
+            CAMPAIGN_SEND_STRATEGY_OPTIONS_STO_STRUCT,
+            True,
+        ),
     ]
 )
 
 # metrics.integration — sub-object identifying the source integration.
+#
+# Verified live against API revision 2024-10-15: the response includes
+# ``object`` (constant ``"integration"``) and ``key`` (slug, e.g.
+# ``"klaviyo"``) alongside ``id``, ``name``, ``category``.
 METRIC_INTEGRATION_STRUCT = StructType(
     [
+        StructField("object", StringType(), True),
         StructField("id", StringType(), True),
+        StructField("key", StringType(), True),
         StructField("name", StringType(), True),
         StructField("category", StringType(), True),
     ]
@@ -139,6 +204,9 @@ TABLE_SCHEMAS: dict[str, StructType] = {
             StructField("email", StringType(), True),
             StructField("phone_number", StringType(), True),
             StructField("external_id", StringType(), True),
+            # Verified live: ``anonymous_id`` is returned alongside
+            # ``external_id`` on the 2024-10-15 revision.
+            StructField("anonymous_id", StringType(), True),
             StructField("first_name", StringType(), True),
             StructField("last_name", StringType(), True),
             StructField("organization", StringType(), True),
@@ -335,12 +403,21 @@ SUPPORTED_TABLES: list[str] = list(TABLE_SCHEMAS.keys())
 # one place.
 
 # Maximum page size the Klaviyo API allows per endpoint.
+#
+# A value of 0 means the endpoint rejects the ``page[size]`` parameter
+# at runtime — the connector omits it for those tables and lets the
+# server pick its own page size.  Verified live against the 2024-10-15
+# API revision: both ``metrics`` and ``campaigns`` return HTTP 400
+# ``'page_size' is not a valid field for the resource 'metric'/'campaign'``
+# when ``page[size]`` is supplied.  This contradicts the older
+# documentation entries for those endpoints but matches reality.  Both
+# still support cursor pagination via ``page[cursor]``.
 MAX_PAGE_SIZE: dict[str, int] = {
     "profiles": 100,
     "events": 1000,
     "lists": 10,
-    "campaigns": 100,
-    "metrics": 200,
+    "campaigns": 0,
+    "metrics": 0,
     "flows": 50,
     "segments": 10,
     "templates": 10,
@@ -374,7 +451,14 @@ DEFAULT_LOOKBACK_SECONDS: dict[str, int] = {
 # Klaviyo API requires a ``messages.channel`` filter on every campaigns
 # request, so the connector issues one request per channel and unions
 # the results.
-CAMPAIGN_CHANNELS: tuple[str, ...] = ("email", "sms", "mobile_push")
+#
+# API revision 2024-10-15 only accepts ``email`` and ``sms`` for this
+# filter — verified live: ``mobile_push`` returns HTTP 400 ``'channel'
+# must be one of: email, sms (got mobile_push)``.  The Klaviyo docs
+# advertise ``mobile_push`` as a channel value but the campaigns filter
+# does not accept it on this revision.  If a future revision adds
+# support, expand this tuple and re-record the cassette.
+CAMPAIGN_CHANNELS: tuple[str, ...] = ("email", "sms")
 
 # Per-table cursor field name as it appears in the response
 # ``attributes`` (i.e. after flattening).  ``campaigns`` uses
