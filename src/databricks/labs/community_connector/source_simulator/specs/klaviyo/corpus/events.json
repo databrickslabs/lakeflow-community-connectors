@@ -1,0 +1,98 @@
+[
+  {
+    "id": "yankee-5-pk0",
+    "type": "juliet-435",
+    "timestamp": 86463,
+    "datetime": "2024-01-01T00:00:00Z",
+    "uuid": "india-597",
+    "event_properties": {
+      "key_0": "oscar-120"
+    },
+    "profile_id": "mike-245",
+    "metric_id": "victor-193"
+  },
+  {
+    "id": "yankee-1-pk1",
+    "type": "bravo-797",
+    "timestamp": 26890,
+    "datetime": "2024-01-01T01:00:00Z",
+    "uuid": "quebec-877",
+    "event_properties": {
+      "key_0": "zulu-316",
+      "key_1": "lima-352"
+    },
+    "profile_id": "alpha-966",
+    "metric_id": "sierra-538"
+  },
+  {
+    "id": "papa-482-pk2",
+    "type": "foxtrot-923",
+    "timestamp": 80333,
+    "datetime": "2024-01-01T02:00:00Z",
+    "uuid": "juliet-261",
+    "event_properties": {
+      "key_0": "tango-879"
+    },
+    "profile_id": "delta-852",
+    "metric_id": "whiskey-417"
+  },
+  {
+    "id": "whiskey--pk3",
+    "type": "victor-891",
+    "timestamp": 49959,
+    "datetime": "2024-01-01T03:00:00Z",
+    "uuid": "mike-360",
+    "event_properties": {
+      "key_0": "uniform-415"
+    },
+    "profile_id": "sierra-213",
+    "metric_id": "victor-751"
+  },
+  {
+    "id": "uniform--pk4",
+    "type": "oscar-266",
+    "timestamp": 84913,
+    "datetime": "2024-01-01T04:00:00Z",
+    "uuid": "echo-556",
+    "event_properties": {
+      "key_0": "charlie-612",
+      "key_1": "alpha-420"
+    },
+    "profile_id": "lima-920",
+    "metric_id": "juliet-803"
+  },
+  {
+    "id": "hotel-66-pk5",
+    "type": "uniform-616",
+    "timestamp": 6306,
+    "datetime": "2024-01-01T05:00:00Z",
+    "uuid": "november-413",
+    "event_properties": {
+      "key_0": "golf-557"
+    },
+    "profile_id": "golf-552",
+    "metric_id": "delta-153"
+  },
+  {
+    "id": "sierra-3-pk6",
+    "type": "lima-975",
+    "timestamp": 95656,
+    "datetime": "2024-01-01T06:00:00Z",
+    "uuid": "tango-402",
+    "event_properties": {},
+    "profile_id": "xray-444",
+    "metric_id": "lima-997"
+  },
+  {
+    "id": "oscar-28-pk7",
+    "type": "alpha-988",
+    "timestamp": 63702,
+    "datetime": "2024-01-01T07:00:00Z",
+    "uuid": "mike-675",
+    "event_properties": {
+      "key_0": "oscar-706"
+    },
+    "profile_id": "november-874",
+    "metric_id": "golf-373"
+  }
+]
