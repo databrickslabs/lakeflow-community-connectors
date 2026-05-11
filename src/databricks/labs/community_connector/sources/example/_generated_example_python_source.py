@@ -517,6 +517,66 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
+    # src/databricks/labs/community_connector/interface/supports_namespaces.py
+    ########################################################
+
+    class SupportsNamespaces(ABC):
+        """Mixin for connectors whose tables live under hierarchical namespaces.
+
+        A namespace is a path of zero or more string segments (e.g. ``["org",
+        "repo"]`` for GitHub, ``["tenant", "project"]`` for Azure DevOps).
+        Connectors with a flat catalog do not need this mixin — the framework
+        falls back to :meth:`LakeflowConnect.list_tables` and reports each table
+        with an empty namespace.
+
+        Must be used together with :class:`LakeflowConnect`.
+
+        Usage::
+
+            class MyConnector(LakeflowConnect, SupportsNamespaces):
+                ...
+        """
+
+        @abstractmethod
+        def list_namespaces(
+            self,
+            prefix: list[str] | None = None,
+        ) -> list[list[str]]:
+            """Return the immediate child namespaces under ``prefix``.
+
+            This method returns one level of children only. Callers that need to
+            walk the full tree do so by recursing on each returned child. An
+            empty return value means ``prefix`` has no further namespace children
+            — the caller is expected to enumerate tables there via
+            :meth:`list_tables_in_namespaces`.
+
+            Args:
+                prefix: A namespace path under which to list children. ``None`` or
+                    an empty list lists the root-level namespaces.
+            Returns:
+                A list of full namespace paths (each path includes the prefix).
+            """
+
+        @abstractmethod
+        def list_tables_in_namespaces(
+            self,
+            namespaces: list[list[str]] | None = None,
+        ) -> list[tuple[list[str], str]]:
+            """Return ``(namespace, table_name)`` pairs for the given namespaces.
+
+            Args:
+                namespaces: A list of namespace paths to enumerate tables for.
+                    ``None`` means "list tables across all namespaces the
+                    connector can enumerate". An empty list means "no namespaces"
+                    and must return an empty result.
+            Returns:
+                A list of ``(namespace, table_name)`` tuples. ``namespace`` is the
+                full path (a list of strings); ``table_name`` is the table
+                identifier within that namespace.
+            """
+
+
+    ########################################################
     # src/databricks/labs/community_connector/sources/example/example_schemas.py
     ########################################################
 
@@ -992,11 +1052,16 @@ def register_lakeflow_source(spark):
 
     LakeflowConnectImpl = ExampleLakeflowConnect
     # Constant option or column names
-    METADATA_TABLE = "_lakeflow_metadata"
+    METADATA_TABLE = "_community_table_metadata"
+    NAMESPACES_TABLE = "_community_namespaces"
+    TABLES_TABLE = "_community_tables"
+    VIRTUAL_TABLES = (METADATA_TABLE, NAMESPACES_TABLE, TABLES_TABLE)
     TABLE_NAME = "tableName"
     TABLE_NAME_LIST = "tableNameList"
     TABLE_CONFIGS = "tableConfigs"
     IS_DELETE_FLOW = "isDeleteFlow"
+    PREFIX = "prefix"
+    NAMESPACES = "namespaces"
 
 
     # PySpark's DataSource API requires camelCase method names and inherits
@@ -1128,7 +1193,7 @@ def register_lakeflow_source(spark):
             self._supports_partition = isinstance(lakeflow_connect, SupportsPartition)
 
         def partitions(self):
-            if self._supports_partition and self.table_name != METADATA_TABLE:
+            if self._supports_partition and self.table_name not in VIRTUAL_TABLES:
                 try:
                     partition_descs = self.lakeflow_connect.get_partitions(
                         self.table_name, self.options
@@ -1141,6 +1206,10 @@ def register_lakeflow_source(spark):
         def read(self, partition):
             if self.table_name == METADATA_TABLE:
                 records = self._read_table_metadata()
+            elif self.table_name == NAMESPACES_TABLE:
+                records = self._read_namespaces()
+            elif self.table_name == TABLES_TABLE:
+                records = self._read_tables()
             elif self._supports_partition and partition.value is not None:
                 partition_desc = json.loads(partition.value)
                 records = self.lakeflow_connect.read_partition(
@@ -1161,6 +1230,31 @@ def register_lakeflow_source(spark):
                 )
                 all_records.append({TABLE_NAME: table, **metadata})
             return all_records
+
+        def _read_namespaces(self):
+            # Connectors without SupportsNamespaces are flat — no rows.
+            if not isinstance(self.lakeflow_connect, SupportsNamespaces):
+                return []
+            prefix_json = self.options.get(PREFIX)
+            prefix = json.loads(prefix_json) if prefix_json else []
+            return [
+                {"namespace": ns}
+                for ns in self.lakeflow_connect.list_namespaces(prefix)
+            ]
+
+        def _read_tables(self):
+            if isinstance(self.lakeflow_connect, SupportsNamespaces):
+                namespaces_json = self.options.get(NAMESPACES)
+                namespaces = json.loads(namespaces_json) if namespaces_json else None
+                pairs = self.lakeflow_connect.list_tables_in_namespaces(namespaces)
+                return [
+                    {"namespace": ns, "table_name": tn} for ns, tn in pairs
+                ]
+            # Flat connector: report every table with an empty namespace.
+            return [
+                {"namespace": [], "table_name": tn}
+                for tn in self.lakeflow_connect.list_tables()
+            ]
 
 
     class LakeflowSource(DataSource):
@@ -1189,8 +1283,20 @@ def register_lakeflow_source(spark):
                         StructField("ingestion_type", StringType(), True),
                     ]
                 )
-            else:
-                return self.lakeflow_connect.get_table_schema(table, self.options)
+            if table == NAMESPACES_TABLE:
+                return StructType(
+                    [
+                        StructField("namespace", ArrayType(StringType()), False),
+                    ]
+                )
+            if table == TABLES_TABLE:
+                return StructType(
+                    [
+                        StructField("namespace", ArrayType(StringType()), False),
+                        StructField("table_name", StringType(), False),
+                    ]
+                )
+            return self.lakeflow_connect.get_table_schema(table, self.options)
 
         def reader(self, schema: StructType):
             return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)

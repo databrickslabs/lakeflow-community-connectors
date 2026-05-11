@@ -124,7 +124,7 @@ def _get_table_metadata(
     df = (
         spark.read.format("lakeflow_connect")
         .option("databricks.connection", connection_name)
-        .option("tableName", "_lakeflow_metadata")
+        .option("tableName", "_community_table_metadata")
         .option("tableNameList", ",".join(table_list))
         .option("tableConfigs", json.dumps(table_configs))
         .load()
