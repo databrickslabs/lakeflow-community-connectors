@@ -1,0 +1,57 @@
+[
+  {
+    "id": 1000,
+    "user_id": 76303,
+    "date": "2024-01-01T00:00:00Z",
+    "task_id": 48894,
+    "time": 79968,
+    "comment": "hotel-492",
+    "approved": false,
+    "locked": true,
+    "type_of_work_id": 82975
+  },
+  {
+    "id": 1001,
+    "user_id": 69414,
+    "date": "2024-01-01T01:00:00Z",
+    "task_id": 63950,
+    "time": 83508,
+    "comment": "tango-987",
+    "approved": true,
+    "locked": true,
+    "type_of_work_id": 21116
+  },
+  {
+    "id": 1002,
+    "user_id": 3771,
+    "date": "2024-01-01T02:00:00Z",
+    "task_id": 92054,
+    "time": 66861,
+    "comment": "zulu-771",
+    "approved": true,
+    "locked": false,
+    "type_of_work_id": 10307
+  },
+  {
+    "id": 1003,
+    "user_id": 58395,
+    "date": "2024-01-01T03:00:00Z",
+    "task_id": 51260,
+    "time": 58581,
+    "comment": "foxtrot-890",
+    "approved": false,
+    "locked": true,
+    "type_of_work_id": 22847
+  },
+  {
+    "id": 1004,
+    "user_id": 43026,
+    "date": "2024-01-01T04:00:00Z",
+    "task_id": 28057,
+    "time": 6878,
+    "comment": "tango-705",
+    "approved": true,
+    "locked": false,
+    "type_of_work_id": 32680
+  }
+]

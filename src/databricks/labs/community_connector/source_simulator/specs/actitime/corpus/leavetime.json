@@ -1,0 +1,42 @@
+[
+  {
+    "id": 1000,
+    "user_id": 22576,
+    "date": "2024-01-01T00:00:00Z",
+    "leave_type_id": 86221,
+    "time": 58671,
+    "approved": true
+  },
+  {
+    "id": 1001,
+    "user_id": 82536,
+    "date": "2024-01-01T01:00:00Z",
+    "leave_type_id": 77714,
+    "time": 78954,
+    "approved": false
+  },
+  {
+    "id": 1002,
+    "user_id": 44826,
+    "date": "2024-01-01T02:00:00Z",
+    "leave_type_id": 83709,
+    "time": 92320,
+    "approved": true
+  },
+  {
+    "id": 1003,
+    "user_id": 52860,
+    "date": "2024-01-01T03:00:00Z",
+    "leave_type_id": 61012,
+    "time": 19126,
+    "approved": false
+  },
+  {
+    "id": 1004,
+    "user_id": 58639,
+    "date": "2024-01-01T04:00:00Z",
+    "leave_type_id": 7423,
+    "time": 19864,
+    "approved": true
+  }
+]

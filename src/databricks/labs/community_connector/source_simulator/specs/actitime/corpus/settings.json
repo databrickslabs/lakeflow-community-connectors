@@ -1,0 +1,52 @@
+[
+  {
+    "id": 1000,
+    "workday_duration": 57309,
+    "week_start_day": 54415,
+    "date_format": "golf-950",
+    "time_format": "tango-698",
+    "currency_code": "charlie-770",
+    "decimal_separator": "november-186",
+    "thousands_separator": "november-636"
+  },
+  {
+    "id": 1001,
+    "workday_duration": 74849,
+    "week_start_day": 68168,
+    "date_format": "foxtrot-402",
+    "time_format": "alpha-321",
+    "currency_code": "quebec-188",
+    "decimal_separator": "sierra-713",
+    "thousands_separator": "papa-810"
+  },
+  {
+    "id": 1002,
+    "workday_duration": 25592,
+    "week_start_day": 29834,
+    "date_format": "xray-736",
+    "time_format": "yankee-894",
+    "currency_code": "echo-704",
+    "decimal_separator": "golf-142",
+    "thousands_separator": "bravo-671"
+  },
+  {
+    "id": 1003,
+    "workday_duration": 69859,
+    "week_start_day": 68222,
+    "date_format": "foxtrot-764",
+    "time_format": "mike-384",
+    "currency_code": "golf-642",
+    "decimal_separator": "uniform-164",
+    "thousands_separator": "uniform-146"
+  },
+  {
+    "id": 1004,
+    "workday_duration": 70670,
+    "week_start_day": 73389,
+    "date_format": "juliet-534",
+    "time_format": "lima-900",
+    "currency_code": "kilo-667",
+    "decimal_separator": "papa-211",
+    "thousands_separator": "india-395"
+  }
+]

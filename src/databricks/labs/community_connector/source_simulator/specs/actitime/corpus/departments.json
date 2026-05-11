@@ -1,0 +1,37 @@
+[
+  {
+    "id": 1000,
+    "name": "golf-573",
+    "description": "juliet-673",
+    "parent_id": 7002,
+    "manager_id": 67416
+  },
+  {
+    "id": 1001,
+    "name": "delta-161",
+    "description": "charlie-841",
+    "parent_id": 25922,
+    "manager_id": 5273
+  },
+  {
+    "id": 1002,
+    "name": "hotel-509",
+    "description": "zulu-818",
+    "parent_id": 69753,
+    "manager_id": 57204
+  },
+  {
+    "id": 1003,
+    "name": "oscar-407",
+    "description": "lima-859",
+    "parent_id": 53334,
+    "manager_id": 46242
+  },
+  {
+    "id": 1004,
+    "name": "india-497",
+    "description": "lima-121",
+    "parent_id": 3543,
+    "manager_id": 11858
+  }
+]

@@ -1,0 +1,52 @@
+[
+  {
+    "id": 1000,
+    "name": "zulu-777",
+    "description": "uniform-548",
+    "archived": false,
+    "created": "2024-01-01T00:00:00Z",
+    "url": "golf-228",
+    "allowed_actions_can_modify": false,
+    "allowed_actions_can_delete": false
+  },
+  {
+    "id": 1001,
+    "name": "alpha-965",
+    "description": "uniform-455",
+    "archived": false,
+    "created": "2024-01-01T01:00:00Z",
+    "url": "golf-841",
+    "allowed_actions_can_modify": true,
+    "allowed_actions_can_delete": true
+  },
+  {
+    "id": 1002,
+    "name": "yankee-899",
+    "description": "whiskey-603",
+    "archived": true,
+    "created": "2024-01-01T02:00:00Z",
+    "url": "india-815",
+    "allowed_actions_can_modify": false,
+    "allowed_actions_can_delete": false
+  },
+  {
+    "id": 1003,
+    "name": "papa-600",
+    "description": "sierra-908",
+    "archived": false,
+    "created": "2024-01-01T03:00:00Z",
+    "url": "tango-486",
+    "allowed_actions_can_modify": false,
+    "allowed_actions_can_delete": true
+  },
+  {
+    "id": 1004,
+    "name": "november-868",
+    "description": "tango-140",
+    "archived": false,
+    "created": "2024-01-01T04:00:00Z",
+    "url": "charlie-818",
+    "allowed_actions_can_modify": false,
+    "allowed_actions_can_delete": false
+  }
+]

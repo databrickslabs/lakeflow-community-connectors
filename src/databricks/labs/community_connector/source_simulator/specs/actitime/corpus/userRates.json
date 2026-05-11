@@ -1,0 +1,48 @@
+[
+  {
+    "user_id": 1000,
+    "date_from": null,
+    "regular_rate": 78.62,
+    "overtime_rate": 564.87,
+    "leave_rates": {
+      "key_0": 274.53,
+      "key_1": 142.06
+    }
+  },
+  {
+    "user_id": 1001,
+    "date_from": null,
+    "regular_rate": 70.41,
+    "overtime_rate": 99.59,
+    "leave_rates": {}
+  },
+  {
+    "user_id": 1002,
+    "date_from": null,
+    "regular_rate": 384.95,
+    "overtime_rate": 190.93,
+    "leave_rates": {
+      "key_0": 86.53,
+      "key_1": 860.07
+    }
+  },
+  {
+    "user_id": 1003,
+    "date_from": null,
+    "regular_rate": 625.14,
+    "overtime_rate": 246.74,
+    "leave_rates": {
+      "key_0": 126.66
+    }
+  },
+  {
+    "user_id": 1004,
+    "date_from": null,
+    "regular_rate": 269.07,
+    "overtime_rate": 695.71,
+    "leave_rates": {
+      "key_0": 95.08,
+      "key_1": 560.2
+    }
+  }
+]

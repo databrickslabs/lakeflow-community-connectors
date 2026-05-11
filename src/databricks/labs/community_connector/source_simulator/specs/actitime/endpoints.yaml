@@ -1,0 +1,241 @@
+# actiTIME REST API v1 endpoints exercised by the connector.
+#
+# Connector flow (per ActitimeLakeflowConnect):
+# * Snapshot tables (departments, userGroups, typesOfWork, leaveTypes,
+#   workflowStatuses, timeZoneGroups, holidays) → GET /api/v1/<table>
+#   with offset/limit pagination (the connector reads until a short page).
+# * /settings → GET /api/v1/settings — singleton (returns a JSON object).
+# * /userRates → GET /api/v1/userRates/{userId} — fanned out per user from
+#   /api/v1/users.
+# * CDC tables (customers, projects, tasks, users) → same offset/limit
+#   shape; the connector does a full-list refresh and upserts on id since
+#   the API has no ``modifiedAt`` filter.
+# * timetrack / leavetime → GET with dateFrom/dateTo/stopAfter and a
+#   nested envelope response shape (see notes below).
+# * approvalStatus → GET with dateFrom/dateTo (no stopAfter).
+#
+# Pagination style: most endpoints return a plain JSON array, so
+# ``pagination_style: none`` (no wrapper) is correct — the simulator
+# serves the corpus directly as a list. Where the connector understands
+# offset/limit we declare those params with the right roles so the
+# simulator slices the corpus instead of returning the whole list on
+# every page.
+#
+# Envelope tables (timetrack, leavetime): live responses look like
+#   [{"userId": 1, "date": "2026-05-08", "records": [{...}, ...]}]
+# The bootstrap corpus generated from TABLE_SCHEMAS is flat (one row per
+# record). For simulate-mode the connector will yield zero records for
+# those tables unless the corpus is hand-curated to the envelope shape;
+# tests of these tables should rely on shape-level assertions only or
+# the corpus should be replaced. This is documented here so a future
+# connector-tester contributor can swap in a proper envelope corpus.
+
+endpoints:
+  # ---- snapshot / CDC list resources (plain JSON arrays) ----
+
+  - path: /api/v1/customers
+    method: GET
+    corpus: customers
+    response:
+      pagination_style: none
+    params:
+      offset:     {role: offset}
+      limit:      {role: limit, default: 1000, max: 1000}
+      sort:       {role: ignore}
+      # ``words`` is a free-text search filter (no equality op supported by
+      # the simulator's FilterOp enum). The connector never sends it; mark
+      # as ignore so the spec loads.
+      words:      {role: ignore}
+      ids:        {role: filter, field: id, op: in}
+      archived:   {role: ignore}
+      includeReferenced: {role: ignore}
+
+  - path: /api/v1/projects
+    method: GET
+    corpus: projects
+    response:
+      pagination_style: none
+    params:
+      offset:      {role: offset}
+      limit:       {role: limit, default: 1000, max: 1000}
+      sort:        {role: ignore}
+      words:       {role: ignore}
+      ids:         {role: filter, field: id, op: in}
+      archived:    {role: ignore}
+      customerIds: {role: filter, field: customerId, op: in}
+      includeReferenced: {role: ignore}
+
+  - path: /api/v1/tasks
+    method: GET
+    corpus: tasks
+    response:
+      pagination_style: none
+    params:
+      offset:             {role: offset}
+      limit:              {role: limit, default: 1000, max: 1000}
+      sort:               {role: ignore}
+      words:              {role: ignore}
+      ids:                {role: filter, field: id, op: in}
+      archived:           {role: ignore}
+      projectIds:         {role: filter, field: projectId, op: in}
+      customerIds:        {role: filter, field: customerId, op: in}
+      typeOfWorkIds:      {role: filter, field: typeOfWorkId, op: in}
+      workflowStatusIds:  {role: filter, field: workflowStatusId, op: in}
+      includeReferenced:  {role: ignore}
+
+  - path: /api/v1/users
+    method: GET
+    corpus: users
+    response:
+      pagination_style: none
+    params:
+      offset:        {role: offset}
+      limit:         {role: limit, default: 1000, max: 1000}
+      sort:          {role: ignore}
+      ids:           {role: filter, field: id, op: in}
+      departmentIds: {role: filter, field: departmentId, op: in}
+      active:        {role: filter, field: active, op: eq}
+      archived:      {role: ignore}
+      includeReferenced: {role: ignore}
+
+  - path: /api/v1/departments
+    method: GET
+    corpus: departments
+    response:
+      pagination_style: none
+    params:
+      offset: {role: offset}
+      limit:  {role: limit, default: 1000, max: 1000}
+
+  - path: /api/v1/userGroups
+    method: GET
+    corpus: userGroups
+    response:
+      pagination_style: none
+    params:
+      offset: {role: offset}
+      limit:  {role: limit, default: 1000, max: 1000}
+
+  - path: /api/v1/typesOfWork
+    method: GET
+    corpus: typesOfWork
+    response:
+      pagination_style: none
+    params:
+      offset:   {role: offset}
+      limit:    {role: limit, default: 1000, max: 1000}
+      archived: {role: ignore}
+
+  - path: /api/v1/leaveTypes
+    method: GET
+    corpus: leaveTypes
+    response:
+      pagination_style: none
+    params:
+      offset:   {role: offset}
+      limit:    {role: limit, default: 1000, max: 1000}
+      archived: {role: ignore}
+
+  - path: /api/v1/workflowStatuses
+    method: GET
+    corpus: workflowStatuses
+    response:
+      pagination_style: none
+    params:
+      offset: {role: offset}
+      limit:  {role: limit, default: 1000, max: 1000}
+
+  - path: /api/v1/timeZoneGroups
+    method: GET
+    corpus: timeZoneGroups
+    response:
+      pagination_style: none
+    params:
+      offset: {role: offset}
+      limit:  {role: limit, default: 1000, max: 1000}
+
+  - path: /api/v1/holidays
+    method: GET
+    corpus: holidays
+    response:
+      pagination_style: none
+    params:
+      offset:   {role: offset}
+      limit:    {role: limit, default: 1000, max: 1000}
+      dateFrom: {role: filter, field: date, op: gte}
+      dateTo:   {role: filter, field: date, op: lte}
+
+  # ---- singleton ----
+
+  - path: /api/v1/settings
+    method: GET
+    corpus: settings
+    response:
+      single_entity: true
+      pagination_style: none
+
+  # ---- per-user fan-out: /userRates/{userId} ----
+  # The connector lists /users first then issues one GET per user. We
+  # route any {userId} through the same corpus for simulate-mode; the
+  # connector injects the path id back into each row before yielding.
+  - path: /api/v1/userRates/{user_id}
+    method: GET
+    corpus: userRates
+    response:
+      pagination_style: none
+
+  # ---- time-windowed tables ----
+  # NOTE: live responses use a nested envelope:
+  #   [{"userId": 1, "date": "2026-05-08", "records": [...]}]
+  # The auto-generated flat corpus (from TABLE_SCHEMAS) does not match
+  # this shape; tests covering these endpoints should treat the
+  # returned record count as best-effort until a hand-curated corpus
+  # (or a custom handler) is supplied.
+
+  - path: /api/v1/timetrack
+    method: GET
+    corpus: timetrack
+    response:
+      pagination_style: none
+    params:
+      dateFrom:          {role: filter, field: date, op: gte}
+      dateTo:            {role: filter, field: date, op: lte}
+      userIds:           {role: filter, field: userId, op: in}
+      taskIds:           {role: filter, field: taskId, op: in}
+      projectIds:        {role: ignore}
+      customerIds:       {role: ignore}
+      approved:          {role: filter, field: approved, op: eq}
+      stopAfter:         {role: limit, default: 1000, max: 10000}
+      includeReferenced: {role: ignore}
+    synthesize_future_records:
+      cursor_field: date
+      count: 3
+
+  - path: /api/v1/leavetime
+    method: GET
+    corpus: leavetime
+    response:
+      pagination_style: none
+    params:
+      dateFrom:          {role: filter, field: date, op: gte}
+      dateTo:            {role: filter, field: date, op: lte}
+      userIds:           {role: filter, field: userId, op: in}
+      leaveTypeIds:      {role: filter, field: leaveTypeId, op: in}
+      stopAfter:         {role: limit, default: 1000, max: 10000}
+      includeReferenced: {role: ignore}
+    synthesize_future_records:
+      cursor_field: date
+      count: 3
+
+  - path: /api/v1/approvalStatus
+    method: GET
+    corpus: approvalStatus
+    response:
+      pagination_style: none
+    params:
+      dateFrom: {role: filter, field: weekStartDate, op: gte}
+      dateTo:   {role: filter, field: weekStartDate, op: lte}
+      userIds:  {role: filter, field: userId, op: in}
+    synthesize_future_records:
+      cursor_field: weekStartDate
+      count: 3

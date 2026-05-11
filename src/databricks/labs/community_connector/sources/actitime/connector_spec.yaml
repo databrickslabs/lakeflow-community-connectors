@@ -1,0 +1,67 @@
+# actiTIME Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# actiTIME uses HTTP Basic authentication with a service-account username
+# and password against the REST API v1.
+# ============================================================================
+display_name: actiTIME
+connection:
+  parameters:
+    - name: base_url
+      type: string
+      required: true
+      description: >
+        Base URL of your actiTIME instance, without a trailing slash.
+        For actiTIME Online use 'https://online.actitime.com/<tenant>';
+        for self-hosted use 'https://<your-actitime-host>'. The connector
+        automatically appends '/api/v1' to this value.
+
+    - name: username
+      type: string
+      required: true
+      description: >
+        Username of the actiTIME service account used for API access.
+        The account must have the "Allow access to the actiTIME REST API"
+        permission and sufficient role to read the requested data (typically
+        an Admin or a Manager with broad scope).
+
+    - name: password
+      type: string
+      required: true
+      secret: true
+      description: >
+        Password for the actiTIME service-account user. Used together with
+        the username to form an HTTP Basic auth header. Store as a Databricks
+        secret rather than inline.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+#
+# Options actually read by the connector implementation:
+#   - start_date              Initial cursor for timetrack/leavetime/approvalStatus
+#                             (ISO date, YYYY-MM-DD). Defaults to 30 days before
+#                             init time if not supplied.
+#   - window_days             Size of each sliding date window for timetrack,
+#                             leavetime (default 7) and approvalStatus (default 28).
+#   - lookback_days           Days subtracted from the cursor at read time to catch
+#                             late edits. Defaults: 7 for timetrack/leavetime,
+#                             14 for approvalStatus.
+#   - stopAfter               Server-side result cap for /timetrack and /leavetime
+#                             (default 1000).
+#   - dateFrom                Optional lower bound (ISO date) for the /holidays
+#                             snapshot endpoint.
+#   - dateTo                  Optional upper bound (ISO date) for the /holidays
+#                             snapshot endpoint.
+#   - limit                   Page size for offset/limit list endpoints
+#                             (customers, projects, tasks, users). Default 1000.
+#   - max_records_per_batch   Per-microbatch cap on emitted rows from offset/limit
+#                             endpoints. Default 100000.
+# ============================================================================
+external_options_allowlist: "start_date,window_days,lookback_days,stopAfter,dateFrom,dateTo,limit,max_records_per_batch"

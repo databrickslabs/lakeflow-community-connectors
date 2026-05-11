@@ -1,0 +1,27 @@
+[
+  {
+    "date": null,
+    "name": "hotel-613",
+    "time_zone_group_id": 1000
+  },
+  {
+    "date": null,
+    "name": "golf-906",
+    "time_zone_group_id": 1001
+  },
+  {
+    "date": null,
+    "name": "uniform-200",
+    "time_zone_group_id": 1002
+  },
+  {
+    "date": null,
+    "name": "echo-742",
+    "time_zone_group_id": 1003
+  },
+  {
+    "date": null,
+    "name": "delta-893",
+    "time_zone_group_id": 1004
+  }
+]
