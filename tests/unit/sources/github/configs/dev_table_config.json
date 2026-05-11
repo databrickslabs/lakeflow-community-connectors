@@ -1,0 +1,41 @@
+{
+    "issues": {
+        "owner": "yyoli-db",
+        "repo": "lakeflow-community-connectors"
+    },
+    "repositories": {
+        "owner": "yyoli-db"
+    },
+    "pull_requests": {
+        "owner": "yyoli-db",
+        "repo": "lakeflow-community-connectors"
+    },
+    "comments": {
+        "owner": "yyoli-db",
+        "repo": "lakeflow-community-connectors"
+    },
+    "commits": {
+        "owner": "yyoli-db",
+        "repo": "lakeflow-community-connectors",
+        "max_records_per_batch": "10"
+    },
+    "assignees": {
+        "owner": "yyoli-db",
+        "repo": "lakeflow-community-connectors"
+    },
+    "branches": {
+        "owner": "yyoli-db",
+        "repo": "lakeflow-community-connectors"
+    },
+    "collaborators": {
+        "owner": "yyoli-db",
+        "repo": "lakeflow-community-connectors"
+    },
+    "organizations": {},
+    "teams": {},
+    "users": {},
+    "reviews": {
+        "owner": "yyoli-db",
+        "repo": "lakeflow-community-connectors"
+    }
+}

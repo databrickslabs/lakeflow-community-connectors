@@ -22,22 +22,22 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "databricks-sdk>=0.20.0",
-    "click>=8.0.0",
-    "pyyaml>=6.0",
+    "databricks-sdk>=0.20.0,<1.0",
+    "click>=8.0.0,<9.0",
+    "pyyaml>=6.0,<7.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0",
-    "pytest-mock>=3.0.0",
+    "pytest>=7.0.0,<9.0",
+    "pytest-mock>=3.0.0,<4.0",
 ]
 
 [project.scripts]
-community-connector = "databricks.labs.community_connector.cli:main"
+community-connector = "databricks.labs.community_connector_cli.cli:main"
 
 [project.entry-points."databricks.labs"]
-community_connector = "databricks.labs.community_connector"
+community_connector_cli = "databricks.labs.community_connector_cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -47,6 +47,6 @@ namespaces = true
 "" = "src"
 
 [tool.setuptools.package-data]
-"databricks.labs.community_connector" = ["*.yaml"]
-"databricks.labs.community_connector.templates" = ["*.py"]
+"databricks.labs.community_connector_cli" = ["*.yaml"]
+"databricks.labs.community_connector_cli.templates" = ["*.py"]
 

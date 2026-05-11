@@ -3,7 +3,7 @@ Unit tests for pipeline_spec_validator.py
 """
 
 import pytest
-from databricks.labs.community_connector.pipeline_spec_validator import (
+from databricks.labs.community_connector_cli.pipeline_spec_validator import (
     validate_pipeline_spec,
     validate_and_report,
     PipelineSpecValidationError,

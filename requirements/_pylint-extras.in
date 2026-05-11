@@ -1,0 +1,3 @@
+# Packages installed by the pylint CI job beyond what the root and tools
+# pyproject.toml files declare. Consumed by tools/scripts/regenerate-locks.sh.
+pylint

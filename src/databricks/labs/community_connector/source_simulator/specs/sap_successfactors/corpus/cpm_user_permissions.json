@@ -1,0 +1,26 @@
+[
+  {
+    "targetUserAssignmentUUID": "november-855",
+    "hasPermission": true,
+    "permissionType": "yankee-991",
+    "permisssionValue": "quebec-403"
+  },
+  {
+    "targetUserAssignmentUUID": "zulu-654",
+    "hasPermission": true,
+    "permissionType": "golf-460",
+    "permisssionValue": "delta-871"
+  },
+  {
+    "targetUserAssignmentUUID": "sierra-838",
+    "hasPermission": false,
+    "permissionType": "papa-586",
+    "permisssionValue": "sierra-595"
+  },
+  {
+    "targetUserAssignmentUUID": "juliet-260",
+    "hasPermission": false,
+    "permissionType": "echo-158",
+    "permisssionValue": "sierra-477"
+  }
+]

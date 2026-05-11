@@ -1,0 +1,62 @@
+[
+  {
+    "seqNumber": 15711,
+    "startDate": "bravo-441",
+    "userId": "tango-753",
+    "compaRatio": 684.2,
+    "currency": "alpha-983",
+    "errorCode": "charlie-567",
+    "errorMessage": "november-581",
+    "payRange": "india-964",
+    "proratedMaxPointOfPayRange": "golf-182",
+    "proratedMidPointOfPayRange": "hotel-831",
+    "proratedMinPointOfPayRange": "papa-215",
+    "rangePenetration": 733.99,
+    "yearlyBaseSalary": "oscar-821"
+  },
+  {
+    "seqNumber": 74424,
+    "startDate": "yankee-835",
+    "userId": "romeo-910",
+    "compaRatio": 481.95,
+    "currency": "whiskey-445",
+    "errorCode": "november-993",
+    "errorMessage": "juliet-501",
+    "payRange": "zulu-288",
+    "proratedMaxPointOfPayRange": "zulu-348",
+    "proratedMidPointOfPayRange": "juliet-968",
+    "proratedMinPointOfPayRange": "victor-514",
+    "rangePenetration": 539.6,
+    "yearlyBaseSalary": "kilo-926"
+  },
+  {
+    "seqNumber": 9031,
+    "startDate": "victor-310",
+    "userId": "november-835",
+    "compaRatio": 292.7,
+    "currency": "charlie-731",
+    "errorCode": "bravo-497",
+    "errorMessage": "whiskey-507",
+    "payRange": "zulu-597",
+    "proratedMaxPointOfPayRange": "romeo-330",
+    "proratedMidPointOfPayRange": "xray-463",
+    "proratedMinPointOfPayRange": "quebec-363",
+    "rangePenetration": 72.4,
+    "yearlyBaseSalary": "november-634"
+  },
+  {
+    "seqNumber": 99936,
+    "startDate": "lima-365",
+    "userId": "whiskey-776",
+    "compaRatio": 449.13,
+    "currency": "juliet-245",
+    "errorCode": "bravo-474",
+    "errorMessage": "november-227",
+    "payRange": "whiskey-962",
+    "proratedMaxPointOfPayRange": "bravo-482",
+    "proratedMidPointOfPayRange": "victor-174",
+    "proratedMinPointOfPayRange": "tango-117",
+    "rangePenetration": 807.13,
+    "yearlyBaseSalary": "kilo-880"
+  }
+]

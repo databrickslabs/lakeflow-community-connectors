@@ -1,0 +1,107 @@
+# {{ source_name }} Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+#
+# STRUCTURE OPTIONS:
+# -----------------
+# Option A: Single authentication method (simple case)
+#   Use 'parameters' directly under 'connection'.
+#
+# Option B: Multiple authentication methods
+#   Use 'auth_methods' to define each method with its own parameters,
+#   and 'parameters' for shared parameters across all methods.
+#
+# When multiple auth_methods are defined, the user must choose ONE method
+# and provide all its required parameters. Common parameters apply to all methods.
+# ============================================================================
+connection:
+  # ---------------------------------------------------------------------------
+  # OPTION A: Single Authentication Method (use this for simple connectors)
+  # ---------------------------------------------------------------------------
+  # parameters:
+  #   - name: api_key
+  #     type: string
+  #     required: true
+  #     description: >
+  #       API key used for authentication.
+  #
+  #   - name: base_url
+  #     type: string
+  #     required: false
+  #     description: >
+  #       Base URL for the API. Override if using a custom instance.
+
+  # ---------------------------------------------------------------------------
+  # OPTION B: Multiple Authentication Methods (use for connectors with choices)
+  # ---------------------------------------------------------------------------
+  # auth_methods:
+  #   - name: api_key
+  #     description: >
+  #       Authenticate using an API key. This is the simplest method.
+  #     parameters:
+  #       - name: api_key
+  #         type: string
+  #         required: true
+  #         description: >
+  #           API key for authentication.
+  #
+  #   - name: service_account
+  #     description: >
+  #       Authenticate using service account credentials.
+  #     parameters:
+  #       - name: username
+  #         type: string
+  #         required: true
+  #         description: >
+  #           Service account username.
+  #
+  #       - name: secret
+  #         type: string
+  #         required: true
+  #         description: >
+  #           Service account secret.
+  #
+  # # Shared parameters (apply to all authentication methods)
+  # parameters:
+  #   - name: region
+  #     type: string
+  #     required: false
+  #     description: >
+  #       Data region (e.g., 'US' or 'EU'). Defaults to 'US'.
+  #
+  #   - name: base_url
+  #     type: string
+  #     required: false
+  #     description: >
+  #       Base URL for the API. Override if using a custom instance.
+
+  # ---------------------------------------------------------------------------
+  # OAuth 2.0 Authorization Code Flow (optional)
+  # Uncomment this section if the source uses OAuth 2.0 for authentication.
+  # The authenticate tool will run the browser-based OAuth flow automatically
+  # so the user only needs to provide client_id and client_secret; the
+  # refresh_token is obtained via the redirect.  These three parameter names
+  # are the standard OAuth 2.0 names and are expected in the parameters list.
+  # The authorization_url, token_url, and scopes are defaults that the user
+  # can override at runtime.
+  # ---------------------------------------------------------------------------
+  # oauth:
+  #   authorization_url: "https://example.com/oauth/authorize"
+  #   token_url: "https://example.com/oauth/token"
+  #   scopes: "read write"
+  #   extra_auth_params:
+  #     access_type: "offline"
+  #     prompt: "consent"
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# If no table-specific options are needed, set to empty string or omit.
+# ============================================================================
+external_options_allowlist: ""

@@ -1,0 +1,10 @@
+# Pin pip itself in every lock. Without this, `pip install -r
+# requirements/<lock>.txt` is mediated by whatever pip the runner image
+# happens to ship — the only unhashed network fetch in the otherwise
+# fully hash-verified install chain. A compromised pip can ignore
+# --require-hashes and silently bypass every other pin in the lock.
+#
+# Pinning pip alongside the rest of the lock means the bootstrap pip
+# downloads pip==X.Y.Z under hash verification before it becomes the
+# resolver for everything else. Consumed by tools/scripts/regenerate-locks.sh.
+pip

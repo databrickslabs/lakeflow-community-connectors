@@ -1,36 +1,91 @@
 name: Pylint
 
-on: [push]
+# pull_request_target (instead of pull_request) is required so fork-PR
+# runs receive the OIDC token that configure-jfrog-pypi exchanges for a
+# JFrog Artifactory access token. With pull_request the fork's run gets
+# no OIDC, and the action fails with ACTIONS_ID_TOKEN_REQUEST_TOKEN
+# unbound.
+#
+# Untrusted code from fork PRs is gated by the repo's "Require approval
+# for outside collaborators" setting — fork-PR workflow runs are pending
+# until a maintainer explicitly approves them. The explicit head-SHA
+# checkout below is what actually exercises the PR's code.
+on:
+  push:
+    branches: [master]
+    paths:
+      - '**/*.py'
+      - 'pyproject.toml'
+      - 'requirements/**'
+      - '.github/workflows/pylint.yml'
+  pull_request_target:
+    branches: [master]
+    paths:
+      - '**/*.py'
+      - 'pyproject.toml'
+      - 'requirements/**'
+      - '.github/workflows/pylint.yml'
+
+permissions:
+  contents: read
+  id-token: write  # Required for JFrog OIDC token exchange (see .github/actions/configure-jfrog-pypi).
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.10"]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      with:
+        # pull_request_target defaults to checking out the base ref; we want
+        # to lint the PR's actual code. For push/same-repo events the empty
+        # fallback resolves to the workflow ref.
+        ref: ${{ github.event.pull_request.head.sha }}
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v3
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
       with:
         python-version: ${{ matrix.python-version }}
+    - name: Configure pip via JFrog proxy
+      uses: ./.github/actions/configure-jfrog-pypi
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install pylint
-        pip install -e ".[dev]"
-        pip install -e "./tools/community_connector[dev]"
+        LOCK="requirements/pylint.txt"
+        if [ ! -f "$LOCK" ]; then
+          echo "::error title=Missing lock::$LOCK is required. Run tools/scripts/regenerate-locks.sh and commit requirements/."
+          exit 1
+        fi
+        pip install -r "$LOCK"
+        pip install -e . --no-deps
+        pip install -e ./tools/community_connector --no-deps
     - name: Analysing the code with pylint
       run: |
-        # Lint non-test files
+        # Lint source files (excluding tests directory and generated files).
+        #
+        # Disabled checks:
+        #   W       — warnings (pre-existing project policy)
+        #   C0114   — missing-module-docstring
+        #   C0115   — missing-class-docstring
+        #   C0116   — missing-function-docstring (noisy on dunders, factories,
+        #             one-line helpers; module/class docstrings already cover intent)
+        #   C0415   — import-outside-toplevel (deliberate lazy imports for
+        #             circular-dep avoidance and to defer optional cost)
+        #   R0801   — duplicate-code
+        #   R0902   — too-many-instance-attributes (Simulator/EndpointSpec/
+        #             LiveValidator are config-bag dataclasses)
+        #   R0903   — too-few-public-methods (single-purpose helpers are fine)
+        #   R0911   — too-many-return-statements (guard-clause pattern)
+        #   R0913   — too-many-arguments (named kwargs on stable APIs)
+        #   R0917   — too-many-positional-arguments
+        #   R1705   — unnecessary-else-after-return
         pylint \
         --max-line-length=100 \
-        --disable=W,C0114,C0115,R0801,R1705 \
+        --max-locals=25 \
+        --max-branches=20 \
+        --max-module-lines=1500 \
+        --disable=W,C0114,C0115,C0116,C0415,R0801,R0902,R0903,R0911,R0913,R0917,R1705 \
         --ignore-long-lines='^\s*(#|f?".*"|f?'\''.*'\'')$' \
-        $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py' | grep -v 'tools/scripts/merge_python_source.py' | grep -v 'community_connector/templates/ingest_template' | grep -v 'sources/hubspot/' | grep -v 'sources/stripe/' | grep -v 'sources/mixpanel/' | grep -v 'test_')
-        # Lint test files with C0115,C0116 disabled
-        pylint \
-        --max-line-length=100 \
-        --disable=W,C0114,C0115,R0801,R1705,C0115,C0116 \
-        --ignore-long-lines='^\s*(#|f?".*"|f?'\''.*'\'')$' \
-        $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py' | grep -v 'tools/scripts/merge_python_source.py' | grep -v 'community_connector/templates/ingest_template' | grep -v 'sources/hubspot/' | grep -v 'sources/stripe/' | grep -v 'sources/mixpanel/' | grep 'test_')
+        $(git ls-files '*.py' | grep -v '_generated_' | grep -v 'pipeline-spec/example_ingest.py' | grep -v 'pipeline_spec.example.py' | grep -v 'tools/scripts/merge_python_source.py' | grep -v 'community_connector_cli/templates/ingest_template' | grep -v 'community_connector/sources/hubspot/' | grep -v 'community_connector/sources/stripe/' | grep -v 'community_connector/sources/mixpanel/' | grep -v 'microsoft_teams/sample-ingest.py' | grep -v '^tests/')

@@ -1,0 +1,50 @@
+[
+  {
+    "ruleId": 59442,
+    "accessGroupLevel": 90446,
+    "accessUserType": "mike-532",
+    "excludeSelf": true,
+    "includeSelf": true,
+    "myFilter": "india-162",
+    "relationRole": "foxtrot-350",
+    "status": 18816,
+    "targetGroupLevel": 40627,
+    "targetUserType": "uniform-835"
+  },
+  {
+    "ruleId": 43084,
+    "accessGroupLevel": 42213,
+    "accessUserType": "foxtrot-328",
+    "excludeSelf": false,
+    "includeSelf": true,
+    "myFilter": "papa-472",
+    "relationRole": "alpha-613",
+    "status": 91107,
+    "targetGroupLevel": 40613,
+    "targetUserType": "tango-582"
+  },
+  {
+    "ruleId": 56399,
+    "accessGroupLevel": 44881,
+    "accessUserType": "mike-647",
+    "excludeSelf": false,
+    "includeSelf": false,
+    "myFilter": "uniform-583",
+    "relationRole": "hotel-951",
+    "status": 22903,
+    "targetGroupLevel": 57814,
+    "targetUserType": "uniform-392"
+  },
+  {
+    "ruleId": 69543,
+    "accessGroupLevel": 49263,
+    "accessUserType": "yankee-363",
+    "excludeSelf": false,
+    "includeSelf": false,
+    "myFilter": "xray-244",
+    "relationRole": "foxtrot-413",
+    "status": 82485,
+    "targetGroupLevel": 82093,
+    "targetUserType": "mike-793"
+  }
+]

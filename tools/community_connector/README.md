@@ -63,6 +63,27 @@ community-connector create_pipeline github my_pipeline \
 | `--repo-url` | `-r` | Git repository URL (overrides default) |
 | `--config` | `-f` | Path to custom config file |
 
+### `update_pipeline`
+
+Update the `ingest.py` configuration for an existing pipeline. This command modifies only the pipeline spec in the workspace file; other pipeline settings remain unchanged.
+
+```bash
+# Update with a YAML spec file
+community-connector update_pipeline my_github_pipeline -ps pipeline_spec.yaml
+
+# Update with a JSON spec file
+community-connector update_pipeline my_github_pipeline -ps pipeline_spec.json
+
+# Update with inline JSON spec
+community-connector update_pipeline my_github_pipeline \
+  -ps '{"connection_name": "my_conn", "objects": [{"table": {"source_table": "users"}}]}'
+```
+
+**Options:**
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--pipeline-spec` | `-ps` | Pipeline spec as JSON string or path to .yaml/.json file (required) |
+
 ### `run_pipeline`
 
 Run an existing pipeline by name.
@@ -100,7 +121,7 @@ community-connector create_connection github my_github_conn \
 community-connector create_connection github my_github_conn \
   -o '{"token": "ghp_xxxx"}' --spec ./my_connector_spec.yaml
 
-# With a custom GitHub repo (fetches spec from sources/{source}/connector_spec.yaml)
+# With a custom GitHub repo (fetches spec from src/databricks/labs/community_connector/sources/{source}/connector_spec.yaml)
 community-connector create_connection github my_github_conn \
   -o '{"token": "ghp_xxxx"}' --spec https://github.com/myorg/my-connectors
 ```
@@ -239,9 +260,16 @@ pytest tests/ -v
 
 ### Project Structure
 
+The main source code is organized under `src/databricks/labs/community_connector_cli/`:
+- `libs/` — Shared utilities (spec_parser.py, utils.py, source_loader.py)
+- `pipeline/` — Core ingestion logic (PySpark Data Source, SDP orchestration)
+- `sources/` — Source connectors (github/, zendesk/, stripe/, etc.)
+  - `interface/` — LakeflowConnect base interface
+  - `{source}/` — Each connector has: {source}.py, README.md, test/, configs/
+
 ```
 tools/community_connector/
-├── src/databricks/labs/community_connector/
+├── src/databricks/labs/community_connector_cli/
 │   ├── cli.py                    # Main CLI entry point
 │   ├── config.py                 # Configuration management
 │   ├── repo_client.py            # Databricks Repos API client

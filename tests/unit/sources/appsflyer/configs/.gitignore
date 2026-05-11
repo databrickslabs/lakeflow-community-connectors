@@ -1,0 +1,6 @@
+# Ignore local configuration files with sensitive credentials
+local_config.json
+local_table_config.json
+
+# Keep dev_config.json and dev_table_config.json as examples (without sensitive data)
+# Users should copy these to local_config.json and local_table_config.json for actual use

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "1000",
+    "createdAt": "2024-01-01T00:00:00Z",
+    "updatedAt": "2024-02-01T00:00:00Z",
+    "archived": false,
+    "properties": null,
+    "contacts": [],
+    "companies": []
+  },
+  {
+    "id": "1001",
+    "createdAt": "2024-01-02T00:00:00Z",
+    "updatedAt": "2024-02-02T00:00:00Z",
+    "archived": false,
+    "properties": null,
+    "contacts": [],
+    "companies": []
+  },
+  {
+    "id": "1002",
+    "createdAt": "2024-01-03T00:00:00Z",
+    "updatedAt": "2024-02-03T00:00:00Z",
+    "archived": false,
+    "properties": null,
+    "contacts": [],
+    "companies": []
+  },
+  {
+    "id": "1003",
+    "createdAt": "2024-01-04T00:00:00Z",
+    "updatedAt": "2024-02-04T00:00:00Z",
+    "archived": false,
+    "properties": null,
+    "contacts": [],
+    "companies": []
+  }
+]
