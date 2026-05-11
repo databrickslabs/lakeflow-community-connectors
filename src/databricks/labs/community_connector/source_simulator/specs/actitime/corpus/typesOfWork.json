@@ -1,37 +1,42 @@
 [
   {
-    "id": 1000,
-    "name": "victor-520",
-    "description": "zulu-215",
+    "id": 1,
+    "name": "engineering",
+    "rate": 110.0,
     "archived": false,
-    "billable": false
+    "billable": true,
+    "default": true
   },
   {
-    "id": 1001,
-    "name": "papa-794",
-    "description": "delta-870",
-    "archived": true,
-    "billable": true
-  },
-  {
-    "id": 1002,
-    "name": "victor-179",
-    "description": "india-764",
+    "id": 12,
+    "name": "manufacturing",
+    "rate": 70.0,
     "archived": false,
-    "billable": true
+    "billable": true,
+    "default": false
   },
   {
-    "id": 1003,
-    "name": "india-717",
-    "description": "papa-605",
+    "id": 13,
+    "name": "repair: complex",
+    "rate": 95.0,
     "archived": false,
-    "billable": false
+    "billable": true,
+    "default": false
   },
   {
-    "id": 1004,
-    "name": "oscar-895",
-    "description": "xray-288",
-    "archived": true,
-    "billable": false
+    "id": 14,
+    "name": "repair: standard",
+    "rate": 85.0,
+    "archived": false,
+    "billable": true,
+    "default": false
+  },
+  {
+    "id": 16,
+    "name": "testing",
+    "rate": 85.0,
+    "archived": false,
+    "billable": true,
+    "default": false
   }
 ]

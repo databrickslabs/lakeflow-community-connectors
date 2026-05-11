@@ -1,111 +1,105 @@
 [
   {
-    "id": 1000,
-    "first_name": "uniform-693",
-    "middle_name": "hotel-798",
-    "last_name": "uniform-510",
-    "full_name": "bravo-979",
-    "username": "delta-545",
-    "email": "yankee-699",
-    "department_id": 67205,
+    "id": 1,
+    "username": "redacted@example.com",
     "active": true,
-    "created": "2024-01-01T00:00:00Z",
-    "time_zone_group_id": 18508,
-    "hired": null,
-    "release_date": null,
-    "user_groups": [
-      81190,
-      3088
-    ],
-    "user_roles": [
-      "kilo-331"
-    ],
-    "allowed_actions_can_submit_timetrack": true
+    "firstName": "Fabrizio",
+    "middleName": "",
+    "lastName": "Napolitano",
+    "departmentId": 5,
+    "timeZoneGroupId": -1,
+    "hired": "2026-02-04",
+    "releaseDate": null,
+    "email": "redacted@example.com",
+    "requiresTimeTrackApproval": true,
+    "initialSchedule": null,
+    "allowedActions": {
+      "canSubmitTimetrack": true
+    },
+    "fullName": "Fabrizio Napolitano"
   },
   {
-    "id": 1001,
-    "first_name": "bravo-494",
-    "middle_name": "november-872",
-    "last_name": "zulu-418",
-    "full_name": "charlie-574",
-    "username": "charlie-797",
-    "email": "quebec-145",
-    "department_id": 80386,
+    "id": 13,
+    "username": "hr",
     "active": true,
-    "created": "2024-01-01T01:00:00Z",
-    "time_zone_group_id": 70978,
-    "hired": null,
-    "release_date": null,
-    "user_groups": [
-      76859
+    "firstName": "Jane",
+    "middleName": "",
+    "lastName": "White",
+    "departmentId": 6,
+    "timeZoneGroupId": -1,
+    "hired": "2026-02-04",
+    "releaseDate": null,
+    "email": "redacted@example.com",
+    "requiresTimeTrackApproval": true,
+    "initialSchedule": [
+      0,
+      420,
+      420,
+      420,
+      420,
+      420,
+      0
     ],
-    "user_roles": [
-      "mike-667",
-      "tango-608"
-    ],
-    "allowed_actions_can_submit_timetrack": true
+    "allowedActions": {
+      "canSubmitTimetrack": true
+    },
+    "fullName": "Jane White"
   },
   {
-    "id": 1002,
-    "first_name": "india-446",
-    "middle_name": "uniform-306",
-    "last_name": "papa-992",
-    "full_name": "hotel-556",
-    "username": "quebec-222",
-    "email": "india-552",
-    "department_id": 41803,
-    "active": false,
-    "created": "2024-01-01T02:00:00Z",
-    "time_zone_group_id": 64851,
-    "hired": null,
-    "release_date": null,
-    "user_groups": [
-      86802,
-      5453
-    ],
-    "user_roles": [
-      "charlie-579",
-      "yankee-188"
-    ],
-    "allowed_actions_can_submit_timetrack": true
+    "id": 14,
+    "username": "cto",
+    "active": true,
+    "firstName": "John",
+    "middleName": "",
+    "lastName": "Matthews",
+    "departmentId": 5,
+    "timeZoneGroupId": 2,
+    "hired": "2026-02-04",
+    "releaseDate": null,
+    "email": "redacted@example.com",
+    "requiresTimeTrackApproval": false,
+    "initialSchedule": null,
+    "allowedActions": {
+      "canSubmitTimetrack": true
+    },
+    "fullName": "John Matthews"
   },
   {
-    "id": 1003,
-    "first_name": "alpha-687",
-    "middle_name": "kilo-298",
-    "last_name": "juliet-358",
-    "full_name": "uniform-310",
-    "username": "bravo-944",
-    "email": "romeo-948",
-    "department_id": 1620,
-    "active": false,
-    "created": "2024-01-01T03:00:00Z",
-    "time_zone_group_id": 96758,
-    "hired": null,
-    "release_date": null,
-    "user_groups": [],
-    "user_roles": [
-      "golf-525",
-      "charlie-580"
-    ],
-    "allowed_actions_can_submit_timetrack": false
+    "id": 15,
+    "username": "finance",
+    "active": true,
+    "firstName": "Allison",
+    "middleName": "",
+    "lastName": "Meyers",
+    "departmentId": 6,
+    "timeZoneGroupId": 3,
+    "hired": "2026-02-04",
+    "releaseDate": null,
+    "email": "redacted@example.com",
+    "requiresTimeTrackApproval": true,
+    "initialSchedule": null,
+    "allowedActions": {
+      "canSubmitTimetrack": true
+    },
+    "fullName": "Allison Meyers"
   },
   {
-    "id": 1004,
-    "first_name": "juliet-647",
-    "middle_name": "foxtrot-572",
-    "last_name": "bravo-121",
-    "full_name": "echo-214",
-    "username": "lima-623",
-    "email": "india-585",
-    "department_id": 3145,
-    "active": false,
-    "created": "2024-01-01T04:00:00Z",
-    "time_zone_group_id": 83832,
-    "hired": null,
-    "release_date": null,
-    "user_groups": [],
-    "user_roles": [],
-    "allowed_actions_can_submit_timetrack": true
+    "id": 16,
+    "username": "pm",
+    "active": true,
+    "firstName": "Daniel",
+    "middleName": "",
+    "lastName": "Alvarez",
+    "departmentId": 7,
+    "timeZoneGroupId": 3,
+    "hired": "2026-02-04",
+    "releaseDate": null,
+    "email": "redacted@example.com",
+    "requiresTimeTrackApproval": true,
+    "initialSchedule": null,
+    "allowedActions": {
+      "canSubmitTimetrack": true
+    },
+    "fullName": "Daniel Alvarez"
   }
 ]

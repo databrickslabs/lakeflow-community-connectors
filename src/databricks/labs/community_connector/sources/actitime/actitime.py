@@ -19,11 +19,30 @@ Two API pagination styles are used:
   The connector also slices the requested ``dateFrom``/``dateTo`` window so
   the server-side cap is exercised deterministically.
 
-CDC tables (``customers``, ``projects``, ``tasks``, ``users``) do **not** have
-a ``modifiedAt`` field on the API, so a strict "since last sync" filter is not
+CDC tables (``customers``, ``projects``, ``tasks``) do **not** have a
+``modifiedAt`` field on the API, so a strict "since last sync" filter is not
 possible. We instead perform a full-list refresh on every trigger and rely on
 upsert-on-primary-key semantics downstream. The cursor advances to a sentinel
 ("done" → trigger termination per Trigger.AvailableNow contract).
+
+``users`` is treated as a ``snapshot`` table because the actiTIME API does
+not expose any timestamp field on a user (no ``created``, ``modifiedAt``,
+or equivalent) — see the live response in Phase 2. A full-refresh + upsert
+remains correct and cheap for the typically small user roster.
+
+Some endpoints are tenant-feature-gated and return HTTP 404 on accounts
+that don't have them enabled (commonly ``/userGroups``, ``/settings``,
+``/holidays``, ``/approvalStatus``). The connector treats a 404 on a
+list/snapshot endpoint as "table absent on this tenant" — read returns
+zero records with a ``{"done": True}`` sentinel so the trigger terminates
+cleanly. Add or remove a feature on the tenant to see the table populate.
+
+All list endpoints (``/customers``, ``/projects``, ``/tasks``, ``/users``,
+``/departments``, ``/typesOfWork``, ``/leaveTypes``, ``/workflowStatuses``,
+``/timeZoneGroups``, ``/userGroups``, ``/holidays``) return an envelope of
+the form ``{"offset": N, "limit": M, "items": [...]}``. ``/timetrack`` and
+``/leavetime`` return ``{"dateFrom": ..., "dateTo": ..., "data": [...]}``.
+The connector unwraps these consistently in :meth:`_unwrap_records`.
 
 Append tables (``timetrack``, ``leavetime``, ``approvalStatus``) use the
 sliding time-window strategy. The ``date`` field (or ``week_start_date`` for
@@ -50,7 +69,6 @@ from pyspark.sql.types import (
     DateType,
     DecimalType,
     LongType,
-    MapType,
     StringType,
     StructField,
     StructType,
@@ -72,16 +90,31 @@ DEFAULT_TIMEOUT = 30
 # Ingestion-type metadata — primary keys and cursor fields per table.
 # Kept as a module-level constant so it stays in sync with TABLE_SCHEMAS below.
 TABLE_METADATA: dict[str, dict] = {
-    # CDC tables. cursor_field is set to ``created`` as a proxy, but in
-    # practice we perform a full-list refresh and upsert on id (see class
-    # docstring) because actiTIME has no modifiedAt field.
+    # CDC tables. ``customers``, ``projects`` and ``tasks`` expose
+    # a ``created`` epoch-ms timestamp on the API; we keep it as a proxy
+    # cursor but still perform a full-list refresh + upsert on id since
+    # there is no ``modifiedAt`` filter.
     "customers": {"primary_keys": ["id"], "cursor_field": "created", "ingestion_type": "cdc"},
     "projects": {"primary_keys": ["id"], "cursor_field": "created", "ingestion_type": "cdc"},
     "tasks": {"primary_keys": ["id"], "cursor_field": "created", "ingestion_type": "cdc"},
-    "users": {"primary_keys": ["id"], "cursor_field": "created", "ingestion_type": "cdc"},
+    # ``users`` has no timestamp field on the actiTIME API (verified
+    # against live response — see class docstring). Treat as a snapshot.
+    "users": {"primary_keys": ["id"], "ingestion_type": "snapshot"},
     # Append tables — cursor on the date field, sliding-window strategy.
-    "timetrack": {"primary_keys": ["id"], "cursor_field": "date", "ingestion_type": "append"},
-    "leavetime": {"primary_keys": ["id"], "cursor_field": "date", "ingestion_type": "append"},
+    # timetrack records are nested per (user, day); after flattening the
+    # natural composite key is (user_id, date, task_id). leavetime is one
+    # row per (user, day, leaveType) — composite key (user_id, date,
+    # leave_type_id). Neither endpoint exposes a record-level ``id``.
+    "timetrack": {
+        "primary_keys": ["user_id", "date", "task_id"],
+        "cursor_field": "date",
+        "ingestion_type": "append",
+    },
+    "leavetime": {
+        "primary_keys": ["user_id", "date", "leave_type_id"],
+        "cursor_field": "date",
+        "ingestion_type": "append",
+    },
     "approvalStatus": {
         "primary_keys": ["user_id", "week_start_date"],
         "cursor_field": "week_start_date",
@@ -160,6 +193,11 @@ def _build_schemas() -> dict[str, StructType]:
                 StructField("allowed_actions_can_complete", BooleanType()),
             ]
         ),
+        # NOTE: actiTIME's ``/users`` response has no ``created`` (nor any
+        # other) timestamp, so the column is omitted. ``user_groups`` and
+        # ``user_roles`` are likewise absent from the live response on
+        # this tenant; we leave them off the schema to avoid carrying
+        # always-null columns.
         "users": StructType(
             [
                 StructField("id", LongType()),
@@ -171,36 +209,36 @@ def _build_schemas() -> dict[str, StructType]:
                 StructField("email", StringType()),
                 StructField("department_id", LongType()),
                 StructField("active", BooleanType()),
-                StructField("created", TimestampType()),
                 StructField("time_zone_group_id", LongType()),
                 StructField("hired", DateType()),
                 StructField("release_date", DateType()),
-                StructField("user_groups", ArrayType(LongType())),
-                StructField("user_roles", ArrayType(StringType())),
                 StructField("allowed_actions_can_submit_timetrack", BooleanType()),
             ]
         ),
+        # timetrack: nested envelope flattened to one row per record. The
+        # inner ``records`` array only carries ``taskId`` and ``time`` —
+        # there is no record-level id/comment/approved/locked on this
+        # tenant's API. ``day_offset`` is the day index inside the
+        # response window (0 = dateFrom).
         "timetrack": StructType(
             [
-                StructField("id", LongType()),
                 StructField("user_id", LongType()),
                 StructField("date", DateType()),
+                StructField("day_offset", LongType()),
                 StructField("task_id", LongType()),
                 StructField("time", LongType()),
-                StructField("comment", StringType()),
-                StructField("approved", BooleanType()),
-                StructField("locked", BooleanType()),
-                StructField("type_of_work_id", LongType()),
             ]
         ),
+        # leavetime: flat per-user-per-day-per-leaveType entries; no
+        # nested ``records`` array. The minute total lives under
+        # ``leaveTime`` on the wire.
         "leavetime": StructType(
             [
-                StructField("id", LongType()),
                 StructField("user_id", LongType()),
                 StructField("date", DateType()),
+                StructField("day_offset", LongType()),
                 StructField("leave_type_id", LongType()),
                 StructField("time", LongType()),
-                StructField("approved", BooleanType()),
             ]
         ),
         "departments": StructType(
@@ -219,13 +257,26 @@ def _build_schemas() -> dict[str, StructType]:
                 StructField("description", StringType()),
             ]
         ),
+        # /userRates/{userId} response: ``leaveRates`` is an array of
+        # ``{leaveTypeId, rate}`` objects, not a map keyed by leaveType.
+        # Model as ARRAY<STRUCT<leave_type_id, rate>> for fidelity.
         "userRates": StructType(
             [
                 StructField("user_id", LongType()),
                 StructField("date_from", DateType()),
                 StructField("regular_rate", DecimalType(18, 4)),
                 StructField("overtime_rate", DecimalType(18, 4)),
-                StructField("leave_rates", MapType(StringType(), DecimalType(18, 4))),
+                StructField(
+                    "leave_rates",
+                    ArrayType(
+                        StructType(
+                            [
+                                StructField("leave_type_id", LongType()),
+                                StructField("rate", DecimalType(18, 4)),
+                            ]
+                        )
+                    ),
+                ),
             ]
         ),
         "typesOfWork": StructType(
@@ -396,6 +447,56 @@ class ActitimeLakeflowConnect(LakeflowConnect):
             )
         return resp.json()
 
+    def _get_json_or_none(self, path: str, params: dict | None = None):
+        """GET ``path`` and return the JSON body, or ``None`` on HTTP 404.
+
+        Some endpoints are gated by tenant feature flags (``/userGroups``,
+        ``/settings``, ``/holidays``, ``/approvalStatus``). Treat 404 as
+        "table not enabled on this tenant" and let the caller emit an
+        empty result so the trigger terminates cleanly.
+        """
+        resp = self._request(path, params=params)
+        if resp.status_code == 404:
+            logger.info(
+                "actiTIME API GET %s returned 404 — treating as absent table on this tenant.",
+                path,
+            )
+            return None
+        if resp.status_code // 100 != 2:
+            raise RuntimeError(
+                f"actiTIME API GET {path} failed with HTTP {resp.status_code}: {resp.text[:500]}"
+            )
+        return resp.json()
+
+    @staticmethod
+    def _unwrap_records(body, key: str = "items") -> list:
+        """Return the records list from an actiTIME response body.
+
+        actiTIME wraps list responses in an envelope:
+            { "items": [...], "offset": N, "limit": M }       — most lists
+            { "data": [...], "dateFrom": ..., "dateTo": ... } — timetrack/leavetime
+
+        Bare arrays still occur on some endpoints (e.g. ``/userRates/{id}``).
+        Accept all three shapes — return ``[]`` for anything else (None, an
+        error dict, an unexpected schema) so callers can iterate without
+        guarding.
+        """
+        if isinstance(body, list):
+            return body
+        if isinstance(body, dict):
+            inner = body.get(key)
+            if isinstance(inner, list):
+                return inner
+            # Fallback: tolerate the alternate well-known wrapper key in
+            # case the API ever changes between ``items``/``data``.
+            for alt in ("items", "data", "records"):
+                if alt == key:
+                    continue
+                inner = body.get(alt)
+                if isinstance(inner, list):
+                    return inner
+        return []
+
     # ------------------------------------------------------------------
     # LakeflowConnect API
     # ------------------------------------------------------------------
@@ -460,11 +561,37 @@ class ActitimeLakeflowConnect(LakeflowConnect):
         return iter(records), {"done": True}
 
     def _read_settings(self) -> Iterator[dict]:
-        """/settings is a singleton: returns a JSON object, not an array."""
-        body = self._get_json("settings")
-        if not isinstance(body, dict):
+        """/settings is a singleton: returns a JSON object, not an array.
+
+        On tenants that don't expose tenant-wide settings this endpoint
+        returns 404; we yield no rows in that case (see class docstring).
+        An empty body (``{}``) is treated as "settings unavailable" too,
+        rather than emitting a row with only a synthetic id.
+        """
+        body = self._get_json_or_none("settings")
+        if body is None:
+            return
+        if isinstance(body, list):
             # Defensive: if the API ever changes to a list we still cope.
-            body = (body or [{}])[0]
+            if not body:
+                return
+            body = body[0]
+        if not isinstance(body, dict) or not body:
+            return
+        # Be conservative: only emit a row if at least one known settings
+        # field is present. Avoids materialising rows from an error
+        # envelope that happened to have a 200 status.
+        known = {
+            "workdayDuration",
+            "weekStartDay",
+            "dateFormat",
+            "timeFormat",
+            "currencyCode",
+            "decimalSeparator",
+            "thousandsSeparator",
+        }
+        if not known.intersection(body.keys()):
+            return
         record = dict(body)
         # Synthesise a constant primary key so the row is addressable.
         record.setdefault("id", 1)
@@ -478,25 +605,29 @@ class ActitimeLakeflowConnect(LakeflowConnect):
             uid = user.get("id")
             if uid is None:
                 continue
-            rates = self._get_json(f"userRates/{uid}")
-            if not isinstance(rates, list):
-                rates = []
-            for r in rates:
+            rates = self._get_json_or_none(f"userRates/{uid}")
+            if rates is None:
+                # Tenant feature disabled for this user — skip.
+                continue
+            for r in self._unwrap_records(rates, key="items"):
                 rec = dict(r)
                 rec["userId"] = uid  # inject path param into the body
                 yield self._map_record("userRates", rec)
 
     def _read_holidays(self, table_options: dict[str, str]) -> Iterator[dict]:
-        """/holidays: optionally bounded by dateFrom/dateTo from table_options."""
+        """/holidays: optionally bounded by dateFrom/dateTo from table_options.
+
+        Returns no rows on a 404 (feature absent for this tenant).
+        """
         params: dict[str, str] = {}
         if "dateFrom" in table_options:
             params["dateFrom"] = table_options["dateFrom"]
         if "dateTo" in table_options:
             params["dateTo"] = table_options["dateTo"]
-        body = self._get_json("holidays", params=params)
-        if not isinstance(body, list):
+        body = self._get_json_or_none("holidays", params=params)
+        if body is None:
             return
-        for raw in body:
+        for raw in self._unwrap_records(body, key="items"):
             yield self._map_record("holidays", raw)
 
     # ------------------------------------------------------------------
@@ -580,19 +711,36 @@ class ActitimeLakeflowConnect(LakeflowConnect):
             "dateTo": window_end_inclusive.isoformat(),
             "stopAfter": str(stop_after),
         }
-        body = self._get_json(table_name, params=params)
-        if not isinstance(body, list):
-            body = []
+        body = self._get_json_or_none(table_name, params=params)
+        if body is None:
+            # 404 — table absent on this tenant. Terminate the window walk.
+            return iter([]), start_offset or {"cursor": self._init_ts_iso}
 
-        # The envelope is [{userId, date, records:[…]}, …]. Flatten each
-        # ``records`` element into one row.
+        # The wire envelope is ``{"dateFrom": ..., "dateTo": ...,
+        # "data": [...]}``. Inside ``data``:
+        #   * timetrack — each entry is ``{userId, dayOffset, date,
+        #     records:[{taskId, time}, ...]}``. Flatten one row per record,
+        #     copying userId/date/dayOffset down.
+        #   * leavetime — each entry is already flat:
+        #     ``{userId, dayOffset, date, leaveTypeId, leaveTime}``. Emit
+        #     as-is via ``_map_record``.
+        data = self._unwrap_records(body, key="data")
         flat: list[dict] = []
-        for env in body:
-            uid = env.get("userId")
-            edate = env.get("date")
-            for r in env.get("records", []) or []:
-                merged = {**r, "userId": uid, "date": edate}
-                flat.append(self._map_record(table_name, merged))
+        for env in data:
+            if table_name == "timetrack":
+                uid = env.get("userId")
+                edate = env.get("date")
+                day_offset = env.get("dayOffset")
+                for r in env.get("records", []) or []:
+                    merged = {
+                        **r,
+                        "userId": uid,
+                        "date": edate,
+                        "dayOffset": day_offset,
+                    }
+                    flat.append(self._map_record(table_name, merged))
+            else:  # leavetime — flat per-entry.
+                flat.append(self._map_record(table_name, env))
 
         # Advance the stored cursor to the end of the window we just read.
         next_offset = {"cursor": window_end_date.isoformat()}
@@ -633,10 +781,12 @@ class ActitimeLakeflowConnect(LakeflowConnect):
             "dateFrom": read_from.isoformat(),
             "dateTo": window_end_inclusive.isoformat(),
         }
-        body = self._get_json("approvalStatus", params=params)
-        if not isinstance(body, list):
-            body = []
-        records = [self._map_record("approvalStatus", r) for r in body]
+        body = self._get_json_or_none("approvalStatus", params=params)
+        if body is None:
+            # 404 — feature absent on this tenant. Terminate.
+            return iter([]), start_offset or {"cursor": self._init_ts_iso}
+        raw_records = self._unwrap_records(body, key="items")
+        records = [self._map_record("approvalStatus", r) for r in raw_records]
         next_offset = {"cursor": window_end_date.isoformat()}
         return iter(records), next_offset
 
@@ -653,9 +803,17 @@ class ActitimeLakeflowConnect(LakeflowConnect):
     ) -> Iterator[dict]:
         """Paginate an offset/limit list endpoint until the server is drained.
 
+        actiTIME wraps every list response in ``{"items": [...], "offset":
+        N, "limit": M}``. We unwrap with :meth:`_unwrap_records` so the
+        connector tolerates both the envelope and the legacy bare-array
+        shape some endpoints might still produce.
+
         When ``_raw`` is true the raw API record is yielded (used internally
         for /userRates fan-out); otherwise we run the record through
         :meth:`_map_record` so the output already matches ``TABLE_SCHEMAS``.
+
+        A 404 from a list endpoint is treated as "feature absent on this
+        tenant" — iteration ends without raising. See class docstring.
         """
         page_size = int(table_options.get("limit", "1000"))
         max_records = int(table_options.get("max_records_per_batch", "100000"))
@@ -668,17 +826,19 @@ class ActitimeLakeflowConnect(LakeflowConnect):
         while True:
             params["offset"] = str(offset)
             params["limit"] = str(page_size)
-            body = self._get_json(table_name, params=params)
-            if not isinstance(body, list):
+            body = self._get_json_or_none(table_name, params=params)
+            if body is None:
+                # 404 — treat as empty.
+                return
+            records = self._unwrap_records(body, key="items")
+            if not records:
                 break
-            if not body:
-                break
-            for raw in body:
+            for raw in records:
                 yield raw if _raw else self._map_record(table_name, raw)
                 emitted += 1
                 if emitted >= max_records:
                     return
-            if len(body) < page_size:
+            if len(records) < page_size:
                 break
             offset += page_size
 
@@ -758,34 +918,27 @@ class ActitimeLakeflowConnect(LakeflowConnect):
                 "email": raw.get("email"),
                 "department_id": raw.get("departmentId"),
                 "active": raw.get("active"),
-                "created": _epoch_ms_to_iso(raw.get("created")),
                 "time_zone_group_id": raw.get("timeZoneGroupId"),
                 "hired": raw.get("hired"),
                 "release_date": raw.get("releaseDate"),
-                "user_groups": raw.get("userGroups") or [],
-                "user_roles": raw.get("userRoles") or [],
                 "allowed_actions_can_submit_timetrack": actions.get("canSubmitTimetrack"),
             }
         if table_name == "timetrack":
             return {
-                "id": raw.get("id"),
                 "user_id": raw.get("userId"),
                 "date": raw.get("date"),
+                "day_offset": raw.get("dayOffset"),
                 "task_id": raw.get("taskId"),
                 "time": raw.get("time"),
-                "comment": raw.get("comment"),
-                "approved": raw.get("approved"),
-                "locked": raw.get("locked"),
-                "type_of_work_id": raw.get("typeOfWorkId"),
             }
         if table_name == "leavetime":
+            # Live API returns minutes under ``leaveTime`` (not ``time``).
             return {
-                "id": raw.get("id"),
                 "user_id": raw.get("userId"),
                 "date": raw.get("date"),
+                "day_offset": raw.get("dayOffset"),
                 "leave_type_id": raw.get("leaveTypeId"),
-                "time": raw.get("time"),
-                "approved": raw.get("approved"),
+                "time": raw.get("leaveTime"),
             }
         if table_name == "departments":
             return {
@@ -802,12 +955,21 @@ class ActitimeLakeflowConnect(LakeflowConnect):
                 "description": raw.get("description"),
             }
         if table_name == "userRates":
+            raw_rates = raw.get("leaveRates") or []
+            leave_rates = [
+                {
+                    "leave_type_id": item.get("leaveTypeId"),
+                    "rate": item.get("rate"),
+                }
+                for item in raw_rates
+                if isinstance(item, dict)
+            ]
             return {
                 "user_id": raw.get("userId"),
                 "date_from": raw.get("dateFrom"),
                 "regular_rate": raw.get("regularRate"),
                 "overtime_rate": raw.get("overtimeRate"),
-                "leave_rates": raw.get("leaveRates") or {},
+                "leave_rates": leave_rates,
             }
         if table_name == "typesOfWork":
             return {

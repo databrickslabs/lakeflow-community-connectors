@@ -1,32 +1,47 @@
 [
   {
-    "id": 1000,
-    "name": "delta-303",
-    "type": "lima-794",
-    "order": 88363
+    "id": 1,
+    "name": "New",
+    "type": "open",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": false
+    }
   },
   {
-    "id": 1001,
-    "name": "quebec-636",
-    "type": "alpha-868",
-    "order": 32563
+    "id": 2,
+    "name": "Done",
+    "type": "completed",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": false
+    }
   },
   {
-    "id": 1002,
-    "name": "kilo-614",
-    "type": "echo-776",
-    "order": 25011
+    "id": 3,
+    "name": "Planning",
+    "type": "open",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": false
+    }
   },
   {
-    "id": 1003,
-    "name": "sierra-177",
-    "type": "zulu-744",
-    "order": 3205
+    "id": 4,
+    "name": "In Progress",
+    "type": "open",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": false
+    }
   },
   {
-    "id": 1004,
-    "name": "oscar-543",
-    "type": "charlie-330",
-    "order": 5148
+    "id": 5,
+    "name": "Review",
+    "type": "open",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": false
+    }
   }
 ]

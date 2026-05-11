@@ -1,67 +1,72 @@
 [
   {
-    "id": 1000,
-    "name": "sierra-270",
-    "description": "yankee-733",
-    "customer_id": 44082,
+    "id": 13,
+    "customerId": 6,
+    "name": "Spaceship building",
     "archived": false,
-    "created": "2024-01-01T00:00:00Z",
-    "workflow_enabled": false,
-    "default_type_of_work_id": 26887,
-    "url": "victor-444",
-    "allowed_actions_can_modify": true,
-    "allowed_actions_can_delete": true
+    "created": 1770163200000,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?projectId=13",
+    "customerName": "Big Bang Company",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": true
+    },
+    "description": null
   },
   {
-    "id": 1001,
-    "name": "alpha-889",
-    "description": "papa-111",
-    "customer_id": 59048,
+    "id": 14,
+    "customerId": 6,
+    "name": "Spaceship testing",
     "archived": false,
-    "created": "2024-01-01T01:00:00Z",
-    "workflow_enabled": true,
-    "default_type_of_work_id": 42003,
-    "url": "quebec-662",
-    "allowed_actions_can_modify": false,
-    "allowed_actions_can_delete": false
+    "created": 1770163200000,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?projectId=14",
+    "customerName": "Big Bang Company",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": true
+    },
+    "description": null
   },
   {
-    "id": 1002,
-    "name": "hotel-578",
-    "description": "victor-940",
-    "customer_id": 60242,
-    "archived": true,
-    "created": "2024-01-01T02:00:00Z",
-    "workflow_enabled": true,
-    "default_type_of_work_id": 53907,
-    "url": "bravo-306",
-    "allowed_actions_can_modify": true,
-    "allowed_actions_can_delete": true
-  },
-  {
-    "id": 1003,
-    "name": "quebec-874",
-    "description": "yankee-549",
-    "customer_id": 71894,
+    "id": 15,
+    "customerId": 6,
+    "name": "Flight operations",
     "archived": false,
-    "created": "2024-01-01T03:00:00Z",
-    "workflow_enabled": false,
-    "default_type_of_work_id": 69255,
-    "url": "lima-349",
-    "allowed_actions_can_modify": true,
-    "allowed_actions_can_delete": true
+    "created": 1770163200000,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?projectId=15",
+    "customerName": "Big Bang Company",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": true
+    },
+    "description": null
   },
   {
-    "id": 1004,
-    "name": "alpha-280",
-    "description": "xray-367",
-    "customer_id": 70594,
-    "archived": true,
-    "created": "2024-01-01T04:00:00Z",
-    "workflow_enabled": false,
-    "default_type_of_work_id": 4501,
-    "url": "victor-649",
-    "allowed_actions_can_modify": true,
-    "allowed_actions_can_delete": true
+    "id": 16,
+    "customerId": 7,
+    "name": "Android prototyping",
+    "archived": false,
+    "created": 1770163200000,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?projectId=16",
+    "customerName": "Galaxy Corporation",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": true
+    },
+    "description": null
+  },
+  {
+    "id": 17,
+    "customerId": 7,
+    "name": "Android testing",
+    "archived": false,
+    "created": 1770163200000,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?projectId=17",
+    "customerName": "Galaxy Corporation",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": true
+    },
+    "description": null
   }
 ]

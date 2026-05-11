@@ -1,48 +1,343 @@
 [
   {
-    "user_id": 1000,
-    "date_from": null,
-    "regular_rate": 78.62,
-    "overtime_rate": 564.87,
-    "leave_rates": {
-      "key_0": 274.53,
-      "key_1": 142.06
-    }
+    "dateFrom": "2026-02-04",
+    "regularRate": 45.0,
+    "overtimeRate": 67.5,
+    "leaveRates": [
+      {
+        "leaveTypeId": 1,
+        "rate": 45.0
+      },
+      {
+        "leaveTypeId": 2,
+        "rate": 45.0
+      },
+      {
+        "leaveTypeId": 3,
+        "rate": 45.0
+      },
+      {
+        "leaveTypeId": 9,
+        "rate": 45.0
+      }
+    ]
   },
   {
-    "user_id": 1001,
-    "date_from": null,
-    "regular_rate": 70.41,
-    "overtime_rate": 99.59,
-    "leave_rates": {}
+    "dateFrom": "2026-02-04",
+    "regularRate": 40.0,
+    "overtimeRate": 60.0,
+    "leaveRates": [
+      {
+        "leaveTypeId": 1,
+        "rate": 40.0
+      },
+      {
+        "leaveTypeId": 2,
+        "rate": 40.0
+      },
+      {
+        "leaveTypeId": 3,
+        "rate": 40.0
+      },
+      {
+        "leaveTypeId": 9,
+        "rate": 40.0
+      }
+    ]
   },
   {
-    "user_id": 1002,
-    "date_from": null,
-    "regular_rate": 384.95,
-    "overtime_rate": 190.93,
-    "leave_rates": {
-      "key_0": 86.53,
-      "key_1": 860.07
-    }
+    "dateFrom": "2026-02-04",
+    "regularRate": 32.0,
+    "overtimeRate": 48.0,
+    "leaveRates": [
+      {
+        "leaveTypeId": 1,
+        "rate": 32.0
+      },
+      {
+        "leaveTypeId": 2,
+        "rate": 32.0
+      },
+      {
+        "leaveTypeId": 3,
+        "rate": 32.0
+      },
+      {
+        "leaveTypeId": 9,
+        "rate": 32.0
+      }
+    ]
   },
   {
-    "user_id": 1003,
-    "date_from": null,
-    "regular_rate": 625.14,
-    "overtime_rate": 246.74,
-    "leave_rates": {
-      "key_0": 126.66
-    }
+    "dateFrom": "2026-03-11",
+    "regularRate": 35.0,
+    "overtimeRate": 52.5,
+    "leaveRates": [
+      {
+        "leaveTypeId": 1,
+        "rate": 35.0
+      },
+      {
+        "leaveTypeId": 2,
+        "rate": 35.0
+      },
+      {
+        "leaveTypeId": 3,
+        "rate": 35.0
+      },
+      {
+        "leaveTypeId": 9,
+        "rate": 35.0
+      }
+    ]
   },
   {
-    "user_id": 1004,
-    "date_from": null,
-    "regular_rate": 269.07,
-    "overtime_rate": 695.71,
-    "leave_rates": {
-      "key_0": 95.08,
-      "key_1": 560.2
-    }
+    "dateFrom": "2026-02-04",
+    "regularRate": 38.0,
+    "overtimeRate": 56.0,
+    "leaveRates": [
+      {
+        "leaveTypeId": 1,
+        "rate": 38.0
+      },
+      {
+        "leaveTypeId": 2,
+        "rate": 38.0
+      },
+      {
+        "leaveTypeId": 3,
+        "rate": 38.0
+      },
+      {
+        "leaveTypeId": 9,
+        "rate": 38.0
+      }
+    ]
+  },
+  {
+    "dateFrom": "2026-03-11",
+    "regularRate": 40.0,
+    "overtimeRate": 60.0,
+    "leaveRates": [
+      {
+        "leaveTypeId": 1,
+        "rate": 40.0
+      },
+      {
+        "leaveTypeId": 2,
+        "rate": 40.0
+      },
+      {
+        "leaveTypeId": 3,
+        "rate": 40.0
+      },
+      {
+        "leaveTypeId": 9,
+        "rate": 40.0
+      }
+    ]
+  },
+  {
+    "dateFrom": "2026-02-04",
+    "regularRate": 25.0,
+    "overtimeRate": null,
+    "leaveRates": [
+      {
+        "leaveTypeId": 1,
+        "rate": 25.0
+      },
+      {
+        "leaveTypeId": 2,
+        "rate": 25.0
+      },
+      {
+        "leaveTypeId": 3,
+        "rate": 25.0
+      },
+      {
+        "leaveTypeId": 9,
+        "rate": 25.0
+      }
+    ]
+  },
+  {
+    "dateFrom": "2026-02-04",
+    "regularRate": 40.0,
+    "overtimeRate": null,
+    "leaveRates": [
+      {
+        "leaveTypeId": 1,
+        "rate": 40.0
+      },
+      {
+        "leaveTypeId": 2,
+        "rate": 40.0
+      },
+      {
+        "leaveTypeId": 3,
+        "rate": 40.0
+      },
+      {
+        "leaveTypeId": 9,
+        "rate": 40.0
+      }
+    ]
+  },
+  {
+    "dateFrom": "2026-02-04",
+    "regularRate": 20.0,
+    "overtimeRate": null,
+    "leaveRates": [
+      {
+        "leaveTypeId": 1,
+        "rate": 20.0
+      },
+      {
+        "leaveTypeId": 2,
+        "rate": 20.0
+      },
+      {
+        "leaveTypeId": 3,
+        "rate": 20.0
+      },
+      {
+        "leaveTypeId": 9,
+        "rate": 20.0
+      }
+    ]
+  },
+  {
+    "dateFrom": "2026-02-04",
+    "regularRate": 35.0,
+    "overtimeRate": 52.5,
+    "leaveRates": [
+      {
+        "leaveTypeId": 1,
+        "rate": 35.0
+      },
+      {
+        "leaveTypeId": 2,
+        "rate": 35.0
+      },
+      {
+        "leaveTypeId": 3,
+        "rate": 35.0
+      },
+      {
+        "leaveTypeId": 9,
+        "rate": 35.0
+      }
+    ]
+  },
+  {
+    "dateFrom": "2026-02-04",
+    "regularRate": 30.0,
+    "overtimeRate": null,
+    "leaveRates": [
+      {
+        "leaveTypeId": 1,
+        "rate": 30.0
+      },
+      {
+        "leaveTypeId": 2,
+        "rate": 30.0
+      },
+      {
+        "leaveTypeId": 3,
+        "rate": 30.0
+      },
+      {
+        "leaveTypeId": 9,
+        "rate": 30.0
+      }
+    ]
+  },
+  {
+    "dateFrom": "2026-02-04",
+    "regularRate": 33.0,
+    "overtimeRate": null,
+    "leaveRates": [
+      {
+        "leaveTypeId": 1,
+        "rate": 33.0
+      },
+      {
+        "leaveTypeId": 2,
+        "rate": 33.0
+      },
+      {
+        "leaveTypeId": 3,
+        "rate": 33.0
+      },
+      {
+        "leaveTypeId": 9,
+        "rate": 33.0
+      }
+    ]
+  },
+  {
+    "dateFrom": "2026-03-11",
+    "regularRate": 35.0,
+    "overtimeRate": null,
+    "leaveRates": [
+      {
+        "leaveTypeId": 1,
+        "rate": 35.0
+      },
+      {
+        "leaveTypeId": 2,
+        "rate": 35.0
+      },
+      {
+        "leaveTypeId": 3,
+        "rate": 35.0
+      },
+      {
+        "leaveTypeId": 9,
+        "rate": 35.0
+      }
+    ]
+  },
+  {
+    "dateFrom": "2026-02-04",
+    "regularRate": 18.0,
+    "overtimeRate": null,
+    "leaveRates": [
+      {
+        "leaveTypeId": 1,
+        "rate": 18.0
+      },
+      {
+        "leaveTypeId": 2,
+        "rate": 18.0
+      },
+      {
+        "leaveTypeId": 3,
+        "rate": 18.0
+      }
+    ]
+  },
+  {
+    "dateFrom": "2026-05-15",
+    "regularRate": 20.0,
+    "overtimeRate": null,
+    "leaveRates": [
+      {
+        "leaveTypeId": 1,
+        "rate": 20.0
+      },
+      {
+        "leaveTypeId": 2,
+        "rate": 20.0
+      },
+      {
+        "leaveTypeId": 3,
+        "rate": 20.0
+      },
+      {
+        "leaveTypeId": 9,
+        "rate": 20.0
+      }
+    ]
   }
 ]

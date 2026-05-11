@@ -1,42 +1,26 @@
 [
   {
-    "id": 1000,
-    "name": "charlie-348",
-    "description": "papa-737",
-    "archived": true,
-    "paid_leave": true,
-    "auto_accrual": true
+    "id": 2,
+    "name": "Time Off",
+    "balance": "PTO",
+    "archived": false
   },
   {
-    "id": 1001,
-    "name": "echo-358",
-    "description": "whiskey-213",
-    "archived": false,
-    "paid_leave": true,
-    "auto_accrual": false
+    "id": 3,
+    "name": "Vacation",
+    "balance": "PTO",
+    "archived": false
   },
   {
-    "id": 1002,
-    "name": "yankee-999",
-    "description": "lima-519",
-    "archived": false,
-    "paid_leave": true,
-    "auto_accrual": true
+    "id": 1,
+    "name": "Sick Leave",
+    "balance": "Sick",
+    "archived": false
   },
   {
-    "id": 1003,
-    "name": "papa-840",
-    "description": "golf-717",
-    "archived": true,
-    "paid_leave": true,
-    "auto_accrual": true
-  },
-  {
-    "id": 1004,
-    "name": "delta-232",
-    "description": "quebec-305",
-    "archived": true,
-    "paid_leave": true,
-    "auto_accrual": false
+    "id": 9,
+    "name": "Family Leave",
+    "balance": "None",
+    "archived": false
   }
 ]

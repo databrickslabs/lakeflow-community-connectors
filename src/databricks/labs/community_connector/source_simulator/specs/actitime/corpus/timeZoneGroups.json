@@ -1,27 +1,20 @@
 [
   {
-    "id": 1000,
-    "name": "foxtrot-781",
-    "time_zone": "papa-147"
+    "id": -1,
+    "name": "New York",
+    "timeZoneId": "America/New_York",
+    "default": true
   },
   {
-    "id": 1001,
-    "name": "mike-254",
-    "time_zone": "zulu-680"
+    "id": 2,
+    "name": "London",
+    "timeZoneId": "Europe/London",
+    "default": false
   },
   {
-    "id": 1002,
-    "name": "foxtrot-327",
-    "time_zone": "lima-868"
-  },
-  {
-    "id": 1003,
-    "name": "uniform-267",
-    "time_zone": "foxtrot-469"
-  },
-  {
-    "id": 1004,
-    "name": "kilo-921",
-    "time_zone": "alpha-502"
+    "id": 3,
+    "name": "Sydney",
+    "timeZoneId": "Australia/Sydney",
+    "default": false
   }
 ]
