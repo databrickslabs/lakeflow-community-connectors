@@ -1,0 +1,75 @@
+[
+  {
+    "resolution": {"frequency": "H", "timezone": "UTC"},
+    "curve": {
+      "name": "DE Power Spot Day-Ahead EUR/MWh H Forecast",
+      "curve_type": "TIMESERIES",
+      "data_type": "FORECAST",
+      "area": "DE",
+      "frequency": "H",
+      "timezone": "UTC",
+      "unit": "EUR",
+      "denominator": "MWh",
+      "source": "EQ",
+      "commodity": "Power"
+    },
+    "instance": {"issued": "2026-05-05T00:00:00+00:00", "tag": ""},
+    "contract": null,
+    "scenario_names": null,
+    "unit": "EUR",
+    "denominator": "MWh",
+    "data": [
+      {"d": "2026-05-05T01:00:00", "v": 40.0},
+      {"d": "2026-05-05T02:00:00", "v": 41.0},
+      {"d": "2026-05-05T03:00:00", "v": 42.0}
+    ]
+  },
+  {
+    "resolution": {"frequency": "H", "timezone": "UTC"},
+    "curve": {
+      "name": "DE Power Spot Day-Ahead EUR/MWh H Forecast",
+      "curve_type": "TIMESERIES",
+      "data_type": "FORECAST",
+      "area": "DE",
+      "frequency": "H",
+      "timezone": "UTC",
+      "unit": "EUR",
+      "denominator": "MWh",
+      "source": "EQ",
+      "commodity": "Power"
+    },
+    "instance": {"issued": "2026-05-06T00:00:00+00:00", "tag": ""},
+    "contract": null,
+    "scenario_names": null,
+    "unit": "EUR",
+    "denominator": "MWh",
+    "data": [
+      {"d": "2026-05-06T01:00:00", "v": 43.0},
+      {"d": "2026-05-06T02:00:00", "v": 44.0}
+    ]
+  },
+  {
+    "resolution": {"frequency": "H", "timezone": "UTC"},
+    "curve": {
+      "name": "DE Power Spot Day-Ahead EUR/MWh H Forecast",
+      "curve_type": "TIMESERIES",
+      "data_type": "FORECAST",
+      "area": "DE",
+      "frequency": "H",
+      "timezone": "UTC",
+      "unit": "EUR",
+      "denominator": "MWh",
+      "source": "EQ",
+      "commodity": "Power"
+    },
+    "instance": {"issued": "2026-05-07T00:00:00+00:00", "tag": ""},
+    "contract": null,
+    "scenario_names": null,
+    "unit": "EUR",
+    "denominator": "MWh",
+    "data": [
+      {"d": "2026-05-07T01:00:00", "v": 45.0},
+      {"d": "2026-05-07T02:00:00", "v": 46.0}
+    ]
+  }
+]

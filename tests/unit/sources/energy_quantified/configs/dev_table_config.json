@@ -1,0 +1,24 @@
+{
+  "curves": {},
+  "timeseries": {
+    "curve_name": "DE Power Spot Day-Ahead EUR/MWh H Forecast",
+    "frequency": "H"
+  },
+  "instances": {
+    "curve_name": "DE Power Spot Day-Ahead EUR/MWh H Forecast",
+    "frequency": "H"
+  },
+  "periods": {
+    "curve_name": "DE Power Outages Periods MW B Actual"
+  },
+  "ohlc": {
+    "curve_name": "EU API2 Coal Front Month USD/t M Actual",
+    "period": "M",
+    "front": "1"
+  },
+  "srmc": {
+    "curve_name": "EU API2 Coal Front Month USD/t M Actual",
+    "period": "M",
+    "front": "1"
+  }
+}

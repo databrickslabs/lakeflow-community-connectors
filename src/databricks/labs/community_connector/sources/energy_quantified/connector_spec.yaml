@@ -1,0 +1,67 @@
+# Energy Quantified Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# ============================================================================
+display_name: Energy Quantified
+connection:
+  parameters:
+    - name: api_key
+      type: string
+      required: true
+      secret: true
+      description: >
+        Energy Quantified API key used to authenticate all requests.
+        Sent as the X-API-Key header.
+        Obtain your API key from your Energy Quantified profile at
+        https://app.energyquantified.com/profile
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+#
+# Scanned from energy_quantified.py and energy_quantified_utils.py for all
+# keys read via table_options.get(...) and table_options[...].
+# ============================================================================
+external_options_allowlist: >
+  curve_name,
+  page_size,
+  start_date,
+  end_date,
+  timezone,
+  lookback_days,
+  partition_days,
+  max_records_per_batch,
+  limit,
+  tags,
+  exclude_tags,
+  frequency,
+  aggregation,
+  hour_filter,
+  threshold,
+  threshold_pct,
+  period,
+  front,
+  delivery,
+  unit,
+  fill,
+  efficiency,
+  carbon_emissions,
+  api2_tonne_to_mwh,
+  gas_therm_to_mwh,
+  carbon_tax_area,
+  q,
+  area,
+  curve_type,
+  data_type,
+  category,
+  exact_category,
+  commodity,
+  source,
+  only_subscribed,
+  has_place
