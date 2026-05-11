@@ -341,7 +341,10 @@ class AlchemyLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             for entry in page.get("contracts", []):
                 rec = dict(entry)
                 rec["address"] = rec.get("address") or wallet
-                rec["contract"] = normalise_contract(rec.get("contract"))
+                contract = normalise_contract(rec.get("contract"))
+                rec["contract"] = contract
+                if isinstance(contract, dict) and contract.get("address"):
+                    rec["contract_address"] = contract["address"]
                 records.append(rec)
         return iter(records), {}
 
