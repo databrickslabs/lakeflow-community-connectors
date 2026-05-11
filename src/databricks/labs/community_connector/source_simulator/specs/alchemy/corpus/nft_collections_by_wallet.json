@@ -26,7 +26,8 @@
       "spamClassifications": [
         "romeo-968"
       ]
-    }
+    },
+    "contract_address": "delta-68-pk0"
   },
   {
     "address": "juliet-5-pk1",
@@ -55,7 +56,8 @@
       "spamClassifications": [
         "tango-704"
       ]
-    }
+    },
+    "contract_address": "hotel-64-pk1"
   },
   {
     "address": "delta-18-pk2",
@@ -85,7 +87,8 @@
         "echo-834",
         "xray-346"
       ]
-    }
+    },
+    "contract_address": "hotel-71-pk2"
   },
   {
     "address": "yankee-4-pk3",
@@ -112,7 +115,8 @@
       },
       "isSpam": "november-307",
       "spamClassifications": []
-    }
+    },
+    "contract_address": "victor-8-pk3"
   },
   {
     "address": "india-28-pk4",
@@ -141,6 +145,7 @@
       "spamClassifications": [
         "bravo-357"
       ]
-    }
+    },
+    "contract_address": "tango-85-pk4"
   }
 ]

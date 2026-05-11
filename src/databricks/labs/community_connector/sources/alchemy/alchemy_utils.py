@@ -246,12 +246,19 @@ def normalise_nft_record(record: dict[str, Any]) -> dict[str, Any]:
 
     - Lowercase ``openSeaMetadata`` on the embedded contract.
     - Coerce ``raw.metadata`` to a string map.
+    - Lift ``contract.address`` to a top-level ``contract_address`` field
+      so it can be used as a primary key. The ingestion framework treats
+      ``primary_keys`` entries as flat top-level column names and does
+      not walk nested structs.
     """
     if not record:
         return record
     out = dict(record)
     if "contract" in out:
-        out["contract"] = normalise_contract(out.get("contract"))
+        contract = normalise_contract(out.get("contract"))
+        out["contract"] = contract
+        if isinstance(contract, dict) and contract.get("address"):
+            out["contract_address"] = contract["address"]
     raw = out.get("raw")
     if isinstance(raw, dict):
         new_raw = dict(raw)

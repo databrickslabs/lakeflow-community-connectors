@@ -73,7 +73,8 @@
       "uniform-374",
       "papa-339"
     ],
-    "balance": "zulu-846"
+    "balance": "zulu-846",
+    "contract_address": "delta-22-pk0"
   },
   {
     "owner": "charlie--pk1",
@@ -151,7 +152,8 @@
     "owners": [
       "juliet-174"
     ],
-    "balance": "echo-617"
+    "balance": "echo-617",
+    "contract_address": "zulu-105-pk1"
   },
   {
     "owner": "kilo-431-pk2",
@@ -223,7 +225,8 @@
       "transactionHash": "tango-879"
     },
     "owners": [],
-    "balance": "tango-847"
+    "balance": "tango-847",
+    "contract_address": "india-22-pk2"
   },
   {
     "owner": "november-pk3",
@@ -302,7 +305,8 @@
       "foxtrot-406",
       "oscar-276"
     ],
-    "balance": "kilo-831"
+    "balance": "kilo-831",
+    "contract_address": "india-82-pk3"
   },
   {
     "owner": "golf-160-pk4",
@@ -376,6 +380,7 @@
       "transactionHash": "zulu-690"
     },
     "owners": [],
-    "balance": "romeo-743"
+    "balance": "romeo-743",
+    "contract_address": "tango-90-pk4"
   }
 ]

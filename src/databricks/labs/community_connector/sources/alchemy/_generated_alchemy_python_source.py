@@ -685,6 +685,7 @@ def register_lakeflow_source(spark):
             [
                 StructField("address", StringType(), False),
                 StructField("network", StringType(), False),
+                StructField("contract_address", StringType(), False),
                 StructField("contract", CONTRACT_METADATA_STRUCT, False),
             ]
         ),
@@ -748,6 +749,7 @@ def register_lakeflow_source(spark):
             [
                 StructField("owner", StringType(), False),
                 StructField("network", StringType(), False),
+                StructField("contract_address", StringType(), False),
                 StructField("contract", CONTRACT_METADATA_STRUCT, False),
                 StructField("tokenId", StringType(), False),
                 StructField("tokenType", StringType(), True),
@@ -768,6 +770,7 @@ def register_lakeflow_source(spark):
         "nft_metadata": StructType(
             [
                 StructField("network", StringType(), False),
+                StructField("contract_address", StringType(), False),
                 StructField("contract", CONTRACT_METADATA_STRUCT, False),
                 StructField("tokenId", StringType(), False),
                 StructField("tokenType", StringType(), True),
@@ -829,9 +832,10 @@ def register_lakeflow_source(spark):
             "ingestion_type": "snapshot",
         },
         "nft_collections_by_wallet": {
-            # ``contract.address`` is a nested field; the engine accepts
-            # dotted paths as PK references.
-            "primary_keys": ["address", "network", "contract.address"],
+            # ``contract_address`` is hoisted from nested ``contract.address``
+            # in ``normalise_nft_record``. The ingestion framework requires
+            # primary-key entries to be flat top-level column names.
+            "primary_keys": ["address", "network", "contract_address"],
             "ingestion_type": "snapshot",
         },
         "wallet_transactions": {
@@ -855,11 +859,11 @@ def register_lakeflow_source(spark):
             "ingestion_type": "append",
         },
         "nfts_by_wallet": {
-            "primary_keys": ["owner", "network", "contract.address", "tokenId"],
+            "primary_keys": ["owner", "network", "contract_address", "tokenId"],
             "ingestion_type": "snapshot",
         },
         "nft_metadata": {
-            "primary_keys": ["network", "contract.address", "tokenId"],
+            "primary_keys": ["network", "contract_address", "tokenId"],
             "ingestion_type": "snapshot",
         },
         "nft_contract_metadata": {
@@ -1175,12 +1179,19 @@ def register_lakeflow_source(spark):
 
         - Lowercase ``openSeaMetadata`` on the embedded contract.
         - Coerce ``raw.metadata`` to a string map.
+        - Lift ``contract.address`` to a top-level ``contract_address`` field
+          so it can be used as a primary key. The ingestion framework treats
+          ``primary_keys`` entries as flat top-level column names and does
+          not walk nested structs.
         """
         if not record:
             return record
         out = dict(record)
         if "contract" in out:
-            out["contract"] = normalise_contract(out.get("contract"))
+            contract = normalise_contract(out.get("contract"))
+            out["contract"] = contract
+            if isinstance(contract, dict) and contract.get("address"):
+                out["contract_address"] = contract["address"]
         raw = out.get("raw")
         if isinstance(raw, dict):
             new_raw = dict(raw)

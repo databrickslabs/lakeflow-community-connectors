@@ -199,6 +199,7 @@ TABLE_SCHEMAS: dict[str, StructType] = {
         [
             StructField("address", StringType(), False),
             StructField("network", StringType(), False),
+            StructField("contract_address", StringType(), False),
             StructField("contract", CONTRACT_METADATA_STRUCT, False),
         ]
     ),
@@ -262,6 +263,7 @@ TABLE_SCHEMAS: dict[str, StructType] = {
         [
             StructField("owner", StringType(), False),
             StructField("network", StringType(), False),
+            StructField("contract_address", StringType(), False),
             StructField("contract", CONTRACT_METADATA_STRUCT, False),
             StructField("tokenId", StringType(), False),
             StructField("tokenType", StringType(), True),
@@ -282,6 +284,7 @@ TABLE_SCHEMAS: dict[str, StructType] = {
     "nft_metadata": StructType(
         [
             StructField("network", StringType(), False),
+            StructField("contract_address", StringType(), False),
             StructField("contract", CONTRACT_METADATA_STRUCT, False),
             StructField("tokenId", StringType(), False),
             StructField("tokenType", StringType(), True),
@@ -343,9 +346,10 @@ TABLE_METADATA: dict[str, dict] = {
         "ingestion_type": "snapshot",
     },
     "nft_collections_by_wallet": {
-        # ``contract.address`` is a nested field; the engine accepts
-        # dotted paths as PK references.
-        "primary_keys": ["address", "network", "contract.address"],
+        # ``contract_address`` is hoisted from nested ``contract.address``
+        # in ``normalise_nft_record``. The ingestion framework requires
+        # primary-key entries to be flat top-level column names.
+        "primary_keys": ["address", "network", "contract_address"],
         "ingestion_type": "snapshot",
     },
     "wallet_transactions": {
@@ -369,11 +373,11 @@ TABLE_METADATA: dict[str, dict] = {
         "ingestion_type": "append",
     },
     "nfts_by_wallet": {
-        "primary_keys": ["owner", "network", "contract.address", "tokenId"],
+        "primary_keys": ["owner", "network", "contract_address", "tokenId"],
         "ingestion_type": "snapshot",
     },
     "nft_metadata": {
-        "primary_keys": ["network", "contract.address", "tokenId"],
+        "primary_keys": ["network", "contract_address", "tokenId"],
         "ingestion_type": "snapshot",
     },
     "nft_contract_metadata": {
