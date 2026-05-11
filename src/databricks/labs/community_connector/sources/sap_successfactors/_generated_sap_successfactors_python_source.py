@@ -8024,8 +8024,8 @@ def register_lakeflow_source(spark):
             return map(lambda x: parse_value(x, self.schema), records)
 
         def _read_table_metadata(self):
-            table_name_list = self.options.get(TABLE_NAME_LIST, "")
-            table_names = [o.strip() for o in table_name_list.split(",") if o.strip()]
+            table_name_list = self.options.get(TABLE_NAME_LIST)
+            table_names = json.loads(table_name_list) if table_name_list else []
             all_records = []
             table_configs = json.loads(self.options.get(TABLE_CONFIGS, "{}"))
             for table in table_names:

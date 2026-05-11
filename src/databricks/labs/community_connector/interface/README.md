@@ -29,7 +29,7 @@ To integrate with the Spark Declarative Pipeline (SDP) used by Lakeflow Communit
 spark.read.format("lakeflow_connect")
      .option("databricks.connection", connection_name)
      .option("tableName", "_community_table_metadata")
-     .option("tableNameList", ",".join(table_list))
+     .option("tableNameList", json.dumps(table_list))
      .load()
 
 # API to list all tables
@@ -38,7 +38,7 @@ spark.read.format("lakeflow_connect")
 spark.read.format("lakeflow_connect")
      .option("databricks.connection", connection_name)
      .option("tableName", "_lakeflow_table_list")
-     .option("tableNameList", ",".join(table_list))
+     .option("tableNameList", json.dumps(table_list))
      .load()
 
 
