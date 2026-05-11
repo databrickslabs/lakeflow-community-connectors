@@ -1,0 +1,163 @@
+# Alchemy — Portfolio, Prices, and NFT v3 APIs.
+#
+# Two URL shapes:
+# * Portfolio + Prices: `https://api.g.alchemy.com/...`
+# * NFT v3:             `https://{network}.g.alchemy.com/...`
+# The simulator only matches on the path component, so both shapes are
+# handled by a single entry per endpoint path.
+#
+# Connector flow:
+# * Portfolio (tokens / token_balances / nft_collections / wallet_transactions)
+#   → POST with a JSON body that includes the network(s) inline.  All four
+#   use `pageKey` cursor pagination inside the `data` envelope.
+# * Prices by-symbol / by-address → single-page, no pagination.
+# * Prices historical → POST with `startTime`/`endTime` range; the
+#   connector walks the range in interval-sized windows so the simulator
+#   does not need to model pagination.
+# * NFT v3 → GET with subdomain-routed network; `pageKey` cursor for
+#   `getNFTsForOwner`.  The other three NFT v3 endpoints return a
+#   single response.
+#
+# Cursor capping (Trigger.AvailableNow termination): the connector caps
+# its returned cursor at `_init_ts` for the two append tables
+# (`wallet_transactions`, `token_prices_historical`).  The relevant
+# endpoints below declare `synthesize_future_records` so simulate-mode
+# tests actually exercise the cap rather than draining a static window.
+
+endpoints:
+  # ===================================================================== #
+  # Portfolio API — POST, body contains network(s)
+  # ===================================================================== #
+
+  # ---- tokens_by_wallet (snapshot) ----
+  # Returns `{data: {tokens: [...], pageKey: ...}}`.  The simulator's
+  # `none` pagination style returns the whole corpus in one page and
+  # leaves `pageKey` unset (null), which is the connector's stop signal.
+  - path: "/data/v1/{api_key}/assets/tokens/by-address"
+    method: POST
+    corpus: tokens_by_wallet
+    response:
+      pagination_style: none
+      wrapper: {records_key: "data.tokens", extras: {pageKey: null}}
+
+  # ---- token_balances_by_wallet (snapshot) ----
+  - path: "/data/v1/{api_key}/assets/tokens/balances/by-address"
+    method: POST
+    corpus: token_balances_by_wallet
+    response:
+      pagination_style: none
+      wrapper: {records_key: "data.tokens", extras: {pageKey: null}}
+
+  # ---- nft_collections_by_wallet (snapshot) ----
+  - path: "/data/v1/{api_key}/assets/nfts/contracts/by-address"
+    method: POST
+    corpus: nft_collections_by_wallet
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: "data.contracts"
+        extras: {pageKey: null, totalCount: 0}
+
+  # ---- wallet_transactions (append, dual-cursor) ----
+  # Response is flat (no `data` envelope): `{transactions: [...], after:
+  # null, before: null, totalCount: N}`.  `synthesize_future_records`
+  # appends three rows past `_init_ts` so the connector's init-time cap
+  # is exercised; without it the corpus would naturally fit inside the
+  # cap and the test would never validate the termination contract.
+  - path: "/data/v1/{api_key}/transactions/history/by-address"
+    method: POST
+    corpus: wallet_transactions
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: transactions
+        extras: {after: null, before: null, totalCount: 0}
+    synthesize_future_records:
+      cursor_field: timeStamp
+      count: 3
+
+  # ===================================================================== #
+  # Prices API
+  # ===================================================================== #
+
+  # ---- token_prices_by_symbol (snapshot, GET) ----
+  - path: "/prices/v1/{api_key}/tokens/by-symbol"
+    method: GET
+    corpus: token_prices_by_symbol
+    response:
+      pagination_style: none
+      wrapper: {records_key: data}
+
+  # ---- token_prices_by_address (snapshot, POST) ----
+  - path: "/prices/v1/{api_key}/tokens/by-address"
+    method: POST
+    corpus: token_prices_by_address
+    response:
+      pagination_style: none
+      wrapper: {records_key: data}
+
+  # ---- token_prices_historical (append, range-query) ----
+  # Response: `{symbol|network+address, currency, data: [...]}`.  The
+  # connector splits the request range into interval-sized windows so
+  # the simulator does not need to model pagination — each window is a
+  # single request.  Cursor-cap test relies on the simulator returning
+  # rows whose `timestamp` extends past `_init_ts`; declare it so the
+  # connector's init-time cap is forced into the test path.
+  - path: "/prices/v1/{api_key}/tokens/historical"
+    method: POST
+    corpus: token_prices_historical
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras: {currency: "usd"}
+    synthesize_future_records:
+      cursor_field: timestamp
+      count: 3
+
+  # ===================================================================== #
+  # NFT API v3 — GET, subdomain-routed network
+  # ===================================================================== #
+
+  # ---- nfts_by_wallet (snapshot, paginated) ----
+  - path: "/nft/v3/{api_key}/getNFTsForOwner"
+    method: GET
+    corpus: nfts_by_wallet
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: ownedNfts
+        extras:
+          pageKey: null
+          totalCount: 0
+          validAt:
+            blockNumber: 0
+            blockHash: ""
+            blockTimestamp: ""
+
+  # ---- nft_metadata (single entity) ----
+  - path: "/nft/v3/{api_key}/getNFTMetadata"
+    method: GET
+    corpus: nft_metadata
+    response:
+      pagination_style: none
+      single_entity: true
+
+  # ---- nft_contract_metadata (single entity) ----
+  - path: "/nft/v3/{api_key}/getContractMetadata"
+    method: GET
+    corpus: nft_contract_metadata
+    response:
+      pagination_style: none
+      single_entity: true
+
+  # ---- nft_floor_prices (single entity, dynamic keys) ----
+  # Response is a dynamic object keyed by marketplace name; the
+  # connector iterates over its keys.  Best modelled as a single
+  # entity since there is no array.
+  - path: "/nft/v3/{api_key}/getFloorPrice"
+    method: GET
+    corpus: nft_floor_prices
+    response:
+      pagination_style: none
+      single_entity: true

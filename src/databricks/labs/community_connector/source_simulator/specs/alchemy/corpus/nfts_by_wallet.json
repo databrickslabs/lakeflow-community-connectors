@@ -1,0 +1,381 @@
+[
+  {
+    "owner": "echo-777-pk0",
+    "network": "golf-536-pk0",
+    "contract": {
+      "address": "delta-22-pk0",
+      "name": "alpha-422",
+      "symbol": "mike-374",
+      "totalSupply": "alpha-372",
+      "tokenType": "foxtrot-253",
+      "contractDeployer": "echo-419",
+      "deployedBlockNumber": 42332,
+      "openseaMetadata": {
+        "floorPrice": 153.9,
+        "collectionName": "kilo-531",
+        "safelistRequestStatus": "golf-250",
+        "imageUrl": "whiskey-108",
+        "description": "juliet-487",
+        "externalUrl": "bravo-407",
+        "twitterUsername": "romeo-776",
+        "discordUrl": "mike-674",
+        "bannerImageUrl": "quebec-696",
+        "lastIngestedAt": "sierra-885"
+      },
+      "isSpam": "india-305",
+      "spamClassifications": []
+    },
+    "tokenId": "foxtrot--pk0",
+    "tokenType": "echo-990",
+    "name": "zulu-932",
+    "description": "india-872",
+    "image": {
+      "cachedUrl": "charlie-545",
+      "thumbnailUrl": "bravo-433",
+      "pngUrl": "yankee-315",
+      "contentType": "whiskey-482",
+      "size": 51306,
+      "originalUrl": "echo-858"
+    },
+    "raw": {
+      "tokenUri": "foxtrot-996",
+      "metadata": {
+        "key_0": "oscar-999",
+        "key_1": "zulu-462"
+      },
+      "error": "papa-887"
+    },
+    "collection": {
+      "name": "bravo-356",
+      "slug": "yankee-293",
+      "externalUrl": "golf-375",
+      "bannerImageUrl": "whiskey-313"
+    },
+    "tokenUri": "india-187",
+    "timeLastUpdated": "sierra-712",
+    "acquiredAt": {
+      "blockTimestamp": "yankee-570",
+      "blockNumber": 82297
+    },
+    "animation": {
+      "cachedUrl": "delta-975",
+      "contentType": "papa-483",
+      "size": 70861,
+      "originalUrl": "delta-595"
+    },
+    "mint": {
+      "mintAddress": "kilo-617",
+      "blockNumber": 66360,
+      "timestamp": "bravo-137",
+      "transactionHash": "quebec-540"
+    },
+    "owners": [
+      "uniform-374",
+      "papa-339"
+    ],
+    "balance": "zulu-846"
+  },
+  {
+    "owner": "charlie--pk1",
+    "network": "tango-64-pk1",
+    "contract": {
+      "address": "zulu-105-pk1",
+      "name": "alpha-176",
+      "symbol": "whiskey-538",
+      "totalSupply": "hotel-395",
+      "tokenType": "india-379",
+      "contractDeployer": "yankee-161",
+      "deployedBlockNumber": 38355,
+      "openseaMetadata": {
+        "floorPrice": 681.07,
+        "collectionName": "kilo-663",
+        "safelistRequestStatus": "uniform-546",
+        "imageUrl": "oscar-859",
+        "description": "juliet-322",
+        "externalUrl": "romeo-226",
+        "twitterUsername": "kilo-309",
+        "discordUrl": "tango-681",
+        "bannerImageUrl": "whiskey-834",
+        "lastIngestedAt": "lima-788"
+      },
+      "isSpam": "delta-251",
+      "spamClassifications": [
+        "delta-583",
+        "india-525"
+      ]
+    },
+    "tokenId": "kilo-690-pk1",
+    "tokenType": "sierra-444",
+    "name": "sierra-910",
+    "description": "xray-109",
+    "image": {
+      "cachedUrl": "papa-182",
+      "thumbnailUrl": "romeo-782",
+      "pngUrl": "yankee-784",
+      "contentType": "papa-545",
+      "size": 3120,
+      "originalUrl": "hotel-680"
+    },
+    "raw": {
+      "tokenUri": "victor-813",
+      "metadata": {
+        "key_0": "uniform-319",
+        "key_1": "romeo-272"
+      },
+      "error": "victor-334"
+    },
+    "collection": {
+      "name": "tango-834",
+      "slug": "whiskey-188",
+      "externalUrl": "bravo-577",
+      "bannerImageUrl": "yankee-260"
+    },
+    "tokenUri": "papa-735",
+    "timeLastUpdated": "victor-691",
+    "acquiredAt": {
+      "blockTimestamp": "zulu-772",
+      "blockNumber": 38447
+    },
+    "animation": {
+      "cachedUrl": "bravo-983",
+      "contentType": "kilo-313",
+      "size": 22634,
+      "originalUrl": "golf-202"
+    },
+    "mint": {
+      "mintAddress": "quebec-689",
+      "blockNumber": 40201,
+      "timestamp": "mike-564",
+      "transactionHash": "tango-442"
+    },
+    "owners": [
+      "juliet-174"
+    ],
+    "balance": "echo-617"
+  },
+  {
+    "owner": "kilo-431-pk2",
+    "network": "yankee-6-pk2",
+    "contract": {
+      "address": "india-22-pk2",
+      "name": "sierra-914",
+      "symbol": "india-384",
+      "totalSupply": "golf-594",
+      "tokenType": "sierra-449",
+      "contractDeployer": "papa-618",
+      "deployedBlockNumber": 25270,
+      "openseaMetadata": {
+        "floorPrice": 970.29,
+        "collectionName": "quebec-518",
+        "safelistRequestStatus": "november-371",
+        "imageUrl": "india-420",
+        "description": "sierra-696",
+        "externalUrl": "oscar-985",
+        "twitterUsername": "tango-271",
+        "discordUrl": "lima-756",
+        "bannerImageUrl": "november-294",
+        "lastIngestedAt": "charlie-446"
+      },
+      "isSpam": "mike-976",
+      "spamClassifications": []
+    },
+    "tokenId": "delta-38-pk2",
+    "tokenType": "tango-591",
+    "name": "quebec-558",
+    "description": "hotel-322",
+    "image": {
+      "cachedUrl": "bravo-416",
+      "thumbnailUrl": "november-921",
+      "pngUrl": "november-550",
+      "contentType": "whiskey-550",
+      "size": 18877,
+      "originalUrl": "golf-114"
+    },
+    "raw": {
+      "tokenUri": "romeo-745",
+      "metadata": {
+        "key_0": "alpha-775"
+      },
+      "error": "yankee-210"
+    },
+    "collection": {
+      "name": "xray-599",
+      "slug": "india-504",
+      "externalUrl": "uniform-610",
+      "bannerImageUrl": "oscar-583"
+    },
+    "tokenUri": "whiskey-850",
+    "timeLastUpdated": "delta-388",
+    "acquiredAt": {
+      "blockTimestamp": "lima-962",
+      "blockNumber": 21506
+    },
+    "animation": {
+      "cachedUrl": "oscar-154",
+      "contentType": "quebec-148",
+      "size": 55866,
+      "originalUrl": "zulu-189"
+    },
+    "mint": {
+      "mintAddress": "papa-335",
+      "blockNumber": 22585,
+      "timestamp": "juliet-850",
+      "transactionHash": "tango-879"
+    },
+    "owners": [],
+    "balance": "tango-847"
+  },
+  {
+    "owner": "november-pk3",
+    "network": "victor-6-pk3",
+    "contract": {
+      "address": "india-82-pk3",
+      "name": "oscar-736",
+      "symbol": "tango-111",
+      "totalSupply": "bravo-390",
+      "tokenType": "hotel-843",
+      "contractDeployer": "yankee-184",
+      "deployedBlockNumber": 36741,
+      "openseaMetadata": {
+        "floorPrice": 457.2,
+        "collectionName": "delta-667",
+        "safelistRequestStatus": "echo-793",
+        "imageUrl": "mike-159",
+        "description": "golf-910",
+        "externalUrl": "foxtrot-507",
+        "twitterUsername": "uniform-106",
+        "discordUrl": "xray-494",
+        "bannerImageUrl": "quebec-779",
+        "lastIngestedAt": "mike-720"
+      },
+      "isSpam": "sierra-380",
+      "spamClassifications": [
+        "november-128",
+        "sierra-348"
+      ]
+    },
+    "tokenId": "whiskey--pk3",
+    "tokenType": "alpha-273",
+    "name": "alpha-700",
+    "description": "charlie-370",
+    "image": {
+      "cachedUrl": "zulu-966",
+      "thumbnailUrl": "delta-194",
+      "pngUrl": "tango-621",
+      "contentType": "kilo-922",
+      "size": 38632,
+      "originalUrl": "november-462"
+    },
+    "raw": {
+      "tokenUri": "foxtrot-997",
+      "metadata": {
+        "key_0": "sierra-693",
+        "key_1": "india-836"
+      },
+      "error": "alpha-556"
+    },
+    "collection": {
+      "name": "kilo-226",
+      "slug": "victor-559",
+      "externalUrl": "foxtrot-538",
+      "bannerImageUrl": "zulu-669"
+    },
+    "tokenUri": "romeo-961",
+    "timeLastUpdated": "whiskey-613",
+    "acquiredAt": {
+      "blockTimestamp": "oscar-870",
+      "blockNumber": 3973
+    },
+    "animation": {
+      "cachedUrl": "romeo-735",
+      "contentType": "tango-519",
+      "size": 88550,
+      "originalUrl": "oscar-838"
+    },
+    "mint": {
+      "mintAddress": "golf-879",
+      "blockNumber": 93732,
+      "timestamp": "xray-509",
+      "transactionHash": "victor-135"
+    },
+    "owners": [
+      "foxtrot-406",
+      "oscar-276"
+    ],
+    "balance": "kilo-831"
+  },
+  {
+    "owner": "golf-160-pk4",
+    "network": "papa-733-pk4",
+    "contract": {
+      "address": "tango-90-pk4",
+      "name": "xray-391",
+      "symbol": "whiskey-787",
+      "totalSupply": "yankee-881",
+      "tokenType": "bravo-781",
+      "contractDeployer": "hotel-523",
+      "deployedBlockNumber": 85416,
+      "openseaMetadata": {
+        "floorPrice": 348.86,
+        "collectionName": "quebec-570",
+        "safelistRequestStatus": "sierra-323",
+        "imageUrl": "mike-146",
+        "description": "kilo-677",
+        "externalUrl": "uniform-435",
+        "twitterUsername": "mike-846",
+        "discordUrl": "zulu-627",
+        "bannerImageUrl": "uniform-266",
+        "lastIngestedAt": "kilo-426"
+      },
+      "isSpam": "oscar-643",
+      "spamClassifications": [
+        "zulu-545"
+      ]
+    },
+    "tokenId": "november-pk4",
+    "tokenType": "kilo-329",
+    "name": "oscar-894",
+    "description": "golf-861",
+    "image": {
+      "cachedUrl": "alpha-615",
+      "thumbnailUrl": "victor-713",
+      "pngUrl": "bravo-373",
+      "contentType": "juliet-552",
+      "size": 94336,
+      "originalUrl": "hotel-837"
+    },
+    "raw": {
+      "tokenUri": "juliet-414",
+      "metadata": {
+        "key_0": "charlie-505"
+      },
+      "error": "echo-908"
+    },
+    "collection": {
+      "name": "whiskey-466",
+      "slug": "juliet-281",
+      "externalUrl": "bravo-373",
+      "bannerImageUrl": "delta-643"
+    },
+    "tokenUri": "whiskey-465",
+    "timeLastUpdated": "alpha-157",
+    "acquiredAt": {
+      "blockTimestamp": "romeo-191",
+      "blockNumber": 54575
+    },
+    "animation": {
+      "cachedUrl": "lima-419",
+      "contentType": "uniform-786",
+      "size": 33135,
+      "originalUrl": "uniform-242"
+    },
+    "mint": {
+      "mintAddress": "lima-498",
+      "blockNumber": 80085,
+      "timestamp": "alpha-389",
+      "transactionHash": "zulu-690"
+    },
+    "owners": [],
+    "balance": "romeo-743"
+  }
+]

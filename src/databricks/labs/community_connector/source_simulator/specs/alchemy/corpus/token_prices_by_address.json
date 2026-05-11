@@ -1,0 +1,61 @@
+[
+  {
+    "network": "quebec-4-pk0",
+    "address": "india-63-pk0",
+    "prices": [],
+    "error": "echo-759"
+  },
+  {
+    "network": "quebec-2-pk1",
+    "address": "papa-866-pk1",
+    "prices": [
+      {
+        "currency": "alpha-810",
+        "value": "november-401",
+        "lastUpdatedAt": "yankee-205"
+      }
+    ],
+    "error": "india-141"
+  },
+  {
+    "network": "mike-393-pk2",
+    "address": "alpha-85-pk2",
+    "prices": [
+      {
+        "currency": "victor-697",
+        "value": "november-836",
+        "lastUpdatedAt": "oscar-701"
+      }
+    ],
+    "error": "charlie-393"
+  },
+  {
+    "network": "oscar-48-pk3",
+    "address": "charlie--pk3",
+    "prices": [
+      {
+        "currency": "oscar-879",
+        "value": "papa-762",
+        "lastUpdatedAt": "foxtrot-868"
+      },
+      {
+        "currency": "november-243",
+        "value": "xray-960",
+        "lastUpdatedAt": "romeo-774"
+      }
+    ],
+    "error": "charlie-230"
+  },
+  {
+    "network": "juliet-1-pk4",
+    "address": "oscar-83-pk4",
+    "prices": [
+      {
+        "currency": "bravo-693",
+        "value": "papa-140",
+        "lastUpdatedAt": "zulu-538"
+      }
+    ],
+    "error": "juliet-768"
+  }
+]

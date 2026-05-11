@@ -1,0 +1,146 @@
+[
+  {
+    "address": "quebec-6-pk0",
+    "network": "sierra-2-pk0",
+    "contract": {
+      "address": "delta-68-pk0",
+      "name": "mike-348",
+      "symbol": "quebec-117",
+      "totalSupply": "papa-882",
+      "tokenType": "papa-587",
+      "contractDeployer": "juliet-742",
+      "deployedBlockNumber": 39333,
+      "openseaMetadata": {
+        "floorPrice": 962.56,
+        "collectionName": "xray-505",
+        "safelistRequestStatus": "romeo-680",
+        "imageUrl": "quebec-937",
+        "description": "charlie-885",
+        "externalUrl": "hotel-925",
+        "twitterUsername": "quebec-718",
+        "discordUrl": "golf-749",
+        "bannerImageUrl": "india-549",
+        "lastIngestedAt": "xray-862"
+      },
+      "isSpam": "victor-996",
+      "spamClassifications": [
+        "romeo-968"
+      ]
+    }
+  },
+  {
+    "address": "juliet-5-pk1",
+    "network": "november-pk1",
+    "contract": {
+      "address": "hotel-64-pk1",
+      "name": "november-536",
+      "symbol": "mike-475",
+      "totalSupply": "juliet-674",
+      "tokenType": "echo-643",
+      "contractDeployer": "mike-523",
+      "deployedBlockNumber": 54712,
+      "openseaMetadata": {
+        "floorPrice": 580.29,
+        "collectionName": "bravo-502",
+        "safelistRequestStatus": "zulu-206",
+        "imageUrl": "uniform-151",
+        "description": "xray-205",
+        "externalUrl": "mike-836",
+        "twitterUsername": "victor-497",
+        "discordUrl": "november-326",
+        "bannerImageUrl": "kilo-867",
+        "lastIngestedAt": "bravo-462"
+      },
+      "isSpam": "bravo-792",
+      "spamClassifications": [
+        "tango-704"
+      ]
+    }
+  },
+  {
+    "address": "delta-18-pk2",
+    "network": "foxtrot--pk2",
+    "contract": {
+      "address": "hotel-71-pk2",
+      "name": "quebec-279",
+      "symbol": "india-630",
+      "totalSupply": "quebec-660",
+      "tokenType": "mike-436",
+      "contractDeployer": "oscar-996",
+      "deployedBlockNumber": 81776,
+      "openseaMetadata": {
+        "floorPrice": 714.61,
+        "collectionName": "yankee-678",
+        "safelistRequestStatus": "delta-914",
+        "imageUrl": "quebec-605",
+        "description": "whiskey-806",
+        "externalUrl": "romeo-875",
+        "twitterUsername": "hotel-865",
+        "discordUrl": "uniform-897",
+        "bannerImageUrl": "juliet-270",
+        "lastIngestedAt": "november-687"
+      },
+      "isSpam": "xray-226",
+      "spamClassifications": [
+        "echo-834",
+        "xray-346"
+      ]
+    }
+  },
+  {
+    "address": "yankee-4-pk3",
+    "network": "romeo-31-pk3",
+    "contract": {
+      "address": "victor-8-pk3",
+      "name": "oscar-783",
+      "symbol": "xray-460",
+      "totalSupply": "romeo-777",
+      "tokenType": "xray-902",
+      "contractDeployer": "foxtrot-695",
+      "deployedBlockNumber": 27684,
+      "openseaMetadata": {
+        "floorPrice": 21.44,
+        "collectionName": "foxtrot-483",
+        "safelistRequestStatus": "juliet-467",
+        "imageUrl": "mike-466",
+        "description": "quebec-236",
+        "externalUrl": "papa-666",
+        "twitterUsername": "charlie-517",
+        "discordUrl": "juliet-144",
+        "bannerImageUrl": "november-597",
+        "lastIngestedAt": "papa-727"
+      },
+      "isSpam": "november-307",
+      "spamClassifications": []
+    }
+  },
+  {
+    "address": "india-28-pk4",
+    "network": "mike-119-pk4",
+    "contract": {
+      "address": "tango-85-pk4",
+      "name": "juliet-248",
+      "symbol": "lima-122",
+      "totalSupply": "yankee-172",
+      "tokenType": "whiskey-120",
+      "contractDeployer": "sierra-749",
+      "deployedBlockNumber": 85072,
+      "openseaMetadata": {
+        "floorPrice": 858.74,
+        "collectionName": "quebec-214",
+        "safelistRequestStatus": "golf-595",
+        "imageUrl": "golf-692",
+        "description": "whiskey-287",
+        "externalUrl": "papa-408",
+        "twitterUsername": "kilo-948",
+        "discordUrl": "oscar-168",
+        "bannerImageUrl": "juliet-242",
+        "lastIngestedAt": "yankee-704"
+      },
+      "isSpam": "oscar-544",
+      "spamClassifications": [
+        "bravo-357"
+      ]
+    }
+  }
+]

@@ -1,0 +1,40 @@
+{
+  "tokens_by_wallet": {
+    "wallet_address": "0xsimulator0000000000000000000000000000000"
+  },
+  "token_balances_by_wallet": {
+    "wallet_address": "0xsimulator0000000000000000000000000000000"
+  },
+  "nft_collections_by_wallet": {
+    "wallet_address": "0xsimulator0000000000000000000000000000000"
+  },
+  "wallet_transactions": {
+    "wallet_address": "0xsimulator0000000000000000000000000000000",
+    "network": "eth-mainnet"
+  },
+  "token_prices_by_symbol": {
+    "symbols": "ETH,BTC"
+  },
+  "token_prices_by_address": {
+    "addresses": "eth-mainnet:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+  },
+  "token_prices_historical": {
+    "symbol": "ETH",
+    "start_time": "2024-01-01T00:00:00Z",
+    "end_time": "2024-01-02T00:00:00Z",
+    "interval": "1d"
+  },
+  "nfts_by_wallet": {
+    "wallet_address": "0xsimulator0000000000000000000000000000000"
+  },
+  "nft_metadata": {
+    "contract_address": "0xsimulatorContractAddress00000000000000000",
+    "token_id": "1"
+  },
+  "nft_contract_metadata": {
+    "contract_address": "0xsimulatorContractAddress00000000000000000"
+  },
+  "nft_floor_prices": {
+    "contract_address": "0xsimulatorContractAddress00000000000000000"
+  }
+}
