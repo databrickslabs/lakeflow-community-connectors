@@ -227,9 +227,17 @@ class AlchemyLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         start_offset: dict | None = None,
         end_offset: dict | None = None,
     ) -> list[dict]:
-        """Split the historical-prices range into per-window partitions."""
+        """Split the historical-prices range into per-window partitions.
+
+        The framework calls this for every table when the connector
+        inherits from ``SupportsPartition`` — ``is_partitioned`` is only
+        honored on the streaming path. For non-partitioned tables we
+        raise ``NotImplementedError`` so the framework's per-task
+        proxy falls back to ``read_table`` (it treats any exception
+        from ``get_partitions`` as "this table isn't partitionable").
+        """
         if table_name != "token_prices_historical":
-            return [{"all": True}]
+            raise NotImplementedError(f"Table '{table_name}' does not support partitioned reads")
 
         interval = table_options.get("interval", "1d")
         # Default partition size = the interval's maximum API window.
