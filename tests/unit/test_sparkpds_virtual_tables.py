@@ -17,7 +17,7 @@ from databricks.labs.community_connector.interface import (
     SupportsPartition,
 )
 from databricks.labs.community_connector.sparkpds.lakeflow_datasource import (
-    NAMESPACES,
+    NAMESPACE,
     NAMESPACES_TABLE,
     PREFIX,
     TABLE_NAME,
@@ -66,16 +66,16 @@ class _NamespacedConnector(LakeflowConnect, SupportsNamespaces):
             return [["orgA", "repo1"], ["orgA", "repo2"]]
         return []
 
-    def list_tables_in_namespaces(self, namespaces=None):
+    def list_tables_in_namespace(self, namespace=None):
         all_pairs: list[tuple[list[str], str]] = [
+            ([], "global_settings"),
             (["orgA", "repo1"], "issues"),
             (["orgA", "repo2"], "issues"),
             (["orgB"], "users"),
         ]
-        if namespaces is None:
+        if namespace is None:
             return all_pairs
-        keys = {tuple(ns) for ns in namespaces}
-        return [(ns, tn) for ns, tn in all_pairs if tuple(ns) in keys]
+        return [(ns, tn) for ns, tn in all_pairs if ns == namespace]
 
 
 def _reader(connector: LakeflowConnect, table: str, **extra_opts) -> LakeflowBatchReader:
@@ -154,21 +154,33 @@ def test_tables_flat_connector_uses_list_tables_with_empty_namespace():
 def test_tables_namespaced_default_lists_everything():
     reader = _reader(_NamespacedConnector({}), TABLES_TABLE)
     assert reader._read_tables() == [
+        {"namespace": [], "table_name": "global_settings"},
         {"namespace": ["orgA", "repo1"], "table_name": "issues"},
         {"namespace": ["orgA", "repo2"], "table_name": "issues"},
         {"namespace": ["orgB"], "table_name": "users"},
     ]
 
 
-def test_tables_namespaced_filtered_by_namespaces_option():
+def test_tables_namespaced_root_only_with_empty_namespace():
+    """An explicit empty-list namespace selects only root-level tables."""
     reader = _reader(
         _NamespacedConnector({}),
         TABLES_TABLE,
-        **{NAMESPACES: json.dumps([["orgA", "repo1"], ["orgB"]])},
+        **{NAMESPACE: json.dumps([])},
+    )
+    assert reader._read_tables() == [
+        {"namespace": [], "table_name": "global_settings"},
+    ]
+
+
+def test_tables_namespaced_filtered_by_single_namespace_option():
+    reader = _reader(
+        _NamespacedConnector({}),
+        TABLES_TABLE,
+        **{NAMESPACE: json.dumps(["orgA", "repo1"])},
     )
     assert reader._read_tables() == [
         {"namespace": ["orgA", "repo1"], "table_name": "issues"},
-        {"namespace": ["orgB"], "table_name": "users"},
     ]
 
 

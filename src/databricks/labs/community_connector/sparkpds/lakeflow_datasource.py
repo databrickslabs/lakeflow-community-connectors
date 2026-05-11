@@ -50,7 +50,7 @@ TABLE_NAME_LIST = "tableNameList"
 TABLE_CONFIGS = "tableConfigs"
 IS_DELETE_FLOW = "isDeleteFlow"
 PREFIX = "prefix"
-NAMESPACES = "namespaces"
+NAMESPACE = "namespace"
 
 
 # PySpark's DataSource API requires camelCase method names and inherits
@@ -233,9 +233,13 @@ class LakeflowBatchReader(DataSourceReader):
 
     def _read_tables(self):
         if isinstance(self.lakeflow_connect, SupportsNamespaces):
-            namespaces_json = self.options.get(NAMESPACES)
-            namespaces = json.loads(namespaces_json) if namespaces_json else None
-            pairs = self.lakeflow_connect.list_tables_in_namespaces(namespaces)
+            namespace_json = self.options.get(NAMESPACE)
+            # `None` (option absent) = list every namespace.
+            # `[]` (explicit empty list) = list root-level tables.
+            namespace = (
+                json.loads(namespace_json) if namespace_json is not None else None
+            )
+            pairs = self.lakeflow_connect.list_tables_in_namespace(namespace)
             return [
                 {"namespace": ns, "table_name": tn} for ns, tn in pairs
             ]

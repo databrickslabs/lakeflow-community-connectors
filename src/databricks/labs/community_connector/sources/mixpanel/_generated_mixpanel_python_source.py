@@ -530,7 +530,7 @@ def register_lakeflow_source(spark):
             walk the full tree do so by recursing on each returned child. An
             empty return value means ``prefix`` has no further namespace children
             — the caller is expected to enumerate tables there via
-            :meth:`list_tables_in_namespaces`.
+            :meth:`list_tables_in_namespace`.
 
             Args:
                 prefix: A namespace path under which to list children. ``None`` or
@@ -540,17 +540,20 @@ def register_lakeflow_source(spark):
             """
 
         @abstractmethod
-        def list_tables_in_namespaces(
+        def list_tables_in_namespace(
             self,
-            namespaces: list[list[str]] | None = None,
+            namespace: list[str] | None = None,
         ) -> list[tuple[list[str], str]]:
-            """Return ``(namespace, table_name)`` pairs for the given namespaces.
+            """Return ``(namespace, table_name)`` pairs for one namespace path.
 
             Args:
-                namespaces: A list of namespace paths to enumerate tables for.
-                    ``None`` means "list tables across all namespaces the
-                    connector can enumerate". An empty list means "no namespaces"
-                    and must return an empty result.
+                namespace: The namespace path to enumerate tables for.
+                    - ``None`` means "list tables across every namespace the
+                      connector can enumerate".
+                    - An empty list ``[]`` means "list tables at the root"
+                      (tables that live outside any namespace).
+                    - A non-empty list lists tables under exactly that one
+                      namespace path.
             Returns:
                 A list of ``(namespace, table_name)`` tuples. ``namespace`` is the
                 full path (a list of strings); ``table_name`` is the table
@@ -1274,7 +1277,7 @@ def register_lakeflow_source(spark):
     TABLE_CONFIGS = "tableConfigs"
     IS_DELETE_FLOW = "isDeleteFlow"
     PREFIX = "prefix"
-    NAMESPACES = "namespaces"
+    NAMESPACE = "namespace"
 
 
     # PySpark's DataSource API requires camelCase method names and inherits
@@ -1457,9 +1460,13 @@ def register_lakeflow_source(spark):
 
         def _read_tables(self):
             if isinstance(self.lakeflow_connect, SupportsNamespaces):
-                namespaces_json = self.options.get(NAMESPACES)
-                namespaces = json.loads(namespaces_json) if namespaces_json else None
-                pairs = self.lakeflow_connect.list_tables_in_namespaces(namespaces)
+                namespace_json = self.options.get(NAMESPACE)
+                # `None` (option absent) = list every namespace.
+                # `[]` (explicit empty list) = list root-level tables.
+                namespace = (
+                    json.loads(namespace_json) if namespace_json is not None else None
+                )
+                pairs = self.lakeflow_connect.list_tables_in_namespace(namespace)
                 return [
                     {"namespace": ns, "table_name": tn} for ns, tn in pairs
                 ]
