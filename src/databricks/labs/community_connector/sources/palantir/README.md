@@ -123,7 +123,7 @@ The connector dynamically discovers all object types in your configured ontology
 - Only syncs new/updated records based on cursor field
 - Use when: object types have timestamp fields for tracking changes
 - Configuration: Specify `cursor_field` in table options
-- Pre-computes max cursor value via aggregate endpoint (falls back to orderBy desc)
+- Pre-computes max cursor value via the search endpoint (`orderBy desc, pageSize=1`)
 - On subsequent runs, skips data fetch entirely if no new records exist
 - Server-side filtering: uses `where: gt` via objectSet composition so the API only returns records newer than the checkpoint — no full scan needed on incremental runs
 
@@ -240,8 +240,7 @@ Databricks Delta Table (Unity Catalog)
 | `/api/v2/ontologies/{ontology}/objectTypes` | GET | List available tables |
 | `/api/v2/ontologies/{ontology}/objectTypes/{type}` | GET | Get schema and primary key |
 | `/api/v2/ontologies/{ontology}/objectSets/loadObjects?snapshot=true` | POST | Fetch data with consistent pagination |
-| `/api/v2/ontologies/{ontology}/objectSets/aggregate` | POST | Get max cursor value (primary) |
-| `/api/v2/ontologies/{ontology}/objects/{type}/search` | POST | Get max cursor value (fallback: orderBy desc, limit 1) |
+| `/api/v2/ontologies/{ontology}/objects/{type}/search` | POST | Get max cursor value (orderBy desc, limit 1) |
 
 ## Best Practices
 

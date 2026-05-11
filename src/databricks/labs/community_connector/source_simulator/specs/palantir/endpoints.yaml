@@ -3,8 +3,7 @@
 # The connector uses three endpoint groups:
 # * **objectTypes** (GET): list and describe object types (tables).
 # * **loadObjects** (POST): paginated data fetch with snapshot consistency.
-# * **aggregate** (POST): lightweight max-cursor lookup.
-# * **search** (POST): fallback max-cursor lookup via orderBy.
+# * **search** (POST): max-cursor lookup via orderBy desc + limit 1.
 #
 # The simulator serves single-page responses (nextPageToken: null) so
 # the connector's pagination loop terminates after one page per call.
@@ -32,6 +31,11 @@ endpoints:
         extras:
           nextPageToken: null
           totalCount: "4"
+          # Palantir always includes propertySecurities on
+          # loadObjects responses (per-property visibility metadata).
+          # Declaring it here keeps the live validator happy; the
+          # connector ignores it.
+          propertySecurities: []
     # Cap-validation: clone records with arrivalTimestamp = ``now() + N
     # hours`` so the corpus contains records past the connector's
     # ``_init_time``. ``test_read_terminates`` then exercises the cap
@@ -40,19 +44,7 @@ endpoints:
       cursor_field: arrivalTimestamp
       count: 3
 
-  # ---- aggregate (max cursor lookup) ----
-
-  - path: "/api/v2/ontologies/{ontology}/objectSets/aggregate"
-    method: POST
-    corpus: aggregate
-    response:
-      pagination_style: none
-      wrapper:
-        records_key: data
-        extras:
-          accuracy: ACCURATE
-
-  # ---- search (fallback max cursor) ----
+  # ---- search (max cursor lookup) ----
 
   - path: "/api/v2/ontologies/{ontology}/objects/{objectType}/search"
     method: POST

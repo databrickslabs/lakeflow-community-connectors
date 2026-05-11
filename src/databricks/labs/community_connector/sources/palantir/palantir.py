@@ -8,7 +8,7 @@ into Databricks using the LakeflowConnect interface.
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Dict, List, Iterator, Any, Set, Tuple
+from typing import Dict, List, Iterator, Any, Tuple
 
 import requests
 from pyspark.sql.types import (
@@ -85,11 +85,6 @@ class PalantirLakeflowConnect(LakeflowConnect):
         self._schema_cache: Dict[str, StructType] = {}
         self._metadata_cache: Dict[str, dict] = {}
         self._object_types_cache: Dict[str, dict] = None
-        # Tables for which the aggregate endpoint returned 404 (not
-        # supported by the object type). Avoids re-issuing the same
-        # doomed call on every CDC tick — saves one HTTP call per
-        # read for tables that don't aggregate.
-        self._aggregate_unsupported: Set[str] = set()
 
     def _ensure_object_types_cached(self) -> None:
         """
@@ -342,6 +337,7 @@ class PalantirLakeflowConnect(LakeflowConnect):
         self, table_name: str, page_size: int,
         where_clause: dict = None,
         max_records: int = 0,
+        order_by_field: str = None,
     ) -> Iterator[dict]:
         """
         Generator that yields records page by page, keeping only one page
@@ -349,13 +345,17 @@ class PalantirLakeflowConnect(LakeflowConnect):
 
         Args:
             max_records: Cap on total records yielded (0 = unlimited).
+            order_by_field: Optional field to sort records by (ascending).
+                Required for Strategy B incremental reads so the
+                connector can advance the offset to the last-emitted
+                record's cursor without skipping unread records.
         """
         object_set = self._build_object_set(table_name, where_clause)
         page_token = None
         emitted = 0
         while True:
             records, next_page_token = self._fetch_page(
-                object_set, page_token, page_size
+                object_set, page_token, page_size, order_by_field
             )
             for record in records:
                 if max_records and emitted >= max_records:
@@ -433,83 +433,24 @@ class PalantirLakeflowConnect(LakeflowConnect):
     def _get_max_cursor_value(
         self, table_name: str, cursor_field: str
     ) -> Any:
-        """
-        Get the maximum cursor field value. Tries the aggregate endpoint
-        first (lightweight, no records fetched). Falls back to orderBy
-        desc + limit 1 if aggregate fails (some object types don't
-        support aggregation).
-        """
-        result = self._get_max_cursor_via_aggregate(table_name, cursor_field)
-        if result is not None:
-            return result
+        """Get the maximum cursor field value via the search endpoint.
 
+        Earlier versions of this connector tried the ``aggregate``
+        endpoint first as a "lightweight max-cursor lookup" and fell
+        back to ``search``. In practice Palantir returns 500 for
+        aggregate against the ontology object types we use, so the
+        fallback path was the only one that ever produced a result.
+        We removed the aggregate code path to skip the doomed HTTP
+        round-trip on every CDC tick. ``search`` (``orderBy desc,
+        limit 1``) works universally and the payload-size difference
+        vs aggregate is negligible (one record vs one metric).
+        """
         return self._get_max_cursor_via_search(table_name, cursor_field)
-
-    def _get_max_cursor_via_aggregate(
-        self, table_name: str, cursor_field: str
-    ) -> Any:
-        """Get max cursor value using the aggregate endpoint.
-
-        Returns ``None`` when the aggregate call fails or its response
-        does not contain a ``max_cursor`` metric. Caller falls back to
-        :meth:`_get_max_cursor_via_search` in that case.
-
-        Failure modes are observable rather than silent:
-
-        * 404 → table doesn't support aggregation. Cached so subsequent
-          CDC ticks skip the doomed call entirely (saves 1 HTTP call
-          per read for the lifetime of the connector instance).
-        * Other ``RequestException`` (auth, network, 5xx) → logged at
-          ``warning`` so operators can grep for it; not cached so
-          transient failures retry on the next call.
-        """
-        if table_name in self._aggregate_unsupported:
-            return None
-
-        url = (
-            f"{self.base_url}/api/v2/ontologies/{self.ontology_api_name}"
-            f"/objectSets/aggregate"
-        )
-        body = {
-            "objectSet": {"type": "base", "objectType": table_name},
-            "aggregation": [
-                {"type": "max", "field": cursor_field, "name": "max_cursor"},
-            ],
-            "groupBy": [],
-        }
-        try:
-            response = self._session.post(url, json=body, timeout=30)
-            if response.status_code == 404:
-                self._aggregate_unsupported.add(table_name)
-                logger.debug(
-                    "aggregate not supported for %s.%s (404); "
-                    "falling back to search for the lifetime of this connector",
-                    table_name,
-                    cursor_field,
-                )
-                return None
-            response.raise_for_status()
-        except requests.RequestException as e:
-            logger.warning(
-                "aggregate failed for %s.%s: %s; falling back to search",
-                table_name,
-                cursor_field,
-                e,
-            )
-            return None
-
-        data = response.json()
-        groups = data.get("data", [])
-        if groups:
-            for metric in groups[0].get("metrics", []):
-                if metric.get("name") == "max_cursor":
-                    return metric.get("value")
-        return None
 
     def _get_max_cursor_via_search(
         self, table_name: str, cursor_field: str
     ) -> Any:
-        """Fallback: get max cursor value using orderBy desc, limit 1.
+        """Get max cursor value using ``orderBy desc, limit 1``.
 
         Returns ``None`` if the call fails (logged at ``warning``) or
         the response has no records. Caller treats ``None`` as ``no
@@ -530,7 +471,7 @@ class PalantirLakeflowConnect(LakeflowConnect):
             response.raise_for_status()
         except requests.RequestException as e:
             logger.warning(
-                "search fallback failed for %s.%s: %s; "
+                "search failed for %s.%s: %s; "
                 "cursor will not advance this tick",
                 table_name,
                 cursor_field,
@@ -552,34 +493,40 @@ class PalantirLakeflowConnect(LakeflowConnect):
         cursor_field: str,
     ) -> Tuple[Iterator[dict], dict]:
         """
-        Read data in incremental (CDC) mode using a generator with
-        server-side filtering.
+        Read data in incremental (CDC) mode — Strategy B (server-side
+        limit with last-emitted-cursor offset).
 
         Flow:
-        1. Call the aggregate endpoint to get the current max cursor value
-           (lightweight, no records fetched).
-        2. Cap the cursor at ``_init_time`` so a single trigger run only
-           drains data that existed when the connector started.
-        3. If max hasn't changed since checkpoint → return empty (no new data).
-        4. If this is an incremental run (prev checkpoint exists), use a
-           server-side 'where: gt' filter so the API only returns records
-           newer than the checkpoint — avoids full scan.
-        5. If this is the first run (no checkpoint), fetch all records
-           (no where clause).
-        6. Yield records via generator, one page at a time, respecting
-           ``max_records_per_batch``.
+        1. Build a server-side ``where: cursor > prev_max_cursor`` filter
+           so the API only returns records newer than the checkpoint.
+        2. Request records sorted by ``cursor_field`` ascending. Without
+           this the "first N records" returned by the API are in
+           arbitrary order and the offset can't safely advance to a
+           sub-range of the dataset.
+        3. Eagerly drain up to ``max_records_per_batch`` records into
+           memory, dropping anything with a null cursor and anything
+           past ``_init_time`` (the latter is deferred to the next
+           trigger run so this batch terminates).
+        4. Set the offset to the cursor of the LAST emitted record —
+           not the dataset max. If the admission cap was hit, the next
+           microbatch picks up via ``where: gt last_emitted`` and
+           drains the remainder. No records are skipped, regardless of
+           how the dataset compares to the cap.
+        5. If no records were emitted, return an empty iterator with
+           the same offset so Spark Streaming terminates the microbatch.
 
         Works with both SCD_TYPE_1 and SCD_TYPE_2 — the SCD type is
         handled by the framework's apply_changes, not by this method.
 
         Args:
-            table_name: Object type API name
-            start_offset: Offset with optional 'max_cursor_value'
+            table_name: Object type API name.
+            start_offset: Offset with optional 'max_cursor_value'.
             table_options: Options including optional 'page_size'
-            cursor_field: Field name to use for cursor tracking
+                and 'max_records_per_batch'.
+            cursor_field: Field name to use for cursor tracking.
 
         Returns:
-            Tuple of (generator of records, end offset dict)
+            Tuple of (records iterator, end offset dict).
         """
         page_size = int(table_options.get("page_size", "1000"))
         max_records = int(
@@ -589,63 +536,9 @@ class PalantirLakeflowConnect(LakeflowConnect):
         )
         prev_max_cursor = start_offset.get("max_cursor_value") if start_offset else None
 
-        # Step 1: Get current max cursor via aggregate (lightweight).
-        current_max_cursor = self._get_max_cursor_value(table_name, cursor_field)
-
-        # Step 2: Cap at _init_time so this trigger run doesn't chase
-        # data arriving after connector start.
-        #
-        # Comparison is in tz-aware UTC datetime space, not on raw
-        # strings. Lex compare breaks when Palantir's response uses a
-        # different ISO 8601 form than _init_time (e.g. ``+00:00`` vs
-        # ``Z``, fractional seconds, non-UTC offsets). Parsing into
-        # datetimes normalises all of those before comparing.
-        #
-        # Non-timestamp cursors (numeric IDs, UUIDs) return None from
-        # the parse and the cap is skipped. Termination for those
-        # cases is bounded by the offset-unchanged check below.
-        if current_max_cursor:
-            cursor_dt = self._to_utc_datetime(current_max_cursor)
-            init_dt = self._to_utc_datetime(self._init_time)
-            if (
-                cursor_dt is not None
-                and init_dt is not None
-                and cursor_dt > init_dt
-            ):
-                # Preserve cursor shape: a date-only cursor caps to a
-                # date-only string; a full-timestamp cursor caps to the
-                # full _init_time. Truncates _init_time to the cursor's
-                # length when shorter, otherwise uses _init_time as-is.
-                current_max_cursor = (
-                    self._init_time[: len(current_max_cursor)]
-                    if isinstance(current_max_cursor, str)
-                    and len(current_max_cursor) <= len(self._init_time)
-                    else self._init_time
-                )
-
-        # Use whichever is greater: previous checkpoint or current max.
-        # max() is only safe when both values are the same type, so we
-        # gate it on type equality. When types differ (typically because
-        # the upstream changed the cursor field's type), prefer the
-        # current value over the stale checkpoint.
-        if prev_max_cursor is not None and current_max_cursor is not None:
-            if type(prev_max_cursor) is type(current_max_cursor):
-                new_max_cursor = max(prev_max_cursor, current_max_cursor)
-            else:
-                new_max_cursor = current_max_cursor
-        else:
-            new_max_cursor = current_max_cursor or prev_max_cursor
-
-        # Step 3: Check if there's new data.
-        final_offset = {"max_cursor_value": new_max_cursor}
-        if start_offset and final_offset == start_offset:
-            # No new data — return empty iterator and same offset to stop.
-            return iter([]), start_offset
-        next_offset = final_offset
-
-        # Step 4: Build server-side where clause for incremental runs.
+        # Build server-side where clause for incremental runs.
         # On first run (prev_max_cursor is None): no filter → full load.
-        # On subsequent runs: gt filter → only new/updated records from API.
+        # On subsequent runs: gt filter → only new/updated records.
         where_clause = None
         if prev_max_cursor is not None:
             where_clause = {
@@ -654,24 +547,47 @@ class PalantirLakeflowConnect(LakeflowConnect):
                 "value": prev_max_cursor,
             }
 
-        # Step 5: Generator that yields records page by page.
-        # Records with null cursor_field are excluded (not yielded).
-        # Respects max_records_per_batch for admission control.
-        def _filtered_pages() -> Iterator[dict]:
-            emitted = 0
-            for record in self._generate_all_pages(
-                table_name, page_size, where_clause=where_clause
+        # Eagerly materialise records up to max_records, in cursor
+        # ASC order. Tracking the last-emitted cursor is what makes
+        # the cap correct — the next microbatch picks up from there.
+        # Memory bound is max_records × record_size; the user controls
+        # the cap via ``max_records_per_batch``.
+        init_dt = self._to_utc_datetime(self._init_time)
+        records: List[dict] = []
+        last_emitted_cursor: Any = None
+        for record in self._generate_all_pages(
+            table_name,
+            page_size,
+            where_clause=where_clause,
+            order_by_field=cursor_field,
+        ):
+            if max_records and len(records) >= max_records:
+                break
+            cursor_value = record.get(cursor_field)
+            if cursor_value is None:
+                continue
+            # _init_time cap: defer records past wall-clock start to
+            # the next trigger run so this microbatch terminates.
+            # Records are sorted ASC by cursor, so the first
+            # past-init_time record marks the end of this slice.
+            cursor_dt = self._to_utc_datetime(cursor_value)
+            if (
+                cursor_dt is not None
+                and init_dt is not None
+                and cursor_dt > init_dt
             ):
-                if max_records and emitted >= max_records:
-                    return
-                # Skip records with null cursor (server-side gt filter
-                # already excludes them on incremental runs, but on
-                # the first full load we need this client-side check).
-                if record.get(cursor_field) is not None:
-                    yield record
-                    emitted += 1
+                break
+            records.append(record)
+            last_emitted_cursor = cursor_value
 
-        return _filtered_pages(), next_offset
+        # No records emitted → terminate the microbatch with the
+        # same offset so Spark sees "no progress" and stops.
+        if not records:
+            return iter([]), start_offset if start_offset else {
+                "max_cursor_value": prev_max_cursor
+            }
+
+        return iter(records), {"max_cursor_value": last_emitted_cursor}
 
     def _build_object_set(
         self, table_name: str, where_clause: dict = None
@@ -701,6 +617,7 @@ class PalantirLakeflowConnect(LakeflowConnect):
         object_set: dict,
         page_token: str = None,
         page_size: int = 1000,
+        order_by_field: str = None,
     ) -> Tuple[List[dict], str]:
         """
         Fetch a single page of data from Palantir API using the
@@ -713,6 +630,9 @@ class PalantirLakeflowConnect(LakeflowConnect):
             object_set: objectSet definition (from _build_object_set)
             page_token: Optional pagination token from previous call
             page_size: Number of records to fetch (default 1000, max 10000)
+            order_by_field: Optional field name to sort by ascending.
+                Used for Strategy B incremental reads so the offset
+                can be set to the cursor of the last emitted record.
 
         Returns:
             Tuple of (list of records, next page token or None)
@@ -731,6 +651,10 @@ class PalantirLakeflowConnect(LakeflowConnect):
         }
         if page_token:
             body["pageToken"] = page_token
+        if order_by_field:
+            body["orderBy"] = {
+                "fields": [{"field": order_by_field, "direction": "asc"}]
+            }
 
         max_retries = 5
         for attempt in range(max_retries):

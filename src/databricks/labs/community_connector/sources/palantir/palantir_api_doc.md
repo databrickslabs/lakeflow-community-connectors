@@ -35,8 +35,7 @@ For this connector, Palantir ontology object types are treated as **tables**. Th
 | `GET /api/v2/ontologies/{ontology}/objectTypes` | List all object types in an ontology | `list_tables()` |
 | `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}` | Get object type definition (schema, primary key) | `get_table_schema()`, `read_table_metadata()` |
 | `POST /api/v2/ontologies/{ontology}/objectSets/loadObjects` | Load object instances with snapshot-consistent pagination | `read_table()` → `_fetch_page()` |
-| `POST /api/v2/ontologies/{ontology}/objectSets/aggregate` | Get max cursor value (lightweight, no records) | `_get_max_cursor_value()` (primary) |
-| `POST /api/v2/ontologies/{ontology}/objects/{objectType}/search` | Get max cursor value (orderBy desc, limit 1) | `_get_max_cursor_value()` (fallback) |
+| `POST /api/v2/ontologies/{ontology}/objects/{objectType}/search` | Get max cursor value (orderBy desc, limit 1) | `_get_max_cursor_value()` |
 
 **Connector scope**:
 - All object types in the configured ontology are available as tables.
@@ -44,7 +43,7 @@ For this connector, Palantir ontology object types are treated as **tables**. Th
 - The connector supports snapshot (full refresh) and CDC (incremental with server-side filtering) ingestion modes.
 - Data is fetched via `loadObjectSet` with `snapshot=true` for consistent pagination across large datasets.
 - CDC incremental runs use server-side `where: gt` filtering via objectSet composition.
-- Max cursor lookup uses the aggregate endpoint with orderBy desc fallback.
+- Max cursor lookup uses the search endpoint with `orderBy desc, pageSize=1`.
 - Transient errors (429, 503) are retried with exponential backoff (up to 5 attempts).
 - Link types, action types, and query types are **not** supported.
 
@@ -381,61 +380,15 @@ curl -X POST \
 - `pageSize` is capped at 10,000.
 
 
-### 5. Aggregate Object Set (Max Cursor Lookup)
-
-**Endpoint**: `POST /api/v2/ontologies/{ontologyApiName}/objectSets/aggregate`
-
-**Used by**: `_get_max_cursor_value()` (primary method)
-
-**Purpose**: Compute aggregate metrics (max, count, min, etc.) over an object set without fetching any records. Used to efficiently determine the current max cursor value for CDC checkpointing.
-
-**Example request**:
-
-```bash
-curl -X POST \
-  -H "Authorization: Bearer <TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "objectSet": {"type": "base", "objectType": "ExampleFlight"},
-    "aggregation": [
-      {"type": "max", "field": "arrivalTimestamp", "name": "max_cursor"},
-      {"type": "count", "name": "total"}
-    ],
-    "groupBy": []
-  }' \
-  "https://yourcompany.palantirfoundry.com/api/v2/ontologies/ontology-282f1207/objectSets/aggregate"
-```
-
-**Example response**:
-
-```json
-{
-  "accuracy": "ACCURATE",
-  "data": [
-    {
-      "group": {},
-      "metrics": [
-        {"name": "total", "value": 1660475.0},
-        {"name": "max_cursor", "value": "2024-01-01T15:35:00Z"}
-      ]
-    }
-  ]
-}
-```
-
-**Connector behavior**:
-- Calls aggregate first (lightweight — no records fetched).
-- If aggregate fails (some object types return `INTERNAL` error), falls back to the search endpoint with `orderBy desc, pageSize=1`.
-- Result is compared against the checkpoint: if unchanged, returns immediately with no data fetch.
-
-
-### 6. Search Objects (Max Cursor Fallback)
+### 5. Search Objects (Max Cursor Lookup)
 
 **Endpoint**: `POST /api/v2/ontologies/{ontologyApiName}/objects/{objectTypeApiName}/search`
 
-**Used by**: `_get_max_cursor_value()` (fallback when aggregate fails)
+**Used by**: `_get_max_cursor_value()`
 
-**Purpose**: Fallback method to get the max cursor value by fetching a single record sorted descending.
+**Purpose**: Determine the current max cursor value for CDC checkpointing by fetching a single record sorted descending on the cursor field.
+
+> **Note**: An earlier version of this connector tried the `/objectSets/aggregate` endpoint first as a "lightweight max-cursor lookup" and fell back to `search`. Palantir returns HTTP 500 for `aggregate` against the object types we use, so the fallback path was the only one that ever produced a result. The aggregate code path was removed to skip the doomed HTTP round-trip on every CDC tick.
 
 **Example request**:
 
@@ -541,7 +494,7 @@ The connector supports two ingestion strategies based on whether a `cursor_field
 
 - **Triggered when**: `cursor_field` is specified in table options (e.g., `"updatedAt"`, `"arrivalTimestamp"`).
 - **Behavior**:
-  1. Pre-computes the current max cursor value via aggregate endpoint (falls back to orderBy desc if aggregate fails).
+  1. Pre-computes the current max cursor value via the search endpoint (`orderBy desc, pageSize=1`).
   2. If max hasn't changed since last checkpoint → returns empty iterator immediately (no API calls for data).
   3. On first run (no checkpoint): fetches all records via `loadObjectSet` with base objectSet (full load).
   4. On incremental runs: fetches only new records via `loadObjectSet` with filtered objectSet (`where: gt` on cursor field). The API performs server-side filtering — only matching records are returned.
