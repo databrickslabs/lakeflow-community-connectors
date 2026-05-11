@@ -2,7 +2,15 @@
   {
     "apiName": "ExampleFlight",
     "displayName": "Example Flight",
+    "pluralDisplayName": "Example Flights",
     "description": "Represents commercial passenger flights",
+    "icon": {
+      "type": "blueprint",
+      "color": "#13C9BA",
+      "name": "airplane"
+    },
+    "titleProperty": "flightNumber",
+    "visibility": "NORMAL",
     "primaryKey": "flightId",
     "properties": {
       "flightId": {"dataType": {"type": "string"}},
@@ -22,7 +30,15 @@
   {
     "apiName": "FlightsFinal",
     "displayName": "Flights Final",
+    "pluralDisplayName": "Flights Final",
     "description": "Mirrors the live ontology's FlightsFinal table so the same dev_table_config entry exercises CDC in simulate mode too.",
+    "icon": {
+      "type": "blueprint",
+      "color": "#13C9BA",
+      "name": "airplane"
+    },
+    "titleProperty": "flightTitle",
+    "visibility": "NORMAL",
     "primaryKey": "flightId",
     "properties": {
       "flightId": {"dataType": {"type": "string"}},
