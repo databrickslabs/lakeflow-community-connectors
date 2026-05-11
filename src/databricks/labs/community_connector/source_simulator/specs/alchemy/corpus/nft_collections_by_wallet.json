@@ -10,7 +10,7 @@
       "tokenType": "papa-587",
       "contractDeployer": "juliet-742",
       "deployedBlockNumber": 39333,
-      "openseaMetadata": {
+      "openSeaMetadata": {
         "floorPrice": 962.56,
         "collectionName": "xray-505",
         "safelistRequestStatus": "romeo-680",
@@ -39,7 +39,7 @@
       "tokenType": "echo-643",
       "contractDeployer": "mike-523",
       "deployedBlockNumber": 54712,
-      "openseaMetadata": {
+      "openSeaMetadata": {
         "floorPrice": 580.29,
         "collectionName": "bravo-502",
         "safelistRequestStatus": "zulu-206",
@@ -68,7 +68,7 @@
       "tokenType": "mike-436",
       "contractDeployer": "oscar-996",
       "deployedBlockNumber": 81776,
-      "openseaMetadata": {
+      "openSeaMetadata": {
         "floorPrice": 714.61,
         "collectionName": "yankee-678",
         "safelistRequestStatus": "delta-914",
@@ -98,7 +98,7 @@
       "tokenType": "xray-902",
       "contractDeployer": "foxtrot-695",
       "deployedBlockNumber": 27684,
-      "openseaMetadata": {
+      "openSeaMetadata": {
         "floorPrice": 21.44,
         "collectionName": "foxtrot-483",
         "safelistRequestStatus": "juliet-467",
@@ -125,7 +125,7 @@
       "tokenType": "whiskey-120",
       "contractDeployer": "sierra-749",
       "deployedBlockNumber": 85072,
-      "openseaMetadata": {
+      "openSeaMetadata": {
         "floorPrice": 858.74,
         "collectionName": "quebec-214",
         "safelistRequestStatus": "golf-595",

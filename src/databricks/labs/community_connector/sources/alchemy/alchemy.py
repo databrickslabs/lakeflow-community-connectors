@@ -14,8 +14,6 @@ opt out of partitioned reads via ``is_partitioned`` and fall back to
 the single-driver ``read_table`` path.
 """
 
-from __future__ import annotations
-
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator

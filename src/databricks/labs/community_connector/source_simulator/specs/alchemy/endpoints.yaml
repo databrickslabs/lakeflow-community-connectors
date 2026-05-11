@@ -49,6 +49,13 @@ endpoints:
       wrapper: {records_key: "data.tokens", extras: {pageKey: null}}
 
   # ---- nft_collections_by_wallet (snapshot) ----
+  # Note: live responses for very large wallets (e.g. CEX hot wallets)
+  # can additionally include a top-level ``error`` field alongside
+  # ``data`` describing partial per-network failures.  The simulator's
+  # wrapper format only supports extras inside the innermost wrapper,
+  # so the partial-error shape isn't modelled here.  The connector
+  # tolerates it: records are always read from ``data.contracts`` and
+  # the ``error`` sibling is ignored.
   - path: "/data/v1/{api_key}/assets/nfts/contracts/by-address"
     method: POST
     corpus: nft_collections_by_wallet
@@ -110,7 +117,7 @@ endpoints:
       pagination_style: none
       wrapper:
         records_key: data
-        extras: {currency: "usd"}
+        extras: {symbol: "", currency: "usd"}
     synthesize_future_records:
       cursor_field: timestamp
       count: 3

@@ -1,15 +1,15 @@
 {
   "tokens_by_wallet": {
-    "wallet_address": "0xsimulator0000000000000000000000000000000"
+    "wallet_address": "0x28C6c06298d514Db089934071355E5743bf21d60"
   },
   "token_balances_by_wallet": {
-    "wallet_address": "0xsimulator0000000000000000000000000000000"
+    "wallet_address": "0x28C6c06298d514Db089934071355E5743bf21d60"
   },
   "nft_collections_by_wallet": {
-    "wallet_address": "0xsimulator0000000000000000000000000000000"
+    "wallet_address": "0x28C6c06298d514Db089934071355E5743bf21d60"
   },
   "wallet_transactions": {
-    "wallet_address": "0xsimulator0000000000000000000000000000000",
+    "wallet_address": "0x28C6c06298d514Db089934071355E5743bf21d60",
     "network": "eth-mainnet"
   },
   "token_prices_by_symbol": {
@@ -25,16 +25,16 @@
     "interval": "1d"
   },
   "nfts_by_wallet": {
-    "wallet_address": "0xsimulator0000000000000000000000000000000"
+    "wallet_address": "0x28C6c06298d514Db089934071355E5743bf21d60"
   },
   "nft_metadata": {
-    "contract_address": "0xsimulatorContractAddress00000000000000000",
+    "contract_address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D",
     "token_id": "1"
   },
   "nft_contract_metadata": {
-    "contract_address": "0xsimulatorContractAddress00000000000000000"
+    "contract_address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D"
   },
   "nft_floor_prices": {
-    "contract_address": "0xsimulatorContractAddress00000000000000000"
+    "contract_address": "0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D"
   }
 }

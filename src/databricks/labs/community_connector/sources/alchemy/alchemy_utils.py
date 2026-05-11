@@ -9,8 +9,6 @@ Centralises:
   Alchemy's casing inconsistencies across API families.
 """
 
-from __future__ import annotations
-
 import logging
 import random
 import time
