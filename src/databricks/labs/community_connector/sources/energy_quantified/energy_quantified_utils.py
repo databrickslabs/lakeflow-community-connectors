@@ -22,6 +22,7 @@ from urllib.parse import quote
 
 import requests
 
+# pylint: disable-next=line-too-long
 from databricks.labs.community_connector.sources.energy_quantified.energy_quantified_schemas import (
     INITIAL_BACKOFF,
     MAX_RETRIES,

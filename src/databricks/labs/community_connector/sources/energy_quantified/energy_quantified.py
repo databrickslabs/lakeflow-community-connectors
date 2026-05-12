@@ -40,6 +40,8 @@ from databricks.labs.community_connector.interface import (
     LakeflowConnect,
     SupportsPartitionedStream,
 )
+
+# pylint: disable-next=line-too-long
 from databricks.labs.community_connector.sources.energy_quantified.energy_quantified_schemas import (
     API_BASE_URL,
     DEFAULT_CURVES_PAGE_SIZE,
@@ -387,7 +389,7 @@ class EnergyQuantifiedLakeflowConnect(LakeflowConnect, SupportsPartitionedStream
     # instances — cursor walk-backward (append)
     # ================================================================== #
 
-    def _read_instances(
+    def _read_instances(  # pylint: disable=too-many-branches,too-many-statements
         self,
         start_offset: dict,
         table_options: dict[str, str],
