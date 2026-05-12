@@ -266,6 +266,17 @@ endpoints:
         extras:
           dateFrom: ""
           dateTo: ""
+          # When the requested window is wider than the server's internal
+          # cap, ``/timetrack`` truncates ``dateTo`` and returns a
+          # ``nextDateFrom`` pointer at which the next call should resume.
+          # Declared here so the live validator stops flagging it as
+          # missing-from-spec drift. The connector does not consume it
+          # today: with the default ``window_days=7`` the server never
+          # truncates, and ``lookback_days`` provides safety on widened
+          # windows. If we ever push window_days large enough to trip
+          # server-side chunking on a high-activity tenant, we'd need to
+          # honor this pointer to avoid silently skipping rows.
+          nextDateFrom: ""
     params:
       dateFrom:          {role: filter, field: date, op: gte}
       dateTo:            {role: filter, field: date, op: lte}

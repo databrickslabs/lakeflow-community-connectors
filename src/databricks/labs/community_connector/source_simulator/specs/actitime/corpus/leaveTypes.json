@@ -22,5 +22,11 @@
     "name": "Family Leave",
     "balance": "None",
     "archived": false
+  },
+  {
+    "id": 10,
+    "name": "Unpaid Leave",
+    "balance": "None",
+    "archived": false
   }
 ]

@@ -15,7 +15,7 @@
         "time": 210
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-04-06"
   },
   {
@@ -34,7 +34,7 @@
         "time": 150
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-04-06"
   },
   {
@@ -57,7 +57,7 @@
         "time": 90
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-04-06"
   },
   {
@@ -76,7 +76,7 @@
         "time": 165
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-04-06"
   },
   {
@@ -99,7 +99,7 @@
         "time": 150
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-04-06"
   },
   {
@@ -118,7 +118,7 @@
         "time": 210
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-04-13"
   },
   {
@@ -141,7 +141,7 @@
         "time": 150
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-04-13"
   },
   {
@@ -160,7 +160,7 @@
         "time": 150
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-04-13"
   },
   {
@@ -179,7 +179,7 @@
         "time": 165
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-04-13"
   },
   {
@@ -194,7 +194,7 @@
         "time": 180
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-04-13"
   },
   {
@@ -209,7 +209,7 @@
         "time": 210
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-04-20"
   },
   {
@@ -232,7 +232,7 @@
         "time": 75
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-04-20"
   },
   {
@@ -255,7 +255,7 @@
         "time": 150
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-04-20"
   },
   {
@@ -278,7 +278,7 @@
         "time": 80
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-04-20"
   },
   {
@@ -297,7 +297,7 @@
         "time": 150
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-04-20"
   },
   {
@@ -316,7 +316,7 @@
         "time": 170
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-04-27"
   },
   {
@@ -339,7 +339,7 @@
         "time": 180
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-04-27"
   },
   {
@@ -362,7 +362,7 @@
         "time": 150
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-04-27"
   },
   {
@@ -381,7 +381,7 @@
         "time": 135
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-04-27"
   },
   {
@@ -404,7 +404,7 @@
         "time": 90
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-04-27"
   },
   {
@@ -427,7 +427,7 @@
         "time": 75
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-05-04"
   },
   {
@@ -446,7 +446,7 @@
         "time": 130
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-05-04"
   },
   {
@@ -465,7 +465,7 @@
         "time": 130
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-05-04"
   },
   {
@@ -488,7 +488,7 @@
         "time": 160
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-05-04"
   },
   {
@@ -503,7 +503,672 @@
         "time": 225
       }
     ],
-    "dayOffset": 2,
+    "dayOffset": 1,
     "date": "2026-05-04"
+  },
+  {
+    "userId": 1,
+    "records": [
+      {
+        "taskId": 115,
+        "time": 60
+      },
+      {
+        "taskId": 135,
+        "time": 85
+      },
+      {
+        "taskId": 136,
+        "time": 150
+      },
+      {
+        "taskId": 139,
+        "time": 180
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-11"
+  },
+  {
+    "userId": 13,
+    "records": [
+      {
+        "taskId": 98,
+        "time": 135
+      },
+      {
+        "taskId": 120,
+        "time": 60
+      },
+      {
+        "taskId": 140,
+        "time": 150
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-11"
+  },
+  {
+    "userId": 1,
+    "records": [
+      {
+        "taskId": 115,
+        "time": 90
+      },
+      {
+        "taskId": 135,
+        "time": 160
+      },
+      {
+        "taskId": 136,
+        "time": 240
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-12"
+  },
+  {
+    "userId": 13,
+    "records": [
+      {
+        "taskId": 98,
+        "time": 90
+      },
+      {
+        "taskId": 120,
+        "time": 110
+      },
+      {
+        "taskId": 135,
+        "time": 195
+      },
+      {
+        "taskId": 140,
+        "time": 60
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-12"
+  },
+  {
+    "userId": 1,
+    "records": [
+      {
+        "taskId": 115,
+        "time": 45
+      },
+      {
+        "taskId": 135,
+        "time": 285
+      },
+      {
+        "taskId": 136,
+        "time": 150
+      }
+    ],
+    "dayOffset": 2,
+    "date": "2026-02-13"
+  },
+  {
+    "userId": 14,
+    "records": [
+      {
+        "taskId": 115,
+        "time": 180
+      },
+      {
+        "taskId": 135,
+        "time": 190
+      },
+      {
+        "taskId": 136,
+        "time": 90
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-11"
+  },
+  {
+    "userId": 14,
+    "records": [
+      {
+        "taskId": 104,
+        "time": 195
+      },
+      {
+        "taskId": 115,
+        "time": 160
+      },
+      {
+        "taskId": 135,
+        "time": 130
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-12"
+  },
+  {
+    "userId": 14,
+    "records": [
+      {
+        "taskId": 104,
+        "time": 165
+      },
+      {
+        "taskId": 115,
+        "time": 150
+      },
+      {
+        "taskId": 135,
+        "time": 190
+      }
+    ],
+    "dayOffset": 2,
+    "date": "2026-02-13"
+  },
+  {
+    "userId": 15,
+    "records": [
+      {
+        "taskId": 116,
+        "time": 170
+      },
+      {
+        "taskId": 117,
+        "time": 60
+      },
+      {
+        "taskId": 118,
+        "time": 255
+      }
+    ],
+    "dayOffset": 2,
+    "date": "2026-02-13"
+  },
+  {
+    "userId": 14,
+    "records": [
+      {
+        "taskId": 104,
+        "time": 210
+      },
+      {
+        "taskId": 135,
+        "time": 135
+      },
+      {
+        "taskId": 136,
+        "time": 110
+      }
+    ],
+    "dayOffset": 5,
+    "date": "2026-02-16"
+  },
+  {
+    "userId": 16,
+    "records": [
+      {
+        "taskId": 80,
+        "time": 90
+      },
+      {
+        "taskId": 124,
+        "time": 210
+      },
+      {
+        "taskId": 126,
+        "time": 195
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-11"
+  },
+  {
+    "userId": 17,
+    "records": [
+      {
+        "taskId": 80,
+        "time": 60
+      },
+      {
+        "taskId": 84,
+        "time": 225
+      },
+      {
+        "taskId": 85,
+        "time": 200
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-11"
+  },
+  {
+    "userId": 16,
+    "records": [
+      {
+        "taskId": 80,
+        "time": 75
+      },
+      {
+        "taskId": 124,
+        "time": 210
+      },
+      {
+        "taskId": 126,
+        "time": 140
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-12"
+  },
+  {
+    "userId": 17,
+    "records": [
+      {
+        "taskId": 80,
+        "time": 120
+      },
+      {
+        "taskId": 84,
+        "time": 160
+      },
+      {
+        "taskId": 85,
+        "time": 190
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-12"
+  },
+  {
+    "userId": 16,
+    "records": [
+      {
+        "taskId": 80,
+        "time": 90
+      },
+      {
+        "taskId": 124,
+        "time": 165
+      },
+      {
+        "taskId": 125,
+        "time": 120
+      },
+      {
+        "taskId": 126,
+        "time": 150
+      }
+    ],
+    "dayOffset": 2,
+    "date": "2026-02-13"
+  },
+  {
+    "userId": 18,
+    "records": [
+      {
+        "taskId": 84,
+        "time": 135
+      },
+      {
+        "taskId": 125,
+        "time": 150
+      },
+      {
+        "taskId": 126,
+        "time": 200
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-11"
+  },
+  {
+    "userId": 19,
+    "records": [
+      {
+        "taskId": 80,
+        "time": 40
+      },
+      {
+        "taskId": 81,
+        "time": 150
+      },
+      {
+        "taskId": 84,
+        "time": 290
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-11"
+  },
+  {
+    "userId": 18,
+    "records": [
+      {
+        "taskId": 84,
+        "time": 120
+      },
+      {
+        "taskId": 125,
+        "time": 150
+      },
+      {
+        "taskId": 126,
+        "time": 210
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-12"
+  },
+  {
+    "userId": 19,
+    "records": [
+      {
+        "taskId": 80,
+        "time": 45
+      },
+      {
+        "taskId": 81,
+        "time": 180
+      },
+      {
+        "taskId": 84,
+        "time": 225
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-12"
+  },
+  {
+    "userId": 18,
+    "records": [
+      {
+        "taskId": 84,
+        "time": 105
+      },
+      {
+        "taskId": 125,
+        "time": 225
+      },
+      {
+        "taskId": 126,
+        "time": 165
+      }
+    ],
+    "dayOffset": 2,
+    "date": "2026-02-13"
+  },
+  {
+    "userId": 20,
+    "records": [
+      {
+        "taskId": 124,
+        "time": 225
+      },
+      {
+        "taskId": 126,
+        "time": 290
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-11"
+  },
+  {
+    "userId": 21,
+    "records": [
+      {
+        "taskId": 89,
+        "time": 150
+      },
+      {
+        "taskId": 90,
+        "time": 225
+      },
+      {
+        "taskId": 92,
+        "time": 120
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-11"
+  },
+  {
+    "userId": 20,
+    "records": [
+      {
+        "taskId": 124,
+        "time": 250
+      },
+      {
+        "taskId": 126,
+        "time": 255
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-12"
+  },
+  {
+    "userId": 21,
+    "records": [
+      {
+        "taskId": 89,
+        "time": 165
+      },
+      {
+        "taskId": 90,
+        "time": 250
+      },
+      {
+        "taskId": 92,
+        "time": 60
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-12"
+  },
+  {
+    "userId": 20,
+    "records": [
+      {
+        "taskId": 124,
+        "time": 225
+      },
+      {
+        "taskId": 126,
+        "time": 220
+      }
+    ],
+    "dayOffset": 2,
+    "date": "2026-02-13"
+  },
+  {
+    "userId": 22,
+    "records": [
+      {
+        "taskId": 101,
+        "time": 130
+      },
+      {
+        "taskId": 127,
+        "time": 135
+      },
+      {
+        "taskId": 129,
+        "time": 160
+      },
+      {
+        "taskId": 132,
+        "time": 60
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-11"
+  },
+  {
+    "userId": 22,
+    "records": [
+      {
+        "taskId": 127,
+        "time": 220
+      },
+      {
+        "taskId": 129,
+        "time": 260
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-12"
+  },
+  {
+    "userId": 22,
+    "records": [
+      {
+        "taskId": 127,
+        "time": 250
+      },
+      {
+        "taskId": 129,
+        "time": 165
+      },
+      {
+        "taskId": 132,
+        "time": 60
+      }
+    ],
+    "dayOffset": 2,
+    "date": "2026-02-13"
+  },
+  {
+    "userId": 22,
+    "records": [
+      {
+        "taskId": 101,
+        "time": 290
+      },
+      {
+        "taskId": 132,
+        "time": 190
+      }
+    ],
+    "dayOffset": 5,
+    "date": "2026-02-16"
+  },
+  {
+    "userId": 22,
+    "records": [
+      {
+        "taskId": 101,
+        "time": 190
+      },
+      {
+        "taskId": 129,
+        "time": 250
+      },
+      {
+        "taskId": 132,
+        "time": 40
+      }
+    ],
+    "dayOffset": 6,
+    "date": "2026-02-17"
+  },
+  {
+    "userId": 1,
+    "records": [
+      {
+        "taskId": 115,
+        "time": 260
+      },
+      {
+        "taskId": 135,
+        "time": 140
+      },
+      {
+        "taskId": 139,
+        "time": 80
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-03-13"
+  },
+  {
+    "userId": 13,
+    "records": [
+      {
+        "taskId": 120,
+        "time": 150
+      },
+      {
+        "taskId": 121,
+        "time": 120
+      },
+      {
+        "taskId": 136,
+        "time": 150
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-03-13"
+  },
+  {
+    "userId": 14,
+    "records": [
+      {
+        "taskId": 101,
+        "time": 70
+      },
+      {
+        "taskId": 115,
+        "time": 160
+      },
+      {
+        "taskId": 135,
+        "time": 220
+      },
+      {
+        "taskId": 136,
+        "time": 40
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-03-13"
+  },
+  {
+    "userId": 18,
+    "records": [
+      {
+        "taskId": 84,
+        "time": 150
+      },
+      {
+        "taskId": 101,
+        "time": 260
+      },
+      {
+        "taskId": 102,
+        "time": 75
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-03-13"
+  },
+  {
+    "userId": 20,
+    "records": [
+      {
+        "taskId": 92,
+        "time": 60
+      },
+      {
+        "taskId": 124,
+        "time": 190
+      },
+      {
+        "taskId": 125,
+        "time": 230
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-03-13"
   }
 ]

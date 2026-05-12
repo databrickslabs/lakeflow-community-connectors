@@ -299,6 +299,33 @@
     ]
   },
   {
+    "dateFrom": "2026-05-12",
+    "regularRate": 38.0,
+    "overtimeRate": null,
+    "leaveRates": [
+      {
+        "leaveTypeId": 1,
+        "rate": 38.0
+      },
+      {
+        "leaveTypeId": 2,
+        "rate": 38.0
+      },
+      {
+        "leaveTypeId": 3,
+        "rate": 38.0
+      },
+      {
+        "leaveTypeId": 9,
+        "rate": 38.0
+      },
+      {
+        "leaveTypeId": 10,
+        "rate": 38.0
+      }
+    ]
+  },
+  {
     "dateFrom": "2026-02-04",
     "regularRate": 18.0,
     "overtimeRate": null,
