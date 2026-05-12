@@ -230,6 +230,68 @@ class TestActitimeConnector(LakeflowConnectTests):
             f"{upper_bound.isoformat()} but got {calls[0]['params']['dateTo']}"
         )
 
+    # ------------------------------------------------------------------
+    # PR #176 review (Young, comment 3228778244) — day_offset is
+    # transport state; emitted rows for the same physical record must be
+    # byte-identical across overlapping windows.
+    # ------------------------------------------------------------------
+
+    def test_timetrack_schema_excludes_day_offset(self):
+        """``day_offset`` must not appear in the timetrack or leavetime
+        schemas. The wire field is computed per-request as ``(date -
+        dateFrom).days`` and would flicker across overlapping fetches."""
+        for table_name in ("timetrack", "leavetime"):
+            schema = self.connector.get_table_schema(table_name, {})
+            field_names = [f.name for f in schema.fields]
+            assert "day_offset" not in field_names, (
+                f"{table_name} schema must not expose day_offset "
+                f"(transport state, not a record property). "
+                f"Saw fields: {field_names}"
+            )
+
+    def test_timetrack_row_byte_identical_across_overlapping_windows(self):
+        """The same ``(user_id, date, task_id)`` fetched in two windows
+        with different ``dateFrom`` must emit byte-identical rows.
+
+        Pre-fix, ``day_offset`` shifted with each window's ``dateFrom``
+        (empirically observed in our own live cassette — 19 dates
+        flickered across requests). Post-fix the column is gone, so
+        rows must dedupe perfectly under composite-PK upsert.
+        """
+        # Drive the connector twice with different lookback_days to
+        # force overlapping fetches with different dateFrom values.
+        # Both runs target the same window_end, so the simulator returns
+        # the same physical entries under different request shapes.
+        records_run_a, _ = self.connector.read_table(
+            "timetrack",
+            {},
+            {"window_days": "60", "lookback_days": "30"},
+        )
+        rows_a = list(records_run_a)
+        records_run_b, _ = self.connector.read_table(
+            "timetrack",
+            {},
+            {"window_days": "60", "lookback_days": "60"},
+        )
+        rows_b = list(records_run_b)
+        if not rows_a or not rows_b:
+            return  # empty tenant — fan-out path ran but no data
+        # Build composite-PK -> row index so we can pair the same fact
+        # across the two runs.
+        index_a = {(r["user_id"], r["date"], r["task_id"]): r for r in rows_a}
+        index_b = {(r["user_id"], r["date"], r["task_id"]): r for r in rows_b}
+        common = set(index_a).intersection(index_b)
+        assert common, (
+            "no overlapping (user_id, date, task_id) records across the "
+            "two runs — test cannot prove determinism"
+        )
+        for key in common:
+            assert index_a[key] == index_b[key], (
+                f"timetrack row for {key} differs between overlapping "
+                f"fetches: run_a={index_a[key]} run_b={index_b[key]} — "
+                f"non-determinism regression"
+            )
+
     def test_timetrack_internal_walk_not_capped_by_max_records(self):
         """Same defence for the /timetrack fan-out path.
 

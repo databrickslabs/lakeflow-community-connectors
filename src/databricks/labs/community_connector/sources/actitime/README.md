@@ -118,7 +118,7 @@ Snapshot tables are full-refresh on every run. `userRates` is a per-user sub-res
 - camelCase API field names are renamed to snake_case in the output schema.
 - `userRates.leave_rates` is an `array<struct<leave_type_id: long, rate: decimal(18,4)>>` — the API returns the rates as an array of `{leaveTypeId, rate}` objects, not a map.
 - `settings` is a singleton; the connector assigns `id = 1` so the row is addressable downstream.
-- `timetrack` and `leavetime` rows do not carry a record-level id on the API; the connector exposes them with composite primary keys (`user_id, date, task_id` and `user_id, date, leave_type_id` respectively) and adds a `day_offset` column reflecting the day's position inside the response window.
+- `timetrack` and `leavetime` rows do not carry a record-level id on the API; the connector exposes them with composite primary keys (`user_id, date, task_id` and `user_id, date, leave_type_id` respectively). The wire field `dayOffset` is intentionally dropped — it is computed server-side as `(entry.date - request.dateFrom).days` and so changes across overlapping fetches caused by `lookback_days > 0`. `date` is the canonical day attribute.
 
 ## Table Configurations
 

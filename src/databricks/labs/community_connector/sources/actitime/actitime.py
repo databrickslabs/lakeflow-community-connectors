@@ -217,25 +217,27 @@ def _build_schemas() -> dict[str, StructType]:
         # timetrack: nested envelope flattened to one row per record. The
         # inner ``records`` array only carries ``taskId`` and ``time`` —
         # there is no record-level id/comment/approved/locked on this
-        # tenant's API. ``day_offset`` is the day index inside the
-        # response window (0 = dateFrom).
+        # tenant's API. The wire field ``dayOffset`` is intentionally
+        # dropped: empirically (PR #176 review, comment 3228778244) it is
+        # ``(entry.date - request.dateFrom).days``, which flickers across
+        # overlapping fetches caused by ``lookback_days > 0`` and is not
+        # a stable record property. ``date`` is the canonical day.
         "timetrack": StructType(
             [
                 StructField("user_id", LongType()),
                 StructField("date", DateType()),
-                StructField("day_offset", LongType()),
                 StructField("task_id", LongType()),
                 StructField("time", LongType()),
             ]
         ),
         # leavetime: flat per-user-per-day-per-leaveType entries; no
         # nested ``records`` array. The minute total lives under
-        # ``leaveTime`` on the wire.
+        # ``leaveTime`` on the wire. ``dayOffset`` is dropped for the
+        # same reason documented on the timetrack schema above.
         "leavetime": StructType(
             [
                 StructField("user_id", LongType()),
                 StructField("date", DateType()),
-                StructField("day_offset", LongType()),
                 StructField("leave_type_id", LongType()),
                 StructField("time", LongType()),
             ]
@@ -790,12 +792,13 @@ class ActitimeLakeflowConnect(LakeflowConnect):
 
         The wire envelope is ``{"dateFrom": ..., "dateTo": ..., "data":
         [...]}``. Inside ``data``:
-          * timetrack — each entry is ``{userId, dayOffset, date,
-            records:[{taskId, time}, ...]}``. Flatten one row per record,
-            copying userId/date/dayOffset down.
+          * timetrack — each entry is ``{userId, date, records:[{taskId,
+            time}, ...]}``. Flatten one row per record, copying
+            ``userId`` and ``date`` down. ``dayOffset`` is on the wire
+            but intentionally not propagated — see schema docstring.
           * leavetime — each entry is already flat:
-            ``{userId, dayOffset, date, leaveTypeId, leaveTime}``. Emit
-            as-is via ``_map_record``.
+            ``{userId, date, leaveTypeId, leaveTime}``. Emit as-is via
+            ``_map_record``.
         """
         data = self._unwrap_records(body, key="data")
         out: list[dict] = []
@@ -803,13 +806,11 @@ class ActitimeLakeflowConnect(LakeflowConnect):
             if table_name == "timetrack":
                 uid = env.get("userId")
                 edate = env.get("date")
-                day_offset = env.get("dayOffset")
                 for r in env.get("records", []) or []:
                     merged = {
                         **r,
                         "userId": uid,
                         "date": edate,
-                        "dayOffset": day_offset,
                     }
                     out.append(self._map_record(table_name, merged))
             else:  # leavetime — flat per-entry.
@@ -1024,7 +1025,6 @@ class ActitimeLakeflowConnect(LakeflowConnect):
             return {
                 "user_id": raw.get("userId"),
                 "date": raw.get("date"),
-                "day_offset": raw.get("dayOffset"),
                 "task_id": raw.get("taskId"),
                 "time": raw.get("time"),
             }
@@ -1033,7 +1033,6 @@ class ActitimeLakeflowConnect(LakeflowConnect):
             return {
                 "user_id": raw.get("userId"),
                 "date": raw.get("date"),
-                "day_offset": raw.get("dayOffset"),
                 "leave_type_id": raw.get("leaveTypeId"),
                 "time": raw.get("leaveTime"),
             }
