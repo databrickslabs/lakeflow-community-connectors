@@ -740,7 +740,16 @@ def register_lakeflow_source(spark):
             "ingestion_type": "append",
         },
         "srmc": {
-            "primary_keys": ["curve_name", "date", "period", "front", "delivery"],
+            # `delivery` is intentionally NOT in the PK. The SRMC API's
+            # `contract` block only includes whichever of `front` or
+            # `delivery` the caller queried with; the other is null. With
+            # both in the PK, DLT's append_flow drops every row as null-PK
+            # invalid. The (curve_name, date, period, front) tuple is
+            # already unique per request. Callers who only have `delivery`
+            # should set `table_options.delivery` so it flows into the
+            # record's `delivery` column (still useful as a non-PK column
+            # for filtering downstream).
+            "primary_keys": ["curve_name", "date", "period", "front"],
             "cursor_field": "date",
             "ingestion_type": "append",
         },
