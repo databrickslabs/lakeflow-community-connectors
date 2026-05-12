@@ -1,3 +1,4 @@
+from datetime import timedelta
 from unittest.mock import patch
 
 from databricks.labs.community_connector.sources.actitime.actitime import (
@@ -36,6 +37,11 @@ class TestActitimeConnector(LakeflowConnectTests):
         "holidays",
         "approvalStatus",
     })
+    # Default ``forward_days=365`` on leavetime/approvalStatus combined
+    # with ``window_days=7`` walks ~57 microbatches before convergence
+    # (395 days of range / 7-day window). Bump the cap so the suite's
+    # convergence assertion still has headroom for a few outliers.
+    read_termination_max_iterations = 100
 
     # ------------------------------------------------------------------
     # Issue #178 — per-user fan-out on /timetrack and /leavetime
@@ -125,6 +131,103 @@ class TestActitimeConnector(LakeflowConnectTests):
             f"max_records_per_batch=2 truncated the internal /users walk: "
             f"only {len(distinct_users)} distinct users observed in rate "
             f"output (expected at least 3). User ids seen: {distinct_users}"
+        )
+
+    # ------------------------------------------------------------------
+    # PR #176 review (Young, comment 3228778237) — final-window boundary
+    # includes _init_date itself, and forward_days extends past today for
+    # leavetime/approvalStatus.
+    # ------------------------------------------------------------------
+
+    def _capture_time_window_request(self, table_name: str, table_options: dict):
+        """Drive _read_time_window with a cursor at upper_bound - 1 and
+        capture the dateFrom/dateTo of the next API request.
+
+        Patches _get_json_or_none to record the params and return a body
+        that emits zero rows, so we can assert on the request shape
+        regardless of corpus contents.
+        """
+        captured: list[dict] = []
+
+        def fake_get(path, params=None):
+            captured.append({"path": path, "params": params or {}})
+            if path == "users":
+                # Need at least one user so _read_time_window doesn't
+                # short-circuit on an empty user list before issuing the
+                # time-window request we want to capture.
+                return {"items": [{"id": 1}]}
+            return {"data": [], "dateFrom": (params or {}).get("dateFrom"),
+                    "dateTo": (params or {}).get("dateTo")}
+
+        # Use cursor = upper_bound - 1 day so the final-window branch fires.
+        if table_name == "leavetime":
+            forward_days = int(table_options.get("forward_days", "365"))
+            upper_bound = self.connector._init_date + timedelta(days=forward_days)
+        else:
+            upper_bound = self.connector._init_date
+        cursor = (upper_bound - timedelta(days=1)).isoformat()
+
+        with patch.object(self.connector, "_get_json_or_none", side_effect=fake_get):
+            self.connector.read_table(
+                table_name, {"cursor": cursor}, table_options
+            )
+
+        # First captured call is the /users discovery (no dateFrom), then
+        # the time-window request.
+        time_calls = [c for c in captured if "dateFrom" in c["params"]]
+        assert time_calls, f"no time-window API call observed for {table_name}"
+        return time_calls[0]["params"]
+
+    def test_timetrack_final_window_includes_init_date(self):
+        """``dateTo`` on the final window must equal ``_init_date``.
+
+        Pre-fix: ``window_end_inclusive = window_end_date - 1`` excluded
+        ``_init_date`` itself, lagging today's rows by one trigger.
+        Post-fix: when ``window_end_date == upper_bound`` we include the
+        boundary day.
+        """
+        params = self._capture_time_window_request("timetrack", {})
+        expected = self.connector._init_date.isoformat()
+        assert params["dateTo"] == expected, (
+            f"timetrack final-window dateTo should be {expected} (today) "
+            f"but got {params['dateTo']} — boundary regression"
+        )
+
+    def test_leavetime_forward_days_extends_upper_bound(self):
+        """``forward_days`` on ``leavetime`` lets the trigger fetch dates
+        past today (planned leave). Pre-fix the upper bound was clamped at
+        ``_init_date`` and future-dated leave never surfaced."""
+        params = self._capture_time_window_request(
+            "leavetime", {"forward_days": "30", "window_days": "60"}
+        )
+        expected = (self.connector._init_date + timedelta(days=30)).isoformat()
+        assert params["dateTo"] == expected, (
+            f"leavetime with forward_days=30 should reach {expected} but "
+            f"got {params['dateTo']} — forward_days not honored"
+        )
+
+    def test_approvalstatus_forward_days_extends_upper_bound(self):
+        """Same future-fetch contract for ``approvalStatus``."""
+        captured: list[dict] = []
+
+        def fake_get(path, params=None):
+            captured.append({"path": path, "params": params or {}})
+            return {"items": []}
+
+        forward = 14
+        upper_bound = self.connector._init_date + timedelta(days=forward)
+        cursor = (upper_bound - timedelta(days=1)).isoformat()
+        with patch.object(self.connector, "_get_json_or_none", side_effect=fake_get):
+            self.connector.read_table(
+                "approvalStatus",
+                {"cursor": cursor},
+                {"forward_days": str(forward), "window_days": "60"},
+            )
+        calls = [c for c in captured if "dateFrom" in c["params"]]
+        assert calls, "no approvalStatus API call observed"
+        assert calls[0]["params"]["dateTo"] == upper_bound.isoformat(), (
+            f"approvalStatus with forward_days={forward} should reach "
+            f"{upper_bound.isoformat()} but got {calls[0]['params']['dateTo']}"
         )
 
     def test_timetrack_internal_walk_not_capped_by_max_records(self):

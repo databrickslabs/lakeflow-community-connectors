@@ -66,9 +66,14 @@ connection:
 #                             snapshot endpoint.
 #   - dateTo                  Optional upper bound (ISO date) for the /holidays
 #                             snapshot endpoint.
+#   - forward_days            How many days past today the connector will
+#                             fetch on /leavetime and /approvalStatus
+#                             (default 365). Captures planned leave and
+#                             future-week approvals. Ignored on /timetrack
+#                             (logged hours don't exist in the future).
 #   - limit                   Page size for offset/limit list endpoints
 #                             (customers, projects, tasks, users). Default 1000.
-#   - max_records_per_batch   Per-microbatch cap on emitted rows from offset/limit
-#                             endpoints. Default 100000.
+#   - max_records_per_batch   Opt-in per-microbatch cap on emitted rows from
+#                             offset/limit endpoints. Default: drain (unbounded).
 # ============================================================================
-external_options_allowlist: "start_date,window_days,lookback_days,stopAfter,user_batch_size,dateFrom,dateTo,limit,max_records_per_batch"
+external_options_allowlist: "start_date,window_days,lookback_days,forward_days,stopAfter,user_batch_size,dateFrom,dateTo,limit,max_records_per_batch"

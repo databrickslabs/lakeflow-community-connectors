@@ -701,10 +701,20 @@ class ActitimeLakeflowConnect(LakeflowConnect):
         if not cursor:
             cursor = (self._init_date - timedelta(days=30)).isoformat()
 
+        # The effective upper bound is _init_date for /timetrack (logged
+        # hours don't exist in the future) but extends forward for
+        # /leavetime, where planned leave is a real use case. Operators
+        # control the lookahead via ``forward_days`` (default 365).
+        if table_name == "leavetime":
+            forward_days = max(0, int(table_options.get("forward_days", "365")))
+            upper_bound = self._init_date + timedelta(days=forward_days)
+        else:
+            upper_bound = self._init_date
+
         cursor_date = _parse_iso_date(cursor)
-        if cursor_date >= self._init_date:
-            # Caught up to init time — short-circuit so the trigger terminates.
-            return iter([]), start_offset or {"cursor": self._init_ts_iso}
+        if cursor_date >= upper_bound:
+            # Caught up to the upper bound — short-circuit so the trigger terminates.
+            return iter([]), start_offset or {"cursor": upper_bound.isoformat()}
 
         # Apply lookback at read-time only (do NOT modify the stored offset).
         lookback_days = int(table_options.get("lookback_days", "7"))
@@ -714,12 +724,22 @@ class ActitimeLakeflowConnect(LakeflowConnect):
         user_batch_size = max(1, int(table_options.get("user_batch_size", "100")))
 
         window_end_date = min(
-            cursor_date + timedelta(days=window_days), self._init_date
+            cursor_date + timedelta(days=window_days), upper_bound
         )
-        # The actiTIME range is inclusive of both endpoints, so we request
-        # [read_from, window_end_date - 1 day] to avoid double-fetching the
-        # boundary day across consecutive windows.
-        window_end_inclusive = max(window_end_date - timedelta(days=1), read_from)
+        if window_end_date == upper_bound:
+            # Final window of the trigger: include ``upper_bound`` itself.
+            # There is no successor window in this trigger and the next call
+            # short-circuits on ``cursor_date >= upper_bound``, so no
+            # double-fetch is possible. The ``-1 day`` clamp below would
+            # otherwise exclude the boundary day, causing same-day rows to
+            # lag one trigger.
+            window_end_inclusive = window_end_date
+        else:
+            # Intermediate window. The actiTIME range is inclusive of both
+            # endpoints; request [read_from, window_end_date - 1 day] so
+            # the boundary day isn't double-fetched when the next window
+            # starts at ``dateFrom = window_end_date``.
+            window_end_inclusive = max(window_end_date - timedelta(days=1), read_from)
 
         # Enumerate users for this microbatch. Same call shape as
         # :meth:`_read_user_rates`, paginated by ``_read_offset_limit``.
@@ -755,8 +775,10 @@ class ActitimeLakeflowConnect(LakeflowConnect):
             params["userIds"] = ",".join(str(u) for u in batch)
             body = self._get_json_or_none(table_name, params=params)
             if body is None:
-                # 404 — feature absent on this tenant. Terminate the walk.
-                return iter([]), start_offset or {"cursor": self._init_ts_iso}
+                # 404 — feature absent on this tenant. Terminate the walk
+                # by advancing to the upper bound so the next trigger short-
+                # circuits cleanly instead of re-issuing the same 404.
+                return iter([]), {"cursor": upper_bound.isoformat()}
             flat.extend(self._flatten_time_window_batch(table_name, body))
 
         # Advance the stored cursor to the end of the window we just read.
@@ -811,17 +833,27 @@ class ActitimeLakeflowConnect(LakeflowConnect):
         if not cursor:
             cursor = (self._init_date - timedelta(days=30)).isoformat()
 
+        # /approvalStatus supports approving future-week leave; allow the
+        # operator to extend the upper bound past _init_date.
+        forward_days = max(0, int(table_options.get("forward_days", "365")))
+        upper_bound = self._init_date + timedelta(days=forward_days)
+
         cursor_date = _parse_iso_date(cursor)
-        if cursor_date >= self._init_date:
-            return iter([]), start_offset or {"cursor": self._init_ts_iso}
+        if cursor_date >= upper_bound:
+            return iter([]), start_offset or {"cursor": upper_bound.isoformat()}
 
         lookback_days = int(table_options.get("lookback_days", "14"))
         read_from = cursor_date - timedelta(days=lookback_days)
         window_days = max(1, int(table_options.get("window_days", "28")))
         window_end_date = min(
-            cursor_date + timedelta(days=window_days), self._init_date
+            cursor_date + timedelta(days=window_days), upper_bound
         )
-        window_end_inclusive = max(window_end_date - timedelta(days=1), read_from)
+        if window_end_date == upper_bound:
+            # Final window: include the upper bound itself. See
+            # :meth:`_read_time_window` for the boundary-day reasoning.
+            window_end_inclusive = window_end_date
+        else:
+            window_end_inclusive = max(window_end_date - timedelta(days=1), read_from)
 
         params = {
             "dateFrom": read_from.isoformat(),
@@ -829,8 +861,9 @@ class ActitimeLakeflowConnect(LakeflowConnect):
         }
         body = self._get_json_or_none("approvalStatus", params=params)
         if body is None:
-            # 404 — feature absent on this tenant. Terminate.
-            return iter([]), start_offset or {"cursor": self._init_ts_iso}
+            # 404 — feature absent on this tenant. Advance past the upper
+            # bound so the next trigger short-circuits cleanly.
+            return iter([]), {"cursor": upper_bound.isoformat()}
         raw_records = self._unwrap_records(body, key="items")
         records = [self._map_record("approvalStatus", r) for r in raw_records]
         next_offset = {"cursor": window_end_date.isoformat()}
