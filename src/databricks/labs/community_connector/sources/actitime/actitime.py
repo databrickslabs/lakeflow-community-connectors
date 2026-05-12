@@ -55,6 +55,7 @@ always terminates.
 
 import base64
 import logging
+import sys
 import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterator
@@ -553,7 +554,7 @@ class ActitimeLakeflowConnect(LakeflowConnect):
         if table_name == "settings":
             records = list(self._read_settings())
         elif table_name == "userRates":
-            records = list(self._read_user_rates(table_options))
+            records = list(self._read_user_rates())
         elif table_name == "holidays":
             records = list(self._read_holidays(table_options))
         else:
@@ -598,10 +599,16 @@ class ActitimeLakeflowConnect(LakeflowConnect):
         record.setdefault("id", 1)
         yield self._map_record("settings", record)
 
-    def _read_user_rates(self, table_options: dict[str, str]) -> Iterator[dict]:
-        """/userRates is per-user: fan out one request per user from /users."""
-        # Pull a bounded user list. We use offset/limit pagination here too.
-        users = list(self._read_offset_limit("users", table_options, params={}, _raw=True))
+    def _read_user_rates(self) -> Iterator[dict]:
+        """/userRates is per-user: fan out one request per user from /users.
+
+        Takes no ``table_options``: the inner ``/users`` walk is transport
+        plumbing for the fan-out, not an emission of the users table, and
+        ``/userRates/{id}`` itself accepts no filters. Helper defaults
+        handle any tenant size (cap is gated on ``_raw=True`` in
+        :meth:`_read_offset_limit`).
+        """
+        users = list(self._read_offset_limit("users", {}, params={}, _raw=True))
         for user in users:
             uid = user.get("id")
             if uid is None:
@@ -716,10 +723,13 @@ class ActitimeLakeflowConnect(LakeflowConnect):
 
         # Enumerate users for this microbatch. Same call shape as
         # :meth:`_read_user_rates`, paginated by ``_read_offset_limit``.
+        # Pass {} so options scoped to the calling table (timetrack /
+        # leavetime) don't leak into the users discovery walk — see
+        # _read_user_rates for the same pattern.
         user_ids = [
             u.get("id")
             for u in self._read_offset_limit(
-                "users", table_options, params={}, _raw=True
+                "users", {}, params={}, _raw=True
             )
             if u.get("id") is not None
         ]
@@ -852,7 +862,12 @@ class ActitimeLakeflowConnect(LakeflowConnect):
         tenant" — iteration ends without raising. See class docstring.
         """
         page_size = int(table_options.get("limit", "1000"))
-        max_records = int(table_options.get("max_records_per_batch", "100000"))
+        # Opt-in emission cap. When unset we drain the endpoint fully: the
+        # _read_full_list_cdc / _read_snapshot cursor model is {"done": True}
+        # after one call, so any partial drain would silently lose records
+        # 100k+ permanently. See PR #176 review thread for follow-up issue.
+        # Also gated on ``not _raw`` below so internal lookups never cap.
+        max_records = int(table_options.get("max_records_per_batch", str(sys.maxsize)))
         # Surface archived rows too unless the caller has overridden it.
         params = dict(params)
         params.setdefault("archived", "all")
@@ -880,7 +895,12 @@ class ActitimeLakeflowConnect(LakeflowConnect):
             for raw in records:
                 yield raw if _raw else self._map_record(table_name, raw)
                 emitted += 1
-                if emitted >= max_records:
+                # The emission cap only applies on the primary path. Internal
+                # lookups (_raw=True) must drain the endpoint regardless of
+                # the calling table's max_records_per_batch — otherwise the
+                # inner /users walk for userRates / timetrack / leavetime
+                # fan-out silently truncates discovery.
+                if not _raw and emitted >= max_records:
                     return
             if len(records) < applied_page_size:
                 break

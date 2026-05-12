@@ -94,3 +94,63 @@ class TestActitimeConnector(LakeflowConnectTests):
         assert "cursor" in next_offset, (
             "expected cursor to advance even when there are no users"
         )
+
+    # ------------------------------------------------------------------
+    # PR #176 review (Young, comment 3228778226) — max_records_per_batch
+    # must not leak into internal /users discovery walks.
+    # ------------------------------------------------------------------
+
+    def test_user_rates_internal_walk_not_capped_by_max_records(self):
+        """Setting a tiny ``max_records_per_batch`` on userRates must not
+        truncate the internal ``/users`` discovery walk.
+
+        The simulator corpus has 5 users with 3 rate rows each (15 total).
+        Pre-fix: ``max_records_per_batch=2`` would cap the inner
+        ``_read_offset_limit("users", ...)`` walk at 2 users, then fan out
+        to only 2 ``/userRates/{id}`` calls — emitting 6 rate rows.
+        Post-fix: the ``_raw=True`` flag gates the cap so internal lookups
+        drain regardless, and the call site passes ``{}`` so userRates
+        options never reach the users walk in the first place.
+        """
+        records, _ = self.connector.read_table(
+            "userRates", {}, {"max_records_per_batch": "2"}
+        )
+        rows = list(records)
+        if not rows:
+            # Live tenant may have no userRates rows configured for the
+            # service account; skip rather than flake.
+            return
+        distinct_users = {r["user_id"] for r in rows}
+        assert len(distinct_users) >= 3, (
+            f"max_records_per_batch=2 truncated the internal /users walk: "
+            f"only {len(distinct_users)} distinct users observed in rate "
+            f"output (expected at least 3). User ids seen: {distinct_users}"
+        )
+
+    def test_timetrack_internal_walk_not_capped_by_max_records(self):
+        """Same defence for the /timetrack fan-out path.
+
+        ``max_records_per_batch=2`` on timetrack must not cap the internal
+        ``/users`` enumeration that feeds the per-batch ``userIds=`` filter
+        — otherwise users beyond index 1 would never be fanned out.
+        """
+        records, _ = self.connector.read_table(
+            "timetrack",
+            {},
+            {
+                "max_records_per_batch": "2",
+                "user_batch_size": "10",  # force one fan-out batch
+                "window_days": "60",
+                "lookback_days": "60",
+            },
+        )
+        rows = list(records)
+        if not rows:
+            return
+        distinct_users = {r["user_id"] for r in rows}
+        assert len(distinct_users) >= 3, (
+            f"max_records_per_batch=2 leaked into the inner /users walk: "
+            f"only {len(distinct_users)} distinct users observed in "
+            f"timetrack fan-out (expected at least 3). User ids seen: "
+            f"{distinct_users}"
+        )

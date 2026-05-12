@@ -171,7 +171,7 @@ These apply to `customers`, `projects`, `tasks`, and `users` (and are used inter
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `limit` | integer | `1000` | Page size used for offset/limit pagination against the actiTIME server. |
-| `max_records_per_batch` | integer | `100000` | Per-microbatch cap on the number of rows emitted from offset/limit list endpoints. |
+| `max_records_per_batch` | integer | unbounded (drain) | **Opt-in** per-microbatch cap on rows emitted from offset/limit list endpoints. By default the connector drains the endpoint fully. Set this only as a memory-hygiene knob on very large tables — note that the current snapshot / CDC reads return `{"done": True}` after one call and do not yet support partial-offset resumption, so setting this below your table's actual row count **will silently truncate** the remainder until a resumable cursor model lands. The internal `/users` discovery walk used for `userRates`, `timetrack`, and `leavetime` fan-out is always uncapped regardless of this setting. |
 
 Snapshot tables that do not list above (`departments`, `userGroups`, `userRates`, `typesOfWork`, `leaveTypes`, `workflowStatuses`, `timeZoneGroups`, `settings`) do not require any source-specific options.
 
