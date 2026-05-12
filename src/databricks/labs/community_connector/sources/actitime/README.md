@@ -28,13 +28,13 @@ Provide the following **connection-level** options when configuring the connecto
 | `base_url` | string | yes | Base URL of your actiTIME instance, **without a trailing slash**. The connector automatically appends `/api/v1`. | `https://online.actitime.com/acme` |
 | `username` | string | yes | Username (or email) of the actiTIME service-account user used for API access. | `lakeflow-ingest` |
 | `password` | string | yes | Password for the actiTIME service-account user. **Store as a Databricks secret** rather than inline. | `<DATABRICKS_SECRET>` |
-| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names allowed to pass through to the connector. This connector supports table-specific options, so this parameter must be set. | `start_date,window_days,lookback_days,stopAfter,dateFrom,dateTo,limit,max_records_per_batch` |
+| `externalOptionsAllowList` | string | yes | Comma-separated list of table-specific option names allowed to pass through to the connector. This connector supports table-specific options, so this parameter must be set. | `start_date,window_days,lookback_days,stopAfter,user_batch_size,dateFrom,dateTo,limit,max_records_per_batch` |
 
 The full list of supported table-specific options for `externalOptionsAllowList` is:
 
-`start_date,window_days,lookback_days,stopAfter,dateFrom,dateTo,limit,max_records_per_batch`
+`start_date,window_days,lookback_days,stopAfter,user_batch_size,dateFrom,dateTo,limit,max_records_per_batch`
 
-> **Note**: Options such as `start_date`, `window_days`, `lookback_days`, `stopAfter`, `dateFrom`, `dateTo`, `limit`, and `max_records_per_batch` are **not** connection parameters. They are provided per-table via `table_configuration` in the pipeline spec. Their names must be listed in `externalOptionsAllowList` for the connection to allow them through.
+> **Note**: Options such as `start_date`, `window_days`, `lookback_days`, `stopAfter`, `user_batch_size`, `dateFrom`, `dateTo`, `limit`, and `max_records_per_batch` are **not** connection parameters. They are provided per-table via `table_configuration` in the pipeline spec. Their names must be listed in `externalOptionsAllowList` for the connection to allow them through.
 
 ### Obtaining the Required Parameters
 
@@ -55,7 +55,7 @@ A Unity Catalog connection for this connector can be created in two ways via the
 
 1. Follow the **Lakeflow Community Connector** UI flow from the **Add Data** page.
 2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
-3. Set `externalOptionsAllowList` to `start_date,window_days,lookback_days,stopAfter,dateFrom,dateTo,limit,max_records_per_batch` (required so table-specific options can be passed through).
+3. Set `externalOptionsAllowList` to `start_date,window_days,lookback_days,stopAfter,user_batch_size,dateFrom,dateTo,limit,max_records_per_batch` (required so table-specific options can be passed through).
 
 The connection can also be created using the standard Unity Catalog API.
 
@@ -100,7 +100,7 @@ If physical delete tracking is essential, schedule a periodic reconciliation aga
 
 `timetrack`, `leavetime`, and `approvalStatus` are append-only. The connector slices the requested date range into sliding windows and re-reads the recent past on each run to capture late edits within the editable window:
 
-- `timetrack`, `leavetime`: cursor on the `date` column. Default window: **7 days**. Default lookback: **7 days**. Server-side cap via `stopAfter` (default **1000**).
+- `timetrack`, `leavetime`: cursor on the `date` column. Default window: **7 days**. Default lookback: **7 days**. The connector fans out by user batch (`user_batch_size`, default **100**) so the per-call response size stays bounded regardless of tenant scale. `stopAfter` is an opt-in cap and is not sent by default.
 - `approvalStatus`: cursor on `week_start_date`. Default window: **28 days**. Default lookback: **14 days**.
 
 Deletes of `timetrack` / `leavetime` entries are **not** surfaced. Because data is appended, history is treated as immutable downstream; if you need to reconcile deletes, periodically re-sync the open editable window.
@@ -154,7 +154,8 @@ All source-specific options below are passed via `table_configuration` in the pi
 | `start_date` | ISO date (`YYYY-MM-DD`) | 30 days before pipeline init time | `timetrack`, `leavetime`, `approvalStatus` | Initial cursor used when there is no stored offset yet. Controls how far back the very first run reaches. |
 | `window_days` | integer | `7` for `timetrack`/`leavetime`, `28` for `approvalStatus` | `timetrack`, `leavetime`, `approvalStatus` | Size of each sliding date window the connector requests per microbatch. |
 | `lookback_days` | integer | `7` for `timetrack`/`leavetime`, `14` for `approvalStatus` | `timetrack`, `leavetime`, `approvalStatus` | Days subtracted from the cursor at read time to catch late edits to records that fall inside actiTIME's editable window. Does **not** modify the stored offset. |
-| `stopAfter` | integer | `1000` | `timetrack`, `leavetime` | Server-side result cap forwarded as the `stopAfter` query parameter. `approvalStatus` does not accept this option (its `/approvalStatus` endpoint does not support `stopAfter`). |
+| `user_batch_size` | integer | `100` | `timetrack`, `leavetime` | Number of `userIds` the connector fans out per actiTIME request. Bounds the per-call response size on large tenants without relying on `stopAfter` truncation. Lower this on tenants where a single user accumulates an unusually high entry count per window; raise it (up to ~200) on small tenants to reduce call count. |
+| `stopAfter` | integer | unset (opt-in) | `timetrack`, `leavetime` | Optional server-side result cap forwarded as the `stopAfter` query parameter. The connector does **not** send this by default — the per-user batch is the natural bound. Set only if you have a specific need to cap response size further. `approvalStatus` does not accept this option (its `/approvalStatus` endpoint does not support `stopAfter`). |
 
 #### Snapshot options (apply to `holidays`)
 
@@ -231,7 +232,7 @@ Example `pipeline_spec`:
             "start_date": "2026-01-01",
             "window_days": "7",
             "lookback_days": "7",
-            "stopAfter": "1000"
+            "user_batch_size": "100"
           }
         }
       },

@@ -53,8 +53,15 @@ connection:
 #   - lookback_days           Days subtracted from the cursor at read time to catch
 #                             late edits. Defaults: 7 for timetrack/leavetime,
 #                             14 for approvalStatus.
-#   - stopAfter               Server-side result cap for /timetrack and /leavetime
-#                             (default 1000).
+#   - stopAfter               Opt-in server-side result cap for /timetrack and
+#                             /leavetime. The connector does NOT send this by
+#                             default — the per-user batch (see user_batch_size)
+#                             is the natural bound. Forwarded per batch only when
+#                             explicitly set.
+#   - user_batch_size         Number of userIds to fan out per /timetrack and
+#                             /leavetime request (default 100). Bounds the
+#                             per-call response size on large tenants without
+#                             relying on stopAfter truncation.
 #   - dateFrom                Optional lower bound (ISO date) for the /holidays
 #                             snapshot endpoint.
 #   - dateTo                  Optional upper bound (ISO date) for the /holidays
@@ -64,4 +71,4 @@ connection:
 #   - max_records_per_batch   Per-microbatch cap on emitted rows from offset/limit
 #                             endpoints. Default 100000.
 # ============================================================================
-external_options_allowlist: "start_date,window_days,lookback_days,stopAfter,dateFrom,dateTo,limit,max_records_per_batch"
+external_options_allowlist: "start_date,window_days,lookback_days,stopAfter,user_batch_size,dateFrom,dateTo,limit,max_records_per_batch"

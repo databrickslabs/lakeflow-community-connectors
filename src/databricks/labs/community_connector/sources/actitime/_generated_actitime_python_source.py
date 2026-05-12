@@ -1120,12 +1120,21 @@ def register_lakeflow_source(spark):
             """Sliding date-window read for timetrack and leavetime.
 
             actiTIME's ``/timetrack`` and ``/leavetime`` endpoints accept
-            ``dateFrom`` / ``dateTo`` (inclusive) and use ``stopAfter`` as the
-            result cap (not ``limit``/``offset``). To bound each microbatch we
-            slice the requested range into windows of ``window_days`` days and
-            advance the cursor to the window end. Records older than
-            ``lookback_days`` are pulled again on each run to capture late
-            edits within the open editable week.
+            ``dateFrom`` / ``dateTo`` (inclusive) and a ``userIds`` filter,
+            but expose no offset/limit pagination — only ``stopAfter`` as a
+            server-side result cap. Capping by record count silently drops
+            overflow once a tenant has more activity than ``stopAfter`` (the
+            cursor advances to the window end regardless).
+
+            To make the per-call response size predictable independent of
+            tenant scale, the connector enumerates users (via the same
+            ``/users`` walk used by :meth:`_read_user_rates`) and fans out
+            one request per batch of ``user_batch_size`` user IDs (default
+            ``100``). ``stopAfter`` is forwarded only when the caller
+            explicitly sets it — for the default flow the user batch is the
+            natural size bound. Records older than ``lookback_days`` are
+            pulled again on each run to capture late edits within the open
+            editable week.
             """
             # Resolve the starting cursor in priority order:
             # 1. The previous run's checkpointed offset.
@@ -1147,7 +1156,7 @@ def register_lakeflow_source(spark):
             read_from = cursor_date - timedelta(days=lookback_days)
 
             window_days = max(1, int(table_options.get("window_days", "7")))
-            stop_after = int(table_options.get("stopAfter", "1000"))
+            user_batch_size = max(1, int(table_options.get("user_batch_size", "100")))
 
             window_end_date = min(
                 cursor_date + timedelta(days=window_days), self._init_date
@@ -1157,26 +1166,59 @@ def register_lakeflow_source(spark):
             # boundary day across consecutive windows.
             window_end_inclusive = max(window_end_date - timedelta(days=1), read_from)
 
-            params = {
+            # Enumerate users for this microbatch. Same call shape as
+            # :meth:`_read_user_rates`, paginated by ``_read_offset_limit``.
+            user_ids = [
+                u.get("id")
+                for u in self._read_offset_limit(
+                    "users", table_options, params={}, _raw=True
+                )
+                if u.get("id") is not None
+            ]
+            if not user_ids:
+                # Empty tenant — still advance the cursor so the framework
+                # makes progress instead of looping on an empty window.
+                return iter([]), {"cursor": window_end_date.isoformat()}
+
+            base_params = {
                 "dateFrom": read_from.isoformat(),
                 "dateTo": window_end_inclusive.isoformat(),
-                "stopAfter": str(stop_after),
             }
-            body = self._get_json_or_none(table_name, params=params)
-            if body is None:
-                # 404 — table absent on this tenant. Terminate the window walk.
-                return iter([]), start_offset or {"cursor": self._init_ts_iso}
+            if "stopAfter" in table_options:
+                # Caller has explicitly opted into a server-side cap; forward
+                # it per batch. Otherwise leave it off — the user batch is the
+                # size bound.
+                base_params["stopAfter"] = str(table_options["stopAfter"])
 
-            # The wire envelope is ``{"dateFrom": ..., "dateTo": ...,
-            # "data": [...]}``. Inside ``data``:
-            #   * timetrack — each entry is ``{userId, dayOffset, date,
-            #     records:[{taskId, time}, ...]}``. Flatten one row per record,
-            #     copying userId/date/dayOffset down.
-            #   * leavetime — each entry is already flat:
-            #     ``{userId, dayOffset, date, leaveTypeId, leaveTime}``. Emit
-            #     as-is via ``_map_record``.
-            data = self._unwrap_records(body, key="data")
             flat: list[dict] = []
+            for batch_start in range(0, len(user_ids), user_batch_size):
+                batch = user_ids[batch_start : batch_start + user_batch_size]
+                params = dict(base_params)
+                params["userIds"] = ",".join(str(u) for u in batch)
+                body = self._get_json_or_none(table_name, params=params)
+                if body is None:
+                    # 404 — feature absent on this tenant. Terminate the walk.
+                    return iter([]), start_offset or {"cursor": self._init_ts_iso}
+                flat.extend(self._flatten_time_window_batch(table_name, body))
+
+            # Advance the stored cursor to the end of the window we just read.
+            next_offset = {"cursor": window_end_date.isoformat()}
+            return iter(flat), next_offset
+
+        def _flatten_time_window_batch(self, table_name: str, body) -> list[dict]:
+            """Flatten one ``/timetrack`` or ``/leavetime`` response batch.
+
+            The wire envelope is ``{"dateFrom": ..., "dateTo": ..., "data":
+            [...]}``. Inside ``data``:
+              * timetrack — each entry is ``{userId, dayOffset, date,
+                records:[{taskId, time}, ...]}``. Flatten one row per record,
+                copying userId/date/dayOffset down.
+              * leavetime — each entry is already flat:
+                ``{userId, dayOffset, date, leaveTypeId, leaveTime}``. Emit
+                as-is via ``_map_record``.
+            """
+            data = self._unwrap_records(body, key="data")
+            out: list[dict] = []
             for env in data:
                 if table_name == "timetrack":
                     uid = env.get("userId")
@@ -1189,13 +1231,10 @@ def register_lakeflow_source(spark):
                             "date": edate,
                             "dayOffset": day_offset,
                         }
-                        flat.append(self._map_record(table_name, merged))
+                        out.append(self._map_record(table_name, merged))
                 else:  # leavetime — flat per-entry.
-                    flat.append(self._map_record(table_name, env))
-
-            # Advance the stored cursor to the end of the window we just read.
-            next_offset = {"cursor": window_end_date.isoformat()}
-            return iter(flat), next_offset
+                    out.append(self._map_record(table_name, env))
+            return out
 
         def _read_approval_status(
             self,
@@ -1282,11 +1321,9 @@ def register_lakeflow_source(spark):
                 records = self._unwrap_records(body, key="items")
                 if not records:
                     break
-                # actiTIME may cap the page size below the requested ``limit`` (the
-                # envelope's ``limit`` field reports the server-applied value). To
-                # detect end-of-stream we compare against that applied page size,
-                # not the requested one, otherwise a server cap below ``page_size``
-                # would terminate the loop after the very first page.
+                # actiTIME may cap a page below the requested ``limit``; trust the
+                # envelope's ``limit`` field so a server cap doesn't break out of
+                # the loop after the first page.
                 applied_page_size = page_size
                 if isinstance(body, dict):
                     server_limit = body.get("limit")
