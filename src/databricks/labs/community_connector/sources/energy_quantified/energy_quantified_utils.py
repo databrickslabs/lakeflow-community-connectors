@@ -166,13 +166,19 @@ def api_get(
     *,
     rate_limiter: RateLimiter,
     params: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+    return_headers: bool = False,
+) -> Any:
     """Fetch JSON from ``url`` and return the decoded body.
 
     Raises ``RuntimeError`` on any non-2xx status with the response
     body included for debugging.  EQ returns errors as JSON objects
     ``{"http_status": 400, "message": "..."}`` — the raw text is the
     most useful form for diagnostics.
+
+    When ``return_headers`` is True the call returns a ``(body, headers)``
+    tuple instead of just the body — used by the curves catalog reader
+    which depends on ``X-Last-Page`` (pagination metadata lives in
+    response headers, not the envelope).
     """
     resp = request_with_retry(session, "GET", url, rate_limiter=rate_limiter, params=params)
     if resp.status_code >= 400:
@@ -180,11 +186,14 @@ def api_get(
             f"Energy Quantified API error for {label}: {resp.status_code} {resp.text[:500]}"
         )
     try:
-        return resp.json()
+        body = resp.json()
     except ValueError as exc:
         raise RuntimeError(
             f"Energy Quantified API returned non-JSON for {label}: {resp.text[:200]!r}"
         ) from exc
+    if return_headers:
+        return body, dict(resp.headers)
+    return body
 
 
 # --------------------------------------------------------------------------- #
@@ -268,6 +277,22 @@ def to_iso_datetime(value: datetime) -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc).isoformat()
+
+
+def to_eq_datetime(value: datetime) -> str:
+    """Return an Energy-Quantified-compatible datetime string in UTC.
+
+    EQ's query-parameter parser rejects the canonical ISO 8601 form
+    (``YYYY-MM-DDTHH:MM:SS+TZ``) and instead requires a space separator
+    between the date and time, e.g. ``2026-05-11 12:00:00+00:00``.
+    EQ also emits ``issued`` in this same form in response bodies, so
+    we use it both on the wire (``issued-at-latest`` /
+    ``issued-at-earliest``) and as the connector's high-water-mark
+    cursor so string comparisons line up.
+    """
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat(sep=" ", timespec="seconds")
 
 
 def days_ago_iso_date(days: int, now: datetime | None = None) -> str:

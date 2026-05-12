@@ -1,87 +1,652 @@
 [
   {
-    "name": "DE Power Spot Day-Ahead EUR/MWh H Forecast",
+    "name": "AL>XK Exchange Day-Ahead Capacity MW H Actual",
+    "area": "AL",
+    "area_sink": "XK",
+    "categories": [
+      "Exchange",
+      "Day-Ahead",
+      "Capacity"
+    ],
+    "resolution": {
+      "frequency": "PT1H",
+      "timezone": "CET"
+    },
+    "unit": "MW",
+    "denominator": null,
+    "source": null,
+    "data_type": "ACTUAL",
     "curve_type": "TIMESERIES",
+    "subscription": {
+      "access": "PAYING",
+      "type": "package_area",
+      "label": "Power – Albania",
+      "package": "Power",
+      "area": "AL"
+    },
+    "commodity": "Power"
+  },
+  {
+    "name": "AL>XK Exchange Day-Ahead Schedule MWh/h H Actual",
+    "area": "AL",
+    "area_sink": "XK",
+    "categories": [
+      "Exchange",
+      "Day-Ahead",
+      "Schedule"
+    ],
+    "resolution": {
+      "frequency": "PT1H",
+      "timezone": "CET"
+    },
+    "unit": "MWh/h",
+    "denominator": null,
+    "source": null,
+    "data_type": "ACTUAL",
+    "curve_type": "TIMESERIES",
+    "subscription": {
+      "access": "PAYING",
+      "type": "package_area",
+      "label": "Power – Albania",
+      "package": "Power",
+      "area": "AL"
+    },
+    "commodity": "Power"
+  },
+  {
+    "name": "AL>XK Exchange Day-Ahead Schedule MWh/h H Backcast",
+    "area": "AL",
+    "area_sink": "XK",
+    "categories": [
+      "Exchange",
+      "Day-Ahead",
+      "Schedule"
+    ],
+    "resolution": {
+      "frequency": "PT1H",
+      "timezone": "CET"
+    },
+    "unit": "MWh/h",
+    "denominator": null,
+    "source": null,
+    "data_type": "BACKCAST",
+    "curve_type": "TIMESERIES",
+    "subscription": {
+      "access": "PAYING",
+      "type": "package_area",
+      "label": "Power – Albania",
+      "package": "Power",
+      "area": "AL"
+    },
+    "commodity": "Power"
+  },
+  {
+    "name": "AL>XK Exchange Final Schedule MWh/h H Actual",
+    "area": "AL",
+    "area_sink": "XK",
+    "categories": [
+      "Exchange",
+      "Final",
+      "Schedule"
+    ],
+    "resolution": {
+      "frequency": "PT1H",
+      "timezone": "CET"
+    },
+    "unit": "MWh/h",
+    "denominator": null,
+    "source": null,
+    "data_type": "ACTUAL",
+    "curve_type": "TIMESERIES",
+    "subscription": {
+      "access": "PAYING",
+      "type": "package_area",
+      "label": "Power – Albania",
+      "package": "Power",
+      "area": "AL"
+    },
+    "commodity": "Power"
+  },
+  {
+    "name": "AL>ME Exchange Day-Ahead Capacity MW H Actual",
+    "area": "AL",
+    "area_sink": "ME",
+    "categories": [
+      "Exchange",
+      "Day-Ahead",
+      "Capacity"
+    ],
+    "resolution": {
+      "frequency": "PT1H",
+      "timezone": "CET"
+    },
+    "unit": "MW",
+    "denominator": null,
+    "source": null,
+    "data_type": "ACTUAL",
+    "curve_type": "TIMESERIES",
+    "subscription": {
+      "access": "PAYING",
+      "type": "package_area",
+      "label": "Power – Albania",
+      "package": "Power",
+      "area": "AL"
+    },
+    "commodity": "Power"
+  },
+  {
+    "name": "AL>XK Exchange Day-Ahead Schedule MWh/h H Forecast",
+    "area": "AL",
+    "area_sink": "XK",
+    "categories": [
+      "Exchange",
+      "Day-Ahead",
+      "Schedule"
+    ],
+    "resolution": {
+      "frequency": "PT1H",
+      "timezone": "CET"
+    },
+    "unit": "MWh/h",
+    "denominator": null,
+    "source": null,
     "data_type": "FORECAST",
-    "area": "DE",
+    "curve_type": "INSTANCE",
+    "instance_issued_timezone": "CET",
+    "subscription": {
+      "access": "PAYING",
+      "type": "package_area",
+      "label": "Power – Albania",
+      "package": "Power",
+      "area": "AL"
+    },
+    "commodity": "Power"
+  },
+  {
+    "name": "AL>ME Exchange Day-Ahead Schedule MWh/h H Forecast",
+    "area": "AL",
+    "area_sink": "ME",
+    "categories": [
+      "Exchange",
+      "Day-Ahead",
+      "Schedule"
+    ],
+    "resolution": {
+      "frequency": "PT1H",
+      "timezone": "CET"
+    },
+    "unit": "MWh/h",
+    "denominator": null,
+    "source": null,
+    "data_type": "FORECAST",
+    "curve_type": "INSTANCE",
+    "instance_issued_timezone": "CET",
+    "subscription": {
+      "access": "PAYING",
+      "type": "package_area",
+      "label": "Power – Albania",
+      "package": "Power",
+      "area": "AL"
+    },
+    "commodity": "Power"
+  },
+  {
+    "name": "TR>BG Exchange Day-Ahead Schedule MWh/h H Forecast",
+    "area": "TR",
+    "area_sink": "BG",
+    "categories": [
+      "Exchange",
+      "Day-Ahead",
+      "Schedule"
+    ],
+    "resolution": {
+      "frequency": "PT1H",
+      "timezone": "CET"
+    },
+    "unit": "MWh/h",
+    "denominator": null,
+    "source": null,
+    "data_type": "FORECAST",
+    "curve_type": "INSTANCE",
+    "instance_issued_timezone": "CET",
+    "subscription": {
+      "access": "PAYING",
+      "type": "package_area",
+      "label": "Power – Turkey",
+      "package": "Power",
+      "area": "TR"
+    },
+    "commodity": "Power"
+  },
+  {
+    "name": "IT-CNOR>IT-SARD Exchange Day-Ahead Schedule MWh/h H Forecast",
+    "area": "IT-CNOR",
+    "area_sink": "IT-SARD",
+    "categories": [
+      "Exchange",
+      "Day-Ahead",
+      "Schedule"
+    ],
+    "resolution": {
+      "frequency": "PT1H",
+      "timezone": "CET"
+    },
+    "unit": "MWh/h",
+    "denominator": null,
+    "source": null,
+    "data_type": "FORECAST",
+    "curve_type": "INSTANCE",
+    "instance_issued_timezone": "CET",
+    "subscription": {
+      "access": "PAYING",
+      "type": "package_area",
+      "label": "Power – Italy – Central-Northern",
+      "package": "Power",
+      "area": "IT-CNOR"
+    },
+    "commodity": "Power"
+  },
+  {
+    "name": "IE>NIE Exchange Day-Ahead Schedule MWh/h H Forecast",
+    "area": "IE",
+    "area_sink": "NIE",
+    "categories": [
+      "Exchange",
+      "Day-Ahead",
+      "Schedule"
+    ],
+    "resolution": {
+      "frequency": "PT1H",
+      "timezone": "CET"
+    },
+    "unit": "MWh/h",
+    "denominator": null,
+    "source": null,
+    "data_type": "FORECAST",
+    "curve_type": "INSTANCE",
+    "instance_issued_timezone": "CET",
+    "subscription": {
+      "access": "PAYING",
+      "type": "package_area",
+      "label": "Power – Ireland",
+      "package": "Power",
+      "area": "IE"
+    },
+    "commodity": "Power"
+  },
+  {
+    "name": "BG Sensitivity Spot EUR/MWh H Scenario",
+    "area": "BG",
     "area_sink": null,
-    "area_source": null,
-    "place": null,
-    "frequency": "H",
-    "timezone": "CET",
-    "categories": ["power", "spot"],
+    "categories": [
+      "Sensitivity",
+      "Spot"
+    ],
+    "resolution": {
+      "frequency": "PT1H",
+      "timezone": "CET"
+    },
     "unit": "EUR",
     "denominator": "MWh",
-    "source": "EQ",
-    "commodity": "Power",
-    "subscription": {"access": "full", "type": "paid"}
+    "source": null,
+    "data_type": "SCENARIO",
+    "curve_type": "SCENARIO_TIMESERIES",
+    "subscription": {
+      "access": "PAYING",
+      "type": "package",
+      "label": "Sensitivity",
+      "package": "Sensitivity"
+    },
+    "commodity": "Power"
   },
   {
-    "name": "DE Power Production Wind Onshore MW H Actual",
-    "curve_type": "TIMESERIES",
-    "data_type": "ACTUAL",
-    "area": "DE",
+    "name": "CZ Sensitivity Spot EUR/MWh H Scenario",
+    "area": "CZ",
     "area_sink": null,
-    "area_source": null,
-    "place": null,
-    "frequency": "H",
-    "timezone": "CET",
-    "categories": ["power", "production", "wind"],
-    "unit": "MW",
-    "denominator": null,
-    "source": "TSO",
-    "commodity": "Power",
-    "subscription": {"access": "full", "type": "paid"}
-  },
-  {
-    "name": "FR Power Spot Day-Ahead EUR/MWh H Actual",
-    "curve_type": "TIMESERIES",
-    "data_type": "ACTUAL",
-    "area": "FR",
-    "area_sink": null,
-    "area_source": null,
-    "place": null,
-    "frequency": "H",
-    "timezone": "CET",
-    "categories": ["power", "spot"],
+    "categories": [
+      "Sensitivity",
+      "Spot"
+    ],
+    "resolution": {
+      "frequency": "PT1H",
+      "timezone": "CET"
+    },
     "unit": "EUR",
     "denominator": "MWh",
-    "source": "EPEX",
-    "commodity": "Power",
-    "subscription": {"access": "full", "type": "paid"}
+    "source": null,
+    "data_type": "SCENARIO",
+    "curve_type": "SCENARIO_TIMESERIES",
+    "subscription": {
+      "access": "PAYING",
+      "type": "package",
+      "label": "Sensitivity",
+      "package": "Sensitivity"
+    },
+    "commodity": "Power"
   },
   {
-    "name": "EU API2 Coal Front Month USD/t M Actual",
-    "curve_type": "OHLC",
-    "data_type": "ACTUAL",
-    "area": "EU",
-    "area_sink": null,
-    "area_source": null,
-    "place": null,
-    "frequency": "D",
-    "timezone": "UTC",
-    "categories": ["coal", "futures"],
-    "unit": "USD",
-    "denominator": "t",
-    "source": "ICE",
-    "commodity": "Coal",
-    "subscription": {"access": "full", "type": "paid"}
-  },
-  {
-    "name": "DE Power Outages Periods MW B Actual",
-    "curve_type": "PERIOD",
-    "data_type": "ACTUAL",
+    "name": "DE Sensitivity Spot EUR/MWh H Scenario",
     "area": "DE",
     "area_sink": null,
-    "area_source": null,
-    "place": null,
-    "frequency": null,
-    "timezone": "CET",
-    "categories": ["power", "outages"],
+    "categories": [
+      "Sensitivity",
+      "Spot"
+    ],
+    "resolution": {
+      "frequency": "PT1H",
+      "timezone": "CET"
+    },
+    "unit": "EUR",
+    "denominator": "MWh",
+    "source": null,
+    "data_type": "SCENARIO",
+    "curve_type": "SCENARIO_TIMESERIES",
+    "subscription": {
+      "access": "PAYING",
+      "type": "package",
+      "label": "Sensitivity",
+      "package": "Sensitivity"
+    },
+    "commodity": "Power"
+  },
+  {
+    "name": "DK2 Sensitivity Spot EUR/MWh H Scenario",
+    "area": "DK2",
+    "area_sink": null,
+    "categories": [
+      "Sensitivity",
+      "Spot"
+    ],
+    "resolution": {
+      "frequency": "PT1H",
+      "timezone": "CET"
+    },
+    "unit": "EUR",
+    "denominator": "MWh",
+    "source": null,
+    "data_type": "SCENARIO",
+    "curve_type": "SCENARIO_TIMESERIES",
+    "subscription": {
+      "access": "PAYING",
+      "type": "package",
+      "label": "Sensitivity",
+      "package": "Sensitivity"
+    },
+    "commodity": "Power"
+  },
+  {
+    "name": "FI Sensitivity Spot EUR/MWh H Scenario",
+    "area": "FI",
+    "area_sink": null,
+    "categories": [
+      "Sensitivity",
+      "Spot"
+    ],
+    "resolution": {
+      "frequency": "PT1H",
+      "timezone": "CET"
+    },
+    "unit": "EUR",
+    "denominator": "MWh",
+    "source": null,
+    "data_type": "SCENARIO",
+    "curve_type": "SCENARIO_TIMESERIES",
+    "subscription": {
+      "access": "PAYING",
+      "type": "package",
+      "label": "Sensitivity",
+      "package": "Sensitivity"
+    },
+    "commodity": "Power"
+  },
+  {
+    "name": "IT-CALA @Rizziconi-2 Natural Gas Power Capacity Available MW REMIT",
+    "area": "IT-CALA",
+    "area_sink": null,
+    "categories": [
+      "Natural",
+      "Gas",
+      "Power",
+      "Capacity",
+      "Available"
+    ],
+    "resolution": {
+      "frequency": "NONE",
+      "timezone": "CET"
+    },
     "unit": "MW",
     "denominator": null,
-    "source": "ENTSOE",
-    "commodity": "Power",
-    "subscription": {"access": "full", "type": "paid"}
+    "source": null,
+    "data_type": "REMIT",
+    "curve_type": "INSTANCE_PERIOD",
+    "instance_issued_timezone": "CET",
+    "place": {
+      "type": "producer",
+      "key": "pp-rizziconi-2",
+      "name": "Rizziconi",
+      "unit": "2",
+      "area": "IT-CALA",
+      "areas": [
+        "IT-CALA"
+      ],
+      "location": [
+        38.4453,
+        15.99
+      ],
+      "fuels": [
+        "Natural gas"
+      ],
+      "remit_units": [
+        "26WUURIZZICONI2Q"
+      ]
+    },
+    "subscription": {
+      "access": "PAYING",
+      "type": "package_area",
+      "label": "Power – Italy – Calabria",
+      "package": "Power",
+      "area": "IT-CALA"
+    },
+    "commodity": "Power"
+  },
+  {
+    "name": "IT-CALA @Rossano-1 Natural Gas Power Capacity Available MW REMIT",
+    "area": "IT-CALA",
+    "area_sink": null,
+    "categories": [
+      "Natural",
+      "Gas",
+      "Power",
+      "Capacity",
+      "Available"
+    ],
+    "resolution": {
+      "frequency": "NONE",
+      "timezone": "CET"
+    },
+    "unit": "MW",
+    "denominator": null,
+    "source": null,
+    "data_type": "REMIT",
+    "curve_type": "INSTANCE_PERIOD",
+    "instance_issued_timezone": "CET",
+    "place": {
+      "type": "producer",
+      "key": "pp-rossano-1",
+      "name": "Rossano",
+      "unit": "1",
+      "area": "IT-CALA",
+      "areas": [
+        "IT-CALA"
+      ],
+      "location": [
+        39.6218,
+        16.6084
+      ],
+      "fuels": [
+        "Natural gas"
+      ],
+      "remit_units": [
+        "26WUUROSSANO-T1T"
+      ]
+    },
+    "subscription": {
+      "access": "PAYING",
+      "type": "package_area",
+      "label": "Power – Italy – Calabria",
+      "package": "Power",
+      "area": "IT-CALA"
+    },
+    "commodity": "Power"
+  },
+  {
+    "name": "IT-CALA @Scandale-1 Natural Gas Power Capacity Available MW REMIT",
+    "area": "IT-CALA",
+    "area_sink": null,
+    "categories": [
+      "Natural",
+      "Gas",
+      "Power",
+      "Capacity",
+      "Available"
+    ],
+    "resolution": {
+      "frequency": "NONE",
+      "timezone": "CET"
+    },
+    "unit": "MW",
+    "denominator": null,
+    "source": null,
+    "data_type": "REMIT",
+    "curve_type": "INSTANCE_PERIOD",
+    "instance_issued_timezone": "CET",
+    "place": {
+      "type": "producer",
+      "key": "pp-scandale-1",
+      "name": "Scandale",
+      "unit": "1",
+      "area": "IT-CALA",
+      "areas": [
+        "IT-CALA"
+      ],
+      "location": [
+        39.1022,
+        17.0325
+      ],
+      "fuels": [
+        "Natural gas"
+      ],
+      "remit_units": [
+        "26WUCNTRLDSCND16"
+      ]
+    },
+    "subscription": {
+      "access": "PAYING",
+      "type": "package_area",
+      "label": "Power – Italy – Calabria",
+      "package": "Power",
+      "area": "IT-CALA"
+    },
+    "commodity": "Power"
+  },
+  {
+    "name": "IT-CALA @Scandale-2 Natural Gas Power Capacity Available MW REMIT",
+    "area": "IT-CALA",
+    "area_sink": null,
+    "categories": [
+      "Natural",
+      "Gas",
+      "Power",
+      "Capacity",
+      "Available"
+    ],
+    "resolution": {
+      "frequency": "NONE",
+      "timezone": "CET"
+    },
+    "unit": "MW",
+    "denominator": null,
+    "source": null,
+    "data_type": "REMIT",
+    "curve_type": "INSTANCE_PERIOD",
+    "instance_issued_timezone": "CET",
+    "place": {
+      "type": "producer",
+      "key": "pp-scandale-2",
+      "name": "Scandale",
+      "unit": "2",
+      "area": "IT-CALA",
+      "areas": [
+        "IT-CALA"
+      ],
+      "location": [
+        39.1022,
+        17.0325
+      ],
+      "fuels": [
+        "Natural gas"
+      ],
+      "remit_units": [
+        "26WUCNTRLDSCND24"
+      ]
+    },
+    "subscription": {
+      "access": "PAYING",
+      "type": "package_area",
+      "label": "Power – Italy – Calabria",
+      "package": "Power",
+      "area": "IT-CALA"
+    },
+    "commodity": "Power"
+  },
+  {
+    "name": "IT-CALA @Simeri-Crichi Natural Gas Power Capacity Available MW REMIT",
+    "area": "IT-CALA",
+    "area_sink": null,
+    "categories": [
+      "Natural",
+      "Gas",
+      "Power",
+      "Capacity",
+      "Available"
+    ],
+    "resolution": {
+      "frequency": "NONE",
+      "timezone": "CET"
+    },
+    "unit": "MW",
+    "denominator": null,
+    "source": null,
+    "data_type": "REMIT",
+    "curve_type": "INSTANCE_PERIOD",
+    "instance_issued_timezone": "CET",
+    "place": {
+      "type": "producer",
+      "key": "pp-simeri-crichi",
+      "name": "Simeri-Crichi",
+      "unit": null,
+      "area": "IT-CALA",
+      "areas": [
+        "IT-CALA"
+      ],
+      "location": [
+        38.8759,
+        16.6569
+      ],
+      "fuels": [
+        "Natural gas"
+      ],
+      "remit_units": [
+        "26WUSMRICRICHI16"
+      ]
+    },
+    "subscription": {
+      "access": "PAYING",
+      "type": "package_area",
+      "label": "Power – Italy – Calabria",
+      "package": "Power",
+      "area": "IT-CALA"
+    },
+    "commodity": "Power"
   }
 ]

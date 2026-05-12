@@ -1,24 +1,35 @@
 {
-  "curves": {},
+  "curves": {
+    "only_subscribed": "true",
+    "page_size": "50"
+  },
   "timeseries": {
-    "curve_name": "DE Power Spot Day-Ahead EUR/MWh H Forecast",
-    "frequency": "H"
+    "curve_name": "AL>XK Exchange Day-Ahead Capacity MW H Actual",
+    "start_date": "2026-05-01",
+    "end_date": "2026-05-10"
   },
   "instances": {
-    "curve_name": "DE Power Spot Day-Ahead EUR/MWh H Forecast",
-    "frequency": "H"
+    "curve_name": "AL>XK Exchange Day-Ahead Schedule MWh/h H Forecast",
+    "limit": "5",
+    "max_records_per_batch": "50"
   },
   "periods": {
-    "curve_name": "DE Power Outages Periods MW B Actual"
+    "curve_name": "DE-TransnetBW Solar Photovoltaic Installed MW Capacity",
+    "start_date": "2026-01-01",
+    "end_date": "2026-05-10"
   },
   "ohlc": {
-    "curve_name": "EU API2 Coal Front Month USD/t M Actual",
-    "period": "M",
-    "front": "1"
+    "curve_name": "Futures Coal API-2 USD/t ICE OHLC",
+    "period": "month",
+    "front": "1",
+    "start_date": "2026-04-01",
+    "end_date": "2026-05-10"
   },
   "srmc": {
-    "curve_name": "EU API2 Coal Front Month USD/t M Actual",
-    "period": "M",
-    "front": "1"
+    "curve_name": "Futures Coal API-2 USD/t ICE OHLC",
+    "period": "month",
+    "front": "1",
+    "start_date": "2026-04-01",
+    "end_date": "2026-05-10"
   }
 }

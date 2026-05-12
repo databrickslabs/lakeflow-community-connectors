@@ -40,25 +40,19 @@ endpoints:
   # Curve catalog — paginated snapshot
   # ===================================================================== #
 
-  # /metadata/curves/ pagination envelope wraps the page in `data` and
-  # uses `page` (1-indexed) + `page-size`.  The simulator's built-in
-  # `page_number` style emits the right shape; `extras` fills the
-  # envelope metadata the connector reads (`total_pages`) so it knows
-  # when to stop iterating.  With `pagination_style: none` plus a
-  # `total_pages: 1` extra the connector terminates after a single
-  # page, which matches a small bootstrapped corpus.
+  # /metadata/curves/ returns a top-level JSON array; pagination metadata
+  # lives in *response headers* (``X-Last-Page``, ``X-Current-Page``,
+  # ``X-Page-Size``, ``X-Total-Items``) rather than a body envelope.
+  # The simulator does not synthesize these headers, so we fall back on
+  # an empty short page as the "no more data" signal — the connector's
+  # reader treats a short page as terminal when no header is observed.
+  # ``pagination_style: none`` returns the corpus list as-is; with no
+  # wrapper the body shape matches the live flat-list response.
   - path: "/api/metadata/curves/"
     method: GET
     corpus: curves
     response:
       pagination_style: none
-      wrapper:
-        records_key: data
-        extras:
-          total_items: 0
-          total_pages: 1
-          page: 1
-          page_size: 0
     params:
       q:               {role: ignore}
       area:            {role: filter, field: area, op: eq}
@@ -71,8 +65,8 @@ endpoints:
       frequency:       {role: filter, field: frequency, op: eq}
       only-subscribed: {role: ignore}
       has-place:       {role: ignore}
-      page:            {role: page}
-      page-size:       {role: per_page, default: 50, max: 500}
+      page:            {role: ignore}
+      page-size:       {role: ignore}
 
   # ===================================================================== #
   # Timeseries — range query (begin/end)
@@ -93,8 +87,12 @@ endpoints:
       wrapper:
         records_key: data
         extras:
-          resolution: {frequency: "H", timezone: "UTC"}
-          curve: {name: "", curve_type: "TIMESERIES", data_type: "ACTUAL"}
+          resolution: {frequency: "PT1H", timezone: "CET"}
+          curve:
+            name: ""
+            curve_type: "TIMESERIES"
+            data_type: "ACTUAL"
+            resolution: {frequency: "PT1H", timezone: "CET"}
           instance: null
           contract: null
           scenario_names: null
@@ -155,8 +153,12 @@ endpoints:
       wrapper:
         records_key: data
         extras:
-          resolution: {frequency: null, timezone: "UTC"}
-          curve: {name: "", curve_type: "PERIOD", data_type: "ACTUAL"}
+          resolution: {frequency: "NONE", timezone: "CET"}
+          curve:
+            name: ""
+            curve_type: "PERIOD"
+            data_type: "CAPACITY"
+            resolution: {frequency: "NONE", timezone: "CET"}
           instance: null
           unit: "MW"
           denominator: null
@@ -185,9 +187,14 @@ endpoints:
       wrapper:
         records_key: data
         extras:
-          curve: {name: "", curve_type: "OHLC", data_type: "ACTUAL"}
-          unit: "EUR"
-          denominator: "MWh"
+          curve:
+            name: ""
+            curve_type: "OHLC"
+            data_type: "OHLC"
+            commodity: "Coal"
+            resolution: {frequency: "NONE", timezone: "CET"}
+          unit: "USD"
+          denominator: "t"
     params:
       begin:    {role: filter, field: product.traded_at, op: gte}
       end:      {role: filter, field: product.traded_at, op: lte}
@@ -203,10 +210,16 @@ endpoints:
   # SRMC timeseries — derived range query
   # ===================================================================== #
   #
-  # Same envelope shape as /timeseries/ with an additional `contract`
-  # and `options` block.  The simulator returns the corpus as the
-  # `data` array; `extras` fills the rest of the envelope so the
-  # connector's exploder finds the contract metadata for the row PK.
+  # Live shape: ``{curve, unit, denominator, contract, srmc_options,
+  # timeseries: {curve, contract, resolution, unit, denominator,
+  # data: [{d, v}]}}``.  Note the nested ``timeseries`` sub-envelope —
+  # the actual data points live inside it, not at the top level — and
+  # ``srmc_options`` rather than ``options``.  The simulator wrapper
+  # only supports extras at a single nesting level (the level where the
+  # records array sits), so the corpus is served as the inner
+  # ``timeseries`` block.  The connector tolerates the missing outer
+  # ``curve`` / ``contract`` / ``srmc_options`` keys by falling back to
+  # the inner copies, which is what the simulator emits.
 
   - path: "/api/srmc/{curve_name}/timeseries/"
     method: GET
@@ -214,17 +227,16 @@ endpoints:
     response:
       pagination_style: none
       wrapper:
-        records_key: data
+        records_key: timeseries.data
         extras:
           resolution: {frequency: "P1D", timezone: "UTC"}
-          curve: {name: "", curve_type: "OHLC", data_type: "ACTUAL", commodity: "Coal"}
-          contract: {period: "month", front: 1}
-          options:
-            efficiency: 0.36
-            carbon_emissions: 0.34056
-            api2_tonne_to_mwh: 6.978
-            gas_therm_to_mwh: null
-            carbon_tax_area: null
+          curve:
+            name: ""
+            curve_type: "OHLC"
+            data_type: "OHLC"
+            commodity: "Coal"
+            resolution: {frequency: "NONE", timezone: "CET"}
+          contract: {type: "CONTINUOUS", period: "month", front: 1, field: "settlement"}
           unit: "EUR"
           denominator: "MWh"
     params:

@@ -61,6 +61,7 @@ from databricks.labs.community_connector.sources.energy_quantified.energy_quanti
     parse_iso_date_or_datetime,
     parse_max_records,
     require_option,
+    to_eq_datetime,
     to_iso_date,
     to_iso_datetime,
 )
@@ -129,8 +130,15 @@ class EnergyQuantifiedLakeflowConnect(LakeflowConnect, SupportsPartitionedStream
         # when the source is continuously publishing new data.  A
         # subsequent trigger creates a fresh instance with a newer
         # ``_init_ts`` and picks up the gap.
+        #
+        # ``_init_ts`` uses Energy Quantified's space-separated datetime
+        # form (e.g. ``2026-05-11 12:00:00+00:00``) because EQ's query
+        # parser rejects the canonical ``T``-separated ISO 8601 form on
+        # ``issued-at-latest`` / ``issued-at-earliest``.  Records returned
+        # by the API use the same shape, so string comparisons between
+        # ``_init_ts`` and a record's ``issued`` line up.
         now = datetime.now(timezone.utc)
-        self._init_ts = to_iso_datetime(now)
+        self._init_ts = to_eq_datetime(now)
         self._init_date = to_iso_date(now)
 
     # ================================================================== #
@@ -311,9 +319,14 @@ class EnergyQuantifiedLakeflowConnect(LakeflowConnect, SupportsPartitionedStream
     def _read_curves(self, table_options: dict[str, str]) -> tuple[Iterator[dict], dict]:
         """Read the full curve catalog by page-walking ``/metadata/curves/``.
 
-        EQ returns an envelope ``{total_items, total_pages, page,
-        page_size, data: [...]}``.  We iterate until ``page >=
-        total_pages``.
+        EQ's catalog endpoint returns the page as a top-level JSON
+        ARRAY; pagination metadata is carried in response *headers*
+        (``X-Last-Page``, ``X-Current-Page``, ``X-Page-Size``,
+        ``X-Total-Items``).  The connector keeps requesting pages until
+        either the current page reaches ``X-Last-Page`` or the response
+        is empty.  We fall back to the empty-page sentinel when the
+        headers are missing (e.g. an in-process simulator that doesn't
+        replicate them) so behaviour stays robust off-prod.
         """
         page_size = parse_int_option(table_options, "page_size", DEFAULT_CURVES_PAGE_SIZE)
         params: dict[str, Any] = {"page-size": page_size}
@@ -343,17 +356,28 @@ class EnergyQuantifiedLakeflowConnect(LakeflowConnect, SupportsPartitionedStream
         page = 1
         while True:
             params["page"] = page
-            body = api_get(
+            body, headers = api_get(
                 self._session,
                 url,
                 "curves",
                 rate_limiter=self._rate_limiter,
                 params=params,
+                return_headers=True,
             )
-            for raw in body.get("data", []) or []:
+            # Tolerate either shape: live API returns a flat list; some
+            # simulators / test doubles may wrap the page in a `data`
+            # envelope.
+            page_records = body if isinstance(body, list) else (body.get("data") or [])
+            for raw in page_records:
                 records.append(_normalise_curve(raw))
-            total_pages = int(body.get("total_pages") or 0)
-            if page >= total_pages or total_pages == 0:
+
+            last_page = _header_int(headers, "X-Last-Page")
+            if not page_records:
+                break
+            if last_page is not None and page >= last_page:
+                break
+            if last_page is None and len(page_records) < page_size:
+                # No pagination headers (simulator path); short page = done.
                 break
             page += 1
 
@@ -772,15 +796,42 @@ class EnergyQuantifiedLakeflowConnect(LakeflowConnect, SupportsPartitionedStream
 # =========================================================================== #
 
 
+def _header_int(headers: dict[str, Any] | None, key: str) -> int | None:
+    """Look up a response header case-insensitively and parse it as int.
+
+    EQ pagination metadata lives in headers (``X-Last-Page`` etc.), and
+    ``requests`` returns headers as a case-insensitive ``CaseInsensitiveDict``
+    — but we receive a plain ``dict`` here.  Iterate to match by lowercase.
+    """
+    if not headers:
+        return None
+    target = key.lower()
+    for hkey, hval in headers.items():
+        if str(hkey).lower() == target:
+            try:
+                return int(hval)
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
 def _normalise_curve(raw: dict[str, Any]) -> dict[str, Any]:
     """Return a curve record with only the schema's declared fields.
 
     Drops any keys the API may add in future versions so the schema
     stays stable.  ``place`` is preserved as-is; the embedded struct
     schema tolerates missing keys.
+
+    EQ nests ``frequency`` and ``timezone`` inside a ``resolution`` block
+    on the wire (``{"resolution": {"frequency": "PT1H", "timezone":
+    "CET"}}``).  We flatten them to top-level columns so the schema
+    can express them as plain fields and downstream consumers don't
+    have to walk a struct for them.  Fallbacks to the flat form let
+    simulator corpora that pre-flatten the response keep working.
     """
     if not isinstance(raw, dict):
         return {}
+    resolution = raw.get("resolution") if isinstance(raw.get("resolution"), dict) else {}
     out: dict[str, Any] = {
         "name": raw.get("name"),
         "curve_type": raw.get("curve_type"),
@@ -789,8 +840,8 @@ def _normalise_curve(raw: dict[str, Any]) -> dict[str, Any]:
         "area_sink": raw.get("area_sink"),
         "area_source": raw.get("area_source"),
         "place": _slim_place(raw.get("place")),
-        "frequency": raw.get("frequency"),
-        "timezone": raw.get("timezone"),
+        "frequency": (resolution or {}).get("frequency") or raw.get("frequency"),
+        "timezone": (resolution or {}).get("timezone") or raw.get("timezone"),
         "categories": raw.get("categories"),
         "unit": raw.get("unit"),
         "denominator": raw.get("denominator"),
@@ -821,16 +872,22 @@ def _slim_subscription(value: Any) -> dict[str, Any] | None:
 
 
 def _embedded_curve(raw: dict[str, Any]) -> dict[str, Any]:
-    """Slim down the embedded curve metadata to the declared struct fields."""
+    """Slim down the embedded curve metadata to the declared struct fields.
+
+    Same ``resolution`` flattening as :func:`_normalise_curve` — the
+    embedded curve sub-object on /timeseries / /instances / /periods /
+    /ohlc / /srmc responses has the same shape as a catalog curve.
+    """
     if not isinstance(raw, dict):
         return {}
+    resolution = raw.get("resolution") if isinstance(raw.get("resolution"), dict) else {}
     return {
         "name": raw.get("name"),
         "curve_type": raw.get("curve_type"),
         "data_type": raw.get("data_type"),
         "area": raw.get("area"),
-        "frequency": raw.get("frequency"),
-        "timezone": raw.get("timezone"),
+        "frequency": (resolution or {}).get("frequency") or raw.get("frequency"),
+        "timezone": (resolution or {}).get("timezone") or raw.get("timezone"),
         "unit": raw.get("unit"),
         "denominator": raw.get("denominator"),
         "source": raw.get("source"),
@@ -975,19 +1032,34 @@ def _explode_srmc_response(
 ) -> list[dict[str, Any]]:
     """Flatten the SRMC timeseries response.
 
+    EQ wraps the actual data points inside a nested ``timeseries``
+    sub-envelope: ``{curve, unit, denominator, contract, srmc_options,
+    timeseries: {curve, contract, resolution, unit, denominator,
+    data: [{d, v}]}}``.  The sub-envelope is the source of truth for
+    ``resolution`` / ``data``; the outer envelope carries the SRMC-
+    specific ``srmc_options`` (which the API spells differently from
+    the in-block ``options`` field used by other endpoints).
+
     Stamps the contract period / front / delivery from the response
     ``contract`` block (falling back to ``table_options`` if absent)
     so each row carries its full composite PK.
     """
     if not isinstance(body, dict):
         return []
-    resolution = body.get("resolution") or {}
-    unit = body.get("unit")
-    denominator = body.get("denominator")
-    curve = body.get("curve") or {}
+    inner = body.get("timeseries") if isinstance(body.get("timeseries"), dict) else {}
+    # Some simulator corpora pre-flatten the response — fall back to
+    # the outer envelope for ``data`` / ``resolution`` when the nested
+    # ``timeseries`` block is absent.
+    data_items = (inner.get("data") if inner else None) or body.get("data") or []
+    resolution = (inner.get("resolution") if inner else None) or body.get("resolution") or {}
+    unit = (inner.get("unit") if inner else None) or body.get("unit")
+    denominator = (inner.get("denominator") if inner else None) or body.get("denominator")
+    curve = (inner.get("curve") if inner else None) or body.get("curve") or {}
     embedded = _embedded_curve(curve)
-    contract = body.get("contract") or {}
-    options = body.get("options") or {}
+    contract = body.get("contract") or (inner.get("contract") if inner else None) or {}
+    # EQ names this ``srmc_options`` on the wire; tolerate the
+    # alternative ``options`` spelling for simulator corpora.
+    options = body.get("srmc_options") or body.get("options") or {}
 
     period = contract.get("period") or table_options.get("period") or ""
     front = contract.get("front")
@@ -999,7 +1071,7 @@ def _explode_srmc_response(
     delivery = contract.get("delivery") or table_options.get("delivery")
 
     rows: list[dict[str, Any]] = []
-    for item in body.get("data", []) or []:
+    for item in data_items:
         if not isinstance(item, dict):
             continue
         rows.append(
