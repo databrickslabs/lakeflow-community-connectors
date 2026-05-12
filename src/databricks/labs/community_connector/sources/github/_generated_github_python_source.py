@@ -2086,7 +2086,7 @@ def register_lakeflow_source(spark):
     TABLE_NAME_LIST = "tableNameList"
     TABLE_CONFIGS = "tableConfigs"
     IS_DELETE_FLOW = "isDeleteFlow"
-    PREFIX = "prefix"
+    NAMESPACE_PREFIX = "namespace_prefix"
     NAMESPACE = "namespace"
 
 
@@ -2261,7 +2261,7 @@ def register_lakeflow_source(spark):
             # Connectors without SupportsNamespaces are flat — no rows.
             if not isinstance(self.lakeflow_connect, SupportsNamespaces):
                 return []
-            prefix_json = self.options.get(PREFIX)
+            prefix_json = self.options.get(NAMESPACE_PREFIX)
             prefix = json.loads(prefix_json) if prefix_json else []
             return [
                 {"namespace": ns}

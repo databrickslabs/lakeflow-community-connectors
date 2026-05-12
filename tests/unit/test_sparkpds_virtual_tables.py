@@ -18,8 +18,8 @@ from databricks.labs.community_connector.interface import (
 )
 from databricks.labs.community_connector.sparkpds.lakeflow_datasource import (
     NAMESPACE,
+    NAMESPACE_PREFIX,
     NAMESPACES_TABLE,
-    PREFIX,
     TABLE_NAME,
     TABLES_TABLE,
     LakeflowBatchReader,
@@ -132,7 +132,7 @@ def test_namespaces_prefix_drills_in():
     reader = _reader(
         _NamespacedConnector({}),
         NAMESPACES_TABLE,
-        **{PREFIX: json.dumps(["orgA"])},
+        **{NAMESPACE_PREFIX: json.dumps(["orgA"])},
     )
     assert reader._read_namespaces() == [
         {"namespace": ["orgA", "repo1"]},
