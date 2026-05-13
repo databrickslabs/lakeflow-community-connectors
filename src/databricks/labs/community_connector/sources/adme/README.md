@@ -26,21 +26,29 @@ The Search Service contract used by this connector is independently exercised en
 
 ### Required Connection Parameters
 
-To configure the connector, provide the following parameters in your Unity Catalog connection options:
+To configure the connector, provide the following parameters in your Unity Catalog connection options. The connector supports four auth modes; the table below lists the union, with required-by-mode notes in the description.
 
 | Name | Type | Required | Description | Example |
 |------|------|----------|-------------|---------|
-| `tenant_id` | string | yes | Azure AD tenant (Directory) ID. Found in Azure portal under **Azure Active Directory → Properties**. UUID. | `00000000-0000-0000-0000-000000000000` |
-| `client_id` | string | yes | Azure AD app registration client ID. UUID. The same app must be granted the `users.datalake.viewers` entitlement on the target data partition. | `11111111-1111-1111-1111-111111111111` |
-| `client_secret` | string (secret) | yes | Client secret for the app registration. Created under **Certificates & secrets** in the app registration. | `Abc~1234…` |
-| `instance_url` | string | yes | ADME instance base URL — `https://<instance-name>.energy.azure.com` (no trailing slash; the connector strips it if present). | `https://admetest.energy.azure.com` |
+| `base_url` | string | yes | ADME instance base URL — `https://<instance-name>.energy.azure.com` (no trailing slash; the connector strips it if present). Alias: `instance_url` (still accepted for backwards compatibility). | `https://admetest.energy.azure.com` |
 | `data_partition_id` | string | yes | OSDU data partition within the ADME instance. Sent as the `data-partition-id` header on every API call. Found in the ADME instance overview on the Azure portal under **Data Partitions**. | `opendes` |
+| `auth_mode` | string | no | One of `service_principal` (default), `managed_identity`, `federated_identity`, `static_token`. | `federated_identity` |
+| `adme_api_client_id` | string | no | App registration ID of the ADME API app. Used as the OAuth2 scope audience (`<id>/.default`). Defaults to `client_id` (legacy behaviour). | `22222222-2222-2222-2222-222222222222` |
+| `tenant_id` | string | conditional | Azure AD tenant (Directory) ID. Required for `service_principal` and `federated_identity` modes. | `00000000-0000-0000-0000-000000000000` |
+| `client_id` | string | conditional | Azure AD app registration client ID. Required for `service_principal` and `federated_identity` modes. The SP must be granted `users.datalake.viewers` on the data partition. | `11111111-1111-1111-1111-111111111111` |
+| `client_secret` | string (secret) | conditional | App registration client secret. Required for `service_principal` mode only. | `Abc~1234…` |
+| `managed_identity_client_id` | string | no | Client ID of a user-assigned Managed Identity. Omit for system-assigned MI. Used only when `auth_mode=managed_identity`. | `33333333-…` |
+| `federated_token_file` | string | no | Path to a file holding the OIDC assertion. Used when `auth_mode=federated_identity`. | `/var/run/secrets/azure/token` |
+| `federated_token` | string (secret) | no | Inline OIDC assertion (alternative to `federated_token_file`). Used when `auth_mode=federated_identity`. | `<jwt-string>` |
+| `access_token` | string (secret) | no | Pre-issued bearer token. Required when `auth_mode=static_token`. CI/testing only. | `<jwt-string>` |
 | `page_size` | string | no | Search Service page size, between 1 and 1000. Defaults to `1000` (the API maximum). Lowering the value increases the number of API calls but can reduce executor memory pressure. | `500` |
 
-This connector supports per-table options (`window_days`, `lookback_minutes`) — see **Table Configurations** below. Because of that, **`externalOptionsAllowList` must be set as a connection parameter** with the exact value:
+`managed_identity` and `federated_identity` require the `azure-identity` package on the cluster (`pip install "azure-identity>=1.15.0"`). `service_principal` and `static_token` have no extra dependencies.
+
+This connector supports per-table options (`window_days`, `lookback_minutes`, `max_records_per_batch`) — see **Table Configurations** below. Because of that, **`externalOptionsAllowList` must be set as a connection parameter** with the exact value:
 
 ```
-window_days,lookback_minutes
+window_days,lookback_minutes,max_records_per_batch
 ```
 
 ### Obtaining the connection parameters

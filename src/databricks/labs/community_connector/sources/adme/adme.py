@@ -5,9 +5,21 @@ OSDU master-data kinds: Wellbore, Reservoir, and Rock_and_Fluid (which
 maps to ``master-data--Sample`` — see ``adme_api_doc.md`` for the
 mapping rationale).
 
-Authentication: Azure AD OAuth2 client-credentials flow against
-``login.microsoftonline.com``. Token cached in-memory; refreshed on
-401 or just-before-expiry.
+Authentication: four modes selected via ``auth_mode``:
+
+  * ``service_principal`` (default, backwards-compatible) — Azure AD
+    OAuth2 client-credentials flow against ``login.microsoftonline.com``.
+    Token cached in-memory; refreshed on 401 or just-before-expiry.
+  * ``managed_identity`` — Azure system- or user-assigned managed
+    identity (system-assigned when ``managed_identity_client_id`` is
+    omitted). Recommended on Databricks clusters running on Azure.
+  * ``federated_identity`` — OIDC / Workload Identity federation via
+    ``azure.identity.ClientAssertionCredential``. Reads the assertion
+    from ``federated_token`` (inline) or ``federated_token_file`` (path).
+  * ``static_token`` — pre-issued bearer token (testing / CI only).
+
+The audience for the OAuth2 scope is ``adme_api_client_id`` when set;
+otherwise falls back to ``client_id`` (legacy behaviour).
 
 Read path: POST ``/api/search/v2/query_with_cursor`` with a Lucene
 ``modifyTime`` range filter for incremental sync. Pagination via the
@@ -24,6 +36,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -76,12 +89,24 @@ INITIAL_BACKOFF = 1.0
 # Auth
 # ---------------------------------------------------------------------------
 
+AUTH_MODE_SERVICE_PRINCIPAL = "service_principal"
+AUTH_MODE_MANAGED_IDENTITY = "managed_identity"
+AUTH_MODE_FEDERATED_IDENTITY = "federated_identity"
+AUTH_MODE_STATIC_TOKEN = "static_token"
+VALID_AUTH_MODES = {
+    AUTH_MODE_SERVICE_PRINCIPAL,
+    AUTH_MODE_MANAGED_IDENTITY,
+    AUTH_MODE_FEDERATED_IDENTITY,
+    AUTH_MODE_STATIC_TOKEN,
+}
+
 
 class _TokenCache:
     """In-memory bearer-token cache for the Azure AD client-credentials flow.
 
-    Threadsafe: each driver-side and executor-side instance has its own
-    cache, but multiple threads on the same instance share it.
+    Used for ``auth_mode=service_principal``. Threadsafe: each driver-side
+    and executor-side instance has its own cache, but multiple threads on
+    the same instance share it.
     """
 
     def __init__(
@@ -89,10 +114,15 @@ class _TokenCache:
         tenant_id: str,
         client_id: str,
         client_secret: str,
+        adme_api_client_id: str | None = None,
     ) -> None:
         self._tenant_id = tenant_id
         self._client_id = client_id
         self._client_secret = client_secret
+        # Audience for the token scope. Defaults to ``client_id`` for
+        # backwards compatibility (existing setups register the SP under
+        # the ADME API app registration).
+        self._audience = adme_api_client_id or client_id
         self._lock = threading.Lock()
         self._token: str | None = None
         self._expires_at: float = 0.0
@@ -128,8 +158,8 @@ class _TokenCache:
             "client_secret": self._client_secret,
             # ``scope`` and ``resource`` are both required for ADME's
             # Azure AD v1 token endpoint per the ADME docs.
-            "scope": f"{self._client_id}/.default",
-            "resource": self._client_id,
+            "scope": f"{self._audience}/.default",
+            "resource": self._audience,
         }
         resp = requests.post(
             self.token_url,
@@ -153,6 +183,168 @@ class _TokenCache:
         return token, time.time() + expires_in
 
 
+class _AzureIdentityTokenProvider:
+    """Token provider backed by ``azure.identity`` credentials.
+
+    Covers ``managed_identity`` and ``federated_identity`` modes. The
+    underlying credential handles its own caching/refresh; we present the
+    same ``get()/invalidate()`` surface as ``_TokenCache`` so callers
+    don't care which mode is active.
+    """
+
+    def __init__(self, credential: Any, scope: str) -> None:
+        self._credential = credential
+        self._scope = scope
+        self._lock = threading.Lock()
+        # Last-known good token; the underlying credential refreshes
+        # automatically, but we cache the string for log-free hot paths
+        # and to support ``invalidate()`` semantics.
+        self._token: str | None = None
+        self._expires_at: float = 0.0
+
+    def get(self, force_refresh: bool = False) -> str:
+        with self._lock:
+            now = time.time()
+            if (
+                not force_refresh
+                and self._token
+                and now < self._expires_at - 60
+            ):
+                return self._token
+            tok = self._credential.get_token(self._scope)
+            self._token = tok.token
+            self._expires_at = float(tok.expires_on)
+            return self._token
+
+    def invalidate(self) -> None:
+        with self._lock:
+            self._token = None
+            self._expires_at = 0.0
+
+
+class _StaticTokenProvider:
+    """Pre-issued bearer token (CI / testing).
+
+    Honours the ``get()/invalidate()`` shape but never refreshes — if the
+    token expires the caller will see 401s on subsequent requests.
+    """
+
+    def __init__(self, token: str) -> None:
+        if not token or not token.strip():
+            raise ValueError("static_token mode requires a non-empty access_token")
+        self._token = token.strip()
+
+    def get(self, force_refresh: bool = False) -> str:
+        return self._token
+
+    def invalidate(self) -> None:
+        # No-op: nothing to refresh. Caller will keep seeing 401s if the
+        # token has expired, which is the correct signal for static-token
+        # mode (the operator must supply a new token).
+        pass
+
+
+def _read_federated_token(token_inline: str | None, token_file: str | None) -> str:
+    """Read federated assertion from inline value or token file."""
+    if token_inline and token_inline.strip():
+        return token_inline.strip()
+    if token_file:
+        path = os.path.expandvars(os.path.expanduser(token_file))
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    raise ValueError(
+        "federated_identity mode requires federated_token or federated_token_file"
+    )
+
+
+def _build_token_provider(options: dict[str, str]) -> "tuple[Any, str]":
+    """Construct the auth provider implied by ``options['auth_mode']``.
+
+    Returns the provider plus the API audience (used as the OAuth2 scope
+    suffix, ``<audience>/.default``).
+    """
+    auth_mode = (options.get("auth_mode") or AUTH_MODE_SERVICE_PRINCIPAL).strip()
+    if auth_mode not in VALID_AUTH_MODES:
+        raise ValueError(
+            f"unknown auth_mode {auth_mode!r}; expected one of "
+            f"{sorted(VALID_AUTH_MODES)}"
+        )
+
+    tenant_id = options.get("tenant_id")
+    client_id = options.get("client_id")
+    adme_api_client_id = options.get("adme_api_client_id") or client_id
+
+    if auth_mode == AUTH_MODE_SERVICE_PRINCIPAL:
+        client_secret = options.get("client_secret")
+        for name, value in [
+            ("tenant_id", tenant_id),
+            ("client_id", client_id),
+            ("client_secret", client_secret),
+        ]:
+            if not value:
+                raise ValueError(
+                    f"service_principal mode requires connection option {name!r}"
+                )
+        return (
+            _TokenCache(
+                tenant_id=tenant_id,
+                client_id=client_id,
+                client_secret=client_secret,
+                adme_api_client_id=adme_api_client_id,
+            ),
+            adme_api_client_id,
+        )
+
+    if auth_mode == AUTH_MODE_STATIC_TOKEN:
+        token = options.get("access_token")
+        return _StaticTokenProvider(token), adme_api_client_id
+
+    # Both managed_identity and federated_identity rely on azure-identity.
+    try:
+        from azure.identity import (
+            ClientAssertionCredential,
+            ManagedIdentityCredential,
+        )
+    except ImportError as e:
+        raise RuntimeError(
+            f"auth_mode={auth_mode} requires the azure-identity package; "
+            "install with `pip install azure-identity>=1.15.0`"
+        ) from e
+
+    scope = f"{adme_api_client_id}/.default"
+
+    if auth_mode == AUTH_MODE_MANAGED_IDENTITY:
+        mi_client_id = options.get("managed_identity_client_id")
+        if mi_client_id:
+            credential = ManagedIdentityCredential(client_id=mi_client_id)
+        else:
+            credential = ManagedIdentityCredential()
+        return _AzureIdentityTokenProvider(credential, scope), adme_api_client_id
+
+    # federated_identity
+    if not tenant_id:
+        raise ValueError("federated_identity mode requires tenant_id")
+    sp_client_id = options.get("client_id")
+    if not sp_client_id:
+        raise ValueError(
+            "federated_identity mode requires client_id (the service principal id)"
+        )
+    token_inline = options.get("federated_token")
+    token_file = options.get("federated_token_file")
+    # Validate the token source eagerly so misconfigs fail fast.
+    _read_federated_token(token_inline, token_file)
+
+    def _get_assertion() -> str:
+        return _read_federated_token(token_inline, token_file)
+
+    credential = ClientAssertionCredential(
+        tenant_id=tenant_id,
+        client_id=sp_client_id,
+        func=_get_assertion,
+    )
+    return _AzureIdentityTokenProvider(credential, scope), adme_api_client_id
+
+
 # ---------------------------------------------------------------------------
 # Connector
 # ---------------------------------------------------------------------------
@@ -162,11 +354,31 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
     """LakeflowConnect implementation for Azure Data Manager for Energy.
 
     Required connection options:
-        tenant_id            Azure AD tenant ID
-        client_id            App registration client ID
-        client_secret        App registration client secret
-        instance_url         e.g. ``https://admetest.energy.azure.com``
+        base_url             ADME instance base URL (alias: ``instance_url``)
+                             e.g. ``https://admetest.energy.azure.com``
         data_partition_id    e.g. ``opendes`` or ``<inst>-opendes``
+
+    Auth options (selected by ``auth_mode``):
+        auth_mode                       service_principal (default) |
+                                        managed_identity | federated_identity |
+                                        static_token
+        tenant_id                       Azure AD tenant ID
+                                        (required for service_principal,
+                                        federated_identity)
+        client_id                       SP / app registration client ID
+                                        (required for service_principal,
+                                        federated_identity)
+        client_secret                   SP secret
+                                        (required for service_principal)
+        adme_api_client_id              Audience for the OAuth2 scope
+                                        (defaults to client_id)
+        managed_identity_client_id      User-assigned MI client ID
+                                        (omit for system-assigned MI)
+        federated_token / federated_token_file
+                                        OIDC assertion source for
+                                        federated_identity mode
+        access_token                    Pre-issued bearer token for
+                                        static_token mode (CI / testing only)
 
     Optional connection options:
         page_size            Search page size (default 1000, max 1000)
@@ -181,17 +393,13 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
     def __init__(self, options: dict[str, str]) -> None:
         super().__init__(options)
 
-        tenant_id = options.get("tenant_id")
-        client_id = options.get("client_id")
-        client_secret = options.get("client_secret")
-        instance_url = options.get("instance_url")
+        # ``base_url`` is the v1.2.0 spelling; ``instance_url`` is kept as
+        # an alias for backwards compatibility with existing UC connections.
+        instance_url = options.get("base_url") or options.get("instance_url")
         data_partition_id = options.get("data_partition_id")
 
         for name, value in [
-            ("tenant_id", tenant_id),
-            ("client_id", client_id),
-            ("client_secret", client_secret),
-            ("instance_url", instance_url),
+            ("base_url (or instance_url)", instance_url),
             ("data_partition_id", data_partition_id),
         ]:
             if not value:
@@ -202,9 +410,6 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         # Strip trailing slash for clean URL composition.
         self._instance_url = instance_url.rstrip("/")
         self._data_partition_id = data_partition_id
-        self._tenant_id = tenant_id
-        self._client_id = client_id
-        self._client_secret = client_secret
 
         try:
             self._page_size = max(
@@ -213,7 +418,9 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         except (TypeError, ValueError):
             self._page_size = DEFAULT_PAGE_SIZE
 
-        self._token_cache = _TokenCache(tenant_id, client_id, client_secret)
+        # Auth provider — dispatches on options['auth_mode']. Defaults to
+        # service_principal so existing UC connections keep working.
+        self._token_provider, self._adme_audience = _build_token_provider(options)
         self._session = requests.Session()
 
         # Cap offsets at init time so Trigger.AvailableNow terminates
@@ -351,7 +558,7 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
 
         Runs on Spark executors. Recreates the API state needed via
         ``self.options`` (set by the LakeflowConnect base ``__init__``)
-        through the existing ``_session``/``_token_cache`` instance
+        through the existing ``_session``/``_token_provider`` instance
         attributes that get pickled with the connector.
 
         Honors ``max_records_per_batch`` for admission control: when
@@ -488,7 +695,7 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
 
     def _common_headers(self) -> dict[str, str]:
         return {
-            "Authorization": f"Bearer {self._token_cache.get()}",
+            "Authorization": f"Bearer {self._token_provider.get()}",
             "data-partition-id": self._data_partition_id,
             "Content-Type": "application/json",
             "Accept": "application/json",
@@ -510,7 +717,7 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             )
             if resp.status_code == 401 and not auth_retried:
                 # Token may be stale (e.g. revoked or expired early).
-                self._token_cache.invalidate()
+                self._token_provider.invalidate()
                 auth_retried = True
                 continue
             if resp.status_code not in RETRIABLE_STATUS_CODES:
