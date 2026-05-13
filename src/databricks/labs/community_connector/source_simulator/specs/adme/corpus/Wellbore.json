@@ -1,319 +1,211 @@
 [
   {
-    "id": "mike-533-pk0",
-    "kind": "november-108",
-    "version": 83753,
-    "createTime": "mike-315",
-    "createUser": "zulu-495",
-    "modifyTime": "2024-01-01T00:00:00Z",
-    "modifyUser": "whiskey-470",
-    "acl_owners": [
-      "mike-318",
-      "victor-183"
-    ],
-    "acl_viewers": [],
-    "legal_legaltags": [],
-    "legal_status": "romeo-490",
-    "legal_otherRelevantDataCountries": [
-      "victor-864"
-    ],
-    "tags_json": "alpha-285",
-    "meta_json": "lima-921",
-    "data_json": "kilo-107",
-    "FacilityID": "kilo-272",
-    "FacilityName": "kilo-803",
-    "FacilityTypeID": "victor-860",
-    "WellID": "foxtrot-297",
-    "KickOffWellboreID": "tango-849",
-    "StatusSummary": "whiskey-477",
-    "TargetFormation": "foxtrot-305",
-    "FacilityNameAliases_json": "kilo-459",
-    "FacilityOperators_json": "whiskey-557",
-    "VerticalMeasurements_json": "romeo-418",
-    "SpatialLocation_json": "tango-756",
-    "GeoContexts_json": "papa-991",
-    "DrillingReasons_json": "yankee-616",
-    "InitialCompletion_json": "kilo-278",
-    "ExtensionProperties_json": "romeo-132"
+    "id": "opendes:master-data--Wellbore:WB-PERMIAN-001:",
+    "kind": "osdu:wks:master-data--Wellbore:1.0.0",
+    "version": 1710504000000,
+    "acl": {
+      "viewers": ["data.default.viewers@opendes.contoso.com"],
+      "owners":  ["data.default.owners@opendes.contoso.com"]
+    },
+    "legal": {
+      "legaltags":                  ["opendes-public-usa-dataset-1"],
+      "otherRelevantDataCountries": ["US"],
+      "status":                     "compliant"
+    },
+    "tags": {},
+    "createTime": "2023-08-10T14:22:00.000Z",
+    "createUser": "ingestion-service@opendes.contoso.com",
+    "modifyTime": "2024-03-15T10:00:00.000Z",
+    "modifyUser": "data-steward@opendes.contoso.com",
+    "data": {
+      "FacilityName":             "Permian Basin Explorer 1",
+      "FacilityTypeID":           "opendes:reference-data--FacilityType:Well:",
+      "NameAliases": [
+        {
+          "AliasName":       "PBE-1",
+          "AliasNameTypeID": "opendes:reference-data--AliasNameType:RegulatoryName:"
+        }
+      ],
+      "CountryID":                "opendes:reference-data--GeoPoliticalEntity:US:",
+      "StateProvinceID":          "opendes:reference-data--GeoPoliticalEntity:TX:",
+      "WellboreBusinessIntentID": "opendes:reference-data--WellboreBusinessIntent:Exploration:",
+      "WellborePhaseID":          "opendes:reference-data--WellborePhase:TargetReached:",
+      "WellStatus":               "Active",
+      "SpudDate":                 "2023-08-01",
+      "PermitNumber":             "TX-2023-447821",
+      "TotalDepthMD":             4572.0,
+      "TotalDepthTVD":            4210.5,
+      "WaterDepth":               0.0,
+      "ElevationKB":              878.2,
+      "ElevationGL":              868.5,
+      "SurfaceLatitudeDeg":       31.8764,
+      "SurfaceLongitudeDeg":      -102.4523,
+      "TargetFormation":          "Wolfcamp A",
+      "BasinName":                "Permian Basin",
+      "FieldName":                "Midland Basin West",
+      "DrillingContractorName":   "Helmerich & Payne",
+      "RigName":                  "HP-204",
+      "VerticalMeasurements": [
+        {
+          "VerticalMeasurementID":     "TD",
+          "VerticalMeasurement":       4572.0,
+          "VerticalMeasurementTypeID": "opendes:reference-data--VerticalMeasurementType:TotalDepthMD:",
+          "VerticalMeasurementUOMID":  "opendes:reference-data--UnitOfMeasure:m:"
+        },
+        {
+          "VerticalMeasurementID":     "KB",
+          "VerticalMeasurement":       878.2,
+          "VerticalMeasurementTypeID": "opendes:reference-data--VerticalMeasurementType:KellyBushing:",
+          "VerticalMeasurementUOMID":  "opendes:reference-data--UnitOfMeasure:m:"
+        }
+      ],
+      "SpatialPoint": {
+        "type":                        "AnyCrsPoint",
+        "coordinates":                 [-102.4523, 31.8764],
+        "CoordinateReferenceSystemID": "opendes:reference-data--CoordinateReferenceSystem:WGS84:"
+      }
+    }
   },
   {
-    "id": "golf-140-pk1",
-    "kind": "papa-422",
-    "version": 45007,
-    "createTime": "quebec-683",
-    "createUser": "oscar-589",
-    "modifyTime": "2024-01-01T01:00:00Z",
-    "modifyUser": "bravo-418",
-    "acl_owners": [
-      "charlie-429",
-      "hotel-429"
-    ],
-    "acl_viewers": [
-      "romeo-990",
-      "uniform-936"
-    ],
-    "legal_legaltags": [
-      "whiskey-391",
-      "yankee-973"
-    ],
-    "legal_status": "romeo-376",
-    "legal_otherRelevantDataCountries": [],
-    "tags_json": "november-860",
-    "meta_json": "romeo-184",
-    "data_json": "india-129",
-    "FacilityID": "oscar-411",
-    "FacilityName": "golf-814",
-    "FacilityTypeID": "uniform-733",
-    "WellID": "tango-165",
-    "KickOffWellboreID": "xray-274",
-    "StatusSummary": "kilo-688",
-    "TargetFormation": "romeo-884",
-    "FacilityNameAliases_json": "tango-663",
-    "FacilityOperators_json": "whiskey-410",
-    "VerticalMeasurements_json": "uniform-500",
-    "SpatialLocation_json": "romeo-505",
-    "GeoContexts_json": "quebec-888",
-    "DrillingReasons_json": "sierra-387",
-    "InitialCompletion_json": "sierra-775",
-    "ExtensionProperties_json": "whiskey-780"
+    "id": "opendes:master-data--Wellbore:WB-NORTHSEA-002:",
+    "kind": "osdu:wks:master-data--Wellbore:1.0.0",
+    "version": 1710590400000,
+    "acl": {
+      "viewers": ["data.default.viewers@opendes.contoso.com"],
+      "owners":  ["data.default.owners@opendes.contoso.com"]
+    },
+    "legal": {
+      "legaltags":                  ["opendes-public-usa-dataset-1", "opendes-north-sea-dataset-1"],
+      "otherRelevantDataCountries": ["NO", "GB"],
+      "status":                     "compliant"
+    },
+    "tags": {},
+    "createTime": "2022-04-05T08:15:00.000Z",
+    "createUser": "ingestion-service@opendes.contoso.com",
+    "modifyTime": "2024-03-16T08:30:00.000Z",
+    "modifyUser": "data-steward@opendes.contoso.com",
+    "data": {
+      "FacilityName":             "Sleipner Alpha A-23",
+      "FacilityTypeID":           "opendes:reference-data--FacilityType:Well:",
+      "NameAliases": [
+        {
+          "AliasName":       "SLA-A23",
+          "AliasNameTypeID": "opendes:reference-data--AliasNameType:RegulatoryName:"
+        },
+        {
+          "AliasName":       "NPD-2022-00341",
+          "AliasNameTypeID": "opendes:reference-data--AliasNameType:GovernmentPermitNumber:"
+        }
+      ],
+      "CountryID":                "opendes:reference-data--GeoPoliticalEntity:NO:",
+      "StateProvinceID":          "opendes:reference-data--GeoPoliticalEntity:NorwegianNorthSea:",
+      "WellboreBusinessIntentID": "opendes:reference-data--WellboreBusinessIntent:Development:",
+      "WellborePhaseID":          "opendes:reference-data--WellborePhase:Producing:",
+      "WellStatus":               "Producing",
+      "SpudDate":                 "2022-03-14",
+      "PermitNumber":             "NPD-2022-00341",
+      "TotalDepthMD":             3820.0,
+      "TotalDepthTVD":            3650.0,
+      "WaterDepth":               82.5,
+      "ElevationKB":              33.5,
+      "ElevationGL":              -82.5,
+      "SurfaceLatitudeDeg":       58.3745,
+      "SurfaceLongitudeDeg":      1.9124,
+      "TargetFormation":          "Hugin Formation",
+      "BasinName":                "North Sea",
+      "FieldName":                "Sleipner East",
+      "DrillingContractorName":   "Odfjell Drilling",
+      "RigName":                  "Deepsea Aberdeen",
+      "VerticalMeasurements": [
+        {
+          "VerticalMeasurementID":     "TD",
+          "VerticalMeasurement":       3820.0,
+          "VerticalMeasurementTypeID": "opendes:reference-data--VerticalMeasurementType:TotalDepthMD:",
+          "VerticalMeasurementUOMID":  "opendes:reference-data--UnitOfMeasure:m:"
+        },
+        {
+          "VerticalMeasurementID":     "WD",
+          "VerticalMeasurement":       82.5,
+          "VerticalMeasurementTypeID": "opendes:reference-data--VerticalMeasurementType:WaterDepth:",
+          "VerticalMeasurementUOMID":  "opendes:reference-data--UnitOfMeasure:m:"
+        }
+      ],
+      "SpatialPoint": {
+        "type":                        "AnyCrsPoint",
+        "coordinates":                 [1.9124, 58.3745],
+        "CoordinateReferenceSystemID": "opendes:reference-data--CoordinateReferenceSystem:WGS84:"
+      }
+    }
   },
   {
-    "id": "tango-42-pk2",
-    "kind": "alpha-944",
-    "version": 40770,
-    "createTime": "sierra-220",
-    "createUser": "papa-274",
-    "modifyTime": "2024-01-01T02:00:00Z",
-    "modifyUser": "victor-312",
-    "acl_owners": [
-      "november-774"
-    ],
-    "acl_viewers": [
-      "echo-428"
-    ],
-    "legal_legaltags": [],
-    "legal_status": "quebec-780",
-    "legal_otherRelevantDataCountries": [
-      "charlie-916",
-      "november-183"
-    ],
-    "tags_json": "tango-768",
-    "meta_json": "hotel-422",
-    "data_json": "charlie-492",
-    "FacilityID": "mike-978",
-    "FacilityName": "foxtrot-772",
-    "FacilityTypeID": "xray-919",
-    "WellID": "india-963",
-    "KickOffWellboreID": "foxtrot-644",
-    "StatusSummary": "sierra-259",
-    "TargetFormation": "tango-681",
-    "FacilityNameAliases_json": "xray-824",
-    "FacilityOperators_json": "uniform-740",
-    "VerticalMeasurements_json": "zulu-275",
-    "SpatialLocation_json": "zulu-572",
-    "GeoContexts_json": "victor-394",
-    "DrillingReasons_json": "india-718",
-    "InitialCompletion_json": "tango-932",
-    "ExtensionProperties_json": "whiskey-386"
-  },
-  {
-    "id": "golf-721-pk3",
-    "kind": "romeo-564",
-    "version": 33898,
-    "createTime": "foxtrot-363",
-    "createUser": "tango-853",
-    "modifyTime": "2024-01-01T03:00:00Z",
-    "modifyUser": "xray-296",
-    "acl_owners": [
-      "charlie-489",
-      "kilo-968"
-    ],
-    "acl_viewers": [
-      "tango-580",
-      "mike-392"
-    ],
-    "legal_legaltags": [
-      "zulu-636",
-      "hotel-710"
-    ],
-    "legal_status": "november-559",
-    "legal_otherRelevantDataCountries": [],
-    "tags_json": "november-400",
-    "meta_json": "yankee-527",
-    "data_json": "victor-345",
-    "FacilityID": "whiskey-432",
-    "FacilityName": "xray-564",
-    "FacilityTypeID": "romeo-318",
-    "WellID": "zulu-156",
-    "KickOffWellboreID": "mike-825",
-    "StatusSummary": "golf-548",
-    "TargetFormation": "papa-974",
-    "FacilityNameAliases_json": "whiskey-769",
-    "FacilityOperators_json": "victor-161",
-    "VerticalMeasurements_json": "foxtrot-761",
-    "SpatialLocation_json": "victor-600",
-    "GeoContexts_json": "victor-651",
-    "DrillingReasons_json": "delta-443",
-    "InitialCompletion_json": "india-595",
-    "ExtensionProperties_json": "golf-186"
-  },
-  {
-    "id": "lima-680-pk4",
-    "kind": "echo-284",
-    "version": 20081,
-    "createTime": "foxtrot-692",
-    "createUser": "lima-966",
-    "modifyTime": "2024-01-01T04:00:00Z",
-    "modifyUser": "juliet-192",
-    "acl_owners": [
-      "whiskey-515",
-      "mike-778"
-    ],
-    "acl_viewers": [
-      "zulu-669"
-    ],
-    "legal_legaltags": [
-      "alpha-396",
-      "yankee-439"
-    ],
-    "legal_status": "alpha-148",
-    "legal_otherRelevantDataCountries": [
-      "bravo-209",
-      "victor-852"
-    ],
-    "tags_json": "kilo-180",
-    "meta_json": "mike-362",
-    "data_json": "golf-814",
-    "FacilityID": "oscar-507",
-    "FacilityName": "mike-591",
-    "FacilityTypeID": "whiskey-203",
-    "WellID": "kilo-391",
-    "KickOffWellboreID": "tango-485",
-    "StatusSummary": "alpha-586",
-    "TargetFormation": "sierra-481",
-    "FacilityNameAliases_json": "golf-839",
-    "FacilityOperators_json": "tango-711",
-    "VerticalMeasurements_json": "sierra-792",
-    "SpatialLocation_json": "echo-217",
-    "GeoContexts_json": "oscar-266",
-    "DrillingReasons_json": "india-839",
-    "InitialCompletion_json": "mike-103",
-    "ExtensionProperties_json": "golf-173"
-  },
-  {
-    "id": "kilo-752-pk5",
-    "kind": "papa-360",
-    "version": 87092,
-    "createTime": "mike-460",
-    "createUser": "charlie-527",
-    "modifyTime": "2024-01-01T05:00:00Z",
-    "modifyUser": "lima-235",
-    "acl_owners": [
-      "november-247"
-    ],
-    "acl_viewers": [],
-    "legal_legaltags": [],
-    "legal_status": "lima-231",
-    "legal_otherRelevantDataCountries": [
-      "uniform-192"
-    ],
-    "tags_json": "golf-278",
-    "meta_json": "mike-362",
-    "data_json": "charlie-996",
-    "FacilityID": "november-678",
-    "FacilityName": "romeo-294",
-    "FacilityTypeID": "kilo-594",
-    "WellID": "uniform-347",
-    "KickOffWellboreID": "foxtrot-537",
-    "StatusSummary": "golf-180",
-    "TargetFormation": "quebec-221",
-    "FacilityNameAliases_json": "xray-306",
-    "FacilityOperators_json": "alpha-417",
-    "VerticalMeasurements_json": "alpha-788",
-    "SpatialLocation_json": "romeo-851",
-    "GeoContexts_json": "zulu-413",
-    "DrillingReasons_json": "november-508",
-    "InitialCompletion_json": "xray-952",
-    "ExtensionProperties_json": "tango-934"
-  },
-  {
-    "id": "echo-645-pk6",
-    "kind": "victor-989",
-    "version": 97845,
-    "createTime": "whiskey-372",
-    "createUser": "lima-584",
-    "modifyTime": "2024-01-01T06:00:00Z",
-    "modifyUser": "yankee-931",
-    "acl_owners": [
-      "uniform-113"
-    ],
-    "acl_viewers": [],
-    "legal_legaltags": [
-      "foxtrot-232",
-      "alpha-835"
-    ],
-    "legal_status": "yankee-754",
-    "legal_otherRelevantDataCountries": [],
-    "tags_json": "quebec-703",
-    "meta_json": "uniform-240",
-    "data_json": "xray-329",
-    "FacilityID": "alpha-524",
-    "FacilityName": "whiskey-357",
-    "FacilityTypeID": "charlie-114",
-    "WellID": "sierra-944",
-    "KickOffWellboreID": "india-515",
-    "StatusSummary": "papa-965",
-    "TargetFormation": "xray-637",
-    "FacilityNameAliases_json": "whiskey-490",
-    "FacilityOperators_json": "tango-893",
-    "VerticalMeasurements_json": "juliet-537",
-    "SpatialLocation_json": "xray-290",
-    "GeoContexts_json": "papa-838",
-    "DrillingReasons_json": "november-310",
-    "InitialCompletion_json": "uniform-485",
-    "ExtensionProperties_json": "foxtrot-948"
-  },
-  {
-    "id": "mike-323-pk7",
-    "kind": "whiskey-304",
-    "version": 25858,
-    "createTime": "india-858",
-    "createUser": "charlie-937",
-    "modifyTime": "2024-01-01T07:00:00Z",
-    "modifyUser": "november-469",
-    "acl_owners": [
-      "bravo-345",
-      "india-877"
-    ],
-    "acl_viewers": [
-      "alpha-896"
-    ],
-    "legal_legaltags": [
-      "november-940",
-      "november-927"
-    ],
-    "legal_status": "romeo-341",
-    "legal_otherRelevantDataCountries": [
-      "oscar-949",
-      "tango-222"
-    ],
-    "tags_json": "papa-514",
-    "meta_json": "kilo-874",
-    "data_json": "hotel-444",
-    "FacilityID": "echo-712",
-    "FacilityName": "alpha-776",
-    "FacilityTypeID": "november-472",
-    "WellID": "zulu-965",
-    "KickOffWellboreID": "zulu-656",
-    "StatusSummary": "uniform-544",
-    "TargetFormation": "november-746",
-    "FacilityNameAliases_json": "india-804",
-    "FacilityOperators_json": "zulu-947",
-    "VerticalMeasurements_json": "oscar-865",
-    "SpatialLocation_json": "whiskey-676",
-    "GeoContexts_json": "golf-653",
-    "DrillingReasons_json": "yankee-560",
-    "InitialCompletion_json": "alpha-650",
-    "ExtensionProperties_json": "mike-508"
+    "id": "opendes:master-data--Wellbore:WB-GOM-003:",
+    "kind": "osdu:wks:master-data--Wellbore:1.0.0",
+    "version": 1710676800000,
+    "acl": {
+      "viewers": ["data.default.viewers@opendes.contoso.com"],
+      "owners":  ["data.default.owners@opendes.contoso.com"]
+    },
+    "legal": {
+      "legaltags":                  ["opendes-public-usa-dataset-1", "opendes-boem-ocs-dataset-1"],
+      "otherRelevantDataCountries": ["US"],
+      "status":                     "compliant"
+    },
+    "tags": {},
+    "createTime": "2021-11-20T16:45:00.000Z",
+    "createUser": "ingestion-service@opendes.contoso.com",
+    "modifyTime": "2024-03-17T12:15:00.000Z",
+    "modifyUser": "data-steward@opendes.contoso.com",
+    "data": {
+      "FacilityName":             "Thunder Horse South ST1BP1",
+      "FacilityTypeID":           "opendes:reference-data--FacilityType:Well:",
+      "NameAliases": [
+        {
+          "AliasName":       "THS-ST1BP1",
+          "AliasNameTypeID": "opendes:reference-data--AliasNameType:RegulatoryName:"
+        },
+        {
+          "AliasName":       "BOEM-2021-G28278",
+          "AliasNameTypeID": "opendes:reference-data--AliasNameType:GovernmentPermitNumber:"
+        }
+      ],
+      "CountryID":                "opendes:reference-data--GeoPoliticalEntity:US:",
+      "StateProvinceID":          "opendes:reference-data--GeoPoliticalEntity:GulfOfMexicoOCS:",
+      "WellboreBusinessIntentID": "opendes:reference-data--WellboreBusinessIntent:Development:",
+      "WellborePhaseID":          "opendes:reference-data--WellborePhase:Producing:",
+      "WellStatus":               "Producing",
+      "SpudDate":                 "2021-10-01",
+      "PermitNumber":             "BOEM-2021-G28278",
+      "TotalDepthMD":             7823.5,
+      "TotalDepthTVD":            5610.2,
+      "WaterDepth":               1844.0,
+      "ElevationKB":              1870.4,
+      "ElevationGL":              -1844.0,
+      "SurfaceLatitudeDeg":       28.1836,
+      "SurfaceLongitudeDeg":      -88.4729,
+      "TargetFormation":          "Lower Miocene Wilcox",
+      "BasinName":                "Gulf of Mexico Deepwater",
+      "FieldName":                "Thunder Horse",
+      "DrillingContractorName":   "Transocean",
+      "RigName":                  "Transocean Deepwater Pontus",
+      "VerticalMeasurements": [
+        {
+          "VerticalMeasurementID":     "TD",
+          "VerticalMeasurement":       7823.5,
+          "VerticalMeasurementTypeID": "opendes:reference-data--VerticalMeasurementType:TotalDepthMD:",
+          "VerticalMeasurementUOMID":  "opendes:reference-data--UnitOfMeasure:m:"
+        },
+        {
+          "VerticalMeasurementID":     "WD",
+          "VerticalMeasurement":       1844.0,
+          "VerticalMeasurementTypeID": "opendes:reference-data--VerticalMeasurementType:WaterDepth:",
+          "VerticalMeasurementUOMID":  "opendes:reference-data--UnitOfMeasure:m:"
+        }
+      ],
+      "SpatialPoint": {
+        "type":                        "AnyCrsPoint",
+        "coordinates":                 [-88.4729, 28.1836],
+        "CoordinateReferenceSystemID": "opendes:reference-data--CoordinateReferenceSystem:WGS84:"
+      }
+    }
   }
 ]
