@@ -35,7 +35,7 @@ For this connector, Palantir ontology object types are treated as **tables**. Th
 | `GET /api/v2/ontologies/{ontology}/objectTypes` | List all object types in an ontology | `list_tables()` |
 | `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}` | Get object type definition (schema, primary key) | `get_table_schema()`, `read_table_metadata()` |
 | `POST /api/v2/ontologies/{ontology}/objectSets/loadObjects` | Load object instances with snapshot-consistent pagination | `read_table()` → `_fetch_page()` |
-| `POST /api/v2/ontologies/{ontology}/objects/{objectType}/search` | Get max cursor value (orderBy desc, limit 1) | `_get_max_cursor_value()` |
+| `POST /api/v2/ontologies/{ontology}/objects/{objectType}/search` | Peek dataset max cursor for the incremental early-exit short-circuit (orderBy desc, limit 1) | `_get_max_cursor_value()` |
 
 **Connector scope**:
 - All object types in the configured ontology are available as tables.
@@ -386,7 +386,7 @@ curl -X POST \
 
 **Used by**: `_get_max_cursor_value()`
 
-**Purpose**: Determine the current max cursor value for CDC checkpointing by fetching a single record sorted descending on the cursor field.
+**Purpose**: Peek the dataset's current max cursor value (single record sorted descending on the cursor field) to drive the incremental early-exit short-circuit. If the peeked value hasn't advanced past the connector's checkpoint, the read returns an empty iterator with the unchanged offset and skips the `loadObjects` round-trip entirely. The checkpoint itself is set from the last emitted record's cursor — this endpoint is an optimization, not the checkpointing mechanism.
 
 > **Note**: An earlier version of this connector tried the `/objectSets/aggregate` endpoint first as a "lightweight max-cursor lookup" and fell back to `search`. Palantir returns HTTP 500 for `aggregate` against the object types we use, so the fallback path was the only one that ever produced a result. The aggregate code path was removed to skip the doomed HTTP round-trip on every CDC tick.
 
@@ -494,13 +494,12 @@ The connector supports two ingestion strategies based on whether a `cursor_field
 
 - **Triggered when**: `cursor_field` is specified in table options (e.g., `"updatedAt"`, `"arrivalTimestamp"`).
 - **Behavior**:
-  1. Pre-computes the current max cursor value via the search endpoint (`orderBy desc, pageSize=1`).
-  2. If max hasn't changed since last checkpoint → returns empty iterator immediately (no API calls for data).
-  3. On first run (no checkpoint): fetches all records via `loadObjectSet` with base objectSet (full load).
-  4. On incremental runs: fetches only new records via `loadObjectSet` with filtered objectSet (`where: gt` on cursor field). The API performs server-side filtering — only matching records are returned.
-- **Offset tracking**: Checkpoints `{"max_cursor_value": <max_value>}`. On next run, this becomes the filter baseline.
+  1. On first run (no checkpoint): fetches all records via `loadObjectSet` with the base objectSet (full load), sorted ASC by `cursor_field`.
+  2. On subsequent runs: peeks the dataset's current max cursor via the search endpoint (`orderBy desc, pageSize=1`). If the peeked max hasn't advanced past the checkpoint → returns an empty iterator with the unchanged offset (no `loadObjects` call).
+  3. Otherwise: fetches only new records via `loadObjectSet` with filtered objectSet (`where: gt` on `cursor_field`). The API performs server-side filtering — only matching records are returned.
+- **Offset tracking**: Checkpoints `{"max_cursor_value": <cursor of last emitted record>}`. On next run, this is both the comparison target for the search peek and the `where: gt` filter value. Setting the offset to the last *emitted* record (not the dataset max) keeps admission-capped batches resumable without skipping records.
 - **Metadata**: `ingestion_type: "cdc"`
-- **Note**: Records with null cursor field values are excluded from ingestion.
+- **Note**: Records with null cursor field values are excluded from ingestion. If the search peek fails (4xx/5xx/network), the early-exit is skipped and the connector falls through to the `where: gt` path so the read still completes.
 
 
 ## **Error Handling**

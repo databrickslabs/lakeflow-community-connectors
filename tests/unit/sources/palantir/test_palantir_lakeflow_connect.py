@@ -49,9 +49,11 @@ class TestPalantirConnector(LakeflowConnectTests):
         simulate mode because the static simulate corpus returns the
         same max-cursor value every call, so
         ``new_max_cursor == prev`` and ``_read_incremental``
-        early-returns before reaching the where-clause builder. This
+        early-exits before reaching the where-clause builder. This
         test forces the branch by handing in a deliberately stale
-        offset.
+        offset (1970) so the search result is strictly greater and
+        the early-exit short-circuit does **not** fire — the read
+        falls through to ``loadObjects`` with the ``where: gt`` filter.
         """
         # Pick a table that actually carries ``arrivalTimestamp`` — in
         # simulate mode both ``ExampleFlight`` and ``FlightsFinal`` do.
@@ -292,6 +294,132 @@ class TestPalantirCursorTypes:
         # (preserving the date-only shape).
         assert [r["row_id"] for r in emitted] == ["a", "b"]
         assert offset == {"max_cursor_value": "2026-05-08"}
+
+    def test_early_exit_when_search_max_equals_prev_cursor(self):
+        """Early-exit short-circuit fires when the search peek returns
+        a value ``<= prev_max_cursor``. ``loadObjects`` must not be
+        called and the offset must round-trip unchanged so Spark
+        Streaming terminates the microbatch.
+        """
+        c = self._connector()
+        prev = "2026-04-02T00:00:00Z"
+        with patch.object(
+            c, "_get_max_cursor_value", return_value=prev
+        ) as search_spy, patch.object(
+            c, "_fetch_page"
+        ) as fetch_spy:
+            emitted_iter, offset = c.read_table(
+                "FlightsFinal",
+                {"max_cursor_value": prev},
+                {"cursor_field": "arrivalTimestamp"},
+            )
+            emitted = list(emitted_iter)
+        assert emitted == []
+        assert offset == {"max_cursor_value": prev}
+        search_spy.assert_called_once_with("FlightsFinal", "arrivalTimestamp")
+        fetch_spy.assert_not_called()
+
+    def test_no_early_exit_when_search_max_greater(self):
+        """When the search peek returns a value strictly greater than
+        ``prev_max_cursor``, the short-circuit must NOT fire — the
+        connector proceeds to ``loadObjects`` with the ``where: gt``
+        filter so new records are picked up.
+        """
+        c = self._connector()
+        prev = "2026-04-02T00:00:00Z"
+        new_max = "2026-04-05T00:00:00Z"
+        records = [
+            {"row_id": "x", "arrivalTimestamp": "2026-04-03T00:00:00Z"},
+        ]
+        with patch.object(
+            c, "_get_max_cursor_value", return_value=new_max
+        ), patch.object(
+            c, "_fetch_page", return_value=(records, None)
+        ) as fetch_spy:
+            emitted_iter, offset = c.read_table(
+                "FlightsFinal",
+                {"max_cursor_value": prev},
+                {"cursor_field": "arrivalTimestamp"},
+            )
+            emitted = list(emitted_iter)
+        assert [r["row_id"] for r in emitted] == ["x"]
+        assert offset == {"max_cursor_value": "2026-04-03T00:00:00Z"}
+        # First call's object_set must be the where:gt filter.
+        first_call = fetch_spy.call_args_list[0]
+        object_set = first_call.args[0]
+        assert object_set["type"] == "filter"
+        assert object_set["where"] == {
+            "type": "gt",
+            "field": "arrivalTimestamp",
+            "value": prev,
+        }
+
+    def test_no_early_exit_when_search_returns_none(self):
+        """When ``_get_max_cursor_value`` returns ``None`` (search
+        endpoint 4xx/5xx or unsupported for this table), the
+        short-circuit must fall through — the existing ``where: gt``
+        path still works without the search peek.
+        """
+        c = self._connector()
+        prev = "2026-04-02T00:00:00Z"
+        records = [
+            {"row_id": "y", "arrivalTimestamp": "2026-04-03T00:00:00Z"},
+        ]
+        with patch.object(
+            c, "_get_max_cursor_value", return_value=None
+        ), patch.object(
+            c, "_fetch_page", return_value=(records, None)
+        ) as fetch_spy:
+            emitted_iter, _ = c.read_table(
+                "FlightsFinal",
+                {"max_cursor_value": prev},
+                {"cursor_field": "arrivalTimestamp"},
+            )
+            emitted = list(emitted_iter)
+        assert [r["row_id"] for r in emitted] == ["y"]
+        fetch_spy.assert_called()
+
+    def test_first_run_skips_search_peek(self):
+        """On the first run (``start_offset`` is ``None`` / empty),
+        the connector must do a full incremental load and must not
+        issue the search peek — there is no checkpoint to compare
+        against, so the short-circuit would be meaningless.
+        """
+        c = self._connector()
+        records = [
+            {"row_id": "a", "arrivalTimestamp": "2026-04-01T00:00:00Z"},
+        ]
+        with patch.object(
+            c, "_get_max_cursor_value"
+        ) as search_spy, patch.object(
+            c, "_fetch_page", return_value=(records, None)
+        ):
+            c.read_table(
+                "FlightsFinal", None, {"cursor_field": "arrivalTimestamp"}
+            )
+            c.read_table(
+                "FlightsFinal", {}, {"cursor_field": "arrivalTimestamp"}
+            )
+        search_spy.assert_not_called()
+
+    def test_early_exit_handles_numeric_cursor(self):
+        """The cursor comparison helper must work for numeric cursors
+        too: when the search peek returns an int ``<= prev``, the
+        short-circuit fires. ``_to_utc_datetime`` returns ``None`` for
+        non-strings, so the helper falls back to direct ``>``.
+        """
+        c = self._connector()
+        with patch.object(
+            c, "_get_max_cursor_value", return_value=100
+        ), patch.object(c, "_fetch_page") as fetch_spy:
+            emitted_iter, offset = c.read_table(
+                "FlightsFinal",
+                {"max_cursor_value": 100},
+                {"cursor_field": "seq"},
+            )
+            assert list(emitted_iter) == []
+        assert offset == {"max_cursor_value": 100}
+        fetch_spy.assert_not_called()
 
     def test_offset_advances_to_last_emitted_record(self):
         """Core Strategy B invariant: the offset is the cursor of the

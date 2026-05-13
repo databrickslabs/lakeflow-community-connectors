@@ -430,6 +430,30 @@ class PalantirLakeflowConnect(LakeflowConnect):
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.astimezone(timezone.utc)
 
+    def _cursor_strictly_greater(
+        self, new_value: Any, prev_value: Any
+    ) -> bool:
+        """Return ``True`` iff ``new_value > prev_value``.
+
+        Used by the early-exit short-circuit in ``_read_incremental``.
+        Prefers a datetime-aware compare (``_to_utc_datetime`` handles
+        every ISO 8601 form Palantir is known to return) so values
+        with different tz suffixes don't compare lexicographically.
+        Falls back to direct ``>`` for non-timestamp cursor types
+        (numeric IDs, UUIDs, etc.). On ``TypeError`` (e.g. comparing
+        an ``int`` to a ``str``) returns ``True`` so we default to
+        ``do the read`` — the safe choice for a quirky cursor type,
+        because skipping incorrectly would silently drop records.
+        """
+        new_dt = self._to_utc_datetime(new_value)
+        prev_dt = self._to_utc_datetime(prev_value)
+        if new_dt is not None and prev_dt is not None:
+            return new_dt > prev_dt
+        try:
+            return new_value > prev_value
+        except TypeError:
+            return True
+
     def _get_max_cursor_value(
         self, table_name: str, cursor_field: str
     ) -> Any:
@@ -497,6 +521,13 @@ class PalantirLakeflowConnect(LakeflowConnect):
         limit with last-emitted-cursor offset).
 
         Flow:
+        0. Early-exit short-circuit: on subsequent runs (when an
+           offset is supplied), peek at the dataset's current max
+           cursor via a single ``search orderBy desc, limit 1`` call.
+           If it hasn't advanced past ``prev_max_cursor``, return an
+           empty iterator with the same offset and skip the
+           ``loadObjects`` round-trip entirely. Falls through to the
+           full read path on lookup failure (``None`` from helper).
         1. Build a server-side ``where: cursor > prev_max_cursor`` filter
            so the API only returns records newer than the checkpoint.
         2. Request records sorted by ``cursor_field`` ascending. Without
@@ -535,6 +566,30 @@ class PalantirLakeflowConnect(LakeflowConnect):
             )
         )
         prev_max_cursor = start_offset.get("max_cursor_value") if start_offset else None
+
+        # Early-exit short-circuit: peek at the current dataset max
+        # cursor via a single ``search orderBy desc, limit 1`` call
+        # and bail out if nothing has advanced past our checkpoint.
+        # Skips the (paginated) ``loadObjects`` round-trip on no-op
+        # polls — the common case for incremental triggers. Mirrors
+        # the example connector's ``since >= self._init_ts`` skip.
+        #
+        # Skipped on first run (``prev_max_cursor is None``) since
+        # we must do a full load. On lookup failure (search returned
+        # 4xx/5xx and the helper returned ``None``) we fall through
+        # to the ``where: gt`` path so the read still works for
+        # tables where search is unsupported or transiently failing.
+        if prev_max_cursor is not None:
+            new_max_cursor = self._get_max_cursor_value(
+                table_name, cursor_field
+            )
+            if (
+                new_max_cursor is not None
+                and not self._cursor_strictly_greater(
+                    new_max_cursor, prev_max_cursor
+                )
+            ):
+                return iter([]), start_offset
 
         # Build server-side where clause for incremental runs.
         # On first run (prev_max_cursor is None): no filter → full load.

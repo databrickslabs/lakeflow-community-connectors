@@ -9,7 +9,7 @@ The Lakeflow Palantir Foundry Connector allows you to extract data from Palantir
 - **Dynamic Schema Discovery**: Automatically discovers schemas from Palantir object type definitions
 - **Flexible Ingestion Modes**: Supports both snapshot and incremental (CDC) sync
 - **Memory-Efficient Streaming**: Uses generators to yield records page by page, avoiding OOM on large datasets
-- **Pre-Computed Cursor Lookup**: Single API call (orderBy desc, limit 1) to determine max cursor value for CDC checkpointing
+- **Early-Exit Cursor Peek**: A single `orderBy desc, limit 1` call on the search endpoint short-circuits incremental polls when the dataset hasn't advanced past the checkpoint, skipping the `loadObjects` round-trip on no-op ticks. Checkpointing itself is driven by the last emitted record's cursor.
 - **Search API for Large Datasets**: Uses the POST `/objects/{objectType}/search` endpoint which supports full pagination without cross-page limits
 - **Complex Type Support**: Handles geopoints, arrays, structs, and nested objects
 - **In-Memory Caching**: Caches schemas and metadata for improved performance
@@ -123,9 +123,9 @@ The connector dynamically discovers all object types in your configured ontology
 - Only syncs new/updated records based on cursor field
 - Use when: object types have timestamp fields for tracking changes
 - Configuration: Specify `cursor_field` in table options
-- Pre-computes max cursor value via the search endpoint (`orderBy desc, pageSize=1`)
-- On subsequent runs, skips data fetch entirely if no new records exist
 - Server-side filtering: uses `where: gt` via objectSet composition so the API only returns records newer than the checkpoint — no full scan needed on incremental runs
+- Early-exit short-circuit: on subsequent runs, peeks at the dataset's current max cursor via `search orderBy desc, pageSize=1` and skips the data fetch entirely when nothing has advanced past the checkpoint
+- Checkpoint advances to the cursor of the last emitted record so admission-capped batches resume correctly via `where: gt last_emitted` on the next tick
 
 **SCD Type Behavior:**
 
