@@ -582,7 +582,7 @@ class PubgLakeflowConnect(LakeflowConnect):
         # Players is a snapshot — no offset to checkpoint.
         return iter(records), {}
 
-    def _read_matches(
+    def _read_matches(  # pylint: disable=too-many-locals
         self, start_offset: dict, table_options: dict[str, str]
     ) -> tuple[Iterator[dict], dict]:
         """Fetch one or more matches by ID.
@@ -886,7 +886,9 @@ class PubgLakeflowConnect(LakeflowConnect):
                 body = resp.json()
                 data = body.get("data", {})
                 lb_attrs = data.get("attributes", {})
-                leaderboard_id = data.get("id", f"leaderboard-{self._shard}-{game_mode}-{season_id}")
+                leaderboard_id = data.get(
+                    "id", f"leaderboard-{self._shard}-{game_mode}-{season_id}"
+                )
 
                 for player in body.get("included", []):
                     if player.get("type") != "player":
@@ -1185,7 +1187,11 @@ class PubgLakeflowConnect(LakeflowConnect):
             body = match_resp.json()
             telemetry_url = None
             for inc in body.get("included", []):
-                if inc.get("type") == "asset" and inc.get("attributes", {}).get("name") == "telemetry":
+                is_telemetry = (
+                    inc.get("type") == "asset"
+                    and inc.get("attributes", {}).get("name") == "telemetry"
+                )
+                if is_telemetry:
                     telemetry_url = inc["attributes"].get("URL")
                     break
 
