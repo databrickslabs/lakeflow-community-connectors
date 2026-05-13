@@ -6,9 +6,13 @@ ADME is Microsoft's managed implementation of the OSDU Data Platform. This conne
 
 ## Live validation status
 
-This connector has been validated end-to-end against a live ADME instance by deploying it as a Databricks App. All three tables — **Wellbore**, **Reservoir**, and **Rock_and_Fluid** — read cleanly through the connector's `LakeflowConnect.list_tables()` / `get_partitions()` / `read_partition()` paths against live OSDU Search Service, with the Azure AD client-credentials auth flow against `login.microsoftonline.com` and the `data-partition-id` header pattern.
+**`service_principal` (original):** validated end-to-end against a live ADME instance by deploying the connector as a Databricks App. All three tables (**Wellbore**, **Reservoir**, **Rock_and_Fluid**) read cleanly through the connector's `LakeflowConnect.list_tables()` / `get_partitions()` / `read_partition()` paths against the live OSDU Search Service, using the Azure AD client-credentials auth flow against `login.microsoftonline.com` and the `data-partition-id` header pattern.
 
-Offline coverage is also in place: the connector's 16-test simulate-mode suite runs against an in-process source simulator that replays a corpus seeded from the OSDU master-data schemas; the simulator handler matches the request/response shape observed against live ADME.
+**`managed_identity` + `static_token` (this PR, v1.2.0):** validated against the same live ADME instance (`admesbxscusins1.energy.azure.com`, partition `opendes`) from an Azure Databricks cluster in the same Entra tenant. Both modes successfully obtain a bearer (the static-token run mints its bearer via `ManagedIdentityCredential` first, then plugs it into the connector under `auth_mode=static_token`), instantiate `ADMELakeflowConnect`, and complete `list_tables()` + `get_partitions()` + the search-with-cursor POST round-trip end-to-end. Cross-mode consistency checks for `list_tables()` output and partition shape are green. The actual record yield during the live run was 0 (the source partition is currently empty for `Wellbore`); this is a data-availability state, not an auth-mode behaviour.
+
+**`federated_identity` (this PR, v1.2.0):** unit-test coverage only at this time (`tests/unit/sources/adme/test_adme_auth_modes.py`) — the dispatch through `azure.identity.ClientAssertionCredential` is exercised offline. Live validation pending a Workload Identity Federation setup on the target service principal.
+
+Offline coverage is in place across all four modes: the connector's simulate-mode suite runs against an in-process source simulator that replays a corpus seeded from the OSDU master-data schemas; the simulator handler matches the request/response shape observed against live ADME.
 
 The Search Service contract used by this connector is independently exercised end-to-end against live ADME by a sister Databricks reference codebase, [`databricks-industry-solutions/energy-sandbox/osdu-app-with-connector`](https://github.com/databricks-industry-solutions/energy-sandbox/tree/main/osdu-app-with-connector) (see `notebooks/00_smoke_test.py`).
 
