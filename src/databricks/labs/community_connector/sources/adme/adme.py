@@ -535,9 +535,7 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         partitions: list[dict] = []
         cursor = start_iso
         while cursor < end_iso:
-            window_end = self._add_days(cursor, window_days)
-            if window_end > end_iso:
-                window_end = end_iso
+            window_end = min(self._add_days(cursor, window_days), end_iso)
             partitions.append(
                 {
                     "since": cursor,

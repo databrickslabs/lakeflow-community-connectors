@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Iterator, Sequence
 import json
+import os
 import time
 
 from __future__ import annotations
@@ -724,12 +725,24 @@ def register_lakeflow_source(spark):
     # Auth
     # ---------------------------------------------------------------------------
 
+    AUTH_MODE_SERVICE_PRINCIPAL = "service_principal"
+    AUTH_MODE_MANAGED_IDENTITY = "managed_identity"
+    AUTH_MODE_FEDERATED_IDENTITY = "federated_identity"
+    AUTH_MODE_STATIC_TOKEN = "static_token"
+    VALID_AUTH_MODES = {
+        AUTH_MODE_SERVICE_PRINCIPAL,
+        AUTH_MODE_MANAGED_IDENTITY,
+        AUTH_MODE_FEDERATED_IDENTITY,
+        AUTH_MODE_STATIC_TOKEN,
+    }
+
 
     class _TokenCache:
         """In-memory bearer-token cache for the Azure AD client-credentials flow.
 
-        Threadsafe: each driver-side and executor-side instance has its own
-        cache, but multiple threads on the same instance share it.
+        Used for ``auth_mode=service_principal``. Threadsafe: each driver-side
+        and executor-side instance has its own cache, but multiple threads on
+        the same instance share it.
         """
 
         def __init__(
@@ -737,10 +750,15 @@ def register_lakeflow_source(spark):
             tenant_id: str,
             client_id: str,
             client_secret: str,
+            adme_api_client_id: str | None = None,
         ) -> None:
             self._tenant_id = tenant_id
             self._client_id = client_id
             self._client_secret = client_secret
+            # Audience for the token scope. Defaults to ``client_id`` for
+            # backwards compatibility (existing setups register the SP under
+            # the ADME API app registration).
+            self._audience = adme_api_client_id or client_id
             self._lock = threading.Lock()
             self._token: str | None = None
             self._expires_at: float = 0.0
@@ -776,8 +794,8 @@ def register_lakeflow_source(spark):
                 "client_secret": self._client_secret,
                 # ``scope`` and ``resource`` are both required for ADME's
                 # Azure AD v1 token endpoint per the ADME docs.
-                "scope": f"{self._client_id}/.default",
-                "resource": self._client_id,
+                "scope": f"{self._audience}/.default",
+                "resource": self._audience,
             }
             resp = requests.post(
                 self.token_url,
@@ -801,6 +819,168 @@ def register_lakeflow_source(spark):
             return token, time.time() + expires_in
 
 
+    class _AzureIdentityTokenProvider:
+        """Token provider backed by ``azure.identity`` credentials.
+
+        Covers ``managed_identity`` and ``federated_identity`` modes. The
+        underlying credential handles its own caching/refresh; we present the
+        same ``get()/invalidate()`` surface as ``_TokenCache`` so callers
+        don't care which mode is active.
+        """
+
+        def __init__(self, credential: Any, scope: str) -> None:
+            self._credential = credential
+            self._scope = scope
+            self._lock = threading.Lock()
+            # Last-known good token; the underlying credential refreshes
+            # automatically, but we cache the string for log-free hot paths
+            # and to support ``invalidate()`` semantics.
+            self._token: str | None = None
+            self._expires_at: float = 0.0
+
+        def get(self, force_refresh: bool = False) -> str:
+            with self._lock:
+                now = time.time()
+                if (
+                    not force_refresh
+                    and self._token
+                    and now < self._expires_at - 60
+                ):
+                    return self._token
+                tok = self._credential.get_token(self._scope)
+                self._token = tok.token
+                self._expires_at = float(tok.expires_on)
+                return self._token
+
+        def invalidate(self) -> None:
+            with self._lock:
+                self._token = None
+                self._expires_at = 0.0
+
+
+    class _StaticTokenProvider:
+        """Pre-issued bearer token (CI / testing).
+
+        Honours the ``get()/invalidate()`` shape but never refreshes — if the
+        token expires the caller will see 401s on subsequent requests.
+        """
+
+        def __init__(self, token: str) -> None:
+            if not token or not token.strip():
+                raise ValueError("static_token mode requires a non-empty access_token")
+            self._token = token.strip()
+
+        def get(self, force_refresh: bool = False) -> str:
+            return self._token
+
+        def invalidate(self) -> None:
+            # No-op: nothing to refresh. Caller will keep seeing 401s if the
+            # token has expired, which is the correct signal for static-token
+            # mode (the operator must supply a new token).
+            pass
+
+
+    def _read_federated_token(token_inline: str | None, token_file: str | None) -> str:
+        """Read federated assertion from inline value or token file."""
+        if token_inline and token_inline.strip():
+            return token_inline.strip()
+        if token_file:
+            path = os.path.expandvars(os.path.expanduser(token_file))
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read().strip()
+        raise ValueError(
+            "federated_identity mode requires federated_token or federated_token_file"
+        )
+
+
+    def _build_token_provider(options: dict[str, str]) -> "tuple[Any, str]":
+        """Construct the auth provider implied by ``options['auth_mode']``.
+
+        Returns the provider plus the API audience (used as the OAuth2 scope
+        suffix, ``<audience>/.default``).
+        """
+        auth_mode = (options.get("auth_mode") or AUTH_MODE_SERVICE_PRINCIPAL).strip()
+        if auth_mode not in VALID_AUTH_MODES:
+            raise ValueError(
+                f"unknown auth_mode {auth_mode!r}; expected one of "
+                f"{sorted(VALID_AUTH_MODES)}"
+            )
+
+        tenant_id = options.get("tenant_id")
+        client_id = options.get("client_id")
+        adme_api_client_id = options.get("adme_api_client_id") or client_id
+
+        if auth_mode == AUTH_MODE_SERVICE_PRINCIPAL:
+            client_secret = options.get("client_secret")
+            for name, value in [
+                ("tenant_id", tenant_id),
+                ("client_id", client_id),
+                ("client_secret", client_secret),
+            ]:
+                if not value:
+                    raise ValueError(
+                        f"service_principal mode requires connection option {name!r}"
+                    )
+            return (
+                _TokenCache(
+                    tenant_id=tenant_id,
+                    client_id=client_id,
+                    client_secret=client_secret,
+                    adme_api_client_id=adme_api_client_id,
+                ),
+                adme_api_client_id,
+            )
+
+        if auth_mode == AUTH_MODE_STATIC_TOKEN:
+            token = options.get("access_token")
+            return _StaticTokenProvider(token), adme_api_client_id
+
+        # Both managed_identity and federated_identity rely on azure-identity.
+        try:
+            from azure.identity import (
+                ClientAssertionCredential,
+                ManagedIdentityCredential,
+            )
+        except ImportError as e:
+            raise RuntimeError(
+                f"auth_mode={auth_mode} requires the azure-identity package; "
+                "install with `pip install azure-identity>=1.15.0`"
+            ) from e
+
+        scope = f"{adme_api_client_id}/.default"
+
+        if auth_mode == AUTH_MODE_MANAGED_IDENTITY:
+            mi_client_id = options.get("managed_identity_client_id")
+            if mi_client_id:
+                credential = ManagedIdentityCredential(client_id=mi_client_id)
+            else:
+                credential = ManagedIdentityCredential()
+            return _AzureIdentityTokenProvider(credential, scope), adme_api_client_id
+
+        # federated_identity
+        if not tenant_id:
+            raise ValueError("federated_identity mode requires tenant_id")
+        sp_client_id = options.get("client_id")
+        if not sp_client_id:
+            raise ValueError(
+                "federated_identity mode requires client_id (the service principal id)"
+            )
+        token_inline = options.get("federated_token")
+        token_file = options.get("federated_token_file")
+        # Validate the token source eagerly so misconfigs fail fast.
+        _read_federated_token(token_inline, token_file)
+
+        def _get_assertion() -> str:
+            return _read_federated_token(token_inline, token_file)
+
+        credential = ClientAssertionCredential(
+            tenant_id=tenant_id,
+            client_id=sp_client_id,
+            func=_get_assertion,
+        )
+        return _AzureIdentityTokenProvider(credential, scope), adme_api_client_id
+
+
     # ---------------------------------------------------------------------------
     # Connector
     # ---------------------------------------------------------------------------
@@ -810,34 +990,52 @@ def register_lakeflow_source(spark):
         """LakeflowConnect implementation for Azure Data Manager for Energy.
 
         Required connection options:
-            tenant_id            Azure AD tenant ID
-            client_id            App registration client ID
-            client_secret        App registration client secret
-            instance_url         e.g. ``https://admetest.energy.azure.com``
+            base_url             ADME instance base URL (alias: ``instance_url``)
+                                 e.g. ``https://admetest.energy.azure.com``
             data_partition_id    e.g. ``opendes`` or ``<inst>-opendes``
+
+        Auth options (selected by ``auth_mode``):
+            auth_mode                       service_principal (default) |
+                                            managed_identity | federated_identity |
+                                            static_token
+            tenant_id                       Azure AD tenant ID
+                                            (required for service_principal,
+                                            federated_identity)
+            client_id                       SP / app registration client ID
+                                            (required for service_principal,
+                                            federated_identity)
+            client_secret                   SP secret
+                                            (required for service_principal)
+            adme_api_client_id              Audience for the OAuth2 scope
+                                            (defaults to client_id)
+            managed_identity_client_id      User-assigned MI client ID
+                                            (omit for system-assigned MI)
+            federated_token / federated_token_file
+                                            OIDC assertion source for
+                                            federated_identity mode
+            access_token                    Pre-issued bearer token for
+                                            static_token mode (CI / testing only)
 
         Optional connection options:
             page_size            Search page size (default 1000, max 1000)
 
         Recognised per-table options:
-            window_days          Partition size in days (default 1)
-            lookback_minutes     Lookback applied to start cursor (default 5)
+            window_days            Partition size in days (default 1)
+            lookback_minutes       Lookback applied to start cursor (default 5)
+            max_records_per_batch  Cap on records yielded per partition /
+                                   read_table call. Unset or 0 = uncapped.
         """
 
         def __init__(self, options: dict[str, str]) -> None:
             super().__init__(options)
 
-            tenant_id = options.get("tenant_id")
-            client_id = options.get("client_id")
-            client_secret = options.get("client_secret")
-            instance_url = options.get("instance_url")
+            # ``base_url`` is the v1.2.0 spelling; ``instance_url`` is kept as
+            # an alias for backwards compatibility with existing UC connections.
+            instance_url = options.get("base_url") or options.get("instance_url")
             data_partition_id = options.get("data_partition_id")
 
             for name, value in [
-                ("tenant_id", tenant_id),
-                ("client_id", client_id),
-                ("client_secret", client_secret),
-                ("instance_url", instance_url),
+                ("base_url (or instance_url)", instance_url),
                 ("data_partition_id", data_partition_id),
             ]:
                 if not value:
@@ -848,9 +1046,6 @@ def register_lakeflow_source(spark):
             # Strip trailing slash for clean URL composition.
             self._instance_url = instance_url.rstrip("/")
             self._data_partition_id = data_partition_id
-            self._tenant_id = tenant_id
-            self._client_id = client_id
-            self._client_secret = client_secret
 
             try:
                 self._page_size = max(
@@ -859,7 +1054,9 @@ def register_lakeflow_source(spark):
             except (TypeError, ValueError):
                 self._page_size = DEFAULT_PAGE_SIZE
 
-            self._token_cache = _TokenCache(tenant_id, client_id, client_secret)
+            # Auth provider — dispatches on options['auth_mode']. Defaults to
+            # service_principal so existing UC connections keep working.
+            self._token_provider, self._adme_audience = _build_token_provider(options)
             self._session = requests.Session()
 
             # Cap offsets at init time so Trigger.AvailableNow terminates
@@ -974,9 +1171,7 @@ def register_lakeflow_source(spark):
             partitions: list[dict] = []
             cursor = start_iso
             while cursor < end_iso:
-                window_end = self._add_days(cursor, window_days)
-                if window_end > end_iso:
-                    window_end = end_iso
+                window_end = min(self._add_days(cursor, window_days), end_iso)
                 partitions.append(
                     {
                         "since": cursor,
@@ -997,17 +1192,27 @@ def register_lakeflow_source(spark):
 
             Runs on Spark executors. Recreates the API state needed via
             ``self.options`` (set by the LakeflowConnect base ``__init__``)
-            through the existing ``_session``/``_token_cache`` instance
+            through the existing ``_session``/``_token_provider`` instance
             attributes that get pickled with the connector.
+
+            Honors ``max_records_per_batch`` for admission control: when
+            set, stops yielding once the cap is reached so a single
+            partition cannot blow up driver/executor memory.
             """
             self._validate_table(table_name)
 
             since = partition["since"]
             until = partition["until"]
             kind_query = TABLE_TO_KIND_QUERY[table_name]
+            cap = _parse_max_records(table_options)
 
             lucene = self._build_lucene_range(since, until)
-            yield from self._search_paginated(kind_query, lucene)
+            yielded = 0
+            for record in self._search_paginated(kind_query, lucene):
+                if cap is not None and yielded >= cap:
+                    return
+                yield record
+                yielded += 1
 
         # ------------------------------------------------------------------
         # LakeflowConnect.read_table — fallback for non-partitioned reads
@@ -1025,6 +1230,10 @@ def register_lakeflow_source(spark):
             (``is_partitioned`` returns True), so this method is only used
             if the engine deliberately bypasses partitioning. We honour the
             contract by paginating sequentially and capping at init time.
+
+            Honors ``max_records_per_batch``: when set, returns at most that
+            many records and an offset that lets the next call resume mid-
+            window from the same ``modifyTime`` lower bound.
             """
             self._validate_table(table_name)
 
@@ -1035,9 +1244,21 @@ def register_lakeflow_source(spark):
                 return iter([]), start_offset or {"cursor": self._init_time}
 
             kind_query = TABLE_TO_KIND_QUERY[table_name]
+            cap = _parse_max_records(table_options)
             lucene = self._build_lucene_range(since, self._init_time)
-            records = list(self._search_paginated(kind_query, lucene))
-            end_offset = {"cursor": self._init_time}
+
+            records: list[dict] = []
+            capped = False
+            for record in self._search_paginated(kind_query, lucene):
+                if cap is not None and len(records) >= cap:
+                    capped = True
+                    break
+                records.append(record)
+
+            # When the cap fires mid-window, hold the lower bound so the
+            # next batch picks up the rest of the same window. When we drain
+            # the window naturally, advance the cursor to init_time.
+            end_offset = {"cursor": since if capped else self._init_time}
             return iter(records), end_offset
 
         # ------------------------------------------------------------------
@@ -1108,7 +1329,7 @@ def register_lakeflow_source(spark):
 
         def _common_headers(self) -> dict[str, str]:
             return {
-                "Authorization": f"Bearer {self._token_cache.get()}",
+                "Authorization": f"Bearer {self._token_provider.get()}",
                 "data-partition-id": self._data_partition_id,
                 "Content-Type": "application/json",
                 "Accept": "application/json",
@@ -1130,7 +1351,7 @@ def register_lakeflow_source(spark):
                 )
                 if resp.status_code == 401 and not auth_retried:
                     # Token may be stale (e.g. revoked or expired early).
-                    self._token_cache.invalidate()
+                    self._token_provider.invalidate()
                     auth_retried = True
                     continue
                 if resp.status_code not in RETRIABLE_STATUS_CODES:
@@ -1186,6 +1407,21 @@ def register_lakeflow_source(spark):
     # ---------------------------------------------------------------------------
     # Record flattening
     # ---------------------------------------------------------------------------
+
+
+    def _parse_max_records(table_options: dict[str, str]) -> int | None:
+        """Parse the optional ``max_records_per_batch`` admission-control cap.
+
+        Returns ``None`` when unset or non-numeric (uncapped).
+        """
+        raw = table_options.get("max_records_per_batch")
+        if raw is None:
+            return None
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
 
 
     def _flatten_record(raw: dict[str, Any]) -> dict[str, Any]:
