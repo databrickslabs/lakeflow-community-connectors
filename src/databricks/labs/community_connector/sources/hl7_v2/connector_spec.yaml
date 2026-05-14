@@ -47,8 +47,10 @@ connection:
         Fully-qualified Delta table name (catalog.schema.table) containing
         raw HL7 v2 messages. Required when source_type is "delta".
         The table must have columns: data (STRING, raw HL7 pipe-delimited
-        text), sendTime (STRING or TIMESTAMP), and optionally name
-        (STRING, source identifier).
+        text starting with "MSH|"), createTime (STRING or TIMESTAMP in
+        RFC 3339 format — used as the incremental cursor), and optionally
+        name (STRING, source identifier surfaced as source_file in the
+        output tables).
 
     - name: databricks_host
       type: string

@@ -1,7 +1,0 @@
-{
-  "source_type": "delta",
-  "delta_table_name": "YOUR_CATALOG.YOUR_SCHEMA.YOUR_TABLE",
-  "databricks_host": "https://YOUR_WORKSPACE.cloud.databricks.com",
-  "databricks_token": "YOUR_DATABRICKS_TOKEN",
-  "sql_warehouse_id": "YOUR_SQL_WAREHOUSE_ID"
-}

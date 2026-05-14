@@ -1,7 +1,0 @@
-{
-  "project_id": "YOUR_GCP_PROJECT_ID",
-  "location": "YOUR_GCP_LOCATION",
-  "dataset_id": "YOUR_DATASET_ID",
-  "hl7v2_store_id": "YOUR_HL7V2_STORE_ID",
-  "service_account_json": "PASTE_YOUR_SERVICE_ACCOUNT_KEY_JSON_HERE"
-}
