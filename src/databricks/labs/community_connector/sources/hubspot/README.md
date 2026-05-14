@@ -48,7 +48,6 @@ The HubSpot connector supports the following CRM objects with dynamic schema dis
 | `meetings` | `id` | `updatedAt` | contacts, companies, deals, tickets |
 | `tasks` | `id` | `updatedAt` | contacts, companies, deals, tickets |
 | `notes` | `id` | `updatedAt` | contacts, companies, deals, tickets |
-| `deal_split` | `id` | `updatedAt` | — |
 
 > **Note**: Table names are case-sensitive. Use the exact names shown above (lowercase with underscores). Custom objects are also supported and will be discovered automatically.
 
@@ -111,12 +110,6 @@ The HubSpot connector supports the following CRM objects with dynamic schema dis
 - **Incremental Strategy**: Cursor-based on `updatedAt`
 - **Associations**: contacts, companies, deals, tickets
 - **Schema**: All note properties (discovered dynamically) including standard fields like body, timestamp, and all custom properties
-
-#### `deal_split`
-- **Primary Key**: `id`
-- **Incremental Strategy**: Cursor-based on `updatedAt`
-- **Associations**: None
-- **Schema**: All deal split properties (discovered dynamically)
 
 ### Custom Objects
 - **Dynamic Discovery**: The connector automatically discovers and supports any custom objects in your HubSpot instance

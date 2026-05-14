@@ -903,6 +903,7 @@ def register_lakeflow_source(spark):
                     "refresh_token": self.refresh_token,
                     "grant_type": "refresh_token",
                 },
+                timeout=30,
             )
             response.raise_for_status()
             data = response.json()
@@ -927,7 +928,7 @@ def register_lakeflow_source(spark):
 
             for attempt in range(retry_count):
                 response = self._session.request(
-                    method, url, headers=self.get_headers(), params=params
+                    method, url, headers=self.get_headers(), params=params, timeout=60
                 )
 
                 if response.status_code == 200:
@@ -984,7 +985,7 @@ def register_lakeflow_source(spark):
             headers = self.get_headers()
             headers["Content-Type"] = f"multipart/mixed; boundary={boundary}"
 
-            response = self._session.post(self.BATCH_URL, headers=headers, data=body)
+            response = self._session.post(self.BATCH_URL, headers=headers, data=body, timeout=120)
 
             if response.status_code != 200:
                 # Fall back to sequential requests on batch failure
@@ -1046,6 +1047,19 @@ def register_lakeflow_source(spark):
     ########################################################
     # src/databricks/labs/community_connector/sources/gmail/gmail.py
     ########################################################
+
+    def _parse_max_per_batch(table_options: Dict[str, str] | None) -> int:
+        if not table_options:
+            return 0
+        raw = table_options.get("max_records_per_batch")
+        if raw is None:
+            return 0
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return 0
+        return value if value > 0 else 0
+
 
     class GmailLakeflowConnect(LakeflowConnect):
         """Gmail connector implementing the LakeflowConnect interface with 100% API coverage."""
@@ -1180,6 +1194,14 @@ def register_lakeflow_source(spark):
                 page_token = response.get("nextPageToken")
                 if not page_token:
                     break
+
+            # Mirror the _init_history_id cap from the incremental readers so the
+            # deletes path also terminates under Trigger.AvailableNow.
+            if (
+                self._init_history_id
+                and int(latest_history_id) > int(self._init_history_id)
+            ):
+                latest_history_id = str(self._init_history_id)
 
             next_offset = {"historyId": latest_history_id}
             return iter(deleted_records), next_offset
@@ -1324,6 +1346,8 @@ def register_lakeflow_source(spark):
             ):
                 return iter([]), {"historyId": str(self._init_history_id)}
 
+            max_per_batch = _parse_max_per_batch(table_options)
+
             params = {
                 "startHistoryId": start_history_id,
                 "maxResults": 500,
@@ -1352,6 +1376,8 @@ def register_lakeflow_source(spark):
                         if msg_id:
                             all_message_ids.add(msg_id)
 
+                if max_per_batch and len(all_message_ids) >= max_per_batch:
+                    break
                 page_token = response.get("nextPageToken")
                 if not page_token:
                     break
@@ -1464,6 +1490,8 @@ def register_lakeflow_source(spark):
             ):
                 return iter([]), {"historyId": str(self._init_history_id)}
 
+            max_per_batch = _parse_max_per_batch(table_options)
+
             params = {
                 "startHistoryId": start_history_id,
                 "maxResults": 500,
@@ -1492,6 +1520,8 @@ def register_lakeflow_source(spark):
                         if thread_id:
                             all_thread_ids.add(thread_id)
 
+                if max_per_batch and len(all_thread_ids) >= max_per_batch:
+                    break
                 page_token = response.get("nextPageToken")
                 if not page_token:
                     break

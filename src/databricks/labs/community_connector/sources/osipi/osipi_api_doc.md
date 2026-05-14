@@ -1,5 +1,61 @@
 # **OSIPI/AVEVA PI Web API Documentation**
 
+## **Connector Tables**
+
+The OSI PI connector exposes the following logical tables. Each maps to one or
+more PI Web API endpoints documented later in this file.
+
+### Discovery & Inventory
+- `pi_dataservers` — `/piwebapi/dataservers`
+- `pi_points` — `/piwebapi/dataservers/{webId}/points`
+- `pi_point_attributes` — `/piwebapi/points/{webId}/attributes`
+- `pi_point_type_catalog` — derived from `pi_points` (catalog view)
+
+### Time Series (single-tag)
+- `pi_timeseries` — `/piwebapi/streams/{webId}/recorded`
+- `pi_interpolated` — `/piwebapi/streams/{webId}/interpolated`
+- `pi_plot` — `/piwebapi/streams/{webId}/plot`
+- `pi_current_value` — `/piwebapi/streams/{webId}/value`
+- `pi_summary` — `/piwebapi/streams/{webId}/summary`
+- `pi_end` — `/piwebapi/streams/{webId}/end`
+- `pi_value_at_time` — `/piwebapi/streams/{webId}/value` (point-in-time)
+- `pi_recorded_at_time` — `/piwebapi/streams/{webId}/recordedattime`
+- `pi_calculated` — `/piwebapi/calculation/times` (or `intervals`)
+
+### Time Series (multi-tag streamsets)
+- `pi_streamset_recorded` — `/piwebapi/streamsets/recorded`
+- `pi_streamset_interpolated` — `/piwebapi/streamsets/interpolated`
+- `pi_streamset_plot` — `/piwebapi/streamsets/plot`
+- `pi_streamset_summary` — `/piwebapi/streamsets/summary`
+- `pi_streamset_end` — `/piwebapi/streamsets/end`
+
+### Asset Framework
+- `pi_assetservers` — `/piwebapi/assetservers`
+- `pi_assetdatabases` — `/piwebapi/assetservers/{webId}/assetdatabases`
+- `pi_af_hierarchy` — `/piwebapi/assetdatabases/{webId}/elements` (recursive)
+- `pi_element_attributes` — `/piwebapi/elements/{webId}/attributes`
+- `pi_element_templates` — `/piwebapi/assetdatabases/{webId}/elementtemplates`
+- `pi_element_template_attributes` — `/piwebapi/elementtemplates/{webId}/attributetemplates`
+- `pi_attribute_templates` — `/piwebapi/attributetemplates/{webId}`
+- `pi_categories` — `/piwebapi/assetdatabases/{webId}/elementcategories`
+- `pi_analyses` — `/piwebapi/assetdatabases/{webId}/analyses`
+- `pi_analysis_templates` — `/piwebapi/assetdatabases/{webId}/analysistemplates`
+- `pi_af_tables` — `/piwebapi/assetdatabases/{webId}/tables`
+- `pi_af_table_rows` — `/piwebapi/tables/{webId}/data`
+- `pi_units_of_measure` — `/piwebapi/assetservers/{webId}/unitclasses`
+
+### Event Frames
+- `pi_event_frames` — `/piwebapi/assetdatabases/{webId}/eventframes`
+- `pi_eventframe_attributes` — `/piwebapi/eventframes/{webId}/attributes`
+- `pi_eventframe_templates` — `/piwebapi/assetdatabases/{webId}/elementtemplates?instanceType=EventFrame`
+- `pi_eventframe_template_attributes` — `/piwebapi/elementtemplates/{webId}/attributetemplates`
+- `pi_eventframe_referenced_elements` — `/piwebapi/eventframes/{webId}/referencedelements`
+- `pi_eventframe_acknowledgements` — `/piwebapi/eventframes/{webId}/acknowledgements`
+- `pi_eventframe_annotations` — `/piwebapi/eventframes/{webId}/annotations`
+
+### Governance & Diagnostics
+- `pi_links` — diagnostic enumeration of root PI Web API links
+
 ## **Authorization**
 
 PI Web API supports multiple authentication methods. For security best practices, Kerberos is recommended within corporate networks.

@@ -41,6 +41,7 @@ stores it in the ``metadata`` column (VariantType).
 import json
 import logging
 import os
+import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterator
 from urllib.error import HTTPError
@@ -77,6 +78,18 @@ DEFAULT_NUM_PARTITIONS = 8
 WADO_MODE_AUTO = "auto"
 WADO_MODE_FULL = "full"
 WADO_MODE_FRAMES = "frames"
+
+_DICOM_UID_RE = re.compile(r"^[0-9.]+$")
+
+
+def _is_valid_dicom_uid(uid: object) -> bool:
+    """Return True if uid is a non-empty string of digits and dots only.
+
+    DICOM UIDs are constrained by PS3.5 §9 to digits and dots. The check
+    rejects path-traversal payloads (``..``, absolute paths, separators)
+    before any UID is joined into a Volume filesystem path.
+    """
+    return isinstance(uid, str) and bool(_DICOM_UID_RE.match(uid)) and ".." not in uid
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +404,17 @@ class DICOMwebLakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         if not all([study_uid, series_uid, sop_uid]):
             logger.warning("Skipping WADO-RS: missing UIDs in record %s", record)
             return record
+
+        # DICOM UIDs are constrained to digits and dots by the standard
+        # (PS3.5 §9). Reject anything else before joining into the Volume
+        # path to prevent a malformed server response from escaping the
+        # configured volume_path via "..", absolute paths, or path
+        # separators.
+        for uid in (study_uid, series_uid, sop_uid):
+            if not _is_valid_dicom_uid(uid):
+                logger.warning("Skipping WADO-RS: invalid UID %r in record %s", uid, record)
+                record["dicom_file_path"] = None
+                return record
 
         try:
             effective_mode = self._resolve_wado_mode(wado_mode)
