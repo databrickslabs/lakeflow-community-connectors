@@ -1130,6 +1130,17 @@ def register_lakeflow_source(spark):
             cursor_value = start_offset.get(cursor_field) if start_offset and cursor_field else None
             pages_exhausted = True
 
+            # Already at or past the init-time cap and no resume token to honor —
+            # return empty so AvailableNow sees end_offset == start_offset and
+            # terminates without firing an API request.
+            if (
+                cursor_field
+                and cursor_value
+                and cursor_value >= self._init_time
+                and not skip_token
+            ):
+                return iter([]), start_offset or {}
+
             while max_records is None or len(all_items) < max_records:
                 url = f"{self.base_url}{endpoint}"
                 params = {"pageSize": QualtricsConfig.DEFAULT_PAGE_SIZE}

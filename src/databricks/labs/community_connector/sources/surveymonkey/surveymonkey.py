@@ -137,7 +137,7 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
     ) -> dict:
         """Make an API request with retry logic and rate limit handling."""
         for attempt in range(retries):
-            response = requests.get(url, headers=self.headers, params=params)
+            response = requests.get(url, headers=self.headers, params=params, timeout=60)
 
             if response.status_code == 200:
                 return response.json()
@@ -341,6 +341,12 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
         config = OBJECT_CONFIG[table_name]
         cursor_field = config["cursor_field"]
         cursor_start = start_offset.get(cursor_field)
+
+        # Already at or past the init-time cap — return empty so AvailableNow
+        # sees end_offset == start_offset and terminates without firing an API
+        # request.
+        if cursor_start and cursor_start >= self._init_time:
+            return iter([]), start_offset or {}
 
         # Handle special case for survey_responses across all surveys
         if table_name == "survey_responses" and not table_options.get("survey_id"):
@@ -859,7 +865,7 @@ class SurveymonkeyLakeflowConnect(LakeflowConnect):
         """Test the connection to SurveyMonkey API."""
         try:
             url = f"{self.base_url}/users/me"
-            response = requests.get(url, headers=self.headers)
+            response = requests.get(url, headers=self.headers, timeout=30)
 
             if response.status_code == 200:
                 user_data = response.json()

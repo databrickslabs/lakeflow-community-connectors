@@ -88,3 +88,15 @@ endpoints:
         records_key: value
         extras:
           '@odata.nextLink': null
+
+  # Graph delta query — incremental reply reads (mirrors messages/delta).
+  - path: /v1.0/teams/{team_id}/channels/{channel_id}/messages/{message_id}/replies/delta
+    method: GET
+    corpus: message_replies
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: value
+        extras:
+          '@odata.nextLink': null
+          '@odata.deltaLink': null
