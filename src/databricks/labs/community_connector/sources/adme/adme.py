@@ -35,8 +35,8 @@ executors process in parallel.
 from __future__ import annotations
 
 import json
-import logging
 import os
+import re
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -59,8 +59,6 @@ from databricks.labs.community_connector.sources.adme.adme_schemas import (
 )
 
 
-_LOG = logging.getLogger(__name__)
-
 # OSDU Search "query_with_cursor" caps page size at 1000.
 DEFAULT_PAGE_SIZE = 1000
 MAX_PAGE_SIZE = 1000
@@ -77,6 +75,14 @@ DEFAULT_LOOKBACK_MINUTES = 5
 # Used as the lower bound on the very first run when there's no
 # committed offset yet — Lucene's ``*`` matches everything.
 EPOCH_ISO = "1970-01-01T00:00:00.000Z"
+# Any committed offset older than this is treated as "first run / no
+# real watermark" so the partition planner takes the open-ended fast
+# path instead of walking thousands of empty daily windows.
+FIRST_RUN_SENTINEL_THRESHOLD = "2000-01-01T00:00:00.000Z"
+
+# data_partition_id is forwarded verbatim into a custom HTTP header, so
+# constrain it to characters that can never split or escape the header.
+_DATA_PARTITION_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
 
 # HTTP retry configuration. ADME documents cursor inactivity timeout
 # at 1 minute; transient 5xx and 429 are common.
@@ -386,8 +392,6 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
     Recognised per-table options:
         window_days            Partition size in days (default 1)
         lookback_minutes       Lookback applied to start cursor (default 5)
-        max_records_per_batch  Cap on records yielded per partition /
-                               read_table call. Unset or 0 = uncapped.
     """
 
     def __init__(self, options: dict[str, str]) -> None:
@@ -406,6 +410,16 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
                 raise ValueError(
                     f"ADME connector requires connection option {name!r}"
                 )
+
+        # data_partition_id is forwarded verbatim into a custom HTTP
+        # header. Constrain to alphanumeric + ``-``/``_`` so a stray
+        # CRLF (or anything similarly exotic) can't split the header.
+        if not _DATA_PARTITION_ID_PATTERN.fullmatch(data_partition_id):
+            raise ValueError(
+                "ADME connector option 'data_partition_id' must match "
+                "[A-Za-z0-9_-]+ (no whitespace, control chars, or "
+                "header separators)"
+            )
 
         # Strip trailing slash for clean URL composition.
         self._instance_url = instance_url.rstrip("/")
@@ -519,8 +533,10 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         # partition. We don't know the corpus age and walking from 1970
         # in daily windows would generate tens of thousands of empty
         # API calls. The single partition uses Lucene ``*`` for the
-        # lower bound, which the OSDU index handles efficiently.
-        if start_iso == EPOCH_ISO:
+        # lower bound, which the OSDU index handles efficiently. We
+        # treat any pre-2000 lower bound as "no real watermark" so the
+        # optimisation isn't coupled to the exact EPOCH_ISO sentinel.
+        if start_iso < FIRST_RUN_SENTINEL_THRESHOLD:
             return [{"since": EPOCH_ISO, "until": end_iso}]
 
         # Apply a lookback to the lower bound to handle records that
@@ -554,29 +570,20 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
     ) -> Iterator[dict]:
         """Read one ``(since, until]`` window of records.
 
-        Runs on Spark executors. Recreates the API state needed via
-        ``self.options`` (set by the LakeflowConnect base ``__init__``)
-        through the existing ``_session``/``_token_provider`` instance
-        attributes that get pickled with the connector.
-
-        Honors ``max_records_per_batch`` for admission control: when
-        set, stops yielding once the cap is reached so a single
-        partition cannot blow up driver/executor memory.
+        Runs on Spark executors. Each partition is a bounded
+        ``modifyTime`` window produced by ``get_partitions``, so
+        admission control is handled by the partitioner (via
+        ``latest_offset`` + ``window_days``) rather than by a separate
+        per-batch record cap.
         """
         self._validate_table(table_name)
 
         since = partition["since"]
         until = partition["until"]
         kind_query = TABLE_TO_KIND_QUERY[table_name]
-        cap = _parse_max_records(table_options)
 
         lucene = self._build_lucene_range(since, until)
-        yielded = 0
-        for record in self._search_paginated(kind_query, lucene):
-            if cap is not None and yielded >= cap:
-                return
-            yield record
-            yielded += 1
+        yield from self._search_paginated(kind_query, lucene)
 
     # ------------------------------------------------------------------
     # LakeflowConnect.read_table — fallback for non-partitioned reads
@@ -593,11 +600,9 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         All three ADME tables prefer the partitioned stream path
         (``is_partitioned`` returns True), so this method is only used
         if the engine deliberately bypasses partitioning. We honour the
-        contract by paginating sequentially and capping at init time.
-
-        Honors ``max_records_per_batch``: when set, returns at most that
-        many records and an offset that lets the next call resume mid-
-        window from the same ``modifyTime`` lower bound.
+        contract by paginating sequentially from the committed cursor
+        up to init time, then advancing the cursor to init time so
+        Trigger.AvailableNow terminates.
         """
         self._validate_table(table_name)
 
@@ -608,22 +613,10 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             return iter([]), start_offset or {"cursor": self._init_time}
 
         kind_query = TABLE_TO_KIND_QUERY[table_name]
-        cap = _parse_max_records(table_options)
         lucene = self._build_lucene_range(since, self._init_time)
 
-        records: list[dict] = []
-        capped = False
-        for record in self._search_paginated(kind_query, lucene):
-            if cap is not None and len(records) >= cap:
-                capped = True
-                break
-            records.append(record)
-
-        # When the cap fires mid-window, hold the lower bound so the
-        # next batch picks up the rest of the same window. When we drain
-        # the window naturally, advance the cursor to init_time.
-        end_offset = {"cursor": since if capped else self._init_time}
-        return iter(records), end_offset
+        records = list(self._search_paginated(kind_query, lucene))
+        return iter(records), {"cursor": self._init_time}
 
     # ------------------------------------------------------------------
     # Helpers
@@ -702,11 +695,17 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
     def _post_with_retry(
         self, url: str, body: dict[str, Any]
     ) -> requests.Response:
-        """POST with exponential backoff and one auth-refresh retry on 401."""
+        """POST with exponential backoff and one auth-refresh retry on 401.
+
+        The auth-refresh is tracked separately from the retry budget so
+        a stale token doesn't consume one of the ``MAX_RETRIES`` slots
+        otherwise reserved for transient 5xx / 429 responses.
+        """
         backoff = INITIAL_BACKOFF
         auth_retried = False
+        attempts = 0
         resp: requests.Response | None = None
-        for attempt in range(MAX_RETRIES):
+        while attempts < MAX_RETRIES:
             resp = self._session.post(
                 url,
                 headers=self._common_headers(),
@@ -715,13 +714,16 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             )
             if resp.status_code == 401 and not auth_retried:
                 # Token may be stale (e.g. revoked or expired early).
+                # One-shot refresh that doesn't count against the
+                # retry budget.
                 self._token_provider.invalidate()
                 auth_retried = True
                 continue
             if resp.status_code not in RETRIABLE_STATUS_CODES:
                 return resp
 
-            if attempt < MAX_RETRIES - 1:
+            attempts += 1
+            if attempts < MAX_RETRIES:
                 retry_after = resp.headers.get("Retry-After")
                 try:
                     wait = float(retry_after) if retry_after else backoff
@@ -771,21 +773,6 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
 # ---------------------------------------------------------------------------
 # Record flattening
 # ---------------------------------------------------------------------------
-
-
-def _parse_max_records(table_options: dict[str, str]) -> int | None:
-    """Parse the optional ``max_records_per_batch`` admission-control cap.
-
-    Returns ``None`` when unset or non-numeric (uncapped).
-    """
-    raw = table_options.get("max_records_per_batch")
-    if raw is None:
-        return None
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        return None
-    return value if value > 0 else None
 
 
 def _flatten_record(raw: dict[str, Any]) -> dict[str, Any]:

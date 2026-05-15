@@ -152,6 +152,8 @@ The prompt requests `Rock_and_Fluid` mapped to `osdu:wks:master-data--RockAndFlu
 
 **Decision:** The connector's `Rock_and_Fluid` table is mapped to `osdu:wks:master-data--Sample:2.1.0`, which is the core OSDU entity representing a physical rock or fluid sample. This kind is the best single-entity analog to "rock and fluid" master data and is the anchor entity for all RAFS DDMS analysis chains. The mapping is documented here as a deliberate choice; the exact kind `osdu:wks:master-data--RockAndFluid:1.0.0` does not exist in any standard OSDU release found in research.
 
+**Instance-specific note:** Some OSDU/ADME instances expose rock & fluid sample data under the work-product family — for example `osdu:wks:work-product--RockSample:*` is used in the internal `dbx-growth-dev` reference accelerator (v1.1.0). If the configured ADME instance returns no records under `osdu:wks:master-data--Sample:*`, operators should verify the actual sample kind in that partition (e.g. via the Schema Service `GET /api/schema-service/v1/schema` enumeration in the next section) before assuming the connector is broken. Switching kinds is a one-line change in `adme_schemas.py:TABLE_TO_KIND_QUERY` plus a re-record of the simulator corpus.
+
 ### Discovering available kinds at runtime
 
 The OSDU Schema Service can enumerate registered kinds:
