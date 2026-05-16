@@ -17,7 +17,10 @@ from typing import Iterable, Mapping, Optional
 
 import pytest
 
+from pyspark.sql.types import BooleanType, IntegerType, StringType, StructField, StructType
+
 from databricks.labs.community_connector.interface import (
+    AgentOperation,
     LakeflowConnect,
     SupportsIngestionAgent,
 )
@@ -313,3 +316,177 @@ def test_unknown_operation_returns_error_row():
     source = _Source({"operation": "unsupported_op", **_CREDS})
     with pytest.raises(ValueError, match="Unknown ingestion_agent operation"):
         source.schema()
+
+
+# ---------------------------------------------------------------------------
+# AgentOperation plug-in pattern: source-specific operations are first-class
+# objects added via agent_operations() with one map entry.
+# ---------------------------------------------------------------------------
+
+class _DescribeTableOp(AgentOperation):
+    """Describe a table's columns. Required option: tableName."""
+
+    name = "example.describe_table"
+    description = (
+        "Source-specific: describe a table's columns. Required: tableName. "
+        "Returns rows of (column_name, data_type, nullable)."
+    )
+    kind = "metadata"
+    schema = StructType(
+        [
+            StructField("column_name", StringType(), False),
+            StructField("data_type", StringType(), False),
+            StructField("nullable", BooleanType(), False),
+        ]
+    )
+
+    def pull(self, connector, options):
+        table_name = options["tableName"]
+        table_schema = connector.get_table_schema(table_name, options)
+        for field in table_schema.fields:
+            yield {
+                "column_name": field.name,
+                "data_type": field.dataType.simpleString(),
+                "nullable": field.nullable,
+            }
+
+
+class _RowCountOp(AgentOperation):
+    """Data-kind op returning a single (count) row — bypasses _meta."""
+
+    name = "example.row_count"
+    description = "Return the number of records (data-kind, no _meta)."
+    kind = "data"
+    schema = StructType([StructField("count", IntegerType(), False)])
+
+    def pull(self, connector, options):
+        del options
+        # Use list_tables as a trivial scalar source for the test.
+        yield {"count": len(connector.list_tables())}
+
+
+class _ExampleWithCustomOps(ExampleLakeflowConnect, SupportsIngestionAgent):
+    """Source connector that contributes two AgentOperation plug-ins."""
+
+    def agent_operations(self):
+        return {
+            _DescribeTableOp.name: _DescribeTableOp(),
+            _RowCountOp.name: _RowCountOp(),
+        }
+
+
+def _make_custom_source(operation: str, **extra: str) -> IngestionAgentSource:
+    class _Source(IngestionAgentSource):
+        def _build_connector(self):
+            return _ExampleWithCustomOps(_creds_only(self.options))
+
+    return _Source({"operation": operation, **_CREDS, **extra})
+
+
+def test_agent_operations_plug_in_metadata_kind():
+    source = _make_custom_source(_DescribeTableOp.name, tableName="orders")
+    schema = source.schema()
+    # Metadata-kind ops auto-acquire a _meta column.
+    assert [f.name for f in schema.fields] == [
+        "column_name",
+        "data_type",
+        "nullable",
+        "_meta",
+    ]
+    rows = _collect(source)
+    assert all("column_name" in r.asDict() for r in rows)
+    column_names = [r["column_name"] for r in rows]
+    assert "order_id" in column_names
+    # _meta auto-filled to ok.
+    assert rows[0]["_meta"]["status"] == "ok"
+
+
+def test_agent_operations_plug_in_data_kind_skips_meta():
+    source = _make_custom_source(_RowCountOp.name)
+    schema = source.schema()
+    # Data-kind ops keep the natural schema, no _meta column appended.
+    assert [f.name for f in schema.fields] == ["count"]
+    rows = _collect(source)
+    assert len(rows) == 1
+    assert rows[0]["count"] > 0
+
+
+def test_agent_operations_plug_in_metadata_error_becomes_error_row():
+    source = _make_custom_source(_DescribeTableOp.name)  # missing tableName
+    rows = _collect(source)
+    assert len(rows) == 1
+    assert rows[0]["_meta"]["status"] == "error"
+    # KeyError on the missing option propagates as an error row.
+    assert "tableName" in rows[0]["_meta"]["message"]
+
+
+def test_list_operations_includes_source_plug_ins():
+    source = _make_custom_source("list_operations")
+    rows = _collect(source)
+    names = {r["name"] for r in rows}
+    # Built-ins still present.
+    assert {
+        "list_objects",
+        "preview_table",
+        "get_object_metadata",
+        "validate_connection",
+        "list_operations",
+    }.issubset(names)
+    # Source plug-ins listed with their description.
+    assert _DescribeTableOp.name in names
+    assert _RowCountOp.name in names
+    descriptions = {r["name"]: r["description"] for r in rows}
+    assert "Required: tableName" in descriptions[_DescribeTableOp.name]
+
+
+def test_agent_operations_can_replace_builtin_by_name():
+    """A source-defined op with a built-in name takes precedence."""
+
+    class _OverrideListObjects(AgentOperation):
+        name = "list_objects"
+        description = "Source-specific override."
+        kind = "metadata"
+        schema = StructType(
+            [
+                StructField("name", StringType(), False),
+                StructField("type", StringType(), False),
+                StructField("full_path", StringType(), False),
+            ]
+        )
+
+        def pull(self, connector, options):
+            del connector, options
+            yield {
+                "name": "override_marker",
+                "type": "schema",
+                "full_path": "/override",
+            }
+
+    class _ExampleWithOverride(ExampleLakeflowConnect, SupportsIngestionAgent):
+        def agent_operations(self):
+            return {"list_objects": _OverrideListObjects()}
+
+    class _Source(IngestionAgentSource):
+        def _build_connector(self):
+            return _ExampleWithOverride(_creds_only(self.options))
+
+    source = _Source({"operation": "list_objects", **_CREDS})
+    rows = _collect(source)
+    assert len(rows) == 1
+    assert rows[0]["name"] == "override_marker"
+    assert rows[0]["type"] == "schema"
+
+
+def test_agent_operations_rejects_non_operation_values():
+    """An entry that isn't an AgentOperation raises a TypeError."""
+
+    class _BadConnector(ExampleLakeflowConnect, SupportsIngestionAgent):
+        def agent_operations(self):
+            return {"example.bogus": "not an AgentOperation"}
+
+    class _Source(IngestionAgentSource):
+        def _build_connector(self):
+            return _BadConnector(_creds_only(self.options))
+
+    with pytest.raises(TypeError, match="AgentOperation"):
+        _Source({"operation": "example.bogus", **_CREDS})
