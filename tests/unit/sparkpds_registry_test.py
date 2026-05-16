@@ -20,14 +20,23 @@ def test_datasource_subclass_register():
     mock_spark.dataSource.register.assert_called_once_with(DummyDataSource)
 
 
+def _registered_class_names(mock_spark):
+    return [
+        call.args[0].__name__
+        for call in mock_spark.dataSource.register.call_args_list
+    ]
+
+
 def test_lakeflow_connect_subclass_register():
     mock_spark = MagicMock()
     with patch.object(registry, "_import_class", return_value=DummyLakeflowConnect):
         registry.register(mock_spark, DummyLakeflowConnect)
 
-    mock_spark.dataSource.register.assert_called_once()
-    registered_cls = mock_spark.dataSource.register.call_args[0][0]
-    assert registered_cls.__name__ == "RegisterableLakeflowSource_DummyLakeflowConnect"
+    # Registers both the lakeflow_connect source and the ingestion_agent source.
+    assert _registered_class_names(mock_spark) == [
+        "RegisterableLakeflowSource_DummyLakeflowConnect",
+        "RegisterableIngestionAgentSource_DummyLakeflowConnect",
+    ]
 
 
 @patch.object(registry, "_get_register_function", side_effect=ImportError("no generated module"))
@@ -41,13 +50,16 @@ def test_string_source_fallback_to_lakeflow_connect(mock_import_cls, mock_find_c
     mock_get_reg.assert_called_once_with("dummy_source")
     mock_find_cls.assert_called_once_with("dummy_source")
 
-    mock_spark.dataSource.register.assert_called_once()
-    registered_cls = mock_spark.dataSource.register.call_args[0][0]
-    assert registered_cls.__name__ == "RegisterableLakeflowSource_DummyLakeflowConnect"
+    assert _registered_class_names(mock_spark) == [
+        "RegisterableLakeflowSource_DummyLakeflowConnect",
+        "RegisterableIngestionAgentSource_DummyLakeflowConnect",
+    ]
 
 
+@patch.object(registry, "_find_lakeflow_connect_class", return_value=DummyLakeflowConnect)
+@patch.object(registry, "_import_class", return_value=DummyLakeflowConnect)
 @patch.object(registry, "_get_register_function")
-def test_string_source_uses_generated_module(mock_get_reg):
+def test_string_source_uses_generated_module(mock_get_reg, mock_import_cls, mock_find_cls):
     mock_spark = MagicMock()
     mock_register_fn = MagicMock()
     mock_get_reg.return_value = mock_register_fn
@@ -56,6 +68,11 @@ def test_string_source_uses_generated_module(mock_get_reg):
 
     mock_get_reg.assert_called_once_with("zendesk")
     mock_register_fn.assert_called_once_with(mock_spark)
+    # The generated module only wires lakeflow_connect; ingestion_agent is
+    # registered alongside it via class discovery.
+    assert _registered_class_names(mock_spark) == [
+        "RegisterableIngestionAgentSource_DummyLakeflowConnect",
+    ]
 
 
 def test_invalid_source_raises_type_error():

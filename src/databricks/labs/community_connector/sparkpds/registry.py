@@ -14,6 +14,10 @@ from pyspark.sql.datasource import DataSource
 
 from databricks.labs.community_connector.interface import LakeflowConnect
 from databricks.labs.community_connector.sparkpds.lakeflow_datasource import LakeflowSource
+from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource import (
+    IngestionAgentSource,
+    _connector_options,
+)
 
 
 _BASE_PKG = "databricks.labs.community_connector.sources"
@@ -94,7 +98,7 @@ def _find_lakeflow_connect_class(source_name: str) -> Type[LakeflowConnect]:
 
 
 def _register_lakeflow_connect(spark: SparkSession, cls: Type[LakeflowConnect]) -> None:
-    """Wrap a LakeflowConnect class in a LakeflowSource and register it with Spark."""
+    """Wrap a LakeflowConnect class in LakeflowSource + IngestionAgentSource and register both."""
     class_fqn = _get_class_fqn(cls)
 
     class RegisterableLakeflowSource(LakeflowSource):
@@ -108,6 +112,26 @@ def _register_lakeflow_connect(spark: SparkSession, cls: Type[LakeflowConnect]) 
     RegisterableLakeflowSource.__name__ = f"RegisterableLakeflowSource_{cls.__name__}"
 
     spark.dataSource.register(RegisterableLakeflowSource)
+
+    _register_ingestion_agent(spark, cls)
+
+
+def _register_ingestion_agent(spark: SparkSession, cls: Type[LakeflowConnect]) -> None:
+    """Register the ingestion_agent source bound to ``cls``."""
+    class_fqn = _get_class_fqn(cls)
+
+    class RegisterableIngestionAgentSource(IngestionAgentSource):
+        """Ingestion-agent source bound to this connector class."""
+
+        def _build_connector(self):
+            lakeflow_connect_cls = _import_class(class_fqn)
+            return lakeflow_connect_cls(_connector_options(self.options))
+
+    RegisterableIngestionAgentSource.__name__ = (
+        f"RegisterableIngestionAgentSource_{cls.__name__}"
+    )
+
+    spark.dataSource.register(RegisterableIngestionAgentSource)
 
 
 def register(
@@ -149,14 +173,23 @@ def register(
         >>> df = spark.read.format(MyCustomPDS.name()).options(...).load()
     """
     if isinstance(source, str):
+        registered_via_generated = False
         try:
             register_fn = _get_register_function(source)
             register_fn(spark)
-            return
+            registered_via_generated = True
         except ImportError:
-            lakeflow_cls = _find_lakeflow_connect_class(source)
+            pass
+
+        # Always register the ingestion_agent source via class discovery.
+        # The generated/SDP-merged module only wires the lakeflow_connect
+        # format; ingestion_agent needs its own registration alongside.
+        lakeflow_cls = _find_lakeflow_connect_class(source)
+        if registered_via_generated:
+            _register_ingestion_agent(spark, lakeflow_cls)
+        else:
             _register_lakeflow_connect(spark, lakeflow_cls)
-            return
+        return
 
     if isinstance(source, type) and issubclass(source, DataSource):
         spark.dataSource.register(source)

@@ -13,6 +13,10 @@ from databricks.labs.community_connector.sparkpds.lakeflow_datasource import (
     LakeflowStreamReader,
     LakeflowBatchReader,
 )
+from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource import (
+    IngestionAgentSource,
+    IngestionAgentReader,
+)
 
 __all__ = [
     # Registry
@@ -21,4 +25,6 @@ __all__ = [
     "LakeflowSource",
     "LakeflowStreamReader",
     "LakeflowBatchReader",
+    "IngestionAgentSource",
+    "IngestionAgentReader",
 ]
