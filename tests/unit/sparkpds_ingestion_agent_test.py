@@ -23,6 +23,7 @@ from databricks.labs.community_connector.interface import (
     AgentOperation,
     LakeflowConnect,
     SupportsIngestionAgent,
+    agent_operation,
 )
 from databricks.labs.community_connector.libs.simulated_source.api import reset_api
 from databricks.labs.community_connector.sources.example.example import (
@@ -490,3 +491,124 @@ def test_agent_operations_rejects_non_operation_values():
 
     with pytest.raises(TypeError, match="AgentOperation"):
         _Source({"operation": "example.bogus", **_CREDS})
+
+
+# ---------------------------------------------------------------------------
+# Decorator path: @agent_operation on a method, auto-discovered.
+# ---------------------------------------------------------------------------
+
+class _ExampleWithDecoratedOps(ExampleLakeflowConnect, SupportsIngestionAgent):
+    """Source connector that exposes ops purely via @agent_operation.
+
+    Note there is *no* ``agent_operations()`` override — the framework
+    discovers decorated methods automatically.
+    """
+
+    @agent_operation(
+        name="example.describe_table",
+        description="Describe a table's columns. Required: tableName.",
+        schema=StructType(
+            [
+                StructField("column_name", StringType(), False),
+                StructField("data_type", StringType(), False),
+                StructField("nullable", BooleanType(), False),
+            ]
+        ),
+    )
+    def describe_table(self, options):
+        table_name = options["tableName"]
+        table_schema = self.get_table_schema(table_name, options)
+        for field in table_schema.fields:
+            yield {
+                "column_name": field.name,
+                "data_type": field.dataType.simpleString(),
+                "nullable": field.nullable,
+            }
+
+    @agent_operation(
+        name="example.row_count",
+        description="Return the number of tables (data-kind).",
+        schema=StructType([StructField("count", IntegerType(), False)]),
+        kind="data",
+    )
+    def row_count(self, options):
+        del options
+        yield {"count": len(self.list_tables())}
+
+
+def _make_decorated_source(operation: str, **extra: str) -> IngestionAgentSource:
+    class _Source(IngestionAgentSource):
+        def _build_connector(self):
+            return _ExampleWithDecoratedOps(_creds_only(self.options))
+
+    return _Source({"operation": operation, **_CREDS, **extra})
+
+
+def test_decorator_path_auto_discovers_metadata_op():
+    source = _make_decorated_source(
+        "example.describe_table", tableName="orders"
+    )
+    rows = _collect(source)
+    column_names = [r["column_name"] for r in rows]
+    assert "order_id" in column_names
+    # _meta auto-injected for metadata-kind decorated op.
+    assert rows[0]["_meta"]["status"] == "ok"
+
+
+def test_decorator_path_auto_discovers_data_op():
+    source = _make_decorated_source("example.row_count")
+    schema = source.schema()
+    # Data-kind: no _meta column.
+    assert [f.name for f in schema.fields] == ["count"]
+    rows = _collect(source)
+    assert len(rows) == 1
+    assert rows[0]["count"] > 0
+
+
+def test_decorator_path_appears_in_list_operations():
+    rows = _collect(_make_decorated_source("list_operations"))
+    names = {r["name"] for r in rows}
+    assert "example.describe_table" in names
+    assert "example.row_count" in names
+    by_name = {r["name"]: r["description"] for r in rows}
+    assert "Required: tableName" in by_name["example.describe_table"]
+
+
+def test_decorator_and_subclass_paths_combine_via_super():
+    """Override agent_operations() to add a subclass op alongside decorated ones."""
+
+    class _StatefulOp(AgentOperation):
+        name = "example.stateful"
+        description = "Stateful subclass op kept alongside decorated ones."
+        kind = "metadata"
+        schema = StructType([StructField("marker", StringType(), False)])
+
+        def __init__(self, marker_value):
+            self._marker = marker_value
+
+        def pull(self, connector, options):
+            del connector, options
+            yield {"marker": self._marker}
+
+    class _Combined(_ExampleWithDecoratedOps):
+        def agent_operations(self):
+            ops = dict(super().agent_operations())
+            ops[_StatefulOp.name] = _StatefulOp("hello")
+            return ops
+
+    class _Source(IngestionAgentSource):
+        def _build_connector(self):
+            return _Combined(_creds_only(self.options))
+
+    rows = _collect(_Source({"operation": "list_operations", **_CREDS}))
+    names = {r["name"] for r in rows}
+    # Decorated ops still discovered.
+    assert "example.describe_table" in names
+    assert "example.row_count" in names
+    # Class-based op added on top.
+    assert "example.stateful" in names
+
+    # And the stateful op dispatches.
+    rows = _collect(_Source({"operation": "example.stateful", **_CREDS}))
+    assert len(rows) == 1
+    assert rows[0]["marker"] == "hello"
