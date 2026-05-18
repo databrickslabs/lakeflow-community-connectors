@@ -234,14 +234,18 @@ class LakeflowBatchReader(DataSourceReader):
     def _read_tables(self):
         if isinstance(self.lakeflow_connect, SupportsNamespaces):
             namespace_json = self.options.get(NAMESPACE)
-            # `None` (option absent) = list every namespace.
-            # `[]` (explicit empty list) = list root-level tables.
-            namespace = (
-                json.loads(namespace_json) if namespace_json is not None else None
-            )
-            pairs = self.lakeflow_connect.list_tables_in_namespace(namespace)
+            if namespace_json is None:
+                raise ValueError(
+                    f"option '{NAMESPACE}' is required when reading "
+                    f"'{TABLES_TABLE}' against a connector that implements "
+                    f"SupportsNamespaces. Pass a JSON-encoded list[str] "
+                    f"(use '[]' for root-level tables; walk the tree via "
+                    f"'{NAMESPACES_TABLE}' to enumerate every namespace)."
+                )
+            namespace = json.loads(namespace_json)
+            tables = self.lakeflow_connect.list_tables_in_namespace(namespace)
             return [
-                {"namespace": ns, "table_name": tn} for ns, tn in pairs
+                {"namespace": namespace, "table_name": tn} for tn in tables
             ]
         # Flat connector: report every table with an empty namespace.
         return [

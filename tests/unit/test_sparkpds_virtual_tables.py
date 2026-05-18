@@ -9,6 +9,7 @@ requires a real Spark session and is intentionally out of scope here.
 import json
 from typing import Iterator
 
+import pytest
 from pyspark.sql.types import ArrayType, StringType, StructField, StructType
 
 from databricks.labs.community_connector.interface import (
@@ -66,16 +67,15 @@ class _NamespacedConnector(LakeflowConnect, SupportsNamespaces):
             return [["orgA", "repo1"], ["orgA", "repo2"]]
         return []
 
-    def list_tables_in_namespace(self, namespace=None):
-        all_pairs: list[tuple[list[str], str]] = [
-            ([], "global_settings"),
-            (["orgA", "repo1"], "issues"),
-            (["orgA", "repo2"], "issues"),
-            (["orgB"], "users"),
-        ]
-        if namespace is None:
-            return all_pairs
-        return [(ns, tn) for ns, tn in all_pairs if ns == namespace]
+    _TABLES_BY_NAMESPACE = {
+        (): ["global_settings"],
+        ("orgA", "repo1"): ["issues"],
+        ("orgA", "repo2"): ["issues"],
+        ("orgB",): ["users"],
+    }
+
+    def list_tables_in_namespace(self, namespace):
+        return list(self._TABLES_BY_NAMESPACE.get(tuple(namespace), []))
 
 
 def _reader(connector: LakeflowConnect, table: str, **extra_opts) -> LakeflowBatchReader:
@@ -144,6 +144,7 @@ def test_namespaces_prefix_drills_in():
 
 
 def test_tables_flat_connector_uses_list_tables_with_empty_namespace():
+    """Flat connectors ignore the `namespace` option and report every table at root."""
     reader = _reader(_FlatConnector({}), TABLES_TABLE)
     assert reader._read_tables() == [
         {"namespace": [], "table_name": "t1"},
@@ -151,14 +152,11 @@ def test_tables_flat_connector_uses_list_tables_with_empty_namespace():
     ]
 
 
-def test_tables_namespaced_default_lists_everything():
+def test_tables_namespaced_requires_namespace_option():
+    """Reading `_community_tables` without a namespace option must raise."""
     reader = _reader(_NamespacedConnector({}), TABLES_TABLE)
-    assert reader._read_tables() == [
-        {"namespace": [], "table_name": "global_settings"},
-        {"namespace": ["orgA", "repo1"], "table_name": "issues"},
-        {"namespace": ["orgA", "repo2"], "table_name": "issues"},
-        {"namespace": ["orgB"], "table_name": "users"},
-    ]
+    with pytest.raises(ValueError, match="'namespace' is required"):
+        reader._read_tables()
 
 
 def test_tables_namespaced_root_only_with_empty_namespace():
@@ -173,7 +171,7 @@ def test_tables_namespaced_root_only_with_empty_namespace():
     ]
 
 
-def test_tables_namespaced_filtered_by_single_namespace_option():
+def test_tables_namespaced_specific_namespace():
     reader = _reader(
         _NamespacedConnector({}),
         TABLES_TABLE,
@@ -182,6 +180,15 @@ def test_tables_namespaced_filtered_by_single_namespace_option():
     assert reader._read_tables() == [
         {"namespace": ["orgA", "repo1"], "table_name": "issues"},
     ]
+
+
+def test_tables_namespaced_unknown_namespace_returns_empty():
+    reader = _reader(
+        _NamespacedConnector({}),
+        TABLES_TABLE,
+        **{NAMESPACE: json.dumps(["does", "not", "exist"])},
+    )
+    assert reader._read_tables() == []
 
 
 # ----- partitions fast-path skips virtual tables -----

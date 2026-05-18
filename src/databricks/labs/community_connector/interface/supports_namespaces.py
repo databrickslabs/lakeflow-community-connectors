@@ -41,20 +41,20 @@ class SupportsNamespaces(ABC):
     @abstractmethod
     def list_tables_in_namespace(
         self,
-        namespace: list[str] | None = None,
-    ) -> list[tuple[list[str], str]]:
-        """Return ``(namespace, table_name)`` pairs for one namespace path.
+        namespace: list[str],
+    ) -> list[str]:
+        """Return the table names that live directly under ``namespace``.
+
+        Callers that want every table across the whole catalog walk the
+        namespace tree via :meth:`list_namespaces` and call this method
+        once per leaf — there is no "list everything" shortcut.
 
         Args:
-            namespace: The namespace path to enumerate tables for.
-                - ``None`` means "list tables across every namespace the
-                  connector can enumerate".
-                - An empty list ``[]`` means "list tables at the root"
-                  (tables that live outside any namespace).
-                - A non-empty list lists tables under exactly that one
-                  namespace path.
+            namespace: The namespace path. An empty list ``[]`` selects
+                root-level tables (those that live outside any namespace).
         Returns:
-            A list of ``(namespace, table_name)`` tuples. ``namespace`` is the
-            full path (a list of strings); ``table_name`` is the table
-            identifier within that namespace.
+            A list of table names. The full ``(namespace, table_name)``
+            row exposed on ``_community_tables`` is reconstructed by the
+            framework from the namespace the caller already supplied, so
+            the connector does not need to echo it back.
         """
