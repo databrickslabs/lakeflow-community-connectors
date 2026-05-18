@@ -534,11 +534,15 @@ def register_lakeflow_source(spark):
         ) -> list[list[str]]:
             """Return the immediate child namespaces under ``prefix``.
 
-            This method returns one level of children only. Callers that need to
-            walk the full tree do so by recursing on each returned child. An
-            empty return value means ``prefix`` has no further namespace children
-            — the caller is expected to enumerate tables there via
-            :meth:`list_tables_in_namespace`.
+            This method returns one level of *namespace* children only — it
+            never returns tables. A namespace can hold tables and child
+            namespaces independently; callers must always call
+            :meth:`list_tables_in_namespace` for every namespace they care
+            about, regardless of whether :meth:`list_namespaces` returned
+            children for it. An empty return value just means there are no
+            further child namespaces under ``prefix``.
+
+            Walk the full tree by recursing on each returned child.
 
             Args:
                 prefix: A namespace path under which to list children. ``None`` or
