@@ -18,10 +18,13 @@ from databricks.labs.community_connector.interface import (
     SupportsPartition,
 )
 from databricks.labs.community_connector.sparkpds.lakeflow_datasource import (
+    METADATA_TABLE,
     NAMESPACE,
     NAMESPACE_PREFIX,
     NAMESPACES_TABLE,
+    TABLE_CONFIGS,
     TABLE_NAME,
+    TABLE_NAME_LIST,
     TABLES_TABLE,
     LakeflowBatchReader,
     LakeflowSource,
@@ -45,10 +48,20 @@ class _FlatConnector(LakeflowConnect):
 
 
 class _NamespacedConnector(LakeflowConnect, SupportsNamespaces):
-    """Connector with a small two-level namespace hierarchy."""
+    """Connector with a small two-level namespace hierarchy.
+
+    Returns from a dict (insertion-ordered) and at one point from a set so
+    the test exercises the framework-side sorting guarantee.
+    """
 
     def list_tables(self) -> list[str]:
-        return ["issues", "users"]
+        # Framework must never call this path for a SupportsNamespaces
+        # connector — `_community_tables` routes through
+        # `list_tables_in_namespace`. Raise loudly if that assumption
+        # breaks.
+        raise NotImplementedError(
+            "list_tables should not be called on a SupportsNamespaces connector"
+        )
 
     def get_table_schema(self, table_name, table_options):
         return StructType()
@@ -62,16 +75,18 @@ class _NamespacedConnector(LakeflowConnect, SupportsNamespaces):
     def list_namespaces(self, prefix=None):
         prefix = prefix or []
         if prefix == []:
-            return [["orgA"], ["orgB"]]
+            # Return out of sorted order so the framework's sort is
+            # actually exercised by the test below.
+            return [["orgB"], ["orgA"]]
         if prefix == ["orgA"]:
-            return [["orgA", "repo1"], ["orgA", "repo2"]]
+            return [["orgA", "repo2"], ["orgA", "repo1"]]
         return []
 
     _TABLES_BY_NAMESPACE = {
         (): ["global_settings"],
         ("orgA", "repo1"): ["issues"],
         ("orgA", "repo2"): ["issues"],
-        ("orgB",): ["users"],
+        ("orgB",): ["users", "settings"],  # multi-table namespace exercises sort
     }
 
     def list_tables_in_namespace(self, namespace):
@@ -189,6 +204,121 @@ def test_tables_namespaced_unknown_namespace_returns_empty():
         **{NAMESPACE: json.dumps(["does", "not", "exist"])},
     )
     assert reader._read_tables() == []
+
+
+def test_tables_namespaced_sorts_table_names():
+    """Table names within a namespace are sorted framework-side."""
+    reader = _reader(
+        _NamespacedConnector({}),
+        TABLES_TABLE,
+        **{NAMESPACE: json.dumps(["orgB"])},
+    )
+    # Fixture returns ["users", "settings"]; framework sorts → ["settings", "users"].
+    assert reader._read_tables() == [
+        {"namespace": ["orgB"], "table_name": "settings"},
+        {"namespace": ["orgB"], "table_name": "users"},
+    ]
+
+
+def test_tables_flat_connector_with_namespace_option_raises():
+    """A flat connector should not silently ignore a supplied namespace option."""
+    reader = _reader(
+        _FlatConnector({}),
+        TABLES_TABLE,
+        **{NAMESPACE: json.dumps([])},
+    )
+    with pytest.raises(ValueError, match="does not implement SupportsNamespaces"):
+        reader._read_tables()
+
+
+# ----- malformed option values -----
+
+
+def test_namespace_prefix_non_json_raises():
+    reader = _reader(
+        _NamespacedConnector({}),
+        NAMESPACES_TABLE,
+        **{NAMESPACE_PREFIX: "orgA"},  # bare string, not JSON-encoded
+    )
+    with pytest.raises(ValueError, match="JSON-encoded list"):
+        reader._read_namespaces()
+
+
+def test_namespace_prefix_wrong_type_raises():
+    """`'"orgA"'` is valid JSON but parses to a string, not a list[str]."""
+    reader = _reader(
+        _NamespacedConnector({}),
+        NAMESPACES_TABLE,
+        **{NAMESPACE_PREFIX: json.dumps("orgA")},  # parses to "orgA", not ["orgA"]
+    )
+    with pytest.raises(ValueError, match="JSON-encoded list"):
+        reader._read_namespaces()
+
+
+def test_namespace_non_json_raises():
+    reader = _reader(
+        _NamespacedConnector({}),
+        TABLES_TABLE,
+        **{NAMESPACE: "orgA"},
+    )
+    with pytest.raises(ValueError, match="JSON-encoded list"):
+        reader._read_tables()
+
+
+def test_namespace_wrong_type_raises():
+    reader = _reader(
+        _NamespacedConnector({}),
+        TABLES_TABLE,
+        **{NAMESPACE: json.dumps({"not": "a list"})},
+    )
+    with pytest.raises(ValueError, match="JSON-encoded list"):
+        reader._read_tables()
+
+
+def test_namespace_list_of_non_strings_raises():
+    reader = _reader(
+        _NamespacedConnector({}),
+        TABLES_TABLE,
+        **{NAMESPACE: json.dumps(["org", 42])},
+    )
+    with pytest.raises(ValueError, match="JSON-encoded list"):
+        reader._read_tables()
+
+
+def test_table_name_list_wrong_type_raises():
+    """`tableNameList` accepts only a JSON list of strings (not CSV)."""
+    reader = _reader(
+        _FlatConnector({}),
+        METADATA_TABLE,
+        **{TABLE_NAME_LIST: "t1,t2"},  # the old comma-separated format
+    )
+    with pytest.raises(ValueError, match="JSON-encoded list"):
+        reader._read_table_metadata()
+
+
+def test_table_configs_wrong_type_raises():
+    reader = _reader(
+        _FlatConnector({}),
+        METADATA_TABLE,
+        **{
+            TABLE_NAME_LIST: json.dumps(["t1"]),
+            TABLE_CONFIGS: json.dumps(["not", "a", "dict"]),
+        },
+    )
+    with pytest.raises(ValueError, match="JSON-encoded dict"):
+        reader._read_table_metadata()
+
+
+# ----- unknown `_community_*` tableName -----
+
+
+def test_unknown_community_table_raises_in_source():
+    """LakeflowSource rejects typos against the reserved `_community_*` namespace."""
+    # Bypass LakeflowConnectImpl(options) (it's the abstract base) by
+    # invoking __init__ directly and only asserting the early guard fires
+    # before that line.
+    with pytest.raises(ValueError, match="unknown framework virtual table"):
+        LakeflowSource({TABLE_NAME: "_community_tabls"})
 
 
 # ----- partitions fast-path skips virtual tables -----

@@ -10,6 +10,12 @@ class SupportsNamespaces(ABC):
     falls back to :meth:`LakeflowConnect.list_tables` and reports each table
     with an empty namespace.
 
+    Output ordering on the ``_community_namespaces`` and ``_community_tables``
+    Spark virtual tables is normalized by the framework via ``sorted(...)``,
+    so connector implementations of :meth:`list_namespaces` and
+    :meth:`list_tables_in_namespace` are free to return their results in
+    any order (including from a :class:`set` or generator).
+
     Must be used together with :class:`LakeflowConnect`.
 
     Usage::

@@ -536,6 +536,12 @@ def register_lakeflow_source(spark):
         falls back to :meth:`LakeflowConnect.list_tables` and reports each table
         with an empty namespace.
 
+        Output ordering on the ``_community_namespaces`` and ``_community_tables``
+        Spark virtual tables is normalized by the framework via ``sorted(...)``,
+        so connector implementations of :meth:`list_namespaces` and
+        :meth:`list_tables_in_namespace` are free to return their results in
+        any order (including from a :class:`set` or generator).
+
         Must be used together with :class:`LakeflowConnect`.
 
         Usage::
@@ -2050,8 +2056,50 @@ def register_lakeflow_source(spark):
     TABLE_NAME_LIST = "tableNameList"
     TABLE_CONFIGS = "tableConfigs"
     IS_DELETE_FLOW = "isDeleteFlow"
-    NAMESPACE_PREFIX = "namespace_prefix"
+    NAMESPACE_PREFIX = "namespacePrefix"
     NAMESPACE = "namespace"
+
+
+    def _decode_list_of_str_option(option_name: str, value: str | None) -> list[str] | None:
+        """Decode and validate a JSON-encoded ``list[str]`` Spark option.
+
+        Returns ``None`` if the option is absent; otherwise the parsed list.
+        Raises ``ValueError`` with the offending value if the JSON is malformed
+        or the decoded value is not a list of strings.
+        """
+        if value is None:
+            return None
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded list[str]; "
+                f"got non-JSON value: {value!r}"
+            ) from e
+        if not isinstance(decoded, list) or not all(isinstance(s, str) for s in decoded):
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded list[str]; "
+                f"got: {decoded!r}"
+            )
+        return decoded
+
+
+    def _decode_dict_option(option_name: str, value: str | None) -> dict:
+        """Decode and validate a JSON-encoded ``dict`` Spark option."""
+        if value is None:
+            return {}
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded dict; "
+                f"got non-JSON value: {value!r}"
+            ) from e
+        if not isinstance(decoded, dict):
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded dict; got: {decoded!r}"
+            )
+        return decoded
 
 
     # PySpark's DataSource API requires camelCase method names and inherits
@@ -2210,10 +2258,14 @@ def register_lakeflow_source(spark):
             return map(lambda x: parse_value(x, self.schema), records)
 
         def _read_table_metadata(self):
-            table_name_list = self.options.get(TABLE_NAME_LIST)
-            table_names = json.loads(table_name_list) if table_name_list else []
+            table_names = _decode_list_of_str_option(
+                TABLE_NAME_LIST, self.options.get(TABLE_NAME_LIST)
+            ) or []
+            table_configs = _decode_dict_option(
+                TABLE_CONFIGS, self.options.get(TABLE_CONFIGS)
+            )
             all_records = []
-            table_configs = json.loads(self.options.get(TABLE_CONFIGS, "{}"))
+            # Preserve caller-supplied table order — caller controls it.
             for table in table_names:
                 metadata = self.lakeflow_connect.read_table_metadata(
                     table, table_configs.get(table, {})
@@ -2225,17 +2277,18 @@ def register_lakeflow_source(spark):
             # Connectors without SupportsNamespaces are flat — no rows.
             if not isinstance(self.lakeflow_connect, SupportsNamespaces):
                 return []
-            prefix_json = self.options.get(NAMESPACE_PREFIX)
-            prefix = json.loads(prefix_json) if prefix_json else []
-            return [
-                {"namespace": ns}
-                for ns in self.lakeflow_connect.list_namespaces(prefix)
-            ]
+            prefix = _decode_list_of_str_option(
+                NAMESPACE_PREFIX, self.options.get(NAMESPACE_PREFIX)
+            )
+            namespaces = self.lakeflow_connect.list_namespaces(prefix)
+            # Sort framework-side for deterministic output regardless of
+            # connector iteration order.
+            return [{"namespace": ns} for ns in sorted(namespaces)]
 
         def _read_tables(self):
+            namespace_supplied = NAMESPACE in self.options
             if isinstance(self.lakeflow_connect, SupportsNamespaces):
-                namespace_json = self.options.get(NAMESPACE)
-                if namespace_json is None:
+                if not namespace_supplied:
                     raise ValueError(
                         f"option '{NAMESPACE}' is required when reading "
                         f"'{TABLES_TABLE}' against a connector that implements "
@@ -2243,15 +2296,26 @@ def register_lakeflow_source(spark):
                         f"(use '[]' for root-level tables; walk the tree via "
                         f"'{NAMESPACES_TABLE}' to enumerate every namespace)."
                     )
-                namespace = json.loads(namespace_json)
+                namespace = _decode_list_of_str_option(
+                    NAMESPACE, self.options[NAMESPACE]
+                )
                 tables = self.lakeflow_connect.list_tables_in_namespace(namespace)
                 return [
-                    {"namespace": namespace, "table_name": tn} for tn in tables
+                    {"namespace": namespace, "table_name": tn}
+                    for tn in sorted(tables)
                 ]
-            # Flat connector: report every table with an empty namespace.
+            # Flat connector path. Reject a stray `namespace` option — the
+            # caller probably mistook this connector for namespace-aware and
+            # silently ignoring the option would mask the bug.
+            if namespace_supplied:
+                raise ValueError(
+                    f"option '{NAMESPACE}' was supplied but the connector does "
+                    f"not implement SupportsNamespaces. Either omit the option "
+                    f"or use a namespace-aware connector."
+                )
             return [
                 {"namespace": [], "table_name": tn}
-                for tn in self.lakeflow_connect.list_tables()
+                for tn in sorted(self.lakeflow_connect.list_tables())
             ]
 
 
@@ -2262,6 +2326,17 @@ def register_lakeflow_source(spark):
 
         def __init__(self, options):
             self.options = options
+            table = options.get(TABLE_NAME)
+            # Catch typos against the framework's reserved virtual-table namespace
+            # early — falling through to the connector with an unknown
+            # `_community_*` name yields a confusing per-connector error.
+            if table and table.startswith("_community_") and table not in VIRTUAL_TABLES:
+                raise ValueError(
+                    f"unknown framework virtual table '{table}'. Valid framework "
+                    f"virtual tables are: {', '.join(VIRTUAL_TABLES)}. "
+                    f"For a regular source table, use a name that does not start "
+                    f"with '_community_'."
+                )
             # TEMPORARY: LakeflowConnectImpl is replaced with the actual implementation
             # class during merge. See the placeholder comment at the top of this file.
             self.lakeflow_connect = LakeflowConnectImpl(options)  # pylint: disable=abstract-class-instantiated

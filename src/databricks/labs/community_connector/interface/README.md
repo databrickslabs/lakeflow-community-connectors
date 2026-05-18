@@ -42,7 +42,7 @@ spark.read.format("lakeflow_connect")
      .option("databricks.connection", connection_name)
      .option("tableName", "_community_namespaces")
      # Optional. JSON-encoded list[str]. Absent / "[]" = root namespaces.
-     .option("namespace_prefix", json.dumps(["orgA"]))
+     .option("namespacePrefix", json.dumps(["orgA"]))
      .load()
 
 # API to list tables in one namespace
