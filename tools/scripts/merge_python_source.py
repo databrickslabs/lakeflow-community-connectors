@@ -8,6 +8,7 @@ This script combines:
 1. src/databricks/labs/community_connector/libs/utils.py (parsing utilities)
 2. src/databricks/labs/community_connector/interface/lakeflow_connect.py (LakeflowConnect base class)
 2b. src/databricks/labs/community_connector/interface/supports_partition.py (partition support mixins)
+2c. src/databricks/labs/community_connector/interface/supports_namespaces.py (namespace support mixin)
 3. src/databricks/labs/community_connector/sources/{source_name}/*.py (source library files, in dependency order)
 4. src/databricks/labs/community_connector/sources/{source_name}/{source_name}.py (main source connector implementation)
 5. src/databricks/labs/community_connector/sparkpds/lakeflow_datasource.py (PySpark data source registration)
@@ -618,6 +619,7 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     utils_path = src_base / "libs" / "utils.py"
     interface_path = src_base / "interface" / "lakeflow_connect.py"
     partition_path = src_base / "interface" / "supports_partition.py"
+    namespaces_path = src_base / "interface" / "supports_namespaces.py"
     source_path = src_base / "sources" / source_name / f"{source_name}.py"
     lakeflow_source_path = src_base / "sparkpds" / "lakeflow_datasource.py"
 
@@ -635,6 +637,7 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
         utils_content = read_file_content(utils_path)
         interface_content = read_file_content(interface_path)
         partition_content = read_file_content(partition_path)
+        namespaces_content = read_file_content(namespaces_path)
         source_content = read_file_content(source_path)
         lakeflow_source_content = read_file_content(lakeflow_source_path)
 
@@ -651,6 +654,7 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     print(f"- utils.py: {utils_path}", file=sys.stderr)
     print(f"- lakeflow_connect.py: {interface_path}", file=sys.stderr)
     print(f"- supports_partition.py: {partition_path}", file=sys.stderr)
+    print(f"- supports_namespaces.py: {namespaces_path}", file=sys.stderr)
     if lib_files:
         for lib_file in lib_files:
             print(f"- {lib_file.name}: {lib_file}", file=sys.stderr)
@@ -665,6 +669,7 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     utils_imports, utils_code = extract_imports_and_code(utils_content)
     interface_imports, interface_code = extract_imports_and_code(interface_content)
     partition_imports, partition_code = extract_imports_and_code(partition_content)
+    namespaces_imports, namespaces_code = extract_imports_and_code(namespaces_content)
     source_imports, source_code = extract_imports_and_code(source_content)
     lakeflow_imports, lakeflow_code = extract_imports_and_code(lakeflow_source_content)
 
@@ -713,7 +718,7 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     lakeflow_code = "\n".join(filtered_lines)
 
     # Deduplicate and organize all imports
-    all_import_lists = [utils_imports, interface_imports, partition_imports]
+    all_import_lists = [utils_imports, interface_imports, partition_imports, namespaces_imports]
     for _, lib_imports, _ in lib_imports_and_code:
         all_import_lists.append(lib_imports)
     all_import_lists.extend([source_imports, lakeflow_imports])
@@ -784,6 +789,21 @@ def merge_files(source_name: str, output_path: Optional[Path] = None) -> str:
     merged_lines.append("    " + "#" * 56)
     merged_lines.append("")
     for line in partition_code.strip().split("\n"):
+        if line.strip():
+            merged_lines.append("    " + line)
+        else:
+            merged_lines.append("")
+    merged_lines.append("")
+    merged_lines.append("")
+
+    # Section 2c: src/databricks/labs/community_connector/interface/supports_namespaces.py
+    merged_lines.append("    " + "#" * 56)
+    merged_lines.append(
+        "    # src/databricks/labs/community_connector/interface/supports_namespaces.py"
+    )
+    merged_lines.append("    " + "#" * 56)
+    merged_lines.append("")
+    for line in namespaces_code.strip().split("\n"):
         if line.strip():
             merged_lines.append("    " + line)
         else:

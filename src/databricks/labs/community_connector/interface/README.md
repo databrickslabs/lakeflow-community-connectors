@@ -28,17 +28,34 @@ To integrate with the Spark Declarative Pipeline (SDP) used by Lakeflow Communit
 
 spark.read.format("lakeflow_connect")
      .option("databricks.connection", connection_name)
-     .option("tableName", "_lakeflow_metadata")
-     .option("tableNameList", ",".join(table_list))
+     .option("tableName", "_community_table_metadata")
+     .option("tableNameList", json.dumps(table_list))
      .load()
 
-# API to list all tables
-# Schema: table_schema, table_name
-# Only table_name is required
+# API to discover namespaces (only for connectors that implement SupportsNamespaces)
+# Schema:
+#   namespace ARRAY<STRING>
+# Returns the immediate child namespaces under the given prefix.
+# Walk the full tree by recursing on each returned row.
+# Connectors without SupportsNamespaces return zero rows.
 spark.read.format("lakeflow_connect")
      .option("databricks.connection", connection_name)
-     .option("tableName", "_lakeflow_table_list")
-     .option("tableNameList", ",".join(table_list))
+     .option("tableName", "_community_namespaces")
+     # Optional. JSON-encoded list[str]. Absent / "[]" = root namespaces.
+     .option("namespacePrefix", json.dumps(["orgA"]))
+     .load()
+
+# API to list tables in one namespace
+# Schema:
+#   namespace ARRAY<STRING>,
+#   table_name STRING
+# For connectors that implement SupportsNamespaces, the `namespace` option is required.
+# Use "[]" for root-level tables. Walk the tree via _community_namespaces to find namespaces.
+# Flat connectors (no SupportsNamespaces) ignore the option and return every table with an empty namespace.
+spark.read.format("lakeflow_connect")
+     .option("databricks.connection", connection_name)
+     .option("tableName", "_community_tables")
+     .option("namespace", json.dumps(["orgA", "repo1"]))
      .load()
 
 
