@@ -133,6 +133,16 @@ class LakeflowConnectTests:
     # mismatch is a known fixture limitation, not a connector bug.
     allow_empty_first_read: frozenset = frozenset()
 
+    # Per-table allow-list of declared columns that are exempt from
+    # ``test_every_column_populated_by_at_least_one_record``. Use only for
+    # columns the source API genuinely never returns (e.g. password / secret
+    # fields suppressed for security), where no corpus record can ever
+    # exercise them. Document the reason in a comment alongside each entry.
+    # Prefer expanding the corpus or trimming the schema over adding to this
+    # list — the goal of the invariant is to surface schema/corpus drift.
+    # Format: {"table_name": {"column_a", "column_b"}}.
+    allow_null_columns: Dict[str, set] = {}
+
     # ------------------------------------------------------------------
     # Setup
     # ------------------------------------------------------------------
@@ -722,6 +732,101 @@ class LakeflowConnectTests:
             "  Fix: read_table() must eventually return the same offset it "
             "was given. Trigger.AvailableNow termination depends on this."
         )
+
+    # ------------------------------------------------------------------
+    # test_every_column_populated_by_at_least_one_record  (per-table, collected)
+    # ------------------------------------------------------------------
+
+    def test_every_column_populated_by_at_least_one_record(self):
+        """Every declared column is non-null in at least one sampled record.
+
+        Catches schema/flatten/corpus drift where the connector advertises a
+        column but the read path never produces a non-null value for it. The
+        existing per-record ``_all_null`` check only fires when *every* column
+        on a single record is null; this catches the partial form where base
+        / metadata columns populate but typed / flattened columns don't —
+        e.g. corpus records are shaped for a different schema version than
+        the connector's flatten layer expects.
+
+        Simulate mode only: in live mode, a real source may legitimately
+        return records with all-null columns in a small sample, and the
+        invariant becomes flaky. The simulator corpus is fixed, so failure
+        here is a real bug to fix in the connector or the corpus.
+        """
+        tables = self._non_partitioned_tables()
+        if not tables:
+            pytest.skip("All tables use partitioned reads")
+        if _resolve_env_mode_for_simulator(self.simulator_source) != MODE_SIMULATE:
+            pytest.skip("Column-coverage invariant only enforced in simulate mode")
+        errors = []
+        for table in tables:
+            err = self._validate_column_population(table)
+            if err:
+                errors.append(err)
+        if errors:
+            pytest.fail("\n\n".join(errors))
+
+    def _validate_column_population(self, table: str) -> Optional[str]:
+        """Returns error string or None.
+
+        Top-level columns only — nested struct sub-fields are intentionally
+        not recursed into, to avoid false positives where nested fields are
+        legitimately sparse across a small sample.
+        """
+        try:
+            schema = self.connector.get_table_schema(table, self._opts(table))
+        except Exception as e:
+            return f"[{table}] get_table_schema raised during column-population check: {e}"
+
+        try:
+            result = self.connector.read_table(table, {}, self._opts(table))
+        except Exception:
+            # test_read_table will surface the underlying error; don't
+            # double-report it from this check.
+            return None
+        if not isinstance(result, tuple) or len(result) != 2:
+            return None
+        iterator, _ = result
+        if not hasattr(iterator, "__iter__"):
+            return None
+
+        try:
+            records = self._consume(iterator)
+        except Exception:
+            return None
+
+        if not records:
+            # Empty first read is already validated by test_read_table.
+            return None
+
+        populated: set = set()
+        for rec in records:
+            if not isinstance(rec, dict):
+                continue
+            for field in schema.fields:
+                if field.name in populated:
+                    continue
+                if rec.get(field.name) is not None:
+                    populated.add(field.name)
+
+        allowed = set(self.allow_null_columns.get(table, ()))
+        missing = [
+            f.name for f in schema.fields
+            if f.name not in populated and f.name not in allowed
+        ]
+        if missing:
+            return (
+                f"[{table}] Columns null in every sampled record "
+                f"(checked {len(records)} record(s)): {missing}\n"
+                "  Fix: the connector advertises these columns but the read "
+                "path produces no record where they are non-null. Likely causes:\n"
+                "    - corpus records have a different shape than the schema "
+                "(wrong kind, wrong API version)\n"
+                "    - flatten / projection logic looks up wrong field names\n"
+                "    - corpus simply lacks coverage for these columns "
+                "(add a record that populates them)"
+            )
+        return None
 
     # ------------------------------------------------------------------
     # Shared read-validation helper
