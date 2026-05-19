@@ -107,7 +107,25 @@ Not all messages contain all segments. For example, ADT messages typically inclu
 
 ## **Object Schema**
 
-Schemas are **static** — defined by the HL7 v2.5.1 specification. There is no API to discover schemas; they are embedded in the connector code based on the segment definitions below.
+Schemas are **static** — defined by the **HL7 v2.9 specification** (the latest version, a strict superset of v2.1–v2.8). They are embedded in `hl7_v2_schemas.py` based on the segment definitions below; there is no API to discover them at runtime.
+
+**A note on spec version and the `Source:` links per segment.** The per-segment links below point to the Caristix HL7 v2.5.1 reference because that's the most widely-used freely-available HL7 v2 documentation. Since v2.9 is backwards-compatible with v2.5.1, every field documented in those v2.5.1 references is also a valid v2.9 field. The field tables below include the full v2.9 field set (e.g. OBX has 25 fields in v2.9 vs 19 in v2.5.1, OBR has 50 in v2.9 vs 47 in v2.5.1) — fields added in v2.6+ are explicitly marked with `(added in v2.X)` in their descriptions where it matters.
+
+**A note on column naming.** Spark column names in `hl7_v2_schemas.py` are pragmatic shortenings of HL7 spec field names, chosen for readability and consistency with the connector's existing conventions. The mapping is usually obvious but a few cases need a bridge note for future maintainers:
+
+| HL7 spec field | Spark column prefix | Why |
+|---|---|---|
+| OBX.8 "Abnormal Flags" (v2.5.1) / "Interpretation Codes" (v2.7+) | `interpretation_codes` | Code follows v2.7+ rename; same field position, type changed from IS to CWE |
+| OBR.4 "Universal Service Identifier" | `service` | Shorter and unambiguous in OBR context |
+| PID.3 "Patient Identifier List" | `patient_id` (and `patient_id_namespace_id`, etc.) | Matches industry-standard MRN terminology |
+| PID.18 "Patient Account Number" | `patient_account` | Shorter; suffix `_number` is implicit |
+| MRG.1 "Prior Patient Identifier List" | `prior_patient_id` | Mirrors PID.3 |
+| ORC.26 "Advanced Beneficiary Notice Override Reason" | `abn_override_reason` | Standard healthcare abbreviation |
+| RXA.1 "Give Sub-ID Counter" | `administration_sub_id_counter` | Disambiguates from RXA.2 / RXA.3 |
+| MSH.9 "Message Type" (CWE composite) | `message_code` + `trigger_event` + `message_structure` | The 3 components are exposed as separate columns |
+| MSH.20 "Alternate Character Set Handling Scheme" | `alt_character_set_handling` | Shorter; same field |
+
+Composite fields always expand into multiple Spark columns (one per component / sub-component). See **Field Type Mapping** below for the per-type expansion rules.
 
 Every table includes four common columns for traceability and joining:
 
@@ -612,9 +630,9 @@ Source: [Caristix HL7v2.5.1 OBX](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | OBX.5 | Observation Value | VARIES | C | 65536 | * | Result value — type determined by OBX.2 |
 | OBX.6 | Units | CE | O | 250 | 1 | Units of measure (comp 1 = code, comp 2 = text, comp 3 = coding system) |
 | OBX.7 | References Range | ST | O | 60 | 1 | Normal range (e.g. `3.5-5.0`, `>=18`) |
-| OBX.8 | Abnormal Flags | IS | O | 5 | * | `N` (normal), `H` (high), `L` (low), `HH` (critical high), `LL` (critical low), `A` (abnormal) (Table 0078) |
+| OBX.8 | Interpretation Codes | CWE | O | 705 | * | Renamed from "Abnormal Flags" (IS) in v2.7+; same field position. Values: `N` (normal), `H` (high), `L` (low), `HH` (critical high), `LL` (critical low), `A` (abnormal) (Table 0078). Code column: `interpretation_codes` (`ARRAY<STRUCT>` — one CWE struct per repetition) |
 | OBX.9 | Probability | NM | O | 5 | 1 | Probability (0–1) |
-| OBX.10 | Nature of Abnormal Test | ID | O | 2 | * | Nature of abnormal test (Table 0080) |
+| OBX.10 | Nature of Abnormal Test | ID | O | 2 | * | Nature of abnormal test (Table 0080). Code column: `nature_of_abnormal_test` (`ARRAY<STRING>`) |
 | OBX.11 | Observation Result Status | ID | R | 1 | 1 | `F` (final), `P` (preliminary), `C` (correction), `D` (delete), `I` (pending), `X` (cancelled), `W` (post to wrong patient) (Table 0085) |
 | OBX.12 | Effective Date of Reference Range | TS | O | 26 | 1 | Reference range effective date |
 | OBX.13 | User Defined Access Checks | ST | O | 20 | 1 | Access check code |
@@ -624,11 +642,12 @@ Source: [Caristix HL7v2.5.1 OBX](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | OBX.17 | Observation Method | CE | O | 250 | * | Method used |
 | OBX.18 | Equipment Instance Identifier | EI | O | 22 | * | Equipment ID |
 | OBX.19 | Date/Time of the Analysis | TS | O | 26 | 1 | Analysis datetime |
+| OBX.20 | Observation Site | CWE | O | 705 | * | (added in v2.7) Anatomical site where the observation was made. Code columns: `observation_site_*` (CWE expansion) |
+| OBX.21 | Observation Instance Identifier | EI | O | 427 | 1 | (added in v2.7) Unique identifier for this specific observation instance. Code columns: `observation_instance_identifier_*` (EI expansion) |
+| OBX.22 | Mood Code | CNE | C | 705 | 1 | (added in v2.7) Mood of the observation (e.g. EVN=event, RQO=requested) (Table 0725). Code columns: `mood_code_*` (CNE/CWE expansion) |
 | OBX.23 | Performing Organization Name | XON | O | 567 | 1 | Performing lab name |
 | OBX.24 | Performing Organization Address | XAD | O | 631 | 1 | Performing lab address |
 | OBX.25 | Performing Organization Medical Director | XCN | O | 3002 | 1 | Medical director |
-
-> **Note**: OBX.20–OBX.22 are reserved/not used in v2.5.1. Fields jump from OBX.19 to OBX.23.
 
 ### NTE — Notes and Comments (4 fields)
 
@@ -1147,7 +1166,12 @@ HL7 v2 defines its own data types. The connector maps them to Spark SQL types fo
 
 **IMPORTANT — Extraction Rule:** Every component of a composite data type MUST be extracted into its own column. Do NOT extract only component 1 and discard the rest. The "Connector Extraction" column below lists ALL components that must be captured.
 
-For repeating fields (separated by `~`), use `get_rep_component` instead of `get_component` to prevent the repetition separator from bleeding into component values. Only the first repetition is captured; the full value is preserved in `raw_segment`.
+For repeating fields (separated by `~`), use `get_rep_component` instead of `get_component` to prevent the repetition separator from bleeding into component values.
+
+Two extraction strategies are used depending on the HL7 cardinality:
+
+- **Truly repeating fields** (HL7 cardinality `*` — fields where the spec allows multiple distinct values, e.g. PID-5 `patient_names`, NK1-7 `contact_persons`, OBX-8 `interpretation_codes`, MSH-18 `character_set`, MSH-21 `message_profile_identifiers`) are extracted as Spark `ARRAY<STRUCT<...>>` or `ARRAY<STRING>` columns with **one entry per repetition** — no data is lost. The helpers `_xpn_array_fields()`, `_cwe_array_fields()`, and `_ei_array_fields()` implement this and the corresponding `_xpn_array_schema()` / `_cwe_array_schema()` / `_ei_array_schema()` helpers declare the Spark types. There are 24 such columns across 11 tables (PID, NK1, GT1, IN1, MRG, MSH, PD1, PV1, PV2, OBR, OBX) — see the README's "Non-string column types" section for the full enumeration.
+- **Non-repeating composite fields** (HL7 cardinality `1`, e.g. PID-7 `birth_date`, PID-8 `administrative_sex`) are flattened into individual `STRING` columns via `_xpn_fields()` / scalar extractors. Only the first repetition is captured if a sender unexpectedly puts a `~` in a cardinality-1 field; the full raw value is preserved in `raw_segment` for forensic reconstruction.
 
 **IMPORTANT — Sub-component Extraction Rule:** When a component is itself a composite data type (e.g. HD or EI inside CX, XCN, or XON), its sub-components (separated by `&`) MUST also be extracted into individual columns using `get_sub_component(field, comp, sub)` or `get_rep_sub_component(field, rep, comp, sub)`. The most common case is **Assigning Authority (HD)** and **Assigning Facility (HD)** inside CX, XCN, and XON types — these must always be broken down into `namespace_id` (sub 1), `universal_id` (sub 2), and `universal_id_type` (sub 3). The raw component value (which already has `&` in it) is kept as well for convenience.
 

@@ -2,8 +2,6 @@
 
 The Lakeflow HL7 v2 Connector parses HL7 v2 pipe-delimited messages and loads each segment type into its own Delta table, enabling structured analytics over clinical data. The connector supports incremental append-only ingestion, automatically tracking new messages by their send time.
 
-> **Getting started?** See the [UI Setup Guide](#ui-setup-guide) below for step-by-step pipeline creation instructions.
-
 ## Supported Source Modes
 
 | Mode | `source_type` value | Description |
@@ -179,22 +177,32 @@ All HL7 v2 fields are stored as `STRING`. The connector extracts **all** compone
 | ST, TX, FT, IS, ID | Plain text, coded values | STRING | Stored as-is |
 | NM, SI | Numeric strings | STRING | Cast with `CAST(col AS INT)` as needed |
 | TS, DT, TM | Timestamps, dates, times | STRING | HL7 DTM format; datetime fields like `date_of_birth` are parsed to `TIMESTAMP` |
-| CE, CWE, CNE | Coded elements | STRING | All 6 components: `code`, `text`, `coding_system`, `alt_code`, `alt_text`, `alt_coding_system` |
-| XPN | Person name | STRING | ALL 14 active components via `_xpn_fields()` helper: `family_name` (1), `given_name` (2), `middle_name` (3), `suffix` (4), `prefix` (5), `degree` (6), `name_type_code` (7), `name_representation_code` (8), `name_context` (9), `name_assembly_order` (11), `name_effective_date` (12), `name_expiration_date` (13), `professional_suffix` (14), `called_by` (15). |
+| CE, CWE, CNE | Coded elements | STRING (or `ARRAY<STRUCT>` if repeating) | All 6 components: `code`, `text`, `coding_system`, `alt_code`, `alt_text`, `alt_coding_system` |
+| XPN | Person name | STRING (or `ARRAY<STRUCT>` if repeating) | ALL 14 active components via `_xpn_fields()` helper: `family_name` (1), `given_name` (2), `middle_name` (3), `suffix` (4), `prefix` (5), `degree` (6), `name_type_code` (7), `name_representation_code` (8), `name_context` (9), `name_assembly_order` (11), `name_effective_date` (12), `name_expiration_date` (13), `professional_suffix` (14), `called_by` (15). |
 | XAD | Address | STRING | Components: `street`, `other_designation`, `city`, `state`, `zip`, `country`, `type` |
 | XCN | Composite ID/name | STRING | Components: `id`, `family_name`, `given_name`, `prefix` |
 | XON | Organization name | STRING | All 10 components: `name`, `type_code`, `id`, `check_digit`, `check_digit_scheme`, `assigning_authority`, `id_type_code`, `assigning_facility`, `name_rep_code`, `identifier` |
 | HD | Hierarchic designator | STRING | All 3 components: `namespace_id`, `universal_id`, `universal_id_type` |
-| EI | Entity identifier | STRING | All 4 components: `entity_id`, `namespace_id`, `universal_id`, `universal_id_type` |
+| EI | Entity identifier | STRING (or `ARRAY<STRUCT>` if repeating) | All 4 components: `entity_id`, `namespace_id`, `universal_id`, `universal_id_type` |
 | CX | Extended composite ID | STRING | Key components: `id_value`, `check_digit`, `assigning_authority`, `type_code` |
 | PL | Person location | STRING | Components: `point_of_care`, `room`, `bed`, `facility`, `status`, `type` |
 
 **Key rules for composite type extraction:**
 - Every component of a composite type gets its own column — do not extract only component 1 and discard the rest.
-- For repeating fields (separated by `~`), use `get_rep_component` (not `get_component`) to avoid the repetition separator bleeding into component values. Only the first repetition is captured; the full value is in `raw_segment`.
+- **Cardinality-`1` fields** (separated by `~` only if the sender erroneously sends multiple) are flattened into individual `STRING` columns via `_xpn_fields()` / `get_rep_component`. Only the first repetition is captured for these; the full raw value is preserved in `raw_segment`.
+- **Cardinality-`*` fields** (truly repeating per HL7 spec — e.g. `patient_names`, `interpretation_codes`, `character_set`, `message_profile_identifiers`) are stored as Spark `ARRAY` columns with one entry per repetition via the `_xpn_array_fields()` / `_cwe_array_fields()` / `_ei_array_fields()` helpers. See the "Non-string column types" subsection below for the full enumeration of 24 array columns.
 - When a component is itself a composite type (e.g., HD inside CX.4 or XON.6), its sub-components (separated by `&`) are also extracted into individual columns using `get_sub_component`. The raw component value is preserved as well.
 
-`set_id` is stored as `BIGINT`. Datetime fields parsed from HL7 DTM format are stored as `TIMESTAMP`.
+**Non-string column types:**
+
+- `set_id` is stored as `BIGINT`.
+- Datetime fields parsed from HL7 DTM format are stored as `TIMESTAMP`.
+- Truly-repeating HL7 fields (cardinality `*`, separated by `~`) are stored as Spark `ARRAY` columns rather than collapsed to first-repetition strings. There are 24 such columns across 11 tables (`pid`, `nk1`, `gt1`, `in1`, `mrg`, `msh`, `pd1`, `pv1`, `pv2`, `obr`, `obx`). Three element shapes:
+  - `ARRAY<STRUCT<...>>` of **XPN (person name)** structs — one entry per repetition of person-name fields, e.g. `pid.patient_names`, `pid.mothers_maiden_names`, `nk1.contact_persons`, `gt1.guarantor_names`, `mrg.prior_patient_names`. The struct has 14 fields (`family_name`, `given_name`, `middle_name`, `suffix`, `prefix`, `degree`, `name_type_code`, `name_representation_code`, `name_context`, `name_assembly_order`, `name_effective_date`, `name_expiration_date`, `professional_suffix`, `called_by`).
+  - `ARRAY<STRUCT<...>>` of **CWE / EI** structs — one entry per repetition of coded-element or entity-identifier fields, e.g. `obx.interpretation_codes`, `obr.reason_for_study`, `pv1.ambulatory_status`, `pv2.visit_user_code`, `pv2.notify_clergy_code`, `msh.security_handling_instructions`, `msh.special_access_restriction`, `pd1.living_dependency`, `msh.message_profile_identifiers`.
+  - `ARRAY<STRING>` for repeating simple ID/IS fields — `msh.character_set`, `obx.nature_of_abnormal_test`.
+
+Non-repeating composite fields (single occurrence) remain flattened into separate `STRING` columns rather than wrapped in single-element arrays, matching the convention in the API doc's composite-type table above. The full unparsed value is always preserved in `raw_segment`.
 
 ## Troubleshooting
 
@@ -212,6 +220,24 @@ All HL7 v2 fields are stored as `STRING`. The connector extracts **all** compone
 - **No data** — Confirm `createTime` values exist and `data` starts with `MSH|`.
 - **Parse errors** — Ensure `data` is raw pipe-delimited text, not base64. Decode if needed: `UPDATE t SET data = cast(unbase64(data) as STRING)`.
 - **Out of memory** — Set `delta_query_mode` to `per_window` in the connection for large tables.
+
+### Debugging tools
+
+`gcpreader.py` is a standalone CLI for fetching and pretty-printing HL7 v2 messages directly from a GCP Healthcare API HL7v2 store — useful when you want to sanity-check credentials, inspect raw message structure, or verify what the connector will see, without spinning up Spark.
+
+```bash
+# With a config file (same format as connector connection options)
+python src/databricks/labs/community_connector/sources/hl7_v2/gcpreader.py \
+    --config /path/to/dev_config_gcp.json --limit 5
+
+# With individual arguments
+python src/databricks/labs/community_connector/sources/hl7_v2/gcpreader.py \
+    --project-id my-project --location us-central1 \
+    --dataset-id my-dataset --hl7v2-store-id my-store \
+    --service-account-json /path/to/sa-key.json --limit 5
+```
+
+It's intentionally not part of the connector runtime (excluded from the bundled `_generated_*` source) and is purely a developer convenience.
 
 ## UI Setup Guide
 
