@@ -4,7 +4,6 @@ from databricks.labs.community_connector.interface.lakeflow_connect import Lakef
 from databricks.labs.community_connector.interface.supports_ingestion_agent import (
     AgentOperation,
     SupportsIngestionAgent,
-    agent_operation,
 )
 from databricks.labs.community_connector.interface.supports_namespaces import (
     SupportsNamespaces,
@@ -21,5 +20,4 @@ __all__ = [
     "SupportsNamespaces",
     "SupportsPartition",
     "SupportsPartitionedStream",
-    "agent_operation",
 ]
