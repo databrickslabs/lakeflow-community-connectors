@@ -38,6 +38,9 @@ from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource imp
     OP_PREVIEW_TABLE,
     OP_VALIDATE_CONNECTION,
 )
+from databricks.labs.community_connector.sparkpds.lakeflow_datasource import (
+    LakeflowSource,
+)
 
 
 _CREDS = {
@@ -612,3 +615,63 @@ def test_decorator_and_subclass_paths_combine_via_super():
     rows = _collect(_Source({"operation": "example.stateful", **_CREDS}))
     assert len(rows) == 1
     assert rows[0]["marker"] == "hello"
+
+
+# ---------------------------------------------------------------------------
+# Integration through LakeflowSource: the agent surface is reachable via the
+# same `lakeflow_connect` format that serves table reads. Setting `operation`
+# routes through the agent dispatcher; omitting it keeps the regular path.
+# ---------------------------------------------------------------------------
+
+class _ExampleLakeflowSource(LakeflowSource):
+    """LakeflowSource wired to ExampleLakeflowConnect for end-to-end tests."""
+
+    def _build_table_connector(self, options):
+        return ExampleLakeflowConnect(options)
+
+    def _build_agent_source(self, options):
+        class _AgentSource(IngestionAgentSource):
+            def _build_connector(self_inner):  # noqa: N805 — inner method
+                return ExampleLakeflowConnect(_creds_only(self_inner.options))
+
+        return _AgentSource(options)
+
+
+def test_lakeflow_source_routes_to_agent_when_operation_set():
+    source = _ExampleLakeflowSource(
+        {"operation": OP_LIST_OPERATIONS, **_CREDS}
+    )
+    schema = source.schema()
+    # Agent dispatch is in effect — schema is the list_operations shape.
+    assert {f.name for f in schema.fields} == {"name", "description", "_meta"}
+    rows = list(source.reader(schema).read(None))
+    names = {r["name"] for r in rows}
+    assert {
+        OP_LIST_OBJECTS,
+        OP_GET_OBJECT_METADATA,
+        OP_PREVIEW_TABLE,
+        OP_VALIDATE_CONNECTION,
+        OP_LIST_OPERATIONS,
+    }.issubset(names)
+
+
+def test_lakeflow_source_table_mode_unchanged_when_no_operation():
+    # Without `operation`, the source behaves as before — schema() requires
+    # `tableName`. We don't assert on data here; the existing source-specific
+    # test suites cover the table read path.
+    source = _ExampleLakeflowSource({"tableName": "orders", **_CREDS})
+    schema = source.schema()
+    # The table's natural schema has columns; absence of `_meta` confirms we
+    # did NOT go through the agent dispatcher.
+    assert "_meta" not in {f.name for f in schema.fields}
+
+
+def test_lakeflow_source_agent_mode_blocks_streaming():
+    source = _ExampleLakeflowSource(
+        {"operation": OP_VALIDATE_CONNECTION, **_CREDS}
+    )
+    schema = source.schema()
+    with pytest.raises(NotImplementedError, match="streaming"):
+        source.streamReader(schema)
+    with pytest.raises(NotImplementedError, match="streaming"):
+        source.simpleStreamReader(schema)

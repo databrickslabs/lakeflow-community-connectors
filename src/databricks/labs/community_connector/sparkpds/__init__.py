@@ -2,7 +2,10 @@
 Spark Python Data Source (PDS) module for Lakeflow Community Connectors.
 
 This module provides the infrastructure for registering LakeflowSource
-data sources with Spark.
+data sources with Spark. The ingestion-agent operation surface lives
+inside the same ``lakeflow_connect`` format — set the ``operation``
+option to dispatch to the agent surface instead of the regular table
+read path.
 """
 
 from databricks.labs.community_connector.sparkpds.registry import (
@@ -25,6 +28,8 @@ __all__ = [
     "LakeflowSource",
     "LakeflowStreamReader",
     "LakeflowBatchReader",
+    # Internal dispatcher for the agent-operation path on lakeflow_connect.
+    # Exposed for unit testing; not a registered Spark format on its own.
     "IngestionAgentSource",
     "IngestionAgentReader",
 ]

@@ -14,12 +14,6 @@ class DummyDataSource(DataSource):
     pass
 
 
-def test_datasource_subclass_register():
-    mock_spark = MagicMock()
-    registry.register(mock_spark, DummyDataSource)
-    mock_spark.dataSource.register.assert_called_once_with(DummyDataSource)
-
-
 def _registered_class_names(mock_spark):
     return [
         call.args[0].__name__
@@ -27,15 +21,21 @@ def _registered_class_names(mock_spark):
     ]
 
 
+def test_datasource_subclass_register():
+    mock_spark = MagicMock()
+    registry.register(mock_spark, DummyDataSource)
+    mock_spark.dataSource.register.assert_called_once_with(DummyDataSource)
+
+
 def test_lakeflow_connect_subclass_register():
     mock_spark = MagicMock()
     with patch.object(registry, "_import_class", return_value=DummyLakeflowConnect):
         registry.register(mock_spark, DummyLakeflowConnect)
 
-    # Registers both the lakeflow_connect source and the ingestion_agent source.
+    # The single registered LakeflowSource serves both the table-mode and
+    # the agent-operation-mode dispatch paths under the lakeflow_connect format.
     assert _registered_class_names(mock_spark) == [
         "RegisterableLakeflowSource_DummyLakeflowConnect",
-        "RegisterableIngestionAgentSource_DummyLakeflowConnect",
     ]
 
 
@@ -52,14 +52,20 @@ def test_string_source_fallback_to_lakeflow_connect(mock_import_cls, mock_find_c
 
     assert _registered_class_names(mock_spark) == [
         "RegisterableLakeflowSource_DummyLakeflowConnect",
-        "RegisterableIngestionAgentSource_DummyLakeflowConnect",
     ]
 
 
 @patch.object(registry, "_find_lakeflow_connect_class", return_value=DummyLakeflowConnect)
 @patch.object(registry, "_import_class", return_value=DummyLakeflowConnect)
 @patch.object(registry, "_get_register_function")
-def test_string_source_uses_generated_module(mock_get_reg, mock_import_cls, mock_find_cls):
+def test_string_source_invokes_generated_module_then_overlays_class_discovery(
+    mock_get_reg, mock_import_cls, mock_find_cls
+):
+    """Generated module is called for SDP-merged sources; class-discovery
+    LakeflowSource is then registered on top so the agent-operation path
+    is available even for sources whose generated module ships the
+    pre-fold LakeflowSource shape.
+    """
     mock_spark = MagicMock()
     mock_register_fn = MagicMock()
     mock_get_reg.return_value = mock_register_fn
@@ -68,10 +74,10 @@ def test_string_source_uses_generated_module(mock_get_reg, mock_import_cls, mock
 
     mock_get_reg.assert_called_once_with("zendesk")
     mock_register_fn.assert_called_once_with(mock_spark)
-    # The generated module only wires lakeflow_connect; ingestion_agent is
-    # registered alongside it via class discovery.
+    # Generated module's register_fn is a mock that no-ops on the spark
+    # double — only the class-discovery wrapper registers via dataSource.
     assert _registered_class_names(mock_spark) == [
-        "RegisterableIngestionAgentSource_DummyLakeflowConnect",
+        "RegisterableLakeflowSource_DummyLakeflowConnect",
     ]
 
 

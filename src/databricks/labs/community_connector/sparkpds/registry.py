@@ -20,6 +20,22 @@ from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource imp
 )
 
 
+def _bound_agent_source_cls(class_fqn: str) -> type:
+    """Return an IngestionAgentSource subclass bound to ``class_fqn``.
+
+    The agent dispatcher needs to instantiate the concrete LakeflowConnect
+    class — same FQN-binding trick the LakeflowSource wrapper uses below.
+    """
+
+    class _BoundAgentSource(IngestionAgentSource):
+        def _build_connector(self):
+            lakeflow_connect_cls = _import_class(class_fqn)
+            return lakeflow_connect_cls(_connector_options(self.options))
+
+    _BoundAgentSource.__name__ = f"BoundIngestionAgentSource_{class_fqn.rsplit('.', 1)[-1]}"
+    return _BoundAgentSource
+
+
 _BASE_PKG = "databricks.labs.community_connector.sources"
 
 def _get_class_fqn(cls: Type) -> str:
@@ -98,40 +114,27 @@ def _find_lakeflow_connect_class(source_name: str) -> Type[LakeflowConnect]:
 
 
 def _register_lakeflow_connect(spark: SparkSession, cls: Type[LakeflowConnect]) -> None:
-    """Wrap a LakeflowConnect class in LakeflowSource + IngestionAgentSource and register both."""
+    """Wrap a LakeflowConnect class in a LakeflowSource and register it with Spark.
+
+    The registered LakeflowSource serves both the regular ``tableName``
+    dispatch path and the ingestion-agent operation dispatch path
+    (option ``operation``) under the same ``lakeflow_connect`` format.
+    """
     class_fqn = _get_class_fqn(cls)
+    bound_agent_cls = _bound_agent_source_cls(class_fqn)
 
     class RegisterableLakeflowSource(LakeflowSource):
         """Wrapper that dynamically imports the LakeflowConnect class by FQN."""
 
-        def __init__(self, options):
-            self.options = options
-            lakeflow_connect_cls = _import_class(class_fqn)
-            self.lakeflow_connect = lakeflow_connect_cls(options)
+        def _build_table_connector(self, options):
+            return _import_class(class_fqn)(options)
+
+        def _build_agent_source(self, options):
+            return bound_agent_cls(options)
 
     RegisterableLakeflowSource.__name__ = f"RegisterableLakeflowSource_{cls.__name__}"
 
     spark.dataSource.register(RegisterableLakeflowSource)
-
-    _register_ingestion_agent(spark, cls)
-
-
-def _register_ingestion_agent(spark: SparkSession, cls: Type[LakeflowConnect]) -> None:
-    """Register the ingestion_agent source bound to ``cls``."""
-    class_fqn = _get_class_fqn(cls)
-
-    class RegisterableIngestionAgentSource(IngestionAgentSource):
-        """Ingestion-agent source bound to this connector class."""
-
-        def _build_connector(self):
-            lakeflow_connect_cls = _import_class(class_fqn)
-            return lakeflow_connect_cls(_connector_options(self.options))
-
-    RegisterableIngestionAgentSource.__name__ = (
-        f"RegisterableIngestionAgentSource_{cls.__name__}"
-    )
-
-    spark.dataSource.register(RegisterableIngestionAgentSource)
 
 
 def register(
@@ -173,22 +176,18 @@ def register(
         >>> df = spark.read.format(MyCustomPDS.name()).options(...).load()
     """
     if isinstance(source, str):
-        registered_via_generated = False
         try:
             register_fn = _get_register_function(source)
             register_fn(spark)
-            registered_via_generated = True
         except ImportError:
             pass
-
-        # Always register the ingestion_agent source via class discovery.
-        # The generated/SDP-merged module only wires the lakeflow_connect
-        # format; ingestion_agent needs its own registration alongside.
+        # Always register a class-discovery-built LakeflowSource on top of
+        # whatever the generated module wired up. The generated module ships
+        # the pre-fold-in LakeflowSource (table mode only); registering the
+        # current class-discovery wrapper here gives callers both the table
+        # path and the agent-operation path under the same format name.
         lakeflow_cls = _find_lakeflow_connect_class(source)
-        if registered_via_generated:
-            _register_ingestion_agent(spark, lakeflow_cls)
-        else:
-            _register_lakeflow_connect(spark, lakeflow_cls)
+        _register_lakeflow_connect(spark, lakeflow_cls)
         return
 
     if isinstance(source, type) and issubclass(source, DataSource):
