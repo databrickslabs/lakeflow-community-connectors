@@ -17,8 +17,13 @@ from databricks.labs.community_connector.sparkpds.lakeflow_datasource import (
     LakeflowBatchReader,
 )
 from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource import (
-    IngestionAgentSource,
+    GetObjectMetadataOp,
     IngestionAgentReader,
+    IngestionAgentSource,
+    ListObjectsOp,
+    ListOperationsOp,
+    PreviewTableOp,
+    ValidateConnectionOp,
 )
 
 __all__ = [
@@ -28,6 +33,13 @@ __all__ = [
     "LakeflowSource",
     "LakeflowStreamReader",
     "LakeflowBatchReader",
+    # Built-in ingestion-agent operations — subclass these to customise
+    # behaviour while keeping the framework's schema / dispatch contract.
+    "ListObjectsOp",
+    "PreviewTableOp",
+    "GetObjectMetadataOp",
+    "ValidateConnectionOp",
+    "ListOperationsOp",
     # Internal dispatcher for the agent-operation path on lakeflow_connect.
     # Exposed for unit testing; not a registered Spark format on its own.
     "IngestionAgentSource",
