@@ -17,6 +17,7 @@ Coverage:
 
 from __future__ import annotations
 
+import json
 from typing import Mapping
 
 import pytest
@@ -29,8 +30,12 @@ from pyspark.sql.types import (
 )
 
 from databricks.labs.community_connector.interface import (
+    FRAMEWORK_PROTOCOL_VERSION,
+    AgentError,
     AgentOperation,
+    ErrorCode,
     LakeflowConnect,
+    Parameter,
     SupportsIngestionAgent,
 )
 from databricks.labs.community_connector.libs.simulated_source.api import reset_api
@@ -41,6 +46,7 @@ from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource imp
     DEFAULT_PREVIEW_LIMIT,
     IngestionAgentDispatcher,
     ListObjectsOp,
+    OP_DESCRIBE_CONNECTION,
     OP_GET_OBJECT_METADATA,
     OP_LIST_OBJECTS,
     OP_LIST_OPERATIONS,
@@ -171,9 +177,12 @@ def test_preview_table_default_limit():
 
 
 def test_preview_table_missing_table_name_raises():
+    from databricks.labs.community_connector.interface import AgentError
+
     dispatcher = _dispatcher(OP_PREVIEW_TABLE)
-    with pytest.raises(ValueError, match="tableName"):
+    with pytest.raises(AgentError, match="tableName") as exc_info:
         dispatcher.schema()
+    assert exc_info.value.code == "bad_request"
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +234,146 @@ def test_list_operations_works_when_connector_failed_to_build():
     # Built-ins are still listed.
     assert OP_LIST_OBJECTS in names
     assert OP_LIST_OPERATIONS in names
+
+
+def test_list_operations_rows_carry_planning_metadata():
+    """Every row exposes kind, requires_connector, version, schema/params JSON."""
+    rows = _collect(_dispatcher(OP_LIST_OPERATIONS))
+    by_name = {r["name"]: r for r in rows}
+
+    list_objects = by_name[OP_LIST_OBJECTS]
+    assert list_objects["kind"] == "metadata"
+    assert list_objects["requires_connector"] is True
+    assert list_objects["version"] == "1.0.0"
+    # Schema is exposed as JSON; round-trippable.
+    schema_json = json.loads(list_objects["result_schema_json"])
+    assert any(f["name"] == "name" for f in schema_json["fields"])
+    # Parameters declare parent and search.
+    params = json.loads(list_objects["parameters_json"])
+    param_names = {p["name"] for p in params}
+    assert {"parent", "search"} == param_names
+
+    list_ops = by_name[OP_LIST_OPERATIONS]
+    # list_operations is connector-optional.
+    assert list_ops["requires_connector"] is False
+
+    preview = by_name[OP_PREVIEW_TABLE]
+    # preview_table is data-kind; its schema is dynamic, so result_schema_json is null.
+    assert preview["kind"] == "data"
+    assert preview["result_schema_json"] is None
+    preview_params = json.loads(preview["parameters_json"])
+    table_name_param = next(p for p in preview_params if p["name"] == "tableName")
+    assert table_name_param["required"] is True
+    limit_param = next(p for p in preview_params if p["name"] == "limit")
+    assert limit_param["type"] == "integer"
+    assert limit_param["default"] == DEFAULT_PREVIEW_LIMIT
+
+
+# ---------------------------------------------------------------------------
+# Built-in: describe_connection
+# ---------------------------------------------------------------------------
+
+def test_describe_connection_reports_identity_and_capabilities():
+    rows = _collect(_dispatcher(OP_DESCRIBE_CONNECTION))
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["connector_name"] == "ExampleLakeflowConnect"
+    assert row["framework_protocol_version"] == FRAMEWORK_PROTOCOL_VERSION
+    # ExampleLakeflowConnect doesn't implement any of the optional mixins.
+    assert row["supports_namespaces"] is False
+    assert row["supports_partition"] is False
+    assert row["supports_partitioned_stream"] is False
+
+
+def test_describe_connection_picks_up_connector_declared_version():
+    class _VersionedConnector(ExampleLakeflowConnect):
+        version = "2.3.4"
+        source_system = "example-versioned"
+
+    options = {"operation": OP_DESCRIBE_CONNECTION, **_CREDS}
+    dispatcher = IngestionAgentDispatcher(
+        options=options,
+        connector=_VersionedConnector(_creds_only(options)),
+    )
+    row = _collect(dispatcher)[0]
+    assert row["connector_version"] == "2.3.4"
+    assert row["source_system"] == "example-versioned"
+
+
+def test_describe_connection_works_when_connector_failed_to_build():
+    dispatcher = _dispatcher(
+        OP_DESCRIBE_CONNECTION,
+        connector=None,
+        init_error=RuntimeError("bad creds"),
+    )
+    row = _collect(dispatcher)[0]
+    # Identity fields are null when the connector isn't available, but the
+    # framework still reports its own protocol version.
+    assert row["connector_name"] is None
+    assert row["connector_version"] is None
+    assert row["framework_protocol_version"] == FRAMEWORK_PROTOCOL_VERSION
+    assert row["supports_namespaces"] is False
+
+
+# ---------------------------------------------------------------------------
+# Canonical error codes
+# ---------------------------------------------------------------------------
+
+def test_missing_required_param_yields_bad_request_code():
+    """Framework rejects metadata-op missing required param with bad_request."""
+    rows = _collect(_dispatcher(OP_GET_OBJECT_METADATA))  # missing `name`
+    assert len(rows) == 1
+    assert rows[0]["_meta"]["status"] == "error"
+    assert rows[0]["_meta"]["code"] == ErrorCode.BAD_REQUEST
+
+
+def test_unknown_exception_in_pull_yields_internal_error_code():
+    class _BoomOp(AgentOperation):
+        name = "example.boom"
+        description = "Always raises a bare exception."
+        kind = "metadata"
+        schema = StructType([])
+
+        def pull(self, connector, options):
+            raise RuntimeError("kaboom")
+
+    class _BoomConnector(ExampleLakeflowConnect, SupportsIngestionAgent):
+        def agent_operations(self):
+            return {_BoomOp.name: _BoomOp()}
+
+    options = {"operation": _BoomOp.name, **_CREDS}
+    dispatcher = IngestionAgentDispatcher(
+        options=options,
+        connector=_BoomConnector(_creds_only(options)),
+    )
+    rows = _collect(dispatcher)
+    assert rows[0]["_meta"]["code"] == ErrorCode.INTERNAL_ERROR
+    assert "kaboom" in rows[0]["_meta"]["message"]
+
+
+def test_agent_error_code_propagates_into_meta():
+    class _AuthFailingOp(AgentOperation):
+        name = "example.auth_fail"
+        description = "Raises AgentError(AUTH_FAILED)."
+        kind = "metadata"
+        schema = StructType([])
+
+        def pull(self, connector, options):
+            raise AgentError(ErrorCode.AUTH_FAILED, "creds expired")
+
+    class _AuthConnector(ExampleLakeflowConnect, SupportsIngestionAgent):
+        def agent_operations(self):
+            return {_AuthFailingOp.name: _AuthFailingOp()}
+
+    options = {"operation": _AuthFailingOp.name, **_CREDS}
+    dispatcher = IngestionAgentDispatcher(
+        options=options,
+        connector=_AuthConnector(_creds_only(options)),
+    )
+    rows = _collect(dispatcher)
+    assert rows[0]["_meta"]["status"] == "error"
+    assert rows[0]["_meta"]["code"] == ErrorCode.AUTH_FAILED
+    assert "creds expired" in rows[0]["_meta"]["message"]
 
 
 def test_metadata_op_returns_error_row_when_connector_failed():
@@ -485,7 +634,17 @@ class _ExampleLakeflowSource(LakeflowSource):
 def test_lakeflow_source_routes_to_agent_when_operation_set():
     source = _ExampleLakeflowSource({"operation": OP_LIST_OPERATIONS, **_CREDS})
     schema = source.schema()
-    assert {f.name for f in schema.fields} == {"name", "description", "_meta"}
+    # Enriched list_operations columns + _meta envelope.
+    assert {f.name for f in schema.fields} == {
+        "name",
+        "description",
+        "kind",
+        "requires_connector",
+        "version",
+        "result_schema_json",
+        "parameters_json",
+        "_meta",
+    }
     rows = list(source.reader(schema).read(None))
     names = {r["name"] for r in rows}
     assert {

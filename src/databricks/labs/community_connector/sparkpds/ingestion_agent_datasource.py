@@ -5,11 +5,12 @@ option. The agent operation surface lives under the same
 ``lakeflow_connect`` format as regular table reads — there is no
 separate format string.
 
-Operations are first-class :class:`AgentOperation` objects. Five
+Operations are first-class :class:`AgentOperation` objects. Six
 built-ins (``list_objects``, ``preview_table``, ``get_object_metadata``,
-``validate_connection``, ``list_operations``) ship with the framework
-and derive their behaviour from the existing :class:`LakeflowConnect`
-surface — every connector gains the agent surface automatically.
+``validate_connection``, ``list_operations``, ``describe_connection``)
+ship with the framework and derive their behaviour from the existing
+:class:`LakeflowConnect` surface — every connector gains the agent
+surface automatically.
 
 Source customisation goes through
 :meth:`SupportsIngestionAgent.agent_operations`:
@@ -34,13 +35,20 @@ import json
 import re
 from typing import Any, Iterable, Iterator, Mapping, Optional, Tuple
 
-from pyspark.sql.types import StringType, StructField, StructType
+from pyspark.sql.types import BooleanType, StringType, StructField, StructType
 from pyspark.sql.datasource import DataSourceReader, InputPartition
 
 from databricks.labs.community_connector.interface import (
+    FRAMEWORK_PROTOCOL_VERSION,
+    AgentError,
     AgentOperation,
+    ErrorCode,
     LakeflowConnect,
+    Parameter,
     SupportsIngestionAgent,
+    SupportsNamespaces,
+    SupportsPartition,
+    SupportsPartitionedStream,
 )
 from databricks.labs.community_connector.libs.utils import parse_value
 
@@ -68,6 +76,7 @@ OP_PREVIEW_TABLE = "preview_table"
 OP_GET_OBJECT_METADATA = "get_object_metadata"
 OP_VALIDATE_CONNECTION = "validate_connection"
 OP_LIST_OPERATIONS = "list_operations"
+OP_DESCRIBE_CONNECTION = "describe_connection"
 
 # Operation kinds.
 KIND_METADATA = "metadata"
@@ -138,6 +147,23 @@ _LIST_OPERATIONS_BASE_SCHEMA = StructType(
     [
         StructField("name", StringType(), False),
         StructField("description", StringType(), True),
+        StructField("kind", StringType(), True),
+        StructField("requires_connector", BooleanType(), True),
+        StructField("version", StringType(), True),
+        StructField("result_schema_json", StringType(), True),
+        StructField("parameters_json", StringType(), True),
+    ]
+)
+
+_DESCRIBE_CONNECTION_BASE_SCHEMA = StructType(
+    [
+        StructField("connector_name", StringType(), True),
+        StructField("source_system", StringType(), True),
+        StructField("connector_version", StringType(), True),
+        StructField("framework_protocol_version", StringType(), False),
+        StructField("supports_namespaces", BooleanType(), False),
+        StructField("supports_partition", BooleanType(), False),
+        StructField("supports_partitioned_stream", BooleanType(), False),
     ]
 )
 
@@ -169,12 +195,21 @@ class ListObjectsOp(AgentOperation):
 
     name = OP_LIST_OBJECTS
     description = (
-        "Hierarchical listing of objects. "
-        "Optional: parent (path to list under), search (regex on names). "
-        "Returns rows of (name, type, full_path)."
+        "Hierarchical listing of objects. Returns rows of (name, type, full_path)."
     )
     kind = KIND_METADATA
     schema = _LIST_OBJECTS_BASE_SCHEMA
+    parameters = (
+        Parameter(
+            name=PARENT,
+            description="Path identifying the parent to list under. "
+            "Empty/missing lists from the source root.",
+        ),
+        Parameter(
+            name=SEARCH,
+            description="Regex filter applied to result names.",
+        ),
+    )
 
     def pull(self, connector, options):
         parent = options.get(PARENT) or None
@@ -201,15 +236,20 @@ class GetObjectMetadataOp(AgentOperation):
     """Built-in: per-object metadata as ``(key, value)`` rows."""
 
     name = OP_GET_OBJECT_METADATA
-    description = (
-        f"Per-object metadata as (key, value) rows. "
-        f"Required: {NAME}. Optional: {PATH}, {METADATA_KEY}."
-    )
+    description = "Per-object metadata as (key, value) rows."
     kind = KIND_METADATA
     schema = _GET_OBJECT_METADATA_BASE_SCHEMA
+    parameters = (
+        Parameter(name=NAME, required=True, description="Object name to describe."),
+        Parameter(name=PATH, description="Path of the parent (e.g. namespace)."),
+        Parameter(
+            name=METADATA_KEY,
+            description="If set, return only this specific metadata key.",
+        ),
+    )
 
     def pull(self, connector, options):
-        name = _required_option(options, NAME, OP_GET_OBJECT_METADATA)
+        name = options[NAME]  # framework validated required.
         path = options.get(PATH) or None
         metadata_key = options.get(METADATA_KEY) or None
         return self.produce(
@@ -254,21 +294,32 @@ class PreviewTableOp(AgentOperation):
     """
 
     name = OP_PREVIEW_TABLE
-    description = (
-        f"Sample a tabular object. "
-        f"Required: {TABLE_NAME}. "
-        f"Optional: {CATALOG_NAME}, {SCHEMA_NAME}, {LIMIT} "
-        f"(default {DEFAULT_PREVIEW_LIMIT}). "
-        "Returns the table's natural schema and rows."
-    )
+    description = "Sample a tabular object. Returns the table's natural schema and rows."
     kind = KIND_DATA
+    parameters = (
+        Parameter(name=TABLE_NAME, required=True, description="Table to sample."),
+        Parameter(
+            name=CATALOG_NAME,
+            description="Catalog qualifier when the source supports it.",
+        ),
+        Parameter(
+            name=SCHEMA_NAME,
+            description="Schema qualifier when the source supports it.",
+        ),
+        Parameter(
+            name=LIMIT,
+            type="integer",
+            default=DEFAULT_PREVIEW_LIMIT,
+            description=f"Maximum rows to return (default {DEFAULT_PREVIEW_LIMIT}).",
+        ),
+    )
 
     def resolve_schema(self, connector, options):
-        table_name = _required_option(options, TABLE_NAME, OP_PREVIEW_TABLE)
+        table_name = options[TABLE_NAME]
         return connector.get_table_schema(table_name, _connector_options(options))
 
     def pull(self, connector, options):
-        table_name = _required_option(options, TABLE_NAME, OP_PREVIEW_TABLE)
+        table_name = options[TABLE_NAME]
         limit = _int_option(options, LIMIT, DEFAULT_PREVIEW_LIMIT)
         table_options = _connector_options(options)
         records = self.produce(
@@ -338,11 +389,15 @@ class ListOperationsOp(AgentOperation):
     Framework-owned and connector-optional — works even when the
     connector failed to initialise (returns the framework's built-ins,
     minus any source-defined operations the connector would have
-    contributed).
+    contributed). Each row carries the schema, parameter, and
+    version metadata an agent needs to plan a call.
     """
 
     name = OP_LIST_OPERATIONS
-    description = "List operations supported by this connection."
+    description = (
+        "List operations supported by this connection, with their "
+        "parameter declarations, result schemas, and versions."
+    )
     kind = KIND_METADATA
     schema = _LIST_OPERATIONS_BASE_SCHEMA
     requires_connector = False
@@ -350,7 +405,50 @@ class ListOperationsOp(AgentOperation):
     def pull(self, connector, options):
         del options
         for op in _resolve_operation_catalog(connector).values():
-            yield {"name": op.name, "description": op.description}
+            yield {
+                "name": op.name,
+                "description": op.description,
+                "kind": op.kind,
+                "requires_connector": _requires_connector(op),
+                "version": getattr(op, "version", "1.0.0"),
+                "result_schema_json": op.schema.json() if op.schema is not None else None,
+                "parameters_json": _parameters_to_json(getattr(op, "parameters", ())),
+            }
+
+
+class DescribeConnectionOp(AgentOperation):
+    """Built-in: self-description of the connection.
+
+    Returns connector identity, framework / connector versions, and
+    capability mixin flags. Connector-optional: still runs when the
+    connector failed to build (capability flags + connector name come
+    from class introspection only when the connector exists).
+    """
+
+    name = OP_DESCRIBE_CONNECTION
+    description = (
+        "Self-description of the connection: connector name, source "
+        "system, framework / connector versions, and capability mixins."
+    )
+    kind = KIND_METADATA
+    schema = _DESCRIBE_CONNECTION_BASE_SCHEMA
+    requires_connector = False
+
+    def pull(self, connector, options):
+        del options
+        yield {
+            "connector_name": type(connector).__name__ if connector is not None else None,
+            "source_system": (
+                getattr(connector, "source_system", None) if connector is not None else None
+            ),
+            "connector_version": (
+                getattr(connector, "version", None) if connector is not None else None
+            ),
+            "framework_protocol_version": FRAMEWORK_PROTOCOL_VERSION,
+            "supports_namespaces": isinstance(connector, SupportsNamespaces),
+            "supports_partition": isinstance(connector, SupportsPartition),
+            "supports_partitioned_stream": isinstance(connector, SupportsPartitionedStream),
+        }
 
 
 # Ordered map of built-in operations. Source-defined operations with the same
@@ -358,6 +456,7 @@ class ListOperationsOp(AgentOperation):
 _BUILTIN_OPERATIONS: dict[str, AgentOperation] = {
     op.name: op
     for op in (
+        DescribeConnectionOp(),
         ListObjectsOp(),
         PreviewTableOp(),
         GetObjectMetadataOp(),
@@ -425,6 +524,13 @@ class IngestionAgentDispatcher:
                 raise self.init_error
             base = self.operation.schema or StructType([])
         else:
+            # Data-kind ops compute their schema from request options
+            # (e.g. preview_table needs `tableName`). Validate required
+            # parameters now so resolve_schema doesn't trip over missing
+            # keys. Metadata-kind ops use a static schema; their parameter
+            # validation runs at read time and surfaces as an error row.
+            if self.operation.kind == KIND_DATA:
+                _validate_required_parameters(self.operation, self.options)
             base = self.operation.resolve_schema(self.connector, self.options)
         if self.operation.kind == KIND_METADATA:
             # Metadata-kind ops emit a single error row carrying only _meta
@@ -498,6 +604,7 @@ class IngestionAgentReader(DataSourceReader):
         # Metadata-kind: framework wraps pull() exceptions into a single
         # error row and setdefaults _meta on every row to {status: ok}.
         try:
+            _validate_required_parameters(self.operation, request_options)
             rows = self.operation.pull(self.connector, request_options)
             # Materialise so generator-time errors are caught and converted to
             # a single error row instead of escaping mid-iteration. Acceptable
@@ -512,13 +619,18 @@ class IngestionAgentReader(DataSourceReader):
         yield parse_value(_with_default_meta(self._error_row(exc)), self.schema)
 
     def _error_row(self, exc: BaseException) -> dict:
-        return {
-            "_meta": _meta(
-                status="error",
-                code=type(exc).__name__,
-                message=_error_str(exc),
-            )
-        }
+        if isinstance(exc, AgentError):
+            code = exc.code
+            message = str(exc)
+        elif isinstance(exc, ValueError):
+            # Framework-detected input errors (legacy code paths still raise
+            # ValueError for missing options).
+            code = ErrorCode.BAD_REQUEST
+            message = str(exc)
+        else:
+            code = ErrorCode.INTERNAL_ERROR
+            message = _error_str(exc)
+        return {"_meta": _meta(status="error", code=code, message=message)}
 
 
 # ---------------------------------------------------------------------------
@@ -586,8 +698,9 @@ def _required_option(
 ) -> str:
     value = options.get(key)
     if not value:
-        raise ValueError(
-            f"Operation '{operation}' requires option '{key}'."
+        raise AgentError(
+            ErrorCode.BAD_REQUEST,
+            f"Operation '{operation}' requires option '{key}'.",
         )
     return value
 
@@ -599,7 +712,50 @@ def _int_option(options: Mapping[str, str], key: str, default: int) -> int:
     try:
         return int(raw)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"Option '{key}' must be an integer, got {raw!r}.") from exc
+        raise AgentError(
+            ErrorCode.BAD_REQUEST,
+            f"Option '{key}' must be an integer, got {raw!r}.",
+        ) from exc
+
+
+def _validate_required_parameters(
+    op: AgentOperation, options: Mapping[str, str]
+) -> None:
+    """Reject calls missing a required :class:`Parameter`.
+
+    Raises :class:`AgentError` with ``bad_request`` when a required
+    parameter is absent. Called by the dispatcher before
+    ``resolve_schema`` (data-kind) and before ``pull`` (metadata-kind),
+    so ops can rely on declared required inputs being present.
+    """
+    for param in getattr(op, "parameters", ()):
+        if param.required and not options.get(param.name):
+            raise AgentError(
+                ErrorCode.BAD_REQUEST,
+                f"Operation '{op.name}' requires option '{param.name}'.",
+            )
+
+
+def _parameters_to_json(params: Iterable[Parameter]) -> str:
+    """JSON-serialise a tuple of :class:`Parameter` declarations.
+
+    Surfaced by ``list_operations.parameters_json`` so agents can plan
+    calls. Fields with ``None`` default / enum are kept in the JSON for
+    a stable schema.
+    """
+    return json.dumps(
+        [
+            {
+                "name": p.name,
+                "type": p.type,
+                "description": p.description,
+                "required": p.required,
+                "default": p.default,
+                "enum": list(p.enum) if p.enum else None,
+            }
+            for p in params
+        ]
+    )
 
 
 def _with_default_meta(row: Mapping[str, Any]) -> dict:

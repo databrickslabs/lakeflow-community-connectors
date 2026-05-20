@@ -9,9 +9,11 @@ built-ins via :meth:`SupportsIngestionAgent.agent_operations`.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Iterable, Mapping, Optional
+from typing import Any, Iterable, Mapping, Optional, Tuple
 
 from pyspark.sql.types import StructType
+
+from databricks.labs.community_connector.interface.agent_protocol import Parameter
 
 
 _VALID_KINDS = frozenset({"metadata", "data"})
@@ -37,6 +39,14 @@ class AgentOperation(ABC):
     #: still run when the connector failed to construct
     #: (e.g. discovery-style ops like ``list_operations``).
     requires_connector: bool = True
+    #: Typed declaration of accepted input options. Exposed via
+    #: ``list_operations.parameters_json`` so agents can plan calls.
+    #: The framework validates required parameters before invoking
+    #: ``pull``; undeclared options pass through untouched.
+    parameters: Tuple[Parameter, ...] = ()
+    #: Operation version. Bump on breaking changes to the op's input or
+    #: output contract. Surfaced through ``list_operations.version``.
+    version: str = "1.0.0"
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
