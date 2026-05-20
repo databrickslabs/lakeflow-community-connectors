@@ -799,6 +799,17 @@ class LakeflowConnectTests:
             # Empty first read is already validated by test_read_table.
             return None
 
+        return self._check_column_population(table, schema, records)
+
+    def _check_column_population(
+        self, table: str, schema: StructType, records: List[dict]
+    ) -> Optional[str]:
+        """Pure check: given a collected records list, report missing columns.
+
+        Shared between the non-partitioned ``read_table`` path and the
+        partitioned ``read_partition`` path (the partition mixin imports
+        this method off the host class via ``self``).
+        """
         populated: set = set()
         for rec in records:
             if not isinstance(rec, dict):
