@@ -64,3 +64,9 @@ tests/unit/sources/*/cassettes/
 # Self-review reports (output of the self-review-connector skill). Local
 # checkpoint for a developer; not committed by default.
 tests/unit/sources/*/SELF_REVIEW.md
+
+# Pipeline-deployment notebooks auto-created by the Databricks SDP UI in
+# git-linked workspace repos. Per-pipeline artifacts, not part of the
+# connector library. Connector code lives only under
+# src/databricks/labs/community_connector/sources/<name>/.
+/src/ingest.py
