@@ -1,0 +1,236 @@
+# Klaviyo JSON:API endpoints exercised by the connector.
+#
+# Common patterns across every endpoint:
+#   * Response wrapper is JSON:API: ``{"data": [...records...], "links":
+#     {"next": null}}``.  We declare ``wrapper.records_key: data`` and
+#     ``extras.links: {next: null}`` so the simulator emits a single-
+#     page response.
+#   * Pagination is Klaviyo's opaque cursor (``page[cursor]``).  Each
+#     simulator endpoint uses ``pagination_style: none`` and returns
+#     all matching records on one page; the connector terminates when
+#     ``links.next`` is null.
+#   * Filter dialect is Klaviyo's functional DSL (e.g.
+#     ``greater-or-equal(updated,2024-01-01T00:00:00Z)``).  The
+#     simulator's flat ``role: filter`` model can't express the DSL,
+#     so every ``filter`` param is declared ``role: ignore``; the
+#     connector itself caps and filters client-side against
+#     ``_init_ts``, so a superset response from the simulator is fine.
+#   * Corpus records are stored in real JSON:API shape (``{type, id,
+#     attributes: {...}, relationships, links}``) for the tables whose
+#     corpus was reseeded from the live cassette (profiles, events,
+#     lists, campaigns, metrics, flows).  ``segments`` and ``templates``
+#     are still synthetic (the live account has zero records on those
+#     tables) and remain in flat shape.  The connector's
+#     ``flatten_record`` is tolerant of both shapes, so this works
+#     end-to-end.  For ``synthesize_future_records`` to land the cursor
+#     in the right slot we set ``cursor_field`` to the wrapped path
+#     (``attributes.<field>``) on the JSON:API tables and to the flat
+#     path on the synthetic ones.
+#
+# AvailableNow termination cap:
+#   The connector caps cursors at ``_init_ts`` via either client-side
+#   filtering (lists, segments, profiles, flows, templates) or
+#   server-side ``less-than`` (events, campaigns).  Cursor-bearing
+#   endpoints declare ``synthesize_future_records`` so the simulator
+#   injects a few records past ``_init_ts``; if the cap doesn't work
+#   ``test_read_terminates`` won't converge.
+#
+# Connector flow:
+#   GET /api/profiles/   (cdc)
+#   GET /api/events/     (append; supports range query)
+#   GET /api/lists/      (cdc; greater-than only, lookback applied)
+#   GET /api/campaigns/  (cdc; required messages.channel filter; one
+#                         entry below covers all three channels)
+#   GET /api/metrics/    (snapshot; no cursor filter)
+#   GET /api/flows/      (cdc; S-tier 3/s, 60/m — pacing in connector)
+#   GET /api/segments/   (cdc; greater-than only, lookback applied)
+#   GET /api/templates/  (cdc)
+
+endpoints:
+  # ---- profiles (cdc, cursor=attributes.updated) ----
+  - path: "/api/profiles/"
+    method: GET
+    corpus: profiles
+    response:
+      pagination_style: none
+      default_sort: "attributes.updated asc"
+      wrapper:
+        records_key: data
+        extras:
+          links: {next: null}
+    params:
+      # The connector sends `filter=greater-or-equal(updated,...)`.
+      # The simulator's flat-param model can't express a DSL; we
+      # accept the param and ignore it (the connector itself caps and
+      # filters client-side at _init_ts, so the simulator returning a
+      # superset is fine).
+      filter:    {role: ignore}
+      sort:      {role: ignore}
+      "page[size]":   {role: per_page, default: 20, max: 100}
+      "page[cursor]": {role: ignore}
+    synthesize_future_records:
+      cursor_field: attributes.updated
+      count: 3
+
+  # ---- events (append, cursor=attributes.datetime; partitioned) ----
+  - path: "/api/events/"
+    method: GET
+    corpus: events
+    response:
+      pagination_style: none
+      default_sort: "attributes.datetime asc"
+      wrapper:
+        records_key: data
+        extras:
+          links: {next: null}
+    params:
+      filter:    {role: ignore}
+      sort:      {role: ignore}
+      "page[size]":   {role: per_page, default: 200, max: 1000}
+      "page[cursor]": {role: ignore}
+    synthesize_future_records:
+      cursor_field: attributes.datetime
+      count: 3
+
+  # ---- lists (cdc, cursor=attributes.updated; greater-than-only) ----
+  - path: "/api/lists/"
+    method: GET
+    corpus: lists
+    response:
+      pagination_style: none
+      default_sort: "attributes.updated asc"
+      wrapper:
+        records_key: data
+        extras:
+          links: {next: null}
+    params:
+      filter:    {role: ignore}
+      sort:      {role: ignore}
+      "page[size]":   {role: per_page, default: 10, max: 10}
+      "page[cursor]": {role: ignore}
+    synthesize_future_records:
+      cursor_field: attributes.updated
+      count: 3
+
+  # ---- campaigns (cdc, cursor=attributes.updated_at; channel fan-out) ----
+  #
+  # Klaviyo requires ``filter=equals(messages.channel,'email'|'sms'|
+  # 'mobile_push')`` on every request.  The connector issues three
+  # independent paginated requests (one per channel) per refresh; from
+  # the simulator's perspective these are three calls against the same
+  # URL with different filter strings.  We model them as a single
+  # endpoint with the full filter (and channel selection) opaque to
+  # the simulator and let the connector's own dedup-by-id keep the
+  # union clean.  The corpus should contain campaigns whose top-level
+  # row carries a ``channel`` field so the connector's flatten step
+  # produces records keyed by that channel.  (In practice the
+  # connector stamps ``channel`` from the queried filter, not from a
+  # response field — so the corpus just needs to look like a Klaviyo
+  # campaign record.)
+  # API revision 2024-10-15 rejects ``page[size]`` on this endpoint with
+  # HTTP 400 (verified live).  The connector omits the param entirely
+  # for campaigns (``MAX_PAGE_SIZE['campaigns'] = 0``), but the spec
+  # still declares ``page[size]`` as ``ignore`` to be forward-compatible
+  # in case a future revision starts accepting it.  ``page[cursor]`` is
+  # honored.  Also: the ``messages.channel`` filter on this revision
+  # accepts ``email`` and ``sms`` only — not ``mobile_push``.  See
+  # CAMPAIGN_CHANNELS in klaviyo_schemas.py for the active set.
+  - path: "/api/campaigns/"
+    method: GET
+    corpus: campaigns
+    response:
+      pagination_style: none
+      default_sort: "attributes.updated_at asc"
+      wrapper:
+        records_key: data
+        extras:
+          links: {next: null}
+    params:
+      filter:    {role: ignore}
+      sort:      {role: ignore}
+      "page[size]":   {role: ignore}
+      "page[cursor]": {role: ignore}
+    synthesize_future_records:
+      cursor_field: attributes.updated_at
+      count: 3
+
+  # ---- metrics (snapshot; no cursor filter available) ----
+  #
+  # API revision 2024-10-15 rejects ``page[size]`` on this endpoint with
+  # HTTP 400 (``'page_size' is not a valid field for the resource
+  # 'metric'``) despite older docs advertising max=200.  The connector
+  # omits the param (``MAX_PAGE_SIZE['metrics'] = 0``); the spec keeps
+  # it as ``ignore`` for forward compatibility.
+  - path: "/api/metrics/"
+    method: GET
+    corpus: metrics
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          links: {next: null}
+    params:
+      filter:    {role: ignore}
+      "page[size]":   {role: ignore}
+      "page[cursor]": {role: ignore}
+
+  # ---- flows (cdc, cursor=attributes.updated; S-tier 3/s, 60/m) ----
+  - path: "/api/flows/"
+    method: GET
+    corpus: flows
+    response:
+      pagination_style: none
+      default_sort: "attributes.updated asc"
+      wrapper:
+        records_key: data
+        extras:
+          links: {next: null}
+    params:
+      filter:    {role: ignore}
+      sort:      {role: ignore}
+      "page[size]":   {role: per_page, default: 50, max: 50}
+      "page[cursor]": {role: ignore}
+    synthesize_future_records:
+      cursor_field: attributes.updated
+      count: 3
+
+  # ---- segments (cdc, cursor=attributes.updated; greater-than-only) ----
+  - path: "/api/segments/"
+    method: GET
+    corpus: segments
+    response:
+      pagination_style: none
+      default_sort: "updated asc"
+      wrapper:
+        records_key: data
+        extras:
+          links: {next: null}
+    params:
+      filter:    {role: ignore}
+      sort:      {role: ignore}
+      "page[size]":   {role: per_page, default: 10, max: 10}
+      "page[cursor]": {role: ignore}
+    synthesize_future_records:
+      cursor_field: updated
+      count: 3
+
+  # ---- templates (cdc, cursor=attributes.updated) ----
+  - path: "/api/templates/"
+    method: GET
+    corpus: templates
+    response:
+      pagination_style: none
+      default_sort: "updated asc"
+      wrapper:
+        records_key: data
+        extras:
+          links: {next: null}
+    params:
+      filter:    {role: ignore}
+      sort:      {role: ignore}
+      "page[size]":   {role: per_page, default: 10, max: 10}
+      "page[cursor]": {role: ignore}
+    synthesize_future_records:
+      cursor_field: updated
+      count: 3
