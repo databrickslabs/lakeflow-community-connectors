@@ -18,13 +18,13 @@ class TestEVNExtraction:
         msg = parse_first(load_sample("sample_adt.hl7"))
         row = extract_segment(msg, "EVN", _extract_evn)
         assert row["recorded_datetime"] is not None
-        assert row["operator_id"] == "OP001"
+        assert row["operator"][0]["id"] == "OP001"
 
     def test_comprehensive_adt_evn(self):
         msg = parse_first(load_sample("sample_adt_comprehensive.hl7"))
         row = extract_segment(msg, "EVN", _extract_evn)
         assert row["event_type_code"] == "A01"
-        assert row["operator_id"] == "ADM001"
+        assert row["operator"][0]["id"] == "ADM001"
 
     def test_dft_evn(self):
         msg = parse_first(load_sample("sample_dft_financial.hl7"))
@@ -41,7 +41,7 @@ class TestEVNMissingFields:
         row = _extract_evn(msg.get_segment("EVN"))
         assert row["event_type_code"] is None
         assert row["recorded_datetime"] is not None
-        assert row["operator_id"] is None
+        assert row["operator"] is None
         assert row["date_time_planned_event"] is None
         assert row["event_reason"] is None
         assert row["event_occurred"] is None

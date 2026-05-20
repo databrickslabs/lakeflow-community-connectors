@@ -99,3 +99,46 @@ class TestOBXEdgeCases:
         segs = segments_of_type(msg, "OBX")
         types = {_extract_obx(s)["value_type"] for s in segs}
         assert "NM" in types
+
+
+class TestOBXEipArrayPromotion:
+    """OBX-33 observation-related specimen is EIP 0..* — modeled as
+    ARRAY<STRUCT<parent: EI, child: EI>>. Confirms both repetitions and
+    sub-components within each EIP are captured losslessly.
+    """
+
+    def test_observation_related_specimen_eip_pair(self):
+        # OBX-33 = parent_ei&child_ei, with sub-components separated by `&`.
+        # Build via explicit field-count to avoid pipe-counting mistakes.
+        # OBX-33 is field index 33.
+        fields = [""] * 34
+        fields[1] = "1"
+        fields[2] = "ST"
+        fields[3] = "TEST1"
+        fields[5] = "value"
+        fields[33] = (
+            "SP001&LAB&urn:lab&ISO^CHILD001&LAB&urn:lab&ISO"
+            "~SP002&LAB&urn:lab&ISO^CHILD002&LAB&urn:lab&ISO"
+        )
+        segment = "OBX|" + "|".join(fields[1:])
+        msg = parse_message(
+            "MSH|^~\\&|A|B|C|D|20240101||ORU^R01|1|P|2.5\r" + segment
+        )
+        row = _extract_obx(msg.get_segment("OBX"))
+        eips = row["observation_related_specimen"]
+        assert len(eips) == 2
+        assert eips[0]["parent"]["entity_identifier"] == "SP001"
+        assert eips[0]["parent"]["namespace_id"] == "LAB"
+        assert eips[0]["parent"]["universal_id"] == "urn:lab"
+        assert eips[0]["parent"]["universal_id_type"] == "ISO"
+        assert eips[0]["child"]["entity_identifier"] == "CHILD001"
+        assert eips[1]["parent"]["entity_identifier"] == "SP002"
+        assert eips[1]["child"]["entity_identifier"] == "CHILD002"
+
+    def test_observation_related_specimen_absent_yields_none(self):
+        msg = parse_message(
+            "MSH|^~\\&|A|B|C|D|20240101||ORU^R01|1|P|2.5\r"
+            "OBX|1|ST|TEST||value"
+        )
+        row = _extract_obx(msg.get_segment("OBX"))
+        assert row["observation_related_specimen"] is None

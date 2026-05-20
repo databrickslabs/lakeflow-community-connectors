@@ -92,6 +92,48 @@ class TestDG1CweLosslessExtraction:
         assert row["diagnosis_type_text"] is None
         assert row["diagnosis_type_coding_system"] is None
 
+    def test_diagnosing_clinician_xcn_array_lossless(self):
+        """DG1-16 (diagnosingClinician) is XCN 0..* per HL7 v2.9 — must capture
+        every ~-separated repetition with the full XCN structure, not just the
+        first repetition's identifier.
+        """
+        fields = [""] * 17
+        fields[1] = "1"
+        fields[2] = "ICD10"
+        fields[3] = "J18.9"
+        fields[6] = "A"
+        fields[16] = (
+            "DOC001^Smith^Alice^M^^Dr^MD^^HOSP&urn:hospital&ISO^L^^^^^DOC"
+            "~DOC002^Jones^Bob^^^Dr^MD^^HOSP&urn:hospital&ISO^L^^^^^DOC"
+        )
+        segment = "DG1|" + "|".join(fields[1:])
+        msg = parse_message(
+            "MSH|^~\\&|A|B|C|D|20240101||ADT^A01|1|P|2.5\r" + segment
+        )
+        row = _extract_dg1(msg.get_segment("DG1"))
+        clinicians = row["diagnosing_clinician"]
+        assert len(clinicians) == 2
+        assert clinicians[0]["id"] == "DOC001"
+        assert clinicians[0]["family_name"] == "Smith"
+        assert clinicians[0]["given_name"] == "Alice"
+        assert clinicians[0]["middle_name"] == "M"
+        assert clinicians[0]["prefix"] == "Dr"
+        assert clinicians[0]["degree"] == "MD"
+        assert clinicians[0]["assigning_authority"] == "HOSP"
+        assert clinicians[0]["assigning_authority_universal_id"] == "urn:hospital"
+        assert clinicians[0]["name_type_code"] == "L"
+        assert clinicians[1]["id"] == "DOC002"
+        assert clinicians[1]["family_name"] == "Jones"
+        assert clinicians[1]["given_name"] == "Bob"
+
+    def test_diagnosing_clinician_absent_yields_none(self):
+        msg = parse_message(
+            "MSH|^~\\&|A|B|C|D|20240101||ADT^A01|1|P|2.5\r"
+            "DG1|1|ICD10|J18.9|||A"
+        )
+        row = _extract_dg1(msg.get_segment("DG1"))
+        assert row["diagnosing_clinician"] is None
+
     def test_present_on_admission_indicator_with_full_cwe(self):
         # DG1-26 — same pattern. Y/N/U/W are the conventional codes, but the
         # field is CWE and senders are allowed to attach text / alt codes.

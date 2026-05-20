@@ -20,8 +20,8 @@ class TestPV1Extraction:
         assert row["patient_class"] == "I"
         assert row["location_point_of_care"] == "MED"
         assert row["location_room"] == "101"
-        assert row["attending_doctor_id"] == "DOC001"
-        assert row["attending_doctor_family_name"] == "Smith"
+        assert row["attending_doctor"][0]["id"] == "DOC001"
+        assert row["attending_doctor"][0]["family_name"] == "Smith"
 
     def test_comprehensive_pv1(self):
         msg = parse_first(load_sample("sample_adt_comprehensive.hl7"))
@@ -43,7 +43,7 @@ class TestPV1MissingFields:
         assert row["set_id"] == 1
         assert row["patient_class"] == "I"
         assert row["location_point_of_care"] is None
-        assert row["attending_doctor_id"] is None
+        assert row["attending_doctor"] is None
         assert row["hospital_service"] is None
         assert row["admit_datetime"] is None
         assert row["discharge_datetime"] is None

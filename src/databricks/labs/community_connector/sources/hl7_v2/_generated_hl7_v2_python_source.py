@@ -1200,6 +1200,225 @@ def register_lakeflow_source(spark):
         return {column_name: result if result else None}
 
 
+    def _xcn_array_fields(
+        seg: HL7Segment, field_n: int, column_name: str
+    ) -> dict:
+        """XCN (Extended Composite ID Number and Name) — all repetitions as a list of dicts."""
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        reps = raw.split(seg._enc.rep_sep)
+        result = []
+        for rep in reps:
+            if not rep:
+                continue
+            parts = rep.split(seg._enc.comp_sep)
+            def gc(i, _p=parts):
+                return _v(_p[i - 1]) if len(_p) >= i else None
+            def gsc(i, sub, _p=parts):
+                if len(_p) < i or not _p[i - 1]:
+                    return None
+                subs = _p[i - 1].split(seg._enc.sub_comp_sep)
+                return _v(subs[sub - 1]) if len(subs) >= sub else None
+            result.append({
+                "id": gc(1),
+                "family_name": gc(2),
+                "given_name": gc(3),
+                "middle_name": gc(4),
+                "suffix": gc(5),
+                "prefix": gc(6),
+                "degree": gc(7),
+                "source_table": gc(8),
+                "assigning_authority": gsc(9, 1),
+                "assigning_authority_universal_id": gsc(9, 2),
+                "assigning_authority_universal_id_type": gsc(9, 3),
+                "name_type_code": gc(10),
+                "check_digit": gc(11),
+                "check_digit_scheme": gc(12),
+                "identifier_type_code": gc(13),
+                "assigning_facility": gsc(14, 1),
+                "assigning_facility_universal_id": gsc(14, 2),
+                "assigning_facility_universal_id_type": gsc(14, 3),
+                "name_representation_code": gc(15),
+                "name_assembly_order": gc(18),
+                "effective_date": gc(19),
+                "expiration_date": gc(20),
+                "professional_suffix": gc(21),
+            })
+        return {column_name: result if result else None}
+
+
+    def _xon_array_fields(
+        seg: HL7Segment, field_n: int, column_name: str
+    ) -> dict:
+        """XON (Extended Composite Name and Number for Organizations) — all repetitions as a list of dicts."""
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        reps = raw.split(seg._enc.rep_sep)
+        result = []
+        for rep in reps:
+            if not rep:
+                continue
+            parts = rep.split(seg._enc.comp_sep)
+            def gc(i, _p=parts):
+                return _v(_p[i - 1]) if len(_p) >= i else None
+            def gsc(i, sub, _p=parts):
+                if len(_p) < i or not _p[i - 1]:
+                    return None
+                subs = _p[i - 1].split(seg._enc.sub_comp_sep)
+                return _v(subs[sub - 1]) if len(subs) >= sub else None
+            result.append({
+                "name": gc(1),
+                "type_code": gc(2),
+                "id": gc(3),
+                "check_digit": gc(4),
+                "check_digit_scheme": gc(5),
+                "assigning_authority": gsc(6, 1),
+                "assigning_authority_universal_id": gsc(6, 2),
+                "assigning_authority_universal_id_type": gsc(6, 3),
+                "id_type_code": gc(7),
+                "assigning_facility": gsc(8, 1),
+                "assigning_facility_universal_id": gsc(8, 2),
+                "assigning_facility_universal_id_type": gsc(8, 3),
+                "name_rep_code": gc(9),
+                "identifier": gc(10),
+            })
+        return {column_name: result if result else None}
+
+
+    def _cx_array_fields(
+        seg: HL7Segment, field_n: int, column_name: str
+    ) -> dict:
+        """CX (Extended Composite ID with Check Digit) — all repetitions as a list of dicts."""
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        reps = raw.split(seg._enc.rep_sep)
+        result = []
+        for rep in reps:
+            if not rep:
+                continue
+            parts = rep.split(seg._enc.comp_sep)
+            def gc(i, _p=parts):
+                return _v(_p[i - 1]) if len(_p) >= i else None
+            def gsc(i, sub, _p=parts):
+                if len(_p) < i or not _p[i - 1]:
+                    return None
+                subs = _p[i - 1].split(seg._enc.sub_comp_sep)
+                return _v(subs[sub - 1]) if len(subs) >= sub else None
+            result.append({
+                "id": gc(1),
+                "check_digit": gc(2),
+                "check_digit_scheme": gc(3),
+                "assigning_authority": gsc(4, 1),
+                "assigning_authority_universal_id": gsc(4, 2),
+                "assigning_authority_universal_id_type": gsc(4, 3),
+                "type_code": gc(5),
+                "assigning_facility": gsc(6, 1),
+                "assigning_facility_universal_id": gsc(6, 2),
+                "assigning_facility_universal_id_type": gsc(6, 3),
+                "effective_date": gc(7),
+                "expiration_date": gc(8),
+                "assigning_jurisdiction": gc(9),
+                "assigning_agency": gc(10),
+                "security_check": gc(11),
+                "security_check_scheme": gc(12),
+            })
+        return {column_name: result if result else None}
+
+
+    def _xad_array_fields(
+        seg: HL7Segment, field_n: int, column_name: str
+    ) -> dict:
+        """XAD (Extended Address) — all repetitions as a list of dicts."""
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        reps = raw.split(seg._enc.rep_sep)
+        result = []
+        for rep in reps:
+            if not rep:
+                continue
+            parts = rep.split(seg._enc.comp_sep)
+            def gc(i, _p=parts):
+                return _v(_p[i - 1]) if len(_p) >= i else None
+            def gsc(i, sub, _p=parts):
+                if len(_p) < i or not _p[i - 1]:
+                    return None
+                subs = _p[i - 1].split(seg._enc.sub_comp_sep)
+                return _v(subs[sub - 1]) if len(subs) >= sub else None
+            result.append({
+                "street": gc(1),
+                "other_designation": gc(2),
+                "city": gc(3),
+                "state": gc(4),
+                "zip": gc(5),
+                "country": gc(6),
+                "type": gc(7),
+                "other_geographic": gc(8),
+                "county_parish_code": gsc(9, 1),
+                "county_parish_text": gsc(9, 2),
+                "county_parish_coding_system": gsc(9, 3),
+                "census_tract": gsc(10, 1),
+                "census_tract_text": gsc(10, 2),
+                "census_tract_coding_system": gsc(10, 3),
+                "representation_code": gc(11),
+                "effective_date": gc(13),
+                "expiration_date": gc(14),
+                "expiration_reason": gsc(15, 1),
+                "expiration_reason_text": gsc(15, 2),
+                "expiration_reason_coding_system": gsc(15, 3),
+                "temporary_indicator": gc(16),
+                "bad_address_indicator": gc(17),
+                "usage": gc(18),
+                "addressee": gc(19),
+                "comment": gc(20),
+                "preference_order": gc(21),
+                "protection_code": gsc(22, 1),
+                "protection_code_text": gsc(22, 2),
+                "protection_code_coding_system": gsc(22, 3),
+                "identifier": gsc(23, 1),
+            })
+        return {column_name: result if result else None}
+
+
+    def _eip_array_fields(
+        seg: HL7Segment, field_n: int, column_name: str
+    ) -> dict:
+        """EIP (Entity Identifier Pair) — all repetitions as a list of {parent, child} dicts.
+
+        Each EIP has two components (EIP.1 = parent EI, EIP.2 = child EI), each
+        further decomposable into 4 sub-components via the `&` separator.
+        """
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        reps = raw.split(seg._enc.rep_sep)
+        result = []
+        for rep in reps:
+            if not rep:
+                continue
+            parts = rep.split(seg._enc.comp_sep)
+
+            def _ei_from(comp_value: str | None) -> dict | None:
+                if not comp_value:
+                    return None
+                subs = comp_value.split(seg._enc.sub_comp_sep)
+                return {
+                    "entity_identifier": _v(subs[0]) if len(subs) > 0 else None,
+                    "namespace_id": _v(subs[1]) if len(subs) > 1 else None,
+                    "universal_id": _v(subs[2]) if len(subs) > 2 else None,
+                    "universal_id_type": _v(subs[3]) if len(subs) > 3 else None,
+                }
+
+            result.append({
+                "parent": _ei_from(parts[0] if len(parts) > 0 else None),
+                "child": _ei_from(parts[1] if len(parts) > 1 else None),
+            })
+        return {column_name: result if result else None}
+
+
     def _xon_fields(
         seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = True
     ) -> dict:
@@ -1442,7 +1661,7 @@ def register_lakeflow_source(spark):
         return {
             "set_id": _i(seg.get_field(1)),
             "patient_external_id": _v(seg.get_field(2)),
-            **_cx_fields(seg, 3, "patient_id"),
+            **_cx_array_fields(seg, 3, "patient_id"),
             "alternate_patient_id": _v(seg.get_first_repetition(4)),
             **_xpn_array_fields(seg, 5, "patient_names"),
             **_xpn_array_fields(seg, 6, "mothers_maiden_names"),
@@ -1450,17 +1669,17 @@ def register_lakeflow_source(spark):
             **_cwe_fields(seg, 8, "administrative_sex", repeating=False),
             "patient_alias": _v(seg.get_first_repetition(9)),
             **_cwe_array_fields(seg, 10, "race"),
-            **_xad_fields(seg, 11, "address"),
+            **_xad_array_fields(seg, 11, "address"),
             "county_code": _v(seg.get_field(12)),
-            **_xtn_fields(seg, 13, "home_phone"),
-            **_xtn_fields(seg, 14, "business_phone"),
+            **_xtn_array_fields(seg, 13, "home_phone"),
+            **_xtn_array_fields(seg, 14, "business_phone"),
             **_cwe_fields(seg, 15, "primary_language", repeating=False),
             **_cwe_fields(seg, 16, "marital_status", repeating=False),
             **_cwe_fields(seg, 17, "religion", repeating=False),
             **_cx_fields(seg, 18, "patient_account", repeating=False),
             "ssn": _v(seg.get_field(19)),
             "drivers_license": _v(seg.get_field(20)),
-            **_cx_fields(seg, 21, "mothers_identifier"),
+            **_cx_array_fields(seg, 21, "mothers_identifier"),
             **_cwe_array_fields(seg, 22, "ethnic_group"),
             "birth_place": _v(seg.get_field(23)),
             "multiple_birth_indicator": _v(seg.get_field(24)),
@@ -1478,8 +1697,8 @@ def register_lakeflow_source(spark):
             **_cwe_fields(seg, 36, "breed_code", repeating=False),
             "strain": _v(seg.get_field(37)),
             **_cwe_fields(seg, 38, "production_class_code", repeating=False),
-            **_cwe_fields(seg, 39, "tribal_citizenship", repeating=False),
-            **_xtn_fields(seg, 40, "patient_telecom"),
+            **_cwe_array_fields(seg, 39, "tribal_citizenship"),
+            **_xtn_array_fields(seg, 40, "patient_telecom"),
         }
 
 
@@ -1497,9 +1716,9 @@ def register_lakeflow_source(spark):
             **_cwe_fields(seg, 4, "admission_type", repeating=False),
             **_cx_fields(seg, 5, "preadmit_number", repeating=False),
             "prior_patient_location": _v(seg.get_field(6)),
-            **_xcn_fields(seg, 7, "attending_doctor"),
-            **_xcn_fields(seg, 8, "referring_doctor"),
-            **_xcn_fields(seg, 9, "consulting_doctor"),
+            **_xcn_array_fields(seg, 7, "attending_doctor"),
+            **_xcn_array_fields(seg, 8, "referring_doctor"),
+            **_xcn_array_fields(seg, 9, "consulting_doctor"),
             **_cwe_fields(seg, 10, "hospital_service", repeating=False),
             "temporary_location": _v(seg.get_field(11)),
             **_cwe_fields(seg, 12, "preadmit_test_indicator", repeating=False),
@@ -1507,7 +1726,7 @@ def register_lakeflow_source(spark):
             **_cwe_fields(seg, 14, "admit_source", repeating=False),
             **_cwe_array_fields(seg, 15, "ambulatory_status"),
             **_cwe_fields(seg, 16, "vip_indicator", repeating=False),
-            **_xcn_fields(seg, 17, "admitting_doctor"),
+            **_xcn_array_fields(seg, 17, "admitting_doctor"),
             **_cwe_fields(seg, 18, "patient_type", repeating=False),
             **_cx_fields(seg, 19, "visit_number", repeating=False),
             "financial_class": _v(seg.get_rep_component(20, 1, 1)),
@@ -1540,7 +1759,7 @@ def register_lakeflow_source(spark):
             "total_charges": _v(seg.get_field(47)),
             "total_adjustments": _v(seg.get_field(48)),
             "total_payments": _v(seg.get_field(49)),
-            **_cx_fields(seg, 50, "alternate_visit_id", repeating=False),
+            **_cx_array_fields(seg, 50, "alternate_visit_id"),
             **_cwe_fields(seg, 51, "visit_indicator", repeating=False),
             **_xcn_fields(seg, 52, "other_healthcare_provider"),
             "service_episode_description": _v(seg.get_field(53)),
@@ -1560,7 +1779,7 @@ def register_lakeflow_source(spark):
             "observation_end_datetime": _parse_dtm(seg.get_field(8)),
             "collection_volume": _v(seg.get_component(9, 1)),
             "collection_volume_units": _v(seg.get_component(9, 2)),
-            **_xcn_fields(seg, 10, "collector"),
+            **_xcn_array_fields(seg, 10, "collector"),
             "specimen_action_code": _v(seg.get_field(11)),
             **_cwe_fields(seg, 12, "danger_code", repeating=False),
             **_cwe_array_fields(seg, 13, "relevant_clinical_information"),
@@ -1603,7 +1822,7 @@ def register_lakeflow_source(spark):
             **_cwe_fields(seg, 50, "parent_universal_service_id", repeating=False),
             **_ei_fields(seg, 51, "observation_group", repeating=False),
             **_ei_fields(seg, 52, "parent_observation_group", repeating=False),
-            **_cx_fields(seg, 53, "alternate_placer_order", repeating=False),
+            **_cx_array_fields(seg, 53, "alternate_placer_order"),
             "parent_order": _v(seg.get_component(54, 1)),
             "obr_action_code": _v(seg.get_field(55)),
         }
@@ -1626,7 +1845,7 @@ def register_lakeflow_source(spark):
             "user_defined_access_checks": _v(seg.get_field(13)),
             "datetime_of_observation": _parse_dtm(seg.get_field(14)),
             **_cwe_fields(seg, 15, "producers_id", repeating=False),
-            **_xcn_fields(seg, 16, "responsible_observer"),
+            **_xcn_array_fields(seg, 16, "responsible_observer"),
             **_cwe_array_fields(seg, 17, "observation_method"),
             **_ei_array_fields(seg, 18, "equipment_instance_identifier"),
             "datetime_of_analysis": _parse_dtm(seg.get_field(19)),
@@ -1642,8 +1861,8 @@ def register_lakeflow_source(spark):
             "observation_type": _v(seg.get_field(29)),
             "observation_sub_type": _v(seg.get_field(30)),
             "obx_action_code": _v(seg.get_field(31)),
-            **_cwe_fields(seg, 32, "observation_value_absent_reason", repeating=False),
-            "observation_related_specimen": _v(seg.get_field(33)),
+            **_cwe_array_fields(seg, 32, "observation_value_absent_reason"),
+            **_eip_array_fields(seg, 33, "observation_related_specimen"),
         }
 
 
@@ -1680,7 +1899,7 @@ def register_lakeflow_source(spark):
             "outlier_cost": _v(seg.get_field(13)),
             "grouper_version_and_type": _v(seg.get_field(14)),
             "diagnosis_priority": _i(seg.get_field(15)),
-            **_xcn_fields(seg, 16, "diagnosing_clinician"),
+            **_xcn_array_fields(seg, 16, "diagnosing_clinician"),
             **_cwe_fields(seg, 17, "diagnosis_classification", repeating=False),
             "confidential_indicator": _v(seg.get_field(18)),
             "attestation_datetime": _parse_dtm(seg.get_field(19)),
@@ -1700,16 +1919,16 @@ def register_lakeflow_source(spark):
             **_xpn_array_fields(seg, 2, "nk_names"),
             "relationship": _v(seg.get_field(3)),
             **_cwe_fields(seg, 3, "relationship_code", repeating=False),
-            **_xad_fields(seg, 4, "address"),
-            **_xtn_fields(seg, 5, "phone_number"),
-            **_xtn_fields(seg, 6, "business_phone"),
+            **_xad_array_fields(seg, 4, "address"),
+            **_xtn_array_fields(seg, 5, "phone_number"),
+            **_xtn_array_fields(seg, 6, "business_phone"),
             **_cwe_fields(seg, 7, "contact_role", repeating=False),
             "start_date": _parse_dtm(seg.get_field(8)),
             "end_date": _parse_dtm(seg.get_field(9)),
             "job_title": _v(seg.get_field(10)),
             "job_code": _v(seg.get_component(11, 1)),
             **_cx_fields(seg, 12, "employee_number", repeating=False),
-            **_xon_fields(seg, 13, "organization_name"),
+            **_xon_array_fields(seg, 13, "organization_name"),
             **_cwe_fields(seg, 14, "marital_status", repeating=False),
             **_cwe_fields(seg, 15, "administrative_sex", repeating=False),
             "date_of_birth": _parse_dtm(seg.get_field(16)),
@@ -1727,9 +1946,9 @@ def register_lakeflow_source(spark):
             **_cwe_array_fields(seg, 28, "ethnic_group"),
             **_cwe_array_fields(seg, 29, "contact_reason"),
             **_xpn_array_fields(seg, 30, "contact_persons"),
-            **_xtn_fields(seg, 31, "contact_person_telephone"),
-            **_xad_fields(seg, 32, "contact_persons_address"),
-            **_cx_fields(seg, 33, "associated_party_identifiers"),
+            **_xtn_array_fields(seg, 31, "contact_person_telephone"),
+            **_xad_array_fields(seg, 32, "contact_persons_address"),
+            **_cx_array_fields(seg, 33, "associated_party_identifiers"),
             **_cwe_fields(seg, 34, "job_status", repeating=False),
             **_cwe_array_fields(seg, 35, "race"),
             **_cwe_fields(seg, 36, "handicap", repeating=False),
@@ -1747,7 +1966,7 @@ def register_lakeflow_source(spark):
             "recorded_datetime": _parse_dtm(seg.get_field(2)),
             "date_time_planned_event": _parse_dtm(seg.get_field(3)),
             **_cwe_fields(seg, 4, "event_reason", repeating=False),
-            **_xcn_fields(seg, 5, "operator"),
+            **_xcn_array_fields(seg, 5, "operator"),
             "event_occurred": _parse_dtm(seg.get_field(6)),
             **_hd_fields(seg, 7, "event_facility", repeating=False),
         }
@@ -1757,18 +1976,18 @@ def register_lakeflow_source(spark):
         return {
             **_cwe_array_fields(seg, 1, "living_dependency"),
             **_cwe_fields(seg, 2, "living_arrangement", repeating=False),
-            **_xon_fields(seg, 3, "patient_primary_facility"),
+            **_xon_array_fields(seg, 3, "patient_primary_facility"),
             **_xcn_fields(seg, 4, "patient_primary_care_provider"),
             **_cwe_fields(seg, 5, "student_indicator", repeating=False),
             **_cwe_fields(seg, 6, "handicap", repeating=False),
             **_cwe_fields(seg, 7, "living_will_code", repeating=False),
             **_cwe_fields(seg, 8, "organ_donor_code", repeating=False),
             "separate_bill": _v(seg.get_field(9)),
-            **_cx_fields(seg, 10, "duplicate_patient"),
+            **_cx_array_fields(seg, 10, "duplicate_patient"),
             **_cwe_fields(seg, 11, "publicity_code", repeating=False),
             "protection_indicator": _v(seg.get_field(12)),
             "protection_indicator_effective_date": _v(seg.get_field(13)),
-            **_xon_fields(seg, 14, "place_of_worship"),
+            **_xon_array_fields(seg, 14, "place_of_worship"),
             **_cwe_array_fields(seg, 15, "advance_directive_code"),
             **_cwe_fields(seg, 16, "immunization_registry_status", repeating=False),
             "immunization_registry_status_effective_date": _v(seg.get_field(17)),
@@ -1795,7 +2014,7 @@ def register_lakeflow_source(spark):
             "estimated_length_of_inpatient_stay": _i(seg.get_field(10)),
             "actual_length_of_inpatient_stay": _i(seg.get_field(11)),
             "visit_description": _v(seg.get_field(12)),
-            **_xcn_fields(seg, 13, "referral_source"),
+            **_xcn_array_fields(seg, 13, "referral_source"),
             "previous_service_date": _v(seg.get_field(14)),
             "employment_illness_related_indicator": _v(seg.get_field(15)),
             **_cwe_fields(seg, 16, "purge_status_code", repeating=False),
@@ -1805,7 +2024,7 @@ def register_lakeflow_source(spark):
             "expected_number_of_insurance_plans": _i(seg.get_field(20)),
             **_cwe_fields(seg, 21, "visit_publicity_code", repeating=False),
             "visit_protection_indicator": _v(seg.get_field(22)),
-            **_xon_fields(seg, 23, "clinic_organization"),
+            **_xon_array_fields(seg, 23, "clinic_organization"),
             **_cwe_fields(seg, 24, "patient_status_code", repeating=False),
             **_cwe_fields(seg, 25, "visit_priority_code", repeating=False),
             "previous_treatment_date": _v(seg.get_field(26)),
@@ -1838,12 +2057,12 @@ def register_lakeflow_source(spark):
 
     def _extract_mrg(seg: HL7Segment) -> dict:
         return {
-            **_cx_fields(seg, 1, "prior_patient_id", repeating=False),
+            **_cx_array_fields(seg, 1, "prior_patient_id"),
             "prior_alternate_patient_id": _v(seg.get_first_repetition(2)),
             **_cx_fields(seg, 3, "prior_patient_account_number", repeating=False),
             **_cx_fields(seg, 4, "prior_patient_id_mrg4", repeating=False),
             **_cx_fields(seg, 5, "prior_visit_number", repeating=False),
-            **_cx_fields(seg, 6, "prior_alternate_visit_id", repeating=False),
+            **_cx_array_fields(seg, 6, "prior_alternate_visit_id"),
             **_xpn_array_fields(seg, 7, "prior_patient_names"),
         }
 
@@ -1923,7 +2142,7 @@ def register_lakeflow_source(spark):
             "order_status": _v(seg.get_field(5)),
             "response_flag": _v(seg.get_field(6)),
             "quantity_timing": _v(seg.get_first_repetition(7)),
-            "parent_order": _v(seg.get_field(8)),
+            **_eip_array_fields(seg, 8, "parent_order"),
             "datetime_of_transaction": _parse_dtm(seg.get_field(9)),
             **_xcn_fields(seg, 10, "entered_by"),
             **_xcn_fields(seg, 11, "verified_by"),
@@ -1948,7 +2167,7 @@ def register_lakeflow_source(spark):
             **_cwe_fields(seg, 30, "enterer_authorization_mode", repeating=False),
             **_cwe_fields(seg, 31, "parent_universal_service_id", repeating=False),
             "advanced_beneficiary_notice_date": _v(seg.get_field(32)),
-            **_cx_fields(seg, 33, "alternate_placer_order_number", repeating=False),
+            **_cx_array_fields(seg, 33, "alternate_placer_order_number"),
             **_ei_fields(seg, 34, "order_workflow_profile", repeating=False),
             "orc_action_code": _v(seg.get_field(35)),
             "order_status_date_range": _v(seg.get_field(36)),
@@ -1967,7 +2186,7 @@ def register_lakeflow_source(spark):
             "entered_datetime": _parse_dtm(seg.get_field(6)),
             "effective_start_date": _parse_dtm(seg.get_field(7)),
             "expiration_date": _parse_dtm(seg.get_field(8)),
-            **_cwe_fields(seg, 9, "coded_comment", repeating=False),
+            **_cwe_array_fields(seg, 9, "coded_comment"),
         }
 
 
@@ -2002,8 +2221,8 @@ def register_lakeflow_source(spark):
             **_cwe_fields(seg, 27, "container_type", repeating=False),
             **_cwe_fields(seg, 28, "container_condition", repeating=False),
             **_cwe_fields(seg, 29, "specimen_child_role", repeating=False),
-            **_cx_fields(seg, 30, "accession_id", repeating=False),
-            **_cx_fields(seg, 31, "other_specimen_id", repeating=False),
+            **_cx_array_fields(seg, 30, "accession_id"),
+            **_cx_array_fields(seg, 31, "other_specimen_id"),
             **_ei_fields(seg, 32, "shipment_id", repeating=False),
             "culture_start_datetime": _parse_dtm(seg.get_field(33)),
             "culture_final_datetime": _parse_dtm(seg.get_field(34)),
@@ -2016,14 +2235,14 @@ def register_lakeflow_source(spark):
             "set_id": _i(seg.get_field(1)) or 1,
             **_cwe_fields(seg, 2, "insurance_plan", repeating=False),
             **_xon_fields(seg, 3, "insurance_company"),
-            **_xon_fields(seg, 4, "insurance_company_name"),
-            **_xad_fields(seg, 5, "insurance_company_address"),
+            **_xon_array_fields(seg, 4, "insurance_company_name"),
+            **_xad_array_fields(seg, 5, "insurance_company_address"),
             **_xpn_array_fields(seg, 6, "insurance_co_contacts"),
-            **_xtn_fields(seg, 7, "insurance_co_phone_number"),
+            **_xtn_array_fields(seg, 7, "insurance_co_phone_number"),
             "group_number": _v(seg.get_field(8)),
-            **_xon_fields(seg, 9, "group_name"),
+            **_xon_array_fields(seg, 9, "group_name"),
             **_xon_fields(seg, 10, "insureds_group_emp"),
-            **_xon_fields(seg, 11, "insureds_group_emp_name"),
+            **_xon_array_fields(seg, 11, "insureds_group_emp_name"),
             "plan_effective_date": _v(seg.get_field(12)),
             "plan_expiration_date": _v(seg.get_field(13)),
             "authorization_information": _v(seg.get_component(14, 1)),
@@ -2031,7 +2250,7 @@ def register_lakeflow_source(spark):
             **_xpn_array_fields(seg, 16, "insured_names"),
             **_cwe_fields(seg, 17, "insureds_relationship_to_patient", repeating=False),
             "insureds_date_of_birth": _parse_dtm(seg.get_field(18)),
-            **_xad_fields(seg, 19, "insureds_address"),
+            **_xad_array_fields(seg, 19, "insureds_address"),
             **_cwe_fields(seg, 20, "assignment_of_benefits", repeating=False),
             **_cwe_fields(seg, 21, "coordination_of_benefits", repeating=False),
             "coord_of_ben_priority": _v(seg.get_field(22)),
@@ -2042,7 +2261,7 @@ def register_lakeflow_source(spark):
             **_cwe_fields(seg, 27, "release_information_code", repeating=False),
             "pre_admit_cert": _v(seg.get_field(28)),
             "verification_datetime": _parse_dtm(seg.get_field(29)),
-            **_xcn_fields(seg, 30, "verification_by"),
+            **_xcn_array_fields(seg, 30, "verification_by"),
             **_cwe_fields(seg, 31, "type_of_agreement_code", repeating=False),
             **_cwe_fields(seg, 32, "billing_status", repeating=False),
             "lifetime_reserve_days": _i(seg.get_field(33)),
@@ -2056,12 +2275,12 @@ def register_lakeflow_source(spark):
             "room_rate_private": _v(seg.get_component(41, 1)),
             **_cwe_fields(seg, 42, "insureds_employment_status", repeating=False),
             **_cwe_fields(seg, 43, "insureds_administrative_sex", repeating=False),
-            **_xad_fields(seg, 44, "insureds_employers_address"),
+            **_xad_array_fields(seg, 44, "insureds_employers_address"),
             "verification_status": _v(seg.get_field(45)),
             **_cwe_fields(seg, 46, "prior_insurance_plan_id", repeating=False),
             **_cwe_fields(seg, 47, "coverage_type", repeating=False),
             **_cwe_fields(seg, 48, "handicap", repeating=False),
-            **_cx_fields(seg, 49, "insureds_id_number"),
+            **_cx_array_fields(seg, 49, "insureds_id_number"),
             **_cwe_fields(seg, 50, "signature_code", repeating=False),
             "signature_code_date": _v(seg.get_field(51)),
             "insureds_birth_place": _v(seg.get_field(52)),
@@ -2074,12 +2293,12 @@ def register_lakeflow_source(spark):
     def _extract_gt1(seg: HL7Segment) -> dict:
         return {
             "set_id": _i(seg.get_field(1)) or 1,
-            **_cx_fields(seg, 2, "guarantor_number"),
+            **_cx_array_fields(seg, 2, "guarantor_number"),
             **_xpn_array_fields(seg, 3, "guarantor_names"),
             **_xpn_array_fields(seg, 4, "guarantor_spouse_names"),
-            **_xad_fields(seg, 5, "guarantor_address"),
-            **_xtn_fields(seg, 6, "guarantor_ph_num_home"),
-            **_xtn_fields(seg, 7, "guarantor_ph_num_business"),
+            **_xad_array_fields(seg, 5, "guarantor_address"),
+            **_xtn_array_fields(seg, 6, "guarantor_ph_num_home"),
+            **_xtn_array_fields(seg, 7, "guarantor_ph_num_business"),
             "guarantor_date_of_birth": _parse_dtm(seg.get_field(8)),
             **_cwe_fields(seg, 9, "guarantor_administrative_sex", repeating=False),
             **_cwe_fields(seg, 10, "guarantor_type", repeating=False),
@@ -2089,11 +2308,11 @@ def register_lakeflow_source(spark):
             "guarantor_date_end": _v(seg.get_field(14)),
             "guarantor_priority": _i(seg.get_field(15)),
             **_xpn_array_fields(seg, 16, "guarantor_employer_names"),
-            **_xad_fields(seg, 17, "guarantor_employer_address"),
-            **_xtn_fields(seg, 18, "guarantor_employer_phone_number"),
-            **_cx_fields(seg, 19, "guarantor_employee_id_number"),
+            **_xad_array_fields(seg, 17, "guarantor_employer_address"),
+            **_xtn_array_fields(seg, 18, "guarantor_employer_phone_number"),
+            **_cx_array_fields(seg, 19, "guarantor_employee_id_number"),
             **_cwe_fields(seg, 20, "guarantor_employment_status", repeating=False),
-            **_xon_fields(seg, 21, "guarantor_organization_name"),
+            **_xon_array_fields(seg, 21, "guarantor_organization_name"),
             "guarantor_billing_hold_flag": _v(seg.get_field(22)),
             **_cwe_fields(seg, 23, "guarantor_credit_rating_code", repeating=False),
             "guarantor_death_date_and_time": _parse_dtm(seg.get_field(24)),
@@ -2101,7 +2320,7 @@ def register_lakeflow_source(spark):
             **_cwe_fields(seg, 26, "guarantor_charge_adjustment_code", repeating=False),
             "guarantor_household_annual_income": _v(seg.get_component(27, 1)),
             "guarantor_household_size": _i(seg.get_field(28)),
-            **_cx_fields(seg, 29, "guarantor_employer_id_number"),
+            **_cx_array_fields(seg, 29, "guarantor_employer_id_number"),
             **_cwe_fields(seg, 30, "guarantor_marital_status_code", repeating=False),
             "guarantor_hire_effective_date": _v(seg.get_field(31)),
             "employment_stop_date": _v(seg.get_field(32)),
@@ -2118,12 +2337,12 @@ def register_lakeflow_source(spark):
             **_cwe_fields(seg, 43, "nationality", repeating=False),
             **_cwe_array_fields(seg, 44, "ethnic_group"),
             **_xpn_array_fields(seg, 45, "gt1_contact_persons"),
-            **_xtn_fields(seg, 46, "contact_persons_telephone_number"),
+            **_xtn_array_fields(seg, 46, "contact_persons_telephone_number"),
             **_cwe_fields(seg, 47, "contact_reason", repeating=False),
             **_cwe_fields(seg, 48, "contact_relationship", repeating=False),
             "job_title": _v(seg.get_field(49)),
             **_cwe_fields(seg, 50, "job_code_class", repeating=False),
-            **_xon_fields(seg, 51, "guarantor_employers_org_name"),
+            **_xon_array_fields(seg, 51, "guarantor_employers_org_name"),
             **_cwe_fields(seg, 52, "handicap", repeating=False),
             **_cwe_fields(seg, 53, "job_status", repeating=False),
             "guarantor_financial_class": _v(seg.get_component(54, 1)),
@@ -2154,11 +2373,11 @@ def register_lakeflow_source(spark):
             **_cwe_fields(seg, 17, "fee_schedule", repeating=False),
             **_cwe_fields(seg, 18, "patient_type", repeating=False),
             **_cwe_array_fields(seg, 19, "diagnosis_code"),
-            **_xcn_fields(seg, 20, "performed_by"),
-            **_xcn_fields(seg, 21, "ordered_by"),
+            **_xcn_array_fields(seg, 20, "performed_by"),
+            **_xcn_array_fields(seg, 21, "ordered_by"),
             "unit_cost": _v(seg.get_component(22, 1)),
             **_ei_fields(seg, 23, "filler_order_number", repeating=False),
-            **_xcn_fields(seg, 24, "entered_by"),
+            **_xcn_array_fields(seg, 24, "entered_by"),
             **_cwe_fields(seg, 25, "ft1_procedure_code", repeating=False),
             **_cwe_array_fields(seg, 26, "ft1_procedure_code_modifier"),
             **_cwe_fields(seg, 27, "advanced_beneficiary_notice_code", repeating=False),
@@ -2205,7 +2424,7 @@ def register_lakeflow_source(spark):
             **_cwe_fields(seg, 7, "administered_units", repeating=False),
             **_cwe_fields(seg, 8, "administered_dosage_form", repeating=False),
             **_cwe_array_fields(seg, 9, "administration_notes"),
-            **_xcn_fields(seg, 10, "administering_provider"),
+            **_xcn_array_fields(seg, 10, "administering_provider"),
             "administered_at_location": _v(seg.get_field(11)),
             "administered_per_time_unit": _v(seg.get_field(12)),
             "administered_strength": _v(seg.get_field(13)),
@@ -2241,16 +2460,16 @@ def register_lakeflow_source(spark):
             "appointment_duration": _i(seg.get_field(9)),
             **_cwe_fields(seg, 10, "appointment_duration_units", repeating=False),
             "appointment_timing_quantity": _v(seg.get_first_repetition(11)),
-            **_xcn_fields(seg, 12, "placer_contact_person"),
+            **_xcn_array_fields(seg, 12, "placer_contact_person"),
             **_xtn_fields(seg, 13, "placer_contact_phone_number", repeating=False),
-            **_xad_fields(seg, 14, "placer_contact_address"),
+            **_xad_array_fields(seg, 14, "placer_contact_address"),
             "placer_contact_location": _v(seg.get_field(15)),
-            **_xcn_fields(seg, 16, "filler_contact_person"),
+            **_xcn_array_fields(seg, 16, "filler_contact_person"),
             **_xtn_fields(seg, 17, "filler_contact_phone_number", repeating=False),
-            **_xad_fields(seg, 18, "filler_contact_address"),
+            **_xad_array_fields(seg, 18, "filler_contact_address"),
             "filler_contact_location": _v(seg.get_field(19)),
-            **_xcn_fields(seg, 20, "entered_by_person"),
-            **_xtn_fields(seg, 21, "entered_by_phone_number", repeating=False),
+            **_xcn_array_fields(seg, 20, "entered_by_person"),
+            **_xtn_array_fields(seg, 21, "entered_by_phone_number"),
             "entered_by_location": _v(seg.get_field(22)),
             **_ei_fields(seg, 23, "parent_placer_appointment_id", repeating=False),
             **_ei_fields(seg, 24, "parent_filler_appointment_id", repeating=False),
@@ -2267,13 +2486,13 @@ def register_lakeflow_source(spark):
             **_cwe_fields(seg, 2, "document_type", repeating=False),
             "document_content_presentation": _v(seg.get_field(3)),
             "activity_datetime": _parse_dtm(seg.get_field(4)),
-            **_xcn_fields(seg, 5, "primary_activity_provider"),
+            **_xcn_array_fields(seg, 5, "primary_activity_provider"),
             "origination_datetime": _parse_dtm(seg.get_field(6)),
             "transcription_datetime": _parse_dtm(seg.get_field(7)),
             "edit_datetime": _parse_dtm(seg.get_first_repetition(8)),
-            **_xcn_fields(seg, 9, "originator"),
-            **_xcn_fields(seg, 10, "assigned_document_authenticator"),
-            **_xcn_fields(seg, 11, "transcriptionist"),
+            **_xcn_array_fields(seg, 9, "originator"),
+            **_xcn_array_fields(seg, 10, "assigned_document_authenticator"),
+            **_xcn_array_fields(seg, 11, "transcriptionist"),
             **_ei_fields(seg, 12, "unique_document_number", repeating=False),
             **_ei_fields(seg, 13, "parent_document_number", repeating=False),
             **_ei_array_fields(seg, 14, "placer_order_number"),
@@ -2285,8 +2504,8 @@ def register_lakeflow_source(spark):
             "document_storage_status": _v(seg.get_field(20)),
             "document_change_reason": _v(seg.get_field(21)),
             "authentication_person_time_stamp": _v(seg.get_first_repetition(22)),
-            **_xcn_fields(seg, 23, "distributed_copies"),
-            **_cwe_fields(seg, 24, "folder_assignment", repeating=False),
+            **_xcn_array_fields(seg, 23, "distributed_copies"),
+            **_cwe_array_fields(seg, 24, "folder_assignment"),
             "document_title": _v(seg.get_field(25)),
             "agreed_due_datetime": _parse_dtm(seg.get_field(26)),
             **_hd_fields(seg, 27, "creating_facility", repeating=False),
@@ -2479,6 +2698,120 @@ def register_lakeflow_source(spark):
     ])
 
 
+    _XCN_STRUCT = StructType([
+        StructField("id", StringType(), nullable=True),
+        StructField("family_name", StringType(), nullable=True),
+        StructField("given_name", StringType(), nullable=True),
+        StructField("middle_name", StringType(), nullable=True),
+        StructField("suffix", StringType(), nullable=True),
+        StructField("prefix", StringType(), nullable=True),
+        StructField("degree", StringType(), nullable=True),
+        StructField("source_table", StringType(), nullable=True),
+        StructField("assigning_authority", StringType(), nullable=True),
+        StructField("assigning_authority_universal_id", StringType(), nullable=True),
+        StructField("assigning_authority_universal_id_type", StringType(), nullable=True),
+        StructField("name_type_code", StringType(), nullable=True),
+        StructField("check_digit", StringType(), nullable=True),
+        StructField("check_digit_scheme", StringType(), nullable=True),
+        StructField("identifier_type_code", StringType(), nullable=True),
+        StructField("assigning_facility", StringType(), nullable=True),
+        StructField("assigning_facility_universal_id", StringType(), nullable=True),
+        StructField("assigning_facility_universal_id_type", StringType(), nullable=True),
+        StructField("name_representation_code", StringType(), nullable=True),
+        StructField("name_assembly_order", StringType(), nullable=True),
+        StructField("effective_date", StringType(), nullable=True),
+        StructField("expiration_date", StringType(), nullable=True),
+        StructField("professional_suffix", StringType(), nullable=True),
+    ])
+
+
+    _XON_STRUCT = StructType([
+        StructField("name", StringType(), nullable=True),
+        StructField("type_code", StringType(), nullable=True),
+        StructField("id", StringType(), nullable=True),
+        StructField("check_digit", StringType(), nullable=True),
+        StructField("check_digit_scheme", StringType(), nullable=True),
+        StructField("assigning_authority", StringType(), nullable=True),
+        StructField("assigning_authority_universal_id", StringType(), nullable=True),
+        StructField("assigning_authority_universal_id_type", StringType(), nullable=True),
+        StructField("id_type_code", StringType(), nullable=True),
+        StructField("assigning_facility", StringType(), nullable=True),
+        StructField("assigning_facility_universal_id", StringType(), nullable=True),
+        StructField("assigning_facility_universal_id_type", StringType(), nullable=True),
+        StructField("name_rep_code", StringType(), nullable=True),
+        StructField("identifier", StringType(), nullable=True),
+    ])
+
+
+    _CX_STRUCT = StructType([
+        StructField("id", StringType(), nullable=True),
+        StructField("check_digit", StringType(), nullable=True),
+        StructField("check_digit_scheme", StringType(), nullable=True),
+        StructField("assigning_authority", StringType(), nullable=True),
+        StructField("assigning_authority_universal_id", StringType(), nullable=True),
+        StructField("assigning_authority_universal_id_type", StringType(), nullable=True),
+        StructField("type_code", StringType(), nullable=True),
+        StructField("assigning_facility", StringType(), nullable=True),
+        StructField("assigning_facility_universal_id", StringType(), nullable=True),
+        StructField("assigning_facility_universal_id_type", StringType(), nullable=True),
+        StructField("effective_date", StringType(), nullable=True),
+        StructField("expiration_date", StringType(), nullable=True),
+        StructField("assigning_jurisdiction", StringType(), nullable=True),
+        StructField("assigning_agency", StringType(), nullable=True),
+        StructField("security_check", StringType(), nullable=True),
+        StructField("security_check_scheme", StringType(), nullable=True),
+    ])
+
+
+    _XAD_STRUCT = StructType([
+        StructField("street", StringType(), nullable=True),
+        StructField("other_designation", StringType(), nullable=True),
+        StructField("city", StringType(), nullable=True),
+        StructField("state", StringType(), nullable=True),
+        StructField("zip", StringType(), nullable=True),
+        StructField("country", StringType(), nullable=True),
+        StructField("type", StringType(), nullable=True),
+        StructField("other_geographic", StringType(), nullable=True),
+        StructField("county_parish_code", StringType(), nullable=True),
+        StructField("county_parish_text", StringType(), nullable=True),
+        StructField("county_parish_coding_system", StringType(), nullable=True),
+        StructField("census_tract", StringType(), nullable=True),
+        StructField("census_tract_text", StringType(), nullable=True),
+        StructField("census_tract_coding_system", StringType(), nullable=True),
+        StructField("representation_code", StringType(), nullable=True),
+        StructField("effective_date", StringType(), nullable=True),
+        StructField("expiration_date", StringType(), nullable=True),
+        StructField("expiration_reason", StringType(), nullable=True),
+        StructField("expiration_reason_text", StringType(), nullable=True),
+        StructField("expiration_reason_coding_system", StringType(), nullable=True),
+        StructField("temporary_indicator", StringType(), nullable=True),
+        StructField("bad_address_indicator", StringType(), nullable=True),
+        StructField("usage", StringType(), nullable=True),
+        StructField("addressee", StringType(), nullable=True),
+        StructField("comment", StringType(), nullable=True),
+        StructField("preference_order", StringType(), nullable=True),
+        StructField("protection_code", StringType(), nullable=True),
+        StructField("protection_code_text", StringType(), nullable=True),
+        StructField("protection_code_coding_system", StringType(), nullable=True),
+        StructField("identifier", StringType(), nullable=True),
+    ])
+
+
+    # EIP (Entity Identifier Pair) — parent and child EI separated by `&`. Used for
+    # OBX-33 observation-related specimen ID and ORC-8 parent order. Modeled as a
+    # nested struct so consumers can address each EI's 4 components individually.
+    _EI_INNER_STRUCT = StructType([
+        StructField("entity_identifier", StringType(), nullable=True),
+        StructField("namespace_id", StringType(), nullable=True),
+        StructField("universal_id", StringType(), nullable=True),
+        StructField("universal_id_type", StringType(), nullable=True),
+    ])
+    _EIP_STRUCT = StructType([
+        StructField("parent", _EI_INNER_STRUCT, nullable=True),
+        StructField("child", _EI_INNER_STRUCT, nullable=True),
+    ])
+
+
     def _xpn_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
         """XPN (Extended Person Name) — repeating field as ArrayType(StructType([...]))."""
         return [StructField(column_name, ArrayType(_XPN_STRUCT, containsNull=True), nullable=True)]
@@ -2492,6 +2825,31 @@ def register_lakeflow_source(spark):
     def _xtn_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
         """XTN (Extended Telecommunication Number) — repeating field as ArrayType(StructType([...]))."""
         return [StructField(column_name, ArrayType(_XTN_STRUCT, containsNull=True), nullable=True)]
+
+
+    def _xcn_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+        """XCN (Extended Composite ID Number and Name) — repeating field as ArrayType(StructType([...]))."""
+        return [StructField(column_name, ArrayType(_XCN_STRUCT, containsNull=True), nullable=True)]
+
+
+    def _xon_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+        """XON (Extended Composite Name and Number for Organizations) — repeating field as ArrayType(StructType([...]))."""
+        return [StructField(column_name, ArrayType(_XON_STRUCT, containsNull=True), nullable=True)]
+
+
+    def _cx_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+        """CX (Extended Composite ID with Check Digit) — repeating field as ArrayType(StructType([...]))."""
+        return [StructField(column_name, ArrayType(_CX_STRUCT, containsNull=True), nullable=True)]
+
+
+    def _xad_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+        """XAD (Extended Address) — repeating field as ArrayType(StructType([...]))."""
+        return [StructField(column_name, ArrayType(_XAD_STRUCT, containsNull=True), nullable=True)]
+
+
+    def _eip_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+        """EIP (Entity Identifier Pair) — repeating field as ArrayType(StructType<parent: EI, child: EI>)."""
+        return [StructField(column_name, ArrayType(_EIP_STRUCT, containsNull=True), nullable=True)]
 
 
     def _s_array(name: str, comment: str = "") -> StructField:
@@ -2865,7 +3223,7 @@ def register_lakeflow_source(spark):
         + [
             _int_field("set_id",                        "Sequence number when multiple PID segments appear in a message (PID-1)"),
             _s("patient_external_id",           "External patient ID from a prior system (PID-2, deprecated in v2.7)"),
-            *_cx_schema("patient_id", "Patient identifier", "PID-3"),
+            *_cx_array_schema("patient_id", "Patient identifier list (CX, repeatable per spec)", "PID-3"),
             _s("alternate_patient_id",          "Alternate patient identifier from a prior system (PID-4, deprecated in v2.7)"),
             *_xpn_array_schema("patient_names", "Patient names", "PID-5"),
             *_xpn_array_schema("mothers_maiden_names", "Mother's maiden names", "PID-6"),
@@ -2873,17 +3231,17 @@ def register_lakeflow_source(spark):
             *_cwe_schema("administrative_sex", "Administrative sex", "PID-8"),
             _s("patient_alias",                 "Alias name(s) for the patient (PID-9, deprecated in v2.7)"),
             *_cwe_array_schema("race", "Race (CWE, repeatable per spec)", "PID-10"),
-            *_xad_schema("address", "Patient address", "PID-11"),
+            *_xad_array_schema("address", "Patient address (XAD, repeatable per spec)", "PID-11"),
             _s("county_code",                   "County or parish code (PID-12, deprecated in v2.6)"),
-            *_xtn_schema("home_phone", "Home phone", "PID-13"),
-            *_xtn_schema("business_phone", "Business phone", "PID-14"),
+            *_xtn_array_schema("home_phone", "Home phone (XTN, repeatable per spec)", "PID-13"),
+            *_xtn_array_schema("business_phone", "Business phone (XTN, repeatable per spec)", "PID-14"),
             *_cwe_schema("primary_language", "Primary language", "PID-15"),
             *_cwe_schema("marital_status", "Marital status", "PID-16"),
             *_cwe_schema("religion", "Religion", "PID-17"),
             *_cx_schema("patient_account", "Patient account", "PID-18"),
             _s("ssn",                           "Social Security Number (PID-19, deprecated in v2.7)"),
             _s("drivers_license",               "Driver's license number and issuing state (PID-20, deprecated in v2.7)"),
-            *_cx_schema("mothers_identifier", "Mother's identifier", "PID-21"),
+            *_cx_array_schema("mothers_identifier", "Mother's identifier (CX, repeatable per spec)", "PID-21"),
             *_cwe_array_schema("ethnic_group", "Ethnic group (CWE, repeatable per spec)", "PID-22"),
             _s("birth_place",                   "Birthplace as free text (PID-23)"),
             _s("multiple_birth_indicator",      "Whether the patient is one of a multiple birth: Y or N (PID-24)"),
@@ -2901,8 +3259,8 @@ def register_lakeflow_source(spark):
             *_cwe_schema("breed_code", "Breed", "PID-36"),
             _s("strain",                        "Strain description for veterinary use (PID-37, v2.5+)"),
             *_cwe_schema("production_class_code", "Production class", "PID-38"),
-            *_cwe_schema("tribal_citizenship", "Tribal citizenship", "PID-39"),
-            *_xtn_schema("patient_telecom", "Patient telecommunication", "PID-40"),
+            *_cwe_array_schema("tribal_citizenship", "Tribal citizenship (CWE, repeatable per spec)", "PID-39"),
+            *_xtn_array_schema("patient_telecom", "Patient telecommunication (XTN, repeatable per spec)", "PID-40"),
         ]
     )
 
@@ -2930,9 +3288,9 @@ def register_lakeflow_source(spark):
         + [
             _s("prior_patient_location",       "Prior bed location before transfer (PV1-6), raw composite"),
         ]
-        + _xcn_schema("attending_doctor", "Attending physician", "PV1-7")
-        + _xcn_schema("referring_doctor", "Referring physician", "PV1-8")
-        + _xcn_schema("consulting_doctor", "Consulting physician", "PV1-9")
+        + _xcn_array_schema("attending_doctor", "Attending physician (XCN, repeatable per spec)", "PV1-7")
+        + _xcn_array_schema("referring_doctor", "Referring physician (XCN, repeatable per spec)", "PV1-8")
+        + _xcn_array_schema("consulting_doctor", "Consulting physician (XCN, repeatable per spec)", "PV1-9")
         + _cwe_schema("hospital_service", "Hospital service (CWE)", "PV1-10")
         + [
             _s("temporary_location",           "Temporary bed/location during a transfer (PV1-11)"),
@@ -2942,7 +3300,7 @@ def register_lakeflow_source(spark):
         + _cwe_schema("admit_source", "Admit source (CWE)", "PV1-14")
         + _cwe_array_schema("ambulatory_status", "Ambulatory status (CWE, repeatable)", "PV1-15")
         + _cwe_schema("vip_indicator", "VIP indicator (CWE)", "PV1-16")
-        + _xcn_schema("admitting_doctor", "Admitting physician", "PV1-17")
+        + _xcn_array_schema("admitting_doctor", "Admitting physician (XCN, repeatable per spec)", "PV1-17")
         + _cwe_schema("patient_type", "Patient type (CWE)", "PV1-18")
         + _cx_schema("visit_number", "Visit/encounter number", "PV1-19")
         + [
@@ -2989,7 +3347,7 @@ def register_lakeflow_source(spark):
             _s("total_adjustments",            "Total adjustments applied to the visit charges (PV1-48)"),
             _s("total_payments",               "Total payments received for the visit (PV1-49)"),
         ]
-        + _cx_schema("alternate_visit_id", "Alternate visit ID", "PV1-50")
+        + _cx_array_schema("alternate_visit_id", "Alternate visit ID (CX, repeatable per spec)", "PV1-50")
         + _cwe_schema("visit_indicator", "Visit indicator (CWE)", "PV1-51")
         + _xcn_schema("other_healthcare_provider", "Other healthcare provider", "PV1-52")
         + [
@@ -3018,7 +3376,7 @@ def register_lakeflow_source(spark):
             _s("collection_volume",                   "Volume of specimen collected (OBR-9.1)"),
             _s("collection_volume_units",             "Units for the specimen volume (OBR-9.2)"),
         ]
-        + _xcn_schema("collector", "Specimen collector", "OBR-10")
+        + _xcn_array_schema("collector", "Specimen collector (XCN, repeatable per spec)", "OBR-10")
         + [
             _s("specimen_action_code",                "Action to take on the specimen (OBR-11): A=Add, G=Generated, L=Lab, O=Obtained"),
         ]
@@ -3073,7 +3431,7 @@ def register_lakeflow_source(spark):
         + _cwe_schema("parent_universal_service_id", "Parent universal service ID (CWE)", "OBR-50")
         + _ei_schema("observation_group", "Observation group (EI)", "OBR-51")
         + _ei_schema("parent_observation_group", "Parent observation group (EI)", "OBR-52")
-        + _cx_schema("alternate_placer_order", "Alternate placer order (CX)", "OBR-53")
+        + _cx_array_schema("alternate_placer_order", "Alternate placer order (CX, repeatable per spec)", "OBR-53")
         + [
             _s("parent_order",                        "Parent order identifier (OBR-54.1, v2.9+)"),
             _s("obr_action_code",                     "Action code (OBR-55, v2.9+)"),
@@ -3109,7 +3467,7 @@ def register_lakeflow_source(spark):
             _ts("datetime_of_observation",        "Date/time this specific observation was made, parsed to timestamp (OBX-14)"),
         ]
         + _cwe_schema("producers_id", "Producer ID (CWE)", "OBX-15")
-        + _xcn_schema("responsible_observer", "Responsible observer", "OBX-16")
+        + _xcn_array_schema("responsible_observer", "Responsible observer (XCN, repeatable per spec)", "OBX-16")
         + _cwe_array_schema("observation_method", "Observation method (CWE, repeatable per spec)", "OBX-17")
         + _ei_array_schema("equipment_instance_identifier", "Equipment instance (EI, repeatable per spec)", "OBX-18")
         + [
@@ -3131,10 +3489,8 @@ def register_lakeflow_source(spark):
             _s("observation_sub_type",            "Observation sub-type (OBX-30, v2.8.2+)"),
             _s("obx_action_code",                 "Action code (OBX-31, v2.9+)"),
         ]
-        + _cwe_schema("observation_value_absent_reason", "Observation value absent reason (CWE)", "OBX-32")
-        + [
-            _s("observation_related_specimen",    "Related specimen identifier (OBX-33, type EIP — raw value)"),
-        ]
+        + _cwe_array_schema("observation_value_absent_reason", "Observation value absent reason (CWE, repeatable per spec)", "OBX-32")
+        + _eip_array_schema("observation_related_specimen", "Observation-related specimen identifier (EIP, repeatable per spec)", "OBX-33")
     )
 
     # ---------------------------------------------------------------------------
@@ -3193,7 +3549,7 @@ def register_lakeflow_source(spark):
             _s("grouper_version_and_type",             "Version and type of the DRG grouper software (DG1-14)"),
             _int_field("diagnosis_priority",                   "Priority rank of this diagnosis; 1=principal diagnosis (DG1-15)"),
         ]
-        + _xcn_schema("diagnosing_clinician", "Diagnosing clinician", "DG1-16")
+        + _xcn_array_schema("diagnosing_clinician", "Diagnosing clinician (XCN, repeatable per spec)", "DG1-16")
         + _cwe_schema("diagnosis_classification", "Diagnosis classification (CWE; e.g. C=Chronic, A=Acute)", "DG1-17")
         + [
             _s("confidential_indicator",               "Whether the diagnosis is confidential and access-restricted: Y or N (DG1-18)"),
@@ -3224,9 +3580,9 @@ def register_lakeflow_source(spark):
             _s("relationship",               "Relationship to patient composite (NK1-3), raw; use relationship_code_* CWE fields"),
         ]
         + _cwe_schema("relationship_code", "Relationship to patient", "NK1-3")
-        + _xad_schema("address", "Next of kin address", "NK1-4")
-        + _xtn_schema("phone_number", "Next of kin home or primary phone", "NK1-5")
-        + _xtn_schema("business_phone", "Next of kin business phone", "NK1-6")
+        + _xad_array_schema("address", "Next of kin address (XAD, repeatable per spec)", "NK1-4")
+        + _xtn_array_schema("phone_number", "Next of kin home or primary phone (XTN, repeatable per spec)", "NK1-5")
+        + _xtn_array_schema("business_phone", "Next of kin business phone (XTN, repeatable per spec)", "NK1-6")
         + _cwe_schema("contact_role", "Contact role", "NK1-7")
         + [
             _ts("start_date",                "Date this contact relationship became effective, parsed to timestamp (NK1-8)"),
@@ -3235,7 +3591,7 @@ def register_lakeflow_source(spark):
             _s("job_code",                   "Occupation code for the next of kin (NK1-11.1)"),
         ]
         + _cx_schema("employee_number", "Employee number", "NK1-12")
-        + _xon_schema("organization_name", "Employer organization", "NK1-13")
+        + _xon_array_schema("organization_name", "Employer organization (XON, repeatable per spec)", "NK1-13")
         + _cwe_schema("marital_status", "Marital status", "NK1-14")
         + _cwe_schema("administrative_sex", "Administrative sex", "NK1-15")
         + [
@@ -3261,9 +3617,9 @@ def register_lakeflow_source(spark):
         + [
             *_xpn_array_schema("contact_persons", "Contact persons", "NK1-30"),
         ]
-        + _xtn_schema("contact_person_telephone", "Contact person telephone", "NK1-31")
-        + _xad_schema("contact_persons_address", "Contact person address", "NK1-32")
-        + _cx_schema("associated_party_identifiers", "Associated party identifier", "NK1-33")
+        + _xtn_array_schema("contact_person_telephone", "Contact person telephone (XTN, repeatable per spec)", "NK1-31")
+        + _xad_array_schema("contact_persons_address", "Contact person address (XAD, repeatable per spec)", "NK1-32")
+        + _cx_array_schema("associated_party_identifiers", "Associated party identifier (CX, repeatable per spec)", "NK1-33")
         + _cwe_schema("job_status", "Job status (CWE)", "NK1-34")
         + _cwe_array_schema("race", "Race (CWE, repeatable per spec)", "NK1-35")
         + _cwe_schema("handicap", "Handicap (CWE)", "NK1-36")
@@ -3289,7 +3645,7 @@ def register_lakeflow_source(spark):
         ]
         + _cwe_schema("event_reason", "Event reason", "EVN-4")
         + [
-            *_xcn_schema("operator", "Operator", "EVN-5"),
+            *_xcn_array_schema("operator", "Operator (XCN, repeatable per spec)", "EVN-5"),
             _ts("event_occurred",          "Actual date/time the event occurred, parsed to timestamp (EVN-6)"),
         ]
         + _hd_schema("event_facility", "Event facility", "EVN-7")
@@ -3303,7 +3659,7 @@ def register_lakeflow_source(spark):
         _METADATA_FIELDS
         + _cwe_array_schema("living_dependency", "Living dependency (CWE, repeatable)", "PD1-1")
         + _cwe_schema("living_arrangement", "Living arrangement (CWE)", "PD1-2")
-        + _xon_schema("patient_primary_facility", "Primary care facility", "PD1-3")
+        + _xon_array_schema("patient_primary_facility", "Primary care facility (XON, repeatable per spec)", "PD1-3")
         + _xcn_schema("patient_primary_care_provider", "Primary care provider", "PD1-4")
         + _cwe_schema("student_indicator", "Student indicator (CWE)", "PD1-5")
         + _cwe_schema("handicap", "Handicap (CWE)", "PD1-6")
@@ -3312,13 +3668,13 @@ def register_lakeflow_source(spark):
         + [
             _s("separate_bill",                            "Separate billing flag Y/N (PD1-9)"),
         ]
-        + _cx_schema("duplicate_patient", "Duplicate patient", "PD1-10")
+        + _cx_array_schema("duplicate_patient", "Duplicate patient (CX, repeatable per spec)", "PD1-10")
         + _cwe_schema("publicity_code", "Publicity code", "PD1-11")
         + [
             _s("protection_indicator",                     "Protection indicator Y/N (PD1-12); if Y, patient info is restricted"),
             _s("protection_indicator_effective_date",      "Date the protection indicator became effective (PD1-13)"),
         ]
-        + _xon_schema("place_of_worship", "Place of worship", "PD1-14")
+        + _xon_array_schema("place_of_worship", "Place of worship (XON, repeatable per spec)", "PD1-14")
         + _cwe_array_schema("advance_directive_code", "Advance directive (CWE, repeatable per spec)", "PD1-15")
         + _cwe_schema("immunization_registry_status", "Immunization registry status (CWE)", "PD1-16")
         + [
@@ -3358,7 +3714,7 @@ def register_lakeflow_source(spark):
             _int_field("actual_length_of_inpatient_stay",          "Actual length of inpatient stay in days (PV2-11)"),
             _s("visit_description",                        "Free-text visit description (PV2-12)"),
         ]
-        + _xcn_schema("referral_source", "Referral source", "PV2-13")
+        + _xcn_array_schema("referral_source", "Referral source (XCN, repeatable per spec)", "PV2-13")
         + [
             _s("previous_service_date",                    "Date of previous service (PV2-14)"),
             _s("employment_illness_related_indicator",     "Employment illness related Y/N (PV2-15)"),
@@ -3376,7 +3732,7 @@ def register_lakeflow_source(spark):
         + [
             _s("visit_protection_indicator",               "Visit protection indicator ID code (PV2-22)"),
         ]
-        + _xon_schema("clinic_organization", "Clinic organization", "PV2-23")
+        + _xon_array_schema("clinic_organization", "Clinic organization (XON, repeatable per spec)", "PV2-23")
         + _cwe_schema("patient_status_code", "Patient status code (CWE)", "PV2-24")
         + _cwe_schema("visit_priority_code", "Visit priority code (CWE)", "PV2-25")
         + [
@@ -3422,14 +3778,14 @@ def register_lakeflow_source(spark):
 
     MRG_SCHEMA = StructType(
         _METADATA_FIELDS
-        + _cx_schema("prior_patient_id", "Prior patient identifier (MRG-1 CX)", "MRG-1")
+        + _cx_array_schema("prior_patient_id", "Prior patient identifier list (CX, repeatable per spec)", "MRG-1")
         + [
             _s("prior_alternate_patient_id",      "Prior alternate patient ID (MRG-2, deprecated)"),
         ]
         + _cx_schema("prior_patient_account_number", "Prior patient account number", "MRG-3")
         + _cx_schema("prior_patient_id_mrg4", "Prior patient ID (MRG-4)", "MRG-4")
         + _cx_schema("prior_visit_number", "Prior visit number", "MRG-5")
-        + _cx_schema("prior_alternate_visit_id", "Prior alternate visit ID", "MRG-6")
+        + _cx_array_schema("prior_alternate_visit_id", "Prior alternate visit ID (CX, repeatable per spec)", "MRG-6")
         + [
             *_xpn_array_schema("prior_patient_names", "Prior patient names", "MRG-7"),
         ]
@@ -3556,7 +3912,9 @@ def register_lakeflow_source(spark):
             _s("order_status",                             "Order status (ORC-5): IP=In Process, CM=Completed, SC=Scheduled, CA=Cancelled"),
             _s("response_flag",                            "Response flag (ORC-6): E=Report exceptions, R=Same as initiation, D=Deferred, N=Notification"),
             _s("quantity_timing",                          "Quantity/timing (ORC-7, deprecated)"),
-            _s("parent_order",                             "Parent order reference (ORC-8)"),
+        ]
+        + _eip_array_schema("parent_order", "Parent order reference (EIP, repeatable per spec)", "ORC-8")
+        + [
             _ts("datetime_of_transaction",                 "Transaction date/time (ORC-9)"),
         ]
         + _xcn_schema("entered_by", "Person who entered the order", "ORC-10")
@@ -3590,7 +3948,7 @@ def register_lakeflow_source(spark):
         + [
             _s("advanced_beneficiary_notice_date",          "Advanced beneficiary notice date (ORC-32, v2.6+)"),
         ]
-        + _cx_schema("alternate_placer_order_number", "Alternate placer order number (CX)", "ORC-33")
+        + _cx_array_schema("alternate_placer_order_number", "Alternate placer order number (CX, repeatable per spec)", "ORC-33")
         + _ei_schema("order_workflow_profile", "Order workflow profile (EI)", "ORC-34")
         + [
             _s("orc_action_code",                           "Action code (ORC-35, v2.9+)"),
@@ -3618,7 +3976,7 @@ def register_lakeflow_source(spark):
             _ts("effective_start_date","Effective start date of the note (NTE-7, v2.6+)"),
             _ts("expiration_date",     "Expiration date of the note (NTE-8, v2.6+)"),
         ]
-        + _cwe_schema("coded_comment", "Coded comment", "NTE-9")
+        + _cwe_array_schema("coded_comment", "Coded comment (CWE, repeatable per spec)", "NTE-9")
     )
 
     # ---------------------------------------------------------------------------
@@ -3666,8 +4024,8 @@ def register_lakeflow_source(spark):
         + _cwe_schema("container_type", "Container type", "SPM-27")
         + _cwe_schema("container_condition", "Container condition", "SPM-28")
         + _cwe_schema("specimen_child_role", "Specimen child role", "SPM-29")
-        + _cx_schema("accession_id", "Accession identifier (CX)", "SPM-30")
-        + _cx_schema("other_specimen_id", "Other specimen identifier (CX)", "SPM-31")
+        + _cx_array_schema("accession_id", "Accession identifier (CX, repeatable per spec)", "SPM-30")
+        + _cx_array_schema("other_specimen_id", "Other specimen identifier (CX, repeatable per spec)", "SPM-31")
         + _ei_schema("shipment_id", "Shipment identifier (EI)", "SPM-32")
         + [
             _ts("culture_start_datetime",         "Culture start date/time (SPM-33, v2.9+)"),
@@ -3687,18 +4045,18 @@ def register_lakeflow_source(spark):
         ]
         + _cwe_schema("insurance_plan", "Insurance plan", "IN1-2")
         + _xon_schema("insurance_company", "Insurance company", "IN1-3")
-        + _xon_schema("insurance_company_name", "Insurance company name (XON)", "IN1-4")
-        + _xad_schema("insurance_company_address", "Insurance company address", "IN1-5")
+        + _xon_array_schema("insurance_company_name", "Insurance company name (XON, repeatable per spec)", "IN1-4")
+        + _xad_array_schema("insurance_company_address", "Insurance company address (XAD, repeatable per spec)", "IN1-5")
         + [
             *_xpn_array_schema("insurance_co_contacts", "Insurance contacts", "IN1-6"),
         ]
-        + _xtn_schema("insurance_co_phone_number", "Insurance company phone", "IN1-7")
+        + _xtn_array_schema("insurance_co_phone_number", "Insurance company phone (XTN, repeatable per spec)", "IN1-7")
         + [
             _s("group_number",                     "Insurance group/policy group number (IN1-8)"),
         ]
-        + _xon_schema("group_name", "Insurance group name", "IN1-9")
+        + _xon_array_schema("group_name", "Insurance group name (XON, repeatable per spec)", "IN1-9")
         + _xon_schema("insureds_group_emp", "Insured's group employer", "IN1-10")
-        + _xon_schema("insureds_group_emp_name", "Insured's group employer name", "IN1-11")
+        + _xon_array_schema("insureds_group_emp_name", "Insured's group employer name (XON, repeatable per spec)", "IN1-11")
         + [
             _s("plan_effective_date",              "Plan effective date (IN1-12)"),
             _s("plan_expiration_date",             "Plan expiration date (IN1-13)"),
@@ -3712,7 +4070,7 @@ def register_lakeflow_source(spark):
         + [
             _ts("insureds_date_of_birth",          "Insured's date of birth (IN1-18)"),
         ]
-        + _xad_schema("insureds_address", "Insured's address", "IN1-19")
+        + _xad_array_schema("insureds_address", "Insured's address (XAD, repeatable per spec)", "IN1-19")
         + _cwe_schema("assignment_of_benefits", "Assignment of benefits (CWE)", "IN1-20")
         + _cwe_schema("coordination_of_benefits", "Coordination of benefits (CWE)", "IN1-21")
         + [
@@ -3727,7 +4085,7 @@ def register_lakeflow_source(spark):
             _s("pre_admit_cert",                   "Pre-admission certification number (IN1-28)"),
             _ts("verification_datetime",           "Verification date/time (IN1-29)"),
         ]
-        + _xcn_schema("verification_by", "Verified by", "IN1-30")
+        + _xcn_array_schema("verification_by", "Verified by (XCN, repeatable per spec)", "IN1-30")
         + _cwe_schema("type_of_agreement_code", "Type-of-agreement code (CWE)", "IN1-31")
         + _cwe_schema("billing_status", "Billing status (CWE)", "IN1-32")
         + [
@@ -3745,14 +4103,14 @@ def register_lakeflow_source(spark):
         ]
         + _cwe_schema("insureds_employment_status", "Insured's employment status", "IN1-42")
         + _cwe_schema("insureds_administrative_sex", "Insured's administrative sex", "IN1-43")
-        + _xad_schema("insureds_employers_address", "Insured's employer address", "IN1-44")
+        + _xad_array_schema("insureds_employers_address", "Insured's employer address (XAD, repeatable per spec)", "IN1-44")
         + [
             _s("verification_status",              "Verification status (IN1-45)"),
         ]
         + _cwe_schema("prior_insurance_plan_id", "Prior insurance plan ID (CWE)", "IN1-46")
         + _cwe_schema("coverage_type", "Coverage type (CWE)", "IN1-47")
         + _cwe_schema("handicap", "Handicap (CWE)", "IN1-48")
-        + _cx_schema("insureds_id_number", "Insured's ID (CX)", "IN1-49")
+        + _cx_array_schema("insureds_id_number", "Insured's ID (CX, repeatable per spec)", "IN1-49")
         + _cwe_schema("signature_code", "Signature code (CWE)", "IN1-50")
         + [
             _s("signature_code_date",              "Signature code date (IN1-51)"),
@@ -3774,14 +4132,14 @@ def register_lakeflow_source(spark):
         + [
             _pk_int_field("set_id",                           "Sequence number for this GT1 segment within the message (GT1-1)"),
         ]
-        + _cx_schema("guarantor_number", "Guarantor number (CX)", "GT1-2")
+        + _cx_array_schema("guarantor_number", "Guarantor number (CX, repeatable per spec)", "GT1-2")
         + [
             *_xpn_array_schema("guarantor_names", "Guarantor names", "GT1-3"),
             *_xpn_array_schema("guarantor_spouse_names", "Guarantor spouse names", "GT1-4"),
         ]
-        + _xad_schema("guarantor_address", "Guarantor address", "GT1-5")
-        + _xtn_schema("guarantor_ph_num_home", "Guarantor home phone", "GT1-6")
-        + _xtn_schema("guarantor_ph_num_business", "Guarantor business phone", "GT1-7")
+        + _xad_array_schema("guarantor_address", "Guarantor address (XAD, repeatable per spec)", "GT1-5")
+        + _xtn_array_schema("guarantor_ph_num_home", "Guarantor home phone (XTN, repeatable per spec)", "GT1-6")
+        + _xtn_array_schema("guarantor_ph_num_business", "Guarantor business phone (XTN, repeatable per spec)", "GT1-7")
         + [
             _ts("guarantor_date_of_birth",             "Guarantor date of birth (GT1-8)"),
         ]
@@ -3795,11 +4153,11 @@ def register_lakeflow_source(spark):
             _int_field("guarantor_priority",                   "Guarantor priority (GT1-15)"),
             *_xpn_array_schema("guarantor_employer_names", "Guarantor employer names", "GT1-16"),
         ]
-        + _xad_schema("guarantor_employer_address", "Guarantor employer address", "GT1-17")
-        + _xtn_schema("guarantor_employer_phone_number", "Guarantor employer phone", "GT1-18")
-        + _cx_schema("guarantor_employee_id_number", "Guarantor employee ID (CX)", "GT1-19")
+        + _xad_array_schema("guarantor_employer_address", "Guarantor employer address (XAD, repeatable per spec)", "GT1-17")
+        + _xtn_array_schema("guarantor_employer_phone_number", "Guarantor employer phone (XTN, repeatable per spec)", "GT1-18")
+        + _cx_array_schema("guarantor_employee_id_number", "Guarantor employee ID (CX, repeatable per spec)", "GT1-19")
         + _cwe_schema("guarantor_employment_status", "Guarantor employment status (CWE)", "GT1-20")
-        + _xon_schema("guarantor_organization_name", "Guarantor organization name", "GT1-21")
+        + _xon_array_schema("guarantor_organization_name", "Guarantor organization name (XON, repeatable per spec)", "GT1-21")
         + [
             _s("guarantor_billing_hold_flag",          "Billing hold flag Y/N (GT1-22)"),
         ]
@@ -3813,7 +4171,7 @@ def register_lakeflow_source(spark):
             _s("guarantor_household_annual_income",    "Household annual income (GT1-27.1)"),
             _int_field("guarantor_household_size",             "Household size (GT1-28)"),
         ]
-        + _cx_schema("guarantor_employer_id_number", "Guarantor employer ID (CX)", "GT1-29")
+        + _cx_array_schema("guarantor_employer_id_number", "Guarantor employer ID (CX, repeatable per spec)", "GT1-29")
         + _cwe_schema("guarantor_marital_status_code", "Guarantor marital status", "GT1-30")
         + [
             _s("guarantor_hire_effective_date",        "Guarantor hire date (GT1-31)"),
@@ -3838,14 +4196,14 @@ def register_lakeflow_source(spark):
         + [
             *_xpn_array_schema("gt1_contact_persons", "GT1 contact persons", "GT1-45"),
         ]
-        + _xtn_schema("contact_persons_telephone_number", "Contact person phone", "GT1-46")
+        + _xtn_array_schema("contact_persons_telephone_number", "Contact person phone (XTN, repeatable per spec)", "GT1-46")
         + _cwe_schema("contact_reason", "Contact reason", "GT1-47")
         + _cwe_schema("contact_relationship", "Contact relationship (CWE)", "GT1-48")
         + [
             _s("job_title",                            "Job title (GT1-49)"),
         ]
         + _cwe_schema("job_code_class", "Job code/class", "GT1-50")
-        + _xon_schema("guarantor_employers_org_name", "Guarantor employer organization name", "GT1-51")
+        + _xon_array_schema("guarantor_employers_org_name", "Guarantor employer organization name (XON, repeatable per spec)", "GT1-51")
         + _cwe_schema("handicap", "Handicap (CWE)", "GT1-52")
         + _cwe_schema("job_status", "Job status (CWE)", "GT1-53")
         + [
@@ -3889,13 +4247,13 @@ def register_lakeflow_source(spark):
         + _cwe_schema("fee_schedule", "Fee schedule (CWE)", "FT1-17")
         + _cwe_schema("patient_type", "Patient type (CWE)", "FT1-18")
         + _cwe_array_schema("diagnosis_code", "Diagnosis (CWE, repeatable per spec)", "FT1-19")
-        + _xcn_schema("performed_by", "Performed by", "FT1-20")
-        + _xcn_schema("ordered_by", "Ordered by", "FT1-21")
+        + _xcn_array_schema("performed_by", "Performed by (XCN, repeatable per spec)", "FT1-20")
+        + _xcn_array_schema("ordered_by", "Ordered by (XCN, repeatable per spec)", "FT1-21")
         + [
             _s("unit_cost",                               "Unit cost (FT1-22.1)"),
         ]
         + _ei_schema("filler_order_number", "Filler order number (EI)", "FT1-23")
-        + _xcn_schema("entered_by", "Entered by", "FT1-24")
+        + _xcn_array_schema("entered_by", "Entered by (XCN, repeatable per spec)", "FT1-24")
         + _cwe_schema("ft1_procedure_code", "Procedure code", "FT1-25")
         + _cwe_array_schema("ft1_procedure_code_modifier", "Procedure code modifier (CNE, repeatable per spec; CWE-shape struct since CNE shares components)", "FT1-26")
         + _cwe_schema("advanced_beneficiary_notice_code", "Advanced beneficiary notice (ABN) code (CWE)", "FT1-27")
@@ -3961,7 +4319,7 @@ def register_lakeflow_source(spark):
         + _cwe_schema("administered_units", "Units of measure", "RXA-7")
         + _cwe_schema("administered_dosage_form", "Dosage form", "RXA-8")
         + _cwe_array_schema("administration_notes", "Administration notes (CWE, repeatable per spec)", "RXA-9")
-        + _xcn_schema("administering_provider", "Provider who administered", "RXA-10")
+        + _xcn_array_schema("administering_provider", "Provider who administered (XCN, repeatable per spec)", "RXA-10")
         + [
             _s("administered_at_location",                 "Administration location (RXA-11)"),
             _s("administered_per_time_unit",               "Rate time unit (RXA-12)"),
@@ -4014,20 +4372,20 @@ def register_lakeflow_source(spark):
         + [
             _s("appointment_timing_quantity",  "Appointment timing quantity (SCH-11, deprecated)"),
         ]
-        + _xcn_schema("placer_contact_person", "Placer contact person", "SCH-12")
+        + _xcn_array_schema("placer_contact_person", "Placer contact person (XCN, repeatable per spec)", "SCH-12")
         + _xtn_schema("placer_contact_phone_number", "Placer contact phone", "SCH-13")
-        + _xad_schema("placer_contact_address", "Placer contact address", "SCH-14")
+        + _xad_array_schema("placer_contact_address", "Placer contact address (XAD, repeatable per spec)", "SCH-14")
         + [
             _s("placer_contact_location",      "Placer contact location (SCH-15)"),
         ]
-        + _xcn_schema("filler_contact_person", "Filler contact person", "SCH-16")
+        + _xcn_array_schema("filler_contact_person", "Filler contact person (XCN, repeatable per spec)", "SCH-16")
         + _xtn_schema("filler_contact_phone_number", "Filler contact phone", "SCH-17")
-        + _xad_schema("filler_contact_address", "Filler contact address", "SCH-18")
+        + _xad_array_schema("filler_contact_address", "Filler contact address (XAD, repeatable per spec)", "SCH-18")
         + [
             _s("filler_contact_location",      "Filler contact location (SCH-19)"),
         ]
-        + _xcn_schema("entered_by_person", "Person who entered the schedule", "SCH-20")
-        + _xtn_schema("entered_by_phone_number", "Entered by phone", "SCH-21")
+        + _xcn_array_schema("entered_by_person", "Person who entered the schedule (XCN, repeatable per spec)", "SCH-20")
+        + _xtn_array_schema("entered_by_phone_number", "Entered by phone (XTN, repeatable per spec)", "SCH-21")
         + [
             _s("entered_by_location",          "Entered by location (SCH-22)"),
         ]
@@ -4053,15 +4411,15 @@ def register_lakeflow_source(spark):
             _s("document_content_presentation",        "Content presentation type (TXA-3)"),
             _ts("activity_datetime",                   "Activity date/time (TXA-4)"),
         ]
-        + _xcn_schema("primary_activity_provider", "Primary activity provider", "TXA-5")
+        + _xcn_array_schema("primary_activity_provider", "Primary activity provider (XCN, repeatable per spec)", "TXA-5")
         + [
             _ts("origination_datetime",                "Origination date/time (TXA-6)"),
             _ts("transcription_datetime",              "Transcription date/time (TXA-7)"),
             _ts("edit_datetime",                       "Edit date/time (TXA-8)"),
         ]
-        + _xcn_schema("originator", "Document originator", "TXA-9")
-        + _xcn_schema("assigned_document_authenticator", "Assigned document authenticator", "TXA-10")
-        + _xcn_schema("transcriptionist", "Transcriptionist", "TXA-11")
+        + _xcn_array_schema("originator", "Document originator (XCN, repeatable per spec)", "TXA-9")
+        + _xcn_array_schema("assigned_document_authenticator", "Assigned document authenticator (XCN, repeatable per spec)", "TXA-10")
+        + _xcn_array_schema("transcriptionist", "Transcriptionist (XCN, repeatable per spec)", "TXA-11")
         + _ei_schema("unique_document_number", "Unique document number (EI)", "TXA-12")
         + _ei_schema("parent_document_number", "Parent document number (EI)", "TXA-13")
         + _ei_array_schema("placer_order_number", "Placer order number (EI, repeatable per spec)", "TXA-14")
@@ -4075,8 +4433,8 @@ def register_lakeflow_source(spark):
             _s("document_change_reason",               "Reason for document change (TXA-21)"),
             _s("authentication_person_time_stamp",     "Authenticator with timestamp (TXA-22)"),
         ]
-        + _xcn_schema("distributed_copies", "Distributed copy recipient", "TXA-23")
-        + _cwe_schema("folder_assignment", "Folder assignment", "TXA-24")
+        + _xcn_array_schema("distributed_copies", "Distributed copy recipient (XCN, repeatable per spec)", "TXA-23")
+        + _cwe_array_schema("folder_assignment", "Folder assignment (CWE, repeatable per spec)", "TXA-24")
         + [
             _s("document_title",                       "Document title (TXA-25, v2.6+)"),
             _ts("agreed_due_datetime",                 "Agreed due date/time (TXA-26, v2.8+)"),

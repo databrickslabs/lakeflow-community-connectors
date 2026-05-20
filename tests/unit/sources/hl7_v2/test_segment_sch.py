@@ -24,7 +24,7 @@ class TestSCHExtraction:
         assert row["appointment_type"] == "FU"
         assert row["appointment_duration"] == 30
         assert row["filler_status_code"] == "BOOKED"
-        assert row["placer_contact_person_id"] == "DOC002"
+        assert row["placer_contact_person"][0]["id"] == "DOC002"
 
 
 class TestSCHMissingFields:

@@ -17,13 +17,13 @@ class TestPIDExtraction:
     def test_adt_pid(self):
         msg = parse_first(load_sample("sample_adt.hl7"))
         row = extract_segment(msg, "PID", _extract_pid)
-        assert row["patient_id"] == "MRN12345"
+        assert row["patient_id"][0]["id"] == "MRN12345"
         assert row["patient_names"][0]["family_name"] == "Doe"
         assert row["patient_names"][0]["given_name"] == "John"
         assert row["date_of_birth"] is not None
         assert row["administrative_sex"] == "M"
-        assert row["address_city"] == "Boston"
-        assert row["address_state"] == "MA"
+        assert row["address"][0]["city"] == "Boston"
+        assert row["address"][0]["state"] == "MA"
 
     def test_covid_pid_race(self):
         msg = parse_first(load_sample("sample_oru_covid.hl7"))
@@ -47,7 +47,7 @@ class TestPIDExtraction:
         assert row["patient_names"][0]["family_name"] == "Martinez"
         assert row["patient_names"][0]["given_name"] == "Sofia"
         assert row["marital_status"] == "M"
-        assert row["address_zip"] == "60614"
+        assert row["address"][0]["zip"] == "60614"
         assert row["ssn"] == "987-65-4321"
 
     def test_lyme_pid_ethnicity(self):
@@ -71,7 +71,7 @@ class TestPIDMissingFields:
         assert row["administrative_sex"] is None
         # PID-10 race is now ArrayType<CWE>; absent field yields None.
         assert row["race"] is None
-        assert row["address_city"] is None
+        assert row["address"] is None
         assert row["ssn"] is None
 
     def test_pid_with_only_mrn(self):
@@ -80,10 +80,66 @@ class TestPIDMissingFields:
             "PID|1||MRN999^^^HOSP^MR"
         )
         row = _extract_pid(msg.get_segment("PID"))
-        assert row["patient_id"] == "MRN999"
-        assert row["patient_id_assigning_authority"] == "HOSP"
-        assert row["patient_id_type_code"] == "MR"
+        assert row["patient_id"][0]["id"] == "MRN999"
+        assert row["patient_id"][0]["assigning_authority"] == "HOSP"
+        assert row["patient_id"][0]["type_code"] == "MR"
         assert row["patient_names"] is None
+
+
+class TestPIDArrayPromotion:
+    """PID-3 (patient identifier list, CX 1..*), PID-11 (address, XAD 0..*),
+    PID-13/14 (phone, XTN 0..*), and PID-21 (mother's identifier, CX 0..*)
+    are all spec-typed 0..*/1..* — must be captured as ARRAY<STRUCT<...>>
+    preserving every ~-separated repetition.
+    """
+
+    def test_pid3_captures_all_patient_identifier_repetitions(self):
+        msg = parse_message(
+            "MSH|^~\\&|A|B|C|D|20240101||ADT^A01|1|P|2.5\r"
+            "PID|1||MRN1^^^HOSP^MR~SSN^^^USA^SS~ACCT99^^^HOSP^AN||Doe^John"
+        )
+        row = _extract_pid(msg.get_segment("PID"))
+        ids = row["patient_id"]
+        assert len(ids) == 3
+        assert ids[0]["id"] == "MRN1"
+        assert ids[0]["assigning_authority"] == "HOSP"
+        assert ids[0]["type_code"] == "MR"
+        assert ids[1]["id"] == "SSN"
+        assert ids[1]["type_code"] == "SS"
+        assert ids[2]["id"] == "ACCT99"
+        assert ids[2]["type_code"] == "AN"
+
+    def test_pid11_captures_multiple_addresses(self):
+        msg = parse_message(
+            "MSH|^~\\&|A|B|C|D|20240101||ADT^A01|1|P|2.5\r"
+            "PID|1||MRN^^^HOSP||Doe^John||19800101|M|||"
+            "123 Main^^Boston^MA^02101^USA^H~456 Work^Suite 5^Boston^MA^02110^USA^B"
+        )
+        row = _extract_pid(msg.get_segment("PID"))
+        addrs = row["address"]
+        assert len(addrs) == 2
+        assert addrs[0]["street"] == "123 Main"
+        assert addrs[0]["city"] == "Boston"
+        assert addrs[0]["type"] == "H"
+        assert addrs[1]["street"] == "456 Work"
+        assert addrs[1]["other_designation"] == "Suite 5"
+        assert addrs[1]["type"] == "B"
+
+    def test_pid13_captures_multiple_phones(self):
+        msg = parse_message(
+            "MSH|^~\\&|A|B|C|D|20240101||ADT^A01|1|P|2.5\r"
+            "PID|1||MRN||Doe^John||19800101|M|||||"
+            "(617)555-1212^PRN^PH^^^617^5551212~(617)555-1111^ORN^CP^^^617^5551111"
+        )
+        row = _extract_pid(msg.get_segment("PID"))
+        phones = row["home_phone"]
+        assert len(phones) == 2
+        assert phones[0]["number"] == "(617)555-1212"
+        assert phones[0]["use_code"] == "PRN"
+        assert phones[0]["equipment_type"] == "PH"
+        assert phones[0]["area_code"] == "617"
+        assert phones[1]["number"] == "(617)555-1111"
+        assert phones[1]["equipment_type"] == "CP"
 
 
 class TestPIDEdgeCases:

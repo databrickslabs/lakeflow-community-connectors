@@ -19,7 +19,7 @@ class TestIN1Extraction:
         row = extract_segment(msg, "IN1", _extract_in1)
         assert row["insurance_plan"] == "BCBS001"
         assert row["insurance_plan_text"] == "Blue Cross Blue Shield"
-        assert row["insurance_company_name"] == "Blue Cross Blue Shield of Illinois"
+        assert row["insurance_company_name"][0]["name"] == "Blue Cross Blue Shield of Illinois"
         assert row["group_number"] == "GRP7700"
         assert row["plan_type"] == "PPO"
         assert row["insured_names"][0]["family_name"] == "Martinez"
@@ -56,3 +56,30 @@ class TestIN1MissingFields:
         assert row["insurance_plan"] == "PLAN001"
         assert row["insurance_plan_text"] == "Basic Plan"
         assert row["insurance_company"] == "COMP001"
+
+
+class TestIN1ArrayPromotion:
+    """IN1-4 (insurance_company_name, XON 0..*) and IN1-5 (insurance_company_address,
+    XAD 0..*) are spec-typed 0..* — must be captured as ARRAY<STRUCT<...>>
+    preserving every ~-separated repetition.
+    """
+
+    def test_insurance_company_name_xon_array(self):
+        # IN1-4 carries one or more organization names with full XON sub-components.
+        msg = parse_message(
+            "MSH|^~\\&|A|B|C|D|20240101||ADT^A01|1|P|2.5\r"
+            "IN1|1|PLAN001|COMP001|"
+            "BCBS Illinois^L^IL01^^^BCBS&urn:bcbs&ISO^XX"
+            "~Anthem Inc^L^AN02^^^ANTHEM&urn:anthem&ISO^XX"
+        )
+        row = _extract_in1(msg.get_segment("IN1"))
+        names = row["insurance_company_name"]
+        assert len(names) == 2
+        assert names[0]["name"] == "BCBS Illinois"
+        assert names[0]["type_code"] == "L"
+        assert names[0]["id"] == "IL01"
+        assert names[0]["assigning_authority"] == "BCBS"
+        assert names[0]["assigning_authority_universal_id"] == "urn:bcbs"
+        assert names[0]["id_type_code"] == "XX"
+        assert names[1]["name"] == "Anthem Inc"
+        assert names[1]["id"] == "AN02"

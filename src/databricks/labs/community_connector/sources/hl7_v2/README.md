@@ -170,6 +170,21 @@ All tables use **append-only** ingestion. HL7 v2 is a messaging protocol — eve
 
 ## Data Type Mapping
 
+### TL;DR — the two-rule policy
+
+The connector is **lossless by design** — every component of every composite (CWE, XCN, XPN, CX, XAD, XON, XTN, EI, EIP, …) is always preserved. Only the packaging differs based on HL7 spec cardinality:
+
+1. **Single-occurrence composite (`0..1` / `1..1`)** → exploded into flat sibling `STRING` columns on the row, named `<prefix>_<subfield>`.
+   E.g. `pv1.visit_number` (CX 0..1) becomes `visit_number`, `visit_number_check_digit`, `visit_number_assigning_authority`, … all on the same row. `dg1.diagnosis_type` (CWE 0..1) becomes `diagnosis_type` (the code), `diagnosis_type_text`, `diagnosis_type_coding_system`, … .
+2. **Repeating composite (`0..*` / `1..*`)** → wrapped into a single `ARRAY<STRUCT<...>>` column. The struct fields hold the same sub-components; access them with `[i].<subfield>`.
+   E.g. `pv1.attending_doctor` (XCN 0..*) is `ARRAY<STRUCT<id, family_name, given_name, …>>`, accessed as `pv1.attending_doctor[0].id`, `pv1.attending_doctor[0].family_name`. Every `~`-separated repetition is preserved — nothing is silently dropped.
+
+The single intentional exception is **`OBX-5` (observation value)**, which is spec-typed `Varies` — its true type is determined at runtime by `OBX-2` (`value_type`). It stays a plain STRING and the consumer must interpret it based on `value_type`.
+
+The table and sections below give the full per-type details and the complete enumeration of array columns.
+
+---
+
 All HL7 v2 fields are stored as `STRING`. The connector extracts **all** components from composite types into individual columns. Downstream SQL can cast as needed.
 
 | HL7 Data Type | Examples | Databricks Type | Extraction pattern |
@@ -179,12 +194,13 @@ All HL7 v2 fields are stored as `STRING`. The connector extracts **all** compone
 | TS, DT, TM | Timestamps, dates, times | STRING | HL7 DTM format; datetime fields like `date_of_birth` are parsed to `TIMESTAMP` |
 | CE, CWE, CNE | Coded elements | STRING (or `ARRAY<STRUCT>` if repeating) | All 9 active components: `code`, `text`, `coding_system`, `alt_code`, `alt_text`, `alt_coding_system`, `coding_system_version`, `alt_coding_system_version`, `original_text` |
 | XPN | Person name | STRING (or `ARRAY<STRUCT>` if repeating) | ALL 14 active components via `_xpn_fields()` helper: `family_name` (1), `given_name` (2), `middle_name` (3), `suffix` (4), `prefix` (5), `degree` (6), `name_type_code` (7), `name_representation_code` (8), `name_context` (9), `name_assembly_order` (11), `name_effective_date` (12), `name_expiration_date` (13), `professional_suffix` (14), `called_by` (15). |
-| XAD | Address | STRING | Components: `street`, `other_designation`, `city`, `state`, `zip`, `country`, `type` |
-| XCN | Composite ID/name | STRING | Components: `id`, `family_name`, `given_name`, `prefix` |
-| XON | Organization name | STRING | All 10 components: `name`, `type_code`, `id`, `check_digit`, `check_digit_scheme`, `assigning_authority`, `id_type_code`, `assigning_facility`, `name_rep_code`, `identifier` |
+| XAD | Address | STRING (or `ARRAY<STRUCT>` if repeating) | All 23 active components: `street`, `other_designation`, `city`, `state`, `zip`, `country`, `type`, `other_geographic`, `county_parish_code/_text/_coding_system`, `census_tract/_text/_coding_system`, `representation_code`, `effective_date`, `expiration_date`, `expiration_reason/_text/_coding_system`, `temporary_indicator`, `bad_address_indicator`, `usage`, `addressee`, `comment`, `preference_order`, `protection_code/_text/_coding_system`, `identifier` |
+| XCN | Composite ID/name | STRING (or `ARRAY<STRUCT>` if repeating) | All 23 active components: `id`, `family_name`, `given_name`, `middle_name`, `suffix`, `prefix`, `degree`, `source_table`, `assigning_authority/_universal_id/_universal_id_type`, `name_type_code`, `check_digit`, `check_digit_scheme`, `identifier_type_code`, `assigning_facility/_universal_id/_universal_id_type`, `name_representation_code`, `name_assembly_order`, `effective_date`, `expiration_date`, `professional_suffix` |
+| XON | Organization name | STRING (or `ARRAY<STRUCT>` if repeating) | All 14 active components: `name`, `type_code`, `id`, `check_digit`, `check_digit_scheme`, `assigning_authority/_universal_id/_universal_id_type`, `id_type_code`, `assigning_facility/_universal_id/_universal_id_type`, `name_rep_code`, `identifier` |
 | HD | Hierarchic designator | STRING | All 3 components: `namespace_id`, `universal_id`, `universal_id_type` |
 | EI | Entity identifier | STRING (or `ARRAY<STRUCT>` if repeating) | All 4 components: `entity_identifier`, `namespace_id`, `universal_id`, `universal_id_type` |
-| CX | Extended composite ID | STRING | Key components: `id_value`, `check_digit`, `assigning_authority`, `type_code` |
+| EIP | Entity identifier pair | `ARRAY<STRUCT<parent: EI, child: EI>>` | Two EI sub-components (placer/filler order numbers, separated by `&` within each component). E.g. `obx.observation_related_specimen[0].parent.entity_identifier`. |
+| CX | Extended composite ID | STRING (or `ARRAY<STRUCT>` if repeating) | All 16 components: `id`, `check_digit`, `check_digit_scheme`, `assigning_authority/_universal_id/_universal_id_type`, `type_code`, `assigning_facility/_universal_id/_universal_id_type`, `effective_date`, `expiration_date`, `assigning_jurisdiction`, `assigning_agency`, `security_check`, `security_check_scheme` |
 | PL | Person location | STRING | Components: `point_of_care`, `room`, `bed`, `facility`, `status`, `type` |
 
 **Key rules for composite type extraction:**
@@ -228,18 +244,43 @@ For `0..*` CWE fields (`pv1.contract_code`, `obr.relevant_clinical_information`,
 
 The one intentional exception is **`OBX-5` (observation value)**, which is spec-typed `Varies` — its actual data type is whatever `OBX-2` (`value_type`) says it is. That field stays a plain STRING; consumers must interpret it based on the sibling `value_type` column.
 
+### Lossless `0..*` extraction for XCN / CX / XAD / XON / XTN / EIP composite fields
+
+> **Breaking change.** Earlier builds of this connector flattened spec-typed `0..*` composite fields (provider names, identifier lists, addresses, organization names, telecoms, EIPs) into the first repetition's STRING sub-columns — e.g. `pv1.attending_doctor_id` (STRING). Every additional repetition was silently dropped, and even within the first repetition the structure was lossy for callers wanting downstream sub-components. As of this release, **74 fields across 18 segments** are promoted from flat helpers to `ARRAY<STRUCT<...>>`. Downstream queries that referenced `<prefix>_<subfield>` columns (e.g. `attending_doctor_id`, `attending_doctor_family_name`) **must be rewritten** to use array element access (`attending_doctor[0].id`, `attending_doctor[0].family_name`). See "Querying array-of-struct columns" below for SQL patterns.
+
+The full list of newly-promoted fields, grouped by composite type:
+
+- **XCN 0..* (24 fields)** — `dg1.diagnosing_clinician` (DG1-16), `evn.operator` (EVN-5), `ft1.performed_by`/`ordered_by`/`entered_by` (FT1-20/21/24), `in1.verification_by` (IN1-30), `obr.collector` (OBR-10), `obx.responsible_observer` (OBX-16), `pv1.attending_doctor`/`referring_doctor`/`consulting_doctor`/`admitting_doctor` (PV1-7/8/9/17), `pv2.referral_source` (PV2-13), `rxa.administering_provider` (RXA-10), `sch.placer_contact_person`/`filler_contact_person`/`entered_by_person` (SCH-12/16/20), `txa.primary_activity_provider`/`originator`/`assigned_document_authenticator`/`transcriptionist`/`distributed_copies` (TXA-5/9/10/11/23).
+- **CX 0..* / 1..* (13 fields)** — `gt1.guarantor_number`/`guarantor_employee_id_number`/`guarantor_employer_id_number` (GT1-2/19/29), `in1.insureds_id_number` (IN1-49), `mrg.prior_patient_id` (MRG-1, `1..*`), `mrg.prior_alternate_visit_id` (MRG-6), `nk1.associated_party_identifiers` (NK1-33), `obr.alternate_placer_order` (OBR-53), `orc.alternate_placer_order_number` (ORC-33), `pd1.duplicate_patient` (PD1-10), `pid.patient_id` (PID-3, `1..*`), `pid.mothers_identifier` (PID-21), `pv1.alternate_visit_id` (PV1-50), `spm.accession_id`/`other_specimen_id` (SPM-30/31).
+- **XAD 0..* (8 fields)** — `gt1.guarantor_address`/`guarantor_employer_address` (GT1-5/17), `in1.insurance_company_address`/`insureds_address`/`insureds_employers_address` (IN1-5/19/44), `nk1.address`/`contact_persons_address` (NK1-4/32), `pid.address` (PID-11), `sch.placer_contact_address`/`filler_contact_address` (SCH-14/18).
+- **XTN 0..* (11 fields)** — `gt1.guarantor_ph_num_home`/`guarantor_ph_num_business`/`guarantor_employer_phone_number`/`contact_persons_telephone_number` (GT1-6/7/18/46), `in1.insurance_co_phone_number` (IN1-7), `nk1.phone_number`/`business_phone`/`contact_person_telephone` (NK1-5/6/31), `pid.home_phone`/`business_phone`/`patient_telecom` (PID-13/14/40), `sch.entered_by_phone_number` (SCH-21).
+- **XON 0..* (8 fields)** — `gt1.guarantor_organization_name`/`guarantor_employers_org_name` (GT1-21/51), `in1.insurance_company_name`/`group_name`/`insureds_group_emp_name` (IN1-4/9/11), `nk1.organization_name` (NK1-13), `pd1.patient_primary_facility`/`place_of_worship` (PD1-3/14), `pv2.clinic_organization` (PV2-23).
+- **CWE 0..* (4 additional fields)** — `nte.coded_comment` (NTE-9), `obx.observation_value_absent_reason` (OBX-32), `pid.tribal_citizenship` (PID-39), `txa.folder_assignment` (TXA-24). (These were missed in the earlier CWE pass.)
+- **EIP 0..* (2 fields)** — `obx.observation_related_specimen` (OBX-33) and `orc.parent_order` (ORC-8). These are modeled as `ARRAY<STRUCT<parent: STRUCT<...4 EI fields...>, child: STRUCT<...4 EI fields...>>>`.
+
+`xtn` only required flipping the schema/extractor calls — the `_xtn_array_*` helper already existed from an earlier round. The other types (`_xcn_array_*`, `_xon_array_*`, `_xad_array_*`, `_cx_array_*`, `_eip_array_*`) are newly introduced.
+
 ### Querying array-of-struct columns
 
-For any `ARRAY<STRUCT<...>>` column (`pid.race`, `al1.allergy_reaction`, `obr.order_callback_phone`, etc.), use one of these patterns:
+For any `ARRAY<STRUCT<...>>` column (`pid.race`, `pid.patient_id`, `pv1.attending_doctor`, `al1.allergy_reaction`, `obx.observation_related_specimen`, etc.), use one of these patterns:
 
 ```sql
 -- First repetition only (closest analog to the old flat columns)
 SELECT
   message_id,
-  race[0].code            AS race_code,
-  race[0].text            AS race_text,
-  race[0].coding_system   AS race_coding_system
+  race[0].code             AS race_code,
+  race[0].text             AS race_text,
+  patient_id[0].id         AS mrn,
+  patient_id[0].type_code  AS id_type
 FROM pid;
+
+-- Pull a single primary attending physician's identifier/name from PV1
+SELECT
+  message_id,
+  attending_doctor[0].id           AS attending_id,
+  attending_doctor[0].family_name  AS attending_family_name,
+  attending_doctor[0].given_name   AS attending_given_name
+FROM pv1;
 
 -- Fan out one row per repetition
 SELECT
@@ -249,21 +290,40 @@ SELECT
 FROM al1
 LATERAL VIEW explode(allergy_reaction) AS reaction;
 
+SELECT
+  message_id,
+  d.id AS clinician_id,
+  d.family_name
+FROM dg1
+LATERAL VIEW explode(diagnosing_clinician) AS d;
+
 -- Count repetitions or filter by any one of them
 SELECT message_id, size(citizenship) AS num_citizenships FROM pid;
 SELECT message_id FROM pid
 WHERE exists(race, r -> r.code = '2028-9');
+
+-- EIP (paired EI) — observation-related specimen on OBX-33
+SELECT
+  message_id,
+  observation_related_specimen[0].parent.entity_identifier AS parent_spec_id,
+  observation_related_specimen[0].child.entity_identifier  AS child_spec_id
+FROM obx;
 ```
 
 **Non-string column types:**
 
 - `set_id` is stored as `BIGINT`.
 - Datetime fields parsed from HL7 DTM format are stored as `TIMESTAMP`.
-- Truly-repeating HL7 fields (cardinality `*`, separated by `~`) are stored as Spark `ARRAY` columns rather than collapsed to first-repetition strings. There are 70+ such columns spanning effectively every segment table. Four element shapes:
+- Truly-repeating HL7 fields (cardinality `*`, separated by `~`) are stored as Spark `ARRAY` columns rather than collapsed to first-repetition strings. There are 140+ such columns spanning effectively every segment table. Eight element shapes:
   - `ARRAY<STRUCT<...>>` of **XPN (person name)** structs — one entry per repetition of person-name fields, e.g. `pid.patient_names`, `pid.mothers_maiden_names`, `nk1.contact_persons`, `gt1.guarantor_names`, `mrg.prior_patient_names`. The struct has 14 fields (`family_name`, `given_name`, `middle_name`, `suffix`, `prefix`, `degree`, `name_type_code`, `name_representation_code`, `name_context`, `name_assembly_order`, `name_effective_date`, `name_expiration_date`, `professional_suffix`, `called_by`).
   - `ARRAY<STRUCT<...>>` of **CWE / CNE** structs (9 components: `code`, `text`, `coding_system`, `alt_code`, `alt_text`, `alt_coding_system`, `coding_system_version`, `alt_coding_system_version`, `original_text`) — one entry per repetition. Examples: `pid.race`, `pid.ethnic_group`, `pid.citizenship`, `pid.identity_reliability_code`, `nk1.living_dependency`, `nk1.ambulatory_status`, `nk1.citizenship`, `nk1.ethnic_group`, `nk1.contact_reason`, `nk1.race`, `pd1.living_dependency`, `pd1.advance_directive_code`, `pv1.ambulatory_status`, `pv1.contract_code`, `pv2.visit_user_code`, `pv2.notify_clergy_code`, `pv2.recreational_drug_use_code`, `pv2.precaution_code`, `pv2.advance_directive_code_pv2`, `obr.relevant_clinical_information`, `obr.reason_for_study`, `obr.transport_logistics`, `obr.collectors_comment`, `obr.planned_patient_transport_comment`, `obr.procedure_code_modifier`, `obr.placer_supplemental_service_info`, `obr.filler_supplemental_service_info`, `obx.interpretation_codes`, `obx.observation_method`, `obx.observation_site`, `obx.local_process_control`, `al1.allergy_reaction` (lenient ST), `iam.allergy_reaction` (lenient ST), `pr1.procedure_code_modifier`, `pr1.tissue_type_code`, `spm.specimen_type_modifier`, `spm.specimen_additives`, `spm.specimen_source_site_modifier`, `spm.specimen_role`, `spm.specimen_handling_code`, `spm.specimen_risk_code`, `spm.specimen_reject_reason`, `spm.specimen_condition`, `gt1.ambulatory_status`, `gt1.citizenship`, `gt1.ethnic_group`, `gt1.guarantor_race`, `ft1.diagnosis_code`, `ft1.ft1_procedure_code_modifier`, `ft1.special_processing_code`, `ft1.dme_condition_indicator_code`, `rxa.administration_notes`, `rxa.substance_manufacturer_name`, `rxa.substance_treatment_refusal_reason`, `rxa.indication`, `msh.security_handling_instructions`, `msh.special_access_restriction`.
   - `ARRAY<STRUCT<...>>` of **EI (entity identifier)** structs (4 components: `entity_identifier`, `namespace_id`, `universal_id`, `universal_id_type`) — e.g. `msh.message_profile_identifiers`, `obx.equipment_instance_identifier`, `sch.sch_placer_order_number`, `sch.sch_filler_order_number`, `txa.placer_order_number`.
-  - `ARRAY<STRUCT<...>>` of **XTN (telecom)** structs (18 components) — e.g. `obr.order_callback_phone`, `orc.call_back_phone`.
+  - `ARRAY<STRUCT<...>>` of **XTN (telecom)** structs (18 components) — `pid.home_phone`, `pid.business_phone`, `pid.patient_telecom`, `nk1.phone_number`, `nk1.business_phone`, `nk1.contact_person_telephone`, `in1.insurance_co_phone_number`, `gt1.guarantor_ph_num_home`, `gt1.guarantor_ph_num_business`, `gt1.guarantor_employer_phone_number`, `gt1.contact_persons_telephone_number`, `sch.entered_by_phone_number`, `obr.order_callback_phone`, `orc.call_back_phone`.
+  - `ARRAY<STRUCT<...>>` of **XCN (person identifier + name)** structs (23 components: `id`, `family_name`, `given_name`, `middle_name`, …) — `dg1.diagnosing_clinician`, `evn.operator`, `ft1.performed_by`, `ft1.ordered_by`, `ft1.entered_by`, `in1.verification_by`, `obr.collector`, `obx.responsible_observer`, `pv1.attending_doctor`, `pv1.referring_doctor`, `pv1.consulting_doctor`, `pv1.admitting_doctor`, `pv2.referral_source`, `rxa.administering_provider`, `sch.placer_contact_person`, `sch.filler_contact_person`, `sch.entered_by_person`, `txa.primary_activity_provider`, `txa.originator`, `txa.assigned_document_authenticator`, `txa.transcriptionist`, `txa.distributed_copies`.
+  - `ARRAY<STRUCT<...>>` of **CX (extended composite ID)** structs (16 components: `id`, `check_digit`, `assigning_authority`, `type_code`, …) — `pid.patient_id`, `pid.mothers_identifier`, `mrg.prior_patient_id`, `mrg.prior_alternate_visit_id`, `pv1.alternate_visit_id`, `obr.alternate_placer_order`, `orc.alternate_placer_order_number`, `gt1.guarantor_number`, `gt1.guarantor_employee_id_number`, `gt1.guarantor_employer_id_number`, `in1.insureds_id_number`, `nk1.associated_party_identifiers`, `pd1.duplicate_patient`, `spm.accession_id`, `spm.other_specimen_id`.
+  - `ARRAY<STRUCT<...>>` of **XAD (address)** structs (30 components: `street`, `city`, `state`, `zip`, …) — `pid.address`, `nk1.address`, `nk1.contact_persons_address`, `gt1.guarantor_address`, `gt1.guarantor_employer_address`, `in1.insurance_company_address`, `in1.insureds_address`, `in1.insureds_employers_address`, `sch.placer_contact_address`, `sch.filler_contact_address`.
+  - `ARRAY<STRUCT<...>>` of **XON (organization name + id)** structs (14 components: `name`, `type_code`, `id`, `assigning_authority`, …) — `in1.insurance_company_name`, `in1.group_name`, `in1.insureds_group_emp_name`, `gt1.guarantor_organization_name`, `gt1.guarantor_employers_org_name`, `nk1.organization_name`, `pd1.patient_primary_facility`, `pd1.place_of_worship`, `pv2.clinic_organization`.
+  - `ARRAY<STRUCT<parent: STRUCT<...EI...>, child: STRUCT<...EI...>>>` of **EIP (entity identifier pair)** structs — `obx.observation_related_specimen`, `orc.parent_order`. Access as `obx.observation_related_specimen[0].parent.entity_identifier`.
   - `ARRAY<STRING>` for repeating simple ID/IS fields — `msh.character_set`, `obx.nature_of_abnormal_test`.
 
 Non-repeating composite fields (single occurrence) remain flattened into separate `STRING` columns rather than wrapped in single-element arrays, matching the convention in the API doc's composite-type table above. The full unparsed value is always preserved in `raw_segment`.

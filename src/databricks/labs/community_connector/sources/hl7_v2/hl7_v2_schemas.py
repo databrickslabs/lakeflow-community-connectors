@@ -141,6 +141,120 @@ _XTN_STRUCT = StructType([
 ])
 
 
+_XCN_STRUCT = StructType([
+    StructField("id", StringType(), nullable=True),
+    StructField("family_name", StringType(), nullable=True),
+    StructField("given_name", StringType(), nullable=True),
+    StructField("middle_name", StringType(), nullable=True),
+    StructField("suffix", StringType(), nullable=True),
+    StructField("prefix", StringType(), nullable=True),
+    StructField("degree", StringType(), nullable=True),
+    StructField("source_table", StringType(), nullable=True),
+    StructField("assigning_authority", StringType(), nullable=True),
+    StructField("assigning_authority_universal_id", StringType(), nullable=True),
+    StructField("assigning_authority_universal_id_type", StringType(), nullable=True),
+    StructField("name_type_code", StringType(), nullable=True),
+    StructField("check_digit", StringType(), nullable=True),
+    StructField("check_digit_scheme", StringType(), nullable=True),
+    StructField("identifier_type_code", StringType(), nullable=True),
+    StructField("assigning_facility", StringType(), nullable=True),
+    StructField("assigning_facility_universal_id", StringType(), nullable=True),
+    StructField("assigning_facility_universal_id_type", StringType(), nullable=True),
+    StructField("name_representation_code", StringType(), nullable=True),
+    StructField("name_assembly_order", StringType(), nullable=True),
+    StructField("effective_date", StringType(), nullable=True),
+    StructField("expiration_date", StringType(), nullable=True),
+    StructField("professional_suffix", StringType(), nullable=True),
+])
+
+
+_XON_STRUCT = StructType([
+    StructField("name", StringType(), nullable=True),
+    StructField("type_code", StringType(), nullable=True),
+    StructField("id", StringType(), nullable=True),
+    StructField("check_digit", StringType(), nullable=True),
+    StructField("check_digit_scheme", StringType(), nullable=True),
+    StructField("assigning_authority", StringType(), nullable=True),
+    StructField("assigning_authority_universal_id", StringType(), nullable=True),
+    StructField("assigning_authority_universal_id_type", StringType(), nullable=True),
+    StructField("id_type_code", StringType(), nullable=True),
+    StructField("assigning_facility", StringType(), nullable=True),
+    StructField("assigning_facility_universal_id", StringType(), nullable=True),
+    StructField("assigning_facility_universal_id_type", StringType(), nullable=True),
+    StructField("name_rep_code", StringType(), nullable=True),
+    StructField("identifier", StringType(), nullable=True),
+])
+
+
+_CX_STRUCT = StructType([
+    StructField("id", StringType(), nullable=True),
+    StructField("check_digit", StringType(), nullable=True),
+    StructField("check_digit_scheme", StringType(), nullable=True),
+    StructField("assigning_authority", StringType(), nullable=True),
+    StructField("assigning_authority_universal_id", StringType(), nullable=True),
+    StructField("assigning_authority_universal_id_type", StringType(), nullable=True),
+    StructField("type_code", StringType(), nullable=True),
+    StructField("assigning_facility", StringType(), nullable=True),
+    StructField("assigning_facility_universal_id", StringType(), nullable=True),
+    StructField("assigning_facility_universal_id_type", StringType(), nullable=True),
+    StructField("effective_date", StringType(), nullable=True),
+    StructField("expiration_date", StringType(), nullable=True),
+    StructField("assigning_jurisdiction", StringType(), nullable=True),
+    StructField("assigning_agency", StringType(), nullable=True),
+    StructField("security_check", StringType(), nullable=True),
+    StructField("security_check_scheme", StringType(), nullable=True),
+])
+
+
+_XAD_STRUCT = StructType([
+    StructField("street", StringType(), nullable=True),
+    StructField("other_designation", StringType(), nullable=True),
+    StructField("city", StringType(), nullable=True),
+    StructField("state", StringType(), nullable=True),
+    StructField("zip", StringType(), nullable=True),
+    StructField("country", StringType(), nullable=True),
+    StructField("type", StringType(), nullable=True),
+    StructField("other_geographic", StringType(), nullable=True),
+    StructField("county_parish_code", StringType(), nullable=True),
+    StructField("county_parish_text", StringType(), nullable=True),
+    StructField("county_parish_coding_system", StringType(), nullable=True),
+    StructField("census_tract", StringType(), nullable=True),
+    StructField("census_tract_text", StringType(), nullable=True),
+    StructField("census_tract_coding_system", StringType(), nullable=True),
+    StructField("representation_code", StringType(), nullable=True),
+    StructField("effective_date", StringType(), nullable=True),
+    StructField("expiration_date", StringType(), nullable=True),
+    StructField("expiration_reason", StringType(), nullable=True),
+    StructField("expiration_reason_text", StringType(), nullable=True),
+    StructField("expiration_reason_coding_system", StringType(), nullable=True),
+    StructField("temporary_indicator", StringType(), nullable=True),
+    StructField("bad_address_indicator", StringType(), nullable=True),
+    StructField("usage", StringType(), nullable=True),
+    StructField("addressee", StringType(), nullable=True),
+    StructField("comment", StringType(), nullable=True),
+    StructField("preference_order", StringType(), nullable=True),
+    StructField("protection_code", StringType(), nullable=True),
+    StructField("protection_code_text", StringType(), nullable=True),
+    StructField("protection_code_coding_system", StringType(), nullable=True),
+    StructField("identifier", StringType(), nullable=True),
+])
+
+
+# EIP (Entity Identifier Pair) — parent and child EI separated by `&`. Used for
+# OBX-33 observation-related specimen ID and ORC-8 parent order. Modeled as a
+# nested struct so consumers can address each EI's 4 components individually.
+_EI_INNER_STRUCT = StructType([
+    StructField("entity_identifier", StringType(), nullable=True),
+    StructField("namespace_id", StringType(), nullable=True),
+    StructField("universal_id", StringType(), nullable=True),
+    StructField("universal_id_type", StringType(), nullable=True),
+])
+_EIP_STRUCT = StructType([
+    StructField("parent", _EI_INNER_STRUCT, nullable=True),
+    StructField("child", _EI_INNER_STRUCT, nullable=True),
+])
+
+
 def _xpn_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
     """XPN (Extended Person Name) — repeating field as ArrayType(StructType([...]))."""
     return [StructField(column_name, ArrayType(_XPN_STRUCT, containsNull=True), nullable=True)]
@@ -154,6 +268,31 @@ def _cwe_array_schema(column_name: str, label: str, field_ref: str) -> list[Stru
 def _xtn_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
     """XTN (Extended Telecommunication Number) — repeating field as ArrayType(StructType([...]))."""
     return [StructField(column_name, ArrayType(_XTN_STRUCT, containsNull=True), nullable=True)]
+
+
+def _xcn_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+    """XCN (Extended Composite ID Number and Name) — repeating field as ArrayType(StructType([...]))."""
+    return [StructField(column_name, ArrayType(_XCN_STRUCT, containsNull=True), nullable=True)]
+
+
+def _xon_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+    """XON (Extended Composite Name and Number for Organizations) — repeating field as ArrayType(StructType([...]))."""
+    return [StructField(column_name, ArrayType(_XON_STRUCT, containsNull=True), nullable=True)]
+
+
+def _cx_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+    """CX (Extended Composite ID with Check Digit) — repeating field as ArrayType(StructType([...]))."""
+    return [StructField(column_name, ArrayType(_CX_STRUCT, containsNull=True), nullable=True)]
+
+
+def _xad_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+    """XAD (Extended Address) — repeating field as ArrayType(StructType([...]))."""
+    return [StructField(column_name, ArrayType(_XAD_STRUCT, containsNull=True), nullable=True)]
+
+
+def _eip_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+    """EIP (Entity Identifier Pair) — repeating field as ArrayType(StructType<parent: EI, child: EI>)."""
+    return [StructField(column_name, ArrayType(_EIP_STRUCT, containsNull=True), nullable=True)]
 
 
 def _s_array(name: str, comment: str = "") -> StructField:
@@ -527,7 +666,7 @@ PID_SCHEMA = StructType(
     + [
         _int_field("set_id",                        "Sequence number when multiple PID segments appear in a message (PID-1)"),
         _s("patient_external_id",           "External patient ID from a prior system (PID-2, deprecated in v2.7)"),
-        *_cx_schema("patient_id", "Patient identifier", "PID-3"),
+        *_cx_array_schema("patient_id", "Patient identifier list (CX, repeatable per spec)", "PID-3"),
         _s("alternate_patient_id",          "Alternate patient identifier from a prior system (PID-4, deprecated in v2.7)"),
         *_xpn_array_schema("patient_names", "Patient names", "PID-5"),
         *_xpn_array_schema("mothers_maiden_names", "Mother's maiden names", "PID-6"),
@@ -535,17 +674,17 @@ PID_SCHEMA = StructType(
         *_cwe_schema("administrative_sex", "Administrative sex", "PID-8"),
         _s("patient_alias",                 "Alias name(s) for the patient (PID-9, deprecated in v2.7)"),
         *_cwe_array_schema("race", "Race (CWE, repeatable per spec)", "PID-10"),
-        *_xad_schema("address", "Patient address", "PID-11"),
+        *_xad_array_schema("address", "Patient address (XAD, repeatable per spec)", "PID-11"),
         _s("county_code",                   "County or parish code (PID-12, deprecated in v2.6)"),
-        *_xtn_schema("home_phone", "Home phone", "PID-13"),
-        *_xtn_schema("business_phone", "Business phone", "PID-14"),
+        *_xtn_array_schema("home_phone", "Home phone (XTN, repeatable per spec)", "PID-13"),
+        *_xtn_array_schema("business_phone", "Business phone (XTN, repeatable per spec)", "PID-14"),
         *_cwe_schema("primary_language", "Primary language", "PID-15"),
         *_cwe_schema("marital_status", "Marital status", "PID-16"),
         *_cwe_schema("religion", "Religion", "PID-17"),
         *_cx_schema("patient_account", "Patient account", "PID-18"),
         _s("ssn",                           "Social Security Number (PID-19, deprecated in v2.7)"),
         _s("drivers_license",               "Driver's license number and issuing state (PID-20, deprecated in v2.7)"),
-        *_cx_schema("mothers_identifier", "Mother's identifier", "PID-21"),
+        *_cx_array_schema("mothers_identifier", "Mother's identifier (CX, repeatable per spec)", "PID-21"),
         *_cwe_array_schema("ethnic_group", "Ethnic group (CWE, repeatable per spec)", "PID-22"),
         _s("birth_place",                   "Birthplace as free text (PID-23)"),
         _s("multiple_birth_indicator",      "Whether the patient is one of a multiple birth: Y or N (PID-24)"),
@@ -563,8 +702,8 @@ PID_SCHEMA = StructType(
         *_cwe_schema("breed_code", "Breed", "PID-36"),
         _s("strain",                        "Strain description for veterinary use (PID-37, v2.5+)"),
         *_cwe_schema("production_class_code", "Production class", "PID-38"),
-        *_cwe_schema("tribal_citizenship", "Tribal citizenship", "PID-39"),
-        *_xtn_schema("patient_telecom", "Patient telecommunication", "PID-40"),
+        *_cwe_array_schema("tribal_citizenship", "Tribal citizenship (CWE, repeatable per spec)", "PID-39"),
+        *_xtn_array_schema("patient_telecom", "Patient telecommunication (XTN, repeatable per spec)", "PID-40"),
     ]
 )
 
@@ -592,9 +731,9 @@ PV1_SCHEMA = StructType(
     + [
         _s("prior_patient_location",       "Prior bed location before transfer (PV1-6), raw composite"),
     ]
-    + _xcn_schema("attending_doctor", "Attending physician", "PV1-7")
-    + _xcn_schema("referring_doctor", "Referring physician", "PV1-8")
-    + _xcn_schema("consulting_doctor", "Consulting physician", "PV1-9")
+    + _xcn_array_schema("attending_doctor", "Attending physician (XCN, repeatable per spec)", "PV1-7")
+    + _xcn_array_schema("referring_doctor", "Referring physician (XCN, repeatable per spec)", "PV1-8")
+    + _xcn_array_schema("consulting_doctor", "Consulting physician (XCN, repeatable per spec)", "PV1-9")
     + _cwe_schema("hospital_service", "Hospital service (CWE)", "PV1-10")
     + [
         _s("temporary_location",           "Temporary bed/location during a transfer (PV1-11)"),
@@ -604,7 +743,7 @@ PV1_SCHEMA = StructType(
     + _cwe_schema("admit_source", "Admit source (CWE)", "PV1-14")
     + _cwe_array_schema("ambulatory_status", "Ambulatory status (CWE, repeatable)", "PV1-15")
     + _cwe_schema("vip_indicator", "VIP indicator (CWE)", "PV1-16")
-    + _xcn_schema("admitting_doctor", "Admitting physician", "PV1-17")
+    + _xcn_array_schema("admitting_doctor", "Admitting physician (XCN, repeatable per spec)", "PV1-17")
     + _cwe_schema("patient_type", "Patient type (CWE)", "PV1-18")
     + _cx_schema("visit_number", "Visit/encounter number", "PV1-19")
     + [
@@ -651,7 +790,7 @@ PV1_SCHEMA = StructType(
         _s("total_adjustments",            "Total adjustments applied to the visit charges (PV1-48)"),
         _s("total_payments",               "Total payments received for the visit (PV1-49)"),
     ]
-    + _cx_schema("alternate_visit_id", "Alternate visit ID", "PV1-50")
+    + _cx_array_schema("alternate_visit_id", "Alternate visit ID (CX, repeatable per spec)", "PV1-50")
     + _cwe_schema("visit_indicator", "Visit indicator (CWE)", "PV1-51")
     + _xcn_schema("other_healthcare_provider", "Other healthcare provider", "PV1-52")
     + [
@@ -680,7 +819,7 @@ OBR_SCHEMA = StructType(
         _s("collection_volume",                   "Volume of specimen collected (OBR-9.1)"),
         _s("collection_volume_units",             "Units for the specimen volume (OBR-9.2)"),
     ]
-    + _xcn_schema("collector", "Specimen collector", "OBR-10")
+    + _xcn_array_schema("collector", "Specimen collector (XCN, repeatable per spec)", "OBR-10")
     + [
         _s("specimen_action_code",                "Action to take on the specimen (OBR-11): A=Add, G=Generated, L=Lab, O=Obtained"),
     ]
@@ -735,7 +874,7 @@ OBR_SCHEMA = StructType(
     + _cwe_schema("parent_universal_service_id", "Parent universal service ID (CWE)", "OBR-50")
     + _ei_schema("observation_group", "Observation group (EI)", "OBR-51")
     + _ei_schema("parent_observation_group", "Parent observation group (EI)", "OBR-52")
-    + _cx_schema("alternate_placer_order", "Alternate placer order (CX)", "OBR-53")
+    + _cx_array_schema("alternate_placer_order", "Alternate placer order (CX, repeatable per spec)", "OBR-53")
     + [
         _s("parent_order",                        "Parent order identifier (OBR-54.1, v2.9+)"),
         _s("obr_action_code",                     "Action code (OBR-55, v2.9+)"),
@@ -771,7 +910,7 @@ OBX_SCHEMA = StructType(
         _ts("datetime_of_observation",        "Date/time this specific observation was made, parsed to timestamp (OBX-14)"),
     ]
     + _cwe_schema("producers_id", "Producer ID (CWE)", "OBX-15")
-    + _xcn_schema("responsible_observer", "Responsible observer", "OBX-16")
+    + _xcn_array_schema("responsible_observer", "Responsible observer (XCN, repeatable per spec)", "OBX-16")
     + _cwe_array_schema("observation_method", "Observation method (CWE, repeatable per spec)", "OBX-17")
     + _ei_array_schema("equipment_instance_identifier", "Equipment instance (EI, repeatable per spec)", "OBX-18")
     + [
@@ -793,10 +932,8 @@ OBX_SCHEMA = StructType(
         _s("observation_sub_type",            "Observation sub-type (OBX-30, v2.8.2+)"),
         _s("obx_action_code",                 "Action code (OBX-31, v2.9+)"),
     ]
-    + _cwe_schema("observation_value_absent_reason", "Observation value absent reason (CWE)", "OBX-32")
-    + [
-        _s("observation_related_specimen",    "Related specimen identifier (OBX-33, type EIP — raw value)"),
-    ]
+    + _cwe_array_schema("observation_value_absent_reason", "Observation value absent reason (CWE, repeatable per spec)", "OBX-32")
+    + _eip_array_schema("observation_related_specimen", "Observation-related specimen identifier (EIP, repeatable per spec)", "OBX-33")
 )
 
 # ---------------------------------------------------------------------------
@@ -855,7 +992,7 @@ DG1_SCHEMA = StructType(
         _s("grouper_version_and_type",             "Version and type of the DRG grouper software (DG1-14)"),
         _int_field("diagnosis_priority",                   "Priority rank of this diagnosis; 1=principal diagnosis (DG1-15)"),
     ]
-    + _xcn_schema("diagnosing_clinician", "Diagnosing clinician", "DG1-16")
+    + _xcn_array_schema("diagnosing_clinician", "Diagnosing clinician (XCN, repeatable per spec)", "DG1-16")
     + _cwe_schema("diagnosis_classification", "Diagnosis classification (CWE; e.g. C=Chronic, A=Acute)", "DG1-17")
     + [
         _s("confidential_indicator",               "Whether the diagnosis is confidential and access-restricted: Y or N (DG1-18)"),
@@ -886,9 +1023,9 @@ NK1_SCHEMA = StructType(
         _s("relationship",               "Relationship to patient composite (NK1-3), raw; use relationship_code_* CWE fields"),
     ]
     + _cwe_schema("relationship_code", "Relationship to patient", "NK1-3")
-    + _xad_schema("address", "Next of kin address", "NK1-4")
-    + _xtn_schema("phone_number", "Next of kin home or primary phone", "NK1-5")
-    + _xtn_schema("business_phone", "Next of kin business phone", "NK1-6")
+    + _xad_array_schema("address", "Next of kin address (XAD, repeatable per spec)", "NK1-4")
+    + _xtn_array_schema("phone_number", "Next of kin home or primary phone (XTN, repeatable per spec)", "NK1-5")
+    + _xtn_array_schema("business_phone", "Next of kin business phone (XTN, repeatable per spec)", "NK1-6")
     + _cwe_schema("contact_role", "Contact role", "NK1-7")
     + [
         _ts("start_date",                "Date this contact relationship became effective, parsed to timestamp (NK1-8)"),
@@ -897,7 +1034,7 @@ NK1_SCHEMA = StructType(
         _s("job_code",                   "Occupation code for the next of kin (NK1-11.1)"),
     ]
     + _cx_schema("employee_number", "Employee number", "NK1-12")
-    + _xon_schema("organization_name", "Employer organization", "NK1-13")
+    + _xon_array_schema("organization_name", "Employer organization (XON, repeatable per spec)", "NK1-13")
     + _cwe_schema("marital_status", "Marital status", "NK1-14")
     + _cwe_schema("administrative_sex", "Administrative sex", "NK1-15")
     + [
@@ -923,9 +1060,9 @@ NK1_SCHEMA = StructType(
     + [
         *_xpn_array_schema("contact_persons", "Contact persons", "NK1-30"),
     ]
-    + _xtn_schema("contact_person_telephone", "Contact person telephone", "NK1-31")
-    + _xad_schema("contact_persons_address", "Contact person address", "NK1-32")
-    + _cx_schema("associated_party_identifiers", "Associated party identifier", "NK1-33")
+    + _xtn_array_schema("contact_person_telephone", "Contact person telephone (XTN, repeatable per spec)", "NK1-31")
+    + _xad_array_schema("contact_persons_address", "Contact person address (XAD, repeatable per spec)", "NK1-32")
+    + _cx_array_schema("associated_party_identifiers", "Associated party identifier (CX, repeatable per spec)", "NK1-33")
     + _cwe_schema("job_status", "Job status (CWE)", "NK1-34")
     + _cwe_array_schema("race", "Race (CWE, repeatable per spec)", "NK1-35")
     + _cwe_schema("handicap", "Handicap (CWE)", "NK1-36")
@@ -951,7 +1088,7 @@ EVN_SCHEMA = StructType(
     ]
     + _cwe_schema("event_reason", "Event reason", "EVN-4")
     + [
-        *_xcn_schema("operator", "Operator", "EVN-5"),
+        *_xcn_array_schema("operator", "Operator (XCN, repeatable per spec)", "EVN-5"),
         _ts("event_occurred",          "Actual date/time the event occurred, parsed to timestamp (EVN-6)"),
     ]
     + _hd_schema("event_facility", "Event facility", "EVN-7")
@@ -965,7 +1102,7 @@ PD1_SCHEMA = StructType(
     _METADATA_FIELDS
     + _cwe_array_schema("living_dependency", "Living dependency (CWE, repeatable)", "PD1-1")
     + _cwe_schema("living_arrangement", "Living arrangement (CWE)", "PD1-2")
-    + _xon_schema("patient_primary_facility", "Primary care facility", "PD1-3")
+    + _xon_array_schema("patient_primary_facility", "Primary care facility (XON, repeatable per spec)", "PD1-3")
     + _xcn_schema("patient_primary_care_provider", "Primary care provider", "PD1-4")
     + _cwe_schema("student_indicator", "Student indicator (CWE)", "PD1-5")
     + _cwe_schema("handicap", "Handicap (CWE)", "PD1-6")
@@ -974,13 +1111,13 @@ PD1_SCHEMA = StructType(
     + [
         _s("separate_bill",                            "Separate billing flag Y/N (PD1-9)"),
     ]
-    + _cx_schema("duplicate_patient", "Duplicate patient", "PD1-10")
+    + _cx_array_schema("duplicate_patient", "Duplicate patient (CX, repeatable per spec)", "PD1-10")
     + _cwe_schema("publicity_code", "Publicity code", "PD1-11")
     + [
         _s("protection_indicator",                     "Protection indicator Y/N (PD1-12); if Y, patient info is restricted"),
         _s("protection_indicator_effective_date",      "Date the protection indicator became effective (PD1-13)"),
     ]
-    + _xon_schema("place_of_worship", "Place of worship", "PD1-14")
+    + _xon_array_schema("place_of_worship", "Place of worship (XON, repeatable per spec)", "PD1-14")
     + _cwe_array_schema("advance_directive_code", "Advance directive (CWE, repeatable per spec)", "PD1-15")
     + _cwe_schema("immunization_registry_status", "Immunization registry status (CWE)", "PD1-16")
     + [
@@ -1020,7 +1157,7 @@ PV2_SCHEMA = StructType(
         _int_field("actual_length_of_inpatient_stay",          "Actual length of inpatient stay in days (PV2-11)"),
         _s("visit_description",                        "Free-text visit description (PV2-12)"),
     ]
-    + _xcn_schema("referral_source", "Referral source", "PV2-13")
+    + _xcn_array_schema("referral_source", "Referral source (XCN, repeatable per spec)", "PV2-13")
     + [
         _s("previous_service_date",                    "Date of previous service (PV2-14)"),
         _s("employment_illness_related_indicator",     "Employment illness related Y/N (PV2-15)"),
@@ -1038,7 +1175,7 @@ PV2_SCHEMA = StructType(
     + [
         _s("visit_protection_indicator",               "Visit protection indicator ID code (PV2-22)"),
     ]
-    + _xon_schema("clinic_organization", "Clinic organization", "PV2-23")
+    + _xon_array_schema("clinic_organization", "Clinic organization (XON, repeatable per spec)", "PV2-23")
     + _cwe_schema("patient_status_code", "Patient status code (CWE)", "PV2-24")
     + _cwe_schema("visit_priority_code", "Visit priority code (CWE)", "PV2-25")
     + [
@@ -1084,14 +1221,14 @@ PV2_SCHEMA = StructType(
 
 MRG_SCHEMA = StructType(
     _METADATA_FIELDS
-    + _cx_schema("prior_patient_id", "Prior patient identifier (MRG-1 CX)", "MRG-1")
+    + _cx_array_schema("prior_patient_id", "Prior patient identifier list (CX, repeatable per spec)", "MRG-1")
     + [
         _s("prior_alternate_patient_id",      "Prior alternate patient ID (MRG-2, deprecated)"),
     ]
     + _cx_schema("prior_patient_account_number", "Prior patient account number", "MRG-3")
     + _cx_schema("prior_patient_id_mrg4", "Prior patient ID (MRG-4)", "MRG-4")
     + _cx_schema("prior_visit_number", "Prior visit number", "MRG-5")
-    + _cx_schema("prior_alternate_visit_id", "Prior alternate visit ID", "MRG-6")
+    + _cx_array_schema("prior_alternate_visit_id", "Prior alternate visit ID (CX, repeatable per spec)", "MRG-6")
     + [
         *_xpn_array_schema("prior_patient_names", "Prior patient names", "MRG-7"),
     ]
@@ -1218,7 +1355,9 @@ ORC_SCHEMA = StructType(
         _s("order_status",                             "Order status (ORC-5): IP=In Process, CM=Completed, SC=Scheduled, CA=Cancelled"),
         _s("response_flag",                            "Response flag (ORC-6): E=Report exceptions, R=Same as initiation, D=Deferred, N=Notification"),
         _s("quantity_timing",                          "Quantity/timing (ORC-7, deprecated)"),
-        _s("parent_order",                             "Parent order reference (ORC-8)"),
+    ]
+    + _eip_array_schema("parent_order", "Parent order reference (EIP, repeatable per spec)", "ORC-8")
+    + [
         _ts("datetime_of_transaction",                 "Transaction date/time (ORC-9)"),
     ]
     + _xcn_schema("entered_by", "Person who entered the order", "ORC-10")
@@ -1252,7 +1391,7 @@ ORC_SCHEMA = StructType(
     + [
         _s("advanced_beneficiary_notice_date",          "Advanced beneficiary notice date (ORC-32, v2.6+)"),
     ]
-    + _cx_schema("alternate_placer_order_number", "Alternate placer order number (CX)", "ORC-33")
+    + _cx_array_schema("alternate_placer_order_number", "Alternate placer order number (CX, repeatable per spec)", "ORC-33")
     + _ei_schema("order_workflow_profile", "Order workflow profile (EI)", "ORC-34")
     + [
         _s("orc_action_code",                           "Action code (ORC-35, v2.9+)"),
@@ -1280,7 +1419,7 @@ NTE_SCHEMA = StructType(
         _ts("effective_start_date","Effective start date of the note (NTE-7, v2.6+)"),
         _ts("expiration_date",     "Expiration date of the note (NTE-8, v2.6+)"),
     ]
-    + _cwe_schema("coded_comment", "Coded comment", "NTE-9")
+    + _cwe_array_schema("coded_comment", "Coded comment (CWE, repeatable per spec)", "NTE-9")
 )
 
 # ---------------------------------------------------------------------------
@@ -1328,8 +1467,8 @@ SPM_SCHEMA = StructType(
     + _cwe_schema("container_type", "Container type", "SPM-27")
     + _cwe_schema("container_condition", "Container condition", "SPM-28")
     + _cwe_schema("specimen_child_role", "Specimen child role", "SPM-29")
-    + _cx_schema("accession_id", "Accession identifier (CX)", "SPM-30")
-    + _cx_schema("other_specimen_id", "Other specimen identifier (CX)", "SPM-31")
+    + _cx_array_schema("accession_id", "Accession identifier (CX, repeatable per spec)", "SPM-30")
+    + _cx_array_schema("other_specimen_id", "Other specimen identifier (CX, repeatable per spec)", "SPM-31")
     + _ei_schema("shipment_id", "Shipment identifier (EI)", "SPM-32")
     + [
         _ts("culture_start_datetime",         "Culture start date/time (SPM-33, v2.9+)"),
@@ -1349,18 +1488,18 @@ IN1_SCHEMA = StructType(
     ]
     + _cwe_schema("insurance_plan", "Insurance plan", "IN1-2")
     + _xon_schema("insurance_company", "Insurance company", "IN1-3")
-    + _xon_schema("insurance_company_name", "Insurance company name (XON)", "IN1-4")
-    + _xad_schema("insurance_company_address", "Insurance company address", "IN1-5")
+    + _xon_array_schema("insurance_company_name", "Insurance company name (XON, repeatable per spec)", "IN1-4")
+    + _xad_array_schema("insurance_company_address", "Insurance company address (XAD, repeatable per spec)", "IN1-5")
     + [
         *_xpn_array_schema("insurance_co_contacts", "Insurance contacts", "IN1-6"),
     ]
-    + _xtn_schema("insurance_co_phone_number", "Insurance company phone", "IN1-7")
+    + _xtn_array_schema("insurance_co_phone_number", "Insurance company phone (XTN, repeatable per spec)", "IN1-7")
     + [
         _s("group_number",                     "Insurance group/policy group number (IN1-8)"),
     ]
-    + _xon_schema("group_name", "Insurance group name", "IN1-9")
+    + _xon_array_schema("group_name", "Insurance group name (XON, repeatable per spec)", "IN1-9")
     + _xon_schema("insureds_group_emp", "Insured's group employer", "IN1-10")
-    + _xon_schema("insureds_group_emp_name", "Insured's group employer name", "IN1-11")
+    + _xon_array_schema("insureds_group_emp_name", "Insured's group employer name (XON, repeatable per spec)", "IN1-11")
     + [
         _s("plan_effective_date",              "Plan effective date (IN1-12)"),
         _s("plan_expiration_date",             "Plan expiration date (IN1-13)"),
@@ -1374,7 +1513,7 @@ IN1_SCHEMA = StructType(
     + [
         _ts("insureds_date_of_birth",          "Insured's date of birth (IN1-18)"),
     ]
-    + _xad_schema("insureds_address", "Insured's address", "IN1-19")
+    + _xad_array_schema("insureds_address", "Insured's address (XAD, repeatable per spec)", "IN1-19")
     + _cwe_schema("assignment_of_benefits", "Assignment of benefits (CWE)", "IN1-20")
     + _cwe_schema("coordination_of_benefits", "Coordination of benefits (CWE)", "IN1-21")
     + [
@@ -1389,7 +1528,7 @@ IN1_SCHEMA = StructType(
         _s("pre_admit_cert",                   "Pre-admission certification number (IN1-28)"),
         _ts("verification_datetime",           "Verification date/time (IN1-29)"),
     ]
-    + _xcn_schema("verification_by", "Verified by", "IN1-30")
+    + _xcn_array_schema("verification_by", "Verified by (XCN, repeatable per spec)", "IN1-30")
     + _cwe_schema("type_of_agreement_code", "Type-of-agreement code (CWE)", "IN1-31")
     + _cwe_schema("billing_status", "Billing status (CWE)", "IN1-32")
     + [
@@ -1407,14 +1546,14 @@ IN1_SCHEMA = StructType(
     ]
     + _cwe_schema("insureds_employment_status", "Insured's employment status", "IN1-42")
     + _cwe_schema("insureds_administrative_sex", "Insured's administrative sex", "IN1-43")
-    + _xad_schema("insureds_employers_address", "Insured's employer address", "IN1-44")
+    + _xad_array_schema("insureds_employers_address", "Insured's employer address (XAD, repeatable per spec)", "IN1-44")
     + [
         _s("verification_status",              "Verification status (IN1-45)"),
     ]
     + _cwe_schema("prior_insurance_plan_id", "Prior insurance plan ID (CWE)", "IN1-46")
     + _cwe_schema("coverage_type", "Coverage type (CWE)", "IN1-47")
     + _cwe_schema("handicap", "Handicap (CWE)", "IN1-48")
-    + _cx_schema("insureds_id_number", "Insured's ID (CX)", "IN1-49")
+    + _cx_array_schema("insureds_id_number", "Insured's ID (CX, repeatable per spec)", "IN1-49")
     + _cwe_schema("signature_code", "Signature code (CWE)", "IN1-50")
     + [
         _s("signature_code_date",              "Signature code date (IN1-51)"),
@@ -1436,14 +1575,14 @@ GT1_SCHEMA = StructType(
     + [
         _pk_int_field("set_id",                           "Sequence number for this GT1 segment within the message (GT1-1)"),
     ]
-    + _cx_schema("guarantor_number", "Guarantor number (CX)", "GT1-2")
+    + _cx_array_schema("guarantor_number", "Guarantor number (CX, repeatable per spec)", "GT1-2")
     + [
         *_xpn_array_schema("guarantor_names", "Guarantor names", "GT1-3"),
         *_xpn_array_schema("guarantor_spouse_names", "Guarantor spouse names", "GT1-4"),
     ]
-    + _xad_schema("guarantor_address", "Guarantor address", "GT1-5")
-    + _xtn_schema("guarantor_ph_num_home", "Guarantor home phone", "GT1-6")
-    + _xtn_schema("guarantor_ph_num_business", "Guarantor business phone", "GT1-7")
+    + _xad_array_schema("guarantor_address", "Guarantor address (XAD, repeatable per spec)", "GT1-5")
+    + _xtn_array_schema("guarantor_ph_num_home", "Guarantor home phone (XTN, repeatable per spec)", "GT1-6")
+    + _xtn_array_schema("guarantor_ph_num_business", "Guarantor business phone (XTN, repeatable per spec)", "GT1-7")
     + [
         _ts("guarantor_date_of_birth",             "Guarantor date of birth (GT1-8)"),
     ]
@@ -1457,11 +1596,11 @@ GT1_SCHEMA = StructType(
         _int_field("guarantor_priority",                   "Guarantor priority (GT1-15)"),
         *_xpn_array_schema("guarantor_employer_names", "Guarantor employer names", "GT1-16"),
     ]
-    + _xad_schema("guarantor_employer_address", "Guarantor employer address", "GT1-17")
-    + _xtn_schema("guarantor_employer_phone_number", "Guarantor employer phone", "GT1-18")
-    + _cx_schema("guarantor_employee_id_number", "Guarantor employee ID (CX)", "GT1-19")
+    + _xad_array_schema("guarantor_employer_address", "Guarantor employer address (XAD, repeatable per spec)", "GT1-17")
+    + _xtn_array_schema("guarantor_employer_phone_number", "Guarantor employer phone (XTN, repeatable per spec)", "GT1-18")
+    + _cx_array_schema("guarantor_employee_id_number", "Guarantor employee ID (CX, repeatable per spec)", "GT1-19")
     + _cwe_schema("guarantor_employment_status", "Guarantor employment status (CWE)", "GT1-20")
-    + _xon_schema("guarantor_organization_name", "Guarantor organization name", "GT1-21")
+    + _xon_array_schema("guarantor_organization_name", "Guarantor organization name (XON, repeatable per spec)", "GT1-21")
     + [
         _s("guarantor_billing_hold_flag",          "Billing hold flag Y/N (GT1-22)"),
     ]
@@ -1475,7 +1614,7 @@ GT1_SCHEMA = StructType(
         _s("guarantor_household_annual_income",    "Household annual income (GT1-27.1)"),
         _int_field("guarantor_household_size",             "Household size (GT1-28)"),
     ]
-    + _cx_schema("guarantor_employer_id_number", "Guarantor employer ID (CX)", "GT1-29")
+    + _cx_array_schema("guarantor_employer_id_number", "Guarantor employer ID (CX, repeatable per spec)", "GT1-29")
     + _cwe_schema("guarantor_marital_status_code", "Guarantor marital status", "GT1-30")
     + [
         _s("guarantor_hire_effective_date",        "Guarantor hire date (GT1-31)"),
@@ -1500,14 +1639,14 @@ GT1_SCHEMA = StructType(
     + [
         *_xpn_array_schema("gt1_contact_persons", "GT1 contact persons", "GT1-45"),
     ]
-    + _xtn_schema("contact_persons_telephone_number", "Contact person phone", "GT1-46")
+    + _xtn_array_schema("contact_persons_telephone_number", "Contact person phone (XTN, repeatable per spec)", "GT1-46")
     + _cwe_schema("contact_reason", "Contact reason", "GT1-47")
     + _cwe_schema("contact_relationship", "Contact relationship (CWE)", "GT1-48")
     + [
         _s("job_title",                            "Job title (GT1-49)"),
     ]
     + _cwe_schema("job_code_class", "Job code/class", "GT1-50")
-    + _xon_schema("guarantor_employers_org_name", "Guarantor employer organization name", "GT1-51")
+    + _xon_array_schema("guarantor_employers_org_name", "Guarantor employer organization name (XON, repeatable per spec)", "GT1-51")
     + _cwe_schema("handicap", "Handicap (CWE)", "GT1-52")
     + _cwe_schema("job_status", "Job status (CWE)", "GT1-53")
     + [
@@ -1551,13 +1690,13 @@ FT1_SCHEMA = StructType(
     + _cwe_schema("fee_schedule", "Fee schedule (CWE)", "FT1-17")
     + _cwe_schema("patient_type", "Patient type (CWE)", "FT1-18")
     + _cwe_array_schema("diagnosis_code", "Diagnosis (CWE, repeatable per spec)", "FT1-19")
-    + _xcn_schema("performed_by", "Performed by", "FT1-20")
-    + _xcn_schema("ordered_by", "Ordered by", "FT1-21")
+    + _xcn_array_schema("performed_by", "Performed by (XCN, repeatable per spec)", "FT1-20")
+    + _xcn_array_schema("ordered_by", "Ordered by (XCN, repeatable per spec)", "FT1-21")
     + [
         _s("unit_cost",                               "Unit cost (FT1-22.1)"),
     ]
     + _ei_schema("filler_order_number", "Filler order number (EI)", "FT1-23")
-    + _xcn_schema("entered_by", "Entered by", "FT1-24")
+    + _xcn_array_schema("entered_by", "Entered by (XCN, repeatable per spec)", "FT1-24")
     + _cwe_schema("ft1_procedure_code", "Procedure code", "FT1-25")
     + _cwe_array_schema("ft1_procedure_code_modifier", "Procedure code modifier (CNE, repeatable per spec; CWE-shape struct since CNE shares components)", "FT1-26")
     + _cwe_schema("advanced_beneficiary_notice_code", "Advanced beneficiary notice (ABN) code (CWE)", "FT1-27")
@@ -1623,7 +1762,7 @@ RXA_SCHEMA = StructType(
     + _cwe_schema("administered_units", "Units of measure", "RXA-7")
     + _cwe_schema("administered_dosage_form", "Dosage form", "RXA-8")
     + _cwe_array_schema("administration_notes", "Administration notes (CWE, repeatable per spec)", "RXA-9")
-    + _xcn_schema("administering_provider", "Provider who administered", "RXA-10")
+    + _xcn_array_schema("administering_provider", "Provider who administered (XCN, repeatable per spec)", "RXA-10")
     + [
         _s("administered_at_location",                 "Administration location (RXA-11)"),
         _s("administered_per_time_unit",               "Rate time unit (RXA-12)"),
@@ -1676,20 +1815,20 @@ SCH_SCHEMA = StructType(
     + [
         _s("appointment_timing_quantity",  "Appointment timing quantity (SCH-11, deprecated)"),
     ]
-    + _xcn_schema("placer_contact_person", "Placer contact person", "SCH-12")
+    + _xcn_array_schema("placer_contact_person", "Placer contact person (XCN, repeatable per spec)", "SCH-12")
     + _xtn_schema("placer_contact_phone_number", "Placer contact phone", "SCH-13")
-    + _xad_schema("placer_contact_address", "Placer contact address", "SCH-14")
+    + _xad_array_schema("placer_contact_address", "Placer contact address (XAD, repeatable per spec)", "SCH-14")
     + [
         _s("placer_contact_location",      "Placer contact location (SCH-15)"),
     ]
-    + _xcn_schema("filler_contact_person", "Filler contact person", "SCH-16")
+    + _xcn_array_schema("filler_contact_person", "Filler contact person (XCN, repeatable per spec)", "SCH-16")
     + _xtn_schema("filler_contact_phone_number", "Filler contact phone", "SCH-17")
-    + _xad_schema("filler_contact_address", "Filler contact address", "SCH-18")
+    + _xad_array_schema("filler_contact_address", "Filler contact address (XAD, repeatable per spec)", "SCH-18")
     + [
         _s("filler_contact_location",      "Filler contact location (SCH-19)"),
     ]
-    + _xcn_schema("entered_by_person", "Person who entered the schedule", "SCH-20")
-    + _xtn_schema("entered_by_phone_number", "Entered by phone", "SCH-21")
+    + _xcn_array_schema("entered_by_person", "Person who entered the schedule (XCN, repeatable per spec)", "SCH-20")
+    + _xtn_array_schema("entered_by_phone_number", "Entered by phone (XTN, repeatable per spec)", "SCH-21")
     + [
         _s("entered_by_location",          "Entered by location (SCH-22)"),
     ]
@@ -1715,15 +1854,15 @@ TXA_SCHEMA = StructType(
         _s("document_content_presentation",        "Content presentation type (TXA-3)"),
         _ts("activity_datetime",                   "Activity date/time (TXA-4)"),
     ]
-    + _xcn_schema("primary_activity_provider", "Primary activity provider", "TXA-5")
+    + _xcn_array_schema("primary_activity_provider", "Primary activity provider (XCN, repeatable per spec)", "TXA-5")
     + [
         _ts("origination_datetime",                "Origination date/time (TXA-6)"),
         _ts("transcription_datetime",              "Transcription date/time (TXA-7)"),
         _ts("edit_datetime",                       "Edit date/time (TXA-8)"),
     ]
-    + _xcn_schema("originator", "Document originator", "TXA-9")
-    + _xcn_schema("assigned_document_authenticator", "Assigned document authenticator", "TXA-10")
-    + _xcn_schema("transcriptionist", "Transcriptionist", "TXA-11")
+    + _xcn_array_schema("originator", "Document originator (XCN, repeatable per spec)", "TXA-9")
+    + _xcn_array_schema("assigned_document_authenticator", "Assigned document authenticator (XCN, repeatable per spec)", "TXA-10")
+    + _xcn_array_schema("transcriptionist", "Transcriptionist (XCN, repeatable per spec)", "TXA-11")
     + _ei_schema("unique_document_number", "Unique document number (EI)", "TXA-12")
     + _ei_schema("parent_document_number", "Parent document number (EI)", "TXA-13")
     + _ei_array_schema("placer_order_number", "Placer order number (EI, repeatable per spec)", "TXA-14")
@@ -1737,8 +1876,8 @@ TXA_SCHEMA = StructType(
         _s("document_change_reason",               "Reason for document change (TXA-21)"),
         _s("authentication_person_time_stamp",     "Authenticator with timestamp (TXA-22)"),
     ]
-    + _xcn_schema("distributed_copies", "Distributed copy recipient", "TXA-23")
-    + _cwe_schema("folder_assignment", "Folder assignment", "TXA-24")
+    + _xcn_array_schema("distributed_copies", "Distributed copy recipient (XCN, repeatable per spec)", "TXA-23")
+    + _cwe_array_schema("folder_assignment", "Folder assignment (CWE, repeatable per spec)", "TXA-24")
     + [
         _s("document_title",                       "Document title (TXA-25, v2.6+)"),
         _ts("agreed_due_datetime",                 "Agreed due date/time (TXA-26, v2.8+)"),

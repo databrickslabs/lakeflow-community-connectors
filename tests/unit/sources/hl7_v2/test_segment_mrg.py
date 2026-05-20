@@ -17,7 +17,7 @@ class TestMRGExtraction:
     def test_comprehensive_mrg(self):
         msg = parse_first(load_sample("sample_adt_comprehensive.hl7"))
         row = extract_segment(msg, "MRG", _extract_mrg)
-        assert row["prior_patient_id"] == "MRN77001"
+        assert row["prior_patient_id"][0]["id"] == "MRN77001"
         assert row["prior_patient_account_number"] == "MRN66001"
 
 
@@ -28,7 +28,7 @@ class TestMRGMissingFields:
             "MRG|OLD001^^^HOSP^MR"
         )
         row = _extract_mrg(msg.get_segment("MRG"))
-        assert row["prior_patient_id"] == "OLD001"
+        assert row["prior_patient_id"][0]["id"] == "OLD001"
         assert row["prior_alternate_patient_id"] is None
         assert row["prior_patient_account_number"] is None
         assert row["prior_patient_names"] is None

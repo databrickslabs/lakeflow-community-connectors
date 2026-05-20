@@ -17,7 +17,7 @@ class TestPD1Extraction:
     def test_comprehensive_pd1(self):
         msg = parse_first(load_sample("sample_adt_comprehensive.hl7"))
         row = extract_segment(msg, "PD1", _extract_pd1)
-        assert row["patient_primary_facility"] == "CHICAGO PRIMARY CARE"
+        assert row["patient_primary_facility"][0]["name"] == "CHICAGO PRIMARY CARE"
         assert row["patient_primary_care_provider_id"] == "8877665"
 
 
@@ -42,5 +42,5 @@ class TestPD1MissingFields:
             "PD1|||MAIN CLINIC^^^^^123||||Y|Y"
         )
         row = _extract_pd1(msg.get_segment("PD1"))
-        assert row["patient_primary_facility"] == "MAIN CLINIC"
+        assert row["patient_primary_facility"][0]["name"] == "MAIN CLINIC"
         assert row["organ_donor_code"] == "Y"
