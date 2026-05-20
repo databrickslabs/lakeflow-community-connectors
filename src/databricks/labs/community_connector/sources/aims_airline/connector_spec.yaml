@@ -1,0 +1,27 @@
+# AIMS Airline Community Connector Spec
+# This file defines the specification for the connector including
+# connection parameters and allowlist options.
+
+# ============================================================================
+# Connection Parameters
+# These are provided when creating the Unity Catalog connection.
+# Authentication: API access key for AIMS data access.
+# ============================================================================
+display_name: AIMS Airline
+connection:
+  parameters:
+    - name: access_key
+      type: string
+      required: true
+      secret: true
+      description: >
+        API access key for authenticating with the AIMS airline data service.
+
+# ============================================================================
+# External Options Allowlist
+# These table-specific options must be included in the externalOptionsAllowList
+# parameter of the UC connection to allow them to be passed through.
+# Use a comma-separated string of option names.
+# If no table-specific options are needed, set to empty string or omit.
+# ============================================================================
+external_options_allowlist: ""
