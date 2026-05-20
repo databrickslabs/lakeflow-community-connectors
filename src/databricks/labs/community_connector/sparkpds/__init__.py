@@ -18,8 +18,8 @@ from databricks.labs.community_connector.sparkpds.lakeflow_datasource import (
 )
 from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource import (
     GetObjectMetadataOp,
+    IngestionAgentDispatcher,
     IngestionAgentReader,
-    IngestionAgentSource,
     ListObjectsOp,
     ListOperationsOp,
     PreviewTableOp,
@@ -42,6 +42,6 @@ __all__ = [
     "ListOperationsOp",
     # Internal dispatcher for the agent-operation path on lakeflow_connect.
     # Exposed for unit testing; not a registered Spark format on its own.
-    "IngestionAgentSource",
+    "IngestionAgentDispatcher",
     "IngestionAgentReader",
 ]

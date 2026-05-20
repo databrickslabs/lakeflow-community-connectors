@@ -11,7 +11,7 @@ built-ins (``list_objects``, ``preview_table``, ``get_object_metadata``,
 and derive their behaviour from the existing :class:`LakeflowConnect`
 surface — every connector gains the agent surface automatically.
 
-Source customisation is exclusively through
+Source customisation goes through
 :meth:`SupportsIngestionAgent.agent_operations`:
 
 - **To customise a built-in**, subclass the relevant built-in class
@@ -22,9 +22,9 @@ Source customisation is exclusively through
 - **To add a new source-prefixed operation**, subclass
   :class:`AgentOperation` directly and implement ``pull``.
 
-The classes :class:`IngestionAgentSource` / :class:`IngestionAgentReader`
-are exposed for unit testing; they are not registered as a separate
-Spark format.
+:class:`IngestionAgentDispatcher` and :class:`IngestionAgentReader`
+are exposed for unit testing; the dispatcher is a plain class (not a
+Spark DataSource).
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ import re
 from typing import Any, Iterable, Iterator, Mapping, Optional, Tuple
 
 from pyspark.sql.types import StringType, StructField, StructType
-from pyspark.sql.datasource import DataSource, DataSourceReader, InputPartition
+from pyspark.sql.datasource import DataSourceReader, InputPartition
 
 from databricks.labs.community_connector.interface import (
     AgentOperation,
@@ -43,18 +43,6 @@ from databricks.labs.community_connector.interface import (
     SupportsIngestionAgent,
 )
 from databricks.labs.community_connector.libs.utils import parse_value
-
-
-# =============================================================================
-# Merge-script placeholder. Same shape as ``lakeflow_datasource.py``. The merge
-# script does not currently process this module, so the placeholder is only a
-# safety net for direct ``IngestionAgentSource`` instantiation; the registry
-# wrapper overrides ``_build_connector`` to bind to the concrete LakeflowConnect
-# class at registration time.
-# =============================================================================
-# fmt: off
-LakeflowConnectImpl = LakeflowConnect  # __LAKEFLOW_CONNECT_IMPL__
-# fmt: on
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +72,32 @@ OP_LIST_OPERATIONS = "list_operations"
 # Operation kinds.
 KIND_METADATA = "metadata"
 KIND_DATA = "data"
+
+# Reserved keys the agent layer owns. Stripped from the dict passed into
+# LakeflowConnect.__init__ so the connector can't accidentally interpret an
+# agent option as one of its own. The user's request options keep these
+# keys; ops read them via the AgentOperation.pull options dict.
+_AGENT_RESERVED_KEYS = frozenset(
+    {OPERATION, PARENT, SEARCH, PATH, NAME, METADATA_KEY, LIMIT}
+)
+
+
+def _agent_options(options: Mapping[str, str]) -> dict:
+    """Options visible to ``AgentOperation.pull`` / ``resolve_schema``.
+
+    Strips only the framework-owned ``operation`` key.
+    """
+    return {k: v for k, v in options.items() if k != OPERATION}
+
+
+def _connector_options(options: Mapping[str, str]) -> dict:
+    """Options passed to ``LakeflowConnect.__init__`` and to read-side calls
+    (``read_table``, ``get_table_schema``, ``read_table_metadata``).
+
+    Strips ``operation`` plus the agent-reserved keys so the connector sees
+    only its own option namespace.
+    """
+    return {k: v for k, v in options.items() if k not in _AGENT_RESERVED_KEYS}
 
 
 # ---------------------------------------------------------------------------
@@ -143,21 +157,15 @@ def _error_str(exc: BaseException) -> str:
 # ---------------------------------------------------------------------------
 # Built-in AgentOperation subclasses.
 #
-# Each built-in fixes ``name``, ``description``, ``kind``, ``schema`` and
-# ``pull``. ``pull`` parses the request options into typed kwargs and
-# delegates to ``produce``, which is the override hook for sources that
-# want a richer implementation. ``produce`` is the only method a source
-# customising a built-in should override — everything else is part of the
-# contract callers rely on.
+# Each fixes ``name``, ``description``, ``kind``, ``schema`` and ``pull``.
+# ``pull`` parses the request options into typed kwargs and delegates to
+# ``produce`` — the single override point for sources that want a richer
+# implementation. ``produce`` is the only method a source customising a
+# built-in should override.
 # ---------------------------------------------------------------------------
 
 class ListObjectsOp(AgentOperation):
-    """Built-in: hierarchical listing of objects under an optional parent.
-
-    Subclass and override :meth:`produce` to return a source-native or
-    hierarchical listing. Do not override ``pull``, ``schema``, ``kind``,
-    or ``name`` — those are the framework contract.
-    """
+    """Built-in: hierarchical listing of objects under an optional parent."""
 
     name = OP_LIST_OBJECTS
     description = (
@@ -185,16 +193,6 @@ class ListObjectsOp(AgentOperation):
         Default flat listing derived from ``list_tables``. Override to
         return hierarchical results or to bind to a source-native
         listing API.
-
-        Args:
-            connector: The :class:`LakeflowConnect` instance.
-            parent: Path identifying the parent to list under. ``None``
-                lists from the source root.
-            search: Regex filter applied to names; ``None`` for no filter.
-
-        Yields:
-            Row dicts with keys ``name``, ``type``, ``full_path`` (and
-            optionally ``_meta`` for per-row warnings).
         """
         return _default_list_objects(connector, parent, search)
 
@@ -219,7 +217,7 @@ class GetObjectMetadataOp(AgentOperation):
             path=path,
             name=name,
             metadata_key=metadata_key,
-            table_options=_table_options(options),
+            table_options=_connector_options(options),
         )
 
     def produce(
@@ -250,10 +248,9 @@ class GetObjectMetadataOp(AgentOperation):
 class PreviewTableOp(AgentOperation):
     """Built-in: sample-read a tabular object.
 
-    Data-kind operation — rows pass through with the table's natural
-    schema (no ``_meta`` column) and errors surface as Spark exceptions.
-    Override :meth:`produce` to wire to a source-native sampling API
-    that's cheaper than reading + slicing.
+    Data-kind — rows pass through with the table's natural schema (no
+    ``_meta`` column) and errors surface as Spark exceptions. Override
+    :meth:`produce` to wire to a source-native sampling API.
     """
 
     name = OP_PREVIEW_TABLE
@@ -268,12 +265,12 @@ class PreviewTableOp(AgentOperation):
 
     def resolve_schema(self, connector, options):
         table_name = _required_option(options, TABLE_NAME, OP_PREVIEW_TABLE)
-        return connector.get_table_schema(table_name, _table_options(options))
+        return connector.get_table_schema(table_name, _connector_options(options))
 
     def pull(self, connector, options):
         table_name = _required_option(options, TABLE_NAME, OP_PREVIEW_TABLE)
         limit = _int_option(options, LIMIT, DEFAULT_PREVIEW_LIMIT)
-        table_options = _table_options(options)
+        table_options = _connector_options(options)
         records = self.produce(
             connector,
             table_name=table_name,
@@ -295,15 +292,8 @@ class PreviewTableOp(AgentOperation):
 
         Default consumes ``read_table`` and lets the framework slice.
         Override to use a source-native LIMIT clause when available.
-
-        Args:
-            connector: The :class:`LakeflowConnect` instance.
-            table_name: Table to sample.
-            limit: Maximum number of records the framework expects.
-            table_options: Connector-level options for the read
-                (reserved agent keys already stripped).
         """
-        del limit  # Framework slices; default doesn't need it.
+        del limit
         return _default_preview_records(connector, table_name, table_options)
 
 
@@ -324,13 +314,9 @@ class ValidateConnectionOp(AgentOperation):
 
     def pull(self, connector, options):
         del options
-        result = self.produce(connector)
-        return [{"_meta": _normalize_meta(result)}]
+        return [{"_meta": _normalize_meta(self.produce(connector))}]
 
-    def produce(
-        self,
-        connector: LakeflowConnect,
-    ) -> Mapping[str, Optional[str]]:
+    def produce(self, connector: LakeflowConnect) -> Mapping[str, Optional[str]]:
         """Return ``{status, code, message}`` for the connection.
 
         Default: try ``list_tables``; report exceptions as ``error``.
@@ -349,15 +335,17 @@ class ValidateConnectionOp(AgentOperation):
 class ListOperationsOp(AgentOperation):
     """Built-in: list operations supported by this connection.
 
-    Framework-owned. There is normally no reason for a source to
-    override this — the catalog is computed from the framework's
-    built-ins plus the source's ``agent_operations`` map.
+    Framework-owned and connector-optional — works even when the
+    connector failed to initialise (returns the framework's built-ins,
+    minus any source-defined operations the connector would have
+    contributed).
     """
 
     name = OP_LIST_OPERATIONS
     description = "List operations supported by this connection."
     kind = KIND_METADATA
     schema = _LIST_OPERATIONS_BASE_SCHEMA
+    requires_connector = False
 
     def pull(self, connector, options):
         del options
@@ -380,70 +368,64 @@ _BUILTIN_OPERATIONS: dict[str, AgentOperation] = {
 
 
 # ---------------------------------------------------------------------------
-# DataSource — internal dispatcher reached via LakeflowSource. Not a
-# registered Spark format on its own.
+# Dispatcher (plain class, not a DataSource)
 # ---------------------------------------------------------------------------
 
 # pylint: disable=invalid-name,missing-function-docstring
-class IngestionAgentSource(DataSource):
-    """Internal dispatcher for the ingestion-agent operation surface.
+class IngestionAgentDispatcher:
+    """Dispatches ingestion-agent operations onto a pre-built connector.
 
     Constructed by :class:`LakeflowSource` when the ``operation`` option
-    is set. Lifecycle:
+    is set. The connector is built by ``LakeflowSource`` and passed in
+    — the dispatcher never instantiates it itself.
 
-    - ``__init__`` validates the ``operation`` option and tries to build
-      the underlying :class:`LakeflowConnect`. Init failure is tolerated
-      for ``validate_connection`` (it becomes the error row reported
-      back to the agent) and ``list_operations`` (we still return the
-      built-in catalog). For every other operation, init errors
-      propagate as Spark exceptions.
     - ``schema()`` resolves the operation and asks it for its schema.
       Metadata-kind ops automatically include a ``_meta`` column;
       data-kind ops return the schema unchanged.
     - ``reader()`` returns an :class:`IngestionAgentReader` that
-      dispatches to the operation on read, applying ``_meta`` defaults
-      and converting errors to a single error row (metadata kind) or
-      letting them propagate (data kind).
+      applies ``_meta`` defaults and converts errors to a single
+      error row (metadata kind) or lets them propagate (data kind).
+
+    Init-error policy: when the connector failed to build, ``connector``
+    is ``None`` and ``init_error`` holds the exception. The reader uses
+    the operation's :attr:`AgentOperation.requires_connector` flag —
+    ops that don't need a connector (e.g. ``list_operations``) still
+    run; metadata-kind ops that do need one emit an error row;
+    data-kind ops re-raise.
     """
 
-    def __init__(self, options: Mapping[str, str]) -> None:
+    def __init__(
+        self,
+        options: Mapping[str, str],
+        connector: Optional[LakeflowConnect],
+        init_error: Optional[BaseException] = None,
+    ) -> None:
         self.options = dict(options)
+        self.connector = connector
+        self.init_error = init_error
         self.operation_name = self.options.get(OPERATION)
         if not self.operation_name:
             raise ValueError(
                 f"ingestion-agent dispatch requires an '{OPERATION}' option."
             )
-        self._connector_init_error: Optional[BaseException] = None
-        self.lakeflow_connect: Optional[LakeflowConnect] = None
-        try:
-            self.lakeflow_connect = self._build_connector()
-        except Exception as exc:  # pylint: disable=broad-except
-            # validate_connection and list_operations tolerate init failure —
-            # they convert it into structured output. Every other operation
-            # genuinely needs the connector, so propagate.
-            if self.operation_name not in (
-                OP_VALIDATE_CONNECTION,
-                OP_LIST_OPERATIONS,
-            ):
-                raise
-            self._connector_init_error = exc
-        self.operation = _resolve_operation(
-            self.lakeflow_connect, self.operation_name
-        )
+        self.operation = _resolve_operation(connector, self.operation_name)
 
-    def _build_connector(self) -> LakeflowConnect:
-        # Both the merge script and the registry wrapper retarget this;
-        # see the placeholder at the top of the module.
-        return LakeflowConnectImpl(  # pylint: disable=abstract-class-instantiated
-            _connector_options(self.options)
-        )
-
-    def schema(self):
+    def schema(self) -> StructType:
         if self.operation is None:
             raise ValueError(
                 f"Unknown ingestion-agent operation: {self.operation_name}"
             )
-        base = self.operation.resolve_schema(self.lakeflow_connect, self.options)
+        # If the connector failed to init and the op needs it, we can't
+        # safely call resolve_schema (it may dereference the connector).
+        # Fall back to the op's static `schema` attribute and rely on the
+        # reader to emit an error row. Data-kind ops in this state can't
+        # produce a valid schema at all, so we raise the init error.
+        if self.init_error is not None and _requires_connector(self.operation):
+            if self.operation.kind == KIND_DATA:
+                raise self.init_error
+            base = self.operation.schema or StructType([])
+        else:
+            base = self.operation.resolve_schema(self.connector, self.options)
         if self.operation.kind == KIND_METADATA:
             # Metadata-kind ops emit a single error row carrying only _meta
             # when pull() raises. Relax data-column nullability so that
@@ -451,14 +433,14 @@ class IngestionAgentSource(DataSource):
             return _ensure_meta_field(_relax_nullability(base))
         return base
 
-    def reader(self, schema: StructType):
+    def reader(self, schema: StructType) -> "IngestionAgentReader":
         return IngestionAgentReader(
             options=self.options,
             schema=schema,
             operation=self.operation,
             operation_name=self.operation_name,
-            lakeflow_connect=self.lakeflow_connect,
-            connector_init_error=self._connector_init_error,
+            connector=self.connector,
+            init_error=self.init_error,
         )
 
 
@@ -473,15 +455,15 @@ class IngestionAgentReader(DataSourceReader):
         schema: StructType,
         operation: Optional[AgentOperation],
         operation_name: str,
-        lakeflow_connect: Optional[LakeflowConnect],
-        connector_init_error: Optional[BaseException],
+        connector: Optional[LakeflowConnect],
+        init_error: Optional[BaseException],
     ) -> None:
         self.options = dict(options)
         self.schema = schema
         self.operation = operation
         self.operation_name = operation_name
-        self.lakeflow_connect = lakeflow_connect
-        self.connector_init_error = connector_init_error
+        self.connector = connector
+        self.init_error = init_error
 
     def partitions(self):
         # All ingestion-agent operations are small, single-partition reads.
@@ -489,7 +471,6 @@ class IngestionAgentReader(DataSourceReader):
 
     def read(self, _partition):
         if self.operation is None:
-            # Unknown operation — surface as a metadata error row.
             yield from self._yield_error_rows(
                 ValueError(
                     f"Unknown ingestion-agent operation: {self.operation_name}"
@@ -497,34 +478,28 @@ class IngestionAgentReader(DataSourceReader):
             )
             return
 
-        kind = self.operation.kind
+        # If the connector failed and this op needs it, route by kind:
+        # metadata-kind → error row, data-kind → re-raise.
+        if self.init_error is not None and _requires_connector(self.operation):
+            if self.operation.kind == KIND_METADATA:
+                yield from self._yield_error_rows(self.init_error)
+                return
+            raise self.init_error
 
-        # Special-case: validate_connection on a failed connector init.
-        # The op can't run without a connector, so we emit its result directly.
-        if (
-            self.connector_init_error is not None
-            and self.operation.name == OP_VALIDATE_CONNECTION
-        ):
-            yield from self._yield_error_rows(self.connector_init_error)
-            return
+        request_options = _agent_options(self.options)
 
-        if kind == KIND_DATA:
+        if self.operation.kind == KIND_DATA:
             # Data-kind ops surface exceptions as Spark exceptions and don't
             # carry a _meta column.
-            request_options = _request_options(self.options)
-            for record in self.operation.pull(
-                self.lakeflow_connect, request_options
-            ):
+            for record in self.operation.pull(self.connector, request_options):
                 yield parse_value(record, self.schema)
             return
 
         # Metadata-kind: framework wraps pull() exceptions into a single
         # error row and setdefaults _meta on every row to {status: ok}.
         try:
-            rows = self.operation.pull(
-                self.lakeflow_connect, _request_options(self.options)
-            )
-            # Materialize so generator-time errors are caught and converted to
+            rows = self.operation.pull(self.connector, request_options)
+            # Materialise so generator-time errors are caught and converted to
             # a single error row instead of escaping mid-iteration. Acceptable
             # because all metadata ops produce small results.
             rows = list(rows) if not isinstance(rows, list) else rows
@@ -549,6 +524,11 @@ class IngestionAgentReader(DataSourceReader):
 # ---------------------------------------------------------------------------
 # Operation catalog
 # ---------------------------------------------------------------------------
+
+def _requires_connector(op: AgentOperation) -> bool:
+    """Whether ``op`` needs a working connector. Default ``True``."""
+    return getattr(op, "requires_connector", True)
+
 
 def _source_operations(
     connector: Optional[LakeflowConnect],
@@ -600,37 +580,6 @@ def _resolve_operation(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-# Reserved option keys are addressed to the agent layer, not the underlying
-# connector. They are stripped from the dict passed to LakeflowConnect.__init__
-# and to table_options for table-targeting operations.
-_RESERVED_OPTIONS = frozenset(
-    {OPERATION, PARENT, SEARCH, PATH, NAME, METADATA_KEY, LIMIT}
-)
-# Table-targeting operations receive these as separate arguments. They stay
-# inside the connector-init options dict (so credentials etc. survive) but
-# are stripped from table_options to keep the connector's existing contract.
-_TABLE_OPTION_RESERVED = frozenset(
-    {OPERATION, PARENT, SEARCH, PATH, NAME, METADATA_KEY, LIMIT, TABLE_NAME}
-)
-
-
-def _connector_options(options: Mapping[str, str]) -> dict:
-    return {k: v for k, v in options.items() if k not in _RESERVED_OPTIONS}
-
-
-def _table_options(options: Mapping[str, str]) -> dict:
-    return {k: v for k, v in options.items() if k not in _TABLE_OPTION_RESERVED}
-
-
-def _request_options(options: Mapping[str, str]) -> dict:
-    """Options passed to ``AgentOperation.pull`` / ``resolve_schema``.
-
-    We drop the framework-only ``operation`` key but keep everything else,
-    including credentials, so source-defined ops can read whatever they need.
-    """
-    return {k: v for k, v in options.items() if k != OPERATION}
-
 
 def _required_option(
     options: Mapping[str, str], key: str, operation: str

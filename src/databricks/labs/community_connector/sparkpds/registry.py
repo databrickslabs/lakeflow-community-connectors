@@ -1,8 +1,8 @@
 """
 Registry module for registering LakeflowSource with Spark's DataSource API.
 
-This module provides functions to register a LakeflowConnect implementation
-or a custom DataSource with Spark, making it available as a Python Data Source.
+Provides functions to register a LakeflowConnect implementation or a custom
+DataSource with Spark, making it available as a Python Data Source.
 """
 
 import importlib
@@ -13,10 +13,6 @@ from pyspark.sql.datasource import DataSource
 
 from databricks.labs.community_connector.interface import LakeflowConnect
 from databricks.labs.community_connector.sparkpds.lakeflow_datasource import LakeflowSource
-from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource import (
-    IngestionAgentSource,
-    _connector_options,
-)
 
 
 _BASE_PKG = "databricks.labs.community_connector.sources"
@@ -60,22 +56,6 @@ def _find_lakeflow_connect_class(source_name: str) -> Type[LakeflowConnect]:
     )
 
 
-def _bound_agent_source_cls(class_fqn: str) -> type:
-    """Return an IngestionAgentSource subclass bound to ``class_fqn``.
-
-    The agent dispatcher needs to instantiate the concrete LakeflowConnect
-    class — same FQN-binding trick the LakeflowSource wrapper uses below.
-    """
-
-    class _BoundAgentSource(IngestionAgentSource):
-        def _build_connector(self):
-            lakeflow_connect_cls = _import_class(class_fqn)
-            return lakeflow_connect_cls(_connector_options(self.options))
-
-    _BoundAgentSource.__name__ = f"BoundIngestionAgentSource_{class_fqn.rsplit('.', 1)[-1]}"
-    return _BoundAgentSource
-
-
 def _register_lakeflow_connect(spark: SparkSession, cls: Type[LakeflowConnect]) -> None:
     """Wrap a LakeflowConnect class in a LakeflowSource and register it with Spark.
 
@@ -84,16 +64,12 @@ def _register_lakeflow_connect(spark: SparkSession, cls: Type[LakeflowConnect]) 
     (option ``operation``) under the same ``lakeflow_connect`` format.
     """
     class_fqn = _get_class_fqn(cls)
-    bound_agent_cls = _bound_agent_source_cls(class_fqn)
 
     class RegisterableLakeflowSource(LakeflowSource):
         """Wrapper that dynamically imports the LakeflowConnect class by FQN."""
 
-        def _build_table_connector(self, options):
+        def _build_connector(self, options):
             return _import_class(class_fqn)(options)
-
-        def _build_agent_source(self, options):
-            return bound_agent_cls(options)
 
     RegisterableLakeflowSource.__name__ = f"RegisterableLakeflowSource_{cls.__name__}"
 

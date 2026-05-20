@@ -1,6 +1,6 @@
 """Unit tests for the ingestion-agent dispatcher on ``lakeflow_connect``.
 
-Exercises :class:`IngestionAgentSource` / :class:`IngestionAgentReader`
+Exercises :class:`IngestionAgentDispatcher` / :class:`IngestionAgentReader`
 directly and end-to-end through :class:`LakeflowSource`, without
 spinning up a SparkSession.
 
@@ -10,8 +10,8 @@ Coverage:
 - the AgentOperation plug-in pattern for source-specific operations;
 - the built-in subclassing pattern (override ``produce`` to customise);
 - input validation (missing operation, missing required option);
-- error containment for metadata operations (init failure → error row,
-  not a Spark exception);
+- init-failure error containment (metadata-kind → error row,
+  data-kind → re-raise, connector-optional → still runs);
 - end-to-end dispatch through LakeflowSource.
 """
 
@@ -39,7 +39,7 @@ from databricks.labs.community_connector.sources.example.example import (
 )
 from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource import (
     DEFAULT_PREVIEW_LIMIT,
-    IngestionAgentSource,
+    IngestionAgentDispatcher,
     ListObjectsOp,
     OP_GET_OBJECT_METADATA,
     OP_LIST_OBJECTS,
@@ -68,25 +68,23 @@ def _creds_only(options: Mapping[str, str]) -> dict:
     return {k: options[k] for k in ("username", "password") if k in options}
 
 
-class _ExampleIngestionAgentSource(IngestionAgentSource):
-    """IngestionAgentSource bound to ExampleLakeflowConnect.
-
-    Mirrors what the registry wrapper does at runtime.
-    """
-
-    def _build_connector(self):
-        return ExampleLakeflowConnect(_creds_only(self.options))
-
-
-def _make_source(operation: str, **extra: str) -> IngestionAgentSource:
-    return _ExampleIngestionAgentSource(
-        {"operation": operation, **_CREDS, **extra}
+def _dispatcher(
+    operation: str,
+    connector=None,
+    init_error: Exception | None = None,
+    **extra: str,
+) -> IngestionAgentDispatcher:
+    options = {"operation": operation, **_CREDS, **extra}
+    if connector is None and init_error is None:
+        connector = ExampleLakeflowConnect(_creds_only(options))
+    return IngestionAgentDispatcher(
+        options=options, connector=connector, init_error=init_error
     )
 
 
-def _collect(source: IngestionAgentSource) -> list:
-    schema = source.schema()
-    reader = source.reader(schema)
+def _collect(dispatcher: IngestionAgentDispatcher) -> list:
+    schema = dispatcher.schema()
+    reader = dispatcher.reader(schema)
     return list(reader.read(next(iter(reader.partitions()))))
 
 
@@ -95,7 +93,7 @@ def _collect(source: IngestionAgentSource) -> list:
 # ---------------------------------------------------------------------------
 
 def test_list_objects_defaults_to_flat_table_list():
-    rows = _collect(_make_source(OP_LIST_OBJECTS))
+    rows = _collect(_dispatcher(OP_LIST_OBJECTS))
     names = [r["name"] for r in rows]
     assert "events" in names
     assert "orders" in names
@@ -103,19 +101,16 @@ def test_list_objects_defaults_to_flat_table_list():
     assert types == {"table"}
     for row in rows:
         assert row["full_path"] == row["name"]
-        # Default success rows carry _meta.status == "ok".
         assert row["_meta"]["status"] == "ok"
 
 
 def test_list_objects_search_filters_by_regex():
-    rows = _collect(_make_source(OP_LIST_OBJECTS, search="^orders$"))
+    rows = _collect(_dispatcher(OP_LIST_OBJECTS, search="^orders$"))
     assert [r["name"] for r in rows] == ["orders"]
 
 
 def test_list_objects_returns_empty_when_parent_unknown():
-    # The default implementation has no hierarchy — any non-empty parent
-    # is treated as "no children" rather than an error.
-    rows = _collect(_make_source(OP_LIST_OBJECTS, parent="some/path"))
+    rows = _collect(_dispatcher(OP_LIST_OBJECTS, parent="some/path"))
     assert rows == []
 
 
@@ -124,21 +119,16 @@ def test_list_objects_returns_empty_when_parent_unknown():
 # ---------------------------------------------------------------------------
 
 def test_get_object_metadata_flattens_read_table_metadata():
-    rows = _collect(_make_source(OP_GET_OBJECT_METADATA, name="orders"))
+    rows = _collect(_dispatcher(OP_GET_OBJECT_METADATA, name="orders"))
     by_key = {r["key"]: r["value"] for r in rows}
-    # The example connector reports orders as cdc_with_deletes.
     assert by_key["ingestion_type"] == "cdc_with_deletes"
     assert by_key["cursor_column"] == "updated_at"
-    # primary_key value gets stringified (JSON list) since the schema column
-    # is a string.
     assert "id" in by_key["primary_key"]
 
 
 def test_get_object_metadata_filters_by_key():
     rows = _collect(
-        _make_source(
-            OP_GET_OBJECT_METADATA, name="orders", metadataKey="ingestion_type"
-        )
+        _dispatcher(OP_GET_OBJECT_METADATA, name="orders", metadataKey="ingestion_type")
     )
     assert len(rows) == 1
     assert rows[0]["key"] == "ingestion_type"
@@ -146,9 +136,7 @@ def test_get_object_metadata_filters_by_key():
 
 def test_get_object_metadata_unknown_key_returns_warning_row():
     rows = _collect(
-        _make_source(
-            OP_GET_OBJECT_METADATA, name="orders", metadataKey="does_not_exist"
-        )
+        _dispatcher(OP_GET_OBJECT_METADATA, name="orders", metadataKey="does_not_exist")
     )
     assert len(rows) == 1
     assert rows[0]["key"] == "does_not_exist"
@@ -158,7 +146,7 @@ def test_get_object_metadata_unknown_key_returns_warning_row():
 
 
 def test_get_object_metadata_missing_name_returns_error_row():
-    rows = _collect(_make_source(OP_GET_OBJECT_METADATA))
+    rows = _collect(_dispatcher(OP_GET_OBJECT_METADATA))
     assert len(rows) == 1
     assert rows[0]["_meta"]["status"] == "error"
     assert "name" in rows[0]["_meta"]["message"]
@@ -169,25 +157,23 @@ def test_get_object_metadata_missing_name_returns_error_row():
 # ---------------------------------------------------------------------------
 
 def test_preview_table_returns_rows_capped_by_limit():
-    source = _make_source(OP_PREVIEW_TABLE, tableName="orders", limit="2")
-    schema = source.schema()
-    # The schema is the source's natural table schema — no _meta column.
+    dispatcher = _dispatcher(OP_PREVIEW_TABLE, tableName="orders", limit="2")
+    schema = dispatcher.schema()
+    # Data-kind: source's natural schema, no _meta column.
     assert "_meta" not in [f.name for f in schema.fields]
-    rows = _collect(source)
+    rows = _collect(dispatcher)
     assert 0 < len(rows) <= 2
 
 
 def test_preview_table_default_limit():
-    source = _make_source(OP_PREVIEW_TABLE, tableName="products")
-    rows = _collect(source)
+    rows = _collect(_dispatcher(OP_PREVIEW_TABLE, tableName="products"))
     assert len(rows) <= DEFAULT_PREVIEW_LIMIT
 
 
 def test_preview_table_missing_table_name_raises():
-    source = _make_source(OP_PREVIEW_TABLE)
-    # preview_table is data-bearing: errors propagate, not error rows.
+    dispatcher = _dispatcher(OP_PREVIEW_TABLE)
     with pytest.raises(ValueError, match="tableName"):
-        source.schema()
+        dispatcher.schema()
 
 
 # ---------------------------------------------------------------------------
@@ -195,49 +181,28 @@ def test_preview_table_missing_table_name_raises():
 # ---------------------------------------------------------------------------
 
 def test_validate_connection_ok_with_default_health_check():
-    rows = _collect(_make_source(OP_VALIDATE_CONNECTION))
+    rows = _collect(_dispatcher(OP_VALIDATE_CONNECTION))
     assert len(rows) == 1
     assert rows[0]["_meta"]["status"] == "ok"
 
 
-class _FailingConnector(LakeflowConnect):
-    """LakeflowConnect whose __init__ always raises — exercises init-failure path."""
-
-    def __init__(self, options):
-        raise RuntimeError("bad creds")
-
-    def list_tables(self):
-        return []
-
-    def get_table_schema(self, table_name, table_options):
-        raise NotImplementedError
-
-    def read_table_metadata(self, table_name, table_options):
-        raise NotImplementedError
-
-    def read_table(self, table_name, start_offset, table_options):
-        raise NotImplementedError
-
-
-class _FailingSource(IngestionAgentSource):
-    def _build_connector(self):
-        return _FailingConnector(self.options)
-
-
 def test_validate_connection_reports_init_failure_as_error_row():
-    source = _FailingSource({"operation": OP_VALIDATE_CONNECTION})
-    rows = list(source.reader(source.schema()).read(None))
+    init_error = RuntimeError("bad creds")
+    dispatcher = _dispatcher(
+        OP_VALIDATE_CONNECTION, connector=None, init_error=init_error
+    )
+    rows = _collect(dispatcher)
     assert len(rows) == 1
     assert rows[0]["_meta"]["status"] == "error"
     assert "bad creds" in rows[0]["_meta"]["message"]
 
 
 # ---------------------------------------------------------------------------
-# Built-in: list_operations
+# Built-in: list_operations (connector-optional)
 # ---------------------------------------------------------------------------
 
 def test_list_operations_returns_builtin_catalog():
-    rows = _collect(_make_source(OP_LIST_OPERATIONS))
+    rows = _collect(_dispatcher(OP_LIST_OPERATIONS))
     names = {r["name"] for r in rows}
     assert {
         OP_LIST_OBJECTS,
@@ -246,6 +211,46 @@ def test_list_operations_returns_builtin_catalog():
         OP_VALIDATE_CONNECTION,
         OP_LIST_OPERATIONS,
     }.issubset(names)
+
+
+def test_list_operations_works_when_connector_failed_to_build():
+    """Connector-optional ops still run with a None connector."""
+    dispatcher = _dispatcher(
+        OP_LIST_OPERATIONS,
+        connector=None,
+        init_error=RuntimeError("bad creds"),
+    )
+    rows = _collect(dispatcher)
+    names = {r["name"] for r in rows}
+    # Built-ins are still listed.
+    assert OP_LIST_OBJECTS in names
+    assert OP_LIST_OPERATIONS in names
+
+
+def test_metadata_op_returns_error_row_when_connector_failed():
+    """Metadata-kind ops that require a connector → error row on init failure."""
+    dispatcher = _dispatcher(
+        OP_LIST_OBJECTS,
+        connector=None,
+        init_error=RuntimeError("bad creds"),
+    )
+    rows = _collect(dispatcher)
+    assert len(rows) == 1
+    assert rows[0]["_meta"]["status"] == "error"
+    assert "bad creds" in rows[0]["_meta"]["message"]
+
+
+def test_data_op_raises_when_connector_failed():
+    """Data-kind ops → exception propagates."""
+    init_error = RuntimeError("bad creds")
+    dispatcher = _dispatcher(
+        OP_PREVIEW_TABLE,
+        tableName="orders",
+        connector=None,
+        init_error=init_error,
+    )
+    with pytest.raises(RuntimeError, match="bad creds"):
+        dispatcher.schema()
 
 
 # ---------------------------------------------------------------------------
@@ -269,34 +274,30 @@ class _NamespacedConnector(ExampleLakeflowConnect, SupportsIngestionAgent):
         return {ListObjectsOp.name: _NamespacedListObjectsOp()}
 
 
-class _NamespacedSource(IngestionAgentSource):
-    def _build_connector(self):
-        return _NamespacedConnector(_creds_only(self.options))
+def _namespaced_dispatcher(operation: str, **extra: str) -> IngestionAgentDispatcher:
+    options = {"operation": operation, **_CREDS, **extra}
+    return IngestionAgentDispatcher(
+        options=options,
+        connector=_NamespacedConnector(_creds_only(options)),
+    )
 
 
 def test_builtin_subclass_replaces_default_at_root():
-    source = _NamespacedSource({"operation": OP_LIST_OBJECTS, **_CREDS})
-    rows = _collect(source)
+    rows = _collect(_namespaced_dispatcher(OP_LIST_OBJECTS))
     assert [r["name"] for r in rows] == ["public"]
     assert rows[0]["type"] == "schema"
     assert rows[0]["_meta"]["status"] == "ok"
 
 
 def test_builtin_subclass_handles_parent_drill_down():
-    source = _NamespacedSource(
-        {"operation": OP_LIST_OBJECTS, "parent": "public", **_CREDS}
-    )
-    rows = _collect(source)
+    rows = _collect(_namespaced_dispatcher(OP_LIST_OBJECTS, parent="public"))
     assert len(rows) == 1
     assert rows[0]["name"] == "orders"
     assert rows[0]["full_path"] == "public.orders"
 
 
 def test_builtin_subclass_returns_empty_for_unknown_parent():
-    source = _NamespacedSource(
-        {"operation": OP_LIST_OBJECTS, "parent": "other", **_CREDS}
-    )
-    rows = _collect(source)
+    rows = _collect(_namespaced_dispatcher(OP_LIST_OBJECTS, parent="other"))
     assert rows == []
 
 
@@ -353,54 +354,49 @@ class _ExampleWithCustomOps(ExampleLakeflowConnect, SupportsIngestionAgent):
         }
 
 
-class _CustomOpsSource(IngestionAgentSource):
-    def _build_connector(self):
-        return _ExampleWithCustomOps(_creds_only(self.options))
-
-
-def _make_custom_source(operation: str, **extra: str) -> IngestionAgentSource:
-    return _CustomOpsSource({"operation": operation, **_CREDS, **extra})
+def _custom_ops_dispatcher(operation: str, **extra: str) -> IngestionAgentDispatcher:
+    options = {"operation": operation, **_CREDS, **extra}
+    return IngestionAgentDispatcher(
+        options=options,
+        connector=_ExampleWithCustomOps(_creds_only(options)),
+    )
 
 
 def test_source_specific_op_metadata_kind():
-    source = _make_custom_source(_DescribeTableOp.name, tableName="orders")
-    schema = source.schema()
-    # Metadata-kind ops auto-acquire a _meta column.
+    dispatcher = _custom_ops_dispatcher(_DescribeTableOp.name, tableName="orders")
+    schema = dispatcher.schema()
     assert [f.name for f in schema.fields] == [
         "column_name",
         "data_type",
         "nullable",
         "_meta",
     ]
-    rows = _collect(source)
+    rows = _collect(dispatcher)
     column_names = [r["column_name"] for r in rows]
     assert "order_id" in column_names
     assert rows[0]["_meta"]["status"] == "ok"
 
 
 def test_source_specific_op_data_kind_skips_meta():
-    source = _make_custom_source(_RowCountOp.name)
-    schema = source.schema()
-    # Data-kind ops keep the natural schema, no _meta column appended.
+    dispatcher = _custom_ops_dispatcher(_RowCountOp.name)
+    schema = dispatcher.schema()
     assert [f.name for f in schema.fields] == ["count"]
-    rows = _collect(source)
+    rows = _collect(dispatcher)
     assert len(rows) == 1
     assert rows[0]["count"] > 0
 
 
 def test_source_specific_op_metadata_error_becomes_error_row():
-    source = _make_custom_source(_DescribeTableOp.name)  # missing tableName
-    rows = _collect(source)
+    dispatcher = _custom_ops_dispatcher(_DescribeTableOp.name)  # missing tableName
+    rows = _collect(dispatcher)
     assert len(rows) == 1
     assert rows[0]["_meta"]["status"] == "error"
-    # KeyError on the missing option propagates as an error row.
     assert "tableName" in rows[0]["_meta"]["message"]
 
 
 def test_list_operations_includes_source_plug_ins():
-    rows = _collect(_make_custom_source("list_operations"))
+    rows = _collect(_custom_ops_dispatcher("list_operations"))
     names = {r["name"] for r in rows}
-    # Built-ins still present.
     assert {
         "list_objects",
         "preview_table",
@@ -408,7 +404,6 @@ def test_list_operations_includes_source_plug_ins():
         "validate_connection",
         "list_operations",
     }.issubset(names)
-    # Source plug-ins listed with their description.
     assert _DescribeTableOp.name in names
     assert _RowCountOp.name in names
     descriptions = {r["name"]: r["description"] for r in rows}
@@ -422,12 +417,11 @@ def test_agent_operations_rejects_non_operation_values():
         def agent_operations(self):
             return {"example.bogus": "not an AgentOperation"}
 
-    class _BadSource(IngestionAgentSource):
-        def _build_connector(self):
-            return _BadConnector(_creds_only(self.options))
-
     with pytest.raises(TypeError, match="AgentOperation"):
-        _BadSource({"operation": "example.bogus", **_CREDS})
+        IngestionAgentDispatcher(
+            options={"operation": "example.bogus", **_CREDS},
+            connector=_BadConnector(_creds_only(_CREDS)),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -463,13 +457,16 @@ def test_agent_operation_rejects_invalid_kind():
 
 def test_missing_operation_raises_on_init():
     with pytest.raises(ValueError, match="operation"):
-        _ExampleIngestionAgentSource(dict(_CREDS))
+        IngestionAgentDispatcher(
+            options=dict(_CREDS),
+            connector=ExampleLakeflowConnect(_creds_only(_CREDS)),
+        )
 
 
 def test_unknown_operation_returns_error_row():
-    source = _make_source("unsupported_op")
+    dispatcher = _dispatcher("unsupported_op")
     with pytest.raises(ValueError, match="Unknown ingestion-agent operation"):
-        source.schema()
+        dispatcher.schema()
 
 
 # ---------------------------------------------------------------------------
@@ -481,19 +478,13 @@ def test_unknown_operation_returns_error_row():
 class _ExampleLakeflowSource(LakeflowSource):
     """LakeflowSource wired to ExampleLakeflowConnect for end-to-end tests."""
 
-    def _build_table_connector(self, options):
+    def _build_connector(self, options):
         return ExampleLakeflowConnect(options)
-
-    def _build_agent_source(self, options):
-        return _ExampleIngestionAgentSource(options)
 
 
 def test_lakeflow_source_routes_to_agent_when_operation_set():
-    source = _ExampleLakeflowSource(
-        {"operation": OP_LIST_OPERATIONS, **_CREDS}
-    )
+    source = _ExampleLakeflowSource({"operation": OP_LIST_OPERATIONS, **_CREDS})
     schema = source.schema()
-    # Agent dispatch is in effect — schema is the list_operations shape.
     assert {f.name for f in schema.fields} == {"name", "description", "_meta"}
     rows = list(source.reader(schema).read(None))
     names = {r["name"] for r in rows}
@@ -507,9 +498,6 @@ def test_lakeflow_source_routes_to_agent_when_operation_set():
 
 
 def test_lakeflow_source_table_mode_unchanged_when_no_operation():
-    # Without `operation`, the source behaves as before — schema() requires
-    # `tableName`. We don't assert on data here; the existing source-specific
-    # test suites cover the table read path.
     source = _ExampleLakeflowSource({"tableName": "orders", **_CREDS})
     schema = source.schema()
     # The table's natural schema has columns; absence of `_meta` confirms we
@@ -518,11 +506,33 @@ def test_lakeflow_source_table_mode_unchanged_when_no_operation():
 
 
 def test_lakeflow_source_agent_mode_blocks_streaming():
-    source = _ExampleLakeflowSource(
-        {"operation": OP_VALIDATE_CONNECTION, **_CREDS}
-    )
+    source = _ExampleLakeflowSource({"operation": OP_VALIDATE_CONNECTION, **_CREDS})
     schema = source.schema()
     with pytest.raises(NotImplementedError, match="streaming"):
         source.streamReader(schema)
     with pytest.raises(NotImplementedError, match="streaming"):
         source.simpleStreamReader(schema)
+
+
+class _FailingLakeflowSource(LakeflowSource):
+    """LakeflowSource whose _build_connector always raises — exercises the
+    LakeflowSource-level init-failure path for agent mode.
+    """
+
+    def _build_connector(self, options):
+        raise RuntimeError("bad creds")
+
+
+def test_lakeflow_source_agent_mode_swallows_init_error():
+    """Agent mode catches init errors; the dispatcher emits an error row at read time."""
+    source = _FailingLakeflowSource({"operation": OP_VALIDATE_CONNECTION, **_CREDS})
+    rows = list(source.reader(source.schema()).read(None))
+    assert len(rows) == 1
+    assert rows[0]["_meta"]["status"] == "error"
+    assert "bad creds" in rows[0]["_meta"]["message"]
+
+
+def test_lakeflow_source_table_mode_propagates_init_error():
+    """Table mode raises init errors — no error-row fallback for regular reads."""
+    with pytest.raises(RuntimeError, match="bad creds"):
+        _FailingLakeflowSource({"tableName": "orders", **_CREDS})

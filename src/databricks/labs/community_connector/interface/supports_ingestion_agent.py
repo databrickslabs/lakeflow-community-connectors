@@ -32,6 +32,11 @@ class AgentOperation(ABC):
     description: str = ""
     kind: str = "metadata"
     schema: Optional[StructType] = None
+    #: Whether the operation needs a live :class:`LakeflowConnect`
+    #: instance. Defaults to ``True``. Set ``False`` on ops that should
+    #: still run when the connector failed to construct
+    #: (e.g. discovery-style ops like ``list_operations``).
+    requires_connector: bool = True
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
