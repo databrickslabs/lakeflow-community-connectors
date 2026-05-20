@@ -8122,7 +8122,7 @@ def register_lakeflow_source(spark):
                 )
                 tables = self.lakeflow_connect.list_tables_in_namespace(namespace)
                 return [
-                    {"namespace": namespace, "table_name": tn}
+                    {"namespace": namespace, TABLE_NAME: tn}
                     for tn in sorted(tables)
                 ]
             # Flat connector path. Reject a stray `namespace` option — the
@@ -8135,7 +8135,7 @@ def register_lakeflow_source(spark):
                     f"or use a namespace-aware connector."
                 )
             return [
-                {"namespace": [], "table_name": tn}
+                {"namespace": [], TABLE_NAME: tn}
                 for tn in sorted(self.lakeflow_connect.list_tables())
             ]
 
@@ -8187,7 +8187,7 @@ def register_lakeflow_source(spark):
                 return StructType(
                     [
                         StructField("namespace", ArrayType(StringType()), False),
-                        StructField("table_name", StringType(), False),
+                        StructField(TABLE_NAME, StringType(), False),
                     ]
                 )
             return self.lakeflow_connect.get_table_schema(table, self.options)
