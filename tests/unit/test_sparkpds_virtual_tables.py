@@ -122,7 +122,7 @@ def test_community_tables_schema():
     assert schema == StructType(
         [
             StructField("namespace", ArrayType(StringType()), False),
-            StructField("table_name", StringType(), False),
+            StructField("tableName", StringType(), False),
         ]
     )
 
@@ -162,8 +162,8 @@ def test_tables_flat_connector_uses_list_tables_with_empty_namespace():
     """Flat connectors ignore the `namespace` option and report every table at root."""
     reader = _reader(_FlatConnector({}), TABLES_TABLE)
     assert reader._read_tables() == [
-        {"namespace": [], "table_name": "t1"},
-        {"namespace": [], "table_name": "t2"},
+        {"namespace": [], "tableName": "t1"},
+        {"namespace": [], "tableName": "t2"},
     ]
 
 
@@ -182,7 +182,7 @@ def test_tables_namespaced_root_only_with_empty_namespace():
         **{NAMESPACE: json.dumps([])},
     )
     assert reader._read_tables() == [
-        {"namespace": [], "table_name": "global_settings"},
+        {"namespace": [], "tableName": "global_settings"},
     ]
 
 
@@ -193,7 +193,7 @@ def test_tables_namespaced_specific_namespace():
         **{NAMESPACE: json.dumps(["orgA", "repo1"])},
     )
     assert reader._read_tables() == [
-        {"namespace": ["orgA", "repo1"], "table_name": "issues"},
+        {"namespace": ["orgA", "repo1"], "tableName": "issues"},
     ]
 
 
@@ -215,8 +215,8 @@ def test_tables_namespaced_sorts_table_names():
     )
     # Fixture returns ["users", "settings"]; framework sorts → ["settings", "users"].
     assert reader._read_tables() == [
-        {"namespace": ["orgB"], "table_name": "settings"},
-        {"namespace": ["orgB"], "table_name": "users"},
+        {"namespace": ["orgB"], "tableName": "settings"},
+        {"namespace": ["orgB"], "tableName": "users"},
     ]
 
 
