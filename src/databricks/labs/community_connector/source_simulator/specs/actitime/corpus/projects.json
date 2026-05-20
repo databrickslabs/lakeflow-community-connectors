@@ -68,5 +68,21 @@
       "canDelete": true
     },
     "description": null
+  },
+  {
+    "id": 99001,
+    "customerId": 6,
+    "name": "Synthetic — column coverage augmentation",
+    "archived": false,
+    "created": 1770163200000,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?projectId=99001",
+    "customerName": "Big Bang Company",
+    "allowedActions": {
+      "canModify": false,
+      "canDelete": false
+    },
+    "description": "Synthetic project added to satisfy the simulator column-coverage invariant; not from any live tenant capture.",
+    "workflowEnabled": true,
+    "defaultTypeOfWorkId": 1
   }
 ]

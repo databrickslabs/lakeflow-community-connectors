@@ -231,13 +231,6 @@
     "leaveTime": 240
   },
   {
-    "userId": 23,
-    "dayOffset": 5,
-    "date": "2026-05-29",
-    "leaveTypeId": 9,
-    "leaveTime": 240
-  },
-  {
     "userId": 20,
     "dayOffset": 8,
     "date": "2026-06-01",
@@ -252,20 +245,6 @@
     "leaveTime": 480
   },
   {
-    "userId": 20,
-    "dayOffset": 1,
-    "date": "2026-06-01",
-    "leaveTypeId": 2,
-    "leaveTime": 480
-  },
-  {
-    "userId": 20,
-    "dayOffset": 2,
-    "date": "2026-06-02",
-    "leaveTypeId": 2,
-    "leaveTime": 480
-  },
-  {
     "userId": 1,
     "dayOffset": 12,
     "date": "2026-06-19",
@@ -275,20 +254,6 @@
   {
     "userId": 20,
     "dayOffset": 12,
-    "date": "2026-06-19",
-    "leaveTypeId": 9,
-    "leaveTime": 480
-  },
-  {
-    "userId": 1,
-    "dayOffset": 5,
-    "date": "2026-06-19",
-    "leaveTypeId": 2,
-    "leaveTime": 480
-  },
-  {
-    "userId": 20,
-    "dayOffset": 5,
     "date": "2026-06-19",
     "leaveTypeId": 9,
     "leaveTime": 480
@@ -303,20 +268,6 @@
   {
     "userId": 16,
     "dayOffset": 11,
-    "date": "2026-06-25",
-    "leaveTypeId": 2,
-    "leaveTime": 510
-  },
-  {
-    "userId": 16,
-    "dayOffset": 3,
-    "date": "2026-06-24",
-    "leaveTypeId": 2,
-    "leaveTime": 480
-  },
-  {
-    "userId": 16,
-    "dayOffset": 4,
     "date": "2026-06-25",
     "leaveTypeId": 2,
     "leaveTime": 510
@@ -352,41 +303,6 @@
   {
     "userId": 1,
     "dayOffset": 12,
-    "date": "2026-07-17",
-    "leaveTypeId": 3,
-    "leaveTime": 480
-  },
-  {
-    "userId": 1,
-    "dayOffset": 1,
-    "date": "2026-07-13",
-    "leaveTypeId": 3,
-    "leaveTime": 480
-  },
-  {
-    "userId": 1,
-    "dayOffset": 2,
-    "date": "2026-07-14",
-    "leaveTypeId": 3,
-    "leaveTime": 480
-  },
-  {
-    "userId": 1,
-    "dayOffset": 3,
-    "date": "2026-07-15",
-    "leaveTypeId": 3,
-    "leaveTime": 480
-  },
-  {
-    "userId": 1,
-    "dayOffset": 4,
-    "date": "2026-07-16",
-    "leaveTypeId": 3,
-    "leaveTime": 480
-  },
-  {
-    "userId": 1,
-    "dayOffset": 5,
     "date": "2026-07-17",
     "leaveTypeId": 3,
     "leaveTime": 480
@@ -463,13 +379,6 @@
   },
   {
     "userId": 21,
-    "dayOffset": 1,
-    "date": "2026-08-03",
-    "leaveTypeId": 3,
-    "leaveTime": 480
-  },
-  {
-    "userId": 21,
     "dayOffset": 2,
     "date": "2026-08-04",
     "leaveTypeId": 3,
@@ -525,34 +434,6 @@
     "leaveTime": 240
   },
   {
-    "userId": 14,
-    "dayOffset": 1,
-    "date": "2026-08-17",
-    "leaveTypeId": 3,
-    "leaveTime": 480
-  },
-  {
-    "userId": 14,
-    "dayOffset": 2,
-    "date": "2026-08-18",
-    "leaveTypeId": 3,
-    "leaveTime": 480
-  },
-  {
-    "userId": 14,
-    "dayOffset": 3,
-    "date": "2026-08-19",
-    "leaveTypeId": 3,
-    "leaveTime": 480
-  },
-  {
-    "userId": 14,
-    "dayOffset": 4,
-    "date": "2026-08-20",
-    "leaveTypeId": 3,
-    "leaveTime": 240
-  },
-  {
     "userId": 16,
     "dayOffset": 9,
     "date": "2026-09-01",
@@ -576,34 +457,6 @@
   {
     "userId": 16,
     "dayOffset": 12,
-    "date": "2026-09-04",
-    "leaveTypeId": 3,
-    "leaveTime": 450
-  },
-  {
-    "userId": 16,
-    "dayOffset": 2,
-    "date": "2026-09-01",
-    "leaveTypeId": 3,
-    "leaveTime": 480
-  },
-  {
-    "userId": 16,
-    "dayOffset": 3,
-    "date": "2026-09-02",
-    "leaveTypeId": 3,
-    "leaveTime": 480
-  },
-  {
-    "userId": 16,
-    "dayOffset": 4,
-    "date": "2026-09-03",
-    "leaveTypeId": 3,
-    "leaveTime": 510
-  },
-  {
-    "userId": 16,
-    "dayOffset": 5,
     "date": "2026-09-04",
     "leaveTypeId": 3,
     "leaveTime": 450

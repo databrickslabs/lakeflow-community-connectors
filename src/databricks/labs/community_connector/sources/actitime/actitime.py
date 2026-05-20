@@ -1092,10 +1092,14 @@ class ActitimeLakeflowConnect(LakeflowConnect):
                 "order": raw.get("order"),
             }
         if table_name == "timeZoneGroups":
+            # Wire field is ``timeZoneId`` (e.g. "America/New_York"), not
+            # ``timeZone`` — verified against the live API response across
+            # all three time-zone groups on the test tenant. Accept the
+            # legacy ``timeZone`` key too just in case the API ever varies.
             return {
                 "id": raw.get("id"),
                 "name": raw.get("name"),
-                "time_zone": raw.get("timeZone"),
+                "time_zone": raw.get("timeZoneId") or raw.get("timeZone"),
             }
         if table_name == "settings":
             return {

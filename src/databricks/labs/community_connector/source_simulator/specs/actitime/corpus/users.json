@@ -101,5 +101,24 @@
       "canSubmitTimetrack": true
     },
     "fullName": "Daniel Alvarez"
+  },
+  {
+    "id": 99001,
+    "username": "synthetic.augmentation",
+    "active": false,
+    "firstName": "Synthetic",
+    "middleName": "",
+    "lastName": "Augmentation",
+    "departmentId": -1,
+    "timeZoneGroupId": -1,
+    "hired": "2024-01-01",
+    "releaseDate": "2030-12-31",
+    "email": "synthetic@example.invalid",
+    "requiresTimeTrackApproval": false,
+    "initialSchedule": null,
+    "allowedActions": {
+      "canSubmitTimetrack": false
+    },
+    "fullName": "Synthetic Augmentation"
   }
 ]

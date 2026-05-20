@@ -38,5 +38,14 @@
     "archived": false,
     "billable": true,
     "default": false
+  },
+  {
+    "id": 99001,
+    "name": "Synthetic — column coverage augmentation",
+    "description": "Synthetic type-of-work added to satisfy the simulator column-coverage invariant; not from any live tenant capture.",
+    "rate": 0.0,
+    "archived": false,
+    "billable": true,
+    "default": false
   }
 ]

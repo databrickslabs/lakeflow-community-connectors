@@ -43,5 +43,15 @@
       "canModify": true,
       "canDelete": false
     }
+  },
+  {
+    "id": 99001,
+    "name": "Synthetic — column coverage augmentation",
+    "type": "open",
+    "order": 99,
+    "allowedActions": {
+      "canModify": false,
+      "canDelete": false
+    }
   }
 ]

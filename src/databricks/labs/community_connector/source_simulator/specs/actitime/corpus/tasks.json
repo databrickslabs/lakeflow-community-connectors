@@ -108,5 +108,29 @@
     "estimatedTime": 24000,
     "customerId": 6,
     "projectId": 13
+  },
+  {
+    "id": 99001,
+    "name": "Synthetic — column coverage augmentation",
+    "description": "Synthetic task added to satisfy the simulator column-coverage invariant; not from any live tenant capture.",
+    "created": 1770163200000,
+    "status": "completed",
+    "workflowStatusId": 2,
+    "typeOfWorkId": 1,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?taskId=99001",
+    "projectName": "Spaceship building",
+    "customerName": "Big Bang Company",
+    "workflowStatusName": "Done",
+    "typeOfWorkName": "engineering",
+    "allowedActions": {
+      "canModify": false,
+      "canDelete": false,
+      "canComplete": true
+    },
+    "deadline": null,
+    "estimatedTime": null,
+    "customerId": 6,
+    "projectId": 13,
+    "archived": true
   }
 ]
