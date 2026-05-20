@@ -1,0 +1,11 @@
+{
+  "contact": "crm_objects",
+  "compan": "crm_objects",
+  "deal": "crm_objects",
+  "ticket": "crm_objects",
+  "call": "engagement",
+  "email": "engagement",
+  "meeting": "engagement",
+  "task": "engagement",
+  "note": "engagement"
+}
