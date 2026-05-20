@@ -11,9 +11,9 @@ from decimal import Decimal
 from typing import Any, Iterator, Sequence
 import json
 import os
+import re
 import time
 
-from __future__ import annotations
 from pyspark.sql import Row
 from pyspark.sql.datasource import (
     DataSource,
@@ -43,7 +43,6 @@ from pyspark.sql.types import (
     VariantVal,
 )
 import base64
-import logging
 import requests
 import threading
 
@@ -521,6 +520,79 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
+    # src/databricks/labs/community_connector/interface/supports_namespaces.py
+    ########################################################
+
+    class SupportsNamespaces(ABC):
+        """Mixin for connectors whose tables live under hierarchical namespaces.
+
+        A namespace is a path of zero or more string segments (e.g. ``["org",
+        "repo"]`` for GitHub, ``["tenant", "project"]`` for Azure DevOps).
+        Connectors with a flat catalog do not need this mixin — the framework
+        falls back to :meth:`LakeflowConnect.list_tables` and reports each table
+        with an empty namespace.
+
+        Output ordering on the ``_community_namespaces`` and ``_community_tables``
+        Spark virtual tables is normalized by the framework via ``sorted(...)``,
+        so connector implementations of :meth:`list_namespaces` and
+        :meth:`list_tables_in_namespace` are free to return their results in
+        any order (including from a :class:`set` or generator).
+
+        Must be used together with :class:`LakeflowConnect`.
+
+        Usage::
+
+            class MyConnector(LakeflowConnect, SupportsNamespaces):
+                ...
+        """
+
+        @abstractmethod
+        def list_namespaces(
+            self,
+            prefix: list[str] | None = None,
+        ) -> list[list[str]]:
+            """Return the immediate child namespaces under ``prefix``.
+
+            This method returns one level of *namespace* children only — it
+            never returns tables. A namespace can hold tables and child
+            namespaces independently; callers must always call
+            :meth:`list_tables_in_namespace` for every namespace they care
+            about, regardless of whether :meth:`list_namespaces` returned
+            children for it. An empty return value just means there are no
+            further child namespaces under ``prefix``.
+
+            Walk the full tree by recursing on each returned child.
+
+            Args:
+                prefix: A namespace path under which to list children. ``None`` or
+                    an empty list lists the root-level namespaces.
+            Returns:
+                A list of full namespace paths (each path includes the prefix).
+            """
+
+        @abstractmethod
+        def list_tables_in_namespace(
+            self,
+            namespace: list[str],
+        ) -> list[str]:
+            """Return the table names that live directly under ``namespace``.
+
+            Callers that want every table across the whole catalog walk the
+            namespace tree via :meth:`list_namespaces` and call this method
+            once per leaf — there is no "list everything" shortcut.
+
+            Args:
+                namespace: The namespace path. An empty list ``[]`` selects
+                    root-level tables (those that live outside any namespace).
+            Returns:
+                A list of table names. The full ``(namespace, table_name)``
+                row exposed on ``_community_tables`` is reconstructed by the
+                framework from the namespace the caller already supplied, so
+                the connector does not need to echo it back.
+            """
+
+
+    ########################################################
     # src/databricks/labs/community_connector/sources/adme/adme_schemas.py
     ########################################################
 
@@ -695,9 +767,6 @@ def register_lakeflow_source(spark):
     # src/databricks/labs/community_connector/sources/adme/adme.py
     ########################################################
 
-    _LOG = logging.getLogger(__name__)
-
-    # OSDU Search "query_with_cursor" caps page size at 1000.
     DEFAULT_PAGE_SIZE = 1000
     MAX_PAGE_SIZE = 1000
 
@@ -713,12 +782,37 @@ def register_lakeflow_source(spark):
     # Used as the lower bound on the very first run when there's no
     # committed offset yet — Lucene's ``*`` matches everything.
     EPOCH_ISO = "1970-01-01T00:00:00.000Z"
+    # Any committed offset older than this is treated as "first run / no
+    # real watermark" so the partition planner takes the open-ended fast
+    # path instead of walking thousands of empty daily windows.
+    FIRST_RUN_SENTINEL_THRESHOLD = "2000-01-01T00:00:00.000Z"
+
+    # data_partition_id is forwarded verbatim into a custom HTTP header, so
+    # constrain it to characters that can never split or escape the header.
+    # Matches the documented contract in connector_spec.yaml and README:
+    # alphanumeric plus hyphen (no underscore).
+    _DATA_PARTITION_ID_PATTERN = re.compile(r"[A-Za-z0-9-]+")
 
     # HTTP retry configuration. ADME documents cursor inactivity timeout
     # at 1 minute; transient 5xx and 429 are common.
     RETRIABLE_STATUS_CODES = {429, 500, 502, 503, 504}
     MAX_RETRIES = 5
     INITIAL_BACKOFF = 1.0
+
+    # Cap on how much of an upstream HTTP response body is folded into a
+    # RuntimeError message. OSDU error bodies sometimes carry correlation IDs
+    # and request echo data that lands verbatim in Spark driver logs.
+    _ERROR_BODY_LIMIT = 256
+
+
+    def _redact_body(text: str) -> str:
+        """Return ``text`` truncated and stripped of CR/LF for safe error messages."""
+        if not text:
+            return ""
+        flattened = text.replace("\r", " ").replace("\n", " ")
+        if len(flattened) <= _ERROR_BODY_LIMIT:
+            return flattened
+        return flattened[:_ERROR_BODY_LIMIT] + "...[truncated]"
 
 
     # ---------------------------------------------------------------------------
@@ -807,13 +901,15 @@ def register_lakeflow_source(spark):
             )
             if resp.status_code != 200:
                 raise RuntimeError(
-                    f"ADME auth failed: {resp.status_code} {resp.text}"
+                    f"ADME auth failed: {resp.status_code} {_redact_body(resp.text)}"
                 )
             payload = resp.json()
             token = payload.get("access_token")
             if not token:
+                redacted_keys = sorted(k for k in payload if k != "access_token")
                 raise RuntimeError(
-                    f"ADME auth response missing access_token: {payload}"
+                    "ADME auth response missing access_token; "
+                    f"keys present: {redacted_keys}"
                 )
             expires_in = float(payload.get("expires_in", 3600))
             return token, time.time() + expires_in
@@ -1022,8 +1118,6 @@ def register_lakeflow_source(spark):
         Recognised per-table options:
             window_days            Partition size in days (default 1)
             lookback_minutes       Lookback applied to start cursor (default 5)
-            max_records_per_batch  Cap on records yielded per partition /
-                                   read_table call. Unset or 0 = uncapped.
         """
 
         def __init__(self, options: dict[str, str]) -> None:
@@ -1042,6 +1136,16 @@ def register_lakeflow_source(spark):
                     raise ValueError(
                         f"ADME connector requires connection option {name!r}"
                     )
+
+            # data_partition_id is forwarded verbatim into a custom HTTP
+            # header. Constrain to alphanumeric + ``-``/``_`` so a stray
+            # CRLF (or anything similarly exotic) can't split the header.
+            if not _DATA_PARTITION_ID_PATTERN.fullmatch(data_partition_id):
+                raise ValueError(
+                    "ADME connector option 'data_partition_id' must match "
+                    "[A-Za-z0-9_-]+ (no whitespace, control chars, or "
+                    "header separators)"
+                )
 
             # Strip trailing slash for clean URL composition.
             self._instance_url = instance_url.rstrip("/")
@@ -1155,8 +1259,11 @@ def register_lakeflow_source(spark):
             # partition. We don't know the corpus age and walking from 1970
             # in daily windows would generate tens of thousands of empty
             # API calls. The single partition uses Lucene ``*`` for the
-            # lower bound, which the OSDU index handles efficiently.
-            if start_iso == EPOCH_ISO:
+            # lower bound, which the OSDU index handles efficiently. We
+            # treat any lower bound at or before 2000-01-01 as "no real
+            # watermark" so the optimisation isn't coupled to the exact
+            # EPOCH_ISO sentinel.
+            if start_iso <= FIRST_RUN_SENTINEL_THRESHOLD:
                 return [{"since": EPOCH_ISO, "until": end_iso}]
 
             # Apply a lookback to the lower bound to handle records that
@@ -1190,29 +1297,20 @@ def register_lakeflow_source(spark):
         ) -> Iterator[dict]:
             """Read one ``(since, until]`` window of records.
 
-            Runs on Spark executors. Recreates the API state needed via
-            ``self.options`` (set by the LakeflowConnect base ``__init__``)
-            through the existing ``_session``/``_token_provider`` instance
-            attributes that get pickled with the connector.
-
-            Honors ``max_records_per_batch`` for admission control: when
-            set, stops yielding once the cap is reached so a single
-            partition cannot blow up driver/executor memory.
+            Runs on Spark executors. Each partition is a bounded
+            ``modifyTime`` window produced by ``get_partitions``, so
+            admission control is handled by the partitioner (via
+            ``latest_offset`` + ``window_days``) rather than by a separate
+            per-batch record cap.
             """
             self._validate_table(table_name)
 
             since = partition["since"]
             until = partition["until"]
             kind_query = TABLE_TO_KIND_QUERY[table_name]
-            cap = _parse_max_records(table_options)
 
             lucene = self._build_lucene_range(since, until)
-            yielded = 0
-            for record in self._search_paginated(kind_query, lucene):
-                if cap is not None and yielded >= cap:
-                    return
-                yield record
-                yielded += 1
+            yield from self._search_paginated(kind_query, lucene)
 
         # ------------------------------------------------------------------
         # LakeflowConnect.read_table — fallback for non-partitioned reads
@@ -1229,11 +1327,9 @@ def register_lakeflow_source(spark):
             All three ADME tables prefer the partitioned stream path
             (``is_partitioned`` returns True), so this method is only used
             if the engine deliberately bypasses partitioning. We honour the
-            contract by paginating sequentially and capping at init time.
-
-            Honors ``max_records_per_batch``: when set, returns at most that
-            many records and an offset that lets the next call resume mid-
-            window from the same ``modifyTime`` lower bound.
+            contract by paginating sequentially from the committed cursor
+            up to init time, then advancing the cursor to init time so
+            Trigger.AvailableNow terminates.
             """
             self._validate_table(table_name)
 
@@ -1244,22 +1340,10 @@ def register_lakeflow_source(spark):
                 return iter([]), start_offset or {"cursor": self._init_time}
 
             kind_query = TABLE_TO_KIND_QUERY[table_name]
-            cap = _parse_max_records(table_options)
             lucene = self._build_lucene_range(since, self._init_time)
 
-            records: list[dict] = []
-            capped = False
-            for record in self._search_paginated(kind_query, lucene):
-                if cap is not None and len(records) >= cap:
-                    capped = True
-                    break
-                records.append(record)
-
-            # When the cap fires mid-window, hold the lower bound so the
-            # next batch picks up the rest of the same window. When we drain
-            # the window naturally, advance the cursor to init_time.
-            end_offset = {"cursor": since if capped else self._init_time}
-            return iter(records), end_offset
+            records = list(self._search_paginated(kind_query, lucene))
+            return iter(records), {"cursor": self._init_time}
 
         # ------------------------------------------------------------------
         # Helpers
@@ -1338,11 +1422,17 @@ def register_lakeflow_source(spark):
         def _post_with_retry(
             self, url: str, body: dict[str, Any]
         ) -> requests.Response:
-            """POST with exponential backoff and one auth-refresh retry on 401."""
+            """POST with exponential backoff and one auth-refresh retry on 401.
+
+            The auth-refresh is tracked separately from the retry budget so
+            a stale token doesn't consume one of the ``MAX_RETRIES`` slots
+            otherwise reserved for transient 5xx / 429 responses.
+            """
             backoff = INITIAL_BACKOFF
             auth_retried = False
+            attempts = 0
             resp: requests.Response | None = None
-            for attempt in range(MAX_RETRIES):
+            while attempts < MAX_RETRIES:
                 resp = self._session.post(
                     url,
                     headers=self._common_headers(),
@@ -1351,13 +1441,16 @@ def register_lakeflow_source(spark):
                 )
                 if resp.status_code == 401 and not auth_retried:
                     # Token may be stale (e.g. revoked or expired early).
+                    # One-shot refresh that doesn't count against the
+                    # retry budget.
                     self._token_provider.invalidate()
                     auth_retried = True
                     continue
                 if resp.status_code not in RETRIABLE_STATUS_CODES:
                     return resp
 
-                if attempt < MAX_RETRIES - 1:
+                attempts += 1
+                if attempts < MAX_RETRIES:
                     retry_after = resp.headers.get("Retry-After")
                     try:
                         wait = float(retry_after) if retry_after else backoff
@@ -1389,7 +1482,7 @@ def register_lakeflow_source(spark):
                 if resp.status_code != 200:
                     raise RuntimeError(
                         f"ADME search failed for kind={kind_query!r}: "
-                        f"{resp.status_code} {resp.text}"
+                        f"{resp.status_code} {_redact_body(resp.text)}"
                     )
                 payload = resp.json()
                 results = payload.get("results") or []
@@ -1407,21 +1500,6 @@ def register_lakeflow_source(spark):
     # ---------------------------------------------------------------------------
     # Record flattening
     # ---------------------------------------------------------------------------
-
-
-    def _parse_max_records(table_options: dict[str, str]) -> int | None:
-        """Parse the optional ``max_records_per_batch`` admission-control cap.
-
-        Returns ``None`` when unset or non-numeric (uncapped).
-        """
-        raw = table_options.get("max_records_per_batch")
-        if raw is None:
-            return None
-        try:
-            value = int(raw)
-        except (TypeError, ValueError):
-            return None
-        return value if value > 0 else None
 
 
     def _flatten_record(raw: dict[str, Any]) -> dict[str, Any]:
@@ -1618,11 +1696,58 @@ def register_lakeflow_source(spark):
 
     LakeflowConnectImpl = ADMELakeflowConnect
     # Constant option or column names
-    METADATA_TABLE = "_lakeflow_metadata"
+    METADATA_TABLE = "_community_table_metadata"
+    NAMESPACES_TABLE = "_community_namespaces"
+    TABLES_TABLE = "_community_tables"
+    VIRTUAL_TABLES = (METADATA_TABLE, NAMESPACES_TABLE, TABLES_TABLE)
     TABLE_NAME = "tableName"
     TABLE_NAME_LIST = "tableNameList"
     TABLE_CONFIGS = "tableConfigs"
     IS_DELETE_FLOW = "isDeleteFlow"
+    NAMESPACE_PREFIX = "namespacePrefix"
+    NAMESPACE = "namespace"
+
+
+    def _decode_list_of_str_option(option_name: str, value: str | None) -> list[str] | None:
+        """Decode and validate a JSON-encoded ``list[str]`` Spark option.
+
+        Returns ``None`` if the option is absent; otherwise the parsed list.
+        Raises ``ValueError`` with the offending value if the JSON is malformed
+        or the decoded value is not a list of strings.
+        """
+        if value is None:
+            return None
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded list[str]; "
+                f"got non-JSON value: {value!r}"
+            ) from e
+        if not isinstance(decoded, list) or not all(isinstance(s, str) for s in decoded):
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded list[str]; "
+                f"got: {decoded!r}"
+            )
+        return decoded
+
+
+    def _decode_dict_option(option_name: str, value: str | None) -> dict:
+        """Decode and validate a JSON-encoded ``dict`` Spark option."""
+        if value is None:
+            return {}
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded dict; "
+                f"got non-JSON value: {value!r}"
+            ) from e
+        if not isinstance(decoded, dict):
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded dict; got: {decoded!r}"
+            )
+        return decoded
 
 
     # PySpark's DataSource API requires camelCase method names and inherits
@@ -1754,7 +1879,7 @@ def register_lakeflow_source(spark):
             self._supports_partition = isinstance(lakeflow_connect, SupportsPartition)
 
         def partitions(self):
-            if self._supports_partition and self.table_name != METADATA_TABLE:
+            if self._supports_partition and self.table_name not in VIRTUAL_TABLES:
                 try:
                     partition_descs = self.lakeflow_connect.get_partitions(
                         self.table_name, self.options
@@ -1767,6 +1892,10 @@ def register_lakeflow_source(spark):
         def read(self, partition):
             if self.table_name == METADATA_TABLE:
                 records = self._read_table_metadata()
+            elif self.table_name == NAMESPACES_TABLE:
+                records = self._read_namespaces()
+            elif self.table_name == TABLES_TABLE:
+                records = self._read_tables()
             elif self._supports_partition and partition.value is not None:
                 partition_desc = json.loads(partition.value)
                 records = self.lakeflow_connect.read_partition(
@@ -1777,16 +1906,65 @@ def register_lakeflow_source(spark):
             return map(lambda x: parse_value(x, self.schema), records)
 
         def _read_table_metadata(self):
-            table_name_list = self.options.get(TABLE_NAME_LIST, "")
-            table_names = [o.strip() for o in table_name_list.split(",") if o.strip()]
+            table_names = _decode_list_of_str_option(
+                TABLE_NAME_LIST, self.options.get(TABLE_NAME_LIST)
+            ) or []
+            table_configs = _decode_dict_option(
+                TABLE_CONFIGS, self.options.get(TABLE_CONFIGS)
+            )
             all_records = []
-            table_configs = json.loads(self.options.get(TABLE_CONFIGS, "{}"))
+            # Preserve caller-supplied table order — caller controls it.
             for table in table_names:
                 metadata = self.lakeflow_connect.read_table_metadata(
                     table, table_configs.get(table, {})
                 )
                 all_records.append({TABLE_NAME: table, **metadata})
             return all_records
+
+        def _read_namespaces(self):
+            # Connectors without SupportsNamespaces are flat — no rows.
+            if not isinstance(self.lakeflow_connect, SupportsNamespaces):
+                return []
+            prefix = _decode_list_of_str_option(
+                NAMESPACE_PREFIX, self.options.get(NAMESPACE_PREFIX)
+            )
+            namespaces = self.lakeflow_connect.list_namespaces(prefix)
+            # Sort framework-side for deterministic output regardless of
+            # connector iteration order.
+            return [{"namespace": ns} for ns in sorted(namespaces)]
+
+        def _read_tables(self):
+            namespace_supplied = NAMESPACE in self.options
+            if isinstance(self.lakeflow_connect, SupportsNamespaces):
+                if not namespace_supplied:
+                    raise ValueError(
+                        f"option '{NAMESPACE}' is required when reading "
+                        f"'{TABLES_TABLE}' against a connector that implements "
+                        f"SupportsNamespaces. Pass a JSON-encoded list[str] "
+                        f"(use '[]' for root-level tables; walk the tree via "
+                        f"'{NAMESPACES_TABLE}' to enumerate every namespace)."
+                    )
+                namespace = _decode_list_of_str_option(
+                    NAMESPACE, self.options[NAMESPACE]
+                )
+                tables = self.lakeflow_connect.list_tables_in_namespace(namespace)
+                return [
+                    {"namespace": namespace, "table_name": tn}
+                    for tn in sorted(tables)
+                ]
+            # Flat connector path. Reject a stray `namespace` option — the
+            # caller probably mistook this connector for namespace-aware and
+            # silently ignoring the option would mask the bug.
+            if namespace_supplied:
+                raise ValueError(
+                    f"option '{NAMESPACE}' was supplied but the connector does "
+                    f"not implement SupportsNamespaces. Either omit the option "
+                    f"or use a namespace-aware connector."
+                )
+            return [
+                {"namespace": [], "table_name": tn}
+                for tn in sorted(self.lakeflow_connect.list_tables())
+            ]
 
 
     class LakeflowSource(DataSource):
@@ -1796,6 +1974,17 @@ def register_lakeflow_source(spark):
 
         def __init__(self, options):
             self.options = options
+            table = options.get(TABLE_NAME)
+            # Catch typos against the framework's reserved virtual-table namespace
+            # early — falling through to the connector with an unknown
+            # `_community_*` name yields a confusing per-connector error.
+            if table and table.startswith("_community_") and table not in VIRTUAL_TABLES:
+                raise ValueError(
+                    f"unknown framework virtual table '{table}'. Valid framework "
+                    f"virtual tables are: {', '.join(VIRTUAL_TABLES)}. "
+                    f"For a regular source table, use a name that does not start "
+                    f"with '_community_'."
+                )
             # TEMPORARY: LakeflowConnectImpl is replaced with the actual implementation
             # class during merge. See the placeholder comment at the top of this file.
             self.lakeflow_connect = LakeflowConnectImpl(options)  # pylint: disable=abstract-class-instantiated
@@ -1815,8 +2004,20 @@ def register_lakeflow_source(spark):
                         StructField("ingestion_type", StringType(), True),
                     ]
                 )
-            else:
-                return self.lakeflow_connect.get_table_schema(table, self.options)
+            if table == NAMESPACES_TABLE:
+                return StructType(
+                    [
+                        StructField("namespace", ArrayType(StringType()), False),
+                    ]
+                )
+            if table == TABLES_TABLE:
+                return StructType(
+                    [
+                        StructField("namespace", ArrayType(StringType()), False),
+                        StructField("table_name", StringType(), False),
+                    ]
+                )
+            return self.lakeflow_connect.get_table_schema(table, self.options)
 
         def reader(self, schema: StructType):
             return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)

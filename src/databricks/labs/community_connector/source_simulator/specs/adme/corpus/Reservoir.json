@@ -1,7 +1,7 @@
 [
   {
-    "id": "opendes:work-product-component--ReservoirZone:RZ-PERMIAN-001:",
-    "kind": "osdu:wks:work-product-component--ReservoirZone:1.0.0",
+    "id": "opendes:master-data--Reservoir:RES-PERMIAN-001:",
+    "kind": "osdu:wks:master-data--Reservoir:1.2.0",
     "version": 1710590400000,
     "acl": {
       "viewers": ["data.default.viewers@opendes.contoso.com"],
@@ -18,43 +18,41 @@
     "modifyTime": "2024-03-16T09:00:00.000Z",
     "modifyUser": "data-steward@opendes.contoso.com",
     "data": {
-      "ZoneName":                   "Wolfcamp A Upper",
-      "ReservoirTypeID":            "opendes:reference-data--ReservoirType:Unconventional:",
-      "FluidTypeID":                "opendes:reference-data--FluidType:Oil:",
-      "WellboreID":                 "opendes:master-data--Wellbore:WB-PERMIAN-001:",
-      "TopDepthMD":                 2285.0,
-      "BaseDepthMD":                2524.5,
-      "TopDepthTVD":                2103.8,
-      "BaseDepthTVD":               2325.6,
-      "DepthToTopSubsea":           -2340.5,
-      "DepthToBaseSubsea":          -2580.0,
-      "GrossThickness":             239.5,
-      "NetPayThickness":            180.0,
-      "Porosity":                   0.078,
-      "Permeability":               0.0012,
-      "WaterSaturation":            0.280,
-      "InitialReservoirPressure":   4820.0,
-      "InitialReservoirPressureUOMID": "opendes:reference-data--UnitOfMeasure:psi:",
-      "ReservoirTemperature":       85.0,
-      "ReservoirTemperatureUOMID":  "opendes:reference-data--UnitOfMeasure:degC:",
-      "GasOilRatio":                1250.0,
-      "APIGravity":                 42.5,
-      "DriveTypeID":                "opendes:reference-data--DriveType:SolutionGasDrive:",
-      "FormationName":              "Wolfcamp",
-      "FieldName":                  "Midland Basin West",
-      "BasinName":                  "Permian Basin",
-      "ZoneIntervals": [
+      "ReservoirID":             "opendes:master-data--Reservoir:RES-PERMIAN-001:",
+      "ReservoirName":           "Wolfcamp A Upper",
+      "ReservoirType":           "Unconventional",
+      "ReservoirDescription":    "Wolfcamp A upper bench, Midland Basin West",
+      "FieldID":                 "opendes:master-data--Field:MidlandBasinWest:",
+      "BasinID":                 "opendes:master-data--Basin:PermianBasin:",
+      "FormationID":             "opendes:master-data--GeologicalFormation:Wolfcamp:",
+      "FluidTypeID":             "opendes:reference-data--FluidType:Oil:",
+      "DepthTopMD":              2285.0,
+      "DepthBaseMD":             2524.5,
+      "DepthTopTVD":             2103.8,
+      "DepthBaseTVD":            2325.6,
+      "GrossThickness":          239.5,
+      "NetPayThickness":         180.0,
+      "PorosityAverage":         0.078,
+      "WaterSaturationAverage":  0.280,
+      "PermeabilityHorizontal":  0.0012,
+      "PermeabilityVertical":    0.00018,
+      "InitialReservoirPressure": 4820.0,
+      "ReservoirTemperature":    85.0,
+      "GeoContexts": [
         {
-          "TopDepthMD":  2285.0,
-          "BaseDepthMD": 2524.5,
-          "ZoneTypeID":  "opendes:reference-data--ZoneType:Pay:"
+          "GeoTypeID":   "opendes:reference-data--GeoPoliticalContextType:Country:",
+          "GeoPoliticalEntityID": "opendes:master-data--GeoPoliticalEntity:US:"
         }
-      ]
+      ],
+      "NameAliases": [
+        {"AliasName": "Wolfcamp A", "AliasNameTypeID": "opendes:reference-data--AliasNameType:Common:"}
+      ],
+      "ExtensionProperties": {"BasinSubtype": "Delaware-adjacent"}
     }
   },
   {
-    "id": "opendes:work-product-component--ReservoirZone:RZ-NORTHSEA-002:",
-    "kind": "osdu:wks:work-product-component--ReservoirZone:1.0.0",
+    "id": "opendes:master-data--Reservoir:RES-NORTHSEA-002:",
+    "kind": "osdu:wks:master-data--Reservoir:1.2.0",
     "version": 1710676800000,
     "acl": {
       "viewers": ["data.default.viewers@opendes.contoso.com"],
@@ -71,43 +69,41 @@
     "modifyTime": "2024-03-16T14:30:00.000Z",
     "modifyUser": "data-steward@opendes.contoso.com",
     "data": {
-      "ZoneName":                   "Hugin Sandstone Main",
-      "ReservoirTypeID":            "opendes:reference-data--ReservoirType:Conventional:",
-      "FluidTypeID":                "opendes:reference-data--FluidType:GasCondensate:",
-      "WellboreID":                 "opendes:master-data--Wellbore:WB-NORTHSEA-002:",
-      "TopDepthMD":                 2105.0,
-      "BaseDepthMD":                2290.0,
-      "TopDepthTVD":                2010.0,
-      "BaseDepthTVD":               2188.0,
-      "DepthToTopSubsea":           -2105.0,
-      "DepthToBaseSubsea":          -2290.0,
-      "GrossThickness":             185.0,
-      "NetPayThickness":            140.0,
-      "Porosity":                   0.224,
-      "Permeability":               145.0,
-      "WaterSaturation":            0.185,
-      "InitialReservoirPressure":   3640.0,
-      "InitialReservoirPressureUOMID": "opendes:reference-data--UnitOfMeasure:psi:",
-      "ReservoirTemperature":       68.9,
-      "ReservoirTemperatureUOMID":  "opendes:reference-data--UnitOfMeasure:degC:",
-      "GasOilRatio":                18500.0,
-      "APIGravity":                 54.2,
-      "DriveTypeID":                "opendes:reference-data--DriveType:WaterDrive:",
-      "FormationName":              "Hugin Formation",
-      "FieldName":                  "Sleipner East",
-      "BasinName":                  "North Sea",
-      "ZoneIntervals": [
+      "ReservoirID":             "opendes:master-data--Reservoir:RES-NORTHSEA-002:",
+      "ReservoirName":           "Hugin Sandstone Main",
+      "ReservoirType":           "Conventional",
+      "ReservoirDescription":    "Hugin Formation, Sleipner East",
+      "FieldID":                 "opendes:master-data--Field:SleipnerEast:",
+      "BasinID":                 "opendes:master-data--Basin:NorthSea:",
+      "FormationID":             "opendes:master-data--GeologicalFormation:Hugin:",
+      "FluidTypeID":             "opendes:reference-data--FluidType:GasCondensate:",
+      "DepthTopMD":              2105.0,
+      "DepthBaseMD":             2290.0,
+      "DepthTopTVD":             2010.0,
+      "DepthBaseTVD":            2188.0,
+      "GrossThickness":          185.0,
+      "NetPayThickness":         140.0,
+      "PorosityAverage":         0.224,
+      "WaterSaturationAverage":  0.185,
+      "PermeabilityHorizontal":  145.0,
+      "PermeabilityVertical":    32.5,
+      "InitialReservoirPressure": 3640.0,
+      "ReservoirTemperature":    68.9,
+      "GeoContexts": [
         {
-          "TopDepthMD":  2105.0,
-          "BaseDepthMD": 2290.0,
-          "ZoneTypeID":  "opendes:reference-data--ZoneType:Pay:"
+          "GeoTypeID":   "opendes:reference-data--GeoPoliticalContextType:Country:",
+          "GeoPoliticalEntityID": "opendes:master-data--GeoPoliticalEntity:NO:"
         }
-      ]
+      ],
+      "NameAliases": [
+        {"AliasName": "Hugin Main", "AliasNameTypeID": "opendes:reference-data--AliasNameType:Common:"}
+      ],
+      "ExtensionProperties": {"Block": "15/9"}
     }
   },
   {
-    "id": "opendes:work-product-component--ReservoirZone:RZ-GOM-003:",
-    "kind": "osdu:wks:work-product-component--ReservoirZone:1.0.0",
+    "id": "opendes:master-data--Reservoir:RES-GOM-003:",
+    "kind": "osdu:wks:master-data--Reservoir:1.2.0",
     "version": 1710763200000,
     "acl": {
       "viewers": ["data.default.viewers@opendes.contoso.com"],
@@ -124,38 +120,36 @@
     "modifyTime": "2024-03-17T07:45:00.000Z",
     "modifyUser": "data-steward@opendes.contoso.com",
     "data": {
-      "ZoneName":                   "Lower Miocene Wilcox Sand A",
-      "ReservoirTypeID":            "opendes:reference-data--ReservoirType:Conventional:",
-      "FluidTypeID":                "opendes:reference-data--FluidType:Oil:",
-      "WellboreID":                 "opendes:master-data--Wellbore:WB-GOM-003:",
-      "TopDepthMD":                 4820.0,
-      "BaseDepthMD":                5050.0,
-      "TopDepthTVD":                4618.0,
-      "BaseDepthTVD":               4835.0,
-      "DepthToTopSubsea":           -4820.0,
-      "DepthToBaseSubsea":          -5050.0,
-      "GrossThickness":             230.0,
-      "NetPayThickness":            195.0,
-      "Porosity":                   0.286,
-      "Permeability":               520.0,
-      "WaterSaturation":            0.210,
-      "InitialReservoirPressure":   11800.0,
-      "InitialReservoirPressureUOMID": "opendes:reference-data--UnitOfMeasure:psi:",
-      "ReservoirTemperature":       137.8,
-      "ReservoirTemperatureUOMID":  "opendes:reference-data--UnitOfMeasure:degC:",
-      "GasOilRatio":                840.0,
-      "APIGravity":                 38.1,
-      "DriveTypeID":                "opendes:reference-data--DriveType:NaturalWaterDrive:",
-      "FormationName":              "Lower Miocene Wilcox",
-      "FieldName":                  "Thunder Horse",
-      "BasinName":                  "Gulf of Mexico Deepwater",
-      "ZoneIntervals": [
+      "ReservoirID":             "opendes:master-data--Reservoir:RES-GOM-003:",
+      "ReservoirName":           "Lower Miocene Wilcox Sand A",
+      "ReservoirType":           "Conventional",
+      "ReservoirDescription":    "Lower Miocene Wilcox, Thunder Horse",
+      "FieldID":                 "opendes:master-data--Field:ThunderHorse:",
+      "BasinID":                 "opendes:master-data--Basin:GulfOfMexicoDeepwater:",
+      "FormationID":             "opendes:master-data--GeologicalFormation:LowerMioceneWilcox:",
+      "FluidTypeID":             "opendes:reference-data--FluidType:Oil:",
+      "DepthTopMD":              4820.0,
+      "DepthBaseMD":             5050.0,
+      "DepthTopTVD":             4618.0,
+      "DepthBaseTVD":            4835.0,
+      "GrossThickness":          230.0,
+      "NetPayThickness":         195.0,
+      "PorosityAverage":         0.286,
+      "WaterSaturationAverage":  0.210,
+      "PermeabilityHorizontal":  520.0,
+      "PermeabilityVertical":    105.0,
+      "InitialReservoirPressure": 11800.0,
+      "ReservoirTemperature":    137.8,
+      "GeoContexts": [
         {
-          "TopDepthMD":  4820.0,
-          "BaseDepthMD": 5050.0,
-          "ZoneTypeID":  "opendes:reference-data--ZoneType:Pay:"
+          "GeoTypeID":   "opendes:reference-data--GeoPoliticalContextType:Country:",
+          "GeoPoliticalEntityID": "opendes:master-data--GeoPoliticalEntity:US:"
         }
-      ]
+      ],
+      "NameAliases": [
+        {"AliasName": "Wilcox A", "AliasNameTypeID": "opendes:reference-data--AliasNameType:Common:"}
+      ],
+      "ExtensionProperties": {"BlockOcs": "Mississippi Canyon 778"}
     }
   }
 ]

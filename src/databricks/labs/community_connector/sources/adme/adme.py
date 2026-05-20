@@ -32,8 +32,6 @@ naturally — ``latest_offset`` returns a snapshot timestamp and
 executors process in parallel.
 """
 
-from __future__ import annotations
-
 import json
 import os
 import re
@@ -82,13 +80,30 @@ FIRST_RUN_SENTINEL_THRESHOLD = "2000-01-01T00:00:00.000Z"
 
 # data_partition_id is forwarded verbatim into a custom HTTP header, so
 # constrain it to characters that can never split or escape the header.
-_DATA_PARTITION_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
+# Matches the documented contract in connector_spec.yaml and README:
+# alphanumeric plus hyphen (no underscore).
+_DATA_PARTITION_ID_PATTERN = re.compile(r"[A-Za-z0-9-]+")
 
 # HTTP retry configuration. ADME documents cursor inactivity timeout
 # at 1 minute; transient 5xx and 429 are common.
 RETRIABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 MAX_RETRIES = 5
 INITIAL_BACKOFF = 1.0
+
+# Cap on how much of an upstream HTTP response body is folded into a
+# RuntimeError message. OSDU error bodies sometimes carry correlation IDs
+# and request echo data that lands verbatim in Spark driver logs.
+_ERROR_BODY_LIMIT = 256
+
+
+def _redact_body(text: str) -> str:
+    """Return ``text`` truncated and stripped of CR/LF for safe error messages."""
+    if not text:
+        return ""
+    flattened = text.replace("\r", " ").replace("\n", " ")
+    if len(flattened) <= _ERROR_BODY_LIMIT:
+        return flattened
+    return flattened[:_ERROR_BODY_LIMIT] + "...[truncated]"
 
 
 # ---------------------------------------------------------------------------
@@ -177,13 +192,15 @@ class _TokenCache:
         )
         if resp.status_code != 200:
             raise RuntimeError(
-                f"ADME auth failed: {resp.status_code} {resp.text}"
+                f"ADME auth failed: {resp.status_code} {_redact_body(resp.text)}"
             )
         payload = resp.json()
         token = payload.get("access_token")
         if not token:
+            redacted_keys = sorted(k for k in payload if k != "access_token")
             raise RuntimeError(
-                f"ADME auth response missing access_token: {payload}"
+                "ADME auth response missing access_token; "
+                f"keys present: {redacted_keys}"
             )
         expires_in = float(payload.get("expires_in", 3600))
         return token, time.time() + expires_in
@@ -534,9 +551,10 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
         # in daily windows would generate tens of thousands of empty
         # API calls. The single partition uses Lucene ``*`` for the
         # lower bound, which the OSDU index handles efficiently. We
-        # treat any pre-2000 lower bound as "no real watermark" so the
-        # optimisation isn't coupled to the exact EPOCH_ISO sentinel.
-        if start_iso < FIRST_RUN_SENTINEL_THRESHOLD:
+        # treat any lower bound at or before 2000-01-01 as "no real
+        # watermark" so the optimisation isn't coupled to the exact
+        # EPOCH_ISO sentinel.
+        if start_iso <= FIRST_RUN_SENTINEL_THRESHOLD:
             return [{"since": EPOCH_ISO, "until": end_iso}]
 
         # Apply a lookback to the lower bound to handle records that
@@ -755,7 +773,7 @@ class ADMELakeflowConnect(LakeflowConnect, SupportsPartitionedStream):
             if resp.status_code != 200:
                 raise RuntimeError(
                     f"ADME search failed for kind={kind_query!r}: "
-                    f"{resp.status_code} {resp.text}"
+                    f"{resp.status_code} {_redact_body(resp.text)}"
                 )
             payload = resp.json()
             results = payload.get("results") or []

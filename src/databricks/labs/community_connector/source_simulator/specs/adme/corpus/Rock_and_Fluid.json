@@ -1,7 +1,7 @@
 [
   {
-    "id": "opendes:work-product-component--RockAndFluidSample:RAF-PERMIAN-001:",
-    "kind": "osdu:wks:work-product-component--RockAndFluidSample:1.0.0",
+    "id": "opendes:master-data--Sample:SAMPLE-PERMIAN-001:",
+    "kind": "osdu:wks:master-data--Sample:2.1.0",
     "version": 1710676800000,
     "acl": {
       "viewers": ["data.default.viewers@opendes.contoso.com"],
@@ -18,41 +18,32 @@
     "modifyTime": "2024-03-17T10:00:00.000Z",
     "modifyUser": "data-steward@opendes.contoso.com",
     "data": {
-      "SampleName":                "PBE-1 Wolfcamp A Core Plug CP-047",
-      "SampleID":                  "CP-047",
-      "SampleTypeID":              "opendes:reference-data--SampleType:CorePlug:",
-      "WellboreID":                "opendes:master-data--Wellbore:WB-PERMIAN-001:",
-      "SampleAcquisitionDepthMD":  2418.5,
-      "SampleAcquisitionDepthUOMID": "opendes:reference-data--UnitOfMeasure:m:",
-      "SampleAcquisitionDepthTVD": 2225.0,
-      "FormationName":             "Wolfcamp A",
-      "SampleConditionID":         "opendes:reference-data--SampleCondition:RestoredState:",
-      "PlugOrientationID":         "opendes:reference-data--PlugOrientation:Horizontal:",
-      "CoreRunNumber":             3,
-      "AnalysisDate":              "2023-11-12",
-      "LaboratoryName":            "CoreLab Houston",
-      "Porosity":                  0.078,
-      "Permeability":              0.0009,
-      "WaterSaturation":           0.285,
-      "GrainDensity":              2.71,
-      "BulkDensity":               2.50,
-      "ConfiningPressure":         3500.0,
-      "ConfiningPressureUOMID":    "opendes:reference-data--UnitOfMeasure:psi:",
-      "PorePressure":              1200.0,
-      "PorePressureUOMID":         "opendes:reference-data--UnitOfMeasure:psi:",
-      "MeasurementTemperature":    23.9,
-      "MeasurementTemperatureUOMID": "opendes:reference-data--UnitOfMeasure:degC:",
-      "SamplingMethods": [
-        {
-          "SamplingMethodTypeID": "opendes:reference-data--SamplingMethodType:ConventionalCore:",
-          "SamplingDate":         "2023-09-22"
+      "SampleAcquisition": {
+        "SampleAcquisitionJobID":       "opendes:master-data--SampleAcquisitionJob:JOB-PBE-1-001:",
+        "SampleAcquisitionTypeID":      "opendes:reference-data--SampleAcquisitionType:CorePlug:",
+        "SampleAcquisitionContainerID": "opendes:master-data--SampleContainer:CP-047:",
+        "AcquisitionStartDate":         "2023-09-22T08:00:00.000Z",
+        "AcquisitionEndDate":           "2023-09-22T16:30:00.000Z",
+        "CollectionServiceCompanyID":   "opendes:master-data--Organisation:Halliburton:",
+        "HandlingServiceCompanyID":     "opendes:master-data--Organisation:CoreLabHouston:",
+        "SampleAcquisitionDetail": {
+          "WellboreID":  "opendes:master-data--Wellbore:WB-PERMIAN-001:",
+          "ToolKind":    "ConventionalCore",
+          "RunNumber":   "3",
+          "TopDepth":    2418.5,
+          "BaseDepth":   2420.0,
+          "FormationCondition": {
+            "Pressure":    3500.0,
+            "Temperature": 23.9
+          }
         }
-      ]
+      },
+      "ExtensionProperties": {"PorosityMeasured": 0.078, "PermeabilityMeasured_mD": 0.0009}
     }
   },
   {
-    "id": "opendes:work-product-component--RockAndFluidSample:RAF-NORTHSEA-002:",
-    "kind": "osdu:wks:work-product-component--RockAndFluidSample:1.0.0",
+    "id": "opendes:master-data--Sample:SAMPLE-NORTHSEA-002:",
+    "kind": "osdu:wks:master-data--Sample:2.1.0",
     "version": 1710763200000,
     "acl": {
       "viewers": ["data.default.viewers@opendes.contoso.com"],
@@ -69,41 +60,32 @@
     "modifyTime": "2024-03-17T15:30:00.000Z",
     "modifyUser": "data-steward@opendes.contoso.com",
     "data": {
-      "SampleName":                "SLA-A23 Hugin Sidewall Core SWC-012",
-      "SampleID":                  "SWC-012",
-      "SampleTypeID":              "opendes:reference-data--SampleType:SidewallCore:",
-      "WellboreID":                "opendes:master-data--Wellbore:WB-NORTHSEA-002:",
-      "SampleAcquisitionDepthMD":  2187.3,
-      "SampleAcquisitionDepthUOMID": "opendes:reference-data--UnitOfMeasure:m:",
-      "SampleAcquisitionDepthTVD": 2089.5,
-      "FormationName":             "Hugin Formation",
-      "SampleConditionID":         "opendes:reference-data--SampleCondition:AsReceived:",
-      "PlugOrientationID":         "opendes:reference-data--PlugOrientation:Vertical:",
-      "CoreRunNumber":             2,
-      "AnalysisDate":              "2022-10-30",
-      "LaboratoryName":            "Equinor Research Centre Trondheim",
-      "Porosity":                  0.224,
-      "Permeability":              138.5,
-      "WaterSaturation":           0.192,
-      "GrainDensity":              2.65,
-      "BulkDensity":               2.06,
-      "ConfiningPressure":         2800.0,
-      "ConfiningPressureUOMID":    "opendes:reference-data--UnitOfMeasure:psi:",
-      "PorePressure":              950.0,
-      "PorePressureUOMID":         "opendes:reference-data--UnitOfMeasure:psi:",
-      "MeasurementTemperature":    20.0,
-      "MeasurementTemperatureUOMID": "opendes:reference-data--UnitOfMeasure:degC:",
-      "SamplingMethods": [
-        {
-          "SamplingMethodTypeID": "opendes:reference-data--SamplingMethodType:SidewallCoring:",
-          "SamplingDate":         "2022-09-10"
+      "SampleAcquisition": {
+        "SampleAcquisitionJobID":       "opendes:master-data--SampleAcquisitionJob:JOB-SLA-A23-002:",
+        "SampleAcquisitionTypeID":      "opendes:reference-data--SampleAcquisitionType:SidewallCore:",
+        "SampleAcquisitionContainerID": "opendes:master-data--SampleContainer:SWC-012:",
+        "AcquisitionStartDate":         "2022-09-10T06:00:00.000Z",
+        "AcquisitionEndDate":           "2022-09-10T14:00:00.000Z",
+        "CollectionServiceCompanyID":   "opendes:master-data--Organisation:Schlumberger:",
+        "HandlingServiceCompanyID":     "opendes:master-data--Organisation:EquinorResearchCentreTrondheim:",
+        "SampleAcquisitionDetail": {
+          "WellboreID":  "opendes:master-data--Wellbore:WB-NORTHSEA-002:",
+          "ToolKind":    "RotarySidewallCore",
+          "RunNumber":   "2",
+          "TopDepth":    2187.3,
+          "BaseDepth":   2188.0,
+          "FormationCondition": {
+            "Pressure":    2800.0,
+            "Temperature": 20.0
+          }
         }
-      ]
+      },
+      "ExtensionProperties": {"PorosityMeasured": 0.224, "PermeabilityMeasured_mD": 138.5}
     }
   },
   {
-    "id": "opendes:work-product-component--RockAndFluidSample:RAF-GOM-003:",
-    "kind": "osdu:wks:work-product-component--RockAndFluidSample:1.0.0",
+    "id": "opendes:master-data--Sample:SAMPLE-GOM-003:",
+    "kind": "osdu:wks:master-data--Sample:2.1.0",
     "version": 1710849600000,
     "acl": {
       "viewers": ["data.default.viewers@opendes.contoso.com"],
@@ -120,36 +102,27 @@
     "modifyTime": "2024-03-18T08:00:00.000Z",
     "modifyUser": "data-steward@opendes.contoso.com",
     "data": {
-      "SampleName":                "THS-ST1BP1 Wilcox Cuttings CUT-022",
-      "SampleID":                  "CUT-022",
-      "SampleTypeID":              "opendes:reference-data--SampleType:DrillCuttings:",
-      "WellboreID":                "opendes:master-data--Wellbore:WB-GOM-003:",
-      "SampleAcquisitionDepthMD":  5140.0,
-      "SampleAcquisitionDepthUOMID": "opendes:reference-data--UnitOfMeasure:m:",
-      "SampleAcquisitionDepthTVD": 4925.0,
-      "FormationName":             "Lower Miocene Wilcox",
-      "SampleConditionID":         "opendes:reference-data--SampleCondition:WashedAndDried:",
-      "PlugOrientationID":         null,
-      "CoreRunNumber":             null,
-      "AnalysisDate":              "2022-06-05",
-      "LaboratoryName":            "Intertek Westport",
-      "Porosity":                  0.286,
-      "Permeability":              498.0,
-      "WaterSaturation":           0.210,
-      "GrainDensity":              2.67,
-      "BulkDensity":               1.90,
-      "ConfiningPressure":         9500.0,
-      "ConfiningPressureUOMID":    "opendes:reference-data--UnitOfMeasure:psi:",
-      "PorePressure":              4800.0,
-      "PorePressureUOMID":         "opendes:reference-data--UnitOfMeasure:psi:",
-      "MeasurementTemperature":    121.1,
-      "MeasurementTemperatureUOMID": "opendes:reference-data--UnitOfMeasure:degC:",
-      "SamplingMethods": [
-        {
-          "SamplingMethodTypeID": "opendes:reference-data--SamplingMethodType:DrillCuttings:",
-          "SamplingDate":         "2022-04-02"
+      "SampleAcquisition": {
+        "SampleAcquisitionJobID":       "opendes:master-data--SampleAcquisitionJob:JOB-THS-ST1BP1-003:",
+        "SampleAcquisitionTypeID":      "opendes:reference-data--SampleAcquisitionType:DrillCuttings:",
+        "SampleAcquisitionContainerID": "opendes:master-data--SampleContainer:CUT-022:",
+        "AcquisitionStartDate":         "2022-04-02T07:00:00.000Z",
+        "AcquisitionEndDate":           "2022-04-02T18:00:00.000Z",
+        "CollectionServiceCompanyID":   "opendes:master-data--Organisation:BPRig:",
+        "HandlingServiceCompanyID":     "opendes:master-data--Organisation:IntertekWestport:",
+        "SampleAcquisitionDetail": {
+          "WellboreID":  "opendes:master-data--Wellbore:WB-GOM-003:",
+          "ToolKind":    "DrillCuttings",
+          "RunNumber":   null,
+          "TopDepth":    5140.0,
+          "BaseDepth":   5142.0,
+          "FormationCondition": {
+            "Pressure":    9500.0,
+            "Temperature": 121.1
+          }
         }
-      ]
+      },
+      "ExtensionProperties": {"PorosityMeasured": 0.286, "PermeabilityMeasured_mD": 498.0}
     }
   }
 ]
