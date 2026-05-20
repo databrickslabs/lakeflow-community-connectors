@@ -435,7 +435,7 @@ def test_agent_operations_rejects_non_operation_values():
 # ---------------------------------------------------------------------------
 
 def test_agent_operation_rejects_empty_name():
-    with pytest.raises(TypeError, match="non-empty class-level `name`"):
+    with pytest.raises(TypeError, match="non-empty `name`"):
         class _NoName(AgentOperation):
             description = "x"
             kind = "metadata"
@@ -446,7 +446,7 @@ def test_agent_operation_rejects_empty_name():
 
 
 def test_agent_operation_rejects_invalid_kind():
-    with pytest.raises(TypeError, match="kind="):
+    with pytest.raises(TypeError, match=r"kind must be one of"):
         class _BadKind(AgentOperation):
             name = "x"
             description = "x"
