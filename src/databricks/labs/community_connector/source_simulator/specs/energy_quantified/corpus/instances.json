@@ -1,0 +1,128 @@
+[
+  {
+    "curve": {
+      "name": "AL>XK Exchange Day-Ahead Schedule MWh/h H Forecast",
+      "area": "AL",
+      "area_sink": "XK",
+      "categories": [
+        "Exchange",
+        "Day-Ahead",
+        "Schedule"
+      ],
+      "resolution": {
+        "frequency": "PT1H",
+        "timezone": "CET"
+      },
+      "unit": "MWh/h",
+      "denominator": null,
+      "source": null,
+      "data_type": "FORECAST",
+      "curve_type": "INSTANCE",
+      "instance_issued_timezone": "CET",
+      "subscription": {
+        "access": "PAYING",
+        "type": "package_area",
+        "label": "Power – Albania",
+        "package": "Power",
+        "area": "AL"
+      },
+      "commodity": "Power"
+    },
+    "instance": {
+      "issued": "2026-05-11 12:00:00+02:00",
+      "tag": "postfix",
+      "created": "2026-05-11 13:02:23+02:00",
+      "modified": "2026-05-11 17:02:22+02:00"
+    },
+    "resolution": {
+      "frequency": "PT1H",
+      "timezone": "UTC"
+    },
+    "unit": "MWh/h",
+    "data": [
+      {
+        "d": "2026-05-12 22:00Z",
+        "v": 141.76
+      },
+      {
+        "d": "2026-05-12 23:00Z",
+        "v": 141.76
+      },
+      {
+        "d": "2026-05-13 00:00Z",
+        "v": 141.76
+      },
+      {
+        "d": "2026-05-13 01:00Z",
+        "v": 141.76
+      },
+      {
+        "d": "2026-05-13 02:00Z",
+        "v": 141.76
+      }
+    ]
+  },
+  {
+    "curve": {
+      "name": "AL>XK Exchange Day-Ahead Schedule MWh/h H Forecast",
+      "area": "AL",
+      "area_sink": "XK",
+      "categories": [
+        "Exchange",
+        "Day-Ahead",
+        "Schedule"
+      ],
+      "resolution": {
+        "frequency": "PT1H",
+        "timezone": "CET"
+      },
+      "unit": "MWh/h",
+      "denominator": null,
+      "source": null,
+      "data_type": "FORECAST",
+      "curve_type": "INSTANCE",
+      "instance_issued_timezone": "CET",
+      "subscription": {
+        "access": "PAYING",
+        "type": "package_area",
+        "label": "Power – Albania",
+        "package": "Power",
+        "area": "AL"
+      },
+      "commodity": "Power"
+    },
+    "instance": {
+      "issued": "2026-05-11 00:00:00+02:00",
+      "tag": "prefix",
+      "created": "2026-05-11 05:02:21+02:00",
+      "modified": null
+    },
+    "resolution": {
+      "frequency": "PT1H",
+      "timezone": "UTC"
+    },
+    "unit": "MWh/h",
+    "data": [
+      {
+        "d": "2026-05-11 22:00Z",
+        "v": 140.66
+      },
+      {
+        "d": "2026-05-11 23:00Z",
+        "v": 140.66
+      },
+      {
+        "d": "2026-05-12 00:00Z",
+        "v": 140.66
+      },
+      {
+        "d": "2026-05-12 01:00Z",
+        "v": 140.66
+      },
+      {
+        "d": "2026-05-12 02:00Z",
+        "v": 140.66
+      }
+    ]
+  }
+]

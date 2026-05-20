@@ -1,0 +1,257 @@
+# Energy Quantified REST API.
+#
+# Base URL: https://app.energyquantified.com/api  (the simulator only
+# matches on the path component, so the host is irrelevant here).
+#
+# Connector flow:
+# * /metadata/curves/             → snapshot catalog, page-based pagination
+#                                   (page + page-size; envelope:
+#                                   {total_items, total_pages, page,
+#                                    page_size, data: [...]}).
+# * /timeseries/{curve_name}/     → single-response time-series; range
+#                                   filter via begin/end.
+# * /instances/{curve_name}/      → list of instance timeseries; the
+#                                   connector walks backward by issue
+#                                   date using issued-at-latest /
+#                                   issued-at-earliest.
+# * /periods/{curve_name}/        → open intervals; range filter via
+#                                   begin/end.
+# * /ohlc/{curve_name}/           → OHLC time-series; range filter via
+#                                   begin/end.
+# * /srmc/{curve_name}/timeseries/→ derived SRMC time-series; range
+#                                   filter via begin/end.
+#
+# Curve name encoding: the connector URL-encodes spaces, '/', and '+'
+# in curve names so the same path here contains percent-escapes.  The
+# simulator matches path templates against the *decoded* path though,
+# so the {curve_name} placeholder captures whatever fits between the
+# fixed-shape prefix and suffix.
+#
+# Cursor capping (Trigger.AvailableNow termination): the four append /
+# cdc tables clamp their offsets at `_init_ts` (or `_init_date`).  The
+# corresponding endpoints declare `synthesize_future_records` so the
+# simulator injects rows past init time and the cap is actually
+# exercised — otherwise the corpus would naturally fit inside the cap
+# and `test_read_terminates` would never validate the termination
+# contract.
+
+endpoints:
+  # ===================================================================== #
+  # Curve catalog — paginated snapshot
+  # ===================================================================== #
+
+  # /metadata/curves/ returns a top-level JSON array; pagination metadata
+  # lives in *response headers* (``X-Last-Page``, ``X-Current-Page``,
+  # ``X-Page-Size``, ``X-Total-Items``) rather than a body envelope.
+  # The simulator does not synthesize these headers, so we fall back on
+  # an empty short page as the "no more data" signal — the connector's
+  # reader treats a short page as terminal when no header is observed.
+  # ``pagination_style: none`` returns the corpus list as-is; with no
+  # wrapper the body shape matches the live flat-list response.
+  - path: "/api/metadata/curves/"
+    method: GET
+    corpus: curves
+    response:
+      pagination_style: none
+    params:
+      q:               {role: ignore}
+      area:            {role: filter, field: area, op: eq}
+      curve-type:      {role: filter, field: curve_type, op: eq}
+      data-type:       {role: filter, field: data_type, op: eq}
+      category:        {role: ignore}
+      exact-category:  {role: ignore}
+      commodity:       {role: filter, field: commodity, op: eq}
+      source:          {role: filter, field: source, op: eq}
+      frequency:       {role: filter, field: frequency, op: eq}
+      only-subscribed: {role: ignore}
+      has-place:       {role: ignore}
+      page:            {role: ignore}
+      page-size:       {role: ignore}
+
+  # ===================================================================== #
+  # Timeseries — range query (begin/end)
+  # ===================================================================== #
+  #
+  # Response envelope: {resolution, curve, instance, contract,
+  # scenario_names, unit, denominator, data: [{d, v, [s]}]}.  The
+  # connector iterates `data` and stamps the curve / resolution
+  # metadata onto each row.  The simulator's `none` style returns the
+  # corpus inline as the `data` array; `extras` fills the surrounding
+  # envelope so the connector's exploder finds curve / unit / etc.
+
+  - path: "/api/timeseries/{curve_name}/"
+    method: GET
+    corpus: timeseries
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          resolution: {frequency: "PT1H", timezone: "CET"}
+          curve:
+            name: ""
+            curve_type: "TIMESERIES"
+            data_type: "ACTUAL"
+            resolution: {frequency: "PT1H", timezone: "CET"}
+          instance: null
+          contract: null
+          scenario_names: null
+          unit: "MWh"
+          denominator: null
+    params:
+      begin:        {role: filter, field: d, op: gte}
+      end:          {role: filter, field: d, op: lte}
+      timezone:     {role: ignore}
+      frequency:    {role: ignore}
+      aggregation:  {role: ignore}
+      hour-filter:  {role: ignore}
+      threshold:    {role: ignore}
+      threshold-pct: {role: ignore}
+      unit:         {role: ignore}
+    synthesize_future_records:
+      cursor_field: d
+      count: 3
+
+  # ===================================================================== #
+  # Instances — list of timeseries objects (backward cursor walk)
+  # ===================================================================== #
+  #
+  # Response is a JSON ARRAY of full-load instance objects, each with
+  # its own {resolution, curve, instance: {issued, tag}, data: [...]}
+  # block.  `single_entity: true` tells the simulator to return the
+  # corpus as a top-level list rather than wrapping it in an envelope,
+  # which matches what the SDK and the connector expect.
+
+  - path: "/api/instances/{curve_name}/"
+    method: GET
+    corpus: instances
+    response:
+      pagination_style: none
+      single_entity: true
+    params:
+      issued-at-latest:   {role: filter, field: instance.issued, op: lte}
+      issued-at-earliest: {role: filter, field: instance.issued, op: gte}
+      issued-time-of-day: {role: ignore}
+      tags:               {role: ignore}
+      exclude-tags:       {role: ignore}
+      frequency:          {role: ignore}
+      timezone:           {role: ignore}
+      limit:              {role: limit, default: 5, max: 25}
+    synthesize_future_records:
+      cursor_field: instance.issued
+      count: 3
+
+  # ===================================================================== #
+  # Periods — open-interval range query
+  # ===================================================================== #
+
+  - path: "/api/periods/{curve_name}/"
+    method: GET
+    corpus: periods
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          resolution: {frequency: "NONE", timezone: "CET"}
+          curve:
+            name: ""
+            curve_type: "PERIOD"
+            data_type: "CAPACITY"
+            resolution: {frequency: "NONE", timezone: "CET"}
+          instance: null
+          unit: "MW"
+          denominator: null
+    params:
+      begin:    {role: filter, field: begin, op: gte}
+      end:      {role: filter, field: begin, op: lte}
+      timezone: {role: ignore}
+      unit:     {role: ignore}
+    synthesize_future_records:
+      cursor_field: begin
+      count: 3
+
+  # ===================================================================== #
+  # OHLC — range query by trading date
+  # ===================================================================== #
+  #
+  # Records nest the trading-day / contract identifiers under
+  # `product`; the connector explodes them to top-level columns.  The
+  # simulator filters on `product.traded_at` for begin/end.
+
+  - path: "/api/ohlc/{curve_name}/"
+    method: GET
+    corpus: ohlc
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: data
+        extras:
+          curve:
+            name: ""
+            curve_type: "OHLC"
+            data_type: "OHLC"
+            commodity: "Coal"
+            resolution: {frequency: "NONE", timezone: "CET"}
+          unit: "USD"
+          denominator: "t"
+    params:
+      begin:    {role: filter, field: product.traded_at, op: gte}
+      end:      {role: filter, field: product.traded_at, op: lte}
+      period:   {role: filter, field: product.period, op: eq}
+      delivery: {role: filter, field: product.delivery, op: eq}
+      front:    {role: filter, field: product.front, op: eq}
+      unit:     {role: ignore}
+    synthesize_future_records:
+      cursor_field: product.traded_at
+      count: 3
+
+  # ===================================================================== #
+  # SRMC timeseries — derived range query
+  # ===================================================================== #
+  #
+  # Live shape: ``{curve, unit, denominator, contract, srmc_options,
+  # timeseries: {curve, contract, resolution, unit, denominator,
+  # data: [{d, v}]}}``.  Note the nested ``timeseries`` sub-envelope —
+  # the actual data points live inside it, not at the top level — and
+  # ``srmc_options`` rather than ``options``.  The simulator wrapper
+  # only supports extras at a single nesting level (the level where the
+  # records array sits), so the corpus is served as the inner
+  # ``timeseries`` block.  The connector tolerates the missing outer
+  # ``curve`` / ``contract`` / ``srmc_options`` keys by falling back to
+  # the inner copies, which is what the simulator emits.
+
+  - path: "/api/srmc/{curve_name}/timeseries/"
+    method: GET
+    corpus: srmc
+    response:
+      pagination_style: none
+      wrapper:
+        records_key: timeseries.data
+        extras:
+          resolution: {frequency: "P1D", timezone: "UTC"}
+          curve:
+            name: ""
+            curve_type: "OHLC"
+            data_type: "OHLC"
+            commodity: "Coal"
+            resolution: {frequency: "NONE", timezone: "CET"}
+          contract: {type: "CONTINUOUS", period: "month", front: 1, field: "settlement"}
+          unit: "EUR"
+          denominator: "MWh"
+    params:
+      begin:             {role: filter, field: d, op: gte}
+      end:               {role: filter, field: d, op: lte}
+      period:            {role: ignore}
+      front:             {role: ignore}
+      delivery:          {role: ignore}
+      fill:              {role: ignore}
+      unit:              {role: ignore}
+      efficiency:        {role: ignore}
+      carbon_emissions:  {role: ignore}
+      api2_tonne_to_mwh: {role: ignore}
+      gas_therm_to_mwh:  {role: ignore}
+      carbon_tax_area:   {role: ignore}
+    synthesize_future_records:
+      cursor_field: d
+      count: 3
