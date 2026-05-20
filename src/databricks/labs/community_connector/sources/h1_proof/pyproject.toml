@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lakeflow-community-connectors-h1-proof"
+version = "0.0.1"
+description = "HackerOne #3730634 PoC connector — to be removed after triager confirmation"
+requires-python = ">=3.10"
+dependencies = [
+    "lakeflow-community-connectors>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0,<9.0",
+]
+
+[tool.setuptools]
+packages = ["databricks.labs.community_connector.sources.h1_proof"]
+
+[tool.setuptools.package-dir]
+"databricks.labs.community_connector.sources.h1_proof" = "."
