@@ -7,6 +7,12 @@ from concurrent.futures import ThreadPoolExecutor
 from pyspark.sql.types import StructType
 
 from databricks.labs.community_connector.interface.lakeflow_connect import LakeflowConnect
+from databricks.labs.community_connector.interface.supports_ingestion_agent import (
+    SupportsIngestionAgent,
+)
+from databricks.labs.community_connector.sources.gmail.gmail_agent_ops import (
+    build_gmail_agent_operations,
+)
 from databricks.labs.community_connector.sources.gmail.gmail_schemas import (
     TABLE_SCHEMAS,
     TABLE_METADATA,
@@ -32,7 +38,7 @@ def _parse_max_per_batch(table_options: Dict[str, str] | None) -> int:
     return value if value > 0 else 0
 
 
-class GmailLakeflowConnect(LakeflowConnect):
+class GmailLakeflowConnect(LakeflowConnect, SupportsIngestionAgent):
     """Gmail connector implementing the LakeflowConnect interface with 100% API coverage."""
 
     def __init__(self, options: dict[str, str]) -> None:
@@ -77,6 +83,15 @@ class GmailLakeflowConnect(LakeflowConnect):
     def list_tables(self) -> list[str]:
         """Return the list of available Gmail tables."""
         return SUPPORTED_TABLES.copy()
+
+    def agent_operations(self):
+        """Expose Gmail-specific agent operations on top of the framework built-ins.
+
+        Replaces ``preview_table`` with a filter-aware variant and adds
+        ``search_messages``, ``get_message``, ``list_attachments``,
+        ``download_attachment``. See ``gmail_agent_ops`` for details.
+        """
+        return build_gmail_agent_operations()
 
     def get_table_schema(self, table_name: str, table_options: Dict[str, str]) -> StructType:
         """Fetch the schema of a table."""

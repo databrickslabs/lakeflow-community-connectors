@@ -36,8 +36,15 @@ connection:
       secret: true
       description: >
         Long-lived OAuth 2.0 refresh token obtained via the OAuth consent flow.
-        Use Google OAuth Playground or implement OAuth flow to obtain this token.
-        Required scope: https://www.googleapis.com/auth/gmail.readonly
+        Use Google OAuth Playground or implement the OAuth flow to obtain it.
+        Required scopes (request BOTH at consent time on a single token):
+          - https://www.googleapis.com/auth/gmail.readonly
+          - https://www.googleapis.com/auth/drive.readonly
+        The Drive scope is required for the download_attachment agent
+        operation to fetch Drive-hosted attachments (>25 MB or files
+        attached via Drive sharing). Read-only ingestion of Gmail tables
+        works with gmail.readonly alone, but agent download operations
+        will return permission_denied if the Drive scope is missing.
 
     - name: user_id
       type: string
@@ -53,7 +60,7 @@ connection:
 # parameter of the UC connection to allow them to be passed through.
 # Use a comma-separated string of option names.
 # ============================================================================
-external_options_allowlist: "q,labelIds,maxResults,includeSpamTrash,format,max_records_per_batch"
+external_options_allowlist: "q,labelIds,maxResults,includeSpamTrash,format,max_records_per_batch,after_date,before_date,newer_than,subject,from_address,to_address,label,has_attachment,is_unread,query,message_id,attachment_id,drive_file_id,volume_path,export_mime_type"
 
 # ============================================================================
 # Supported Tables (10 tables - 100% Gmail API coverage)

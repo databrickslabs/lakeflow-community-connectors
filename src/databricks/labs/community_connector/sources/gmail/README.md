@@ -10,7 +10,9 @@ This documentation describes how to configure and use the **Gmail** Lakeflow com
   - `client_id`: OAuth 2.0 client ID
   - `client_secret`: OAuth 2.0 client secret
   - `refresh_token`: Long-lived refresh token obtained via OAuth consent flow
-- **Required OAuth Scope**: `https://www.googleapis.com/auth/gmail.readonly`
+- **Required OAuth Scopes** (request both at consent time on the same refresh token):
+  - `https://www.googleapis.com/auth/gmail.readonly` — read mail, search, list attachments
+  - `https://www.googleapis.com/auth/drive.readonly` — download Drive-hosted attachments referenced by Gmail (files >25 MB or shared via Drive). Required by the `download_attachment` agent operation.
 - **Network access**: The environment must be able to reach `https://gmail.googleapis.com`.
 - **Lakeflow / Databricks environment**: A workspace where you can register a Lakeflow community connector and run ingestion pipelines.
 
@@ -70,8 +72,9 @@ Before creating credentials, you must configure the OAuth consent screen:
    - Enter your Gmail address and click **Add**
 8. Click **Save and Continue**
 9. On the **Data Access** page, click **Add or Remove Scopes**
-10. Search for `gmail.readonly` and check the box for:
-   - `https://www.googleapis.com/auth/gmail.readonly`
+10. Search for and check both scopes:
+    - `https://www.googleapis.com/auth/gmail.readonly`
+    - `https://www.googleapis.com/auth/drive.readonly`
 11. Click **Update** → **Save and Continue**
 
 ---
@@ -111,8 +114,10 @@ Now you'll authorize the app and obtain a refresh token. This is a one-time proc
 Replace `YOUR_CLIENT_ID` in the URL below with your actual Client ID:
 
 ```
-https://accounts.google.com/o/oauth2/v2/auth?client_id=YOUR_CLIENT_ID&redirect_uri=https://oauth.pstmn.io/v1/callback&response_type=code&scope=https://www.googleapis.com/auth/gmail.readonly&access_type=offline&prompt=consent
+https://accounts.google.com/o/oauth2/v2/auth?client_id=YOUR_CLIENT_ID&redirect_uri=https://oauth.pstmn.io/v1/callback&response_type=code&scope=https://www.googleapis.com/auth/gmail.readonly%20https://www.googleapis.com/auth/drive.readonly&access_type=offline&prompt=consent
 ```
+
+> Both scopes are joined with `%20` (URL-encoded space). The refresh token returned by this flow works for both Gmail and Drive API calls.
 
 
 
