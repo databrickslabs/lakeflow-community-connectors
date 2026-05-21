@@ -2089,9 +2089,9 @@ SCH_SCHEMA = StructType(
     + _ei_schema("parent_placer_appointment_id", "Parent placer appointment ID (EI)", "SCH-23")
     + _ei_schema("parent_filler_appointment_id", "Parent filler appointment ID (EI)", "SCH-24")
     + _cwe_schema("filler_status_code", "Filler status code", "SCH-25")
-    + _ei_array_schema("sch_placer_order_number", "Placer order number (EI, repeatable per spec)", "SCH-26")
-    + _ei_array_schema("sch_filler_order_number", "Filler order number (EI, repeatable per spec)", "SCH-27")
-    + _eip_schema("alternate_placer_order_group_number", "Alternate placer order group number (EIP, v2.9+)", "SCH-28")
+    + _ei_array_schema("placer_order_number", "Placer order number (EI, repeatable per spec)", "SCH-26")
+    + _ei_array_schema("filler_order_number", "Filler order number (EI, repeatable per spec)", "SCH-27")
+    + _eip_schema("alternate_placer_order_group_number", "Alternate placer order group number (EIP, [0..1], v2.9+)", "SCH-28")
 )
 
 # ---------------------------------------------------------------------------

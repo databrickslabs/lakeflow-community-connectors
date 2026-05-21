@@ -960,8 +960,8 @@ def _extract_sch(seg: HL7Segment) -> dict:
         **_ei_fields(seg, 23, "parent_placer_appointment_id", repeating=False),
         **_ei_fields(seg, 24, "parent_filler_appointment_id", repeating=False),
         **_cwe_fields(seg, 25, "filler_status_code", repeating=False),
-        **_ei_array_fields(seg, 26, "sch_placer_order_number"),
-        **_ei_array_fields(seg, 27, "sch_filler_order_number"),
+        **_ei_array_fields(seg, 26, "placer_order_number"),
+        **_ei_array_fields(seg, 27, "filler_order_number"),
         **_eip_fields(seg, 28, "alternate_placer_order_group_number"),
     }
 
