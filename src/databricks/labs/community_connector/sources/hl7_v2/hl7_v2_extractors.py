@@ -306,7 +306,7 @@ def _extract_obr(seg: HL7Segment) -> dict:
         **_ei_fields(seg, 52, "parent_observation_group", repeating=False),
         **_cx_array_fields(seg, 53, "alternate_placer_order"),
         **_eip_array_fields(seg, 54, "parent_order"),
-        "obr_action_code": _v(seg.get_field(55)),
+        "action_code": _v(seg.get_field(55)),
     }
 
 
@@ -342,7 +342,7 @@ def _extract_obx(seg: HL7Segment) -> dict:
         **_cwe_array_fields(seg, 28, "local_process_control"),
         "observation_type": _v(seg.get_field(29)),
         "observation_sub_type": _v(seg.get_field(30)),
-        "obx_action_code": _v(seg.get_field(31)),
+        "action_code": _v(seg.get_field(31)),
         **_cwe_array_fields(seg, 32, "observation_value_absent_reason"),
         **_eip_array_fields(seg, 33, "observation_related_specimen"),
     }
@@ -488,7 +488,7 @@ def _extract_pv2(seg: HL7Segment) -> dict:
         **_cwe_fields(seg, 2, "accommodation_code", repeating=False),
         **_cwe_fields(seg, 3, "admit_reason", repeating=False),
         **_cwe_fields(seg, 4, "transfer_reason", repeating=False),
-        "patient_valuables": _v(seg.get_first_repetition(5)),
+        **_s_array_fields(seg, 5, "patient_valuables"),
         "patient_valuables_location": _v(seg.get_field(6)),
         **_cwe_array_fields(seg, 7, "visit_user_code"),
         "expected_admit_datetime": _parse_dtm(seg.get_field(8)),
@@ -526,14 +526,14 @@ def _extract_pv2(seg: HL7Segment) -> dict:
         **_cwe_fields(seg, 40, "admission_level_of_care_code", repeating=False),
         **_cwe_array_fields(seg, 41, "precaution_code"),
         **_cwe_fields(seg, 42, "patient_condition_code", repeating=False),
-        **_cwe_fields(seg, 43, "living_will_code_pv2", repeating=False),
-        **_cwe_fields(seg, 44, "organ_donor_code_pv2", repeating=False),
-        **_cwe_array_fields(seg, 45, "advance_directive_code_pv2"),
+        **_cwe_fields(seg, 43, "living_will_code", repeating=False),
+        **_cwe_fields(seg, 44, "organ_donor_code", repeating=False),
+        **_cwe_array_fields(seg, 45, "advance_directive_code"),
         "patient_status_effective_date": _parse_dtm(seg.get_field(46)),
         "expected_loa_return_datetime": _parse_dtm(seg.get_field(47)),
         "expected_preadmission_testing_datetime": _parse_dtm(seg.get_field(48)),
         **_cwe_array_fields(seg, 49, "notify_clergy_code"),
-        "advance_directive_last_verified_date_pv2": _parse_dtm(seg.get_field(50)),
+        "advance_directive_last_verified_date": _parse_dtm(seg.get_field(50)),
     }
 
 
@@ -651,7 +651,7 @@ def _extract_orc(seg: HL7Segment) -> dict:
         "advanced_beneficiary_notice_date": _parse_dtm(seg.get_field(32)),
         **_cx_array_fields(seg, 33, "alternate_placer_order_number"),
         **_cwe_array_fields(seg, 34, "order_workflow_profile"),
-        "orc_action_code": _v(seg.get_field(35)),
+        "action_code": _v(seg.get_field(35)),
         "order_status_date_range_start": _parse_dtm(seg.get_component(36, 1)),
         "order_status_date_range_end": _parse_dtm(seg.get_component(36, 2)),
         "order_creation_datetime": _parse_dtm(seg.get_field(37)),
@@ -710,7 +710,7 @@ def _extract_spm(seg: HL7Segment) -> dict:
         **_ei_fields(seg, 32, "shipment_id", repeating=False),
         "culture_start_datetime": _parse_dtm(seg.get_field(33)),
         "culture_final_datetime": _parse_dtm(seg.get_field(34)),
-        "spm_action_code": _v(seg.get_field(35)),
+        "action_code": _v(seg.get_field(35)),
     }
 
 
@@ -817,10 +817,10 @@ def _extract_gt1(seg: HL7Segment) -> dict:
         "protection_indicator": _v(seg.get_field(39)),
         **_cwe_fields(seg, 40, "student_indicator", repeating=False),
         **_cwe_fields(seg, 41, "religion", repeating=False),
-        **_xpn_array_fields(seg, 42, "gt1_mothers_maiden_names"),
+        **_xpn_array_fields(seg, 42, "mothers_maiden_names"),
         **_cwe_fields(seg, 43, "nationality", repeating=False),
         **_cwe_array_fields(seg, 44, "ethnic_group"),
-        **_xpn_array_fields(seg, 45, "gt1_contact_persons"),
+        **_xpn_array_fields(seg, 45, "contact_persons"),
         **_xtn_array_fields(seg, 46, "contact_persons_telephone_number"),
         **_cwe_fields(seg, 47, "contact_reason", repeating=False),
         **_cwe_fields(seg, 48, "contact_relationship", repeating=False),

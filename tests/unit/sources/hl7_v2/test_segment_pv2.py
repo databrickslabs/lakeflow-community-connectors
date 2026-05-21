@@ -35,6 +35,15 @@ class TestPV2MissingFields:
         assert row["expected_discharge_datetime"] is None
         assert row["visit_description"] is None
         assert row["estimated_length_of_inpatient_stay"] is None
+        assert row["patient_valuables"] is None
+
+    def test_pv2_patient_valuables_array(self):
+        msg = parse_message(
+            "MSH|^~\\&|A|B|C|D|20240101||ADT^A01|1|P|2.5\r"
+            "PV2|||||wallet~watch~keys"
+        )
+        row = _extract_pv2(msg.get_segment("PV2"))
+        assert row["patient_valuables"] == ["wallet", "watch", "keys"]
 
     def test_pv2_partial_fields(self):
         msg = parse_message(

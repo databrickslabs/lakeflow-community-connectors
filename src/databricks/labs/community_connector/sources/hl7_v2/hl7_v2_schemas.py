@@ -1140,7 +1140,7 @@ OBR_SCHEMA = StructType(
     + _cx_array_schema("alternate_placer_order", "Alternate placer order (CX, repeatable per spec)", "OBR-53")
     + _eip_array_schema("parent_order", "Parent order identifier (EIP, repeatable per spec, v2.9+)", "OBR-54")
     + [
-        _s("obr_action_code",                     "Action code (OBR-55, v2.9+)"),
+        _s("action_code",                     "Action code (OBR-55, v2.9+)"),
     ]
 )
 
@@ -1193,7 +1193,7 @@ OBX_SCHEMA = StructType(
     + [
         _s("observation_type",                "Observation type (OBX-29, v2.8.2+)"),
         _s("observation_sub_type",            "Observation sub-type (OBX-30, v2.8.2+)"),
-        _s("obx_action_code",                 "Action code (OBX-31, v2.9+)"),
+        _s("action_code",                 "Action code (OBX-31, v2.9+)"),
     ]
     + _cwe_array_schema("observation_value_absent_reason", "Observation value absent reason (CWE, repeatable per spec)", "OBX-32")
     + _eip_array_schema("observation_related_specimen", "Observation-related specimen identifier (EIP, repeatable per spec)", "OBX-33")
@@ -1409,7 +1409,7 @@ PV2_SCHEMA = StructType(
     + _cwe_schema("admit_reason", "Admit reason", "PV2-3")
     + _cwe_schema("transfer_reason", "Transfer reason", "PV2-4")
     + [
-        _s("patient_valuables",                        "Patient's valuable items description (PV2-5)"),
+        _s_array("patient_valuables",                  "Patient's valuable items descriptions (ST, repeatable per spec, PV2-5)"),
         _s("patient_valuables_location",               "Location of patient's valuables (PV2-6)"),
     ]
     + _cwe_array_schema("visit_user_code", "Visit user code (CWE, repeatable)", "PV2-7")
@@ -1464,9 +1464,9 @@ PV2_SCHEMA = StructType(
     + _cwe_schema("admission_level_of_care_code", "Admission level of care code", "PV2-40")
     + _cwe_array_schema("precaution_code", "Precaution code (CWE, repeatable per spec)", "PV2-41")
     + _cwe_schema("patient_condition_code", "Patient condition code", "PV2-42")
-    + _cwe_schema("living_will_code_pv2", "Living will code (CWE)", "PV2-43")
-    + _cwe_schema("organ_donor_code_pv2", "Organ donor code (CWE)", "PV2-44")
-    + _cwe_array_schema("advance_directive_code_pv2", "Advance directive (CWE, repeatable per spec)", "PV2-45")
+    + _cwe_schema("living_will_code", "Living will code (CWE)", "PV2-43")
+    + _cwe_schema("organ_donor_code", "Organ donor code (CWE)", "PV2-44")
+    + _cwe_array_schema("advance_directive_code", "Advance directive (CWE, repeatable per spec)", "PV2-45")
     + [
         _ts("patient_status_effective_date",           "Patient status effective date (PV2-46, DT)"),
         _ts("expected_loa_return_datetime",            "Expected leave of absence return date/time (PV2-47)"),
@@ -1474,7 +1474,7 @@ PV2_SCHEMA = StructType(
     ]
     + _cwe_array_schema("notify_clergy_code", "Notify clergy code (CWE, repeatable)", "PV2-49")
     + [
-        _ts("advance_directive_last_verified_date_pv2", "Date advance directive was last verified (PV2-50, DT, v2.9+)"),
+        _ts("advance_directive_last_verified_date",    "Date advance directive was last verified (PV2-50, DT, v2.9+)"),
     ]
 )
 
@@ -1655,7 +1655,7 @@ ORC_SCHEMA = StructType(
     + _cx_array_schema("alternate_placer_order_number", "Alternate placer order number (CX, repeatable per spec)", "ORC-33")
     + _cwe_array_schema("order_workflow_profile", "Order workflow profile (CWE, repeatable per spec, v2.9+)", "ORC-34")
     + [
-        _s("orc_action_code",                           "Action code (ORC-35, v2.9+)"),
+        _s("action_code",                           "Action code (ORC-35, v2.9+)"),
         _ts("order_status_date_range_start",            "Order status date range start (ORC-36.1, DR, v2.9+)"),
         _ts("order_status_date_range_end",              "Order status date range end (ORC-36.2, DR, v2.9+)"),
         _ts("order_creation_datetime",                  "Order creation date/time (ORC-37, v2.9+)"),
@@ -1736,7 +1736,7 @@ SPM_SCHEMA = StructType(
     + [
         _ts("culture_start_datetime",         "Culture start date/time (SPM-33, v2.9+)"),
         _ts("culture_final_datetime",         "Culture final date/time (SPM-34, v2.9+)"),
-        _s("spm_action_code",                 "Action code (SPM-35, v2.9+)"),
+        _s("action_code",                 "Action code (SPM-35, v2.9+)"),
     ]
 )
 
@@ -1897,12 +1897,12 @@ GT1_SCHEMA = StructType(
     + _cwe_schema("student_indicator", "Student indicator (CWE)", "GT1-40")
     + _cwe_schema("religion", "Religion", "GT1-41")
     + [
-        *_xpn_array_schema("gt1_mothers_maiden_names", "GT1 mother's maiden names", "GT1-42"),
+        *_xpn_array_schema("mothers_maiden_names", "GT1 mother's maiden names", "GT1-42"),
     ]
     + _cwe_schema("nationality", "Nationality", "GT1-43")
     + _cwe_array_schema("ethnic_group", "Ethnic group (CWE, repeatable per spec)", "GT1-44")
     + [
-        *_xpn_array_schema("gt1_contact_persons", "GT1 contact persons", "GT1-45"),
+        *_xpn_array_schema("contact_persons", "GT1 contact persons", "GT1-45"),
     ]
     + _xtn_array_schema("contact_persons_telephone_number", "Contact person phone (XTN, repeatable per spec)", "GT1-46")
     + _cwe_schema("contact_reason", "Contact reason", "GT1-47")
@@ -2038,7 +2038,7 @@ RXA_SCHEMA = StructType(
     + _cwe_array_schema("indication", "Indication for administration (CWE, repeatable per spec)", "RXA-19")
     + [
         _s("completion_status",                        "Completion status (RXA-20): CP=Complete, RE=Refused, NA=Not Administered, PA=Partial"),
-        _s("action_code_rxa",                          "Action code (RXA-21)"),
+        _s("action_code_rxa",                      "Action Code – RXA (RXA-21); vaccine record action, ID Table 0206"),
         _ts("system_entry_datetime",                   "System entry date/time (RXA-22)"),
         _s("administered_drug_strength_volume",        "Drug strength volume (RXA-23)"),
     ]
