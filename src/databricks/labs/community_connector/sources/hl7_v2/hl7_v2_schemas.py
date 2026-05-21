@@ -1583,7 +1583,7 @@ IAM_SCHEMA = StructType(
     + [
         _ts("modified_datetime",                  "Date/time the record was last modified (IAM-26, v2.6+)"),
     ]
-    + _cwe_schema("clinician_identified_code", "Clinician-identified allergen", "IAM-27")
+    + _cwe_schema("clinician_identified_allergen_code", "Clinician-identified allergen code (CWE)", "IAM-27")
     + _xon_schema("initially_recorded_by_organization", "Organization that initially recorded the reaction", "IAM-28")
     + _xon_schema("modified_by_organization", "Organization that last modified the record", "IAM-29")
     + _xon_schema("inactivated_by_organization", "Organization that inactivated the record", "IAM-30")

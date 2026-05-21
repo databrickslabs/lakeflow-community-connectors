@@ -582,7 +582,7 @@ def _extract_iam(seg: HL7Segment) -> dict:
         "initially_recorded_datetime": _parse_dtm(seg.get_field(24)),
         **_xcn_fields(seg, 25, "modified_by_person", repeating=False),
         "modified_datetime": _parse_dtm(seg.get_field(26)),
-        **_cwe_fields(seg, 27, "clinician_identified_code", repeating=False),
+        **_cwe_fields(seg, 27, "clinician_identified_allergen_code", repeating=False),
         **_xon_fields(seg, 28, "initially_recorded_by_organization", repeating=False),
         **_xon_fields(seg, 29, "modified_by_organization", repeating=False),
         **_xon_fields(seg, 30, "inactivated_by_organization", repeating=False),
