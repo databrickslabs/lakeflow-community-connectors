@@ -1233,6 +1233,47 @@ def register_lakeflow_source(spark):
         return {column_name: result if result else None}
 
 
+    def _tq_array_fields(seg: HL7Segment, field_n: int, column_name: str) -> dict:
+        """TQ (Timing Quantity) — repeating: ARRAY<STRUCT<quantity, interval_repeat_pattern, ..., total_occurrences>>.
+        Deprecated in v2.5; supported here for older (v2.3/v2.4) messages."""
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        reps = raw.split(seg._enc.rep_sep)
+        result = []
+        for rep in reps:
+            if not rep:
+                continue
+            parts = rep.split(seg._enc.comp_sep)
+
+            def gc(i, _p=parts):
+                return _v(_p[i - 1]) if len(_p) >= i else None
+
+            def gsc(i, sub, _p=parts):
+                if len(_p) < i or not _p[i - 1]:
+                    return None
+                subs = _p[i - 1].split(seg._enc.sub_comp_sep)
+                return _v(subs[sub - 1]) if len(subs) >= sub else None
+
+            result.append({
+                "quantity":                gsc(1, 1) or gc(1),  # TQ.1.1 (CQ quantity)
+                "quantity_units":          gsc(1, 2),            # TQ.1.2 (CQ units, CWE.1)
+                "interval_repeat_pattern": gsc(2, 1),            # TQ.2.1 (RI repeat pattern)
+                "interval_explicit_time":  gsc(2, 2),            # TQ.2.2 (RI explicit time)
+                "duration":                gc(3),                 # TQ.3 (ST)
+                "start_datetime":          _parse_dtm(gc(4)),    # TQ.4 (TS)
+                "end_datetime":            _parse_dtm(gc(5)),    # TQ.5 (TS)
+                "priority":                gc(6),                 # TQ.6 (ID)
+                "condition":               gc(7),                 # TQ.7 (ST)
+                "text":                    gc(8),                 # TQ.8 (TX)
+                "conjunction":             gc(9),                 # TQ.9 (ID)
+                "order_sequencing":        gc(10),                # TQ.10 (OSD, raw)
+                "occurrence_duration":     gsc(11, 1) or gc(11), # TQ.11.1 (CE/CWE code)
+                "total_occurrences":       gc(12),                # TQ.12 (NM)
+            })
+        return {column_name: result if result else None}
+
+
     def _jcc_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
         """JCC (Job Code/Class) — 3 components: CWE (job code) + CWE (job class) + TX (description)."""
         def gsc(comp, sub):
@@ -2189,7 +2230,7 @@ def register_lakeflow_source(spark):
             "diagnostic_service_section": _v(seg.get_field(24)),
             "result_status": _v(seg.get_field(25)),
             **_prl_fields(seg, 26, "parent_result"),
-            "quantity_timing": _v(seg.get_first_repetition(27)),
+            **_tq_array_fields(seg, 27, "quantity_timing"),
             **_xcn_array_fields(seg, 28, "result_copies_to"),
             **_eip_array_fields(seg, 29, "parent_placer_order_number"),
             "transportation_mode": _v(seg.get_field(30)),
@@ -2534,7 +2575,7 @@ def register_lakeflow_source(spark):
             **_ei_fields(seg, 4, "placer_group_number", repeating=False),
             "order_status": _v(seg.get_field(5)),
             "response_flag": _v(seg.get_field(6)),
-            "quantity_timing": _v(seg.get_first_repetition(7)),
+            **_tq_array_fields(seg, 7, "quantity_timing"),
             **_eip_array_fields(seg, 8, "parent_order"),
             "datetime_of_transaction": _parse_dtm(seg.get_field(9)),
             **_xcn_array_fields(seg, 10, "entered_by"),
@@ -3238,6 +3279,24 @@ def register_lakeflow_source(spark):
     ])
 
 
+    _TQ_STRUCT = StructType([
+        StructField("quantity",                StringType(), nullable=True),  # TQ.1.1 (CQ quantity value, NM)
+        StructField("quantity_units",          StringType(), nullable=True),  # TQ.1.2 (CQ units, CWE.1)
+        StructField("interval_repeat_pattern", StringType(), nullable=True),  # TQ.2.1 (RI repeat pattern)
+        StructField("interval_explicit_time",  StringType(), nullable=True),  # TQ.2.2 (RI explicit time)
+        StructField("duration",                StringType(), nullable=True),  # TQ.3 (ST)
+        StructField("start_datetime",          StringType(), nullable=True),  # TQ.4 (TS, ISO-8601)
+        StructField("end_datetime",            StringType(), nullable=True),  # TQ.5 (TS, ISO-8601)
+        StructField("priority",                StringType(), nullable=True),  # TQ.6 (ID)
+        StructField("condition",               StringType(), nullable=True),  # TQ.7 (ST)
+        StructField("text",                    StringType(), nullable=True),  # TQ.8 (TX)
+        StructField("conjunction",             StringType(), nullable=True),  # TQ.9 (ID)
+        StructField("order_sequencing",        StringType(), nullable=True),  # TQ.10 (OSD, raw)
+        StructField("occurrence_duration",     StringType(), nullable=True),  # TQ.11.1 (CE/CWE.1)
+        StructField("total_occurrences",       StringType(), nullable=True),  # TQ.12 (NM)
+    ])
+
+
     _NDL_STRUCT = StructType([
         StructField("id", StringType(), nullable=True),
         StructField("family_name", StringType(), nullable=True),
@@ -3297,6 +3356,11 @@ def register_lakeflow_source(spark):
     def _eip_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
         """EIP (Entity Identifier Pair) — repeating field as ArrayType(StructType<placer_assigned_identifier: EI, filler_assigned_identifier: EI>)."""
         return [StructField(column_name, ArrayType(_EIP_STRUCT, containsNull=True), nullable=True)]
+
+
+    def _tq_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+        """TQ (Timing Quantity) — repeating field as ArrayType(StructType([...])). Deprecated in v2.5."""
+        return [StructField(column_name, ArrayType(_TQ_STRUCT, containsNull=True), nullable=True)]
 
 
     def _s_array(name: str, comment: str = "") -> StructField:
@@ -4058,9 +4122,7 @@ def register_lakeflow_source(spark):
             _s("result_status",                       "Overall result status (OBR-25): F=Final, P=Preliminary, C=Corrected, X=Canceled"),
         ]
         + _prl_schema("parent_result", "Parent result link (PRL)", "OBR-26")
-        + [
-            _s("quantity_timing",                     "Quantity and timing of the order (OBR-27, deprecated in v2.7)"),
-        ]
+        + _tq_array_schema("quantity_timing", "Quantity/timing of the order (TQ, repeatable, deprecated in v2.5)", "OBR-27")
         + _xcn_array_schema("result_copies_to", "Result copy-to provider (XCN, repeatable per spec)", "OBR-28")
         + _eip_array_schema("parent_placer_order_number", "Placer order number of the parent order (EIP, repeatable per spec)", "OBR-29")
         + [
@@ -4572,8 +4634,8 @@ def register_lakeflow_source(spark):
         + [
             _s("order_status",                             "Order status (ORC-5): IP=In Process, CM=Completed, SC=Scheduled, CA=Cancelled"),
             _s("response_flag",                            "Response flag (ORC-6): E=Report exceptions, R=Same as initiation, D=Deferred, N=Notification"),
-            _s("quantity_timing",                          "Quantity/timing (ORC-7, deprecated)"),
         ]
+        + _tq_array_schema("quantity_timing", "Quantity/timing (TQ, repeatable, deprecated in v2.5)", "ORC-7")
         + _eip_array_schema("parent_order", "Parent order reference (EIP, repeatable per spec)", "ORC-8")
         + [
             _ts("datetime_of_transaction",                 "Transaction date/time (ORC-9)"),

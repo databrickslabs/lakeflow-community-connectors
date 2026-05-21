@@ -388,6 +388,47 @@ def _fc_array_fields(seg: HL7Segment, field_n: int, column_name: str) -> dict:
     return {column_name: result if result else None}
 
 
+def _tq_array_fields(seg: HL7Segment, field_n: int, column_name: str) -> dict:
+    """TQ (Timing Quantity) — repeating: ARRAY<STRUCT<quantity, interval_repeat_pattern, ..., total_occurrences>>.
+    Deprecated in v2.5; supported here for older (v2.3/v2.4) messages."""
+    raw = seg.get_field(field_n)
+    if not raw:
+        return {column_name: None}
+    reps = raw.split(seg._enc.rep_sep)
+    result = []
+    for rep in reps:
+        if not rep:
+            continue
+        parts = rep.split(seg._enc.comp_sep)
+
+        def gc(i, _p=parts):
+            return _v(_p[i - 1]) if len(_p) >= i else None
+
+        def gsc(i, sub, _p=parts):
+            if len(_p) < i or not _p[i - 1]:
+                return None
+            subs = _p[i - 1].split(seg._enc.sub_comp_sep)
+            return _v(subs[sub - 1]) if len(subs) >= sub else None
+
+        result.append({
+            "quantity":                gsc(1, 1) or gc(1),  # TQ.1.1 (CQ quantity)
+            "quantity_units":          gsc(1, 2),            # TQ.1.2 (CQ units, CWE.1)
+            "interval_repeat_pattern": gsc(2, 1),            # TQ.2.1 (RI repeat pattern)
+            "interval_explicit_time":  gsc(2, 2),            # TQ.2.2 (RI explicit time)
+            "duration":                gc(3),                 # TQ.3 (ST)
+            "start_datetime":          _parse_dtm(gc(4)),    # TQ.4 (TS)
+            "end_datetime":            _parse_dtm(gc(5)),    # TQ.5 (TS)
+            "priority":                gc(6),                 # TQ.6 (ID)
+            "condition":               gc(7),                 # TQ.7 (ST)
+            "text":                    gc(8),                 # TQ.8 (TX)
+            "conjunction":             gc(9),                 # TQ.9 (ID)
+            "order_sequencing":        gc(10),                # TQ.10 (OSD, raw)
+            "occurrence_duration":     gsc(11, 1) or gc(11), # TQ.11.1 (CE/CWE code)
+            "total_occurrences":       gc(12),                # TQ.12 (NM)
+        })
+    return {column_name: result if result else None}
+
+
 def _jcc_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     """JCC (Job Code/Class) — 3 components: CWE (job code) + CWE (job class) + TX (description)."""
     def gsc(comp, sub):

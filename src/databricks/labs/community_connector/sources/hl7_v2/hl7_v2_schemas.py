@@ -284,6 +284,24 @@ _FC_STRUCT = StructType([
 ])
 
 
+_TQ_STRUCT = StructType([
+    StructField("quantity",                StringType(), nullable=True),  # TQ.1.1 (CQ quantity value, NM)
+    StructField("quantity_units",          StringType(), nullable=True),  # TQ.1.2 (CQ units, CWE.1)
+    StructField("interval_repeat_pattern", StringType(), nullable=True),  # TQ.2.1 (RI repeat pattern)
+    StructField("interval_explicit_time",  StringType(), nullable=True),  # TQ.2.2 (RI explicit time)
+    StructField("duration",                StringType(), nullable=True),  # TQ.3 (ST)
+    StructField("start_datetime",          StringType(), nullable=True),  # TQ.4 (TS, ISO-8601)
+    StructField("end_datetime",            StringType(), nullable=True),  # TQ.5 (TS, ISO-8601)
+    StructField("priority",                StringType(), nullable=True),  # TQ.6 (ID)
+    StructField("condition",               StringType(), nullable=True),  # TQ.7 (ST)
+    StructField("text",                    StringType(), nullable=True),  # TQ.8 (TX)
+    StructField("conjunction",             StringType(), nullable=True),  # TQ.9 (ID)
+    StructField("order_sequencing",        StringType(), nullable=True),  # TQ.10 (OSD, raw)
+    StructField("occurrence_duration",     StringType(), nullable=True),  # TQ.11.1 (CE/CWE.1)
+    StructField("total_occurrences",       StringType(), nullable=True),  # TQ.12 (NM)
+])
+
+
 _NDL_STRUCT = StructType([
     StructField("id", StringType(), nullable=True),
     StructField("family_name", StringType(), nullable=True),
@@ -343,6 +361,11 @@ def _xad_array_schema(column_name: str, label: str, field_ref: str) -> list[Stru
 def _eip_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
     """EIP (Entity Identifier Pair) — repeating field as ArrayType(StructType<placer_assigned_identifier: EI, filler_assigned_identifier: EI>)."""
     return [StructField(column_name, ArrayType(_EIP_STRUCT, containsNull=True), nullable=True)]
+
+
+def _tq_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+    """TQ (Timing Quantity) — repeating field as ArrayType(StructType([...])). Deprecated in v2.5."""
+    return [StructField(column_name, ArrayType(_TQ_STRUCT, containsNull=True), nullable=True)]
 
 
 def _s_array(name: str, comment: str = "") -> StructField:
@@ -1104,9 +1127,7 @@ OBR_SCHEMA = StructType(
         _s("result_status",                       "Overall result status (OBR-25): F=Final, P=Preliminary, C=Corrected, X=Canceled"),
     ]
     + _prl_schema("parent_result", "Parent result link (PRL)", "OBR-26")
-    + [
-        _s("quantity_timing",                     "Quantity and timing of the order (OBR-27, deprecated in v2.7)"),
-    ]
+    + _tq_array_schema("quantity_timing", "Quantity/timing of the order (TQ, repeatable, deprecated in v2.5)", "OBR-27")
     + _xcn_array_schema("result_copies_to", "Result copy-to provider (XCN, repeatable per spec)", "OBR-28")
     + _eip_array_schema("parent_placer_order_number", "Placer order number of the parent order (EIP, repeatable per spec)", "OBR-29")
     + [
@@ -1618,8 +1639,8 @@ ORC_SCHEMA = StructType(
     + [
         _s("order_status",                             "Order status (ORC-5): IP=In Process, CM=Completed, SC=Scheduled, CA=Cancelled"),
         _s("response_flag",                            "Response flag (ORC-6): E=Report exceptions, R=Same as initiation, D=Deferred, N=Notification"),
-        _s("quantity_timing",                          "Quantity/timing (ORC-7, deprecated)"),
     ]
+    + _tq_array_schema("quantity_timing", "Quantity/timing (TQ, repeatable, deprecated in v2.5)", "ORC-7")
     + _eip_array_schema("parent_order", "Parent order reference (EIP, repeatable per spec)", "ORC-8")
     + [
         _ts("datetime_of_transaction",                 "Transaction date/time (ORC-9)"),
