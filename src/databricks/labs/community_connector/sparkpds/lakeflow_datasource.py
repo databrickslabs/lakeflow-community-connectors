@@ -19,6 +19,11 @@ from databricks.labs.community_connector.interface import (
     SupportsPartitionedStream,
 )
 from databricks.labs.community_connector.libs.utils import parse_value
+from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource import (
+    IngestionAgentDispatcher,
+    OPERATION,
+    _connector_options,
+)
 
 
 # =============================================================================
@@ -319,6 +324,27 @@ class LakeflowSource(DataSource):
 
     def __init__(self, options):
         self.options = options
+        self._agent_dispatcher: IngestionAgentDispatcher | None = None
+        # Agent-operation mode: ``operation`` option routes through the
+        # ingestion-agent dispatcher instead of the table read path. The
+        # dispatcher owns the option vocabulary and may run even when the
+        # connector failed to init (e.g. list_operations), so we build it
+        # eagerly and capture any init error.
+        if options.get(OPERATION):
+            connector: LakeflowConnect | None = None
+            init_error: BaseException | None = None
+            try:
+                # TEMPORARY: LakeflowConnectImpl is replaced with the actual
+                # implementation class during merge.
+                connector = LakeflowConnectImpl(_connector_options(options))  # pylint: disable=abstract-class-instantiated
+            except Exception as exc:  # pylint: disable=broad-except
+                init_error = exc
+            self._agent_dispatcher = IngestionAgentDispatcher(
+                options=options, connector=connector, init_error=init_error
+            )
+            self.lakeflow_connect = connector
+            return
+
         table = options.get(TABLE_NAME)
         # Catch typos against the framework's reserved virtual-table namespace
         # early — falling through to the connector with an unknown
@@ -339,6 +365,8 @@ class LakeflowSource(DataSource):
         return "lakeflow_connect"
 
     def schema(self):
+        if self._agent_dispatcher is not None:
+            return self._agent_dispatcher.schema()
         table = self.options[TABLE_NAME]
         if table == METADATA_TABLE:
             return StructType(
@@ -365,6 +393,8 @@ class LakeflowSource(DataSource):
         return self.lakeflow_connect.get_table_schema(table, self.options)
 
     def reader(self, schema: StructType):
+        if self._agent_dispatcher is not None:
+            return self._agent_dispatcher.reader(schema)
         return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)
 
     def streamReader(self, schema: StructType):
