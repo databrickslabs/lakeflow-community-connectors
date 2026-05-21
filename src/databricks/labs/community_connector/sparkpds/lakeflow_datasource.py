@@ -1,4 +1,4 @@
-from typing import Iterator, Optional
+from typing import Iterator
 import json
 from pyspark.sql.types import StructType, StructField, StringType, ArrayType
 from pyspark.sql.datasource import (
@@ -22,7 +22,6 @@ from databricks.labs.community_connector.libs.utils import parse_value
 from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource import (
     OPERATION as _AGENT_OPERATION,
     IngestionAgentDispatcher,
-    _connector_options as _agent_connector_options,
 )
 
 
@@ -333,71 +332,48 @@ class LakeflowSource(DataSource):
 
     def __init__(self, options):
         self.options = options
-        agent_mode = bool(options.get(_AGENT_OPERATION))
-
-        if not agent_mode:
-            # Table mode: guard against typos in the framework's reserved
-            # virtual-table namespace early — falling through to the
-            # connector with an unknown `_community_*` name yields a
-            # confusing per-connector error.
-            table = options.get(TABLE_NAME)
-            if (
-                table
-                and table.startswith("_community_")
-                and table not in VIRTUAL_TABLES
-            ):
-                raise ValueError(
-                    f"unknown framework virtual table '{table}'. Valid framework "
-                    f"virtual tables are: {', '.join(VIRTUAL_TABLES)}. "
-                    f"For a regular source table, use a name that does not start "
-                    f"with '_community_'."
-                )
-
-        # Build the connector once. In table mode, init errors propagate.
-        # In agent mode, we stash the error and let the dispatcher decide
-        # (metadata-kind ops convert it to an error row; data-kind ops
-        # re-raise).
-        connector_init_error: Optional[BaseException] = None
-        self.lakeflow_connect = None
-        try:
-            self.lakeflow_connect = self._build_connector(
-                _agent_connector_options(options) if agent_mode else options
+        table = options.get(TABLE_NAME)
+        # Catch typos against the framework's reserved virtual-table namespace
+        # early — falling through to the connector with an unknown
+        # `_community_*` name yields a confusing per-connector error.
+        if table and table.startswith("_community_") and table not in VIRTUAL_TABLES:
+            raise ValueError(
+                f"unknown framework virtual table '{table}'. Valid framework "
+                f"virtual tables are: {', '.join(VIRTUAL_TABLES)}. "
+                f"For a regular source table, use a name that does not start "
+                f"with '_community_'."
             )
-        except Exception as exc:  # pylint: disable=broad-except
-            if not agent_mode:
-                raise
-            connector_init_error = exc
-
-        self._agent = (
-            IngestionAgentDispatcher(
-                options=options,
-                connector=self.lakeflow_connect,
-                init_error=connector_init_error,
-            )
-            if agent_mode
-            else None
-        )
-
-    def _build_connector(self, options) -> LakeflowConnect:
-        """Construct the underlying :class:`LakeflowConnect`.
-
-        Registry-built subclasses override this to bind to the FQN-
-        resolved class. The default path defers to the module-level
-        ``LakeflowConnectImpl`` alias, which the merge script rewrites
-        to the source's concrete class for SDP-merged single-file
-        deployments.
-        """
         # TEMPORARY: LakeflowConnectImpl is replaced with the actual implementation
         # class during merge. See the placeholder comment at the top of this file.
-        return LakeflowConnectImpl(options)  # pylint: disable=abstract-class-instantiated
+        self.lakeflow_connect = LakeflowConnectImpl(options)  # pylint: disable=abstract-class-instantiated
 
     @classmethod
     def name(cls):
         return "lakeflow_connect"
 
+    def _agent_dispatcher(self):
+        """Construct and cache the ingestion-agent dispatcher.
+
+        Built lazily on first access from ``self.lakeflow_connect`` so this
+        class doesn't need an ``__init__`` change to support agent dispatch
+        (the registry's ``RegisterableLakeflowSource`` wrapper overrides
+        ``__init__`` to bind the FQN-resolved connector, and that path
+        stays intact). Returns ``None`` in table mode.
+        """
+        if not hasattr(self, "_agent_cache"):
+            if self.options.get(_AGENT_OPERATION):
+                self._agent_cache = IngestionAgentDispatcher(
+                    options=self.options,
+                    connector=self.lakeflow_connect,
+                )
+            else:
+                self._agent_cache = None
+        return self._agent_cache
+
     def schema(self):
-        if self._agent is not None:
-            return self._agent.schema()
+        agent = self._agent_dispatcher()
+        if agent is not None:
+            return agent.schema()
         table = self.options[TABLE_NAME]
         if table == METADATA_TABLE:
             return StructType(
@@ -424,12 +400,13 @@ class LakeflowSource(DataSource):
         return self.lakeflow_connect.get_table_schema(table, self.options)
 
     def reader(self, schema: StructType):
-        if self._agent is not None:
-            return self._agent.reader(schema)
+        agent = self._agent_dispatcher()
+        if agent is not None:
+            return agent.reader(schema)
         return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)
 
     def streamReader(self, schema: StructType):
-        if self._agent is not None:
+        if self._agent_dispatcher() is not None:
             raise NotImplementedError(
                 "ingestion-agent operations (option 'operation' set) are "
                 "read-only and do not support streaming."
@@ -445,7 +422,7 @@ class LakeflowSource(DataSource):
         return super().streamReader(schema)
 
     def simpleStreamReader(self, schema: StructType):
-        if self._agent is not None:
+        if self._agent_dispatcher() is not None:
             raise NotImplementedError(
                 "ingestion-agent operations (option 'operation' set) are "
                 "read-only and do not support streaming."

@@ -571,10 +571,16 @@ def test_unknown_operation_returns_error_row():
 # ---------------------------------------------------------------------------
 
 class _ExampleLakeflowSource(LakeflowSource):
-    """LakeflowSource wired to ExampleLakeflowConnect for end-to-end tests."""
+    """LakeflowSource wired to ExampleLakeflowConnect for end-to-end tests.
 
-    def _build_connector(self, options):
-        return ExampleLakeflowConnect(options)
+    Mirrors what ``registry.RegisterableLakeflowSource`` does at runtime:
+    bypass ``LakeflowSource.__init__``'s placeholder connector and bind
+    to the concrete connector class directly.
+    """
+
+    def __init__(self, options):
+        self.options = options
+        self.lakeflow_connect = ExampleLakeflowConnect(options)
 
 
 def test_lakeflow_source_routes_to_agent_when_operation_set():
@@ -617,24 +623,24 @@ def test_lakeflow_source_agent_mode_blocks_streaming():
 
 
 class _FailingLakeflowSource(LakeflowSource):
-    """LakeflowSource whose _build_connector always raises — exercises the
-    LakeflowSource-level init-failure path for agent mode.
-    """
+    """LakeflowSource whose connector-init always raises."""
 
-    def _build_connector(self, options):
+    def __init__(self, options):
+        self.options = options
         raise RuntimeError("bad creds")
 
 
-def test_lakeflow_source_agent_mode_swallows_init_error():
-    """Agent mode catches init errors; the dispatcher emits an error row at read time."""
-    source = _FailingLakeflowSource({"operation": OP_VALIDATE_CONNECTION, **_CREDS})
-    rows = list(source.reader(source.schema()).read(None))
-    assert len(rows) == 1
-    assert rows[0]["_meta"]["status"] == "error"
-    assert "bad creds" in rows[0]["_meta"]["message"]
+def test_lakeflow_source_propagates_init_errors():
+    """Init failures propagate from LakeflowSource regardless of mode.
 
-
-def test_lakeflow_source_table_mode_propagates_init_error():
-    """Table mode raises init errors — no error-row fallback for regular reads."""
+    Agent-mode init-error containment is the dispatcher's contract when
+    callers construct it directly with ``init_error=`` (see
+    ``test_validate_connection_reports_init_failure_as_error_row``). The
+    LakeflowSource layer doesn't try to convert init errors into
+    structured rows — that would require ``__init__`` changes in the
+    registry wrapper, and the gain isn't worth the coupling.
+    """
     with pytest.raises(RuntimeError, match="bad creds"):
         _FailingLakeflowSource({"tableName": "orders", **_CREDS})
+    with pytest.raises(RuntimeError, match="bad creds"):
+        _FailingLakeflowSource({"operation": OP_VALIDATE_CONNECTION, **_CREDS})
