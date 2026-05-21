@@ -19,10 +19,6 @@ from databricks.labs.community_connector.interface import (
     SupportsPartitionedStream,
 )
 from databricks.labs.community_connector.libs.utils import parse_value
-from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource import (
-    OPERATION as _AGENT_OPERATION,
-    IngestionAgentDispatcher,
-)
 
 
 # =============================================================================
@@ -319,15 +315,6 @@ class LakeflowBatchReader(DataSourceReader):
 class LakeflowSource(DataSource):
     """
     PySpark DataSource implementation for Lakeflow Connect.
-
-    Two dispatch modes share the ``lakeflow_connect`` format:
-
-    - **Table mode** — the default. ``tableName`` selects either a source
-      table or one of the framework's ``_community_*`` virtual tables.
-    - **Agent operation mode** — when the ``operation`` option is set,
-      requests dispatch through the ingestion-agent operation catalog
-      (``list_objects``, ``preview_table``, etc.). Streaming reads are
-      not supported in this mode.
     """
 
     def __init__(self, options):
@@ -351,29 +338,7 @@ class LakeflowSource(DataSource):
     def name(cls):
         return "lakeflow_connect"
 
-    def _agent_dispatcher(self):
-        """Construct and cache the ingestion-agent dispatcher.
-
-        Built lazily on first access from ``self.lakeflow_connect`` so this
-        class doesn't need an ``__init__`` change to support agent dispatch
-        (the registry's ``RegisterableLakeflowSource`` wrapper overrides
-        ``__init__`` to bind the FQN-resolved connector, and that path
-        stays intact). Returns ``None`` in table mode.
-        """
-        if not hasattr(self, "_agent_cache"):
-            if self.options.get(_AGENT_OPERATION):
-                self._agent_cache = IngestionAgentDispatcher(
-                    options=self.options,
-                    connector=self.lakeflow_connect,
-                )
-            else:
-                self._agent_cache = None
-        return self._agent_cache
-
     def schema(self):
-        agent = self._agent_dispatcher()
-        if agent is not None:
-            return agent.schema()
         table = self.options[TABLE_NAME]
         if table == METADATA_TABLE:
             return StructType(
@@ -400,17 +365,9 @@ class LakeflowSource(DataSource):
         return self.lakeflow_connect.get_table_schema(table, self.options)
 
     def reader(self, schema: StructType):
-        agent = self._agent_dispatcher()
-        if agent is not None:
-            return agent.reader(schema)
         return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)
 
     def streamReader(self, schema: StructType):
-        if self._agent_dispatcher() is not None:
-            raise NotImplementedError(
-                "ingestion-agent operations (option 'operation' set) are "
-                "read-only and do not support streaming."
-            )
         # Use the partitioned DataSourceStreamReader when the connector
         # implements SupportsPartitionedStream and the table opts in.
         # Otherwise, delegate to super() which raises PySparkNotImplementedError,
@@ -422,9 +379,4 @@ class LakeflowSource(DataSource):
         return super().streamReader(schema)
 
     def simpleStreamReader(self, schema: StructType):
-        if self._agent_dispatcher() is not None:
-            raise NotImplementedError(
-                "ingestion-agent operations (option 'operation' set) are "
-                "read-only and do not support streaming."
-            )
         return LakeflowStreamReader(self.options, schema, self.lakeflow_connect)

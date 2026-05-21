@@ -1,9 +1,19 @@
-"""Ingestion-agent operation dispatcher for the ``lakeflow_connect`` format.
+"""Ingestion-agent operation dispatcher.
 
-Used by :class:`LakeflowSource` when callers set the ``operation``
-option. The agent operation surface lives under the same
-``lakeflow_connect`` format as regular table reads — there is no
-separate format string.
+Implements the read-side agent surface as a plain dispatcher class.
+Callers construct :class:`IngestionAgentDispatcher` directly with a
+:class:`LakeflowConnect` instance and an options dict, then ask for
+``schema()`` / ``reader(schema)``.
+
+Wiring this dispatcher into :class:`LakeflowSource` — so it's reachable
+via ``spark.read.format("lakeflow_connect").option("operation", ...)``
+— is a follow-up PR. That change also needs the merge script
+(``tools/scripts/merge_python_source.py``) to start bundling this
+module + ``interface/supports_ingestion_agent.py`` +
+``interface/agent_protocol.py`` into the ``_generated_*`` deployables.
+Until then this module is standalone scaffolding: importable from the
+package, exercised by unit tests, but not yet on the Spark format
+dispatch path.
 
 Operations are first-class :class:`AgentOperation` objects. Five
 built-ins (``list_objects``, ``preview_table``, ``get_object_metadata``,
@@ -21,10 +31,6 @@ Source customisation goes through
 
 - **To add a new source-prefixed operation**, subclass
   :class:`AgentOperation` directly and implement ``pull``.
-
-:class:`IngestionAgentDispatcher` and :class:`IngestionAgentReader`
-are exposed for unit testing; the dispatcher is a plain class (not a
-Spark DataSource).
 """
 
 from __future__ import annotations

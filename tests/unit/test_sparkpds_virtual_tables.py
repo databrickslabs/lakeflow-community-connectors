@@ -104,7 +104,6 @@ def _source_schema(connector: LakeflowConnect, table: str) -> StructType:
     src = LakeflowSource.__new__(LakeflowSource)
     src.options = {TABLE_NAME: table}
     src.lakeflow_connect = connector
-    src._agent = None  # bypass init also skips agent-routing setup
     return src.schema()
 
 

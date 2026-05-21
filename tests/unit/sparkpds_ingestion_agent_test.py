@@ -1,8 +1,11 @@
-"""Unit tests for the ingestion-agent dispatcher on ``lakeflow_connect``.
+"""Unit tests for the ingestion-agent dispatcher.
 
 Exercises :class:`IngestionAgentDispatcher` / :class:`IngestionAgentReader`
-directly and end-to-end through :class:`LakeflowSource`, without
-spinning up a SparkSession.
+directly, without spinning up a SparkSession. Wiring the dispatcher
+into :class:`LakeflowSource` (so callers can reach it through
+``spark.read.format("lakeflow_connect").option("operation", ...)``) is
+a follow-up PR — see the module docstring on
+``sparkpds.ingestion_agent_datasource``.
 
 Coverage:
 
@@ -11,8 +14,7 @@ Coverage:
 - the built-in subclassing pattern (override ``produce`` to customise);
 - input validation (missing operation, missing required option);
 - init-failure error containment (metadata-kind → error row,
-  data-kind → re-raise, connector-optional → still runs);
-- end-to-end dispatch through LakeflowSource.
+  data-kind → re-raise, connector-optional → still runs).
 """
 
 from __future__ import annotations
@@ -50,9 +52,6 @@ from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource imp
     OP_LIST_OPERATIONS,
     OP_PREVIEW_TABLE,
     OP_VALIDATE_CONNECTION,
-)
-from databricks.labs.community_connector.sparkpds.lakeflow_datasource import (
-    LakeflowSource,
 )
 
 
@@ -562,85 +561,3 @@ def test_unknown_operation_returns_error_row():
     dispatcher = _dispatcher("unsupported_op")
     with pytest.raises(ValueError, match="Unknown ingestion-agent operation"):
         dispatcher.schema()
-
-
-# ---------------------------------------------------------------------------
-# Integration through LakeflowSource: the agent surface is reachable via the
-# same `lakeflow_connect` format that serves table reads. Setting `operation`
-# routes through the agent dispatcher; omitting it keeps the regular path.
-# ---------------------------------------------------------------------------
-
-class _ExampleLakeflowSource(LakeflowSource):
-    """LakeflowSource wired to ExampleLakeflowConnect for end-to-end tests.
-
-    Mirrors what ``registry.RegisterableLakeflowSource`` does at runtime:
-    bypass ``LakeflowSource.__init__``'s placeholder connector and bind
-    to the concrete connector class directly.
-    """
-
-    def __init__(self, options):
-        self.options = options
-        self.lakeflow_connect = ExampleLakeflowConnect(options)
-
-
-def test_lakeflow_source_routes_to_agent_when_operation_set():
-    source = _ExampleLakeflowSource({"operation": OP_LIST_OPERATIONS, **_CREDS})
-    schema = source.schema()
-    assert {f.name for f in schema.fields} == {
-        "name",
-        "description",
-        "kind",
-        "result_schema_json",
-        "parameters_json",
-        "_meta",
-    }
-    rows = list(source.reader(schema).read(None))
-    names = {r["name"] for r in rows}
-    assert {
-        OP_LIST_OBJECTS,
-        OP_GET_OBJECT_METADATA,
-        OP_PREVIEW_TABLE,
-        OP_VALIDATE_CONNECTION,
-        OP_LIST_OPERATIONS,
-    }.issubset(names)
-
-
-def test_lakeflow_source_table_mode_unchanged_when_no_operation():
-    source = _ExampleLakeflowSource({"tableName": "orders", **_CREDS})
-    schema = source.schema()
-    # The table's natural schema has columns; absence of `_meta` confirms we
-    # did NOT go through the agent dispatcher.
-    assert "_meta" not in {f.name for f in schema.fields}
-
-
-def test_lakeflow_source_agent_mode_blocks_streaming():
-    source = _ExampleLakeflowSource({"operation": OP_VALIDATE_CONNECTION, **_CREDS})
-    schema = source.schema()
-    with pytest.raises(NotImplementedError, match="streaming"):
-        source.streamReader(schema)
-    with pytest.raises(NotImplementedError, match="streaming"):
-        source.simpleStreamReader(schema)
-
-
-class _FailingLakeflowSource(LakeflowSource):
-    """LakeflowSource whose connector-init always raises."""
-
-    def __init__(self, options):
-        self.options = options
-        raise RuntimeError("bad creds")
-
-
-def test_lakeflow_source_propagates_init_errors():
-    """Init failures propagate from LakeflowSource regardless of mode.
-
-    Agent-mode init-error containment is the dispatcher's contract when
-    callers construct it directly with ``init_error=`` (see
-    ``test_validate_connection_reports_init_failure_as_error_row``). The
-    LakeflowSource layer doesn't try to convert init errors into
-    structured rows — that would require ``__init__`` changes in the
-    registry wrapper, and the gain isn't worth the coupling.
-    """
-    with pytest.raises(RuntimeError, match="bad creds"):
-        _FailingLakeflowSource({"tableName": "orders", **_CREDS})
-    with pytest.raises(RuntimeError, match="bad creds"):
-        _FailingLakeflowSource({"operation": OP_VALIDATE_CONNECTION, **_CREDS})
