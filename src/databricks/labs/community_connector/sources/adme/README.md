@@ -49,10 +49,10 @@ To configure the connector, provide the following parameters in your Unity Catal
 
 `managed_identity` and `federated_identity` require the `azure-identity` package on the cluster (`pip install "azure-identity>=1.15.0"`). `service_principal` and `static_token` have no extra dependencies.
 
-This connector supports per-table options (`window_days`, `lookback_minutes`, `max_records_per_batch`) — see **Table Configurations** below. Because of that, **`externalOptionsAllowList` must be set as a connection parameter** with the exact value:
+This connector supports per-table options (`window_days`, `lookback_minutes`) — see **Table Configurations** below. Because of that, **`externalOptionsAllowList` must be set as a connection parameter** with the exact value:
 
 ```
-window_days,lookback_minutes,max_records_per_batch
+window_days,lookback_minutes
 ```
 
 ### Obtaining the connection parameters
@@ -68,7 +68,7 @@ window_days,lookback_minutes,max_records_per_batch
 #### 2. Find the ADME instance URL and data partition
 
 1. In the Azure portal, open your ADME instance.
-2. The **Overview** blade shows the **URI** field — that's `instance_url` (e.g. `https://admetest.energy.azure.com`).
+2. The **Overview** blade shows the **URI** field — that's `base_url` (e.g. `https://admetest.energy.azure.com`). The legacy alias `instance_url` is still accepted for backwards compatibility.
 3. The same blade lists **Data Partitions** for the instance. Pick one — that's `data_partition_id` (e.g. `opendes`).
 
 #### 3. Grant the service principal the `users.datalake.viewers` role
@@ -114,7 +114,11 @@ A Unity Catalog connection for this connector can be created in two ways via the
 
 1. Follow the **Lakeflow Community Connector** UI flow from the **Add Data** page.
 2. Select any existing Lakeflow Community Connector connection for this source or create a new one.
-3. Provide the required connection parameters (`tenant_id`, `client_id`, `client_secret`, `instance_url`, `data_partition_id`, optionally `page_size`).
+3. Provide the required connection parameters. The required set depends on the chosen `auth_mode`:
+   - **`service_principal` (default):** `base_url`, `data_partition_id`, `tenant_id`, `client_id`, `client_secret`. Optionally `adme_api_client_id`, `page_size`.
+   - **`managed_identity`:** `base_url`, `data_partition_id`, `auth_mode=managed_identity`. Optionally `managed_identity_client_id` (user-assigned MI), `adme_api_client_id`, `page_size`.
+   - **`federated_identity`:** `base_url`, `data_partition_id`, `auth_mode=federated_identity`, `tenant_id`, `client_id`, plus one of `federated_token_file` or `federated_token`. Optionally `adme_api_client_id`, `page_size`.
+   - **`static_token`:** `base_url`, `data_partition_id`, `auth_mode=static_token`, `access_token`. Optionally `page_size`. CI/testing only.
 4. **Set `externalOptionsAllowList` to `window_days,lookback_minutes`** so the per-table options below can be passed through.
 
 The connection can also be created using the standard Unity Catalog API.
@@ -334,7 +338,7 @@ The first run does a full backfill across all selected tables (a single open-end
 - **Three tables only in v1** — `Wellbore`, `Reservoir`, `Rock_and_Fluid`. Other OSDU master-data kinds (Well, Field, Basin, SampleAcquisitionJob, GenericFacility, etc.) are reachable via the same Search Service but not exposed by this connector.
 - **No delete sync** — the OSDU Search index drops deleted records but the Search Service does not provide a deletion feed. Tombstones are not emitted; use a periodic full refresh to reconcile.
 - **No DDMS endpoints** — the connector reads only from `/api/search/v2/`. The DDMS-specific endpoints (Wellbore DDMS, Reservoir DDMS, RAFS DDMS) are out of scope; their RESQML/well-log payloads are not surfaced.
-- **No interactive auth flows** — only the Azure AD client-credentials grant is supported. Managed Identity, device-code, and static bearer tokens are not.
+- **No interactive auth flows** — device-code and other user-facing OAuth grants are not supported. The four supported modes are `service_principal` (client-credentials), `managed_identity` (Azure system/user MI), `federated_identity` (OIDC / Workload Identity), and `static_token` (pre-issued bearer; CI/testing only).
 - **Soft-bounded `init_time` snapshot** — `latest_offset` returns the connector's process-init time rather than probing the source for the actual maximum `modifyTime`. This guarantees `Trigger.AvailableNow` termination but means records modified after init time will not appear until the next trigger. This is the intended tradeoff.
 - **No spatial / domain-specific filters as first-class options** — the OSDU Search API supports `spatialFilter`, `returnedFields`, and `sort` but those are not surfaced as connector options. To pre-filter by geography or domain attribute, post-process the destination tables.
 - **One data partition per connection** — to ingest from multiple OSDU partitions, create one Unity Catalog connection per partition.
@@ -354,6 +358,6 @@ The first run does a full backfill across all selected tables (a single open-end
 
 - **Source**: Azure Data Manager for Energy (ADME) — OSDU Search Service (`/api/search/v2/query_with_cursor`)
 - **Supported Objects**: 3 tables (`Wellbore`, `Reservoir`, `Rock_and_Fluid`)
-- **Authentication**: Azure AD OAuth2 client-credentials (Bearer token + `data-partition-id` header)
+- **Authentication**: Azure AD — four modes selected via `auth_mode` (`service_principal` / `managed_identity` / `federated_identity` / `static_token`). All call ADME with a Bearer token + `data-partition-id` header.
 - **Supported Ingestion Types**: `cdc` (upserts; no deletes)
 - **Partitioned Reads**: yes — `SupportsPartitionedStream` over `modifyTime` windows

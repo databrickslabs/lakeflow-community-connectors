@@ -13,6 +13,15 @@
       "status":                     "compliant"
     },
     "tags": {},
+    "meta": [
+      {
+        "kind": "Unit",
+        "name": "m",
+        "persistableReference": "{\"abcd\":{\"a\":0.0,\"b\":1.0,\"c\":1.0,\"d\":0.0},\"symbol\":\"m\",\"baseMeasurement\":{\"ancestry\":\"Length\",\"type\":\"UM\"},\"type\":\"UAD\"}",
+        "propertyNames": ["TopDepth", "BaseDepth"],
+        "unitOfMeasureID": "opendes:reference-data--UnitOfMeasure:m:"
+      }
+    ],
     "createTime": "2023-10-05T13:00:00.000Z",
     "createUser": "ingestion-service@opendes.contoso.com",
     "modifyTime": "2024-03-17T10:00:00.000Z",
