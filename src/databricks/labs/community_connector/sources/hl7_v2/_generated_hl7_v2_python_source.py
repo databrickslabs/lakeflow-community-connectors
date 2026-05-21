@@ -1149,6 +1149,26 @@ def register_lakeflow_source(spark):
         }
 
 
+    def _sps_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+        """SPS (Specimen Source) — 7 components. Withdrawn in v2.7; used for backward compatibility with v2.3–v2.6."""
+        def gc(comp):
+            return _v(seg.get_component(field_n, comp))
+
+        def gsc(comp, sub):
+            return _v(seg.get_sub_component(field_n, comp, sub))
+
+        return {
+            f"{prefix}":                            gsc(1, 1) or gc(1),  # SPS.1.1 (CWE.1 source code)
+            f"{prefix}_text":                       gsc(1, 2),           # SPS.1.2 (CWE.2 source text)
+            f"{prefix}_additives":                  gsc(2, 1) or gc(2),  # SPS.2.1 (CWE.1 additives code)
+            f"{prefix}_collection_method":          gc(3),               # SPS.3 (TX)
+            f"{prefix}_body_site":                  gsc(4, 1) or gc(4),  # SPS.4.1 (CWE.1 body site)
+            f"{prefix}_site_modifier":              gsc(5, 1) or gc(5),  # SPS.5.1 (CWE.1 site modifier)
+            f"{prefix}_collection_method_modifier": gsc(6, 1) or gc(6),  # SPS.6.1 (CWE.1 method modifier)
+            f"{prefix}_role":                       gsc(7, 1) or gc(7),  # SPS.7.1 (CWE.1 specimen role)
+        }
+
+
     def _dln_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
         """DLN (Driver's License Number) — 3 components: license number (ST) + issuing state (IS) + expiration date (DT)."""
         def gc(comp):
@@ -1294,7 +1314,7 @@ def register_lakeflow_source(spark):
 
 
     def _moc_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
-        """MOC (Charge to Practice) — 2 components: MO (amount + currency) + CWE (charge code)."""
+        """MOC (Money and Code) — MOC.1: MO (Monetary Amount) + MOC.2: CWE (Charge Code)."""
         def gsc(comp, sub):
             return _v(seg.get_sub_component(field_n, comp, sub))
 
@@ -1302,11 +1322,11 @@ def register_lakeflow_source(spark):
             return _v(seg.get_component(field_n, comp))
 
         return {
-            f"{prefix}_amount": gsc(1, 1) or gc(1),
-            f"{prefix}_currency": gsc(1, 2),
-            f"{prefix}_code": gsc(2, 1) or gc(2),
-            f"{prefix}_code_text": gsc(2, 2),
-            f"{prefix}_code_coding_system": gsc(2, 3),
+            f"{prefix}_monetary_amount":           gsc(1, 1) or gc(1),  # MOC.1.1 (MO.1 quantity, NM)
+            f"{prefix}_monetary_amount_currency":  gsc(1, 2),            # MOC.1.2 (MO.2 denomination, ID)
+            f"{prefix}_charge_code":               gsc(2, 1) or gc(2),  # MOC.2.1 (CWE.1 code)
+            f"{prefix}_charge_code_text":          gsc(2, 2),            # MOC.2.2 (CWE.2 text)
+            f"{prefix}_charge_code_coding_system": gsc(2, 3),            # MOC.2.3 (CWE.3 coding system)
         }
 
 
@@ -2253,8 +2273,8 @@ def register_lakeflow_source(spark):
             **_cwe_fields(seg, 12, "danger_code", repeating=False),
             **_cwe_array_fields(seg, 13, "relevant_clinical_information"),
             "specimen_received_datetime": _parse_dtm(seg.get_field(14)),
-            "specimen_source": _v(seg.get_field(15)),
-            **_xcn_fields(seg, 16, "ordering_provider"),
+            **_sps_fields(seg, 15, "specimen_source"),
+            **_xcn_array_fields(seg, 16, "ordering_provider"),
             **_xtn_array_fields(seg, 17, "order_callback_phone"),
             "placer_field_1": _v(seg.get_field(18)),
             "placer_field_2": _v(seg.get_field(19)),
@@ -2267,7 +2287,7 @@ def register_lakeflow_source(spark):
             **_prl_fields(seg, 26, "parent_result"),
             **_tq_array_fields(seg, 27, "quantity_timing"),
             **_xcn_array_fields(seg, 28, "result_copies_to"),
-            **_eip_array_fields(seg, 29, "parent_placer_order_number"),
+            **_eip_fields(seg, 29, "parent_results_observation_identifier"),
             "transportation_mode": _v(seg.get_field(30)),
             **_cwe_array_fields(seg, 31, "reason_for_study"),
             **_ndl_fields(seg, 32, "principal_result_interpreter"),
@@ -3506,6 +3526,20 @@ def register_lakeflow_source(spark):
         ]
 
 
+    def _sps_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+        """SPS (Specimen Source) — 7 components. Withdrawn in v2.7; used for backward compatibility with v2.3–v2.6."""
+        return [
+            _s(f"{prefix}",                              f"{label} source name/code ({field_ref}.1.1, CWE.1)"),
+            _s(f"{prefix}_text",                         f"{label} source name text ({field_ref}.1.2, CWE.2)"),
+            _s(f"{prefix}_additives",                    f"{label} additives code ({field_ref}.2.1, CWE.1)"),
+            _s(f"{prefix}_collection_method",            f"{label} collection method ({field_ref}.3, TX)"),
+            _s(f"{prefix}_body_site",                    f"{label} body site code ({field_ref}.4.1, CWE.1)"),
+            _s(f"{prefix}_site_modifier",                f"{label} site modifier code ({field_ref}.5.1, CWE.1)"),
+            _s(f"{prefix}_collection_method_modifier",   f"{label} collection method modifier ({field_ref}.6.1, CWE.1)"),
+            _s(f"{prefix}_role",                         f"{label} specimen role ({field_ref}.7.1, CWE.1)"),
+        ]
+
+
     def _aui_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
         """AUI (Authorization Information) — ST + DT + ST."""
         return [
@@ -3567,13 +3601,13 @@ def register_lakeflow_source(spark):
 
 
     def _moc_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
-        """MOC (Charge to Practice) — MO (amount+currency) + CWE (charge code)."""
+        """MOC (Money and Code) — MOC.1: MO (Monetary Amount) + MOC.2: CWE (Charge Code)."""
         return [
-            _s(f"{prefix}_amount",            f"{label} amount ({field_ref}.1.1, MO quantity)"),
-            _s(f"{prefix}_currency",          f"{label} ISO 4217 currency ({field_ref}.1.2, MO)"),
-            _s(f"{prefix}_code",              f"{label} charge code ({field_ref}.2.1, CWE)"),
-            _s(f"{prefix}_code_text",         f"{label} charge code text ({field_ref}.2.2, CWE)"),
-            _s(f"{prefix}_code_coding_system", f"{label} charge code coding system ({field_ref}.2.3, CWE)"),
+            _s(f"{prefix}_monetary_amount",           f"{label} monetary quantity ({field_ref}.1.1, MO.1, NM)"),
+            _s(f"{prefix}_monetary_amount_currency",  f"{label} ISO 4217 denomination ({field_ref}.1.2, MO.2, ID)"),
+            _s(f"{prefix}_charge_code",               f"{label} charge code ({field_ref}.2.1, CWE.1)"),
+            _s(f"{prefix}_charge_code_text",          f"{label} charge code text ({field_ref}.2.2, CWE.2)"),
+            _s(f"{prefix}_charge_code_coding_system", f"{label} charge code coding system ({field_ref}.2.3, CWE.3)"),
         ]
 
 
@@ -4140,9 +4174,9 @@ def register_lakeflow_source(spark):
         + _cwe_array_schema("relevant_clinical_information", "Relevant clinical information (CWE, repeatable per spec)", "OBR-13")
         + [
             _ts("specimen_received_datetime",         "Date/time the specimen was received by the lab, parsed to timestamp (OBR-14)"),
-            _s("specimen_source",                     "Specimen source and collection method (OBR-15, deprecated in v2.7)"),
         ]
-        + _xcn_schema("ordering_provider", "Ordering physician", "OBR-16")
+        + _sps_schema("specimen_source", "Specimen source (SPS, withdrawn in v2.7; backward-compatible)", "OBR-15")
+        + _xcn_array_schema("ordering_provider", "Ordering physician (XCN, repeatable; withdrawn v2.9 — backward-compatible)", "OBR-16")
         + _xtn_array_schema("order_callback_phone", "Order callback phone (XTN, repeatable per spec)", "OBR-17")
         + [
             _s("placer_field_1",                      "Placer-defined field 1 for local use (OBR-18)"),
@@ -4159,7 +4193,7 @@ def register_lakeflow_source(spark):
         + _prl_schema("parent_result", "Parent result link (PRL)", "OBR-26")
         + _tq_array_schema("quantity_timing", "Quantity/timing of the order (TQ, repeatable, deprecated in v2.5)", "OBR-27")
         + _xcn_array_schema("result_copies_to", "Result copy-to provider (XCN, repeatable per spec)", "OBR-28")
-        + _eip_array_schema("parent_placer_order_number", "Placer order number of the parent order (EIP, repeatable per spec)", "OBR-29")
+        + _eip_schema("parent_results_observation_identifier", "Parent results observation identifier — links child result to parent observation (EIP, [0..1])", "OBR-29")
         + [
             _s("transportation_mode",                  "Specimen transportation mode code (OBR-30)"),
         ]
@@ -4180,7 +4214,7 @@ def register_lakeflow_source(spark):
             _s("escort_required",                      "Escort required indicator code (OBR-42)"),
         ]
         + _cwe_array_schema("planned_patient_transport_comment", "Planned patient transport comment (CWE, repeatable per spec)", "OBR-43")
-        + _cwe_schema("procedure_code", "Procedure code (CWE)", "OBR-44")
+        + _cwe_schema("procedure_code", "Procedure code (CNE; CWE-compatible struct)", "OBR-44")
         + _cwe_array_schema("procedure_code_modifier", "Procedure code modifier (CNE, repeatable per spec; uses CWE-shape struct since CNE and CWE share components)", "OBR-45")
         + _cwe_array_schema("placer_supplemental_service_info", "Placer supplemental service info (CWE, repeatable per spec)", "OBR-46")
         + _cwe_array_schema("filler_supplemental_service_info", "Filler supplemental service info (CWE, repeatable per spec)", "OBR-47")

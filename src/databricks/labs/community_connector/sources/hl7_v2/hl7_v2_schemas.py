@@ -476,6 +476,20 @@ def _vid_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
     ]
 
 
+def _sps_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+    """SPS (Specimen Source) — 7 components. Withdrawn in v2.7; used for backward compatibility with v2.3–v2.6."""
+    return [
+        _s(f"{prefix}",                              f"{label} source name/code ({field_ref}.1.1, CWE.1)"),
+        _s(f"{prefix}_text",                         f"{label} source name text ({field_ref}.1.2, CWE.2)"),
+        _s(f"{prefix}_additives",                    f"{label} additives code ({field_ref}.2.1, CWE.1)"),
+        _s(f"{prefix}_collection_method",            f"{label} collection method ({field_ref}.3, TX)"),
+        _s(f"{prefix}_body_site",                    f"{label} body site code ({field_ref}.4.1, CWE.1)"),
+        _s(f"{prefix}_site_modifier",                f"{label} site modifier code ({field_ref}.5.1, CWE.1)"),
+        _s(f"{prefix}_collection_method_modifier",   f"{label} collection method modifier ({field_ref}.6.1, CWE.1)"),
+        _s(f"{prefix}_role",                         f"{label} specimen role ({field_ref}.7.1, CWE.1)"),
+    ]
+
+
 def _aui_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
     """AUI (Authorization Information) — ST + DT + ST."""
     return [
@@ -537,13 +551,13 @@ def _jcc_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
 
 
 def _moc_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
-    """MOC (Charge to Practice) — MO (amount+currency) + CWE (charge code)."""
+    """MOC (Money and Code) — MOC.1: MO (Monetary Amount) + MOC.2: CWE (Charge Code)."""
     return [
-        _s(f"{prefix}_amount",            f"{label} amount ({field_ref}.1.1, MO quantity)"),
-        _s(f"{prefix}_currency",          f"{label} ISO 4217 currency ({field_ref}.1.2, MO)"),
-        _s(f"{prefix}_code",              f"{label} charge code ({field_ref}.2.1, CWE)"),
-        _s(f"{prefix}_code_text",         f"{label} charge code text ({field_ref}.2.2, CWE)"),
-        _s(f"{prefix}_code_coding_system", f"{label} charge code coding system ({field_ref}.2.3, CWE)"),
+        _s(f"{prefix}_monetary_amount",           f"{label} monetary quantity ({field_ref}.1.1, MO.1, NM)"),
+        _s(f"{prefix}_monetary_amount_currency",  f"{label} ISO 4217 denomination ({field_ref}.1.2, MO.2, ID)"),
+        _s(f"{prefix}_charge_code",               f"{label} charge code ({field_ref}.2.1, CWE.1)"),
+        _s(f"{prefix}_charge_code_text",          f"{label} charge code text ({field_ref}.2.2, CWE.2)"),
+        _s(f"{prefix}_charge_code_coding_system", f"{label} charge code coding system ({field_ref}.2.3, CWE.3)"),
     ]
 
 
@@ -1110,9 +1124,9 @@ OBR_SCHEMA = StructType(
     + _cwe_array_schema("relevant_clinical_information", "Relevant clinical information (CWE, repeatable per spec)", "OBR-13")
     + [
         _ts("specimen_received_datetime",         "Date/time the specimen was received by the lab, parsed to timestamp (OBR-14)"),
-        _s("specimen_source",                     "Specimen source and collection method (OBR-15, deprecated in v2.7)"),
     ]
-    + _xcn_schema("ordering_provider", "Ordering physician", "OBR-16")
+    + _sps_schema("specimen_source", "Specimen source (SPS, withdrawn in v2.7; backward-compatible)", "OBR-15")
+    + _xcn_array_schema("ordering_provider", "Ordering physician (XCN, repeatable; withdrawn v2.9 — backward-compatible)", "OBR-16")
     + _xtn_array_schema("order_callback_phone", "Order callback phone (XTN, repeatable per spec)", "OBR-17")
     + [
         _s("placer_field_1",                      "Placer-defined field 1 for local use (OBR-18)"),
@@ -1129,7 +1143,7 @@ OBR_SCHEMA = StructType(
     + _prl_schema("parent_result", "Parent result link (PRL)", "OBR-26")
     + _tq_array_schema("quantity_timing", "Quantity/timing of the order (TQ, repeatable, deprecated in v2.5)", "OBR-27")
     + _xcn_array_schema("result_copies_to", "Result copy-to provider (XCN, repeatable per spec)", "OBR-28")
-    + _eip_array_schema("parent_placer_order_number", "Placer order number of the parent order (EIP, repeatable per spec)", "OBR-29")
+    + _eip_schema("parent_results_observation_identifier", "Parent results observation identifier — links child result to parent observation (EIP, [0..1])", "OBR-29")
     + [
         _s("transportation_mode",                  "Specimen transportation mode code (OBR-30)"),
     ]
@@ -1150,7 +1164,7 @@ OBR_SCHEMA = StructType(
         _s("escort_required",                      "Escort required indicator code (OBR-42)"),
     ]
     + _cwe_array_schema("planned_patient_transport_comment", "Planned patient transport comment (CWE, repeatable per spec)", "OBR-43")
-    + _cwe_schema("procedure_code", "Procedure code (CWE)", "OBR-44")
+    + _cwe_schema("procedure_code", "Procedure code (CNE; CWE-compatible struct)", "OBR-44")
     + _cwe_array_schema("procedure_code_modifier", "Procedure code modifier (CNE, repeatable per spec; uses CWE-shape struct since CNE and CWE share components)", "OBR-45")
     + _cwe_array_schema("placer_supplemental_service_info", "Placer supplemental service info (CWE, repeatable per spec)", "OBR-46")
     + _cwe_array_schema("filler_supplemental_service_info", "Filler supplemental service info (CWE, repeatable per spec)", "OBR-47")

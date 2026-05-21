@@ -304,6 +304,26 @@ def _aui_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     }
 
 
+def _sps_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+    """SPS (Specimen Source) — 7 components. Withdrawn in v2.7; used for backward compatibility with v2.3–v2.6."""
+    def gc(comp):
+        return _v(seg.get_component(field_n, comp))
+
+    def gsc(comp, sub):
+        return _v(seg.get_sub_component(field_n, comp, sub))
+
+    return {
+        f"{prefix}":                            gsc(1, 1) or gc(1),  # SPS.1.1 (CWE.1 source code)
+        f"{prefix}_text":                       gsc(1, 2),           # SPS.1.2 (CWE.2 source text)
+        f"{prefix}_additives":                  gsc(2, 1) or gc(2),  # SPS.2.1 (CWE.1 additives code)
+        f"{prefix}_collection_method":          gc(3),               # SPS.3 (TX)
+        f"{prefix}_body_site":                  gsc(4, 1) or gc(4),  # SPS.4.1 (CWE.1 body site)
+        f"{prefix}_site_modifier":              gsc(5, 1) or gc(5),  # SPS.5.1 (CWE.1 site modifier)
+        f"{prefix}_collection_method_modifier": gsc(6, 1) or gc(6),  # SPS.6.1 (CWE.1 method modifier)
+        f"{prefix}_role":                       gsc(7, 1) or gc(7),  # SPS.7.1 (CWE.1 specimen role)
+    }
+
+
 def _dln_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     """DLN (Driver's License Number) — 3 components: license number (ST) + issuing state (IS) + expiration date (DT)."""
     def gc(comp):
@@ -449,7 +469,7 @@ def _jcc_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
 
 
 def _moc_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
-    """MOC (Charge to Practice) — 2 components: MO (amount + currency) + CWE (charge code)."""
+    """MOC (Money and Code) — MOC.1: MO (Monetary Amount) + MOC.2: CWE (Charge Code)."""
     def gsc(comp, sub):
         return _v(seg.get_sub_component(field_n, comp, sub))
 
@@ -457,11 +477,11 @@ def _moc_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
         return _v(seg.get_component(field_n, comp))
 
     return {
-        f"{prefix}_amount": gsc(1, 1) or gc(1),
-        f"{prefix}_currency": gsc(1, 2),
-        f"{prefix}_code": gsc(2, 1) or gc(2),
-        f"{prefix}_code_text": gsc(2, 2),
-        f"{prefix}_code_coding_system": gsc(2, 3),
+        f"{prefix}_monetary_amount":           gsc(1, 1) or gc(1),  # MOC.1.1 (MO.1 quantity, NM)
+        f"{prefix}_monetary_amount_currency":  gsc(1, 2),            # MOC.1.2 (MO.2 denomination, ID)
+        f"{prefix}_charge_code":               gsc(2, 1) or gc(2),  # MOC.2.1 (CWE.1 code)
+        f"{prefix}_charge_code_text":          gsc(2, 2),            # MOC.2.2 (CWE.2 text)
+        f"{prefix}_charge_code_coding_system": gsc(2, 3),            # MOC.2.3 (CWE.3 coding system)
     }
 
 

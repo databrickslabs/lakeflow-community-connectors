@@ -48,7 +48,7 @@ class TestOBRMissingFields:
         assert row["service"] is None
         assert row["service_text"] is None
         assert row["result_status"] is None
-        assert row["ordering_provider_id"] is None
+        assert row["ordering_provider"] is None
         assert row["diagnostic_service_section"] is None
 
     def test_obr_service_only(self):
@@ -92,10 +92,10 @@ class TestOBRCompositeFields:
         assert row["collection_volume"] == "10.5"
         assert row["collection_volume_units"] == "mL"
 
-        assert row["charge_to_practice_amount"] == "150.00"
-        assert row["charge_to_practice_currency"] == "USD"
-        assert row["charge_to_practice_code"] == "OFFICE"
-        assert row["charge_to_practice_code_text"] == "Office charge"
+        assert row["charge_to_practice_monetary_amount"] == "150.00"
+        assert row["charge_to_practice_monetary_amount_currency"] == "USD"
+        assert row["charge_to_practice_charge_code"] == "OFFICE"
+        assert row["charge_to_practice_charge_code_text"] == "Office charge"
 
         assert row["parent_result"] == "GLU"
         assert row["parent_result_text"] == "Glucose result"
@@ -103,8 +103,8 @@ class TestOBRCompositeFields:
         assert row["parent_result_sub_id"] == "SUB1"
         assert row["parent_result_descriptor"] == "Some descriptor"
 
-        assert row["parent_placer_order_number"][0]["placer_assigned_identifier"]["entity_identifier"] == "PARENT123"
-        assert row["parent_placer_order_number"][0]["filler_assigned_identifier"]["entity_identifier"] == "CHILD456"
+        assert row["parent_results_observation_identifier_placer_assigned_identifier"] == "PARENT123"
+        assert row["parent_results_observation_identifier_filler_assigned_identifier"] == "CHILD456"
 
         principal = row
         assert principal["principal_result_interpreter"] == "DOC1"
