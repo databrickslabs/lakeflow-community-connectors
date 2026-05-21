@@ -34,19 +34,11 @@ class AgentOperation(ABC):
     description: str = ""
     kind: str = "metadata"
     schema: Optional[StructType] = None
-    #: Whether the operation needs a live :class:`LakeflowConnect`
-    #: instance. Defaults to ``True``. Set ``False`` on ops that should
-    #: still run when the connector failed to construct
-    #: (e.g. discovery-style ops like ``list_operations``).
-    requires_connector: bool = True
     #: Typed declaration of accepted input options. Exposed via
     #: ``list_operations.parameters_json`` so agents can plan calls.
     #: The framework validates required parameters before invoking
     #: ``pull``; undeclared options pass through untouched.
     parameters: Tuple[Parameter, ...] = ()
-    #: Operation version. Bump on breaking changes to the op's input or
-    #: output contract. Surfaced through ``list_operations.version``.
-    version: str = "1.0.0"
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)

@@ -5,12 +5,11 @@ option. The agent operation surface lives under the same
 ``lakeflow_connect`` format as regular table reads — there is no
 separate format string.
 
-Operations are first-class :class:`AgentOperation` objects. Six
+Operations are first-class :class:`AgentOperation` objects. Five
 built-ins (``list_objects``, ``preview_table``, ``get_object_metadata``,
-``validate_connection``, ``list_operations``, ``describe_connection``)
-ship with the framework and derive their behaviour from the existing
-:class:`LakeflowConnect` surface — every connector gains the agent
-surface automatically.
+``validate_connection``, ``list_operations``) ship with the framework
+and derive their behaviour from the existing :class:`LakeflowConnect`
+surface — every connector gains the agent surface automatically.
 
 Source customisation goes through
 :meth:`SupportsIngestionAgent.agent_operations`:
@@ -35,20 +34,16 @@ import json
 import re
 from typing import Any, Iterable, Iterator, Mapping, Optional, Tuple
 
-from pyspark.sql.types import BooleanType, StringType, StructField, StructType
+from pyspark.sql.types import StringType, StructField, StructType
 from pyspark.sql.datasource import DataSourceReader, InputPartition
 
 from databricks.labs.community_connector.interface import (
-    FRAMEWORK_PROTOCOL_VERSION,
     AgentError,
     AgentOperation,
     ErrorCode,
     LakeflowConnect,
     Parameter,
     SupportsIngestionAgent,
-    SupportsNamespaces,
-    SupportsPartition,
-    SupportsPartitionedStream,
 )
 from databricks.labs.community_connector.libs.utils import parse_value
 
@@ -76,11 +71,19 @@ OP_PREVIEW_TABLE = "preview_table"
 OP_GET_OBJECT_METADATA = "get_object_metadata"
 OP_VALIDATE_CONNECTION = "validate_connection"
 OP_LIST_OPERATIONS = "list_operations"
-OP_DESCRIBE_CONNECTION = "describe_connection"
 
 # Operation kinds.
 KIND_METADATA = "metadata"
 KIND_DATA = "data"
+
+# Operations that can dispatch even when the connector failed to build
+# (e.g. bad creds). Today this is only `list_operations` — it can yield
+# the framework's built-in catalog without touching the connector.
+_CONNECTOR_OPTIONAL_OPS = frozenset({OP_LIST_OPERATIONS})
+
+
+def _requires_connector(op: AgentOperation) -> bool:
+    return op.name not in _CONNECTOR_OPTIONAL_OPS
 
 # Reserved keys the agent layer owns. Stripped from the dict passed into
 # LakeflowConnect.__init__ so the connector can't accidentally interpret an
@@ -148,22 +151,8 @@ _LIST_OPERATIONS_BASE_SCHEMA = StructType(
         StructField("name", StringType(), False),
         StructField("description", StringType(), True),
         StructField("kind", StringType(), True),
-        StructField("requires_connector", BooleanType(), True),
-        StructField("version", StringType(), True),
         StructField("result_schema_json", StringType(), True),
         StructField("parameters_json", StringType(), True),
-    ]
-)
-
-_DESCRIBE_CONNECTION_BASE_SCHEMA = StructType(
-    [
-        StructField("connector_name", StringType(), True),
-        StructField("source_system", StringType(), True),
-        StructField("connector_version", StringType(), True),
-        StructField("framework_protocol_version", StringType(), False),
-        StructField("supports_namespaces", BooleanType(), False),
-        StructField("supports_partition", BooleanType(), False),
-        StructField("supports_partitioned_stream", BooleanType(), False),
     ]
 )
 
@@ -386,21 +375,19 @@ class ValidateConnectionOp(AgentOperation):
 class ListOperationsOp(AgentOperation):
     """Built-in: list operations supported by this connection.
 
-    Framework-owned and connector-optional — works even when the
-    connector failed to initialise (returns the framework's built-ins,
-    minus any source-defined operations the connector would have
-    contributed). Each row carries the schema, parameter, and
-    version metadata an agent needs to plan a call.
+    Framework-owned. Runs even when the connector failed to build —
+    returns the framework's built-in catalog, minus any source-defined
+    operations the connector would have contributed. Each row carries
+    the schema and parameter metadata an agent needs to plan a call.
     """
 
     name = OP_LIST_OPERATIONS
     description = (
         "List operations supported by this connection, with their "
-        "parameter declarations, result schemas, and versions."
+        "parameter declarations and result schemas."
     )
     kind = KIND_METADATA
     schema = _LIST_OPERATIONS_BASE_SCHEMA
-    requires_connector = False
 
     def pull(self, connector, options):
         del options
@@ -409,46 +396,9 @@ class ListOperationsOp(AgentOperation):
                 "name": op.name,
                 "description": op.description,
                 "kind": op.kind,
-                "requires_connector": _requires_connector(op),
-                "version": getattr(op, "version", "1.0.0"),
                 "result_schema_json": op.schema.json() if op.schema is not None else None,
                 "parameters_json": _parameters_to_json(getattr(op, "parameters", ())),
             }
-
-
-class DescribeConnectionOp(AgentOperation):
-    """Built-in: self-description of the connection.
-
-    Returns connector identity, framework / connector versions, and
-    capability mixin flags. Connector-optional: still runs when the
-    connector failed to build (capability flags + connector name come
-    from class introspection only when the connector exists).
-    """
-
-    name = OP_DESCRIBE_CONNECTION
-    description = (
-        "Self-description of the connection: connector name, source "
-        "system, framework / connector versions, and capability mixins."
-    )
-    kind = KIND_METADATA
-    schema = _DESCRIBE_CONNECTION_BASE_SCHEMA
-    requires_connector = False
-
-    def pull(self, connector, options):
-        del options
-        yield {
-            "connector_name": type(connector).__name__ if connector is not None else None,
-            "source_system": (
-                getattr(connector, "source_system", None) if connector is not None else None
-            ),
-            "connector_version": (
-                getattr(connector, "version", None) if connector is not None else None
-            ),
-            "framework_protocol_version": FRAMEWORK_PROTOCOL_VERSION,
-            "supports_namespaces": isinstance(connector, SupportsNamespaces),
-            "supports_partition": isinstance(connector, SupportsPartition),
-            "supports_partitioned_stream": isinstance(connector, SupportsPartitionedStream),
-        }
 
 
 # Ordered map of built-in operations. Source-defined operations with the same
@@ -456,7 +406,6 @@ class DescribeConnectionOp(AgentOperation):
 _BUILTIN_OPERATIONS: dict[str, AgentOperation] = {
     op.name: op
     for op in (
-        DescribeConnectionOp(),
         ListObjectsOp(),
         PreviewTableOp(),
         GetObjectMetadataOp(),
@@ -636,11 +585,6 @@ class IngestionAgentReader(DataSourceReader):
 # ---------------------------------------------------------------------------
 # Operation catalog
 # ---------------------------------------------------------------------------
-
-def _requires_connector(op: AgentOperation) -> bool:
-    """Whether ``op`` needs a working connector. Default ``True``."""
-    return getattr(op, "requires_connector", True)
-
 
 def _source_operations(
     connector: Optional[LakeflowConnect],

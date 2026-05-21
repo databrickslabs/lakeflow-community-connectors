@@ -1,7 +1,6 @@
 """LakeflowConnect base interface for source connectors."""
 
 from databricks.labs.community_connector.interface.agent_protocol import (
-    FRAMEWORK_PROTOCOL_VERSION,
     AgentError,
     ErrorCode,
     Parameter,
@@ -20,7 +19,6 @@ from databricks.labs.community_connector.interface.supports_partition import (
 )
 
 __all__ = [
-    "FRAMEWORK_PROTOCOL_VERSION",
     "AgentError",
     "AgentOperation",
     "ErrorCode",

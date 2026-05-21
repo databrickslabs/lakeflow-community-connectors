@@ -12,12 +12,6 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 
-#: Protocol version. Bump on breaking changes to operation contracts or
-#: the ``_meta`` envelope. Exposed via ``describe_connection`` so agents
-#: can negotiate against it.
-FRAMEWORK_PROTOCOL_VERSION = "1.0.0"
-
-
 class ErrorCode:
     """Canonical error codes for ``_meta.code``.
 

@@ -30,7 +30,6 @@ from pyspark.sql.types import (
 )
 
 from databricks.labs.community_connector.interface import (
-    FRAMEWORK_PROTOCOL_VERSION,
     AgentError,
     AgentOperation,
     ErrorCode,
@@ -46,7 +45,6 @@ from databricks.labs.community_connector.sparkpds.ingestion_agent_datasource imp
     DEFAULT_PREVIEW_LIMIT,
     IngestionAgentDispatcher,
     ListObjectsOp,
-    OP_DESCRIBE_CONNECTION,
     OP_GET_OBJECT_METADATA,
     OP_LIST_OBJECTS,
     OP_LIST_OPERATIONS,
@@ -237,14 +235,12 @@ def test_list_operations_works_when_connector_failed_to_build():
 
 
 def test_list_operations_rows_carry_planning_metadata():
-    """Every row exposes kind, requires_connector, version, schema/params JSON."""
+    """Every row exposes kind + schema/params JSON for planning."""
     rows = _collect(_dispatcher(OP_LIST_OPERATIONS))
     by_name = {r["name"]: r for r in rows}
 
     list_objects = by_name[OP_LIST_OBJECTS]
     assert list_objects["kind"] == "metadata"
-    assert list_objects["requires_connector"] is True
-    assert list_objects["version"] == "1.0.0"
     # Schema is exposed as JSON; round-trippable.
     schema_json = json.loads(list_objects["result_schema_json"])
     assert any(f["name"] == "name" for f in schema_json["fields"])
@@ -252,10 +248,6 @@ def test_list_operations_rows_carry_planning_metadata():
     params = json.loads(list_objects["parameters_json"])
     param_names = {p["name"] for p in params}
     assert {"parent", "search"} == param_names
-
-    list_ops = by_name[OP_LIST_OPERATIONS]
-    # list_operations is connector-optional.
-    assert list_ops["requires_connector"] is False
 
     preview = by_name[OP_PREVIEW_TABLE]
     # preview_table is data-kind; its schema is dynamic, so result_schema_json is null.
@@ -267,52 +259,6 @@ def test_list_operations_rows_carry_planning_metadata():
     limit_param = next(p for p in preview_params if p["name"] == "limit")
     assert limit_param["type"] == "integer"
     assert limit_param["default"] == DEFAULT_PREVIEW_LIMIT
-
-
-# ---------------------------------------------------------------------------
-# Built-in: describe_connection
-# ---------------------------------------------------------------------------
-
-def test_describe_connection_reports_identity_and_capabilities():
-    rows = _collect(_dispatcher(OP_DESCRIBE_CONNECTION))
-    assert len(rows) == 1
-    row = rows[0]
-    assert row["connector_name"] == "ExampleLakeflowConnect"
-    assert row["framework_protocol_version"] == FRAMEWORK_PROTOCOL_VERSION
-    # ExampleLakeflowConnect doesn't implement any of the optional mixins.
-    assert row["supports_namespaces"] is False
-    assert row["supports_partition"] is False
-    assert row["supports_partitioned_stream"] is False
-
-
-def test_describe_connection_picks_up_connector_declared_version():
-    class _VersionedConnector(ExampleLakeflowConnect):
-        version = "2.3.4"
-        source_system = "example-versioned"
-
-    options = {"operation": OP_DESCRIBE_CONNECTION, **_CREDS}
-    dispatcher = IngestionAgentDispatcher(
-        options=options,
-        connector=_VersionedConnector(_creds_only(options)),
-    )
-    row = _collect(dispatcher)[0]
-    assert row["connector_version"] == "2.3.4"
-    assert row["source_system"] == "example-versioned"
-
-
-def test_describe_connection_works_when_connector_failed_to_build():
-    dispatcher = _dispatcher(
-        OP_DESCRIBE_CONNECTION,
-        connector=None,
-        init_error=RuntimeError("bad creds"),
-    )
-    row = _collect(dispatcher)[0]
-    # Identity fields are null when the connector isn't available, but the
-    # framework still reports its own protocol version.
-    assert row["connector_name"] is None
-    assert row["connector_version"] is None
-    assert row["framework_protocol_version"] == FRAMEWORK_PROTOCOL_VERSION
-    assert row["supports_namespaces"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -634,13 +580,10 @@ class _ExampleLakeflowSource(LakeflowSource):
 def test_lakeflow_source_routes_to_agent_when_operation_set():
     source = _ExampleLakeflowSource({"operation": OP_LIST_OPERATIONS, **_CREDS})
     schema = source.schema()
-    # Enriched list_operations columns + _meta envelope.
     assert {f.name for f in schema.fields} == {
         "name",
         "description",
         "kind",
-        "requires_connector",
-        "version",
         "result_schema_json",
         "parameters_json",
         "_meta",
