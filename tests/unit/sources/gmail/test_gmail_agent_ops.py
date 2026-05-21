@@ -48,13 +48,7 @@ def connector(monkeypatch):
         "GmailApiClient.make_request",
         lambda self, method, path, **kwargs: {"historyId": "1"},
     )
-    return GmailLakeflowConnect(
-        {
-            "client_id": "x",
-            "client_secret": "x",
-            "refresh_token": "x",
-        }
-    )
+    return GmailLakeflowConnect({"access_token": "x"})
 
 
 def _dispatch(operation: str, connector, **options):
