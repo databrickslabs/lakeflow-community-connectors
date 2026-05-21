@@ -544,9 +544,9 @@ def _extract_pv2(seg: HL7Segment) -> dict:
 def _extract_mrg(seg: HL7Segment) -> dict:
     return {
         **_cx_array_fields(seg, 1, "prior_patient_id"),
-        "prior_alternate_patient_id": _v(seg.get_first_repetition(2)),
+        **_cx_array_fields(seg, 2, "prior_alternate_patient_id"),
         **_cx_fields(seg, 3, "prior_patient_account_number", repeating=False),
-        **_cx_fields(seg, 4, "prior_patient_id_mrg4", repeating=False),
+        **_cx_fields(seg, 4, "prior_patient_id_external", repeating=False),
         **_cx_fields(seg, 5, "prior_visit_number", repeating=False),
         **_cx_fields(seg, 6, "prior_alternate_visit_id", repeating=False),
         **_xpn_array_fields(seg, 7, "prior_patient_names"),

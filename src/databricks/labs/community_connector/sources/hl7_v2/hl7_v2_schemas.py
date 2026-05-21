@@ -1520,11 +1520,9 @@ PV2_SCHEMA = StructType(
 MRG_SCHEMA = StructType(
     _METADATA_FIELDS
     + _cx_array_schema("prior_patient_id", "Prior patient identifier list (CX, repeatable per spec)", "MRG-1")
-    + [
-        _s("prior_alternate_patient_id",      "Prior alternate patient ID (MRG-2, deprecated)"),
-    ]
+    + _cx_array_schema("prior_alternate_patient_id", "Prior alternate patient ID list (CX, repeatable per spec)", "MRG-2")
     + _cx_schema("prior_patient_account_number", "Prior patient account number", "MRG-3")
-    + _cx_schema("prior_patient_id_mrg4", "Prior patient ID (MRG-4)", "MRG-4")
+    + _cx_schema("prior_patient_id_external", "Prior patient ID — external (MRG-4, backward-compat v2.3)", "MRG-4")
     + _cx_schema("prior_visit_number", "Prior visit number", "MRG-5")
     + _cx_schema("prior_alternate_visit_id", "Prior alternate visit ID (CX)", "MRG-6")
     + [

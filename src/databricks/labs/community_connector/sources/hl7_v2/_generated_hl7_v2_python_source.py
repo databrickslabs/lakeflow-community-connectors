@@ -2546,9 +2546,9 @@ def register_lakeflow_source(spark):
     def _extract_mrg(seg: HL7Segment) -> dict:
         return {
             **_cx_array_fields(seg, 1, "prior_patient_id"),
-            "prior_alternate_patient_id": _v(seg.get_first_repetition(2)),
+            **_cx_array_fields(seg, 2, "prior_alternate_patient_id"),
             **_cx_fields(seg, 3, "prior_patient_account_number", repeating=False),
-            **_cx_fields(seg, 4, "prior_patient_id_mrg4", repeating=False),
+            **_cx_fields(seg, 4, "prior_patient_id_external", repeating=False),
             **_cx_fields(seg, 5, "prior_visit_number", repeating=False),
             **_cx_fields(seg, 6, "prior_alternate_visit_id", repeating=False),
             **_xpn_array_fields(seg, 7, "prior_patient_names"),
@@ -4569,11 +4569,9 @@ def register_lakeflow_source(spark):
     MRG_SCHEMA = StructType(
         _METADATA_FIELDS
         + _cx_array_schema("prior_patient_id", "Prior patient identifier list (CX, repeatable per spec)", "MRG-1")
-        + [
-            _s("prior_alternate_patient_id",      "Prior alternate patient ID (MRG-2, deprecated)"),
-        ]
+        + _cx_array_schema("prior_alternate_patient_id", "Prior alternate patient ID list (CX, repeatable per spec)", "MRG-2")
         + _cx_schema("prior_patient_account_number", "Prior patient account number", "MRG-3")
-        + _cx_schema("prior_patient_id_mrg4", "Prior patient ID (MRG-4)", "MRG-4")
+        + _cx_schema("prior_patient_id_external", "Prior patient ID — external (MRG-4, backward-compat v2.3)", "MRG-4")
         + _cx_schema("prior_visit_number", "Prior visit number", "MRG-5")
         + _cx_schema("prior_alternate_visit_id", "Prior alternate visit ID (CX)", "MRG-6")
         + [
