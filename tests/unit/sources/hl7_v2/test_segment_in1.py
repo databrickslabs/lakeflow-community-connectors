@@ -55,7 +55,9 @@ class TestIN1MissingFields:
         row = _extract_in1(msg.get_segment("IN1"))
         assert row["insurance_plan"] == "PLAN001"
         assert row["insurance_plan_text"] == "Basic Plan"
-        assert row["insurance_company"] == "COMP001"
+        # IN1-3 is now CX array (v2.9): check first repetition's ID
+        assert row["insurance_company"][0]["id"] == "COMP001"
+        assert row["insurance_company"][0]["assigning_authority"] == "INS"
 
 
 class TestIN1ArrayPromotion:

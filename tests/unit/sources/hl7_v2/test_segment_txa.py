@@ -27,7 +27,8 @@ class TestTXAExtraction:
         assert row["unique_document_file_name"] == "DISCHSUM_20240320.txt"
         assert row["document_completion_status"] == "AU"
         assert row["document_availability_status"] == "AV"
-        assert row["document_title"] == "Discharge Summary for Baker, James"
+        # TXA-25 is now ArrayType<STRING> (0..* per spec, v2.9+)
+        assert row["document_title"][0] == "Discharge Summary for Baker, James"
         assert row["activity_datetime"] is not None
         assert row["origination_datetime"] is not None
 

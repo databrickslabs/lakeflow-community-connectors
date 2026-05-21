@@ -922,6 +922,54 @@ def _eip_array_fields(
     return {column_name: result if result else None}
 
 
+def _eip_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+    """EIP (Entity Identifier Pair) — single instance: parent EI + child EI, 8 flat columns."""
+    def gc(comp):
+        return _v(seg.get_component(field_n, comp))
+
+    def gsc(comp, sub):
+        return _v(seg.get_sub_component(field_n, comp, sub))
+
+    return {
+        f"{prefix}_parent":                      gsc(1, 1) or gc(1),
+        f"{prefix}_parent_namespace_id":         gsc(1, 2),
+        f"{prefix}_parent_universal_id":         gsc(1, 3),
+        f"{prefix}_parent_universal_id_type":    gsc(1, 4),
+        f"{prefix}_child":                       gsc(2, 1) or gc(2),
+        f"{prefix}_child_namespace_id":          gsc(2, 2),
+        f"{prefix}_child_universal_id":          gsc(2, 3),
+        f"{prefix}_child_universal_id_type":     gsc(2, 4),
+    }
+
+
+def _mo_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+    """MO (Money) — 2 components: quantity (NM) + ISO 4217 denomination (ID)."""
+    def gc(comp):
+        return _v(seg.get_component(field_n, comp))
+
+    return {
+        f"{prefix}":          gc(1),
+        f"{prefix}_currency": gc(2),
+    }
+
+
+def _og_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+    """OG (Observation Grouper, v2.8.2+) — 4 components.
+
+    OG.1 = Original Sub-Identifier (ST) — backward-compatible with old OBX-4 ST value.
+    OG.2 = Group (NM), OG.3 = Sequence (NM), OG.4 = Identifier (ST).
+    """
+    def gc(comp):
+        return _v(seg.get_component(field_n, comp))
+
+    return {
+        f"{prefix}":            gc(1),
+        f"{prefix}_group":      gc(2),
+        f"{prefix}_sequence":   gc(3),
+        f"{prefix}_identifier": gc(4),
+    }
+
+
 def _xon_fields(
     seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = True
 ) -> dict:

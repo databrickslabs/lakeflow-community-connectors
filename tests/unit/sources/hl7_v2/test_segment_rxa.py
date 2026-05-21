@@ -21,7 +21,8 @@ class TestRXAExtraction:
         assert row["administered_code_text"] == "Influenza, seasonal, injectable"
         assert row["administered_amount"] == "0.5"
         assert row["administered_units"] == "mL"
-        assert row["substance_lot_number"] == "LT12345"
+        # RXA-15 is now ArrayType<STRING> (0..* per spec, v2.9+)
+        assert row["substance_lot_number"][0] == "LT12345"
         # RXA-17 substance_manufacturer_name is ArrayType<CWE> (0..* per spec).
         assert row["substance_manufacturer_name"][0]["code"] == "MFR001"
         assert row["completion_status"] == "CP"

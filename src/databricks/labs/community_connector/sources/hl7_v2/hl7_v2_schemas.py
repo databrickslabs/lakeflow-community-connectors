@@ -601,6 +601,42 @@ def _pl_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
     ]
 
 
+def _eip_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+    """EIP (Entity Identifier Pair) — single instance: 8 flat fields for parent and child EI."""
+    return [
+        _s(f"{prefix}_parent",                   f"{label} parent entity identifier ({field_ref}.1.1)"),
+        _s(f"{prefix}_parent_namespace_id",       f"{label} parent namespace ID ({field_ref}.1.2)"),
+        _s(f"{prefix}_parent_universal_id",       f"{label} parent universal ID ({field_ref}.1.3)"),
+        _s(f"{prefix}_parent_universal_id_type",  f"{label} parent universal ID type ({field_ref}.1.4)"),
+        _s(f"{prefix}_child",                     f"{label} child entity identifier ({field_ref}.2.1)"),
+        _s(f"{prefix}_child_namespace_id",        f"{label} child namespace ID ({field_ref}.2.2)"),
+        _s(f"{prefix}_child_universal_id",        f"{label} child universal ID ({field_ref}.2.3)"),
+        _s(f"{prefix}_child_universal_id_type",   f"{label} child universal ID type ({field_ref}.2.4)"),
+    ]
+
+
+def _mo_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+    """MO (Money) — 2 component fields: quantity (NM) + ISO 4217 denomination (ID)."""
+    return [
+        _s(f"{prefix}",          f"{label} monetary quantity ({field_ref}.1, NM)"),
+        _s(f"{prefix}_currency", f"{label} ISO 4217 currency code ({field_ref}.2, ID)"),
+    ]
+
+
+def _og_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+    """OG (Observation Grouper, v2.8.2+) — 4 component fields.
+
+    OG.1 = Original Sub-Identifier (ST) — backward-compatible with the legacy OBX-4 ST value.
+    OG.2 = Group (NM), OG.3 = Sequence (NM), OG.4 = Identifier (ST).
+    """
+    return [
+        _s(f"{prefix}",            f"{label} original sub-identifier ({field_ref}.1, ST)"),
+        _s(f"{prefix}_group",      f"{label} group ({field_ref}.2, NM)"),
+        _s(f"{prefix}_sequence",   f"{label} sequence ({field_ref}.3, NM)"),
+        _s(f"{prefix}_identifier", f"{label} identifier ({field_ref}.4, ST)"),
+    ]
+
+
 def _ei_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
     """EI (Entity Identifier) — repeating field as ArrayType(StructType([...]))."""
     ei_struct = StructType([
@@ -980,9 +1016,9 @@ PV1_SCHEMA = StructType(
     + _cwe_schema("credit_rating", "Credit rating (CWE)", "PV1-23")
     + _cwe_array_schema("contract_code", "Contract code (CWE, repeatable per spec)", "PV1-24")
     + [
-        _ts("contract_effective_date",     "Effective date of the contract (PV1-25, DT)"),
-        _s("contract_amount",              "Amount owed under the contract (PV1-26)"),
-        _s("contract_period",              "Duration of the contract in days (PV1-27)"),
+        _s_array("contract_effective_date", "Effective dates of the contract (PV1-25, DT, repeatable per spec)"),
+        _s_array("contract_amount",         "Amounts owed under the contract (PV1-26, NM, repeatable per spec)"),
+        _s_array("contract_period",         "Durations of the contract in days (PV1-27, NM, repeatable per spec)"),
     ]
     + _cwe_schema("interest_code", "Interest code (CWE)", "PV1-28")
     + _cwe_schema("transfer_to_bad_debt_code", "Transfer-to-bad-debt code (CWE)", "PV1-29")
@@ -1020,7 +1056,7 @@ PV1_SCHEMA = StructType(
     + [
         _s("service_episode_description",   "Free-text description of the service episode (PV1-53, v2.8+)"),
     ]
-    + _ei_schema("service_episode_identifier", "Service episode identifier", "PV1-54")
+    + _cx_schema("service_episode_identifier", "Service episode identifier (CX, v2.9+)", "PV1-54")
 )
 
 # ---------------------------------------------------------------------------
@@ -1119,8 +1155,8 @@ OBX_SCHEMA = StructType(
         _s("value_type",                      "Data type of the observation value (OBX-2): NM=Numeric, ST=String, CWE=Coded, TX=Text, TS=Timestamp"),
     ]
     + _cwe_schema("observation_id", "Observation identifier (CWE)", "OBX-3")
+    + _og_schema("observation_sub_id", "Observation sub-ID (OG, v2.8.2+; OG.1 is backward-compatible with legacy ST sub-ID)", "OBX-4")
     + [
-        _s("observation_sub_id",              "Sub-identifier to group related OBX rows, e.g. for waveform or panel data (OBX-4)"),
         _s("observation_value",               "The result value (OBX-5); data type is Varies — check value_type (OBX-2) to interpret"),
     ]
     + _cwe_schema("units", "Units of measure (CWE)", "OBX-6")
@@ -1617,7 +1653,7 @@ ORC_SCHEMA = StructType(
         _ts("advanced_beneficiary_notice_date",         "Advanced beneficiary notice date (ORC-32, DT, v2.6+)"),
     ]
     + _cx_array_schema("alternate_placer_order_number", "Alternate placer order number (CX, repeatable per spec)", "ORC-33")
-    + _ei_schema("order_workflow_profile", "Order workflow profile (EI)", "ORC-34")
+    + _cwe_array_schema("order_workflow_profile", "Order workflow profile (CWE, repeatable per spec, v2.9+)", "ORC-34")
     + [
         _s("orc_action_code",                           "Action code (ORC-35, v2.9+)"),
         _ts("order_status_date_range_start",            "Order status date range start (ORC-36.1, DR, v2.9+)"),
@@ -1714,7 +1750,7 @@ IN1_SCHEMA = StructType(
         _pk_int_field("set_id",                       "Sequence number for this IN1 segment within the message (IN1-1)"),
     ]
     + _cwe_schema("insurance_plan", "Insurance plan", "IN1-2")
-    + _xon_schema("insurance_company", "Insurance company", "IN1-3")
+    + _cx_array_schema("insurance_company", "Insurance company ID (CX, repeatable per spec, v2.9+)", "IN1-3")
     + _xon_array_schema("insurance_company_name", "Insurance company name (XON, repeatable per spec)", "IN1-4")
     + _xad_array_schema("insurance_company_address", "Insurance company address (XAD, repeatable per spec)", "IN1-5")
     + [
@@ -1725,7 +1761,7 @@ IN1_SCHEMA = StructType(
         _s("group_number",                     "Insurance group/policy group number (IN1-8)"),
     ]
     + _xon_array_schema("group_name", "Insurance group name (XON, repeatable per spec)", "IN1-9")
-    + _xon_schema("insureds_group_emp", "Insured's group employer", "IN1-10")
+    + _cx_array_schema("insureds_group_emp", "Insured's group employer ID (CX, repeatable per spec, v2.9+)", "IN1-10")
     + _xon_array_schema("insureds_group_emp_name", "Insured's group employer name (XON, repeatable per spec)", "IN1-11")
     + [
         _ts("plan_effective_date",             "Plan effective date (IN1-12, DT)"),
@@ -1894,7 +1930,9 @@ FT1_SCHEMA = StructType(
     _METADATA_FIELDS
     + [
         _pk_int_field("set_id",                              "Sequence number for this FT1 segment within the message (FT1-1)"),
-        _s("transaction_id",                          "Unique transaction identifier (FT1-2)"),
+    ]
+    + _cx_schema("transaction_id", "Transaction identifier (CX, v2.9+)", "FT1-2")
+    + [
         _s("transaction_batch_id",                    "Batch identifier (FT1-3)"),
         _ts("transaction_date_start",                 "Transaction date/time range start (FT1-4.1, DR)"),
         _ts("transaction_date_end",                   "Transaction date/time range end (FT1-4.2, DR)"),
@@ -1954,9 +1992,9 @@ FT1_SCHEMA = StructType(
         _s("dme_initial_certification_date",          "DME initial certification date (FT1-48, v2.9+)"),
         _s("dme_last_certification_date",             "DME last certification date (FT1-49, v2.9+)"),
         _s("dme_length_of_medical_necessity_days",    "DME length of medical necessity in days (FT1-50, v2.9+)"),
-        _s("dme_rental_price",                        "DME rental price (FT1-51, v2.9+)"),
-        _s("dme_purchase_price",                      "DME purchase price (FT1-52, v2.9+)"),
     ]
+    + _mo_schema("dme_rental_price", "DME rental price (MO, v2.9+)", "FT1-51")
+    + _mo_schema("dme_purchase_price", "DME purchase price (MO, v2.9+)", "FT1-52")
     + _cwe_schema("dme_frequency_code", "DME frequency code (CWE, v2.9+)", "FT1-53")
     + [
         _s("dme_certification_condition_indicator",   "DME certification condition indicator (FT1-54, v2.9+)"),
@@ -1992,8 +2030,8 @@ RXA_SCHEMA = StructType(
     ]
     + _cwe_schema("administered_strength_units", "Administered strength units (CWE)", "RXA-14")
     + [
-        _s("substance_lot_number",                     "Lot number (RXA-15)"),
-        _ts("substance_expiration_date",               "Substance expiration date (RXA-16)"),
+        _s_array("substance_lot_number",               "Lot numbers (RXA-15, ST repeatable per spec)"),
+        _s_array("substance_expiration_date",          "Substance expiration dates (RXA-16, DTM repeatable per spec)"),
     ]
     + _cwe_array_schema("substance_manufacturer_name", "Substance manufacturer (CWE, repeatable per spec)", "RXA-17")
     + _cwe_array_schema("substance_treatment_refusal_reason", "Treatment/refusal reason (CWE, repeatable per spec)", "RXA-18")
@@ -2008,10 +2046,10 @@ RXA_SCHEMA = StructType(
     + _cwe_schema("administered_barcode_identifier", "Administered barcode identifier (CWE)", "RXA-25")
     + [
         _s("pharmacy_order_type",                      "Pharmacy order type (RXA-26)"),
-        _s("administer_at",                            "Administration location (RXA-27, v2.6+)"),
-        _s("administered_at_address",                  "Administered-at address (RXA-28, v2.6+)"),
-        _s("administered_tag_identifier",              "Administered tag identifier (RXA-29.1, v2.9+)"),
     ]
+    + _pl_schema("administer_at", "Administration location (PL, v2.6+)", "RXA-27")
+    + _xad_schema("administered_at_address", "Administered-at address (XAD, v2.6+)", "RXA-28")
+    + _ei_array_schema("administered_tag_identifier", "Administered tag identifier (EI, repeatable per spec, v2.9+)", "RXA-29")
 )
 
 # ---------------------------------------------------------------------------
@@ -2053,7 +2091,7 @@ SCH_SCHEMA = StructType(
     + _cwe_schema("filler_status_code", "Filler status code", "SCH-25")
     + _ei_array_schema("sch_placer_order_number", "Placer order number (EI, repeatable per spec)", "SCH-26")
     + _ei_array_schema("sch_filler_order_number", "Filler order number (EI, repeatable per spec)", "SCH-27")
-    + _ei_schema("alternate_placer_order_group_number", "Alternate placer order group number (EI)", "SCH-28")
+    + _eip_schema("alternate_placer_order_group_number", "Alternate placer order group number (EIP, v2.9+)", "SCH-28")
 )
 
 # ---------------------------------------------------------------------------
@@ -2074,7 +2112,7 @@ TXA_SCHEMA = StructType(
     + [
         _ts("origination_datetime",                "Origination date/time (TXA-6)"),
         _ts("transcription_datetime",              "Transcription date/time (TXA-7)"),
-        _ts("edit_datetime",                       "Edit date/time (TXA-8)"),
+        _s_array("edit_datetime",                  "Edit date/times (TXA-8, DTM repeatable per spec)"),
     ]
     + _xcn_array_schema("originator", "Document originator (XCN, repeatable per spec)", "TXA-9")
     + _xcn_array_schema("assigned_document_authenticator", "Assigned document authenticator (XCN, repeatable per spec)", "TXA-10")
@@ -2090,12 +2128,12 @@ TXA_SCHEMA = StructType(
         _s("document_availability_status",         "Availability status (TXA-19)"),
         _s("document_storage_status",              "Storage status (TXA-20)"),
         _s("document_change_reason",               "Reason for document change (TXA-21)"),
-        _s("authentication_person_time_stamp",     "Authenticator with timestamp (TXA-22)"),
     ]
+    + _xcn_array_schema("authentication_person_time_stamp", "Authentication person with timestamp (PPN→XCN approximation, repeatable per spec, TXA-22)", "TXA-22")
     + _xcn_array_schema("distributed_copies", "Distributed copy recipient (XCN, repeatable per spec)", "TXA-23")
     + _cwe_array_schema("folder_assignment", "Folder assignment (CWE, repeatable per spec)", "TXA-24")
     + [
-        _s("document_title",                       "Document title (TXA-25, v2.6+)"),
+        _s_array("document_title",                 "Document titles (TXA-25, ST repeatable per spec, v2.6+)"),
         _ts("agreed_due_datetime",                 "Agreed due date/time (TXA-26, v2.8+)"),
     ]
     + _hd_schema("creating_facility", "Creating facility", "TXA-27")
