@@ -1,0 +1,1926 @@
+[
+  {
+    "userId": 1,
+    "records": [
+      {
+        "taskId": 95,
+        "time": 120
+      },
+      {
+        "taskId": 135,
+        "time": 195
+      },
+      {
+        "taskId": 136,
+        "time": 210
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-04-06"
+  },
+  {
+    "userId": 13,
+    "records": [
+      {
+        "taskId": 120,
+        "time": 90
+      },
+      {
+        "taskId": 121,
+        "time": 195
+      },
+      {
+        "taskId": 136,
+        "time": 150
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-04-06"
+  },
+  {
+    "userId": 14,
+    "records": [
+      {
+        "taskId": 101,
+        "time": 90
+      },
+      {
+        "taskId": 104,
+        "time": 150
+      },
+      {
+        "taskId": 135,
+        "time": 150
+      },
+      {
+        "taskId": 136,
+        "time": 90
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-04-06"
+  },
+  {
+    "userId": 15,
+    "records": [
+      {
+        "taskId": 116,
+        "time": 120
+      },
+      {
+        "taskId": 117,
+        "time": 210
+      },
+      {
+        "taskId": 118,
+        "time": 165
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-04-06"
+  },
+  {
+    "userId": 16,
+    "records": [
+      {
+        "taskId": 80,
+        "time": 105
+      },
+      {
+        "taskId": 115,
+        "time": 135
+      },
+      {
+        "taskId": 124,
+        "time": 90
+      },
+      {
+        "taskId": 126,
+        "time": 150
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-04-06"
+  },
+  {
+    "userId": 1,
+    "records": [
+      {
+        "taskId": 116,
+        "time": 120
+      },
+      {
+        "taskId": 135,
+        "time": 195
+      },
+      {
+        "taskId": 136,
+        "time": 210
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-04-13"
+  },
+  {
+    "userId": 14,
+    "records": [
+      {
+        "taskId": 101,
+        "time": 150
+      },
+      {
+        "taskId": 135,
+        "time": 150
+      },
+      {
+        "taskId": 136,
+        "time": 40
+      },
+      {
+        "taskId": 138,
+        "time": 150
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-04-13"
+  },
+  {
+    "userId": 15,
+    "records": [
+      {
+        "taskId": 117,
+        "time": 105
+      },
+      {
+        "taskId": 118,
+        "time": 230
+      },
+      {
+        "taskId": 136,
+        "time": 150
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-04-13"
+  },
+  {
+    "userId": 16,
+    "records": [
+      {
+        "taskId": 115,
+        "time": 190
+      },
+      {
+        "taskId": 124,
+        "time": 130
+      },
+      {
+        "taskId": 126,
+        "time": 165
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-04-13"
+  },
+  {
+    "userId": 17,
+    "records": [
+      {
+        "taskId": 82,
+        "time": 290
+      },
+      {
+        "taskId": 103,
+        "time": 180
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-04-13"
+  },
+  {
+    "userId": 1,
+    "records": [
+      {
+        "taskId": 135,
+        "time": 195
+      },
+      {
+        "taskId": 136,
+        "time": 210
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-04-20"
+  },
+  {
+    "userId": 13,
+    "records": [
+      {
+        "taskId": 120,
+        "time": 165
+      },
+      {
+        "taskId": 123,
+        "time": 40
+      },
+      {
+        "taskId": 127,
+        "time": 150
+      },
+      {
+        "taskId": 132,
+        "time": 75
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-04-20"
+  },
+  {
+    "userId": 14,
+    "records": [
+      {
+        "taskId": 87,
+        "time": 90
+      },
+      {
+        "taskId": 135,
+        "time": 130
+      },
+      {
+        "taskId": 136,
+        "time": 110
+      },
+      {
+        "taskId": 138,
+        "time": 150
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-04-20"
+  },
+  {
+    "userId": 16,
+    "records": [
+      {
+        "taskId": 103,
+        "time": 135
+      },
+      {
+        "taskId": 105,
+        "time": 60
+      },
+      {
+        "taskId": 115,
+        "time": 210
+      },
+      {
+        "taskId": 124,
+        "time": 80
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-04-20"
+  },
+  {
+    "userId": 17,
+    "records": [
+      {
+        "taskId": 82,
+        "time": 225
+      },
+      {
+        "taskId": 84,
+        "time": 120
+      },
+      {
+        "taskId": 103,
+        "time": 150
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-04-20"
+  },
+  {
+    "userId": 1,
+    "records": [
+      {
+        "taskId": 116,
+        "time": 150
+      },
+      {
+        "taskId": 135,
+        "time": 150
+      },
+      {
+        "taskId": 136,
+        "time": 170
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-04-27"
+  },
+  {
+    "userId": 13,
+    "records": [
+      {
+        "taskId": 121,
+        "time": 135
+      },
+      {
+        "taskId": 123,
+        "time": 70
+      },
+      {
+        "taskId": 127,
+        "time": 100
+      },
+      {
+        "taskId": 136,
+        "time": 180
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-04-27"
+  },
+  {
+    "userId": 14,
+    "records": [
+      {
+        "taskId": 135,
+        "time": 190
+      },
+      {
+        "taskId": 136,
+        "time": 45
+      },
+      {
+        "taskId": 138,
+        "time": 105
+      },
+      {
+        "taskId": 139,
+        "time": 150
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-04-27"
+  },
+  {
+    "userId": 15,
+    "records": [
+      {
+        "taskId": 116,
+        "time": 155
+      },
+      {
+        "taskId": 118,
+        "time": 200
+      },
+      {
+        "taskId": 138,
+        "time": 135
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-04-27"
+  },
+  {
+    "userId": 16,
+    "records": [
+      {
+        "taskId": 103,
+        "time": 105
+      },
+      {
+        "taskId": 115,
+        "time": 120
+      },
+      {
+        "taskId": 124,
+        "time": 155
+      },
+      {
+        "taskId": 126,
+        "time": 90
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-04-27"
+  },
+  {
+    "userId": 1,
+    "records": [
+      {
+        "taskId": 116,
+        "time": 120
+      },
+      {
+        "taskId": 135,
+        "time": 150
+      },
+      {
+        "taskId": 137,
+        "time": 50
+      },
+      {
+        "taskId": 138,
+        "time": 75
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-05-04"
+  },
+  {
+    "userId": 13,
+    "records": [
+      {
+        "taskId": 120,
+        "time": 160
+      },
+      {
+        "taskId": 136,
+        "time": 195
+      },
+      {
+        "taskId": 138,
+        "time": 130
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-05-04"
+  },
+  {
+    "userId": 14,
+    "records": [
+      {
+        "taskId": 135,
+        "time": 195
+      },
+      {
+        "taskId": 136,
+        "time": 150
+      },
+      {
+        "taskId": 138,
+        "time": 130
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-05-04"
+  },
+  {
+    "userId": 15,
+    "records": [
+      {
+        "taskId": 116,
+        "time": 100
+      },
+      {
+        "taskId": 117,
+        "time": 130
+      },
+      {
+        "taskId": 118,
+        "time": 90
+      },
+      {
+        "taskId": 132,
+        "time": 160
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-05-04"
+  },
+  {
+    "userId": 16,
+    "records": [
+      {
+        "taskId": 81,
+        "time": 165
+      },
+      {
+        "taskId": 114,
+        "time": 225
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-05-04"
+  },
+  {
+    "userId": 1,
+    "records": [
+      {
+        "taskId": 115,
+        "time": 60
+      },
+      {
+        "taskId": 135,
+        "time": 85
+      },
+      {
+        "taskId": 136,
+        "time": 150
+      },
+      {
+        "taskId": 139,
+        "time": 180
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-11"
+  },
+  {
+    "userId": 13,
+    "records": [
+      {
+        "taskId": 98,
+        "time": 135
+      },
+      {
+        "taskId": 120,
+        "time": 60
+      },
+      {
+        "taskId": 140,
+        "time": 150
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-11"
+  },
+  {
+    "userId": 1,
+    "records": [
+      {
+        "taskId": 115,
+        "time": 90
+      },
+      {
+        "taskId": 135,
+        "time": 160
+      },
+      {
+        "taskId": 136,
+        "time": 240
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-12"
+  },
+  {
+    "userId": 13,
+    "records": [
+      {
+        "taskId": 98,
+        "time": 90
+      },
+      {
+        "taskId": 120,
+        "time": 110
+      },
+      {
+        "taskId": 135,
+        "time": 195
+      },
+      {
+        "taskId": 140,
+        "time": 60
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-12"
+  },
+  {
+    "userId": 1,
+    "records": [
+      {
+        "taskId": 115,
+        "time": 45
+      },
+      {
+        "taskId": 135,
+        "time": 285
+      },
+      {
+        "taskId": 136,
+        "time": 150
+      }
+    ],
+    "dayOffset": 2,
+    "date": "2026-02-13"
+  },
+  {
+    "userId": 14,
+    "records": [
+      {
+        "taskId": 115,
+        "time": 180
+      },
+      {
+        "taskId": 135,
+        "time": 190
+      },
+      {
+        "taskId": 136,
+        "time": 90
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-11"
+  },
+  {
+    "userId": 14,
+    "records": [
+      {
+        "taskId": 104,
+        "time": 195
+      },
+      {
+        "taskId": 115,
+        "time": 160
+      },
+      {
+        "taskId": 135,
+        "time": 130
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-12"
+  },
+  {
+    "userId": 14,
+    "records": [
+      {
+        "taskId": 104,
+        "time": 165
+      },
+      {
+        "taskId": 115,
+        "time": 150
+      },
+      {
+        "taskId": 135,
+        "time": 190
+      }
+    ],
+    "dayOffset": 2,
+    "date": "2026-02-13"
+  },
+  {
+    "userId": 15,
+    "records": [
+      {
+        "taskId": 116,
+        "time": 170
+      },
+      {
+        "taskId": 117,
+        "time": 60
+      },
+      {
+        "taskId": 118,
+        "time": 255
+      }
+    ],
+    "dayOffset": 2,
+    "date": "2026-02-13"
+  },
+  {
+    "userId": 14,
+    "records": [
+      {
+        "taskId": 104,
+        "time": 210
+      },
+      {
+        "taskId": 135,
+        "time": 135
+      },
+      {
+        "taskId": 136,
+        "time": 110
+      }
+    ],
+    "dayOffset": 5,
+    "date": "2026-02-16"
+  },
+  {
+    "userId": 16,
+    "records": [
+      {
+        "taskId": 80,
+        "time": 90
+      },
+      {
+        "taskId": 124,
+        "time": 210
+      },
+      {
+        "taskId": 126,
+        "time": 195
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-11"
+  },
+  {
+    "userId": 17,
+    "records": [
+      {
+        "taskId": 80,
+        "time": 60
+      },
+      {
+        "taskId": 84,
+        "time": 225
+      },
+      {
+        "taskId": 85,
+        "time": 200
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-11"
+  },
+  {
+    "userId": 16,
+    "records": [
+      {
+        "taskId": 80,
+        "time": 75
+      },
+      {
+        "taskId": 124,
+        "time": 210
+      },
+      {
+        "taskId": 126,
+        "time": 140
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-12"
+  },
+  {
+    "userId": 17,
+    "records": [
+      {
+        "taskId": 80,
+        "time": 120
+      },
+      {
+        "taskId": 84,
+        "time": 160
+      },
+      {
+        "taskId": 85,
+        "time": 190
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-12"
+  },
+  {
+    "userId": 16,
+    "records": [
+      {
+        "taskId": 80,
+        "time": 90
+      },
+      {
+        "taskId": 124,
+        "time": 165
+      },
+      {
+        "taskId": 125,
+        "time": 120
+      },
+      {
+        "taskId": 126,
+        "time": 150
+      }
+    ],
+    "dayOffset": 2,
+    "date": "2026-02-13"
+  },
+  {
+    "userId": 18,
+    "records": [
+      {
+        "taskId": 84,
+        "time": 135
+      },
+      {
+        "taskId": 125,
+        "time": 150
+      },
+      {
+        "taskId": 126,
+        "time": 200
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-11"
+  },
+  {
+    "userId": 19,
+    "records": [
+      {
+        "taskId": 80,
+        "time": 40
+      },
+      {
+        "taskId": 81,
+        "time": 150
+      },
+      {
+        "taskId": 84,
+        "time": 290
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-11"
+  },
+  {
+    "userId": 18,
+    "records": [
+      {
+        "taskId": 84,
+        "time": 120
+      },
+      {
+        "taskId": 125,
+        "time": 150
+      },
+      {
+        "taskId": 126,
+        "time": 210
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-12"
+  },
+  {
+    "userId": 19,
+    "records": [
+      {
+        "taskId": 80,
+        "time": 45
+      },
+      {
+        "taskId": 81,
+        "time": 180
+      },
+      {
+        "taskId": 84,
+        "time": 225
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-12"
+  },
+  {
+    "userId": 18,
+    "records": [
+      {
+        "taskId": 84,
+        "time": 105
+      },
+      {
+        "taskId": 125,
+        "time": 225
+      },
+      {
+        "taskId": 126,
+        "time": 165
+      }
+    ],
+    "dayOffset": 2,
+    "date": "2026-02-13"
+  },
+  {
+    "userId": 20,
+    "records": [
+      {
+        "taskId": 124,
+        "time": 225
+      },
+      {
+        "taskId": 126,
+        "time": 290
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-11"
+  },
+  {
+    "userId": 21,
+    "records": [
+      {
+        "taskId": 89,
+        "time": 150
+      },
+      {
+        "taskId": 90,
+        "time": 225
+      },
+      {
+        "taskId": 92,
+        "time": 120
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-11"
+  },
+  {
+    "userId": 20,
+    "records": [
+      {
+        "taskId": 124,
+        "time": 250
+      },
+      {
+        "taskId": 126,
+        "time": 255
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-12"
+  },
+  {
+    "userId": 21,
+    "records": [
+      {
+        "taskId": 89,
+        "time": 165
+      },
+      {
+        "taskId": 90,
+        "time": 250
+      },
+      {
+        "taskId": 92,
+        "time": 60
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-12"
+  },
+  {
+    "userId": 20,
+    "records": [
+      {
+        "taskId": 124,
+        "time": 225
+      },
+      {
+        "taskId": 126,
+        "time": 220
+      }
+    ],
+    "dayOffset": 2,
+    "date": "2026-02-13"
+  },
+  {
+    "userId": 22,
+    "records": [
+      {
+        "taskId": 101,
+        "time": 130
+      },
+      {
+        "taskId": 127,
+        "time": 135
+      },
+      {
+        "taskId": 129,
+        "time": 160
+      },
+      {
+        "taskId": 132,
+        "time": 60
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-11"
+  },
+  {
+    "userId": 22,
+    "records": [
+      {
+        "taskId": 127,
+        "time": 220
+      },
+      {
+        "taskId": 129,
+        "time": 260
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-12"
+  },
+  {
+    "userId": 22,
+    "records": [
+      {
+        "taskId": 127,
+        "time": 250
+      },
+      {
+        "taskId": 129,
+        "time": 165
+      },
+      {
+        "taskId": 132,
+        "time": 60
+      }
+    ],
+    "dayOffset": 2,
+    "date": "2026-02-13"
+  },
+  {
+    "userId": 22,
+    "records": [
+      {
+        "taskId": 101,
+        "time": 290
+      },
+      {
+        "taskId": 132,
+        "time": 190
+      }
+    ],
+    "dayOffset": 5,
+    "date": "2026-02-16"
+  },
+  {
+    "userId": 22,
+    "records": [
+      {
+        "taskId": 101,
+        "time": 190
+      },
+      {
+        "taskId": 129,
+        "time": 250
+      },
+      {
+        "taskId": 132,
+        "time": 40
+      }
+    ],
+    "dayOffset": 6,
+    "date": "2026-02-17"
+  },
+  {
+    "userId": 1,
+    "records": [
+      {
+        "taskId": 115,
+        "time": 260
+      },
+      {
+        "taskId": 135,
+        "time": 140
+      },
+      {
+        "taskId": 139,
+        "time": 80
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-03-13"
+  },
+  {
+    "userId": 13,
+    "records": [
+      {
+        "taskId": 120,
+        "time": 150
+      },
+      {
+        "taskId": 121,
+        "time": 120
+      },
+      {
+        "taskId": 136,
+        "time": 150
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-03-13"
+  },
+  {
+    "userId": 14,
+    "records": [
+      {
+        "taskId": 101,
+        "time": 70
+      },
+      {
+        "taskId": 115,
+        "time": 160
+      },
+      {
+        "taskId": 135,
+        "time": 220
+      },
+      {
+        "taskId": 136,
+        "time": 40
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-03-13"
+  },
+  {
+    "userId": 18,
+    "records": [
+      {
+        "taskId": 84,
+        "time": 150
+      },
+      {
+        "taskId": 101,
+        "time": 260
+      },
+      {
+        "taskId": 102,
+        "time": 75
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-03-13"
+  },
+  {
+    "userId": 20,
+    "records": [
+      {
+        "taskId": 92,
+        "time": 60
+      },
+      {
+        "taskId": 124,
+        "time": 190
+      },
+      {
+        "taskId": 125,
+        "time": 230
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-03-13"
+  },
+  {
+    "userId": 1,
+    "records": [
+      {
+        "taskId": 95,
+        "time": 195
+      },
+      {
+        "taskId": 116,
+        "time": 60
+      },
+      {
+        "taskId": 135,
+        "time": 75
+      },
+      {
+        "taskId": 138,
+        "time": 60
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-05-11"
+  },
+  {
+    "userId": 13,
+    "records": [
+      {
+        "taskId": 120,
+        "time": 150
+      },
+      {
+        "taskId": 122,
+        "time": 90
+      },
+      {
+        "taskId": 138,
+        "time": 225
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-05-11"
+  },
+  {
+    "userId": 15,
+    "records": [
+      {
+        "taskId": 116,
+        "time": 150
+      },
+      {
+        "taskId": 117,
+        "time": 70
+      },
+      {
+        "taskId": 118,
+        "time": 190
+      },
+      {
+        "taskId": 119,
+        "time": 85
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-05-11"
+  },
+  {
+    "userId": 16,
+    "records": [
+      {
+        "taskId": 81,
+        "time": 165
+      },
+      {
+        "taskId": 103,
+        "time": 105
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-05-11"
+  },
+  {
+    "userId": 17,
+    "records": [
+      {
+        "taskId": 80,
+        "time": 225
+      },
+      {
+        "taskId": 103,
+        "time": 220
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-05-11"
+  },
+  {
+    "userId": 1,
+    "records": [
+      {
+        "taskId": 115,
+        "time": 210
+      },
+      {
+        "taskId": 136,
+        "time": 255
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-19"
+  },
+  {
+    "userId": 1,
+    "records": [
+      {
+        "taskId": 115,
+        "time": 285
+      },
+      {
+        "taskId": 135,
+        "time": 70
+      },
+      {
+        "taskId": 136,
+        "time": 150
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-20"
+  },
+  {
+    "userId": 1,
+    "records": [
+      {
+        "taskId": 115,
+        "time": 260
+      },
+      {
+        "taskId": 135,
+        "time": 150
+      },
+      {
+        "taskId": 136,
+        "time": 90
+      }
+    ],
+    "dayOffset": 4,
+    "date": "2026-02-23"
+  },
+  {
+    "userId": 1,
+    "records": [
+      {
+        "taskId": 115,
+        "time": 150
+      },
+      {
+        "taskId": 135,
+        "time": 190
+      },
+      {
+        "taskId": 136,
+        "time": 165
+      }
+    ],
+    "dayOffset": 5,
+    "date": "2026-02-24"
+  },
+  {
+    "userId": 13,
+    "records": [
+      {
+        "taskId": 120,
+        "time": 150
+      },
+      {
+        "taskId": 135,
+        "time": 150
+      },
+      {
+        "taskId": 140,
+        "time": 105
+      }
+    ],
+    "dayOffset": 8,
+    "date": "2026-02-27"
+  },
+  {
+    "userId": 14,
+    "records": [
+      {
+        "taskId": 115,
+        "time": 225
+      },
+      {
+        "taskId": 135,
+        "time": 165
+      },
+      {
+        "taskId": 136,
+        "time": 100
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-19"
+  },
+  {
+    "userId": 15,
+    "records": [
+      {
+        "taskId": 116,
+        "time": 240
+      },
+      {
+        "taskId": 117,
+        "time": 75
+      },
+      {
+        "taskId": 118,
+        "time": 160
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-19"
+  },
+  {
+    "userId": 14,
+    "records": [
+      {
+        "taskId": 115,
+        "time": 230
+      },
+      {
+        "taskId": 135,
+        "time": 190
+      },
+      {
+        "taskId": 136,
+        "time": 60
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-20"
+  },
+  {
+    "userId": 15,
+    "records": [
+      {
+        "taskId": 116,
+        "time": 80
+      },
+      {
+        "taskId": 117,
+        "time": 225
+      },
+      {
+        "taskId": 118,
+        "time": 165
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-20"
+  },
+  {
+    "userId": 14,
+    "records": [
+      {
+        "taskId": 115,
+        "time": 210
+      },
+      {
+        "taskId": 135,
+        "time": 190
+      },
+      {
+        "taskId": 136,
+        "time": 90
+      }
+    ],
+    "dayOffset": 4,
+    "date": "2026-02-23"
+  },
+  {
+    "userId": 16,
+    "records": [
+      {
+        "taskId": 80,
+        "time": 60
+      },
+      {
+        "taskId": 84,
+        "time": 165
+      },
+      {
+        "taskId": 124,
+        "time": 130
+      },
+      {
+        "taskId": 126,
+        "time": 110
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-19"
+  },
+  {
+    "userId": 17,
+    "records": [
+      {
+        "taskId": 84,
+        "time": 210
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-19"
+  },
+  {
+    "userId": 16,
+    "records": [
+      {
+        "taskId": 80,
+        "time": 90
+      },
+      {
+        "taskId": 84,
+        "time": 150
+      },
+      {
+        "taskId": 124,
+        "time": 150
+      },
+      {
+        "taskId": 126,
+        "time": 90
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-20"
+  },
+  {
+    "userId": 17,
+    "records": [
+      {
+        "taskId": 80,
+        "time": 220
+      },
+      {
+        "taskId": 84,
+        "time": 140
+      },
+      {
+        "taskId": 85,
+        "time": 130
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-20"
+  },
+  {
+    "userId": 16,
+    "records": [
+      {
+        "taskId": 84,
+        "time": 150
+      },
+      {
+        "taskId": 124,
+        "time": 145
+      },
+      {
+        "taskId": 126,
+        "time": 195
+      }
+    ],
+    "dayOffset": 4,
+    "date": "2026-02-23"
+  },
+  {
+    "userId": 18,
+    "records": [
+      {
+        "taskId": 125,
+        "time": 120
+      },
+      {
+        "taskId": 126,
+        "time": 120
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-19"
+  },
+  {
+    "userId": 19,
+    "records": [
+      {
+        "taskId": 81,
+        "time": 165
+      },
+      {
+        "taskId": 84,
+        "time": 90
+      },
+      {
+        "taskId": 111,
+        "time": 225
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-19"
+  },
+  {
+    "userId": 18,
+    "records": [
+      {
+        "taskId": 84,
+        "time": 220
+      },
+      {
+        "taskId": 125,
+        "time": 120
+      },
+      {
+        "taskId": 126,
+        "time": 140
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-20"
+  },
+  {
+    "userId": 19,
+    "records": [
+      {
+        "taskId": 81,
+        "time": 190
+      },
+      {
+        "taskId": 84,
+        "time": 200
+      },
+      {
+        "taskId": 111,
+        "time": 90
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-20"
+  },
+  {
+    "userId": 18,
+    "records": [
+      {
+        "taskId": 84,
+        "time": 210
+      },
+      {
+        "taskId": 125,
+        "time": 120
+      },
+      {
+        "taskId": 126,
+        "time": 145
+      }
+    ],
+    "dayOffset": 4,
+    "date": "2026-02-23"
+  },
+  {
+    "userId": 20,
+    "records": [
+      {
+        "taskId": 124,
+        "time": 220
+      },
+      {
+        "taskId": 125,
+        "time": 200
+      },
+      {
+        "taskId": 126,
+        "time": 50
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-19"
+  },
+  {
+    "userId": 20,
+    "records": [
+      {
+        "taskId": 124,
+        "time": 190
+      },
+      {
+        "taskId": 125,
+        "time": 150
+      },
+      {
+        "taskId": 126,
+        "time": 140
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-20"
+  },
+  {
+    "userId": 21,
+    "records": [
+      {
+        "taskId": 89,
+        "time": 90
+      },
+      {
+        "taskId": 90,
+        "time": 75
+      },
+      {
+        "taskId": 92,
+        "time": 165
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-20"
+  },
+  {
+    "userId": 20,
+    "records": [
+      {
+        "taskId": 92,
+        "time": 150
+      },
+      {
+        "taskId": 124,
+        "time": 250
+      },
+      {
+        "taskId": 126,
+        "time": 70
+      }
+    ],
+    "dayOffset": 4,
+    "date": "2026-02-23"
+  },
+  {
+    "userId": 21,
+    "records": [
+      {
+        "taskId": 89,
+        "time": 130
+      },
+      {
+        "taskId": 90,
+        "time": 190
+      },
+      {
+        "taskId": 92,
+        "time": 155
+      }
+    ],
+    "dayOffset": 4,
+    "date": "2026-02-23"
+  },
+  {
+    "userId": 22,
+    "records": [
+      {
+        "taskId": 127,
+        "time": 240
+      },
+      {
+        "taskId": 129,
+        "time": 230
+      }
+    ],
+    "dayOffset": 0,
+    "date": "2026-02-19"
+  },
+  {
+    "userId": 22,
+    "records": [
+      {
+        "taskId": 101,
+        "time": 130
+      },
+      {
+        "taskId": 127,
+        "time": 150
+      },
+      {
+        "taskId": 132,
+        "time": 200
+      }
+    ],
+    "dayOffset": 1,
+    "date": "2026-02-20"
+  },
+  {
+    "userId": 22,
+    "records": [
+      {
+        "taskId": 127,
+        "time": 130
+      },
+      {
+        "taskId": 129,
+        "time": 220
+      },
+      {
+        "taskId": 132,
+        "time": 120
+      }
+    ],
+    "dayOffset": 4,
+    "date": "2026-02-23"
+  },
+  {
+    "userId": 22,
+    "records": [
+      {
+        "taskId": 101,
+        "time": 225
+      },
+      {
+        "taskId": 127,
+        "time": 40
+      },
+      {
+        "taskId": 129,
+        "time": 130
+      },
+      {
+        "taskId": 132,
+        "time": 90
+      }
+    ],
+    "dayOffset": 5,
+    "date": "2026-02-24"
+  },
+  {
+    "userId": 22,
+    "records": [
+      {
+        "taskId": 127,
+        "time": 210
+      },
+      {
+        "taskId": 129,
+        "time": 250
+      }
+    ],
+    "dayOffset": 6,
+    "date": "2026-02-25"
+  },
+  {
+    "userId": 13,
+    "records": [
+      {
+        "taskId": 120,
+        "time": 150
+      },
+      {
+        "taskId": 121,
+        "time": 210
+      },
+      {
+        "taskId": 136,
+        "time": 90
+      }
+    ],
+    "dayOffset": 2,
+    "date": "2026-03-23"
+  },
+  {
+    "userId": 14,
+    "records": [
+      {
+        "taskId": 104,
+        "time": 150
+      },
+      {
+        "taskId": 115,
+        "time": 90
+      },
+      {
+        "taskId": 135,
+        "time": 210
+      },
+      {
+        "taskId": 136,
+        "time": 40
+      }
+    ],
+    "dayOffset": 2,
+    "date": "2026-03-23"
+  },
+  {
+    "userId": 15,
+    "records": [
+      {
+        "taskId": 117,
+        "time": 225
+      },
+      {
+        "taskId": 118,
+        "time": 155
+      },
+      {
+        "taskId": 139,
+        "time": 120
+      }
+    ],
+    "dayOffset": 2,
+    "date": "2026-03-23"
+  },
+  {
+    "userId": 17,
+    "records": [
+      {
+        "taskId": 84,
+        "time": 90
+      },
+      {
+        "taskId": 85,
+        "time": 150
+      },
+      {
+        "taskId": 103,
+        "time": 190
+      }
+    ],
+    "dayOffset": 2,
+    "date": "2026-03-23"
+  },
+  {
+    "userId": 18,
+    "records": [
+      {
+        "taskId": 84,
+        "time": 195
+      },
+      {
+        "taskId": 101,
+        "time": 225
+      },
+      {
+        "taskId": 102,
+        "time": 60
+      }
+    ],
+    "dayOffset": 2,
+    "date": "2026-03-23"
+  }
+]
