@@ -258,13 +258,15 @@ def _cp_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
         return _v(seg.get_sub_component(field_n, comp, sub))
 
     return {
-        f"{prefix}": gsc(1, 1) or gc(1),
-        f"{prefix}_currency": gsc(1, 2),
-        f"{prefix}_price_type": gc(2),
-        f"{prefix}_from_value": gc(3),
-        f"{prefix}_to_value": gc(4),
-        f"{prefix}_range_units": gsc(5, 1) or gc(5),
-        f"{prefix}_range_type": gc(6),
+        f"{prefix}":                      gsc(1, 1) or gc(1),
+        f"{prefix}_currency":             gsc(1, 2),
+        f"{prefix}_price_type":           gc(2),
+        f"{prefix}_from_value":           gc(3),
+        f"{prefix}_to_value":             gc(4),
+        f"{prefix}_range_units":          gsc(5, 1) or gc(5),
+        f"{prefix}_range_units_text":     gsc(5, 2),
+        f"{prefix}_range_units_coding_system": gsc(5, 3),
+        f"{prefix}_range_type":           gc(6),
     }
 
 

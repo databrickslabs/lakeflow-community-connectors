@@ -450,8 +450,10 @@ def _cp_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
         _s(f"{prefix}_price_type",  f"{label} price type ({field_ref}.2, ID, Table 0205)"),
         _s(f"{prefix}_from_value",  f"{label} range from value ({field_ref}.3, NM)"),
         _s(f"{prefix}_to_value",    f"{label} range to value ({field_ref}.4, NM)"),
-        _s(f"{prefix}_range_units", f"{label} range units code ({field_ref}.5.1, CWE)"),
-        _s(f"{prefix}_range_type",  f"{label} range type ({field_ref}.6, ID, Table 0298)"),
+        _s(f"{prefix}_range_units",               f"{label} range units code ({field_ref}.5.1, CWE.1)"),
+        _s(f"{prefix}_range_units_text",          f"{label} range units text ({field_ref}.5.2, CWE.2)"),
+        _s(f"{prefix}_range_units_coding_system", f"{label} range units coding system ({field_ref}.5.3, CWE.3)"),
+        _s(f"{prefix}_range_type",                f"{label} range type ({field_ref}.6, ID, Table 0298)"),
     ]
 
 
@@ -1836,12 +1838,12 @@ IN1_SCHEMA = StructType(
         _s("policy_number",                    "Policy number (IN1-36)"),
     ]
     + _cp_schema("policy_deductible", "Policy deductible amount (CP)", "IN1-37")
-    + _cp_schema("policy_limit_amount", "Policy limit amount (CP)", "IN1-38")
+    + _cp_schema("policy_limit_amount", "Policy limit amount (CP, withdrawn v2.8; retained for backward compatibility)", "IN1-38")
     + [
         _int_field("policy_limit_days",                "Policy limit in days (IN1-39)"),
     ]
-    + _cp_schema("room_rate_semi_private", "Semi-private room rate (CP, deprecated)", "IN1-40")
-    + _cp_schema("room_rate_private", "Private room rate (CP, deprecated)", "IN1-41")
+    + _cp_schema("room_rate_semi_private", "Semi-private room rate (CP, withdrawn v2.8; retained for backward compatibility)", "IN1-40")
+    + _cp_schema("room_rate_private", "Private room rate (CP, withdrawn v2.8; retained for backward compatibility)", "IN1-41")
     + _cwe_schema("insureds_employment_status", "Insured's employment status", "IN1-42")
     + _cwe_schema("insureds_administrative_sex", "Insured's administrative sex", "IN1-43")
     + _xad_array_schema("insureds_employers_address", "Insured's employer address (XAD, repeatable per spec)", "IN1-44")
