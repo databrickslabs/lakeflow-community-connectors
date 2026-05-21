@@ -60,6 +60,21 @@ class TestMSHExtraction:
         row = extract_segment(msg, "MSH", _extract_msh)
         assert row["security"] == "36225"
 
+    def test_msh_pt_vid_composites(self):
+        # MSH-11 is PT (Processing ID + Processing Mode); MSH-12 is VID
+        # (Version ID + Internationalization CWE + International Version CWE).
+        msg = parse_message(
+            "MSH|^~\\&|A|B|C|D|20240101120000||ADT^A01|MSG001|P^A|2.5.1^EN&English&L^EN-US&US English&L\r"
+        )
+        row = _extract_msh(msg.get_segment("MSH"))
+        assert row["processing_id"] == "P"
+        assert row["processing_id_mode"] == "A"
+        assert row["version_id"] == "2.5.1"
+        assert row["version_id_internationalization"] == "EN"
+        assert row["version_id_internationalization_text"] == "English"
+        assert row["version_id_internationalization_coding_system"] == "L"
+        assert row["version_id_international_version"] == "EN-US"
+
 
 # ── Extraction: field details ───────────────────────────────────────────────
 

@@ -268,6 +268,284 @@ def _cp_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     }
 
 
+def _pt_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+    """PT (Processing Type) — 2 ID components: Processing ID, Processing Mode."""
+    return {
+        f"{prefix}": _v(seg.get_component(field_n, 1)),
+        f"{prefix}_mode": _v(seg.get_component(field_n, 2)),
+    }
+
+
+def _vid_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+    """VID (Version Identifier) — 3 components: ID + CWE (Internationalization) + CWE (International Version)."""
+    def gc(comp):
+        return _v(seg.get_component(field_n, comp))
+
+    def gsc(comp, sub):
+        return _v(seg.get_sub_component(field_n, comp, sub))
+
+    return {
+        f"{prefix}": gc(1),
+        f"{prefix}_internationalization": gsc(2, 1) or gc(2),
+        f"{prefix}_internationalization_text": gsc(2, 2),
+        f"{prefix}_internationalization_coding_system": gsc(2, 3),
+        f"{prefix}_international_version": gsc(3, 1) or gc(3),
+        f"{prefix}_international_version_text": gsc(3, 2),
+        f"{prefix}_international_version_coding_system": gsc(3, 3),
+    }
+
+
+def _aui_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+    """AUI (Authorization Information) — 3 components: ST (number), DT (date), ST (source)."""
+    return {
+        f"{prefix}": _v(seg.get_component(field_n, 1)),
+        f"{prefix}_date": _parse_dtm(seg.get_component(field_n, 2)),
+        f"{prefix}_source": _v(seg.get_component(field_n, 3)),
+    }
+
+
+def _dld_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+    """DLD (Discharge Location and Date) — 2 components: CWE (location) + DTM (effective date)."""
+    def gsc(comp, sub):
+        return _v(seg.get_sub_component(field_n, comp, sub))
+
+    def gc(comp):
+        return _v(seg.get_component(field_n, comp))
+
+    return {
+        f"{prefix}": gsc(1, 1) or gc(1),
+        f"{prefix}_text": gsc(1, 2),
+        f"{prefix}_coding_system": gsc(1, 3),
+        f"{prefix}_alt_code": gsc(1, 4),
+        f"{prefix}_alt_text": gsc(1, 5),
+        f"{prefix}_alt_coding_system": gsc(1, 6),
+        f"{prefix}_coding_system_version": gsc(1, 7),
+        f"{prefix}_alt_coding_system_version": gsc(1, 8),
+        f"{prefix}_original_text": gsc(1, 9),
+        f"{prefix}_effective_date": _parse_dtm(gc(2)),
+    }
+
+
+def _fc_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+    """FC (Financial Class) — 2 components: CWE (class code) + DTM (effective date). Single-rep variant."""
+    def gsc(comp, sub):
+        return _v(seg.get_sub_component(field_n, comp, sub))
+
+    def gc(comp):
+        return _v(seg.get_component(field_n, comp))
+
+    return {
+        f"{prefix}": gsc(1, 1) or gc(1),
+        f"{prefix}_text": gsc(1, 2),
+        f"{prefix}_coding_system": gsc(1, 3),
+        f"{prefix}_alt_code": gsc(1, 4),
+        f"{prefix}_alt_text": gsc(1, 5),
+        f"{prefix}_alt_coding_system": gsc(1, 6),
+        f"{prefix}_coding_system_version": gsc(1, 7),
+        f"{prefix}_alt_coding_system_version": gsc(1, 8),
+        f"{prefix}_original_text": gsc(1, 9),
+        f"{prefix}_effective_date": _parse_dtm(gc(2)),
+    }
+
+
+def _fc_array_fields(seg: HL7Segment, field_n: int, column_name: str) -> dict:
+    """FC (Financial Class) — repeating: ARRAY<STRUCT<code, text, ..., effective_date>>."""
+    raw = seg.get_field(field_n)
+    if not raw:
+        return {column_name: None}
+    reps = raw.split(seg._enc.rep_sep)
+    result = []
+    for rep in reps:
+        if not rep:
+            continue
+        parts = rep.split(seg._enc.comp_sep)
+
+        def gc(i, _p=parts):
+            return _v(_p[i - 1]) if len(_p) >= i else None
+
+        def gsc(i, sub, _p=parts):
+            if len(_p) < i or not _p[i - 1]:
+                return None
+            subs = _p[i - 1].split(seg._enc.sub_comp_sep)
+            return _v(subs[sub - 1]) if len(subs) >= sub else None
+
+        result.append({
+            "code": gsc(1, 1) or gc(1),
+            "text": gsc(1, 2),
+            "coding_system": gsc(1, 3),
+            "alt_code": gsc(1, 4),
+            "alt_text": gsc(1, 5),
+            "alt_coding_system": gsc(1, 6),
+            "coding_system_version": gsc(1, 7),
+            "alt_coding_system_version": gsc(1, 8),
+            "original_text": gsc(1, 9),
+            "effective_date": _parse_dtm(gc(2)),
+        })
+    return {column_name: result if result else None}
+
+
+def _jcc_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+    """JCC (Job Code/Class) — 3 components: CWE (job code) + CWE (job class) + TX (description)."""
+    def gsc(comp, sub):
+        return _v(seg.get_sub_component(field_n, comp, sub))
+
+    def gc(comp):
+        return _v(seg.get_component(field_n, comp))
+
+    return {
+        f"{prefix}": gsc(1, 1) or gc(1),
+        f"{prefix}_text": gsc(1, 2),
+        f"{prefix}_coding_system": gsc(1, 3),
+        f"{prefix}_class": gsc(2, 1) or gc(2),
+        f"{prefix}_class_text": gsc(2, 2),
+        f"{prefix}_class_coding_system": gsc(2, 3),
+        f"{prefix}_description": gc(3),
+    }
+
+
+def _moc_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+    """MOC (Charge to Practice) — 2 components: MO (amount + currency) + CWE (charge code)."""
+    def gsc(comp, sub):
+        return _v(seg.get_sub_component(field_n, comp, sub))
+
+    def gc(comp):
+        return _v(seg.get_component(field_n, comp))
+
+    return {
+        f"{prefix}_amount": gsc(1, 1) or gc(1),
+        f"{prefix}_currency": gsc(1, 2),
+        f"{prefix}_code": gsc(2, 1) or gc(2),
+        f"{prefix}_code_text": gsc(2, 2),
+        f"{prefix}_code_coding_system": gsc(2, 3),
+    }
+
+
+def _prl_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+    """PRL (Parent Result Link) — 3 components: CWE (parent observation id) + ST (sub-id) + TX (descriptor)."""
+    def gsc(comp, sub):
+        return _v(seg.get_sub_component(field_n, comp, sub))
+
+    def gc(comp):
+        return _v(seg.get_component(field_n, comp))
+
+    return {
+        f"{prefix}": gsc(1, 1) or gc(1),
+        f"{prefix}_text": gsc(1, 2),
+        f"{prefix}_coding_system": gsc(1, 3),
+        f"{prefix}_sub_id": gc(2),
+        f"{prefix}_descriptor": gc(3),
+    }
+
+
+def _ndl_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+    """NDL (Name with Date and Location) — 11 components: CNN (.1 sub-decomposed) + 2 DTM + 8 IS/HD."""
+    def gsc(comp, sub):
+        return _v(seg.get_sub_component(field_n, comp, sub))
+
+    def gc(comp):
+        return _v(seg.get_component(field_n, comp))
+
+    return {
+        f"{prefix}": gsc(1, 1),
+        f"{prefix}_family_name": gsc(1, 2),
+        f"{prefix}_given_name": gsc(1, 3),
+        f"{prefix}_middle_name": gsc(1, 4),
+        f"{prefix}_suffix": gsc(1, 5),
+        f"{prefix}_prefix": gsc(1, 6),
+        f"{prefix}_degree": gsc(1, 7),
+        f"{prefix}_start_datetime": _parse_dtm(gc(2)),
+        f"{prefix}_end_datetime": _parse_dtm(gc(3)),
+        f"{prefix}_point_of_care": gc(4),
+        f"{prefix}_room": gc(5),
+        f"{prefix}_bed": gc(6),
+        f"{prefix}_facility": gsc(7, 1) or gc(7),
+        f"{prefix}_location_status": gc(8),
+        f"{prefix}_patient_location_type": gc(9),
+        f"{prefix}_building": gc(10),
+        f"{prefix}_floor": gc(11),
+    }
+
+
+def _ndl_array_fields(seg: HL7Segment, field_n: int, column_name: str) -> dict:
+    """NDL — repeating: ARRAY<STRUCT> with all components."""
+    raw = seg.get_field(field_n)
+    if not raw:
+        return {column_name: None}
+    reps = raw.split(seg._enc.rep_sep)
+    result = []
+    for rep in reps:
+        if not rep:
+            continue
+        parts = rep.split(seg._enc.comp_sep)
+
+        def gc(i, _p=parts):
+            return _v(_p[i - 1]) if len(_p) >= i else None
+
+        def gsc(i, sub, _p=parts):
+            if len(_p) < i or not _p[i - 1]:
+                return None
+            subs = _p[i - 1].split(seg._enc.sub_comp_sep)
+            return _v(subs[sub - 1]) if len(subs) >= sub else None
+
+        result.append({
+            "id": gsc(1, 1),
+            "family_name": gsc(1, 2),
+            "given_name": gsc(1, 3),
+            "middle_name": gsc(1, 4),
+            "suffix": gsc(1, 5),
+            "prefix": gsc(1, 6),
+            "degree": gsc(1, 7),
+            "start_datetime": _parse_dtm(gc(2)),
+            "end_datetime": _parse_dtm(gc(3)),
+            "point_of_care": gc(4),
+            "room": gc(5),
+            "bed": gc(6),
+            "facility": gsc(7, 1) or gc(7),
+            "location_status": gc(8),
+            "patient_location_type": gc(9),
+            "building": gc(10),
+            "floor": gc(11),
+        })
+    return {column_name: result if result else None}
+
+
+def _pl_array_fields(seg: HL7Segment, field_n: int, column_name: str) -> dict:
+    """PL (Person Location) — repeating: ARRAY<STRUCT> with all 11 components flattened."""
+    raw = seg.get_field(field_n)
+    if not raw:
+        return {column_name: None}
+    reps = raw.split(seg._enc.rep_sep)
+    result = []
+    for rep in reps:
+        if not rep:
+            continue
+        parts = rep.split(seg._enc.comp_sep)
+
+        def gc(i, _p=parts):
+            return _v(_p[i - 1]) if len(_p) >= i else None
+
+        def gsc(i, sub, _p=parts):
+            if len(_p) < i or not _p[i - 1]:
+                return None
+            subs = _p[i - 1].split(seg._enc.sub_comp_sep)
+            return _v(subs[sub - 1]) if len(subs) >= sub else None
+
+        result.append({
+            "point_of_care": gsc(1, 1) or gc(1),
+            "room": gsc(2, 1) or gc(2),
+            "bed": gsc(3, 1) or gc(3),
+            "facility": gsc(4, 1) or gc(4),
+            "status": gc(5),
+            "type": gc(6),
+            "building": gsc(7, 1) or gc(7),
+            "floor": gsc(8, 1) or gc(8),
+            "description": gc(9),
+            "comprehensive_id": gsc(10, 1) or gc(10),
+            "assigning_authority": gsc(11, 1) or gc(11),
+        })
+    return {column_name: result if result else None}
+
+
 def _cq_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
     """CQ (Composite Quantity with Units) — 2 components.
 

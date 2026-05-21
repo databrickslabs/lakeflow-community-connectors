@@ -59,3 +59,28 @@ class TestPV1MissingFields:
         assert row["assigned_patient_location_point_of_care"] == "CLINIC"
         assert row["assigned_patient_location_room"] == "200"
         assert row["assigned_patient_location_bed"] == "A"
+
+
+class TestPV1NewComposites:
+    """PV1-20 financial_class (FC array), PV1-37 discharged_to_location (DLD)."""
+
+    def test_pv1_fc_array_and_dld(self):
+        # PV1-20 FC repeating; PV1-37 DLD = CWE + DTM. Fill PV1 minimally up
+        # to field 37 by skipping irrelevant intervening fields with empty pipes.
+        fields = {1: "1", 2: "I", 20: "PPO&&L^20240101~HMO&Health Maint&L^20240301",
+                  37: "HOME&Home discharge&L^20240505"}
+        # PV1 max field index supplied = 37
+        seg_fields = [fields.get(i, "") for i in range(1, 38)]
+        msg = parse_message(
+            "MSH|^~\\&|A|B|C|D|20240101||ADT^A01|1|P|2.5\r"
+            "PV1|" + "|".join(seg_fields)
+        )
+        row = _extract_pv1(msg.get_segment("PV1"))
+        assert row["financial_class"][0]["code"] == "PPO"
+        assert row["financial_class"][0]["effective_date"] is not None
+        assert row["financial_class"][1]["code"] == "HMO"
+        assert row["financial_class"][1]["text"] == "Health Maint"
+        assert row["discharged_to_location"] == "HOME"
+        assert row["discharged_to_location_text"] == "Home discharge"
+        assert row["discharged_to_location_coding_system"] == "L"
+        assert row["discharged_to_location_effective_date"] is not None

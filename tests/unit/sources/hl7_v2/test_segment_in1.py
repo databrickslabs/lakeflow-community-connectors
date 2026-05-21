@@ -83,3 +83,34 @@ class TestIN1ArrayPromotion:
         assert names[0]["id_type_code"] == "XX"
         assert names[1]["name"] == "Anthem Inc"
         assert names[1]["id"] == "AN02"
+
+
+class TestIN1NewComposites:
+    """IN1-14 authorization_information (AUI), IN1-54 external health plan (CWE array)."""
+
+    def test_in1_aui_and_ehp_array(self):
+        # IN1-12 (DT), IN1-13 (DT), IN1-14 (AUI: ST + DT + ST), IN1-54 (CWE array).
+        fields = {
+            1: "1",
+            2: "PLAN001",
+            12: "20240101",
+            13: "20251231",
+            14: "AUTH123^20240115^InsuranceCo",
+            54: "ABC123^Plan Identifier 1^L~XYZ789^Plan Identifier 2^L",
+        }
+        seg_fields = [fields.get(i, "") for i in range(1, 55)]
+        msg = parse_message(
+            "MSH|^~\\&|A|B|C|D|20240101||ADT^A01|1|P|2.5\r"
+            "IN1|" + "|".join(seg_fields)
+        )
+        row = _extract_in1(msg.get_segment("IN1"))
+        assert row["plan_effective_date"] is not None
+        assert row["plan_expiration_date"] is not None
+        assert row["authorization_information"] == "AUTH123"
+        assert row["authorization_information_date"] is not None
+        assert row["authorization_information_source"] == "InsuranceCo"
+        ehp = row["external_health_plan_identifiers"]
+        assert len(ehp) == 2
+        assert ehp[0]["code"] == "ABC123"
+        assert ehp[0]["text"] == "Plan Identifier 1"
+        assert ehp[1]["code"] == "XYZ789"

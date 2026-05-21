@@ -67,3 +67,21 @@ class TestNK1MissingFields:
         assert row["nk_names"][0]["family_name"] == "Smith"
         assert row["nk_names"][0]["given_name"] == "Jane"
         assert row["relationship_code"] is None
+
+
+class TestNK1NewComposites:
+    """NK1-11 job_code is JCC = CWE (job code) + CWE (job class) + TX (description)."""
+
+    def test_nk1_jcc_field(self):
+        fields = {1: "1", 2: "Smith^John", 11: "ENG&Engineer&L^IT&Information Tech&L^Senior software dev"}
+        seg_fields = [fields.get(i, "") for i in range(1, 12)]
+        msg = parse_message(
+            "MSH|^~\\&|A|B|C|D|20240101||ADT^A01|1|P|2.5\r"
+            "NK1|" + "|".join(seg_fields)
+        )
+        row = _extract_nk1(msg.get_segment("NK1"))
+        assert row["job_code"] == "ENG"
+        assert row["job_code_text"] == "Engineer"
+        assert row["job_code_class"] == "IT"
+        assert row["job_code_class_text"] == "Information Tech"
+        assert row["job_code_description"] == "Senior software dev"

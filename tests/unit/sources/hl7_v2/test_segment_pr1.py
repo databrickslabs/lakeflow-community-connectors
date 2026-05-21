@@ -50,3 +50,30 @@ class TestPR1MissingFields:
         assert row["procedure_code"] == "99213"
         assert row["procedure_code_text"] == "Office Visit"
         assert row["procedure_code_coding_system"] == "CPT4"
+
+
+class TestPR1NewComposites:
+    """PR1-23 treating_organizational_unit is PL repeatable (ARRAY<STRUCT>)."""
+
+    def test_pr1_pl_array_treating_unit(self):
+        # PR1-23 carries one or more PL composites; each fully decomposed.
+        fields = {
+            1: "1",
+            3: "99213^Office Visit^CPT4",
+            23: "WARDA^101^B1^GENHOSP^A^IP^B2^F3^Main ward~OR1^^^GENHOSP^A^IP",
+        }
+        seg_fields = [fields.get(i, "") for i in range(1, 24)]
+        msg = parse_message(
+            "MSH|^~\\&|A|B|C|D|20240101||ADT^A01|1|P|2.5\r"
+            "PR1|" + "|".join(seg_fields)
+        )
+        row = _extract_pr1(msg.get_segment("PR1"))
+        units = row["treating_organizational_unit"]
+        assert len(units) == 2
+        assert units[0]["point_of_care"] == "WARDA"
+        assert units[0]["room"] == "101"
+        assert units[0]["bed"] == "B1"
+        assert units[0]["facility"] == "GENHOSP"
+        assert units[0]["description"] == "Main ward"
+        assert units[1]["point_of_care"] == "OR1"
+        assert units[1]["facility"] == "GENHOSP"

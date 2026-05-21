@@ -21,23 +21,23 @@ class TestNTEExtraction:
         row = _extract_nte(segs[0])
         assert row["set_id"] == 1
         assert row["source_of_comment"] == "text"
-        assert "Note pid" in row["comment"]
+        assert any("Note pid" in c for c in row["comment"])
 
     def test_concat_notes_nte(self):
         msg = parse_first(load_sample("sample_oru_concat_notes.hl7"))
         segs = segments_of_type(msg, "NTE")
         assert len(segs) >= 5
         row1 = _extract_nte(segs[0])
-        assert "memo 1 for PID" in row1["comment"]
+        assert any("memo 1 for PID" in c for c in row1["comment"])
         obr_note = _extract_nte(segs[2])
-        assert "first OBR note" in obr_note["comment"]
+        assert any("first OBR note" in c for c in obr_note["comment"])
 
     def test_celr_nte_long_text(self):
         msg = parse_first(load_sample("sample_oru_lab_celr.hl7"))
         segs = segments_of_type(msg, "NTE")
         assert len(segs) >= 1
         row = _extract_nte(segs[0])
-        assert "SARS-CoV-2" in row["comment"]
+        assert any("SARS-CoV-2" in c for c in row["comment"])
 
     def test_flu_ar_nte_comment_type(self):
         msg = parse_first(load_sample("sample_oru_flu_ar.hl7"))
@@ -65,5 +65,5 @@ class TestNTEMissingFields:
         )
         row = _extract_nte(msg.get_segment("NTE"))
         assert row["source_of_comment"] == "L"
-        assert row["comment"] == "This is a lab note"
+        assert row["comment"] == ["This is a lab note"]
         assert row["comment_type"] is None
