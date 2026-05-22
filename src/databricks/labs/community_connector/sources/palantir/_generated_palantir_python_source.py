@@ -13,6 +13,7 @@ from typing import (
     Dict,
     Iterator,
     List,
+    Optional,
     Sequence,
     Tuple,
 )
@@ -555,6 +556,7 @@ def register_lakeflow_source(spark):
             Raises:
                 ValueError: If required parameters are missing
             """
+            super().__init__(options)
             # Extract and validate required parameters
             self.token = options.get("token")
             if not self.token:
@@ -580,15 +582,17 @@ def register_lakeflow_source(spark):
 
             # Admission control: cap cursor at init time so a single trigger
             # run only drains data that existed when the connector started.
-            self._init_time = datetime.now(timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
+            # Store both the datetime (used in the cap loop — pre-parsed so
+            # we don't re-parse the string once per microbatch) and the ISO
+            # string (kept for backward-compatible introspection / logs).
+            self._init_dt = datetime.now(timezone.utc)
+            self._init_time = self._init_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
             self._default_max_records_per_batch = 100_000
 
             # Initialize caches for performance
             self._schema_cache: Dict[str, StructType] = {}
             self._metadata_cache: Dict[str, dict] = {}
-            self._object_types_cache: Dict[str, dict] = None
+            self._object_types_cache: Optional[Dict[str, dict]] = None
 
         def _ensure_object_types_cached(self) -> None:
             """
@@ -607,10 +611,10 @@ def register_lakeflow_source(spark):
                 response = self._session.get(url, timeout=30)
                 response.raise_for_status()
             except requests.RequestException as e:
-                raise Exception(
+                raise RuntimeError(
                     f"Failed to list object types from Palantir ontology "
-                    f"'{self.ontology_api_name}': {str(e)}"
-                )
+                    f"'{self.ontology_api_name}': {e}"
+                ) from e
 
             data = response.json()
             self._object_types_cache = {
@@ -723,8 +727,22 @@ def register_lakeflow_source(spark):
                 "date": StringType(),  # Keep as ISO date string
                 "datetime": StringType(),
                 "attachment": StringType(),  # JSON representation
-                "decimal": DoubleType(),  # Simplified for MVP
             }
+
+            # Decimal carries explicit precision/scale on the property
+            # definition. Use Spark's DecimalType for exact arithmetic
+            # rather than coercing to DoubleType (which silently loses
+            # precision past 15-16 digits — unsafe for finance /
+            # measurement data). Spark caps precision at 38; clamp
+            # defensively in case Palantir reports a wider type, and fall
+            # back to (38, 18) — the conventional "wide" default — when
+            # Palantir omits the fields.
+            if type_name == "decimal":
+                precision = palantir_type.get("precision") or 38
+                scale = palantir_type.get("scale") or 18
+                precision = min(int(precision), 38)
+                scale = min(int(scale), precision)
+                return DecimalType(precision, scale)
 
             # Handle special/complex types
             if type_name == "geopoint":
@@ -1111,7 +1129,7 @@ def register_lakeflow_source(spark):
             # the cap correct — the next microbatch picks up from there.
             # Memory bound is max_records × record_size; the user controls
             # the cap via ``max_records_per_batch``.
-            init_dt = self._to_utc_datetime(self._init_time)
+            init_dt = self._init_dt
             records: List[dict] = []
             last_emitted_cursor: Any = None
             for record in self._generate_all_pages(
@@ -1215,35 +1233,47 @@ def register_lakeflow_source(spark):
                     "fields": [{"field": order_by_field, "direction": "asc"}]
                 }
 
+            # Retry policy: only transient failures retry. Everything else
+            # (4xx/5xx that isn't 429 or 503) propagates immediately —
+            # otherwise a real auth/config error like 401 (expired token)
+            # or 404 (wrong ontology name) would burn 1+2+4+8 = 15s of
+            # sleep and 5 wasted load-balancer hits before the user sees
+            # the actual error.
             max_retries = 5
+            last_status: int = -1
             for attempt in range(max_retries):
                 try:
                     response = self._session.post(url, json=body, timeout=120)
-                    if response.status_code in (429, 503):
-                        wait = 2 ** attempt
-                        time.sleep(wait)
-                        continue
-                    response.raise_for_status()
-                except requests.RequestException as e:
+                except (requests.ConnectionError, requests.Timeout) as e:
                     if attempt < max_retries - 1:
                         time.sleep(2 ** attempt)
                         continue
-                    raise Exception(
-                        f"Failed to fetch data after {max_retries} retries: {str(e)}"
+                    raise RuntimeError(
+                        f"Failed to fetch data after {max_retries} retries "
+                        f"(network error): {e}"
+                    ) from e
+
+                last_status = response.status_code
+                if response.status_code in (429, 503):
+                    if attempt < max_retries - 1:
+                        time.sleep(2 ** attempt)
+                        continue
+                    raise RuntimeError(
+                        f"Failed to fetch data after {max_retries} retries: "
+                        f"last status {response.status_code}"
                     )
+
+                # Non-transient 4xx/5xx — raise immediately, no retry.
+                response.raise_for_status()
 
                 data = response.json()
                 records = data.get("data", [])
                 next_page_token = data.get("nextPageToken")
-
-                # Small delay for rate limiting
-                time.sleep(0.1)
-
                 return records, next_page_token
 
-            raise Exception(
+            raise RuntimeError(
                 f"Failed to fetch data after {max_retries} retries: "
-                f"last status {response.status_code}"
+                f"last status {last_status}"
             )
 
 

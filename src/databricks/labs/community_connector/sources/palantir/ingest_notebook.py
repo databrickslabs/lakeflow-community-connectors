@@ -37,7 +37,7 @@ register_lakeflow_source(spark)
 # MAGIC - `destination_catalog/schema/table`: Where to land the data in Databricks
 # MAGIC - `scd_type`: SCD_TYPE_1 (upsert), SCD_TYPE_2 (history), or APPEND_ONLY
 # MAGIC - `cursor_field`: Set for incremental sync, omit for snapshot (full refresh)
-# MAGIC - `page_size`: Records per API call (default 100, max 1000)
+# MAGIC - `page_size`: Records per API call (default 1000, max 10000)
 
 # COMMAND ----------
 
@@ -46,10 +46,10 @@ pipeline_spec = {
     "objects": [
         {
             "table": {
-                "source_table": "FlightsFinal",
+                "source_table": "ExampleFlight",
                 "destination_catalog": "users",
                 "destination_schema": "zuhaib_mohd",
-                "destination_table": "flights_final",
+                "destination_table": "example_flight",
                 "table_configuration": {
                     "scd_type": "SCD_TYPE_2",
                     "cursor_field": "arrivalTimestamp",

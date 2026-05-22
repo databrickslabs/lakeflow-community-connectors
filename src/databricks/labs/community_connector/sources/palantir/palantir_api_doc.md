@@ -23,7 +23,7 @@ curl -X GET \
 Notes:
 - All requests must use HTTPS.
 - Rate limiting for individual users: **5,000 requests/minute** with **30 simultaneous** connections. Service users have no request limit but are capped at **800 simultaneous** connections.
-- Exceeding rate limits returns `429` or `503`. The connector retries with exponential backoff (up to 5 attempts) and includes a 0.1s delay between page fetches.
+- Exceeding rate limits returns `429` or `503`. The connector retries those statuses (and `ConnectionError` / `Timeout`) with exponential backoff up to 5 attempts. Non-transient 4xx/5xx responses (e.g. `401` expired token, `404` wrong ontology) propagate on the first attempt so misconfiguration fails fast.
 
 
 ## **Object List**
@@ -432,7 +432,7 @@ The Palantir Ontology API defines property data types in the `dataType` field of
 | `timestamp` | `StringType` | Preserved as ISO 8601 string |
 | `date` | `StringType` | Preserved as ISO date string |
 | `datetime` | `StringType` | Preserved as ISO 8601 string |
-| `decimal` | `DoubleType` | Simplified for MVP |
+| `decimal` | `DecimalType(precision, scale)` | Precision/scale forwarded from Palantir; clamped to Spark's max precision of 38; defaults to `(38, 18)` when unspecified |
 | `attachment` | `StringType` | JSON string representation |
 
 ### Complex Types

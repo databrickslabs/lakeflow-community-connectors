@@ -8,9 +8,8 @@ The Lakeflow Palantir Foundry Connector allows you to extract data from Palantir
 
 - **Dynamic Schema Discovery**: Automatically discovers schemas from Palantir object type definitions
 - **Flexible Ingestion Modes**: Supports both snapshot and incremental (CDC) sync
-- **Memory-Efficient Streaming**: Uses generators to yield records page by page, avoiding OOM on large datasets
-- **Early-Exit Cursor Peek**: A single `orderBy desc, limit 1` call on the search endpoint short-circuits incremental polls when the dataset hasn't advanced past the checkpoint, skipping the `loadObjects` round-trip on no-op ticks. Checkpointing itself is driven by the last emitted record's cursor.
-- **Search API for Large Datasets**: Uses the POST `/objects/{objectType}/search` endpoint which supports full pagination without cross-page limits
+- **Memory-Efficient Snapshot Streaming**: Snapshot mode yields records page by page via a generator, avoiding OOM on large datasets. Incremental mode materialises records up to `max_records_per_batch` (default 100,000) so the offset can advance to the last-emitted cursor; the next microbatch resumes via server-side `where: gt`.
+- **Early-Exit Cursor Peek**: A single `orderBy desc, pageSize=1` call on the search endpoint short-circuits incremental polls when the dataset hasn't advanced past the checkpoint, skipping the `loadObjects` round-trip on no-op ticks. Checkpointing itself is driven by the last emitted record's cursor.
 - **Complex Type Support**: Handles geopoints, arrays, structs, and nested objects
 - **In-Memory Caching**: Caches schemas and metadata for improved performance
 
@@ -106,6 +105,7 @@ The connector supports the following table-specific options via `table_configura
 |--------|------|-------------|---------|
 | `cursor_field` | string | Property name for incremental sync tracking. Omit for snapshot mode. | `"arrivalTimestamp"` |
 | `page_size` | string | Number of records per API request (default 1000, max 10000) | `"10000"` |
+| `max_records_per_batch` | string | Admission cap per microbatch. Default 100000. Smaller values reduce driver memory; larger values reduce the number of microbatches needed to drain a backlog. | `"50000"` |
 
 ## Supported Objects
 
@@ -147,10 +147,11 @@ The connector dynamically discovers all object types in your configured ontology
 | boolean | BooleanType | |
 | timestamp | StringType | Preserved as ISO 8601 format |
 | date | StringType | Preserved as ISO date format |
+| datetime | StringType | Preserved as ISO 8601 format |
 | geopoint | StructType | {latitude: double, longitude: double} |
 | array | ArrayType | Recursive type mapping |
 | struct | StructType | Recursive type mapping |
-| decimal | DoubleType | Simplified for MVP |
+| decimal | DecimalType | Precision/scale forwarded from Palantir; capped at Spark's max precision of 38, defaults to (38, 18) if not specified |
 | attachment | StringType | JSON representation |
 
 ## How to Run
@@ -261,7 +262,7 @@ Databricks Delta Table (Unity Catalog)
 
 ### 4. Monitor API Usage
 - Palantir rate limits: 5,000 requests/minute for individual users
-- The connector includes a 0.1s delay between page fetches
+- The connector retries with exponential backoff on `429` / `503` and on connection / timeout errors; non-transient 4xx/5xx responses fail fast so misconfiguration surfaces immediately
 - For large datasets, consider scheduling during off-peak hours
 - Use a service user token for higher rate limits
 

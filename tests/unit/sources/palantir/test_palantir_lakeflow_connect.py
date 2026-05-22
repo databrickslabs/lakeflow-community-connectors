@@ -1,4 +1,8 @@
-from unittest.mock import patch
+import time
+from unittest.mock import MagicMock, patch
+
+import pytest
+import requests
 
 from databricks.labs.community_connector.sources.palantir.palantir import PalantirLakeflowConnect
 from tests.unit.sources.test_suite import LakeflowConnectTests
@@ -234,7 +238,11 @@ class TestPalantirCursorTypes:
         Z form. Strategy B applies the cap per-record during
         iteration, so the past-init record never gets emitted."""
         c = self._connector()
+        # Pin both the ISO form (kept for backward-compatible
+        # introspection) and the pre-parsed datetime the cap loop
+        # actually reads.
         c._init_time = "2026-05-09T13:30:00Z"
+        c._init_dt = c._to_utc_datetime(c._init_time)
         # First record: 2026-05-09T08:00:00-05:00 == 13:00 UTC (pre-init).
         # Second record: 2026-05-09T09:00:00-05:00 == 14:00 UTC (post-init).
         # Records arrive sorted ASC, so the second one breaks the
@@ -278,6 +286,7 @@ class TestPalantirCursorTypes:
         — a 10-char string, matching the cursor's shape."""
         c = self._connector()
         c._init_time = "2026-05-09T13:30:00Z"
+        c._init_dt = c._to_utc_datetime(c._init_time)
         # Records sorted ASC by date — last two are past init.
         records = [
             {"row_id": "a", "date": "2026-05-07"},
@@ -450,3 +459,183 @@ class TestPalantirCursorTypes:
             emitted = list(emitted_iter)
         assert [r["row_id"] for r in emitted] == ["a", "b"]
         assert offset == {"max_cursor_value": "2026-04-02T00:00:00Z"}
+
+
+class TestPalantirDecimalMapping:
+    """``decimal`` properties must preserve precision/scale via Spark's
+    DecimalType rather than coerce to DoubleType (silent precision
+    loss past ~15 digits is unacceptable for finance / measurement
+    ontologies).
+    """
+
+    @staticmethod
+    def _connector() -> PalantirLakeflowConnect:
+        return PalantirLakeflowConnect({
+            "token": "fake",
+            "hostname": "fake.palantirfoundry.com",
+            "ontology_api_name": "ontology-fake",
+        })
+
+    def test_decimal_uses_palantir_precision_and_scale(self):
+        from pyspark.sql.types import DecimalType
+        c = self._connector()
+        spark_type = c._map_palantir_type_to_spark(
+            {"type": "decimal", "precision": 12, "scale": 4}
+        )
+        assert spark_type == DecimalType(12, 4)
+
+    def test_decimal_defaults_when_precision_missing(self):
+        from pyspark.sql.types import DecimalType
+        c = self._connector()
+        # No precision / scale on the type definition — fall back to
+        # (38, 18), the conventional wide default.
+        assert c._map_palantir_type_to_spark({"type": "decimal"}) == DecimalType(38, 18)
+
+    def test_decimal_precision_clamped_to_spark_max(self):
+        from pyspark.sql.types import DecimalType
+        c = self._connector()
+        # Spark caps precision at 38; Palantir reporting a wider type
+        # must clamp rather than raise.
+        spark_type = c._map_palantir_type_to_spark(
+            {"type": "decimal", "precision": 50, "scale": 10}
+        )
+        assert spark_type == DecimalType(38, 10)
+
+
+def _mock_response(status: int, json_payload: dict = None):
+    """Build a ``requests.Response``-like mock for ``_fetch_page``."""
+    r = MagicMock()
+    r.status_code = status
+    r.json.return_value = json_payload or {}
+    if status >= 400:
+        r.raise_for_status.side_effect = requests.HTTPError(
+            f"HTTP {status}", response=r
+        )
+    else:
+        r.raise_for_status.return_value = None
+    return r
+
+
+class TestPalantirFetchPageRetry:
+    """``_fetch_page`` must retry only on transient failures
+    (429, 503, ConnectionError, Timeout). Real 4xx errors like 401
+    (expired token) or 404 (wrong ontology) must fail fast — otherwise
+    the user waits 1+2+4+8 = 15 s for an unrecoverable error.
+    """
+
+    @staticmethod
+    def _connector() -> PalantirLakeflowConnect:
+        return PalantirLakeflowConnect({
+            "token": "fake",
+            "hostname": "fake.palantirfoundry.com",
+            "ontology_api_name": "ontology-fake",
+        })
+
+    def test_401_fails_fast(self):
+        """A 401 (expired token) must propagate on the first attempt —
+        no sleep, no retry. Verifies the session is hit exactly once
+        and ``time.sleep`` is not called from the retry path.
+        """
+        c = self._connector()
+        with patch.object(
+            c._session, "post", return_value=_mock_response(401)
+        ) as post_spy, patch.object(time, "sleep") as sleep_spy:
+            with pytest.raises(requests.HTTPError):
+                c._fetch_page({"type": "base", "objectType": "T"})
+        assert post_spy.call_count == 1
+        sleep_spy.assert_not_called()
+
+    def test_404_fails_fast(self):
+        """A 404 (wrong ontology name / unknown object type) must
+        propagate on the first attempt rather than retrying through
+        the misconfiguration.
+        """
+        c = self._connector()
+        with patch.object(
+            c._session, "post", return_value=_mock_response(404)
+        ) as post_spy, patch.object(time, "sleep") as sleep_spy:
+            with pytest.raises(requests.HTTPError):
+                c._fetch_page({"type": "base", "objectType": "T"})
+        assert post_spy.call_count == 1
+        sleep_spy.assert_not_called()
+
+    def test_429_retries_then_succeeds(self):
+        """A 429 followed by a 200 must succeed — the retry path is
+        the whole point of the loop, so a transient rate-limit
+        recovers without surfacing an error.
+        """
+        c = self._connector()
+        responses = [
+            _mock_response(429),
+            _mock_response(200, {"data": [{"id": 1}], "nextPageToken": None}),
+        ]
+        with patch.object(
+            c._session, "post", side_effect=responses
+        ) as post_spy, patch.object(time, "sleep"):
+            records, token = c._fetch_page(
+                {"type": "base", "objectType": "T"}
+            )
+        assert records == [{"id": 1}]
+        assert token is None
+        assert post_spy.call_count == 2
+
+    def test_503_retries_then_succeeds(self):
+        """Same as 429 but for 503 (service unavailable)."""
+        c = self._connector()
+        responses = [
+            _mock_response(503),
+            _mock_response(503),
+            _mock_response(200, {"data": [], "nextPageToken": None}),
+        ]
+        with patch.object(
+            c._session, "post", side_effect=responses
+        ) as post_spy, patch.object(time, "sleep"):
+            c._fetch_page({"type": "base", "objectType": "T"})
+        assert post_spy.call_count == 3
+
+    def test_429_exhausted_raises_runtime_error(self):
+        """When 429s persist past ``max_retries``, the connector must
+        raise a clear ``RuntimeError`` carrying the last status — not
+        swallow the failure or loop forever.
+        """
+        c = self._connector()
+        with patch.object(
+            c._session, "post", return_value=_mock_response(429)
+        ) as post_spy, patch.object(time, "sleep"):
+            with pytest.raises(RuntimeError, match="429"):
+                c._fetch_page({"type": "base", "objectType": "T"})
+        assert post_spy.call_count == 5
+
+    def test_connection_error_retries(self):
+        """A ``ConnectionError`` is transient (network blip) and must
+        be retried up to ``max_retries`` — the user's pipeline
+        shouldn't fail on a single dropped TCP connection.
+        """
+        c = self._connector()
+        side_effects = [
+            requests.ConnectionError("dropped"),
+            requests.ConnectionError("dropped"),
+            _mock_response(200, {"data": [], "nextPageToken": None}),
+        ]
+        with patch.object(
+            c._session, "post", side_effect=side_effects
+        ) as post_spy, patch.object(time, "sleep"):
+            c._fetch_page({"type": "base", "objectType": "T"})
+        assert post_spy.call_count == 3
+
+    def test_connection_error_exhausted_raises_runtime_error(self):
+        """When the network never recovers, the helper must raise a
+        ``RuntimeError`` (not a bare ``ConnectionError``) so the
+        caller gets a stable exception surface, and the original
+        cause is preserved via ``__cause__`` for diagnostics.
+        """
+        c = self._connector()
+        with patch.object(
+            c._session,
+            "post",
+            side_effect=requests.ConnectionError("down"),
+        ) as post_spy, patch.object(time, "sleep"):
+            with pytest.raises(RuntimeError, match="network error") as exc:
+                c._fetch_page({"type": "base", "objectType": "T"})
+        assert post_spy.call_count == 5
+        assert isinstance(exc.value.__cause__, requests.ConnectionError)
