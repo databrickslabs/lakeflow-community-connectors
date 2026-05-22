@@ -31,12 +31,31 @@ permissions:
 
 jobs:
   verify:
-    # Gate fork PRs behind the `safe-to-test` label. See trigger model in pylint.yml.
-    if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository || (github.event.action == 'labeled' && github.event.label.name == 'safe-to-test') }}
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest
     steps:
+      - name: Authorize
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          HAS_SAFE_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'safe-to-test') }}
+        run: |
+          if [ "$EVENT_NAME" = "push" ]; then
+            echo "OK: push to master."
+            exit 0
+          fi
+          if [ "$HEAD_REPO" = "$BASE_REPO" ]; then
+            echo "OK: same-repo PR ($HEAD_REPO)."
+            exit 0
+          fi
+          if [ "$HAS_SAFE_LABEL" = "true" ]; then
+            echo "OK: fork PR with safe-to-test label."
+            exit 0
+          fi
+          echo "::error title=Fork PR not authorized::Apply the 'safe-to-test' label to run CI against this commit. See CONTRIBUTING.md."
+          exit 1
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
