@@ -626,7 +626,7 @@ def register_lakeflow_source(spark):
             List all object types (tables) available in the configured ontology.
 
             Returns:
-                List of object type API names (e.g., ["ExampleFlight", "ExampleRouteAlert"])
+                List of object type API names (e.g., ["FlightsFinal", "ExampleRouteAlert"])
             """
             self._ensure_object_types_cached()
             return list(self._object_types_cache.keys())
@@ -648,7 +648,7 @@ def register_lakeflow_source(spark):
             Dynamically discover and return the Spark schema for a Palantir object type.
 
             Args:
-                table_name: Object type API name (e.g., "ExampleFlight")
+                table_name: Object type API name (e.g., "FlightsFinal")
                 table_options: Additional options (not used for schema discovery)
 
             Returns:

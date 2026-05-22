@@ -33,7 +33,11 @@ class TestPalantirConnector(LakeflowConnectTests):
           responses and vice versa).
         - Live tests against the production ontology drain millions
           of rows across multiple tables. FlightsFinal alone covers
-          every code path the parameterised tests assert on.
+          every code path the parameterised tests assert on — it
+          carries ``arrivalTimestamp`` (needed by the
+          ``synthesize_future_records`` cap exercise) and is the
+          single object type the simulator's
+          ``object_types_list.json`` declares.
 
         Custom tests (``test_search_endpoint_coverage``,
         ``test_where_clause_built_for_incremental_call``) still call
@@ -59,9 +63,10 @@ class TestPalantirConnector(LakeflowConnectTests):
         the early-exit short-circuit does **not** fire — the read
         falls through to ``loadObjects`` with the ``where: gt`` filter.
         """
-        # Pick a table that actually carries ``arrivalTimestamp`` — in
-        # simulate mode both ``ExampleFlight`` and ``FlightsFinal`` do.
-        # ``list_tables()[0]`` in live mode could land on a non-flight
+        # Pick a table that actually carries ``arrivalTimestamp`` —
+        # in simulate mode the only object type with this field is
+        # ``FlightsFinal``. ``list_tables()[0]`` in live mode could
+        # land on a non-flight
         # table whose search query for that field returns no records,
         # causing the connector to early-return before reaching the
         # where-clause branch this test is asserting on.

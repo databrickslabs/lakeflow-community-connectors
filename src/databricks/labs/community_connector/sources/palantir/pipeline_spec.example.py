@@ -14,7 +14,7 @@ from databricks.labs.community_connector import register
 
 def example_snapshot_ingestion():
     """
-    Ingest ExampleFlight data in snapshot mode (full refresh).
+    Ingest FlightsFinal data in snapshot mode (full refresh).
     Suitable for tables without frequent updates.
     """
 
@@ -24,7 +24,7 @@ def example_snapshot_ingestion():
         "objects": [
             {
                 "table": {
-                    "source_table": "ExampleFlight",  # Palantir object type API name
+                    "source_table": "FlightsFinal",  # Palantir object type API name
                     "destination_catalog": "main",
                     "destination_schema": "palantir_data",
                     "destination_table": "flights",
@@ -48,7 +48,7 @@ def example_snapshot_ingestion():
 
 def example_incremental_ingestion():
     """
-    Ingest ExampleFlight data in incremental mode using a cursor field.
+    Ingest FlightsFinal data in incremental mode using a cursor field.
     Only syncs new/updated records since last run.
     """
 
@@ -58,7 +58,7 @@ def example_incremental_ingestion():
         "objects": [
             {
                 "table": {
-                    "source_table": "ExampleFlight",
+                    "source_table": "FlightsFinal",
                     "destination_catalog": "main",
                     "destination_schema": "palantir_data",
                     "destination_table": "flights_incremental",
@@ -93,7 +93,7 @@ def example_multiple_objects():
             # Flights (incremental)
             {
                 "table": {
-                    "source_table": "ExampleFlight",
+                    "source_table": "FlightsFinal",
                     "destination_catalog": "main",
                     "destination_schema": "palantir_data",
                     "destination_table": "flights",
@@ -166,7 +166,7 @@ def example_large_dataset():
         "objects": [
             {
                 "table": {
-                    "source_table": "ExampleFlight",
+                    "source_table": "FlightsFinal",
                     "destination_catalog": "main",
                     "destination_schema": "palantir_data",
                     "destination_table": "flights_bulk",
@@ -209,7 +209,7 @@ def example_notebook_usage():
         "objects": [
             {
                 "table": {
-                    "source_table": "ExampleFlight",
+                    "source_table": "FlightsFinal",
                     "destination_catalog": "main",
                     "destination_schema": "palantir_data",
                     "destination_table": "flights",

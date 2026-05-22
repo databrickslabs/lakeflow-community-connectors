@@ -112,7 +112,7 @@ curl -X GET \
 {
   "data": [
     {
-      "apiName": "ExampleFlight",
+      "apiName": "FlightsFinal",
       "displayName": "Example Flight",
       "description": "Represents commercial passenger flights in the US",
       "pluralDisplayName": "Example Flights",
@@ -187,14 +187,14 @@ curl -X GET \
 curl -X GET \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
-  "https://yourcompany.palantirfoundry.com/api/v2/ontologies/ontology-282f1207-a9f0-408c-8820-741db4f051b1/objectTypes/ExampleFlight"
+  "https://yourcompany.palantirfoundry.com/api/v2/ontologies/ontology-282f1207-a9f0-408c-8820-741db4f051b1/objectTypes/FlightsFinal"
 ```
 
 **Example response**:
 
 ```json
 {
-  "apiName": "ExampleFlight",
+  "apiName": "FlightsFinal",
   "displayName": "Example Flight",
   "description": "Represents commercial passenger flights in the US",
   "pluralDisplayName": "Example Flights",
@@ -300,14 +300,14 @@ Each property in the `properties` map has:
 
 Base (all objects):
 ```json
-{"type": "base", "objectType": "ExampleFlight"}
+{"type": "base", "objectType": "FlightsFinal"}
 ```
 
 Filtered (CDC incremental — only new records):
 ```json
 {
   "type": "filter",
-  "objectSet": {"type": "base", "objectType": "ExampleFlight"},
+  "objectSet": {"type": "base", "objectType": "FlightsFinal"},
   "where": {"type": "gt", "field": "arrivalTimestamp", "value": "2024-01-01T15:35:00Z"}
 }
 ```
@@ -318,7 +318,7 @@ Filtered (CDC incremental — only new records):
 curl -X POST \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
-  -d '{"objectSet": {"type": "base", "objectType": "ExampleFlight"}, "pageSize": 10000}' \
+  -d '{"objectSet": {"type": "base", "objectType": "FlightsFinal"}, "pageSize": 10000}' \
   "https://yourcompany.palantirfoundry.com/api/v2/ontologies/ontology-282f1207/objectSets/loadObjects?snapshot=true"
 ```
 
@@ -331,7 +331,7 @@ curl -X POST \
   -d '{
     "objectSet": {
       "type": "filter",
-      "objectSet": {"type": "base", "objectType": "ExampleFlight"},
+      "objectSet": {"type": "base", "objectType": "FlightsFinal"},
       "where": {"type": "gt", "field": "arrivalTimestamp", "value": "2024-01-01T15:35:00Z"}
     },
     "pageSize": 10000
@@ -397,7 +397,7 @@ curl -X POST \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"orderBy": {"fields": [{"field": "arrivalTimestamp", "direction": "desc"}]}, "pageSize": 1}' \
-  "https://yourcompany.palantirfoundry.com/api/v2/ontologies/ontology-282f1207/objects/ExampleFlight/search"
+  "https://yourcompany.palantirfoundry.com/api/v2/ontologies/ontology-282f1207/objects/FlightsFinal/search"
 ```
 
 **Supported where clause filter types** (for reference):

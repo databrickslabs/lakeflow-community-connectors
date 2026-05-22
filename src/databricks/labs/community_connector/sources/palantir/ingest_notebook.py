@@ -33,7 +33,7 @@ register_lakeflow_source(spark)
 # MAGIC
 # MAGIC Edit the values below to match your environment:
 # MAGIC - `connection_name`: Your Unity Catalog connection name
-# MAGIC - `source_table`: Palantir object type API name (e.g., "ExampleFlight")
+# MAGIC - `source_table`: Palantir object type API name (e.g., "FlightsFinal")
 # MAGIC - `destination_catalog/schema/table`: Where to land the data in Databricks
 # MAGIC - `scd_type`: SCD_TYPE_1 (upsert), SCD_TYPE_2 (history), or APPEND_ONLY
 # MAGIC - `cursor_field`: Set for incremental sync, omit for snapshot (full refresh)
@@ -46,7 +46,7 @@ pipeline_spec = {
     "objects": [
         {
             "table": {
-                "source_table": "ExampleFlight",
+                "source_table": "FlightsFinal",
                 "destination_catalog": "users",
                 "destination_schema": "zuhaib_mohd",
                 "destination_table": "example_flight",
