@@ -49,10 +49,10 @@ To configure the connector, provide the following parameters in your Unity Catal
 
 `managed_identity` and `federated_identity` require the `azure-identity` package on the cluster (`pip install "azure-identity>=1.15.0"`). `service_principal` and `static_token` have no extra dependencies.
 
-This connector supports per-table options (`window_days`, `lookback_minutes`) — see **Table Configurations** below. Because of that, **`externalOptionsAllowList` must be set as a connection parameter** with the exact value:
+This connector supports per-table options (`window_days`, `lookback_minutes`, and `kind_query_<table>` overrides — see **Table Configurations** below). Because of that, **`externalOptionsAllowList` must be set as a connection parameter** with the exact value:
 
 ```
-window_days,lookback_minutes
+window_days,lookback_minutes,kind_query_wellbore,kind_query_reservoir,kind_query_rock_and_fluid
 ```
 
 ### Obtaining the connection parameters
@@ -119,7 +119,7 @@ A Unity Catalog connection for this connector can be created in two ways via the
    - **`managed_identity`:** `base_url`, `data_partition_id`, `auth_mode=managed_identity`. Optionally `managed_identity_client_id` (user-assigned MI), `adme_api_client_id`, `page_size`.
    - **`federated_identity`:** `base_url`, `data_partition_id`, `auth_mode=federated_identity`, `tenant_id`, `client_id`, plus one of `federated_token_file` or `federated_token`. Optionally `adme_api_client_id`, `page_size`.
    - **`static_token`:** `base_url`, `data_partition_id`, `auth_mode=static_token`, `access_token`. Optionally `page_size`. CI/testing only.
-4. **Set `externalOptionsAllowList` to `window_days,lookback_minutes`** so the per-table options below can be passed through.
+4. **Set `externalOptionsAllowList` to `window_days,lookback_minutes,kind_query_wellbore,kind_query_reservoir,kind_query_rock_and_fluid`** so the per-table options below can be passed through.
 
 The connection can also be created using the standard Unity Catalog API.
 
@@ -201,6 +201,9 @@ These options must appear in the connection's `externalOptionsAllowList` (see Se
 |---|---|---|---|
 | `window_days` | No | `1` | Size, in days, of each `modifyTime` partition window. The (start, end] range is split into windows of this size and executors fetch them in parallel. Larger windows mean fewer partitions and fewer cursor pages per partition; smaller windows give finer parallelism. Minimum `1`. |
 | `lookback_minutes` | No | `5` | Lookback applied to the lower bound of the watermark on incremental runs to catch records whose `modifyTime` was set just after the previous run sealed its watermark (clock skew / indexer lag). Set to `0` to disable. Does not apply to the very first run, which always starts at the epoch. |
+| `kind_query_wellbore` | No | `osdu:wks:master-data--Wellbore:*` | Override the OSDU kind pattern for the Wellbore table. Useful when an instance exposes wellbore records under a non-standard kind. |
+| `kind_query_reservoir` | No | `osdu:wks:master-data--Reservoir:*` | Override the OSDU kind pattern for the Reservoir table. |
+| `kind_query_rock_and_fluid` | No | `osdu:wks:master-data--Sample:*` | Override the OSDU kind pattern for the Rock_and_Fluid table. Use `osdu:wks:work-product-component--RockSampleAnalysis:*` for instances that expose sample data under the work-product family. Confirm via the Schema Service before overriding — envelope-typed columns still apply but `data.*` flattening leaves Sample-specific scalars NULL on non-Sample kinds. |
 
 ### First-run behaviour
 

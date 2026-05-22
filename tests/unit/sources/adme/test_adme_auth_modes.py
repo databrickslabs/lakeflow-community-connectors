@@ -110,6 +110,20 @@ def test_managed_identity_mode():
     not _has_azure_identity(),
     reason="azure-identity not installed; install with `pip install azure-identity`",
 )
+def test_managed_identity_requires_audience_when_client_id_unset():
+    opts = {
+        "data_partition_id": "opendes",
+        "auth_mode": AUTH_MODE_MANAGED_IDENTITY,
+        "managed_identity_client_id": "33333333-3333-3333-3333-333333333333",
+    }
+    with pytest.raises(ValueError, match="adme_api_client_id"):
+        _build_token_provider(opts)
+
+
+@pytest.mark.skipif(
+    not _has_azure_identity(),
+    reason="azure-identity not installed; install with `pip install azure-identity`",
+)
 def test_federated_identity_inline_token():
     opts = {
         **_BASE,

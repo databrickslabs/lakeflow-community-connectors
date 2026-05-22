@@ -14,6 +14,7 @@ import os
 import re
 import time
 
+from __future__ import annotations
 from pyspark.sql import Row
 from pyspark.sql.datasource import (
     DataSource,
@@ -770,43 +771,23 @@ def register_lakeflow_source(spark):
     DEFAULT_PAGE_SIZE = 1000
     MAX_PAGE_SIZE = 1000
 
-    # Default partition window for the time range. One day at a time keeps
-    # any single partition's work bounded; users can tune via the
-    # ``window_days`` table option.
     DEFAULT_WINDOW_DAYS = 1
-    # Apply a small lookback so records in flight when the previous run's
-    # watermark was captured don't slip through. 5 minutes is conservative
-    # for OSDU's storage->indexer latency.
     DEFAULT_LOOKBACK_MINUTES = 5
 
-    # Used as the lower bound on the very first run when there's no
-    # committed offset yet — Lucene's ``*`` matches everything.
     EPOCH_ISO = "1970-01-01T00:00:00.000Z"
-    # Any committed offset older than this is treated as "first run / no
-    # real watermark" so the partition planner takes the open-ended fast
-    # path instead of walking thousands of empty daily windows.
     FIRST_RUN_SENTINEL_THRESHOLD = "2000-01-01T00:00:00.000Z"
 
-    # data_partition_id is forwarded verbatim into a custom HTTP header, so
-    # constrain it to characters that can never split or escape the header.
-    # Matches the documented contract in connector_spec.yaml and README:
-    # alphanumeric plus hyphen (no underscore).
     _DATA_PARTITION_ID_PATTERN = re.compile(r"[A-Za-z0-9-]+")
 
-    # HTTP retry configuration. ADME documents cursor inactivity timeout
-    # at 1 minute; transient 5xx and 429 are common.
     RETRIABLE_STATUS_CODES = {429, 500, 502, 503, 504}
     MAX_RETRIES = 5
     INITIAL_BACKOFF = 1.0
 
-    # Cap on how much of an upstream HTTP response body is folded into a
-    # RuntimeError message. OSDU error bodies sometimes carry correlation IDs
-    # and request echo data that lands verbatim in Spark driver logs.
     _ERROR_BODY_LIMIT = 256
 
 
     def _redact_body(text: str) -> str:
-        """Return ``text`` truncated and stripped of CR/LF for safe error messages."""
+        """Return text truncated and stripped of CR/LF for safe error messages."""
         if not text:
             return ""
         flattened = text.replace("\r", " ").replace("\n", " ")
@@ -832,12 +813,7 @@ def register_lakeflow_source(spark):
 
 
     class _TokenCache:
-        """In-memory bearer-token cache for the Azure AD client-credentials flow.
-
-        Used for ``auth_mode=service_principal``. Threadsafe: each driver-side
-        and executor-side instance has its own cache, but multiple threads on
-        the same instance share it.
-        """
+        """In-memory bearer-token cache for the Azure AD client-credentials flow."""
 
         def __init__(
             self,
@@ -849,9 +825,6 @@ def register_lakeflow_source(spark):
             self._tenant_id = tenant_id
             self._client_id = client_id
             self._client_secret = client_secret
-            # Audience for the token scope. Defaults to ``client_id`` for
-            # backwards compatibility (existing setups register the SP under
-            # the ADME API app registration).
             self._audience = adme_api_client_id or client_id
             self._lock = threading.Lock()
             self._token: str | None = None
@@ -866,7 +839,6 @@ def register_lakeflow_source(spark):
         def get(self, force_refresh: bool = False) -> str:
             with self._lock:
                 now = time.time()
-                # Refresh ~60s before expiry to avoid mid-request expiry.
                 if (
                     not force_refresh
                     and self._token
@@ -886,17 +858,13 @@ def register_lakeflow_source(spark):
                 "grant_type": "client_credentials",
                 "client_id": self._client_id,
                 "client_secret": self._client_secret,
-                # ``scope`` and ``resource`` are both required for ADME's
-                # Azure AD v1 token endpoint per the ADME docs.
                 "scope": f"{self._audience}/.default",
                 "resource": self._audience,
             }
             resp = requests.post(
                 self.token_url,
                 data=body,
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
                 timeout=30,
             )
             if resp.status_code != 200:
@@ -916,21 +884,15 @@ def register_lakeflow_source(spark):
 
 
     class _AzureIdentityTokenProvider:
-        """Token provider backed by ``azure.identity`` credentials.
+        """Token provider backed by azure.identity credentials.
 
-        Covers ``managed_identity`` and ``federated_identity`` modes. The
-        underlying credential handles its own caching/refresh; we present the
-        same ``get()/invalidate()`` surface as ``_TokenCache`` so callers
-        don't care which mode is active.
+        Covers managed_identity and federated_identity modes.
         """
 
         def __init__(self, credential: Any, scope: str) -> None:
             self._credential = credential
             self._scope = scope
             self._lock = threading.Lock()
-            # Last-known good token; the underlying credential refreshes
-            # automatically, but we cache the string for log-free hot paths
-            # and to support ``invalidate()`` semantics.
             self._token: str | None = None
             self._expires_at: float = 0.0
 
@@ -955,11 +917,7 @@ def register_lakeflow_source(spark):
 
 
     class _StaticTokenProvider:
-        """Pre-issued bearer token (CI / testing).
-
-        Honours the ``get()/invalidate()`` shape but never refreshes — if the
-        token expires the caller will see 401s on subsequent requests.
-        """
+        """Pre-issued bearer token (CI / testing)."""
 
         def __init__(self, token: str) -> None:
             if not token or not token.strip():
@@ -970,9 +928,6 @@ def register_lakeflow_source(spark):
             return self._token
 
         def invalidate(self) -> None:
-            # No-op: nothing to refresh. Caller will keep seeing 401s if the
-            # token has expired, which is the correct signal for static-token
-            # mode (the operator must supply a new token).
             pass
 
 
@@ -989,11 +944,10 @@ def register_lakeflow_source(spark):
         )
 
 
-    def _build_token_provider(options: dict[str, str]) -> "tuple[Any, str]":
-        """Construct the auth provider implied by ``options['auth_mode']``.
+    def _build_token_provider(options: dict[str, str]) -> tuple[Any, str]:
+        """Construct the auth provider implied by options['auth_mode'].
 
-        Returns the provider plus the API audience (used as the OAuth2 scope
-        suffix, ``<audience>/.default``).
+        Returns (provider, audience).
         """
         auth_mode = (options.get("auth_mode") or AUTH_MODE_SERVICE_PRINCIPAL).strip()
         if auth_mode not in VALID_AUTH_MODES:
@@ -1031,7 +985,6 @@ def register_lakeflow_source(spark):
             token = options.get("access_token")
             return _StaticTokenProvider(token), adme_api_client_id
 
-        # Both managed_identity and federated_identity rely on azure-identity.
         try:
             from azure.identity import (
                 ClientAssertionCredential,
@@ -1042,6 +995,12 @@ def register_lakeflow_source(spark):
                 f"auth_mode={auth_mode} requires the azure-identity package; "
                 "install with `pip install azure-identity>=1.15.0`"
             ) from e
+
+        if not adme_api_client_id:
+            raise ValueError(
+                f"auth_mode={auth_mode} requires connection option 'adme_api_client_id' "
+                "(OAuth2 audience for the ADME API) when 'client_id' is not set"
+            )
 
         scope = f"{adme_api_client_id}/.default"
 
@@ -1063,7 +1022,6 @@ def register_lakeflow_source(spark):
             )
         token_inline = options.get("federated_token")
         token_file = options.get("federated_token_file")
-        # Validate the token source eagerly so misconfigs fail fast.
         _read_federated_token(token_inline, token_file)
 
         def _get_assertion() -> str:
@@ -1086,45 +1044,32 @@ def register_lakeflow_source(spark):
         """LakeflowConnect implementation for Azure Data Manager for Energy.
 
         Required connection options:
-            base_url             ADME instance base URL (alias: ``instance_url``)
-                                 e.g. ``https://admetest.energy.azure.com``
-            data_partition_id    e.g. ``opendes`` or ``<inst>-opendes``
+            base_url             ADME instance base URL (alias: instance_url)
+            data_partition_id    e.g. opendes
 
-        Auth options (selected by ``auth_mode``):
-            auth_mode                       service_principal (default) |
-                                            managed_identity | federated_identity |
-                                            static_token
-            tenant_id                       Azure AD tenant ID
-                                            (required for service_principal,
-                                            federated_identity)
-            client_id                       SP / app registration client ID
-                                            (required for service_principal,
-                                            federated_identity)
-            client_secret                   SP secret
-                                            (required for service_principal)
-            adme_api_client_id              Audience for the OAuth2 scope
-                                            (defaults to client_id)
-            managed_identity_client_id      User-assigned MI client ID
-                                            (omit for system-assigned MI)
-            federated_token / federated_token_file
-                                            OIDC assertion source for
-                                            federated_identity mode
-            access_token                    Pre-issued bearer token for
-                                            static_token mode (CI / testing only)
+        Auth options (selected by auth_mode):
+            auth_mode            service_principal | managed_identity |
+                                 federated_identity | static_token
+            tenant_id            Azure AD tenant ID
+            client_id            SP / app registration client ID
+            client_secret        SP secret (service_principal only)
+            adme_api_client_id   Audience for the OAuth2 scope
+            managed_identity_client_id   User-assigned MI client ID
+            federated_token / federated_token_file   OIDC assertion source
+            access_token         Pre-issued bearer token (static_token only)
 
-        Optional connection options:
+        Optional:
             page_size            Search page size (default 1000, max 1000)
 
-        Recognised per-table options:
-            window_days            Partition size in days (default 1)
-            lookback_minutes       Lookback applied to start cursor (default 5)
+        Per-table options:
+            window_days          Partition size in days (default 1)
+            lookback_minutes     Lookback applied to start cursor (default 5)
+            kind_query_<table>   Override OSDU kind query for a specific table
         """
 
         def __init__(self, options: dict[str, str]) -> None:
             super().__init__(options)
 
-            # ``base_url`` is the v1.2.0 spelling; ``instance_url`` is kept as
-            # an alias for backwards compatibility with existing UC connections.
             instance_url = options.get("base_url") or options.get("instance_url")
             data_partition_id = options.get("data_partition_id")
 
@@ -1137,17 +1082,13 @@ def register_lakeflow_source(spark):
                         f"ADME connector requires connection option {name!r}"
                     )
 
-            # data_partition_id is forwarded verbatim into a custom HTTP
-            # header. Constrain to alphanumeric + ``-``/``_`` so a stray
-            # CRLF (or anything similarly exotic) can't split the header.
             if not _DATA_PARTITION_ID_PATTERN.fullmatch(data_partition_id):
                 raise ValueError(
                     "ADME connector option 'data_partition_id' must match "
-                    "[A-Za-z0-9_-]+ (no whitespace, control chars, or "
+                    "[A-Za-z0-9-]+ (no whitespace, control chars, or "
                     "header separators)"
                 )
 
-            # Strip trailing slash for clean URL composition.
             self._instance_url = instance_url.rstrip("/")
             self._data_partition_id = data_partition_id
 
@@ -1158,15 +1099,9 @@ def register_lakeflow_source(spark):
             except (TypeError, ValueError):
                 self._page_size = DEFAULT_PAGE_SIZE
 
-            # Auth provider — dispatches on options['auth_mode']. Defaults to
-            # service_principal so existing UC connections keep working.
             self._token_provider, self._adme_audience = _build_token_provider(options)
             self._session = requests.Session()
 
-            # Cap offsets at init time so Trigger.AvailableNow terminates
-            # even when records are being continuously updated. Records
-            # modified after init time get picked up by the next trigger,
-            # which constructs a fresh connector instance with a newer cap.
             self._init_time = (
                 datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
             )
@@ -1188,7 +1123,6 @@ def register_lakeflow_source(spark):
             self, table_name: str, table_options: dict[str, str]
         ) -> dict:
             self._validate_table(table_name)
-            # Defensive copy so callers can't mutate the static metadata.
             return dict(TABLE_METADATA[table_name])
 
         # ------------------------------------------------------------------
@@ -1196,8 +1130,6 @@ def register_lakeflow_source(spark):
         # ------------------------------------------------------------------
 
         def is_partitioned(self, table_name: str) -> bool:
-            # All three OSDU tables use the same Search-cursor read path,
-            # which is naturally partitionable by ``modifyTime`` window.
             return table_name in SUPPORTED_TABLES
 
         def latest_offset(
@@ -1206,14 +1138,7 @@ def register_lakeflow_source(spark):
             table_options: dict[str, str],
             start_offset: dict | None = None,
         ) -> dict:
-            """Return the most recent offset for incremental reading.
-
-            We don't probe the source for the actual latest ``modifyTime``;
-            instead we cap at the connector's init time. This keeps the
-            offset stable across micro-batches in a single trigger
-            (Trigger.AvailableNow termination guard) and avoids a
-            non-paginated head query against the Search service.
-            """
+            """Return the most recent offset (capped at init time)."""
             self._validate_table(table_name)
             return {"cursor": self._init_time}
 
@@ -1224,13 +1149,7 @@ def register_lakeflow_source(spark):
             start_offset: dict | None = None,
             end_offset: dict | None = None,
         ) -> Sequence[dict]:
-            """Split the (start, end] ``modifyTime`` range into windowed partitions.
-
-            For batch reads (no offsets) the range is ``EPOCH..init_time``.
-            For streaming reads the range is the offsets supplied by Spark.
-            Each partition is a ``(since, until)`` window the executor
-            queries directly via ``read_partition``.
-            """
+            """Split the (start, end] modifyTime range into windowed partitions."""
             self._validate_table(table_name)
 
             window_days = self._parse_int(
@@ -1243,35 +1162,21 @@ def register_lakeflow_source(spark):
             )
 
             if start_offset is None and end_offset is None:
-                # Batch mode: start at the epoch and walk to init time.
                 start_iso = EPOCH_ISO
                 end_iso = self._init_time
             else:
-                # Streaming mode: offsets come from initialOffset / latest_offset.
                 start_iso = (start_offset or {}).get("cursor") or EPOCH_ISO
                 end_iso = (end_offset or {}).get("cursor") or self._init_time
 
-            # Empty range -> no work to do this trigger.
             if start_iso >= end_iso:
                 return []
 
-            # First-run / no-prior-watermark: emit a single open-ended
-            # partition. We don't know the corpus age and walking from 1970
-            # in daily windows would generate tens of thousands of empty
-            # API calls. The single partition uses Lucene ``*`` for the
-            # lower bound, which the OSDU index handles efficiently. We
-            # treat any lower bound at or before 2000-01-01 as "no real
-            # watermark" so the optimisation isn't coupled to the exact
-            # EPOCH_ISO sentinel.
+            # First-run optimization: single open-ended partition
             if start_iso <= FIRST_RUN_SENTINEL_THRESHOLD:
                 return [{"since": EPOCH_ISO, "until": end_iso}]
 
-            # Apply a lookback to the lower bound to handle records that
-            # were in flight when the previous trigger sealed its watermark.
             if lookback_minutes > 0:
                 start_iso = self._subtract_minutes(start_iso, lookback_minutes)
-                # Re-check after the lookback shift; pathological clock cases
-                # could otherwise produce inverted ranges.
                 if start_iso >= end_iso:
                     return []
 
@@ -1279,12 +1184,7 @@ def register_lakeflow_source(spark):
             cursor = start_iso
             while cursor < end_iso:
                 window_end = min(self._add_days(cursor, window_days), end_iso)
-                partitions.append(
-                    {
-                        "since": cursor,
-                        "until": window_end,
-                    }
-                )
+                partitions.append({"since": cursor, "until": window_end})
                 cursor = window_end
 
             return partitions
@@ -1295,19 +1195,12 @@ def register_lakeflow_source(spark):
             partition: dict,
             table_options: dict[str, str],
         ) -> Iterator[dict]:
-            """Read one ``(since, until]`` window of records.
-
-            Runs on Spark executors. Each partition is a bounded
-            ``modifyTime`` window produced by ``get_partitions``, so
-            admission control is handled by the partitioner (via
-            ``latest_offset`` + ``window_days``) rather than by a separate
-            per-batch record cap.
-            """
+            """Read one (since, until] window of records on an executor."""
             self._validate_table(table_name)
 
             since = partition["since"]
             until = partition["until"]
-            kind_query = TABLE_TO_KIND_QUERY[table_name]
+            kind_query = self._resolve_kind_query(table_name, table_options)
 
             lucene = self._build_lucene_range(since, until)
             yield from self._search_paginated(kind_query, lucene)
@@ -1322,24 +1215,14 @@ def register_lakeflow_source(spark):
             start_offset: dict,
             table_options: dict[str, str],
         ) -> tuple[Iterator[dict], dict]:
-            """Single-driver fallback path.
-
-            All three ADME tables prefer the partitioned stream path
-            (``is_partitioned`` returns True), so this method is only used
-            if the engine deliberately bypasses partitioning. We honour the
-            contract by paginating sequentially from the committed cursor
-            up to init time, then advancing the cursor to init time so
-            Trigger.AvailableNow terminates.
-            """
+            """Single-driver fallback path."""
             self._validate_table(table_name)
 
             since = (start_offset or {}).get("cursor") or EPOCH_ISO
-            # Already drained up to init time? Return a stable offset so
-            # Trigger.AvailableNow terminates.
             if since >= self._init_time:
                 return iter([]), start_offset or {"cursor": self._init_time}
 
-            kind_query = TABLE_TO_KIND_QUERY[table_name]
+            kind_query = self._resolve_kind_query(table_name, table_options)
             lucene = self._build_lucene_range(since, self._init_time)
 
             records = list(self._search_paginated(kind_query, lucene))
@@ -1355,6 +1238,21 @@ def register_lakeflow_source(spark):
                     f"Unsupported table {table_name!r}; "
                     f"supported: {SUPPORTED_TABLES}"
                 )
+
+        @staticmethod
+        def _resolve_kind_query(table_name: str, table_options: dict[str, str]) -> str:
+            """Return the OSDU kind query for a table, honouring per-table overrides.
+
+            Checks table_options for kind_query_<table_name_lower> first (e.g.
+            kind_query_rock_and_fluid), then falls back to TABLE_TO_KIND_QUERY.
+            This allows operators to point a table at a different OSDU kind
+            without code changes (e.g. RockSampleAnalysis instead of Sample).
+            """
+            override_key = f"kind_query_{table_name.lower()}"
+            override = table_options.get(override_key)
+            if override and override.strip():
+                return override.strip()
+            return TABLE_TO_KIND_QUERY[table_name]
 
         @staticmethod
         def _parse_int(value: Any, default: int, *, minimum: int = 0) -> int:
@@ -1376,7 +1274,6 @@ def register_lakeflow_source(spark):
 
         @staticmethod
         def _parse_iso(iso_ts: str) -> datetime:
-            # ``fromisoformat`` accepts ``Z`` only on 3.11+; normalise.
             normalised = iso_ts.replace("Z", "+00:00")
             try:
                 dt = datetime.fromisoformat(normalised)
@@ -1388,22 +1285,12 @@ def register_lakeflow_source(spark):
 
         @staticmethod
         def _format_iso(dt: datetime) -> str:
-            # Match the OSDU storage convention: millisecond precision, ``Z`` suffix.
             return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
 
         @staticmethod
         def _build_lucene_range(since: str, until: str) -> str:
-            """Build the OSDU Lucene range filter on ``modifyTime``.
-
-            OSDU Lucene quotes ISO timestamps and uses square brackets for
-            inclusive bounds. We treat ``since`` as "anything modified since
-            last sync" and ``until`` as the upper bound (exclusive logically;
-            Lucene range is inclusive but our windows are non-overlapping so
-            boundary collisions are safe).
-            """
+            """Build the OSDU Lucene range filter on modifyTime."""
             if since == EPOCH_ISO:
-                # Open-ended on the lower bound so the filter is permissive
-                # on first run (and fast for OSDU's index).
                 return f'modifyTime:[* TO "{until}"]'
             return f'modifyTime:["{since}" TO "{until}"]'
 
@@ -1422,12 +1309,7 @@ def register_lakeflow_source(spark):
         def _post_with_retry(
             self, url: str, body: dict[str, Any]
         ) -> requests.Response:
-            """POST with exponential backoff and one auth-refresh retry on 401.
-
-            The auth-refresh is tracked separately from the retry budget so
-            a stale token doesn't consume one of the ``MAX_RETRIES`` slots
-            otherwise reserved for transient 5xx / 429 responses.
-            """
+            """POST with exponential backoff and one auth-refresh retry on 401."""
             backoff = INITIAL_BACKOFF
             auth_retried = False
             attempts = 0
@@ -1440,9 +1322,6 @@ def register_lakeflow_source(spark):
                     timeout=60,
                 )
                 if resp.status_code == 401 and not auth_retried:
-                    # Token may be stale (e.g. revoked or expired early).
-                    # One-shot refresh that doesn't count against the
-                    # retry budget.
                     self._token_provider.invalidate()
                     auth_retried = True
                     continue
@@ -1459,14 +1338,12 @@ def register_lakeflow_source(spark):
                     time.sleep(wait)
                     backoff *= 2
 
-            # All retries exhausted; return the last response so the caller
-            # raises with full context.
             return resp  # type: ignore[return-value]
 
         def _search_paginated(
             self, kind_query: str, lucene_query: str
         ) -> Iterator[dict]:
-            """Yield flat records by paginating ``query_with_cursor``."""
+            """Yield flat records by paginating query_with_cursor."""
             url = f"{self._instance_url}/api/search/v2/query_with_cursor"
             cursor: str | None = None
             while True:
@@ -1490,8 +1367,6 @@ def register_lakeflow_source(spark):
                     yield _flatten_record(raw)
 
                 next_cursor = payload.get("cursor")
-                # OSDU stops returning a cursor (or returns an empty/null one)
-                # when the result set is exhausted.
                 if not next_cursor or not results:
                     return
                 cursor = next_cursor
@@ -1503,13 +1378,7 @@ def register_lakeflow_source(spark):
 
 
     def _flatten_record(raw: dict[str, Any]) -> dict[str, Any]:
-        """Project an OSDU envelope into the flat shape declared by TABLE_SCHEMAS.
-
-        Envelope fields are lifted to typed columns; complex ``data.*``
-        sub-objects are JSON-stringified into ``*_json`` columns. Whatever
-        isn't lifted is preserved as ``data_json`` for downstream escape
-        hatches.
-        """
+        """Project an OSDU envelope into the flat shape declared by TABLE_SCHEMAS."""
         if not isinstance(raw, dict):
             return {}
 
@@ -1545,8 +1414,6 @@ def register_lakeflow_source(spark):
             base.update(_flatten_reservoir(data))
         elif "Sample" in kind:
             base.update(_flatten_sample(data))
-        # Unknown kinds: just ship the envelope. The flattener won't add
-        # any kind-specific columns so the row uses the column defaults.
 
         return base
 
@@ -1560,20 +1427,14 @@ def register_lakeflow_source(spark):
             "KickOffWellboreID": data.get("KickOffWellboreID"),
             "StatusSummary": data.get("StatusSummary"),
             "TargetFormation": data.get("TargetFormation"),
-            "FacilityNameAliases_json": _json_or_none(
-                data.get("FacilityNameAliases")
-            ),
+            "FacilityNameAliases_json": _json_or_none(data.get("FacilityNameAliases")),
             "FacilityOperators_json": _json_or_none(data.get("FacilityOperators")),
-            "VerticalMeasurements_json": _json_or_none(
-                data.get("VerticalMeasurements")
-            ),
+            "VerticalMeasurements_json": _json_or_none(data.get("VerticalMeasurements")),
             "SpatialLocation_json": _json_or_none(data.get("SpatialLocation")),
             "GeoContexts_json": _json_or_none(data.get("GeoContexts")),
             "DrillingReasons_json": _json_or_none(data.get("DrillingReasons")),
             "InitialCompletion_json": _json_or_none(data.get("InitialCompletion")),
-            "ExtensionProperties_json": _json_or_none(
-                data.get("ExtensionProperties")
-            ),
+            "ExtensionProperties_json": _json_or_none(data.get("ExtensionProperties")),
         }
 
 
@@ -1594,26 +1455,14 @@ def register_lakeflow_source(spark):
             "GrossThickness": _coerce_double(data.get("GrossThickness")),
             "NetPayThickness": _coerce_double(data.get("NetPayThickness")),
             "PorosityAverage": _coerce_double(data.get("PorosityAverage")),
-            "WaterSaturationAverage": _coerce_double(
-                data.get("WaterSaturationAverage")
-            ),
-            "PermeabilityHorizontal": _coerce_double(
-                data.get("PermeabilityHorizontal")
-            ),
-            "PermeabilityVertical": _coerce_double(
-                data.get("PermeabilityVertical")
-            ),
-            "InitialReservoirPressure": _coerce_double(
-                data.get("InitialReservoirPressure")
-            ),
-            "ReservoirTemperature": _coerce_double(
-                data.get("ReservoirTemperature")
-            ),
+            "WaterSaturationAverage": _coerce_double(data.get("WaterSaturationAverage")),
+            "PermeabilityHorizontal": _coerce_double(data.get("PermeabilityHorizontal")),
+            "PermeabilityVertical": _coerce_double(data.get("PermeabilityVertical")),
+            "InitialReservoirPressure": _coerce_double(data.get("InitialReservoirPressure")),
+            "ReservoirTemperature": _coerce_double(data.get("ReservoirTemperature")),
             "GeoContexts_json": _json_or_none(data.get("GeoContexts")),
             "NameAliases_json": _json_or_none(data.get("NameAliases")),
-            "ExtensionProperties_json": _json_or_none(
-                data.get("ExtensionProperties")
-            ),
+            "ExtensionProperties_json": _json_or_none(data.get("ExtensionProperties")),
         }
 
 
@@ -1639,13 +1488,9 @@ def register_lakeflow_source(spark):
             "TopDepth": _coerce_double(detail.get("TopDepth")),
             "BaseDepth": _coerce_double(detail.get("BaseDepth")),
             "FormationPressure": _coerce_double(formation_cond.get("Pressure")),
-            "FormationTemperature": _coerce_double(
-                formation_cond.get("Temperature")
-            ),
+            "FormationTemperature": _coerce_double(formation_cond.get("Temperature")),
             "SampleAcquisition_json": _json_or_none(sa),
-            "ExtensionProperties_json": _json_or_none(
-                data.get("ExtensionProperties")
-            ),
+            "ExtensionProperties_json": _json_or_none(data.get("ExtensionProperties")),
         }
 
 

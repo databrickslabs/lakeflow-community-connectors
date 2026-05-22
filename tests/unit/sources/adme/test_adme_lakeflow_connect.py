@@ -39,3 +39,68 @@ class TestADMEConnector(LakeflowConnectTests, SupportsPartitionedStreamTests):
         "instance_url": "https://admetest.energy.azure.com",
         "data_partition_id": "opendes",
     }
+
+
+_BASE_OPTS = {
+    "auth_mode": "static_token",
+    "access_token": "fake-token-for-unit-test",
+    "base_url": "https://admetest.energy.azure.com",
+    "data_partition_id": "opendes",
+}
+
+
+def _make_connector() -> ADMELakeflowConnect:
+    return ADMELakeflowConnect(dict(_BASE_OPTS))
+
+
+def test_resolve_kind_query_default():
+    """No override: falls back to the static TABLE_TO_KIND_QUERY entry."""
+    from databricks.labs.community_connector.sources.adme.adme_schemas import (
+        TABLE_TO_KIND_QUERY,
+    )
+
+    connector = _make_connector()
+    assert (
+        connector._resolve_kind_query("Rock_and_Fluid", {})
+        == TABLE_TO_KIND_QUERY["Rock_and_Fluid"]
+    )
+    assert (
+        connector._resolve_kind_query("Wellbore", {})
+        == TABLE_TO_KIND_QUERY["Wellbore"]
+    )
+
+
+def test_resolve_kind_query_override_rock_and_fluid():
+    """Per-table override via table_options replaces the default kind."""
+    connector = _make_connector()
+    custom = "osdu:wks:work-product-component--RockSampleAnalysis:*"
+    assert (
+        connector._resolve_kind_query(
+            "Rock_and_Fluid", {"kind_query_rock_and_fluid": custom}
+        )
+        == custom
+    )
+
+
+def test_resolve_kind_query_override_wellbore():
+    connector = _make_connector()
+    custom = "osdu:wks:master-data--Wellbore:1.0.0"
+    assert (
+        connector._resolve_kind_query("Wellbore", {"kind_query_wellbore": custom})
+        == custom
+    )
+
+
+def test_resolve_kind_query_blank_override_falls_back():
+    """A whitespace-only override is ignored — falls back to the default."""
+    from databricks.labs.community_connector.sources.adme.adme_schemas import (
+        TABLE_TO_KIND_QUERY,
+    )
+
+    connector = _make_connector()
+    assert (
+        connector._resolve_kind_query(
+            "Rock_and_Fluid", {"kind_query_rock_and_fluid": "  "}
+        )
+        == TABLE_TO_KIND_QUERY["Rock_and_Fluid"]
+    )

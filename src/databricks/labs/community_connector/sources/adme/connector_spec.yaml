@@ -138,5 +138,9 @@ connection:
 # These table-specific options must be included in the externalOptionsAllowList
 # parameter of the UC connection to allow them to be passed through.
 # Use a comma-separated string of option names.
+#
+# kind_query_<table> — Override the OSDU kind query for a specific table.
+#   Example: kind_query_rock_and_fluid=osdu:wks:work-product-component--RockSampleAnalysis:*
+#   Useful when an ADME instance uses a non-standard kind for a table.
 # ============================================================================
-external_options_allowlist: "window_days,lookback_minutes"
+external_options_allowlist: "window_days,lookback_minutes,kind_query_wellbore,kind_query_reservoir,kind_query_rock_and_fluid"
