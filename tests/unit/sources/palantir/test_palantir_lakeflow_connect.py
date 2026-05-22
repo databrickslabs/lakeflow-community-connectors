@@ -63,26 +63,21 @@ class TestPalantirConnector(LakeflowConnectTests):
         the early-exit short-circuit does **not** fire — the read
         falls through to ``loadObjects`` with the ``where: gt`` filter.
         """
-        # Pick a table that actually carries ``arrivalTimestamp`` —
-        # in simulate mode the only object type with this field is
-        # ``FlightsFinal``. ``list_tables()[0]`` in live mode could
-        # land on a non-flight
-        # table whose search query for that field returns no records,
-        # causing the connector to early-return before reaching the
-        # where-clause branch this test is asserting on.
+        # Pin to ``FlightsFinal`` — the canonical anchor table for
+        # this connector's tests. Iterating ``list_tables()`` and
+        # picking the first match in live mode lands on other object
+        # types (``ExampleFlight`` etc.) whose responses don't match
+        # the simulator's FlightsFinal corpus, so the live validator
+        # flags spurious drift even though the connector code path
+        # is identical.
+        table = "FlightsFinal"
         cursor_field = "arrivalTimestamp"
-        candidate = next(
-            (
-                t for t in self.connector.list_tables()
-                if cursor_field in self.connector.get_table_schema(t, {}).fieldNames()
-            ),
-            None,
+        assert table in self.connector.list_tables(), (
+            f"Ontology must expose '{table}' for this test."
         )
-        assert candidate is not None, (
-            f"No table in ontology has '{cursor_field}' — adjust test to a "
-            f"different field present in the live or simulate ontology."
-        )
-        table = candidate
+        assert cursor_field in (
+            self.connector.get_table_schema(table, {}).fieldNames()
+        ), f"'{table}' must carry '{cursor_field}'."
         # Cap reads — in live mode the table can be millions of rows;
         # we only need _fetch_page invoked once to verify the
         # where:gt argument shape.
@@ -122,13 +117,17 @@ class TestPalantirConnector(LakeflowConnectTests):
         gets hit on every CDC read via ``_get_max_cursor_value``.
         This test issues a direct call so coverage is complete even
         if the read path is mocked out by other tests in the suite.
+
+        Pinned to ``FlightsFinal`` + ``arrivalTimestamp`` so the
+        live validator compares the response against the matching
+        FlightsFinal corpus rather than landing on an alphabetically
+        earlier ``Example*`` object type whose schema differs.
         """
-        tables = self.connector.list_tables()
-        assert tables, "Palantir ontology returned no tables"
-        table = tables[0]
-        cursor_field = self.connector.get_table_schema(
-            table, {}
-        ).fieldNames()[0]
+        table = "FlightsFinal"
+        cursor_field = "arrivalTimestamp"
+        assert table in self.connector.list_tables(), (
+            f"Ontology must expose '{table}' for this test."
+        )
         # Returns None or a value; either is acceptable — we only care
         # that POST /objects/{table}/search was issued.
         self.connector._get_max_cursor_via_search(table, cursor_field)
