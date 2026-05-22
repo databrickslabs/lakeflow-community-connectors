@@ -1,15 +1,32 @@
 name: Pylint
 
-# pull_request_target (instead of pull_request) is required so fork-PR
-# runs receive the OIDC token that configure-jfrog-pypi exchanges for a
-# JFrog Artifactory access token. With pull_request the fork's run gets
-# no OIDC, and the action fails with ACTIONS_ID_TOKEN_REQUEST_TOKEN
-# unbound.
+# Trigger model. CI needs the GitHub OIDC token because the protected
+# runner group's only egress to PyPI is the JFrog proxy
+# (.github/actions/configure-jfrog-pypi), and the proxy authenticates by
+# exchanging an OIDC ID token for a JFrog access token. Fork-PR runs on
+# plain `pull_request` don't receive OIDC, so configure-jfrog-pypi fails
+# with `ACTIONS_ID_TOKEN_REQUEST_TOKEN: unbound variable`.
 #
-# Untrusted code from fork PRs is gated by the repo's "Require approval
-# for outside collaborators" setting — fork-PR workflow runs are pending
-# until a maintainer explicitly approves them. The explicit head-SHA
-# checkout below is what actually exercises the PR's code.
+# Naively switching all PR runs to `pull_request_target` to get OIDC is
+# the classic "pwn request" footgun (GitHub Security Lab) — it runs
+# fork-controlled code in base-repo context with secrets/OIDC in scope.
+# H1 report #3730634 (PR #188) exploited exactly that.
+#
+# The compromise:
+#
+#   * push / same-repo pull_request → run normally. These already have
+#     OIDC; nothing fork-controlled is checked out.
+#   * Fork PR pull_request          → workflow fires but `build` is
+#     skipped by the job's `if` (cannot pass OIDC anyway).
+#   * Fork PR pull_request_target   → wired *only* to `types: [labeled]`
+#     and gated on `label.name == 'ok-to-test'`. The label add is the
+#     reviewer's explicit "I have read this diff; it's safe to execute"
+#     signal. The label is auto-stripped on every subsequent push
+#     (.github/workflows/strip-ok-to-test.yml) so each new commit
+#     re-requires approval.
+#
+# The explicit head-SHA checkout is the SHA the reviewer just labeled —
+# i.e. the version they signed off on.
 on:
   push:
     branches: [master]
@@ -18,8 +35,16 @@ on:
       - 'pyproject.toml'
       - 'requirements/**'
       - '.github/workflows/pylint.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - '**/*.py'
+      - 'pyproject.toml'
+      - 'requirements/**'
+      - '.github/workflows/pylint.yml'
   pull_request_target:
     branches: [master]
+    types: [labeled]
     paths:
       - '**/*.py'
       - 'pyproject.toml'
@@ -32,6 +57,11 @@ permissions:
 
 jobs:
   build:
+    # Gate fork PRs behind the `ok-to-test` label. See trigger model above.
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'ok-to-test' && github.event.pull_request.head.repo.full_name != github.repository)
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest
@@ -42,8 +72,9 @@ jobs:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
       with:
         # pull_request_target defaults to checking out the base ref; we want
-        # to lint the PR's actual code. For push/same-repo events the empty
-        # fallback resolves to the workflow ref.
+        # to lint the PR's actual code (specifically: the SHA the reviewer
+        # just labeled `ok-to-test`). For push/same-repo events the variable
+        # is empty and checkout falls back to the workflow ref.
         ref: ${{ github.event.pull_request.head.sha }}
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0

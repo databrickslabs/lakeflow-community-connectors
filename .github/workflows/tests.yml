@@ -1,11 +1,27 @@
 name: Tests
 
-# Triggers: see pull_request_target rationale in .github/workflows/pylint.yml.
+# Trigger model (full rationale in .github/workflows/pylint.yml):
+#
+#   * push to master            — internal/trusted; OIDC available.
+#   * pull_request (same-repo)  — internal-branch PRs only; OIDC available.
+#                                 Fork-PR pull_request events also fire here
+#                                 (we can't filter at trigger level), but
+#                                 the `changes` job's `if` skips them.
+#   * pull_request_target       — *only* on label add. A maintainer adding
+#     types: [labeled]            the `ok-to-test` label is the explicit
+#                                 approval signal that this fork commit is
+#                                 safe to execute with secrets in scope.
+#                                 The label is auto-stripped on every push
+#                                 (.github/workflows/strip-ok-to-test.yml)
+#                                 so each new commit re-requires approval.
 on:
   push:
     branches: [master]
+  pull_request:
+    branches: [master]
   pull_request_target:
     branches: [master]
+    types: [labeled]
 
 permissions:
   contents: read
@@ -14,6 +30,11 @@ permissions:
 jobs:
   # Detect which paths changed
   changes:
+    # Gate fork PRs behind the `ok-to-test` label. See trigger model above.
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'ok-to-test' && github.event.pull_request.head.repo.full_name != github.repository)
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest
@@ -33,12 +54,13 @@ jobs:
       - name: Check changed paths
         id: check
         run: |
-          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
-            BASE_SHA="${{ github.event.pull_request.base.sha }}"
-            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          else
+          if [ "${{ github.event_name }}" = "push" ]; then
             BASE_SHA="${{ github.event.before }}"
             HEAD_SHA="${{ github.event.after }}"
+          else
+            # pull_request (same-repo) or pull_request_target (labeled fork)
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
           fi
 
           # Handle initial commit or force push
