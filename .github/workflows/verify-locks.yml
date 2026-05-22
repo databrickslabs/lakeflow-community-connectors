@@ -14,18 +14,9 @@ on:
       - 'src/databricks/labs/community_connector/sources/**/pyproject.toml'
       - 'requirements/**'
       - 'tools/scripts/regenerate-locks.sh'
-  pull_request:
-    branches: [master]
-    paths:
-      - 'pyproject.toml'
-      - 'tools/community_connector/pyproject.toml'
-      - 'src/databricks/labs/community_connector/sources/**/pyproject.toml'
-      - 'requirements/**'
-      - 'tools/scripts/regenerate-locks.sh'
-      - '.github/workflows/verify-locks.yml'
   pull_request_target:
     branches: [master]
-    types: [labeled]
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - 'pyproject.toml'
       - 'tools/community_connector/pyproject.toml'
@@ -41,10 +32,7 @@ permissions:
 jobs:
   verify:
     # Gate fork PRs behind the `safe-to-test` label. See trigger model in pylint.yml.
-    if: >-
-      github.event_name == 'push' ||
-      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test' && github.event.pull_request.head.repo.full_name != github.repository)
+    if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository || (github.event.action == 'labeled' && github.event.label.name == 'safe-to-test') }}
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest

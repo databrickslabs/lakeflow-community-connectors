@@ -3,27 +3,27 @@ name: Pylint
 # Trigger model. CI needs the GitHub OIDC token because the protected
 # runner group's only egress to PyPI is the JFrog proxy
 # (.github/actions/configure-jfrog-pypi), and the proxy authenticates by
-# exchanging an OIDC ID token for a JFrog access token. Fork-PR runs on
-# plain `pull_request` don't receive OIDC, so configure-jfrog-pypi fails
-# with `ACTIONS_ID_TOKEN_REQUEST_TOKEN: unbound variable`.
+# exchanging an OIDC ID token for a JFrog access token. Plain
+# `pull_request` events from forks don't receive OIDC, so we can't use
+# that trigger for fork PRs at all.
 #
-# Naively switching all PR runs to `pull_request_target` to get OIDC is
-# the classic "pwn request" footgun (GitHub Security Lab) — it runs
-# fork-controlled code in base-repo context with secrets/OIDC in scope.
-# H1 report #3730634 (PR #188) exploited exactly that.
+# Naively using `pull_request_target` for every PR event would give
+# fork-controlled code the OIDC token — the classic "pwn request"
+# footgun (GitHub Security Lab). H1 #3730634 (PR #188) exploited that.
 #
-# The compromise:
+# So: a single `pull_request_target` trigger for all PR events, with a
+# job-level `if` that decides what actually runs:
 #
-#   * push / same-repo pull_request → run normally. These already have
-#     OIDC; nothing fork-controlled is checked out.
-#   * Fork PR pull_request          → workflow fires but `build` is
-#     skipped by the job's `if` (cannot pass OIDC anyway).
-#   * Fork PR pull_request_target   → wired *only* to `types: [labeled]`
-#     and gated on `label.name == 'safe-to-test'`. The label add is the
-#     reviewer's explicit "I have read this diff; it's safe to execute"
-#     signal. The label is auto-stripped on every subsequent push
-#     (.github/workflows/strip-safe-to-test.yml) so each new commit
-#     re-requires approval.
+#   * push to master           — always runs.
+#   * same-repo PR (any event) — runs.
+#   * fork PR opened/sync/etc. — skipped (no fork code executes).
+#   * fork PR labeled          — runs *only* if the added label is
+#                                `safe-to-test`. That label is the
+#                                reviewer's "I read this diff; it's safe
+#                                to execute on the runner" signal. The
+#                                label auto-strips on every subsequent
+#                                push (strip-safe-to-test.yml) so each
+#                                new commit re-requires approval.
 #
 # The explicit head-SHA checkout is the SHA the reviewer just labeled —
 # i.e. the version they signed off on.
@@ -35,16 +35,9 @@ on:
       - 'pyproject.toml'
       - 'requirements/**'
       - '.github/workflows/pylint.yml'
-  pull_request:
-    branches: [master]
-    paths:
-      - '**/*.py'
-      - 'pyproject.toml'
-      - 'requirements/**'
-      - '.github/workflows/pylint.yml'
   pull_request_target:
     branches: [master]
-    types: [labeled]
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - '**/*.py'
       - 'pyproject.toml'
@@ -58,10 +51,7 @@ permissions:
 jobs:
   build:
     # Gate fork PRs behind the `safe-to-test` label. See trigger model above.
-    if: >-
-      github.event_name == 'push' ||
-      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test' && github.event.pull_request.head.repo.full_name != github.repository)
+    if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository || (github.event.action == 'labeled' && github.event.label.name == 'safe-to-test') }}
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest
@@ -73,8 +63,9 @@ jobs:
       with:
         # pull_request_target defaults to checking out the base ref; we want
         # to lint the PR's actual code (specifically: the SHA the reviewer
-        # just labeled `safe-to-test`). For push/same-repo events the variable
-        # is empty and checkout falls back to the workflow ref.
+        # just labeled `safe-to-test`, or the head SHA for same-repo PRs).
+        # For push events the variable is empty and checkout falls back to
+        # the workflow ref.
         ref: ${{ github.event.pull_request.head.sha }}
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
