@@ -19,10 +19,10 @@ name: Pylint
 #   * Fork PR pull_request          → workflow fires but `build` is
 #     skipped by the job's `if` (cannot pass OIDC anyway).
 #   * Fork PR pull_request_target   → wired *only* to `types: [labeled]`
-#     and gated on `label.name == 'ok-to-test'`. The label add is the
+#     and gated on `label.name == 'safe-to-test'`. The label add is the
 #     reviewer's explicit "I have read this diff; it's safe to execute"
 #     signal. The label is auto-stripped on every subsequent push
-#     (.github/workflows/strip-ok-to-test.yml) so each new commit
+#     (.github/workflows/strip-safe-to-test.yml) so each new commit
 #     re-requires approval.
 #
 # The explicit head-SHA checkout is the SHA the reviewer just labeled —
@@ -57,11 +57,11 @@ permissions:
 
 jobs:
   build:
-    # Gate fork PRs behind the `ok-to-test` label. See trigger model above.
+    # Gate fork PRs behind the `safe-to-test` label. See trigger model above.
     if: >-
       github.event_name == 'push' ||
       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'pull_request_target' && github.event.label.name == 'ok-to-test' && github.event.pull_request.head.repo.full_name != github.repository)
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test' && github.event.pull_request.head.repo.full_name != github.repository)
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest
@@ -73,7 +73,7 @@ jobs:
       with:
         # pull_request_target defaults to checking out the base ref; we want
         # to lint the PR's actual code (specifically: the SHA the reviewer
-        # just labeled `ok-to-test`). For push/same-repo events the variable
+        # just labeled `safe-to-test`). For push/same-repo events the variable
         # is empty and checkout falls back to the workflow ref.
         ref: ${{ github.event.pull_request.head.sha }}
     - name: Set up Python ${{ matrix.python-version }}

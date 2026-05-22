@@ -40,11 +40,11 @@ permissions:
 
 jobs:
   verify:
-    # Gate fork PRs behind the `ok-to-test` label. See trigger model in pylint.yml.
+    # Gate fork PRs behind the `safe-to-test` label. See trigger model in pylint.yml.
     if: >-
       github.event_name == 'push' ||
       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'pull_request_target' && github.event.label.name == 'ok-to-test' && github.event.pull_request.head.repo.full_name != github.repository)
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test' && github.event.pull_request.head.repo.full_name != github.repository)
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest

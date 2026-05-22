@@ -8,11 +8,11 @@ name: Tests
 #                                 (we can't filter at trigger level), but
 #                                 the `changes` job's `if` skips them.
 #   * pull_request_target       — *only* on label add. A maintainer adding
-#     types: [labeled]            the `ok-to-test` label is the explicit
+#     types: [labeled]            the `safe-to-test` label is the explicit
 #                                 approval signal that this fork commit is
 #                                 safe to execute with secrets in scope.
 #                                 The label is auto-stripped on every push
-#                                 (.github/workflows/strip-ok-to-test.yml)
+#                                 (.github/workflows/strip-safe-to-test.yml)
 #                                 so each new commit re-requires approval.
 on:
   push:
@@ -30,11 +30,11 @@ permissions:
 jobs:
   # Detect which paths changed
   changes:
-    # Gate fork PRs behind the `ok-to-test` label. See trigger model above.
+    # Gate fork PRs behind the `safe-to-test` label. See trigger model above.
     if: >-
       github.event_name == 'push' ||
       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'pull_request_target' && github.event.label.name == 'ok-to-test' && github.event.pull_request.head.repo.full_name != github.repository)
+      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test' && github.event.pull_request.head.repo.full_name != github.repository)
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest

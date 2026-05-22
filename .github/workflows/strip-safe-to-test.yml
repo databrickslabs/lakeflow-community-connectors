@@ -1,6 +1,6 @@
-name: Strip ok-to-test on new commits
+name: Strip safe-to-test on new commits
 
-# Every new push to a PR invalidates any prior `ok-to-test` review. This
+# Every new push to a PR invalidates any prior `safe-to-test` review. This
 # workflow removes the label automatically on `pull_request_target:
 # synchronize`, forcing the next CI run to require a fresh maintainer
 # approval against the new head SHA.
@@ -25,7 +25,7 @@ jobs:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest
     steps:
-      - name: Remove ok-to-test label if present
+      - name: Remove safe-to-test label if present
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -33,7 +33,7 @@ jobs:
         run: |
           # 404 if the label wasn't present — that's the common case, ignore.
           gh api -X DELETE \
-            "repos/${REPO}/issues/${PR_NUMBER}/labels/ok-to-test" \
+            "repos/${REPO}/issues/${PR_NUMBER}/labels/safe-to-test" \
             --silent 2>/dev/null && \
-            echo "Removed ok-to-test (new commits require re-approval)." || \
-            echo "ok-to-test was not set; nothing to remove."
+            echo "Removed safe-to-test (new commits require re-approval)." || \
+            echo "safe-to-test was not set; nothing to remove."
