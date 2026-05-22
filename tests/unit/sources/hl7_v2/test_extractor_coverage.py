@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.unit.sources.hl7_v2._helpers import SAMPLES_DIR, load_sample, segments_of_type
+from tests.unit.sources.hl7_v2.hl7_v2_test_utils import SAMPLES_DIR, load_sample, segments_of_type
 
 from databricks.labs.community_connector.sources.hl7_v2.hl7_v2 import (
     _EXTRACTORS,

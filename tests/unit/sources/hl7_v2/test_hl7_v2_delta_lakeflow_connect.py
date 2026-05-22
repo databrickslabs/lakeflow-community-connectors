@@ -7,8 +7,6 @@ serves rows projected from the same ``messages`` corpus the GCP handler
 uses. To exercise a real Delta table, set ``CONNECTOR_TEST_MODE=live``.
 """
 
-import json
-
 from databricks.labs.community_connector.sources.hl7_v2.hl7_v2 import HL7V2LakeflowConnect
 from tests.unit.sources.test_suite import LakeflowConnectTests
 
@@ -29,11 +27,3 @@ class TestHL7V2DeltaConnector(LakeflowConnectTests):
         "sql_warehouse_id": "sim-warehouse-id",
         "delta_query_mode": "per_window",
     }
-
-    @classmethod
-    def _load_table_configs(cls):
-        path = cls._config_dir() / "dev_table_config_delta.json"
-        if not path.exists():
-            return {}
-        with open(path, "r") as f:
-            return json.load(f)

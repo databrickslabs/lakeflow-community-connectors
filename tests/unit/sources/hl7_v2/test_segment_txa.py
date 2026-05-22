@@ -6,7 +6,7 @@ One row per message.
 """
 from __future__ import annotations
 
-from tests.unit.sources.hl7_v2._helpers import extract_segment, load_sample, parse_first
+from tests.unit.sources.hl7_v2.hl7_v2_test_utils import extract_segment, load_sample, parse_first
 
 from databricks.labs.community_connector.sources.hl7_v2.hl7_v2 import _extract_txa
 from databricks.labs.community_connector.sources.hl7_v2.hl7_v2_parser import (
@@ -20,14 +20,15 @@ class TestTXAExtraction:
         row = extract_segment(msg, "TXA", _extract_txa)
         assert row["document_type"] == "DS"
         assert row["document_content_presentation"] == "TX"
-        assert row["primary_activity_provider_id"] == "DOC005"
-        assert row["originator_id"] == "DOC005"
-        assert row["transcriptionist_id"] == "TRANS001"
+        assert row["primary_activity_provider"][0]["id"] == "DOC005"
+        assert row["originator"][0]["id"] == "DOC005"
+        assert row["transcriptionist"][0]["id"] == "TRANS001"
         assert row["unique_document_number"] == "TXA10001"
         assert row["unique_document_file_name"] == "DISCHSUM_20240320.txt"
         assert row["document_completion_status"] == "AU"
         assert row["document_availability_status"] == "AV"
-        assert row["document_title"] == "Discharge Summary for Baker, James"
+        # TXA-25 is now ArrayType<STRING> (0..* per spec, v2.9+)
+        assert row["document_title"][0] == "Discharge Summary for Baker, James"
         assert row["activity_datetime"] is not None
         assert row["origination_datetime"] is not None
 
@@ -44,7 +45,7 @@ class TestTXAMissingFields:
         assert row["document_content_presentation"] is None
         assert row["activity_datetime"] is None
         assert row["origination_datetime"] is None
-        assert row["primary_activity_provider_id"] is None
+        assert row["primary_activity_provider"] is None
         assert row["unique_document_number"] is None
         assert row["document_title"] is None
 
@@ -57,4 +58,4 @@ class TestTXAMissingFields:
         assert row["document_type"] == "HP"
         assert row["document_content_presentation"] == "TX"
         assert row["activity_datetime"] is not None
-        assert row["primary_activity_provider_id"] == "DOC001"
+        assert row["primary_activity_provider"][0]["id"] == "DOC001"

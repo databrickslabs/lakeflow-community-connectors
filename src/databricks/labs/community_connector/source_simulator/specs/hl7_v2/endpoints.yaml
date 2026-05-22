@@ -36,13 +36,22 @@ endpoints:
       count: 3
 
   # ------------------------------------------------------------------
-  # Databricks SQL Statement Execution API — Delta mode.
+  # Databricks workspace config discovery.
+  # The databricks-sdk hits this on first use to learn the workspace's
+  # OIDC endpoint, account id, cloud provider, etc.  The connector
+  # never reads the body, but the call must succeed or the SDK errors
+  # before any SQL statement is submitted.
   # ------------------------------------------------------------------
-  - path: "/api/2.0/sql/statements/"
-    method: POST
-    corpus: messages
-    handler: databricks.labs.community_connector.source_simulator.specs.hl7_v2.handlers.delta_sql:submit_statement
+  - path: "/.well-known/databricks-config"
+    method: GET
+    handler: databricks.labs.community_connector.source_simulator.specs.hl7_v2.handlers.databricks_config:serve_workspace_config
 
+  # ------------------------------------------------------------------
+  # Databricks SQL Statement Execution API — Delta mode.
+  # The submit handler returns inline SUCCEEDED results so the SDK
+  # doesn't poll.  The poll endpoint is declared for safety but should
+  # never fire for our short-running preload / per-window queries.
+  # ------------------------------------------------------------------
   - path: "/api/2.0/sql/statements"
     method: POST
     corpus: messages

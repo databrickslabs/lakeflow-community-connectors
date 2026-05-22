@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import textwrap
 
-from tests.unit.sources.hl7_v2._helpers import parse_first, segments_of_type
+from tests.unit.sources.hl7_v2.hl7_v2_test_utils import parse_first, segments_of_type
 
 from databricks.labs.community_connector.sources.hl7_v2.hl7_v2 import _extract_generic
 from databricks.labs.community_connector.sources.hl7_v2.hl7_v2_parser import (

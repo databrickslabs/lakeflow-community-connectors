@@ -6,7 +6,7 @@ can appear per message.
 """
 from __future__ import annotations
 
-from tests.unit.sources.hl7_v2._helpers import extract_segment, load_sample, parse_first
+from tests.unit.sources.hl7_v2.hl7_v2_test_utils import extract_segment, load_sample, parse_first
 
 from databricks.labs.community_connector.sources.hl7_v2.hl7_v2 import (
     _extract_orc,
@@ -31,7 +31,8 @@ class TestORCExtraction:
         assert row["order_control"] == "RE"
         assert row["placer_order_number"] == "201912"
         assert row["filler_order_number"] == "21MP000052"
-        assert row["ordering_facility_name"] == "San Francisco Public Health Lab"
+        # ORC-21 is XON repeatable per spec; flattened to an array of structs.
+        assert row["ordering_facility_name"][0]["name"] == "San Francisco Public Health Lab"
 
     def test_batch_orc(self):
         raw = load_sample("sample_batch_mixed.hl7")
@@ -52,7 +53,8 @@ class TestORCMissingFields:
         assert row["placer_order_number"] is None
         assert row["filler_order_number"] is None
         assert row["order_status"] is None
-        assert row["ordering_provider_id"] is None
+        # ORC-12 is XCN repeatable per spec; flattened to an array of structs (None when empty).
+        assert row["ordering_provider"] is None
         assert row["ordering_facility_name"] is None
 
     def test_orc_new_order(self):

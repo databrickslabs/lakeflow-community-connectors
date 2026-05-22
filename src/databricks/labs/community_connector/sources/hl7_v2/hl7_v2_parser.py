@@ -178,7 +178,8 @@ class HL7Segment:
     def get_rep_sub_component(
         self, field_n: int, rep_n: int, comp_n: int, sub_n: int, default: str = ""
     ) -> str:
-        """Return sub-component *sub_n* of component *comp_n* from repetition *rep_n* of field *field_n*.
+        """Return sub-component *sub_n* of component *comp_n* from repetition
+        *rep_n* of field *field_n*.
 
         All indices are 1-based.
         """

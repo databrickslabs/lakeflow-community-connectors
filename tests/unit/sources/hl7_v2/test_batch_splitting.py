@@ -5,7 +5,7 @@ stripping, multi-message batches.
 """
 from __future__ import annotations
 
-from tests.unit.sources.hl7_v2._helpers import load_sample
+from tests.unit.sources.hl7_v2.hl7_v2_test_utils import load_sample
 
 from databricks.labs.community_connector.sources.hl7_v2.hl7_v2 import _split_messages
 from databricks.labs.community_connector.sources.hl7_v2.hl7_v2_parser import (

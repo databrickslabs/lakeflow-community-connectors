@@ -99,6 +99,8 @@ The object list is **static** — defined by the HL7 v2 specification. Each segm
 |---|---|---|---|
 | `txa` | TXA | 28 | Transcription Document Header — document metadata and status |
 
+> **Note on field counts.** The field count in each row above reflects the number of HL7 segment field positions (e.g. MSH.1 through MSH.28), not the number of Spark columns. Composite types (CWE, XCN, CX, EIP, SPS, TQ, MOC, DLN, OG, etc.) expand into multiple Spark columns per position — the actual Spark schema has many more columns than the HL7 field count. See the per-segment tables below for the full column breakdown.
+
 Additionally, arbitrary **Z-segments** (site-specific custom segments) can be ingested using the `segment_type` table option, producing a generic schema with `field_1` … `field_25` columns.
 
 Not all messages contain all segments. For example, ADT messages typically include MSH, EVN, PID, PD1, PV1, PV2, NK1, AL1, DG1 but not OBR/OBX; ORU messages include MSH, PID, ORC, OBR, OBX, SPM but may omit EVN, AL1, DG1, NK1; DFT messages include MSH, EVN, PID, PV1, FT1, DG1, GT1, IN1.
@@ -107,7 +109,33 @@ Not all messages contain all segments. For example, ADT messages typically inclu
 
 ## **Object Schema**
 
-Schemas are **static** — defined by the HL7 v2.5.1 specification. There is no API to discover schemas; they are embedded in the connector code based on the segment definitions below.
+Schemas are **static** — defined by the **HL7 v2.9 specification** (the latest version, a strict superset of v2.1–v2.8). They are embedded in `hl7_v2_schemas.py` based on the segment definitions below; there is no API to discover them at runtime.
+
+**A note on spec version and the `Source:` links per segment.** The per-segment links below point to the Caristix HL7 v2.5.1 reference because that's the most widely-used freely-available HL7 v2 documentation. Since v2.9 is backwards-compatible with v2.5.1, every field documented in those v2.5.1 references is also a valid v2.9 field. The field tables below include the full v2.9 field set — fields added in v2.6+ are explicitly marked with `(added in v2.X)` in their descriptions where it matters. Notable additions vs v2.5.1: OBX adds fields 26–33 (v2.8+/v2.9+), OBR adds fields 51–55 (v2.8+/v2.9+), ORC adds fields 32–38 (v2.6+/v2.9+), SPM adds fields 30–35 (v2.6+/v2.9+), NTE adds fields 5–9 (v2.6+), IAM adds fields 21–30 (v2.6+), PR1 adds fields 21–25 (v2.6+/v2.7+), PV1 adds fields 53–54 (v2.8+/v2.9+), PV2 adds field 50 (v2.9+), NK1 adds fields 40–41 (v2.7+), PD1 adds fields 22–23 (v2.8+/v2.9+), MSH adds fields 22–28 (v2.6+/v2.7+), IN1 adds fields 54–55 (v2.8+/v2.9+), RXA adds fields 27–29 (v2.6+/v2.9+), SCH adds field 28 (v2.9+), TXA adds fields 24–28 (v2.6+/v2.8+/v2.9+).
+
+**A note on column naming.** Spark column names in `hl7_v2_schemas.py` are pragmatic shortenings of HL7 spec field names, chosen for readability and consistency with the connector's existing conventions. The mapping is usually obvious but a few cases need a bridge note for future maintainers:
+
+| HL7 spec field | Spark column prefix | Why |
+|---|---|---|
+| OBX.8 "Abnormal Flags" (v2.5.1) / "Interpretation Codes" (v2.7+) | `interpretation_codes` | Code follows v2.7+ rename; same field position, type changed from IS to CWE |
+| OBR.4 "Universal Service Identifier" | `service` | Shorter and unambiguous in OBR context |
+| PID.3 "Patient Identifier List" | `patient_id` (and `patient_id_namespace_id`, etc.) | Matches industry-standard MRN terminology |
+| PID.18 "Patient Account Number" | `patient_account` | Shorter; suffix `_number` is implicit |
+| PID.20 "Driver's License Number" (DLN) | `drivers_license_number`, `drivers_license_issuing_state`, `drivers_license_expiration_date` | DLN composite expanded into 3 flat columns |
+| MRG.1 "Prior Patient Identifier List" | `prior_patient_id` | Mirrors PID.3 |
+| ORC.26 "Advanced Beneficiary Notice Override Reason" | `abn_override_reason` | Standard healthcare abbreviation |
+| OBR.23 "Charge to Practice" (MOC) | `charge_to_practice_monetary_amount`, `charge_to_practice_monetary_amount_currency`, `charge_to_practice_charge_code`, `charge_to_practice_charge_code_text`, `charge_to_practice_charge_code_coding_system` | MOC expanded into 5 flat columns |
+| OBR.15 "Specimen Source" (SPS) | `specimen_source`, `specimen_source_text`, `specimen_source_additives`, `specimen_source_collection_method`, `specimen_source_body_site`, `specimen_source_site_modifier`, `specimen_source_collection_method_modifier`, `specimen_source_role` | SPS expanded into 8 flat columns |
+| OBR.27 / ORC.7 "Quantity/Timing" (TQ) | `quantity_timing` (`ARRAY<STRUCT>`) | TQ repeating; stored as array-of-struct |
+| OBR.29 "Parent" (EIP) | `parent_results_observation_identifier_placer_assigned_identifier`, `…_filler_assigned_identifier`, etc. | EIP expanded into 8 flat columns (4 per EI component) |
+| OBX.4 "Observation Sub-ID" (OG v2.8.2+) | `observation_sub_id`, `observation_sub_id_group`, `observation_sub_id_sequence`, `observation_sub_id_identifier` | OG expanded into 4 flat columns; OG.1 is backward-compatible with legacy ST sub-IDs |
+| NK1.33 "Next of Kin / Associated Parties Identifiers" | `associated_party_identifiers` | Shortened from HL7 spec label |
+| NK1.38 "Birth Place" | `birth_place` | Field renamed from prior `nk_birth_place` to match PID convention |
+| RXA.1 "Give Sub-ID Counter" | `administration_sub_id_counter` | Disambiguates from RXA.2 / RXA.3 |
+| MSH.9 "Message Type" (CWE composite) | `message_code` + `trigger_event` + `message_structure` | The 3 components are exposed as separate columns |
+| MSH.20 "Alternate Character Set Handling Scheme" | `alt_character_set_handling` | Shorter; same field |
+
+Composite fields always expand into multiple Spark columns (one per component / sub-component). See **Field Type Mapping** below for the per-type expansion rules.
 
 Every table includes four common columns for traceability and joining:
 
@@ -118,7 +146,7 @@ Every table includes four common columns for traceability and joining:
 | `hl7_version` | MSH-12 | STRING | HL7 version string (e.g. `2.5.1`) |
 | `source_file` | filename | STRING | Source `.hl7` filename for traceability |
 
-### MSH — Message Header (21 fields)
+### MSH — Message Header (28 fields)
 
 Source: [Caristix HL7v2.5.1 MSH](https://hl7-definition.caristix.com/v2/HL7v2.5.1/Segments/MSH)
 
@@ -126,25 +154,32 @@ Source: [Caristix HL7v2.5.1 MSH](https://hl7-definition.caristix.com/v2/HL7v2.5.
 |---|---|---|---|---|---|---|
 | MSH.1 | Field Separator | ST | R | 1 | 1 | Always `\|` |
 | MSH.2 | Encoding Characters | ST | R | 4 | 1 | Default `^~\&` — component, repetition, escape, subcomponent separators |
-| MSH.3 | Sending Application | HD | O | 227 | 1 | Source application identifier |
-| MSH.4 | Sending Facility | HD | O | 227 | 1 | Source facility identifier |
-| MSH.5 | Receiving Application | HD | O | 227 | 1 | Destination application identifier |
-| MSH.6 | Receiving Facility | HD | O | 227 | 1 | Destination facility identifier |
+| MSH.3 | Sending Application | HD | O | 227 | 1 | Source application identifier. Spark columns: `sending_application` (HD.1), `sending_application_universal_id` (HD.2), `sending_application_universal_id_type` (HD.3) |
+| MSH.4 | Sending Facility | HD | O | 227 | 1 | Source facility identifier. Spark columns: `sending_facility`, `sending_facility_universal_id`, `sending_facility_universal_id_type` |
+| MSH.5 | Receiving Application | HD | O | 227 | 1 | Destination application identifier. Spark columns: `receiving_application`, `receiving_application_universal_id`, `receiving_application_universal_id_type` |
+| MSH.6 | Receiving Facility | HD | O | 227 | 1 | Destination facility identifier. Spark columns: `receiving_facility`, `receiving_facility_universal_id`, `receiving_facility_universal_id_type` |
 | MSH.7 | Date/Time Of Message | TS | R | 26 | 1 | Message timestamp (YYYYMMDDHHMMSS format) |
 | MSH.8 | Security | ST | O | 40 | 1 | Security classification |
-| MSH.9 | Message Type | MSG | R | 15 | 1 | Message type (e.g. `ADT^A01^ADT_A01`) — components: message code, trigger event, structure |
+| MSH.9 | Message Type | MSG | R | 15 | 1 | Message type (e.g. `ADT^A01^ADT_A01`) — components stored as: `message_code` (MSH.9.1), `trigger_event` (MSH.9.2), `message_structure` (MSH.9.3) |
 | MSH.10 | Message Control ID | ST | R | 20 | 1 | Unique message identifier — used as join key across all tables |
-| MSH.11 | Processing ID | PT | R | 3 | 1 | `P` (production), `T` (test), `D` (debug) |
-| MSH.12 | Version ID | VID | R | 60 | 1 | HL7 version (e.g. `2.5.1`) |
+| MSH.11 | Processing ID | PT | R | 3 | 1 | `P` (production), `T` (test), `D` (debug). Spark columns: `processing_id` (PT.1), `processing_id_mode` (PT.2) |
+| MSH.12 | Version ID | VID | R | 60 | 1 | HL7 version (e.g. `2.5.1`). Spark columns: `version_id` (VID.1), `version_id_internationalization*` (VID.2 CWE — 3 cols), `version_id_international_version*` (VID.3 CWE — 3 cols) |
 | MSH.13 | Sequence Number | NM | O | 15 | 1 | Sequence number for continuous messaging |
 | MSH.14 | Continuation Pointer | ST | O | 180 | 1 | Continuation pointer for fragmented messages |
 | MSH.15 | Accept Acknowledgment Type | ID | O | 2 | 1 | `AL` (always), `NE` (never), `ER` (error/reject), `SU` (success) |
 | MSH.16 | Application Acknowledgment Type | ID | O | 2 | 1 | Same values as MSH.15 |
 | MSH.17 | Country Code | ID | O | 3 | 1 | ISO 3166 country code |
-| MSH.18 | Character Set | ID | O | 16 | * | Character encoding (e.g. `ASCII`, `8859/1`, `UNICODE UTF-8`) |
-| MSH.19 | Principal Language Of Message | CE | O | 250 | 1 | Language code |
+| MSH.18 | Character Set | ID | O | 16 | * | Character encoding (e.g. `ASCII`, `8859/1`, `UNICODE UTF-8`). Stored as `ARRAY<STRING>` |
+| MSH.19 | Principal Language Of Message | CWE | O | 250 | 1 | Language code. Spark columns: `principal_language`, `principal_language_text`, `principal_language_coding_system`, `principal_language_alt_code`, `principal_language_alt_text`, `principal_language_alt_coding_system`, `principal_language_coding_system_version`, `principal_language_alt_coding_system_version`, `principal_language_original_text` |
 | MSH.20 | Alternate Character Set Handling Scheme | ID | O | 20 | 1 | `ISO 2022-1994` or `2.3` |
-| MSH.21 | Message Profile Identifier | EI | O | 427 | * | Conformance profile IDs |
+| MSH.21 | Message Profile Identifier | EI | O | 427 | * | Conformance profile IDs. Stored as `ARRAY<STRUCT<entity_identifier, namespace_id, universal_id, universal_id_type>>` |
+| MSH.22 | Sending Responsible Organization | XON | O | 567 | 1 | (added in v2.6) Sending responsible organization. Spark columns: `sending_responsible_org`, `sending_responsible_org_type_code`, `sending_responsible_org_id`, `sending_responsible_org_check_digit`, `sending_responsible_org_check_digit_scheme`, `sending_responsible_org_assigning_authority*` (HD — 3 cols), `sending_responsible_org_id_type_code`, `sending_responsible_org_assigning_facility*` (HD — 3 cols), `sending_responsible_org_name_rep_code`, `sending_responsible_org_identifier` |
+| MSH.23 | Receiving Responsible Organization | XON | O | 567 | 1 | (added in v2.6) Receiving responsible organization. Spark columns: `receiving_responsible_org`, `receiving_responsible_org_type_code`, `receiving_responsible_org_id`, `receiving_responsible_org_check_digit`, `receiving_responsible_org_check_digit_scheme`, `receiving_responsible_org_assigning_authority*` (HD — 3 cols), `receiving_responsible_org_id_type_code`, `receiving_responsible_org_assigning_facility*` (HD — 3 cols), `receiving_responsible_org_name_rep_code`, `receiving_responsible_org_identifier` |
+| MSH.24 | Sending Network Address | HD | O | 227 | 1 | (added in v2.6) Network address of sending application. Spark columns: `sending_network_address`, `sending_network_address_universal_id`, `sending_network_address_universal_id_type` |
+| MSH.25 | Receiving Network Address | HD | O | 227 | 1 | (added in v2.6) Network address of receiving application. Spark columns: `receiving_network_address`, `receiving_network_address_universal_id`, `receiving_network_address_universal_id_type` |
+| MSH.26 | Security Classification Tag | CWE | O | 705 | 1 | (added in v2.7) Data classification label for security. Spark columns: `security_classification_tag`, `security_classification_tag_text`, `security_classification_tag_coding_system`, `security_classification_tag_alt_code`, `security_classification_tag_alt_text`, `security_classification_tag_alt_coding_system`, `security_classification_tag_coding_system_version`, `security_classification_tag_alt_coding_system_version`, `security_classification_tag_original_text` |
+| MSH.27 | Security Handling Instructions | CWE | O | 705 | * | (added in v2.7) Handling instructions for secure messaging. Stored as `ARRAY<STRUCT<...9 CWE fields...>>` |
+| MSH.28 | Special Access Restriction Instructions | CWE | O | 705 | * | (added in v2.7.1) Special access restriction codes. Stored as `ARRAY<STRUCT<...9 CWE fields...>>` |
 
 ### EVN — Event Type (7 fields)
 
@@ -160,7 +195,7 @@ Source: [Caristix HL7v2.5.1 EVN](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | EVN.6 | Event Occurred | TS | O | 26 | 1 | When the clinical event actually occurred |
 | EVN.7 | Event Facility | HD | O | 241 | 1 | Facility where event occurred |
 
-### PID — Patient Identification (39 fields)
+### PID — Patient Identification (40 fields)
 
 Source: [Caristix HL7v2.5.1 PID](https://hl7-definition.caristix.com/v2/HL7v2.5.1/Segments/PID)
 
@@ -168,45 +203,46 @@ Source: [Caristix HL7v2.5.1 PID](https://hl7-definition.caristix.com/v2/HL7v2.5.
 |---|---|---|---|---|---|---|
 | PID.1 | Set ID - PID | SI | O | 4 | 1 | Sequence number |
 | PID.2 | Patient ID | CX | B | 20 | 1 | Deprecated — use PID.3 |
-| PID.3 | Patient Identifier List | CX | R | 250 | * | MRN and other patient identifiers (component 1 = ID value) |
+| PID.3 | Patient Identifier List | CX | R | 250 | * | MRN and other patient identifiers. CX expanded into 16 flat columns per repetition. Stored as `ARRAY<STRUCT<...16 CX fields...>>` |
 | PID.4 | Alternate Patient ID - PID | CX | B | 20 | * | Deprecated — use PID.3 |
-| PID.5 | Patient Name | XPN | R | 250 | * | Family name (comp 1), given name (comp 2), middle (comp 3) |
+| PID.5 | Patient Name | XPN | R | 250 | * | Family name (comp 1), given name (comp 2), middle (comp 3). Stored as `ARRAY<STRUCT<...XPN fields...>>` |
 | PID.6 | Mother's Maiden Name | XPN | O | 250 | * | Mother's maiden name |
-| PID.7 | Date/Time of Birth | TS | O | 26 | 1 | DOB in YYYYMMDD format |
-| PID.8 | Administrative Sex | IS | O | 1 | 1 | `M`, `F`, `U`, `A`, `N`, `O` (Table 0001) |
-| PID.9 | Patient Alias | XPN | B | 250 | * | Deprecated |
-| PID.10 | Race | CE | O | 250 | * | Race code (Table 0005) |
-| PID.11 | Patient Address | XAD | O | 250 | * | Street (comp 1), city (comp 3), state (comp 4), zip (comp 5) |
-| PID.12 | County Code | IS | B | 4 | 1 | Deprecated |
-| PID.13 | Phone Number - Home | XTN | O | 250 | * | Home phone number |
-| PID.14 | Phone Number - Business | XTN | O | 250 | * | Business phone number |
-| PID.15 | Primary Language | CE | O | 250 | 1 | Primary language (Table 0296) |
-| PID.16 | Marital Status | CE | O | 250 | 1 | Marital status (Table 0002) |
-| PID.17 | Religion | CE | O | 250 | 1 | Religion (Table 0006) |
-| PID.18 | Patient Account Number | CX | O | 250 | 1 | Account number |
-| PID.19 | SSN Number - Patient | ST | B | 16 | 1 | Deprecated — use PID.3 |
-| PID.20 | Driver's License Number | DLN | B | 25 | 1 | Deprecated — use PID.3 |
-| PID.21 | Mother's Identifier | CX | O | 250 | * | Mother's patient identifier |
-| PID.22 | Ethnic Group | CE | O | 250 | * | Ethnicity (Table 0189) |
-| PID.23 | Birth Place | ST | O | 250 | 1 | Birth location |
-| PID.24 | Multiple Birth Indicator | ID | O | 1 | 1 | Y/N (Table 0136) |
-| PID.25 | Birth Order | NM | O | 2 | 1 | Birth order for multiple births |
-| PID.26 | Citizenship | CE | O | 250 | * | Citizenship (Table 0171) |
-| PID.27 | Veterans Military Status | CE | O | 250 | 1 | Veterans status (Table 0172) |
-| PID.28 | Nationality | CE | B | 250 | 1 | Deprecated |
-| PID.29 | Patient Death Date and Time | TS | O | 26 | 1 | Death datetime |
-| PID.30 | Patient Death Indicator | ID | O | 1 | 1 | Y/N (Table 0136) |
-| PID.31 | Identity Unknown Indicator | ID | O | 1 | 1 | Y/N (Table 0136) |
-| PID.32 | Identity Reliability Code | IS | O | 20 | * | Reliability code (Table 0445) |
-| PID.33 | Last Update Date/Time | TS | O | 26 | 1 | Last demographics update |
-| PID.34 | Last Update Facility | HD | O | 241 | 1 | Facility that last updated |
-| PID.35 | Species Code | CE | C | 250 | 1 | Veterinary use (Table 0446) |
-| PID.36 | Breed Code | CE | C | 250 | 1 | Veterinary use (Table 0447) |
-| PID.37 | Strain | ST | O | 80 | 1 | Veterinary use |
-| PID.38 | Production Class Code | CE | O | 250 | 2 | Veterinary use (Table 0429) |
-| PID.39 | Tribal Citizenship | CWE | O | 250 | * | Tribal citizenship (Table 0171) |
+| PID.7 | Date/Time of Birth | TS | O | 26 | 1 | DOB in YYYYMMDD format. Spark column: `date_of_birth` (TimestampType) |
+| PID.8 | Administrative Sex | CWE | O | 250 | 1 | `M`, `F`, `U`, `A`, `N`, `O` (Table 0001). Spark columns: `administrative_sex`, `administrative_sex_text`, `administrative_sex_coding_system`, `administrative_sex_alt_code`, `administrative_sex_alt_text`, `administrative_sex_alt_coding_system`, `administrative_sex_coding_system_version`, `administrative_sex_alt_coding_system_version`, `administrative_sex_original_text` |
+| PID.9 | Patient Alias | XPN | B | 250 | * | Deprecated. Spark column: `patient_alias` |
+| PID.10 | Race | CWE | O | 250 | * | Race code (Table 0005). Stored as `ARRAY<STRUCT<...9 CWE fields...>>` |
+| PID.11 | Patient Address | XAD | O | 250 | * | Street (comp 1), city (comp 3), state (comp 4), zip (comp 5). Stored as `ARRAY<STRUCT<...XAD fields...>>` |
+| PID.12 | County Code | IS | B | 4 | 1 | Deprecated. Spark column: `county_code` |
+| PID.13 | Phone Number - Home | XTN | O | 250 | * | Home phone number. Stored as `ARRAY<STRUCT<...18 XTN fields...>>` |
+| PID.14 | Phone Number - Business | XTN | O | 250 | * | Business phone number. Stored as `ARRAY<STRUCT<...18 XTN fields...>>` |
+| PID.15 | Primary Language | CWE | O | 250 | 1 | Primary language (Table 0296). Spark columns: `primary_language`, `primary_language_text`, etc. (9 CWE cols) |
+| PID.16 | Marital Status | CWE | O | 250 | 1 | Marital status (Table 0002). Spark columns: `marital_status`, `marital_status_text`, etc. (9 CWE cols) |
+| PID.17 | Religion | CWE | O | 250 | 1 | Religion (Table 0006). Spark columns: `religion`, `religion_text`, etc. (9 CWE cols) |
+| PID.18 | Patient Account Number | CX | O | 250 | 1 | Account number. Spark columns: `patient_account_number`, `patient_account_number_check_digit`, etc. (16 CX cols) |
+| PID.19 | SSN Number - Patient | ST | B | 16 | 1 | Deprecated — use PID.3. Spark column: `ssn` |
+| PID.20 | Driver's License Number | DLN | B | 25 | 1 | DLN composite expanded into 3 flat columns: `drivers_license_number` (DLN.1, ST), `drivers_license_issuing_state` (DLN.2, IS — Table 0333), `drivers_license_expiration_date` (DLN.3, DT — TimestampType) |
+| PID.21 | Mother's Identifier | CX | O | 250 | * | Mother's patient identifier. Stored as `ARRAY<STRUCT<...16 CX fields...>>` |
+| PID.22 | Ethnic Group | CWE | O | 250 | * | Ethnicity (Table 0189). Stored as `ARRAY<STRUCT<...9 CWE fields...>>` |
+| PID.23 | Birth Place | ST | O | 250 | 1 | Birth location. Spark column: `birth_place` |
+| PID.24 | Multiple Birth Indicator | ID | O | 1 | 1 | Y/N (Table 0136). Spark column: `multiple_birth_indicator` |
+| PID.25 | Birth Order | NM | O | 2 | 1 | Birth order for multiple births. Spark column: `birth_order` (IntegerType) |
+| PID.26 | Citizenship | CWE | O | 250 | * | Citizenship (Table 0171). Stored as `ARRAY<STRUCT<...9 CWE fields...>>` |
+| PID.27 | Veterans Military Status | CWE | O | 250 | 1 | Veterans status (Table 0172). Spark columns: `veterans_military_status`, etc. (9 CWE cols) |
+| PID.28 | Nationality | CWE | B | 250 | 1 | Deprecated. Spark columns: `nationality`, etc. (9 CWE cols) |
+| PID.29 | Patient Death Date and Time | TS | O | 26 | 1 | Death datetime. Spark column: `patient_death_datetime` (TimestampType) |
+| PID.30 | Patient Death Indicator | ID | O | 1 | 1 | Y/N (Table 0136). Spark column: `patient_death_indicator` |
+| PID.31 | Identity Unknown Indicator | ID | O | 1 | 1 | Y/N (Table 0136). Spark column: `identity_unknown_indicator` |
+| PID.32 | Identity Reliability Code | CWE | O | 250 | * | Reliability code (Table 0445). Stored as `ARRAY<STRUCT<...9 CWE fields...>>` |
+| PID.33 | Last Update Date/Time | TS | O | 26 | 1 | Last demographics update. Spark column: `last_update_datetime` (TimestampType) |
+| PID.34 | Last Update Facility | HD | O | 241 | 1 | Facility that last updated. Spark columns: `last_update_facility`, `last_update_facility_universal_id`, `last_update_facility_universal_id_type` |
+| PID.35 | Species Code | CWE | C | 250 | 1 | Veterinary use (Table 0446). Spark columns: `species_code`, `species_code_text`, etc. (9 CWE cols) |
+| PID.36 | Breed Code | CWE | C | 250 | 1 | Veterinary use (Table 0447). Spark columns: `breed_code`, `breed_code_text`, etc. (9 CWE cols) |
+| PID.37 | Strain | ST | O | 80 | 1 | Veterinary use. Spark column: `strain` |
+| PID.38 | Production Class Code | CWE | O | 250 | 2 | Veterinary use (Table 0429). Spark columns: `production_class_code`, `production_class_code_text`, etc. (9 CWE cols) |
+| PID.39 | Tribal Citizenship | CWE | O | 250 | * | Tribal citizenship (Table 0171). Stored as `ARRAY<STRUCT<...9 CWE fields...>>` |
+| PID.40 | Patient Telecommunication Information | XTN | O | 2915 | * | (added in v2.7) Patient telecommunication. Stored as `ARRAY<STRUCT<...18 XTN fields...>>`. Spark column array prefix: `patient_telecom` |
 
-### PD1 — Patient Additional Demographic (21 fields)
+### PD1 — Patient Additional Demographic (23 fields)
 
 Source: [Caristix HL7v2.5.1 PD1](https://hl7-definition.caristix.com/v2/HL7v2.5.1/Segments/PD1)
 
@@ -232,9 +268,11 @@ Source: [Caristix HL7v2.5.1 PD1](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | PD1.18 | Publicity Code Effective Date | DT | O | 8 | 1 | Publicity code effective date |
 | PD1.19 | Military Branch | IS | O | 5 | 1 | Military branch (Table 0140) |
 | PD1.20 | Military Rank/Grade | IS | O | 2 | 1 | Military rank/grade (Table 0141) |
-| PD1.21 | Military Status | IS | O | 3 | 1 | Military status (Table 0142) |
+| PD1.21 | Military Status | CWE | O | 705 | 1 | Military status (Table 0142). Spark columns: `military_status`, `military_status_text`, `military_status_coding_system`, `military_status_alt_code`, `military_status_alt_text`, `military_status_alt_coding_system`, `military_status_coding_system_version`, `military_status_alt_coding_system_version`, `military_status_original_text` |
+| PD1.22 | Advance Directive Last Verified Date | DT | O | 8 | 1 | (added in v2.8) Date advance directive was last verified. Spark column: `advance_directive_last_verified_date` (TimestampType) |
+| PD1.23 | Retirement Date | DT | O | 8 | 1 | (added in v2.9) Date the patient retired. Spark column: `retirement_date` (TimestampType) |
 
-### PV1 — Patient Visit (52 fields)
+### PV1 — Patient Visit (54 fields)
 
 Source: [Caristix HL7v2.5.1 PV1](https://hl7-definition.caristix.com/v2/HL7v2.5.1/Segments/PV1)
 
@@ -242,7 +280,7 @@ Source: [Caristix HL7v2.5.1 PV1](https://hl7-definition.caristix.com/v2/HL7v2.5.
 |---|---|---|---|---|---|---|
 | PV1.1 | Set ID - PV1 | SI | O | 4 | 1 | Sequence number |
 | PV1.2 | Patient Class | IS | R | 1 | 1 | `I` (inpatient), `O` (outpatient), `E` (emergency), `P` (preadmit), `R` (recurring), `B` (obstetrics) (Table 0004) |
-| PV1.3 | Assigned Patient Location | PL | O | 80 | 1 | Point of care (comp 1), room (comp 2), bed (comp 3), facility (comp 4) |
+| PV1.3 | Assigned Patient Location | PL | O | 80 | 1 | All 11 PL components flattened via `_pl_fields()` (point_of_care, room, bed, facility, status, type, building, floor, description, comprehensive_id, assigning_authority) |
 | PV1.4 | Admission Type | IS | O | 2 | 1 | Admission type (Table 0007) |
 | PV1.5 | Preadmit Number | CX | O | 250 | 1 | Pre-admission identifier |
 | PV1.6 | Prior Patient Location | PL | O | 80 | 1 | Previous location |
@@ -292,8 +330,10 @@ Source: [Caristix HL7v2.5.1 PV1](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | PV1.50 | Alternate Visit ID | CX | O | 250 | 1 | Alternate visit identifier |
 | PV1.51 | Visit Indicator | IS | O | 1 | 1 | Visit indicator (Table 0326) |
 | PV1.52 | Other Healthcare Provider | XCN | B | 250 | * | Deprecated — use ROL segment |
+| PV1.53 | Service Episode Description | ST | O | 199 | 1 | (added in v2.8) Free-text description of the service episode. Spark column: `service_episode_description` |
+| PV1.54 | Service Episode Identifier | CX | O | 250 | 1 | (added in v2.9) Service episode identifier. CX expanded into 16 flat columns: `service_episode_identifier`, `service_episode_identifier_check_digit`, `service_episode_identifier_check_digit_scheme`, `service_episode_identifier_assigning_authority*` (HD — 3 cols), `service_episode_identifier_type_code`, `service_episode_identifier_assigning_facility*` (HD — 3 cols), `service_episode_identifier_effective_date`, `service_episode_identifier_expiration_date`, `service_episode_identifier_assigning_jurisdiction`, `service_episode_identifier_assigning_agency`, `service_episode_identifier_security_check`, `service_episode_identifier_security_check_scheme` |
 
-### PV2 — Patient Visit Additional Information (49 fields)
+### PV2 — Patient Visit Additional Information (50 fields)
 
 Source: [Caristix HL7v2.5.1 PV2](https://hl7-definition.caristix.com/v2/HL7v2.5.1/Segments/PV2)
 
@@ -347,9 +387,10 @@ Source: [Caristix HL7v2.5.1 PV2](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | PV2.46 | Patient Status Effective Date | DT | O | 8 | 1 | Patient status effective date |
 | PV2.47 | Expected LOA Return Date/Time | TS | O | 26 | 1 | Expected leave of absence return |
 | PV2.48 | Expected Pre-admission Testing Date/Time | TS | C | 26 | 1 | Expected pre-admission testing datetime |
-| PV2.49 | Notify Clergy Code | IS | O | 20 | * | Notify clergy code (Table 0534) |
+| PV2.49 | Notify Clergy Code | CWE | O | 705 | * | Notify clergy code (Table 0534). Stored as `ARRAY<STRUCT<...9 CWE fields...>>` |
+| PV2.50 | Advance Directive Last Verified Date | DT | O | 8 | 1 | (added in v2.9) Date advance directive was last verified. Spark column: `advance_directive_last_verified_date` (TimestampType) |
 
-### NK1 — Next of Kin / Associated Parties (39 fields)
+### NK1 — Next of Kin / Associated Parties (41 fields)
 
 Source: [Caristix HL7v2.5.1 NK1](https://hl7-definition.caristix.com/v2/HL7v2.5.1/Segments/NK1)
 
@@ -391,9 +432,11 @@ Source: [Caristix HL7v2.5.1 NK1](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | NK1.34 | Job Status | IS | O | 2 | 1 | Job status (Table 0311) |
 | NK1.35 | Race | CE | O | 250 | * | Race (Table 0005) |
 | NK1.36 | Handicap | IS | O | 2 | 1 | Handicap (Table 0295) |
-| NK1.37 | Social Security Number | ST | O | 16 | 1 | SSN |
-| NK1.38 | Birth Place | ST | O | 250 | 1 | Birth place |
-| NK1.39 | VIP Indicator | IS | O | 2 | 1 | VIP indicator (Table 0099) |
+| NK1.37 | Social Security Number | ST | O | 16 | 1 | SSN. Spark column: `contact_ssn` |
+| NK1.38 | Birth Place | ST | O | 250 | 1 | (added in v2.6) Birth place of the next of kin. Spark column: `birth_place` |
+| NK1.39 | VIP Indicator | CWE | O | 705 | 1 | VIP indicator (Table 0099). Spark columns: `vip_indicator`, `vip_indicator_text`, `vip_indicator_coding_system`, `vip_indicator_alt_code`, `vip_indicator_alt_text`, `vip_indicator_alt_coding_system`, `vip_indicator_coding_system_version`, `vip_indicator_alt_coding_system_version`, `vip_indicator_original_text` |
+| NK1.40 | Telecommunication Information | XTN | O | 2915 | 1 | (added in v2.7) Next of kin telecommunication information. Spark columns: `telecommunication_info_number`, `telecommunication_info_use_code`, `telecommunication_info_equipment_type`, `telecommunication_info_communication_address`, `telecommunication_info_country_code`, `telecommunication_info_area_code`, `telecommunication_info_local_number`, `telecommunication_info_extension`, and 10 more XTN component columns prefixed `telecommunication_info_*` |
+| NK1.41 | Contact Person's Telecommunication Information | XTN | O | 2915 | 1 | (added in v2.7) Contact person telecommunication information. Spark columns follow the same XTN expansion as NK1.40 with prefix `contact_telecommunication_info_*` |
 
 ### MRG — Merge Patient Information (7 fields)
 
@@ -422,34 +465,44 @@ Source: [Caristix HL7v2.5.1 AL1](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | AL1.5 | Allergy Reaction Code | ST | O | 15 | * | Reaction description (e.g. `HIVES`, `RASH`, `ANAPHYLAXIS`) |
 | AL1.6 | Identification Date | DT | B | 8 | 1 | Deprecated — date allergy was identified |
 
-### IAM — Patient Adverse Reaction Information (20 fields)
+### IAM — Patient Adverse Reaction Information (30 fields)
 
 Source: [Caristix HL7v2.5.1 IAM](https://hl7-definition.caristix.com/v2/HL7v2.5.1/Segments/IAM)
 
 | Position | Name | Data Type | Usage | Max Len | Rpt | Description |
 |---|---|---|---|---|---|---|
 | IAM.1 | Set ID - IAM | SI | R | 4 | 1 | Sequence number |
-| IAM.2 | Allergen Type Code | CE | O | 250 | 1 | Allergen type (Table 0127) — same values as AL1.2 |
-| IAM.3 | Allergen Code/Mnemonic/Description | CE | R | 250 | 1 | Allergen identifier (comp 1 = code, comp 2 = text) |
-| IAM.4 | Allergy Severity Code | CE | O | 250 | 1 | Allergy severity (Table 0128) |
-| IAM.5 | Allergy Reaction Code | ST | O | 15 | * | Reaction description |
-| IAM.6 | Allergy Action Code | CNE | R | 250 | 1 | Action code: `A` (add), `D` (delete), `U` (update) (Table 0323) |
-| IAM.7 | Allergy Unique Identifier | EI | C | 427 | 1 | Unique allergy identifier (comp 1 = entity ID) |
-| IAM.8 | Action Reason | ST | O | 60 | 1 | Reason for the action |
-| IAM.9 | Sensitivity to Causative Agent Code | CE | O | 250 | 1 | Sensitivity code (Table 0436) |
-| IAM.10 | Allergen Group Code/Mnemonic/Description | CE | O | 250 | 1 | Allergen group (comp 1 = code, comp 2 = text) |
-| IAM.11 | Onset Date | DT | O | 8 | 1 | Allergy onset date |
+| IAM.2 | Allergen Type Code | CWE | O | 705 | 1 | Allergen type (Table 0127) — same values as AL1.2. Spark columns: `allergen_type_code`, `allergen_type_code_text`, etc. (9 CWE cols) |
+| IAM.3 | Allergen Code/Mnemonic/Description | CWE | R | 705 | 1 | Allergen identifier. Spark columns: `allergen_code`, `allergen_code_text`, etc. (9 CWE cols) |
+| IAM.4 | Allergy Severity Code | CWE | O | 705 | 1 | Allergy severity (Table 0128). Spark columns: `allergy_severity_code`, `allergy_severity_code_text`, etc. (9 CWE cols) |
+| IAM.5 | Allergy Reaction Code | ST | O | 15 | * | Reaction description. Stored as `ARRAY<STRUCT<...9 CWE fields...>>` (modeled leniently as CWE-shape for real-world senders that emit CWE values) |
+| IAM.6 | Allergy Action Code | CWE | R | 705 | 1 | Action code: `A` (add), `D` (delete), `U` (update) (Table 0323). Spark columns: `allergy_action_code`, `allergy_action_code_text`, etc. (9 CWE cols) |
+| IAM.7 | Allergy Unique Identifier | EI | C | 427 | 1 | Unique allergy identifier. Spark columns: `allergy_unique_identifier`, `allergy_unique_identifier_namespace_id`, `allergy_unique_identifier_universal_id`, `allergy_unique_identifier_universal_id_type` |
+| IAM.8 | Action Reason | ST | O | 60 | 1 | Reason for the action. Spark column: `action_reason` |
+| IAM.9 | Sensitivity to Causative Agent Code | CWE | O | 705 | 1 | Sensitivity code (Table 0436). Spark columns: `sensitivity_to_causative_agent_code`, etc. (9 CWE cols) |
+| IAM.10 | Allergen Group Code/Mnemonic/Description | CWE | O | 705 | 1 | Allergen group. Spark columns: `allergen_group_code`, etc. (9 CWE cols) |
+| IAM.11 | Onset Date | DT | O | 8 | 1 | Allergy onset date. Spark column: `onset_date` (TimestampType) |
 | IAM.12 | Onset Date Text | ST | O | 60 | 1 | Free-text onset date description |
 | IAM.13 | Reported Date/Time | TS | O | 8 | 1 | When the allergy was reported |
-| IAM.14 | Reported By | XPN | O | 250 | 1 | Person who reported (comp 1 = family, comp 2 = given) |
-| IAM.15 | Relationship to Patient Code | CE | O | 250 | 1 | Reporter's relationship (Table 0063) |
-| IAM.16 | Alert Device Code | CE | O | 250 | 1 | Alert device (Table 0437) |
-| IAM.17 | Allergy Clinical Status Code | CE | O | 250 | 1 | Clinical status (Table 0438) |
-| IAM.18 | Statused by Person | XCN | O | 250 | 1 | Person who set status (comp 1 = ID) |
-| IAM.19 | Statused by Organization | XON | O | 250 | 1 | Organization that set status |
+| IAM.14 | Reported By | XCN | O | 250 | 1 | Person who reported. Spark columns: `reported_by_id`, `reported_by_family_name`, `reported_by_given_name`, etc. (23 XCN cols) |
+| IAM.15 | Relationship to Patient Code | CWE | O | 705 | 1 | Reporter's relationship (Table 0063). Spark columns: `relationship_to_patient_code`, etc. (9 CWE cols) |
+| IAM.16 | Alert Device Code | CWE | O | 705 | 1 | Alert device (Table 0437). Spark columns: `alert_device_code`, etc. (9 CWE cols) |
+| IAM.17 | Allergy Clinical Status Code | CWE | O | 705 | 1 | Clinical status (Table 0438). Spark columns: `allergy_clinical_status_code`, etc. (9 CWE cols) |
+| IAM.18 | Statused by Person | XCN | O | 250 | 1 | Person who set status. Spark columns: `statused_by_person_id`, `statused_by_person_family_name`, etc. (23 XCN cols) |
+| IAM.19 | Statused by Organization | XON | O | 250 | 1 | Organization that set status. Spark columns: `statused_by_organization`, `statused_by_organization_type_code`, etc. (14 XON cols) |
 | IAM.20 | Statused at Date/Time | TS | O | 8 | 1 | Status datetime |
+| IAM.21 | Inactivated by Person | XCN | O | 250 | 1 | (added in v2.6) Person who inactivated the record. Spark columns: `inactivated_by_person_id`, `inactivated_by_person_family_name`, etc. (23 XCN cols) |
+| IAM.22 | Inactivated Date/Time | TS | O | 26 | 1 | (added in v2.6) Date/time the record was inactivated. Spark column: `inactivated_datetime` |
+| IAM.23 | Initially Recorded by Person | XCN | O | 250 | 1 | (added in v2.6) Person who initially recorded the reaction. Spark columns: `initially_recorded_by_person_id`, `initially_recorded_by_person_family_name`, etc. (23 XCN cols) |
+| IAM.24 | Initially Recorded Date/Time | TS | O | 26 | 1 | (added in v2.6) Date/time the reaction was initially recorded. Spark column: `initially_recorded_datetime` |
+| IAM.25 | Modified by Person | XCN | O | 250 | 1 | (added in v2.6) Person who last modified the record. Spark columns: `modified_by_person_id`, `modified_by_person_family_name`, etc. (23 XCN cols) |
+| IAM.26 | Modified Date/Time | TS | O | 26 | 1 | (added in v2.6) Date/time the record was last modified. Spark column: `modified_datetime` |
+| IAM.27 | Clinician Identified Allergen Code | CWE | O | 705 | 1 | (added in v2.6) Allergen code as identified by the clinician. Spark columns: `clinician_identified_allergen_code`, etc. (9 CWE cols) |
+| IAM.28 | Initially Recorded by Organization | XON | O | 250 | 1 | (added in v2.6) Organization that initially recorded the reaction. Spark columns: `initially_recorded_by_organization`, etc. (14 XON cols) |
+| IAM.29 | Modified by Organization | XON | O | 250 | 1 | (added in v2.6) Organization that last modified the record. Spark columns: `modified_by_organization`, etc. (14 XON cols) |
+| IAM.30 | Inactivated by Organization | XON | O | 250 | 1 | (added in v2.6) Organization that inactivated the record. Spark columns: `inactivated_by_organization`, etc. (14 XON cols) |
 
-### DG1 — Diagnosis (21 fields)
+### DG1 — Diagnosis (26 fields)
 
 Source: [Caristix HL7v2.5.1 DG1](https://hl7-definition.caristix.com/v2/HL7v2.5.1/Segments/DG1)
 
@@ -474,10 +527,15 @@ Source: [Caristix HL7v2.5.1 DG1](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | DG1.17 | Diagnosis Classification | IS | O | 3 | 1 | Classification (Table 0228) |
 | DG1.18 | Confidential Indicator | ID | O | 1 | 1 | Y/N confidentiality (Table 0136) |
 | DG1.19 | Attestation Date/Time | TS | O | 26 | 1 | Attestation datetime |
-| DG1.20 | Diagnosis Identifier | EI | C | 427 | 1 | Unique diagnosis identifier |
-| DG1.21 | Diagnosis Action Code | ID | C | 1 | 1 | `A` (add), `D` (delete), `U` (update) (Table 0206) |
+| DG1.20 | Diagnosis Identifier | EI | C | 427 | 1 | Unique diagnosis identifier. Spark columns: `diagnosis_identifier`, `diagnosis_identifier_namespace_id`, `diagnosis_identifier_universal_id`, `diagnosis_identifier_universal_id_type` |
+| DG1.21 | Diagnosis Action Code | ID | C | 1 | 1 | `A` (add), `D` (delete), `U` (update) (Table 0206). Spark column: `diagnosis_action_code` |
+| DG1.22 | Parent Diagnosis | EI | C | 427 | 1 | (added in v2.7) Parent diagnosis instance identifier. Spark columns: `parent_diagnosis`, `parent_diagnosis_namespace_id`, `parent_diagnosis_universal_id`, `parent_diagnosis_universal_id_type` |
+| DG1.23 | DRG CCL Value Code | CWE | O | 705 | 1 | (added in v2.7) DRG complication/comorbidity level. Spark columns: `drg_ccl_value_code`, `drg_ccl_value_code_text`, `drg_ccl_value_code_coding_system`, `drg_ccl_value_code_alt_code`, `drg_ccl_value_code_alt_text`, `drg_ccl_value_code_alt_coding_system`, `drg_ccl_value_code_coding_system_version`, `drg_ccl_value_code_alt_coding_system_version`, `drg_ccl_value_code_original_text` |
+| DG1.24 | DRG Grouping Usage | ID | O | 20 | 1 | (added in v2.7) Whether this diagnosis was used in DRG grouping: `Y` or `N`. Spark column: `drg_grouping_usage` |
+| DG1.25 | DRG Diagnosis Determination Status | CWE | O | 705 | 1 | (added in v2.7) DRG diagnosis determination status. Spark columns: `drg_diagnosis_determination_status`, `drg_diagnosis_determination_status_text`, `drg_diagnosis_determination_status_coding_system`, `drg_diagnosis_determination_status_alt_code`, `drg_diagnosis_determination_status_alt_text`, `drg_diagnosis_determination_status_alt_coding_system`, `drg_diagnosis_determination_status_coding_system_version`, `drg_diagnosis_determination_status_alt_coding_system_version`, `drg_diagnosis_determination_status_original_text` |
+| DG1.26 | Present on Admission Indicator | CWE | O | 705 | 1 | (added in v2.7) Present-on-admission indicator: `Y` (yes), `N` (no), `U` (unknown), `W` (clinically undetermined). Spark columns: `present_on_admission_indicator`, `present_on_admission_indicator_text`, `present_on_admission_indicator_coding_system`, `present_on_admission_indicator_alt_code`, `present_on_admission_indicator_alt_text`, `present_on_admission_indicator_alt_coding_system`, `present_on_admission_indicator_coding_system_version`, `present_on_admission_indicator_alt_coding_system_version`, `present_on_admission_indicator_original_text` |
 
-### PR1 — Procedures (20 fields)
+### PR1 — Procedures (25 fields)
 
 Source: [Caristix HL7v2.5.1 PR1](https://hl7-definition.caristix.com/v2/HL7v2.5.1/Segments/PR1)
 
@@ -502,9 +560,14 @@ Source: [Caristix HL7v2.5.1 PR1](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | PR1.17 | Procedure DRG Type | IS | O | 20 | 1 | DRG type (Table 0416) |
 | PR1.18 | Tissue Type Code | CE | O | 250 | * | Tissue type (Table 0417) |
 | PR1.19 | Procedure Identifier | EI | C | 427 | 1 | Unique procedure identifier |
-| PR1.20 | Procedure Action Code | ID | C | 1 | 1 | `A` (add), `D` (delete), `U` (update) (Table 0206) |
+| PR1.20 | Procedure Action Code | ID | C | 1 | 1 | `A` (add), `D` (delete), `U` (update) (Table 0206). Spark column: `procedure_action_code` |
+| PR1.21 | DRG Procedure Determination Status | CWE | O | 705 | 1 | (added in v2.6) DRG procedure determination status. Spark columns: `drg_procedure_determination_status`, `drg_procedure_determination_status_text`, etc. (9 CWE cols) |
+| PR1.22 | DRG Procedure Relevance | CWE | O | 705 | 1 | (added in v2.6) DRG procedure relevance. Spark columns: `drg_procedure_relevance`, `drg_procedure_relevance_text`, etc. (9 CWE cols) |
+| PR1.23 | Treating Organizational Unit | PL | O | 80 | * | (added in v2.7) Treating organizational unit — repeating PL. Stored as `ARRAY<STRUCT<...11 PL fields...>>`. Spark column array: `treating_organizational_unit` |
+| PR1.24 | Respiratory Within Surgery | ID | O | 1 | 1 | (added in v2.7) Respiratory within surgery indicator. Spark column: `respiratory_within_surgery` |
+| PR1.25 | Parent Procedure ID | EI | C | 427 | 1 | (added in v2.7) Parent procedure instance identifier. Spark columns: `parent_procedure_id`, `parent_procedure_id_namespace_id`, `parent_procedure_id_universal_id`, `parent_procedure_id_universal_id_type` |
 
-### ORC — Common Order (31 fields)
+### ORC — Common Order (38 fields)
 
 Source: [Caristix HL7v2.5.1 ORC](https://hl7-definition.caristix.com/v2/HL7v2.5.1/Segments/ORC)
 
@@ -516,8 +579,8 @@ Source: [Caristix HL7v2.5.1 ORC](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | ORC.4 | Placer Group Number | EI | O | 22 | 1 | Placer group number |
 | ORC.5 | Order Status | ID | O | 2 | 1 | Order status (Table 0038) |
 | ORC.6 | Response Flag | ID | O | 1 | 1 | Response flag (Table 0121) |
-| ORC.7 | Quantity/Timing | TQ | B | 200 | * | Deprecated — use TQ1/TQ2 |
-| ORC.8 | Parent Order | EIP | O | 200 | 1 | Parent order reference |
+| ORC.7 | Quantity/Timing | TQ | B | 200 | * | Deprecated in v2.5 — use TQ1/TQ2. TQ composite stored as `ARRAY<STRUCT<...TQ fields...>>`. Spark column: `quantity_timing` |
+| ORC.8 | Parent Order | EIP | O | 200 | * | Parent order reference. EIP stored as `ARRAY<STRUCT<placer_assigned_identifier EI, filler_assigned_identifier EI>>`. Spark column: `parent_order` |
 | ORC.9 | Date/Time of Transaction | TS | O | 26 | 1 | Transaction datetime |
 | ORC.10 | Entered By | XCN | O | 250 | * | Person who entered the order |
 | ORC.11 | Verified By | XCN | O | 250 | * | Person who verified the order |
@@ -540,9 +603,16 @@ Source: [Caristix HL7v2.5.1 ORC](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | ORC.28 | Confidentiality Code | CWE | O | 250 | 1 | Confidentiality code (Table 0177) |
 | ORC.29 | Order Type | CWE | O | 250 | 1 | Order type (Table 0482) |
 | ORC.30 | Enterer Authorization Mode | CNE | O | 250 | 1 | Authorization mode (Table 0483) |
-| ORC.31 | Parent Universal Service Identifier | CWE | O | 250 | 1 | Parent service identifier |
+| ORC.31 | Parent Universal Service Identifier | CWE | O | 250 | 1 | Parent service identifier. Spark columns: `parent_universal_service_id`, `parent_universal_service_id_text`, etc. (9 CWE cols) |
+| ORC.32 | Advanced Beneficiary Notice Date | DT | O | 8 | 1 | (added in v2.6) Advanced beneficiary notice date. Spark column: `advanced_beneficiary_notice_date` (TimestampType) |
+| ORC.33 | Alternate Placer Order Number | CX | O | 250 | * | (added in v2.6) Alternate placer order number. Stored as `ARRAY<STRUCT<...16 CX fields...>>`. Spark column: `alternate_placer_order_number` |
+| ORC.34 | Order Workflow Profile | CWE | O | 705 | * | (added in v2.9) Order workflow profile. Stored as `ARRAY<STRUCT<...9 CWE fields...>>`. Spark column: `order_workflow_profile` |
+| ORC.35 | Action Code | ID | O | 2 | 1 | (added in v2.9) Order action code (Table 0206): `A` (add), `D` (delete), `U` (update), `X` (no change. Spark column: `action_code` |
+| ORC.36 | Order Status Date Range | DR | O | 52 | 1 | (added in v2.9) Order status date range. DR type stored as two columns: `order_status_date_range_start` (DR.1 — TimestampType), `order_status_date_range_end` (DR.2 — TimestampType) |
+| ORC.37 | Order Creation Date/Time | DTM | O | 24 | 1 | (added in v2.9) Date/time the order was created. Spark column: `order_creation_datetime` (TimestampType) |
+| ORC.38 | Filler Order Group Number | EI | O | 427 | 1 | (added in v2.9) Filler order group number. Spark columns: `filler_order_group_number`, `filler_order_group_number_namespace_id`, `filler_order_group_number_universal_id`, `filler_order_group_number_universal_id_type` |
 
-### OBR — Observation Request (50 fields)
+### OBR — Observation Request (55 fields)
 
 Source: [Caristix HL7v2.5.1 OBR](https://hl7-definition.caristix.com/v2/HL7v2.5.1/Segments/OBR)
 
@@ -562,7 +632,7 @@ Source: [Caristix HL7v2.5.1 OBR](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | OBR.12 | Danger Code | CE | O | 250 | 1 | Danger/hazard code |
 | OBR.13 | Relevant Clinical Information | ST | O | 300 | 1 | Clinical info for interpretation |
 | OBR.14 | Specimen Received Date/Time | TS | B | 26 | 1 | Deprecated |
-| OBR.15 | Specimen Source | SPS | B | 300 | 1 | Deprecated — use SPM segment |
+| OBR.15 | Specimen Source | SPS | B | 300 | 1 | Deprecated in v2.7 — use SPM segment for v2.7+. SPS composite is retained for backward-compatible parsing. Expanded into 8 flat columns: `specimen_source` (SPS.1.1 CWE.1 — source code), `specimen_source_text` (SPS.1.2), `specimen_source_additives` (SPS.2.1), `specimen_source_collection_method` (SPS.3 TX), `specimen_source_body_site` (SPS.4.1), `specimen_source_site_modifier` (SPS.5.1), `specimen_source_collection_method_modifier` (SPS.6.1), `specimen_source_role` (SPS.7.1) |
 | OBR.16 | Ordering Provider | XCN | O | 250 | * | Ordering clinician (comp 1 = ID, comp 2 = family name, comp 3 = given name) |
 | OBR.17 | Order Callback Phone Number | XTN | O | 250 | 2 | Callback phone |
 | OBR.18 | Placer Field 1 | ST | O | 60 | 1 | Placer-defined field |
@@ -570,13 +640,13 @@ Source: [Caristix HL7v2.5.1 OBR](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | OBR.20 | Filler Field 1 | ST | O | 60 | 1 | Filler-defined field |
 | OBR.21 | Filler Field 2 | ST | O | 60 | 1 | Filler-defined field |
 | OBR.22 | Results Rpt/Status Chng - Date/Time | TS | C | 26 | 1 | Result report datetime |
-| OBR.23 | Charge to Practice | MOC | O | 40 | 1 | Charge information |
+| OBR.23 | Charge to Practice | MOC | O | 40 | 1 | Charge information. MOC expanded into 5 flat columns: `charge_to_practice_monetary_amount` (MOC.1.1 MO.1 — quantity NM), `charge_to_practice_monetary_amount_currency` (MOC.1.2 MO.2 — ISO 4217 ID), `charge_to_practice_charge_code` (MOC.2.1 CWE.1), `charge_to_practice_charge_code_text` (MOC.2.2 CWE.2), `charge_to_practice_charge_code_coding_system` (MOC.2.3 CWE.3) |
 | OBR.24 | Diagnostic Serv Sect ID | ID | O | 10 | 1 | Diagnostic service section |
 | OBR.25 | Result Status | ID | C | 1 | 1 | `F` (final), `P` (preliminary), `C` (correction), `X` (cancelled), `I` (pending), `S` (partial), `R` (results entered), `O` (order received) |
 | OBR.26 | Parent Result | PRL | O | 400 | 1 | Parent result link |
-| OBR.27 | Quantity/Timing | TQ | B | 200 | * | Deprecated — use TQ1/TQ2 |
-| OBR.28 | Result Copies To | XCN | O | 250 | * | Copy-to recipients |
-| OBR.29 | Parent | EIP | O | 200 | 1 | Parent order reference |
+| OBR.27 | Quantity/Timing | TQ | B | 200 | * | Deprecated in v2.5 — use TQ1/TQ2. TQ composite stored as `ARRAY<STRUCT<...TQ fields...>>`. Spark column: `quantity_timing` |
+| OBR.28 | Result Copies To | XCN | O | 250 | * | Copy-to recipients. Stored as `ARRAY<STRUCT<...23 XCN fields...>>` |
+| OBR.29 | Parent | EIP | O | 200 | 1 | Parent results observation identifier (links a child result to the parent observation). EIP expanded into 8 flat columns: `parent_results_observation_identifier_placer_assigned_identifier` (EIP.1.1), `parent_results_observation_identifier_placer_assigned_identifier_namespace_id` (EIP.1.2), `parent_results_observation_identifier_placer_assigned_identifier_universal_id` (EIP.1.3), `parent_results_observation_identifier_placer_assigned_identifier_universal_id_type` (EIP.1.4), `parent_results_observation_identifier_filler_assigned_identifier` (EIP.2.1), `parent_results_observation_identifier_filler_assigned_identifier_namespace_id` (EIP.2.2), `parent_results_observation_identifier_filler_assigned_identifier_universal_id` (EIP.2.3), `parent_results_observation_identifier_filler_assigned_identifier_universal_id_type` (EIP.2.4) |
 | OBR.30 | Transportation Mode | ID | O | 20 | 1 | Specimen transport mode |
 | OBR.31 | Reason for Study | CE | O | 250 | * | Reason for study |
 | OBR.32 | Principal Result Interpreter | NDL | O | 200 | 1 | Principal interpreter |
@@ -597,9 +667,14 @@ Source: [Caristix HL7v2.5.1 OBR](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | OBR.47 | Filler Supplemental Service Information | CE | O | 250 | * | Filler supplemental info |
 | OBR.48 | Medically Necessary Duplicate Procedure Reason | CWE | C | 250 | 1 | Duplicate procedure reason |
 | OBR.49 | Result Handling | IS | O | 2 | 1 | Result handling instructions |
-| OBR.50 | Parent Universal Service Identifier | CWE | O | 250 | 1 | Parent service identifier |
+| OBR.50 | Parent Universal Service Identifier | CWE | O | 250 | 1 | Parent service identifier. Spark columns: `parent_universal_service_id`, `parent_universal_service_id_text`, `parent_universal_service_id_coding_system`, `parent_universal_service_id_alt_code`, `parent_universal_service_id_alt_text`, `parent_universal_service_id_alt_coding_system`, `parent_universal_service_id_coding_system_version`, `parent_universal_service_id_alt_coding_system_version`, `parent_universal_service_id_original_text` |
+| OBR.51 | Observation Group Identifier | EI | O | 427 | 1 | (added in v2.8) Groups related OBX observations under this OBR. Spark columns: `observation_group`, `observation_group_namespace_id`, `observation_group_universal_id`, `observation_group_universal_id_type` |
+| OBR.52 | Parent Observation Group Identifier | EI | O | 427 | 1 | (added in v2.8) Observation group for the parent OBR. Spark columns: `parent_observation_group`, `parent_observation_group_namespace_id`, `parent_observation_group_universal_id`, `parent_observation_group_universal_id_type` |
+| OBR.53 | Alternate Placer Order Number | CX | O | 250 | * | (added in v2.8) Alternate placer order numbers. Stored as `ARRAY<STRUCT<...16 CX fields...>>`. Spark column: `alternate_placer_order` |
+| OBR.54 | Parent Order | EIP | O | 427 | * | (added in v2.9) Parent order identifiers (repeating EIP). Stored as `ARRAY<STRUCT<placer_assigned_identifier EI, filler_assigned_identifier EI>>`. Spark column: `parent_order` |
+| OBR.55 | Action Code | ID | O | 2 | 1 | (added in v2.9) Action code for this observation request (Table 0206): `A` (add), `D` (delete), `U` (update), `X` (no change). Spark column: `action_code` |
 
-### OBX — Observation/Result (25 fields)
+### OBX — Observation/Result (33 fields)
 
 Source: [Caristix HL7v2.5.1 OBX](https://hl7-definition.caristix.com/v2/HL7v2.5.1/Segments/OBX)
 
@@ -608,13 +683,13 @@ Source: [Caristix HL7v2.5.1 OBX](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | OBX.1 | Set ID - OBX | SI | O | 4 | 1 | Sequence number |
 | OBX.2 | Value Type | ID | C | 2 | 1 | `NM` (numeric), `ST` (string), `TX` (text), `CWE` (coded), `SN` (structured numeric), `FT` (formatted text), `ED` (encapsulated data) (Table 0125) |
 | OBX.3 | Observation Identifier | CE | R | 250 | 1 | LOINC or local code (comp 1 = code, comp 2 = display text, comp 3 = coding system) |
-| OBX.4 | Observation Sub-ID | ST | C | 20 | 1 | Sub-identifier for related observations |
+| OBX.4 | Observation Sub-ID | OG | C | 20 | 1 | Sub-identifier for related observations. Upgraded to OG type in v2.8.2+ (OG.1 = original ST sub-ID is backward-compatible). Expanded into 4 flat columns: `observation_sub_id` (OG.1 — original sub-identifier ST, backward-compatible with legacy ST values), `observation_sub_id_group` (OG.2 — group NM), `observation_sub_id_sequence` (OG.3 — sequence NM), `observation_sub_id_identifier` (OG.4 — identifier ST) |
 | OBX.5 | Observation Value | VARIES | C | 65536 | * | Result value — type determined by OBX.2 |
 | OBX.6 | Units | CE | O | 250 | 1 | Units of measure (comp 1 = code, comp 2 = text, comp 3 = coding system) |
 | OBX.7 | References Range | ST | O | 60 | 1 | Normal range (e.g. `3.5-5.0`, `>=18`) |
-| OBX.8 | Abnormal Flags | IS | O | 5 | * | `N` (normal), `H` (high), `L` (low), `HH` (critical high), `LL` (critical low), `A` (abnormal) (Table 0078) |
+| OBX.8 | Interpretation Codes | CWE | O | 705 | * | Renamed from "Abnormal Flags" (IS) in v2.7+; same field position. Values: `N` (normal), `H` (high), `L` (low), `HH` (critical high), `LL` (critical low), `A` (abnormal) (Table 0078). Code column: `interpretation_codes` (`ARRAY<STRUCT>` — one CWE struct per repetition) |
 | OBX.9 | Probability | NM | O | 5 | 1 | Probability (0–1) |
-| OBX.10 | Nature of Abnormal Test | ID | O | 2 | * | Nature of abnormal test (Table 0080) |
+| OBX.10 | Nature of Abnormal Test | ID | O | 2 | * | Nature of abnormal test (Table 0080). Code column: `nature_of_abnormal_test` (`ARRAY<STRING>`) |
 | OBX.11 | Observation Result Status | ID | R | 1 | 1 | `F` (final), `P` (preliminary), `C` (correction), `D` (delete), `I` (pending), `X` (cancelled), `W` (post to wrong patient) (Table 0085) |
 | OBX.12 | Effective Date of Reference Range | TS | O | 26 | 1 | Reference range effective date |
 | OBX.13 | User Defined Access Checks | ST | O | 20 | 1 | Access check code |
@@ -624,13 +699,22 @@ Source: [Caristix HL7v2.5.1 OBX](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | OBX.17 | Observation Method | CE | O | 250 | * | Method used |
 | OBX.18 | Equipment Instance Identifier | EI | O | 22 | * | Equipment ID |
 | OBX.19 | Date/Time of the Analysis | TS | O | 26 | 1 | Analysis datetime |
+| OBX.20 | Observation Site | CWE | O | 705 | * | (added in v2.7) Anatomical site where the observation was made. Code columns: `observation_site_*` (CWE expansion) |
+| OBX.21 | Observation Instance Identifier | EI | O | 427 | 1 | (added in v2.7) Unique identifier for this specific observation instance. Code columns: `observation_instance_identifier_*` (EI expansion) |
+| OBX.22 | Mood Code | CNE | C | 705 | 1 | (added in v2.7) Mood of the observation (e.g. EVN=event, RQO=requested) (Table 0725). Code columns: `mood_code_*` (CNE/CWE expansion) |
 | OBX.23 | Performing Organization Name | XON | O | 567 | 1 | Performing lab name |
 | OBX.24 | Performing Organization Address | XAD | O | 631 | 1 | Performing lab address |
-| OBX.25 | Performing Organization Medical Director | XCN | O | 3002 | 1 | Medical director |
+| OBX.25 | Performing Organization Medical Director | XCN | O | 3002 | 1 | Medical director. Spark columns: `performing_org_medical_director_id`, `performing_org_medical_director_family_name`, `performing_org_medical_director_given_name`, `performing_org_medical_director_middle_name`, `performing_org_medical_director_suffix`, `performing_org_medical_director_prefix`, `performing_org_medical_director_degree`, `performing_org_medical_director_source_table`, `performing_org_medical_director_assigning_authority*` (HD — 3 cols), `performing_org_medical_director_name_type_code`, `performing_org_medical_director_check_digit`, `performing_org_medical_director_check_digit_scheme`, `performing_org_medical_director_identifier_type_code`, `performing_org_medical_director_assigning_facility*` (HD — 3 cols), `performing_org_medical_director_name_representation_code`, `performing_org_medical_director_name_assembly_order`, `performing_org_medical_director_effective_date`, `performing_org_medical_director_expiration_date`, `performing_org_medical_director_professional_suffix` |
+| OBX.26 | Patient Results Release Category Code | CWE | O | 705 | 1 | (added in v2.8) Category controlling release of results to the patient. Spark column: `patient_results_release_category` (string, CWE.1 code only) |
+| OBX.27 | Root Cause | CWE | O | 705 | 1 | (added in v2.8) Root cause code for the observation. Spark columns: `root_cause`, `root_cause_text`, `root_cause_coding_system`, `root_cause_alt_code`, `root_cause_alt_text`, `root_cause_alt_coding_system`, `root_cause_coding_system_version`, `root_cause_alt_coding_system_version`, `root_cause_original_text` |
+| OBX.28 | Local Process Control | CWE | O | 705 | * | (added in v2.8) Site-defined local process control codes. Stored as `ARRAY<STRUCT<...9 CWE fields...>>`. Spark column: `local_process_control` |
+| OBX.29 | Observation Type | ID | O | 3 | 1 | (added in v2.8.2) Observation type code (Table 0936). Spark column: `observation_type` |
+| OBX.30 | Observation Sub-Type | ID | O | 3 | 1 | (added in v2.8.2) Observation sub-type code (Table 0937). Spark column: `observation_sub_type` |
+| OBX.31 | Action Code | ID | O | 2 | 1 | (added in v2.9) Action code for this observation result (Table 0206): `A` (add), `D` (delete), `U` (update), `X` (no change). Spark column: `action_code` |
+| OBX.32 | Observation Value Absent Reason | CWE | O | 705 | * | (added in v2.9) Reason the observation value is absent. Stored as `ARRAY<STRUCT<...9 CWE fields...>>`. Spark column: `observation_value_absent_reason` |
+| OBX.33 | Observation Related Specimen Identifier | EIP | O | 427 | * | (added in v2.9) Relates this OBX to a SPM specimen by EIP pair. Stored as `ARRAY<STRUCT<placer_assigned_identifier EI, filler_assigned_identifier EI>>`. Spark column: `observation_related_specimen` |
 
-> **Note**: OBX.20–OBX.22 are reserved/not used in v2.5.1. Fields jump from OBX.19 to OBX.23.
-
-### NTE — Notes and Comments (4 fields)
+### NTE — Notes and Comments (9 fields)
 
 Source: [Caristix HL7v2.5.1 NTE](https://hl7-definition.caristix.com/v2/HL7v2.5.1/Segments/NTE)
 
@@ -638,18 +722,23 @@ Source: [Caristix HL7v2.5.1 NTE](https://hl7-definition.caristix.com/v2/HL7v2.5.
 |---|---|---|---|---|---|---|
 | NTE.1 | Set ID - NTE | SI | O | 4 | 1 | Sequence number |
 | NTE.2 | Source of Comment | ID | O | 8 | 1 | `L` (ancillary/filler), `P` (orderer/placer), `O` (other) (Table 0105) |
-| NTE.3 | Comment | FT | O | 65536 | * | Free-text comment/note content |
-| NTE.4 | Comment Type | CE | O | 250 | 1 | Comment type (Table 0364) |
+| NTE.3 | Comment | FT | O | 65536 | * | Free-text comment/note content. Stored as `ARRAY<STRING>`. Spark column: `comment` |
+| NTE.4 | Comment Type | CWE | O | 705 | 1 | Comment type (Table 0364). Spark columns: `comment_type`, `comment_type_text`, `comment_type_coding_system`, `comment_type_alt_code`, `comment_type_alt_text`, `comment_type_alt_coding_system`, `comment_type_coding_system_version`, `comment_type_alt_coding_system_version`, `comment_type_original_text` |
+| NTE.5 | Entered By | XCN | O | 3002 | 1 | (added in v2.6) Person who entered the note. Spark columns: `entered_by_id`, `entered_by_family_name`, `entered_by_given_name`, `entered_by_middle_name`, `entered_by_suffix`, `entered_by_prefix`, `entered_by_degree`, `entered_by_source_table`, `entered_by_assigning_authority*` (HD — 3 cols), `entered_by_name_type_code`, `entered_by_check_digit`, `entered_by_check_digit_scheme`, `entered_by_identifier_type_code`, `entered_by_assigning_facility*` (HD — 3 cols), `entered_by_name_representation_code`, `entered_by_name_assembly_order`, `entered_by_effective_date`, `entered_by_expiration_date`, `entered_by_professional_suffix` |
+| NTE.6 | Entered Date/Time | DTM | O | 24 | 1 | (added in v2.6) Date/time the note was entered. Spark column: `entered_datetime` (TimestampType) |
+| NTE.7 | Effective Start Date | DTM | O | 24 | 1 | (added in v2.6) Effective start date of the note. Spark column: `effective_start_date` (TimestampType) |
+| NTE.8 | Expiration Date | DTM | O | 24 | 1 | (added in v2.6) Expiration date of the note. Spark column: `expiration_date` (TimestampType) |
+| NTE.9 | Coded Comment | CWE | O | 705 | * | (added in v2.9) Coded form of the comment. Stored as `ARRAY<STRUCT<...9 CWE fields...>>`. Spark column: `coded_comment` |
 
-### SPM — Specimen (29 fields)
+### SPM — Specimen (35 fields)
 
 Source: [Caristix HL7v2.5.1 SPM](https://hl7-definition.caristix.com/v2/HL7v2.5.1/Segments/SPM)
 
 | Position | Name | Data Type | Usage | Max Len | Rpt | Description |
 |---|---|---|---|---|---|---|
 | SPM.1 | Set ID - SPM | SI | O | 4 | 1 | Sequence number |
-| SPM.2 | Specimen ID | EIP | O | 80 | 1 | Specimen identifier pair |
-| SPM.3 | Specimen Parent IDs | EIP | O | 80 | * | Parent specimen identifiers |
+| SPM.2 | Specimen ID | EIP | O | 80 | 1 | Specimen identifier pair (single instance). EIP expanded into 8 flat columns: `specimen_id_placer_assigned_identifier` (EIP.1.1), `specimen_id_placer_assigned_identifier_namespace_id` (EIP.1.2), `specimen_id_placer_assigned_identifier_universal_id` (EIP.1.3), `specimen_id_placer_assigned_identifier_universal_id_type` (EIP.1.4), `specimen_id_filler_assigned_identifier` (EIP.2.1), `specimen_id_filler_assigned_identifier_namespace_id` (EIP.2.2), `specimen_id_filler_assigned_identifier_universal_id` (EIP.2.3), `specimen_id_filler_assigned_identifier_universal_id_type` (EIP.2.4) |
+| SPM.3 | Specimen Parent IDs | EIP | O | 80 | * | Parent specimen identifiers. Stored as `ARRAY<STRUCT<placer_assigned_identifier EI, filler_assigned_identifier EI>>`. Spark column: `specimen_parent_ids` |
 | SPM.4 | Specimen Type | CWE | R | 250 | 1 | Specimen type (Table 0487) |
 | SPM.5 | Specimen Type Modifier | CWE | O | 250 | * | Specimen type modifier (Table 0541) |
 | SPM.6 | Specimen Additives | CWE | O | 250 | * | Additives/preservatives (Table 0371) |
@@ -675,9 +764,15 @@ Source: [Caristix HL7v2.5.1 SPM](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | SPM.26 | Number of Specimen Containers | NM | O | 4 | 1 | Container count |
 | SPM.27 | Container Type | CWE | O | 250 | 1 | Container type |
 | SPM.28 | Container Condition | CWE | O | 250 | 1 | Container condition (Table 0544) |
-| SPM.29 | Specimen Child Role | CWE | O | 250 | 1 | Child role (Table 0494) |
+| SPM.29 | Specimen Child Role | CWE | O | 250 | 1 | Child role (Table 0494). Spark columns: `specimen_child_role`, `specimen_child_role_text`, `specimen_child_role_coding_system`, `specimen_child_role_alt_code`, `specimen_child_role_alt_text`, `specimen_child_role_alt_coding_system`, `specimen_child_role_coding_system_version`, `specimen_child_role_alt_coding_system_version`, `specimen_child_role_original_text` |
+| SPM.30 | Accession ID | CX | O | 250 | * | (added in v2.6) Accession identifier. Stored as `ARRAY<STRUCT<...16 CX fields...>>`. Spark column: `accession_id` |
+| SPM.31 | Other Specimen ID | CX | O | 250 | * | (added in v2.6) Other specimen identifiers. Stored as `ARRAY<STRUCT<...16 CX fields...>>`. Spark column: `other_specimen_id` |
+| SPM.32 | Shipment ID | EI | O | 427 | 1 | (added in v2.6) Shipment identifier. Spark columns: `shipment_id`, `shipment_id_namespace_id`, `shipment_id_universal_id`, `shipment_id_universal_id_type` |
+| SPM.33 | Culture Start Date/Time | DTM | O | 24 | 1 | (added in v2.9) Culture start date/time. Spark column: `culture_start_datetime` (TimestampType) |
+| SPM.34 | Culture Final Date/Time | DTM | O | 24 | 1 | (added in v2.9) Culture final date/time. Spark column: `culture_final_datetime` (TimestampType) |
+| SPM.35 | Action Code | ID | O | 2 | 1 | (added in v2.9) Action code for this specimen (Table 0206): `A` (add), `D` (delete), `U` (update), `X` (no change). Spark column: `action_code` |
 
-### IN1 — Insurance (53 fields)
+### IN1 — Insurance (55 fields)
 
 Source: [Caristix HL7v2.5.1 IN1](https://hl7-definition.caristix.com/v2/HL7v2.5.1/Segments/IN1)
 
@@ -734,8 +829,10 @@ Source: [Caristix HL7v2.5.1 IN1](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | IN1.49 | Insured's ID Number | CX | O | 250 | * | Insured's ID |
 | IN1.50 | Signature Code | IS | O | 1 | 1 | Signature code (Table 0535) |
 | IN1.51 | Signature Code Date | DT | O | 8 | 1 | Signature code date |
-| IN1.52 | Insured's Birth Place | ST | O | 250 | 1 | Insured's birth place |
-| IN1.53 | VIP Indicator | IS | O | 2 | 1 | VIP indicator (Table 0099) |
+| IN1.52 | Insured's Birth Place | ST | O | 250 | 1 | Insured's birth place. Spark column: `insureds_birth_place` |
+| IN1.53 | VIP Indicator | CWE | O | 705 | 1 | VIP indicator (Table 0099). Spark columns: `vip_indicator`, `vip_indicator_text`, `vip_indicator_coding_system`, `vip_indicator_alt_code`, `vip_indicator_alt_text`, `vip_indicator_alt_coding_system`, `vip_indicator_coding_system_version`, `vip_indicator_alt_coding_system_version`, `vip_indicator_original_text` |
+| IN1.54 | External Health Plan Identifiers | CWE | O | 705 | * | (added in v2.8) External health plan identifiers. Stored as `ARRAY<STRUCT<...9 CWE fields...>>`. Spark column: `external_health_plan_identifiers` |
+| IN1.55 | Insurance Action Code | ID | O | 2 | 1 | (added in v2.9) Insurance action code (Table 0206): `A` (add), `D` (delete), `U` (update). Spark column: `insurance_action_code` |
 
 ### GT1 — Guarantor (57 fields)
 
@@ -801,7 +898,7 @@ Source: [Caristix HL7v2.5.1 GT1](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | GT1.56 | Guarantor Birth Place | ST | O | 250 | 1 | Birth place |
 | GT1.57 | VIP Indicator | IS | O | 2 | 1 | VIP indicator (Table 0099) |
 
-### FT1 — Financial Transaction (31 fields)
+### FT1 — Financial Transaction (56 fields: 1–31 baseline, 32–43 v2.6+, 44–56 v2.9+)
 
 Source: [Caristix HL7v2.5.1 FT1](https://hl7-definition.caristix.com/v2/HL7v2.5.1/Segments/FT1)
 
@@ -817,8 +914,8 @@ Source: [Caristix HL7v2.5.1 FT1](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | FT1.8 | Transaction Description | ST | B | 40 | 1 | Deprecated — transaction description |
 | FT1.9 | Transaction Description - Alt | ST | B | 40 | 1 | Deprecated — alternate description |
 | FT1.10 | Transaction Quantity | NM | O | 6 | 1 | Quantity |
-| FT1.11 | Transaction Amount - Extended | CP | O | 12 | 1 | Extended amount (quantity × unit price) |
-| FT1.12 | Transaction Amount - Unit | CP | O | 12 | 1 | Unit price |
+| FT1.11 | Transaction Amount - Extended | CP | O | 12 | 1 | Extended amount (quantity × unit price) — all 6 CP components flattened |
+| FT1.12 | Transaction Amount - Unit | CP | O | 12 | 1 | Unit price — all 6 CP components flattened |
 | FT1.13 | Department Code | CE | O | 250 | 1 | Department (Table 0049) |
 | FT1.14 | Insurance Plan ID | CE | O | 250 | 1 | Insurance plan (Table 0072) |
 | FT1.15 | Insurance Amount | CP | O | 12 | 1 | Insurance amount |
@@ -836,10 +933,23 @@ Source: [Caristix HL7v2.5.1 FT1](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | FT1.27 | Advanced Beneficiary Notice Code | CE | O | 250 | 1 | ABN code (Table 0339) |
 | FT1.28 | Medically Necessary Duplicate Procedure Reason | CWE | O | 250 | 1 | Duplicate procedure reason (Table 0476) |
 | FT1.29 | NDC Code | CNE | O | 250 | 1 | National Drug Code (Table 0549) |
-| FT1.30 | Payment Reference ID | CX | O | 250 | 1 | Payment reference |
-| FT1.31 | Transaction Reference Key | SI | O | 4 | * | Transaction reference key |
+| FT1.30 | Payment Reference ID | CX | O | 250 | 1 | Payment reference — all 12 CX components flattened (ID + HD-decomposed assigning authority/facility) |
+| FT1.31 | Transaction Reference Key | SI | O | 4 | * | Repeating SI; stored as `ARRAY<STRING>` of FT1-1 set-IDs linking payment to corresponding charges |
+| FT1.32 | Performing Facility | XON | O | 250 | * | v2.6+. Repeating XON; stored as `ARRAY<STRUCT>` with all XON components per repetition |
+| FT1.33 | Ordering Facility | XON | O | 250 | 1 | v2.6+. All XON components flattened |
+| FT1.34 | Item Number | CWE | O | 250 | 1 | v2.6+. All CWE components flattened |
+| FT1.35 | Model Number | ST | O | 250 | 1 | v2.6+ |
+| FT1.36 | Special Processing Code | CWE | O | 250 | * | v2.6+. Repeating CWE array |
+| FT1.37 | Clinic Code | CWE | O | 250 | 1 | v2.6+. All CWE components flattened |
+| FT1.38 | Referral Number | CX | O | 250 | 1 | v2.6+. All 12 CX components flattened |
+| FT1.39 | Authorization Number | CX | O | 250 | 1 | v2.6+. All 12 CX components flattened |
+| FT1.40 | Service Provider Taxonomy Code | CWE | O | 250 | 1 | v2.6+. All CWE components flattened |
+| FT1.41 | Revenue Code | CWE | O | 250 | 1 | v2.6+. All CWE components flattened (Table 0456) |
+| FT1.42 | Prescription Number | ST | O | 20 | 1 | v2.6+ |
+| FT1.43 | NDC Qty and UoM | CQ | O | 0 | 1 | v2.6+. CQ.1 (NM quantity) + CQ.2 (CWE units) flattened |
+| FT1.44–FT1.56 | DME-related fields | various | O | – | – | v2.9+. Captured for forward compatibility; see `hl7_v2_schemas.py` for individual columns |
 
-### RXA — Pharmacy/Treatment Administration (26 fields)
+### RXA — Pharmacy/Treatment Administration (29 fields)
 
 Source: [Caristix HL7v2.5.1 RXA](https://hl7-definition.caristix.com/v2/HL7v2.5.1/Segments/RXA)
 
@@ -870,9 +980,12 @@ Source: [Caristix HL7v2.5.1 RXA](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | RXA.23 | Administered Drug Strength Volume | NM | O | 5 | 1 | Strength volume |
 | RXA.24 | Administered Drug Strength Volume Units | CWE | O | 250 | 1 | Strength volume units |
 | RXA.25 | Administered Barcode Identifier | CWE | O | 60 | 1 | Barcode identifier |
-| RXA.26 | Pharmacy Order Type | ID | O | 1 | 1 | Order type (Table 0480) |
+| RXA.26 | Pharmacy Order Type | ID | O | 1 | 1 | Order type (Table 0480). Spark column: `pharmacy_order_type` |
+| RXA.27 | Administer-at | PL | O | 80 | 1 | (added in v2.6) Physical location where the drug was administered. PL expanded into 11 flat columns: `administer_at_point_of_care`, `administer_at_room`, `administer_at_bed`, `administer_at_facility*` (HD — 3 cols), `administer_at_status`, `administer_at_type`, `administer_at_building`, `administer_at_floor`, `administer_at_description`, `administer_at_comprehensive_location_id` |
+| RXA.28 | Administered-at Address | XAD | O | 250 | 1 | (added in v2.6) Address where the drug was administered. XAD expanded into multiple flat columns with prefix `administered_at_address_*` |
+| RXA.29 | Administered Tag Identifier | EI | O | 427 | * | (added in v2.9) Tag identifier for the administered drug. Stored as `ARRAY<STRUCT<entity_identifier, namespace_id, universal_id, universal_id_type>>`. Spark column: `administered_tag_identifier` |
 
-### SCH — Scheduling Activity Information (27 fields)
+### SCH — Scheduling Activity Information (28 fields)
 
 Source: [Caristix HL7v2.5.1 SCH](https://hl7-definition.caristix.com/v2/HL7v2.5.1/Segments/SCH)
 
@@ -903,10 +1016,11 @@ Source: [Caristix HL7v2.5.1 SCH](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | SCH.23 | Parent Placer Appointment ID | EI | O | 75 | 1 | Parent placer appointment |
 | SCH.24 | Parent Filler Appointment ID | EI | C | 75 | 1 | Parent filler appointment |
 | SCH.25 | Filler Status Code | CE | O | 250 | 1 | Filler status (Table 0278) |
-| SCH.26 | Placer Order Number | EI | C | 22 | * | Placer order number |
-| SCH.27 | Filler Order Number | EI | C | 22 | * | Filler order number |
+| SCH.26 | Placer Order Number | EI | C | 22 | * | Placer order number. Stored as `ARRAY<STRUCT<entity_identifier, namespace_id, universal_id, universal_id_type>>`. Spark column: `placer_order_number` |
+| SCH.27 | Filler Order Number | EI | C | 22 | * | Filler order number. Stored as `ARRAY<STRUCT<entity_identifier, namespace_id, universal_id, universal_id_type>>`. Spark column: `filler_order_number` |
+| SCH.28 | Alternate Placer Order Group Number | EIP | O | 427 | 1 | (added in v2.9) Alternate placer order group number (single EIP). EIP expanded into 8 flat columns: `alternate_placer_order_group_number_placer_assigned_identifier` (EIP.1.1), `alternate_placer_order_group_number_placer_assigned_identifier_namespace_id` (EIP.1.2), `alternate_placer_order_group_number_placer_assigned_identifier_universal_id` (EIP.1.3), `alternate_placer_order_group_number_placer_assigned_identifier_universal_id_type` (EIP.1.4), `alternate_placer_order_group_number_filler_assigned_identifier` (EIP.2.1), `alternate_placer_order_group_number_filler_assigned_identifier_namespace_id` (EIP.2.2), `alternate_placer_order_group_number_filler_assigned_identifier_universal_id` (EIP.2.3), `alternate_placer_order_group_number_filler_assigned_identifier_universal_id_type` (EIP.2.4) |
 
-### TXA — Transcription Document Header (23 fields)
+### TXA — Transcription Document Header (28 fields)
 
 Source: [Caristix HL7v2.5.1 TXA](https://hl7-definition.caristix.com/v2/HL7v2.5.1/Segments/TXA)
 
@@ -933,8 +1047,13 @@ Source: [Caristix HL7v2.5.1 TXA](https://hl7-definition.caristix.com/v2/HL7v2.5.
 | TXA.19 | Document Availability Status | ID | O | 2 | 1 | Availability status (Table 0273) |
 | TXA.20 | Document Storage Status | ID | O | 2 | 1 | Storage status (Table 0275) |
 | TXA.21 | Document Change Reason | ST | C | 30 | 1 | Reason for document change |
-| TXA.22 | Authentication Person, Time Stamp | PPN | C | 250 | * | Authenticator with timestamp |
-| TXA.23 | Distributed Copies | XCN | O | 250 | * | Recipients of copies |
+| TXA.22 | Authentication Person, Time Stamp | PPN | C | 250 | * | Authenticator with timestamp (PPN approximated as XCN for parsing). Stored as `ARRAY<STRUCT<...23 XCN fields...>>`. Spark column: `authentication_person_time_stamp` |
+| TXA.23 | Distributed Copies | XCN | O | 250 | * | Recipients of copies. Stored as `ARRAY<STRUCT<...23 XCN fields...>>`. Spark column: `distributed_copies` |
+| TXA.24 | Folder Assignment | CWE | O | 705 | * | (added in v2.6) Folder assignment codes. Stored as `ARRAY<STRUCT<...9 CWE fields...>>`. Spark column: `folder_assignment` |
+| TXA.25 | Document Title | ST | O | 250 | * | (added in v2.6) Document titles. Stored as `ARRAY<STRING>`. Spark column: `document_title` |
+| TXA.26 | Agreed Due Date/Time | DTM | O | 24 | 1 | (added in v2.8) Agreed due date/time. Spark column: `agreed_due_datetime` (TimestampType) |
+| TXA.27 | Creating Facility | HD | O | 227 | 1 | (added in v2.9) Facility that created the document. Spark columns: `creating_facility`, `creating_facility_universal_id`, `creating_facility_universal_id_type` |
+| TXA.28 | Creating Specialty | CWE | O | 705 | 1 | (added in v2.9) Specialty responsible for creating the document. Spark columns: `creating_specialty`, `creating_specialty_text`, `creating_specialty_coding_system`, `creating_specialty_alt_code`, `creating_specialty_alt_text`, `creating_specialty_alt_coding_system`, `creating_specialty_coding_system_version`, `creating_specialty_alt_coding_system_version`, `creating_specialty_original_text` |
 
 ---
 
@@ -1147,7 +1266,12 @@ HL7 v2 defines its own data types. The connector maps them to Spark SQL types fo
 
 **IMPORTANT — Extraction Rule:** Every component of a composite data type MUST be extracted into its own column. Do NOT extract only component 1 and discard the rest. The "Connector Extraction" column below lists ALL components that must be captured.
 
-For repeating fields (separated by `~`), use `get_rep_component` instead of `get_component` to prevent the repetition separator from bleeding into component values. Only the first repetition is captured; the full value is preserved in `raw_segment`.
+For repeating fields (separated by `~`), use `get_rep_component` instead of `get_component` to prevent the repetition separator from bleeding into component values.
+
+Two extraction strategies are used depending on the HL7 cardinality:
+
+- **Truly repeating fields** (HL7 cardinality `*` — fields where the spec allows multiple distinct values, e.g. PID-5 `patient_names`, NK1-7 `contact_persons`, OBX-8 `interpretation_codes`, MSH-18 `character_set`, MSH-21 `message_profile_identifiers`) are extracted as Spark `ARRAY<STRUCT<...>>` or `ARRAY<STRING>` columns with **one entry per repetition** — no data is lost. The helpers `_xpn_array_fields()`, `_cwe_array_fields()`, and `_ei_array_fields()` implement this and the corresponding `_xpn_array_schema()` / `_cwe_array_schema()` / `_ei_array_schema()` helpers declare the Spark types. There are 24 such columns across 11 tables (PID, NK1, GT1, IN1, MRG, MSH, PD1, PV1, PV2, OBR, OBX) — see the README's "Non-string column types" section for the full enumeration.
+- **Non-repeating composite fields** (HL7 cardinality `1`, e.g. PID-7 `birth_date`, PID-8 `administrative_sex`) are flattened into individual `STRING` columns via `_xpn_fields()` / scalar extractors. Only the first repetition is captured if a sender unexpectedly puts a `~` in a cardinality-1 field; the full raw value is preserved in `raw_segment` for forensic reconstruction.
 
 **IMPORTANT — Sub-component Extraction Rule:** When a component is itself a composite data type (e.g. HD or EI inside CX, XCN, or XON), its sub-components (separated by `&`) MUST also be extracted into individual columns using `get_sub_component(field, comp, sub)` or `get_rep_sub_component(field, rep, comp, sub)`. The most common case is **Assigning Authority (HD)** and **Assigning Facility (HD)** inside CX, XCN, and XON types — these must always be broken down into `namespace_id` (sub 1), `universal_id` (sub 2), and `universal_id_type` (sub 3). The raw component value (which already has `&` in it) is kept as well for convenience.
 
@@ -1164,22 +1288,28 @@ For repeating fields (separated by `~`), use `get_rep_component` instead of `get
 | XON | Extended Composite Name & ID for Orgs | organization name ^ org name type ^ ID number ^ check digit ^ check digit scheme ^ assigning authority (HD) ^ identifier type ^ assigning facility (HD) ^ name rep code ^ org identifier | ALL 10: name, type_code, id, check_digit, check_digit_scheme, assigning_authority (+ HD sub-components), id_type_code, assigning_facility (+ HD sub-components), name_rep_code, identifier |
 | HD | Hierarchic Designator | namespace ID ^ universal ID ^ universal ID type | ALL 3: namespace_id, universal_id, universal_id_type |
 | EI | Entity Identifier | entity ID ^ namespace ID ^ universal ID ^ universal ID type | ALL 4: entity_id, namespace_id, universal_id, universal_id_type |
-| EIP | Entity Identifier Pair | placer assigned identifier ^ filler assigned identifier | Comp 1 (placer ID) |
-| PL | Person Location | point of care ^ room ^ bed ^ facility ^ location status ^ person location type ^ building ^ floor | Components: point_of_care, room, bed, facility, status, type |
-| MSG | Message Type | message code ^ trigger event ^ message structure | Comp 1 (message code), Comp 2 (trigger event) |
-| PT | Processing Type | processing ID ^ processing mode | Comp 1 (processing ID) |
-| VID | Version Identifier | version ID ^ internationalization code ^ international version ID | Comp 1 (version ID) |
-| DR | Date/Time Range | range start datetime ^ range end datetime | Comp 1 (start), Comp 2 (end) |
-| CQ | Composite Quantity with Units | quantity ^ units | Comp 1 (quantity), Comp 2 (units) |
-| CP | Composite Price | price ^ price type ^ from value ^ to value ^ range units ^ range type | Comp 1 (price) |
-| FC | Financial Class | financial class code ^ effective date | Comp 1 (financial class) |
-| AUI | Authorization Information | authorization number ^ date ^ source | Comp 1 (authorization number) |
-| JCC | Job Code/Class | job code ^ job class | Comp 1 (job code), Comp 2 (job class) |
-| PPN | Performing Person Time Stamp | ID ^ family ^ given ^ middle ^ suffix ^ prefix ^ degree ^ source table ^ assigning authority ^ name type ^ check digit ^ check digit scheme ^ identifier type ^ assigning facility ^ date/time action performed | Comp 1 (ID), Comp 15 (datetime) |
+| EIP | Entity Identifier Pair | placer assigned identifier (EI) ^ filler assigned identifier (EI) | **Single-occurrence EIP (0..1)** — expanded into 8 flat columns via `_eip_fields()` / `_eip_schema()`: `<prefix>_placer_assigned_identifier` + 3 EI sub-cols, `<prefix>_filler_assigned_identifier` + 3 EI sub-cols. Used by `spm.specimen_id_*` (SPM-2), `obr.parent_results_observation_identifier_*` (OBR-29), `sch.alternate_placer_order_group_number_*` (SCH-28). **Repeating EIP (0..\*)** — modeled as `ARRAY<STRUCT<placer_assigned_identifier: STRUCT<...4 EI fields...>, filler_assigned_identifier: STRUCT<...4 EI fields...>>>` via `_eip_array_fields()` / `_eip_array_schema()`. Used by `spm.specimen_parent_ids` (SPM-3), `obx.observation_related_specimen` (OBX-33), `obr.parent_order` (OBR-54), `orc.parent_order` (ORC-8). |
+| DLN | Driver's License Number | license number (ST) ^ issuing state/province (IS) ^ expiration date (DT) | Expanded into 3 flat columns via `_dln_fields()` / `_dln_schema()`: `<prefix>` (DLN.1 ST), `<prefix>_issuing_state` (DLN.2 IS Table 0333), `<prefix>_expiration_date` (DLN.3 DT → TIMESTAMP). Used by `pid.drivers_license_*` (PID-20). |
+| TQ | Timing/Quantity | quantity (CQ) ^ interval (RI) ^ duration (ST) ^ start datetime (DTM) ^ end datetime (DTM) ^ priority (ST) ^ condition (ST) ^ text (TX) ^ conjunction (ID) ^ order sequencing (OSD) ^ occurrence duration (CWE) ^ total occurrences (NM) | Stored as repeating `ARRAY<STRUCT<...TQ fields...>>` via `_tq_array_fields()` / `_tq_array_schema()`. Used by `orc.quantity_timing` (ORC-7), `obr.quantity_timing` (OBR-27). |
+| SPS | Specimen Source | specimen source (CWE) ^ additives (CWE) ^ collection method (TX) ^ body site (CWE) ^ site modifier (CWE) ^ collection method modifier (CWE) ^ specimen role (CWE) | Expanded into 8 flat columns: `specimen_source` (SPS.1.1), `specimen_source_text` (SPS.1.2), `specimen_source_additives` (SPS.2.1), `specimen_source_collection_method` (SPS.3), `specimen_source_body_site` (SPS.4.1), `specimen_source_site_modifier` (SPS.5.1), `specimen_source_collection_method_modifier` (SPS.6.1), `specimen_source_role` (SPS.7.1). Used by `obr.specimen_source_*` (OBR-15). |
+| OG | Observation Grouper | original sub-ID (ST) ^ group (NM) ^ sequence (NM) ^ identifier (ST) | Expanded into 4 flat columns: `observation_sub_id` (OG.1 — backward-compatible ST sub-ID), `observation_sub_id_group` (OG.2 NM), `observation_sub_id_sequence` (OG.3 NM), `observation_sub_id_identifier` (OG.4 ST). Used by `obx.observation_sub_id*` (OBX-4, v2.8.2+). |
+| PL | Person Location | point of care (HD) ^ room (HD) ^ bed (HD) ^ facility (HD) ^ location status (IS) ^ person location type (IS) ^ building (HD) ^ floor (HD) ^ location description (ST) ^ comprehensive location id (EI) ^ assigning authority (HD) | ALL 11 components flattened via `_pl_fields()` / `_pl_schema()`: point_of_care, room, bed, facility, status, type, building, floor, description, comprehensive_id, assigning_authority. Each HD sub-component stores HD.1 namespace ID. For repeating PL fields (e.g. `pr1.treating_organizational_unit`), use `_pl_array_fields()` / `_pl_array_schema()` to produce `ARRAY<STRUCT<...>>`. |
+| MSG | Message Type | message code ^ trigger event ^ message structure | Comp 1 (message code), Comp 2 (trigger event), Comp 3 (message structure) — all flattened into separate columns. |
+| PT | Processing Type | processing ID ^ processing mode | ALL 2 components flattened via `_pt_fields()` / `_pt_schema()`: `{prefix}` (PT.1 ID), `{prefix}_mode` (PT.2 ID). Used by `msh.processing_id*`. |
+| VID | Version Identifier | version ID ^ internationalization code (CWE) ^ international version ID (CWE) | ALL 3 components flattened via `_vid_fields()` / `_vid_schema()` (7 columns): `{prefix}` (VID.1), then 3 CWE sub-components each for VID.2 (`_internationalization*`) and VID.3 (`_international_version*`). Used by `msh.version_id*`. |
+| DR | Date/Time Range | range start datetime ^ range end datetime | Both components flattened as two `_ts` columns: `{prefix}_start` (DR.1, DTM) and `{prefix}_end` (DR.2, DTM). Used by `ft1.transaction_date_*`, `spm.specimen_collection_datetime_*`, `orc.order_status_date_range_*`. |
+| CQ | Composite Quantity with Units | quantity (NM) ^ units (CWE) | ALL 2 components flattened via `_cq_fields()` / `_cq_schema()`: `{prefix}` (CQ.1 NM quantity), `{prefix}_units` (CQ.2.1 CWE code). Used by `ft1.ndc_qty_and_uom*`, `obr.collection_volume*`, `spm.specimen_collection_amount*`, `spm.specimen_current_quantity*`. |
+| CP | Composite Price | price (MO) ^ price type (ID) ^ from value (NM) ^ to value (NM) ^ range units (CWE) ^ range type (ID) | ALL 6 components flattened via `_cp_fields()` / `_cp_schema()` (7 columns including the MO currency sub-component): `{prefix}` (price quantity, CP.1.1), `{prefix}_currency` (ISO 4217 from CP.1.2), `{prefix}_price_type`, `{prefix}_from_value`, `{prefix}_to_value`, `{prefix}_range_units` (CWE code), `{prefix}_range_type`. |
+| FC | Financial Class | financial class code (CWE) ^ effective date (DTM) | ALL 2 components flattened via `_fc_fields()` / `_fc_schema()` (10 columns) — same shape as DLD. Used by `gt1.guarantor_financial_class*` (single). For repeating FC (e.g. `pv1.financial_class`), use `_fc_array_fields()` / `_fc_array_schema()` to produce `ARRAY<STRUCT<...>>`. |
+| AUI | Authorization Information | authorization number (ST) ^ date (DT) ^ source (ST) | ALL 3 components flattened via `_aui_fields()` / `_aui_schema()` (3 columns): `{prefix}` (AUI.1 ST), `{prefix}_date` (AUI.2 DT, parsed to timestamp), `{prefix}_source` (AUI.3 ST). Used by `in1.authorization_information*`. |
+| JCC | Job Code/Class | job code (CWE) ^ job class (CWE) ^ job description (TX) | ALL 3 components flattened via `_jcc_fields()` / `_jcc_schema()` (7 columns): job code CWE (3 cols), job class CWE (3 cols), description (1 col). Used by `nk1.job_code*`, `gt1.job_code_class*`. |
+| MOC | Charge to Practice | amount (MO) ^ charge code (CWE) | ALL 2 components flattened via `_moc_fields()` / `_moc_schema()` (5 columns): `{prefix}_amount`, `{prefix}_currency`, `{prefix}_code`, `{prefix}_code_text`, `{prefix}_code_coding_system`. Used by `obr.charge_to_practice*`. |
+| PRL | Parent Result Link | parent observation ID (CWE) ^ parent observation sub-ID (ST) ^ parent observation descriptor (TX) | ALL 3 components flattened via `_prl_fields()` / `_prl_schema()` (5 columns): CWE (3 cols), sub_id, descriptor. Used by `obr.parent_result*`. |
+| PPN | Performing Person Time Stamp | ID ^ family ^ given ^ middle ^ suffix ^ prefix ^ degree ^ source table ^ assigning authority ^ name type ^ check digit ^ check digit scheme ^ identifier type ^ assigning facility ^ date/time action performed | Modeled as XCN-shape STRING flatten where used (rare in repo). |
 | LA2 | Location with Address Variation 2 | point of care ^ room ^ bed ^ facility ^ location status ^ patient location type ^ building ^ floor ^ street ^ other ^ city ^ state ^ zip ^ country | Comp 1-3 (location), Comp 9-13 (address) |
-| NDL | Name with Date and Location | name ^ start datetime ^ end datetime ^ point of care ^ room ^ bed ^ facility ^ location status ^ patient location type ^ building ^ floor | Comp 1 (name) |
-| DLD | Discharge to Location & Date | discharge to location ^ effective date | Comp 1 (location) |
-| SPS | Specimen Source | specimen source ^ additives ^ specimen collection method ^ body site ^ site modifier ^ collection method modifier ^ specimen role | Comp 1 (source) |
+| NDL | Name with Date and Location | name (CNN) ^ start datetime (DTM) ^ end datetime (DTM) ^ point of care (IS) ^ room (IS) ^ bed (IS) ^ facility (HD) ^ location status (IS) ^ patient location type (IS) ^ building (IS) ^ floor (IS) | ALL 11 components flattened via `_ndl_fields()` / `_ndl_schema()` (17 columns including CNN sub-components: `id`, `family_name`, `given_name`, `middle_name`, `suffix`, `prefix`, `degree`). For repeating NDL (e.g. OBR-33/34/35), use `_ndl_array_fields()` / `_ndl_array_schema()` to produce `ARRAY<STRUCT<...>>`. Used by `obr.principal_result_interpreter*`, `obr.assistant_result_interpreter`, `obr.technician`, `obr.transcriptionist`. |
+| DLD | Discharge to Location & Date | discharge to location (CWE) ^ effective date (DTM) | ALL 2 components flattened via `_dld_fields()` / `_dld_schema()` (10 columns): CWE (9 cols) + DTM. Used by `pv1.discharged_to_location*`. |
+| SPS | Specimen Source | specimen source ^ additives ^ specimen collection method ^ body site ^ site modifier ^ collection method modifier ^ specimen role | Expanded into 8 flat columns — see the DLN/TQ/SPS/OG/MOC sub-section above for the complete description. |
 
 ### General Mapping Rule
 
@@ -1198,29 +1328,29 @@ When a component is itself a composite type (e.g. HD inside CX.4, XON.6, XON.8),
 | Official Docs | https://docs.cloud.google.com/healthcare-api/docs/how-tos/hl7v2-messages | 2026-03-29 | High | How-to: listing, getting, filtering, pagination with pageToken, auth |
 | Official Docs | https://docs.cloud.google.com/healthcare-api/docs/reference/rest/v1/projects.locations.datasets.hl7V2Stores.messages/get | 2026-03-29 | High | GET single message API, view parameter |
 | User-provided documentation | https://hl7-definition.caristix.com/v2/ | 2026-03-27 | Highest | Primary reference for all segment definitions |
-| Caristix HL7 Definition API — MSH | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/MSH | 2026-03-27 | High | MSH segment: 21 fields, data types, usage, max lengths |
+| Caristix HL7 Definition API — MSH | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/MSH | 2026-03-27 | High | MSH segment: 21 v2.5.1 fields; schema extended to 28 fields for v2.6/v2.7 additions (MSH.22–28). data types, usage, max lengths |
 | Caristix HL7 Definition API — EVN | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/EVN | 2026-03-27 | High | EVN segment: 7 fields, data types, usage |
-| Caristix HL7 Definition API — PID | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/PID | 2026-03-27 | High | PID segment: 39 fields, data types, usage |
-| Caristix HL7 Definition API — PD1 | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/PD1 | 2026-03-27 | High | PD1 segment: 21 fields, data types, usage |
-| Caristix HL7 Definition API — PV1 | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/PV1 | 2026-03-27 | High | PV1 segment: 52 fields, data types, usage |
-| Caristix HL7 Definition API — PV2 | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/PV2 | 2026-03-27 | High | PV2 segment: 49 fields, data types, usage |
-| Caristix HL7 Definition API — NK1 | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/NK1 | 2026-03-27 | High | NK1 segment: 39 fields, data types, usage |
+| Caristix HL7 Definition API — PID | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/PID | 2026-03-27 | High | PID segment: 39 v2.5.1 fields; schema extended to 40 fields for PID.40 (v2.7). DLN expansion at PID.20. data types, usage |
+| Caristix HL7 Definition API — PD1 | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/PD1 | 2026-03-27 | High | PD1 segment: 21 v2.5.1 fields; schema extended to 23 fields for PD1.22–23 (v2.8/v2.9). data types, usage |
+| Caristix HL7 Definition API — PV1 | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/PV1 | 2026-03-27 | High | PV1 segment: 52 v2.5.1 fields; schema extended to 54 fields for PV1.53–54 (v2.8/v2.9). data types, usage |
+| Caristix HL7 Definition API — PV2 | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/PV2 | 2026-03-27 | High | PV2 segment: 49 v2.5.1 fields; schema extended to 50 fields for PV2.50 (v2.9). data types, usage |
+| Caristix HL7 Definition API — NK1 | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/NK1 | 2026-03-27 | High | NK1 segment: 39 v2.5.1 fields; schema extended to 41 fields for NK1.40–41 (v2.7); NK1.38 `birth_place` (was `nk_birth_place`). data types, usage |
 | Caristix HL7 Definition API — MRG | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/MRG | 2026-03-27 | High | MRG segment: 7 fields, data types, usage |
 | Caristix HL7 Definition API — AL1 | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/AL1 | 2026-03-27 | High | AL1 segment: 6 fields, data types, usage |
-| Caristix HL7 Definition API — IAM | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/IAM | 2026-03-27 | High | IAM segment: 20 fields, data types, usage |
-| Caristix HL7 Definition API — DG1 | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/DG1 | 2026-03-27 | High | DG1 segment: 21 fields, data types, usage |
-| Caristix HL7 Definition API — PR1 | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/PR1 | 2026-03-27 | High | PR1 segment: 20 fields, data types, usage |
-| Caristix HL7 Definition API — ORC | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/ORC | 2026-03-27 | High | ORC segment: 31 fields, data types, usage |
-| Caristix HL7 Definition API — OBR | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/OBR | 2026-03-27 | High | OBR segment: 50 fields, data types, usage |
-| Caristix HL7 Definition API — OBX | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/OBX | 2026-03-27 | High | OBX segment: 25 fields (with gap at 20–22), data types, usage |
-| Caristix HL7 Definition API — NTE | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/NTE | 2026-03-27 | High | NTE segment: 4 fields, data types, usage |
-| Caristix HL7 Definition API — SPM | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/SPM | 2026-03-27 | High | SPM segment: 29 fields, data types, usage |
-| Caristix HL7 Definition API — IN1 | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/IN1 | 2026-03-27 | High | IN1 segment: 53 fields, data types, usage |
-| Caristix HL7 Definition API — GT1 | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/GT1 | 2026-03-27 | High | GT1 segment: 57 fields, data types, usage |
-| Caristix HL7 Definition API — FT1 | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/FT1 | 2026-03-27 | High | FT1 segment: 31 fields, data types, usage |
-| Caristix HL7 Definition API — RXA | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/RXA | 2026-03-27 | High | RXA segment: 26 fields, data types, usage |
-| Caristix HL7 Definition API — SCH | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/SCH | 2026-03-27 | High | SCH segment: 27 fields, data types, usage |
-| Caristix HL7 Definition API — TXA | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/TXA | 2026-03-27 | High | TXA segment: 23 fields, data types, usage |
+| Caristix HL7 Definition API — IAM | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/IAM | 2026-03-27 | High | IAM segment: 20 v2.5.1 fields; schema extended to 30 fields for IAM.21–30 (v2.6). data types, usage |
+| Caristix HL7 Definition API — DG1 | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/DG1 | 2026-03-27 | High | DG1 segment: 21 v2.5.1 fields; schema extended to 26 fields for DG1.22–26 (v2.7). data types, usage |
+| Caristix HL7 Definition API — PR1 | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/PR1 | 2026-03-27 | High | PR1 segment: 20 v2.5.1 fields; schema extended to 25 fields for PR1.21–25 (v2.6/v2.7). data types, usage |
+| Caristix HL7 Definition API — ORC | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/ORC | 2026-03-27 | High | ORC segment: 31 v2.5.1 fields; schema extended to 38 fields for ORC.32–38 (v2.6/v2.9). TQ expansion at ORC.7, EIP expansion at ORC.8. data types, usage |
+| Caristix HL7 Definition API — OBR | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/OBR | 2026-03-27 | High | OBR segment: 50 v2.5.1 fields; schema extended to 55 fields for OBR.51–55 (v2.8/v2.9). SPS expansion at OBR.15, MOC expansion at OBR.23, TQ expansion at OBR.27, EIP expansion at OBR.29. data types, usage |
+| Caristix HL7 Definition API — OBX | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/OBX | 2026-03-27 | High | OBX segment: 25 v2.5.1 fields; schema extended to 33 fields for OBX.26–33 (v2.8/v2.9). OG expansion at OBX.4. data types, usage |
+| Caristix HL7 Definition API — NTE | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/NTE | 2026-03-27 | High | NTE segment: 4 v2.5.1 fields; schema extended to 9 fields for NTE.5–9 (v2.6/v2.9). data types, usage |
+| Caristix HL7 Definition API — SPM | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/SPM | 2026-03-27 | High | SPM segment: 29 v2.5.1 fields; schema extended to 35 fields for SPM.30–35 (v2.6/v2.9). EIP expansion at SPM.2 and SPM.3. data types, usage |
+| Caristix HL7 Definition API — IN1 | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/IN1 | 2026-03-27 | High | IN1 segment: 53 v2.5.1 fields; schema extended to 55 fields for IN1.54–55 (v2.8/v2.9). data types, usage |
+| Caristix HL7 Definition API — GT1 | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/GT1 | 2026-03-27 | High | GT1 segment: 57 fields (no v2.9 additions). data types, usage |
+| Caristix HL7 Definition API — FT1 | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/FT1 | 2026-03-27 | High | FT1 segment: 31 v2.5.1 fields; schema extended to 56 fields for FT1.32–56 (v2.6/v2.9). data types, usage |
+| Caristix HL7 Definition API — RXA | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/RXA | 2026-03-27 | High | RXA segment: 26 v2.5.1 fields; schema extended to 29 fields for RXA.27–29 (v2.6/v2.9). data types, usage |
+| Caristix HL7 Definition API — SCH | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/SCH | 2026-03-27 | High | SCH segment: 27 v2.5.1 fields; schema extended to 28 fields for SCH.28 (v2.9, EIP expansion). data types, usage |
+| Caristix HL7 Definition API — TXA | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments/TXA | 2026-03-27 | High | TXA segment: 23 v2.5.1 fields; schema extended to 28 fields for TXA.24–28 (v2.6/v2.8/v2.9). data types, usage |
 | Caristix HL7 Definition API — Segments List | https://hl7-definition.caristix.com/v2-api/1/HL7v2.5.1/Segments | 2026-03-27 | High | Complete list of all HL7 v2.5.1 segments — used to select the 23 most clinically relevant |
 
 ### Usage Legend

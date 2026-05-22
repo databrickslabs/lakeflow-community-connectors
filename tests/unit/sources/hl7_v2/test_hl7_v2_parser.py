@@ -261,13 +261,13 @@ class TestParserEdgeCases:
 class TestSampleFileParsing:
     """Every .hl7 file in samples/ must parse without error."""
 
-    from tests.unit.sources.hl7_v2._helpers import SAMPLES_DIR as _SAMPLES_DIR
+    from tests.unit.sources.hl7_v2.hl7_v2_test_utils import SAMPLES_DIR as _SAMPLES_DIR
 
     SAMPLE_FILES = sorted(f.name for f in _SAMPLES_DIR.glob("*.hl7"))
 
     @pytest.mark.parametrize("filename", SAMPLE_FILES)
     def test_sample_parses(self, filename):
-        from tests.unit.sources.hl7_v2._helpers import load_sample
+        from tests.unit.sources.hl7_v2.hl7_v2_test_utils import load_sample
 
         from databricks.labs.community_connector.sources.hl7_v2.hl7_v2 import (
             _split_messages,

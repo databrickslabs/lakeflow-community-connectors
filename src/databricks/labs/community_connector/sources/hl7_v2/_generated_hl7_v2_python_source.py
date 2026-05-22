@@ -9,14 +9,14 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from pathlib import Path
 from typing import Any, Iterator, Sequence
-import argparse
 import json
 import re
-import sys
 import time
 
+from databricks.sdk import WorkspaceClient
+from google.auth.transport import requests as google_auth_requests
+from google.oauth2 import service_account as google_sa
 from pyspark.sql import Row
 from pyspark.sql.datasource import (
     DataSource,
@@ -46,6 +46,7 @@ from pyspark.sql.types import (
     VariantVal,
 )
 import base64
+import requests
 
 
 def register_lakeflow_source(spark):
@@ -521,284 +522,76 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
-    # src/databricks/labs/community_connector/sources/hl7_v2/gcpreader.py
+    # src/databricks/labs/community_connector/interface/supports_namespaces.py
     ########################################################
 
-    def _field_sort_key(key: str) -> tuple:
-        """Convert an HL7 field key into a sortable tuple of ints.
+    class SupportsNamespaces(ABC):
+        """Mixin for connectors whose tables live under hierarchical namespaces.
 
-        '6.2'      → (6, 2)
-        '21[0].1'  → (21, 0, 1)
-        '0'        → (0,)
+        A namespace is a path of zero or more string segments (e.g. ``["org",
+        "repo"]`` for GitHub, ``["tenant", "project"]`` for Azure DevOps).
+        Connectors with a flat catalog do not need this mixin — the framework
+        falls back to :meth:`LakeflowConnect.list_tables` and reports each table
+        with an empty namespace.
+
+        Output ordering on the ``_community_namespaces`` and ``_community_tables``
+        Spark virtual tables is normalized by the framework via ``sorted(...)``,
+        so connector implementations of :meth:`list_namespaces` and
+        :meth:`list_tables_in_namespace` are free to return their results in
+        any order (including from a :class:`set` or generator).
+
+        Must be used together with :class:`LakeflowConnect`.
+
+        Usage::
+
+            class MyConnector(LakeflowConnect, SupportsNamespaces):
+                ...
         """
-        tokens = re.split(r"[\[\]\.]+", key)
-        result: list[int | str] = []
-        for t in tokens:
-            if not t:
-                continue
-            try:
-                result.append(int(t))
-            except ValueError:
-                result.append(t)
-        return tuple(result)
 
+        @abstractmethod
+        def list_namespaces(
+            self,
+            prefix: list[str] | None = None,
+        ) -> list[list[str]]:
+            """Return the immediate child namespaces under ``prefix``.
 
-    def sort_fields(fields: dict) -> dict:
-        """Return *fields* ordered by HL7 field number."""
-        return dict(sorted(fields.items(), key=lambda kv: _field_sort_key(kv[0])))
+            This method returns one level of *namespace* children only — it
+            never returns tables. A namespace can hold tables and child
+            namespaces independently; callers must always call
+            :meth:`list_tables_in_namespace` for every namespace they care
+            about, regardless of whether :meth:`list_namespaces` returned
+            children for it. An empty return value just means there are no
+            further child namespaces under ``prefix``.
 
+            Walk the full tree by recursing on each returned child.
 
-    def _load_service_account(value: str) -> dict:
-        """Load service account info from a file path or inline JSON string."""
-        path = Path(value)
-        if path.is_file():
-            return json.loads(path.read_text())
-        try:
-            return json.loads(value)
-        except json.JSONDecodeError:
-            raise ValueError(
-                f"service_account_json is neither a valid file path nor valid JSON: {value[:80]}"
-            )
+            Args:
+                prefix: A namespace path under which to list children. ``None`` or
+                    an empty list lists the root-level namespaces.
+            Returns:
+                A list of full namespace paths (each path includes the prefix).
+            """
 
+        @abstractmethod
+        def list_tables_in_namespace(
+            self,
+            namespace: list[str],
+        ) -> list[str]:
+            """Return the table names that live directly under ``namespace``.
 
-    def _authenticate(sa_info: dict):
-        """Create and refresh GCP credentials, return an authorized session."""
-        from google.auth.transport.requests import Request
-        from google.oauth2 import service_account
-        import requests
+            Callers that want every table across the whole catalog walk the
+            namespace tree via :meth:`list_namespaces` and call this method
+            once per leaf — there is no "list everything" shortcut.
 
-        creds = service_account.Credentials.from_service_account_info(
-            sa_info,
-            scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        )
-        creds.refresh(Request())
-        session = requests.Session()
-        session.headers["Authorization"] = f"Bearer {creds.token}"
-        return session
-
-
-    def _build_url(project_id: str, location: str, dataset_id: str, hl7v2_store_id: str) -> str:
-        return (
-            f"https://healthcare.googleapis.com/v1"
-            f"/projects/{project_id}"
-            f"/locations/{location}"
-            f"/datasets/{dataset_id}"
-            f"/hl7V2Stores/{hl7v2_store_id}/messages"
-        )
-
-
-    def fetch_messages(
-        session,
-        url: str,
-        limit: int = 10,
-        since: str | None = None,
-    ) -> list[dict]:
-        """Fetch up to *limit* messages from the HL7v2 store."""
-        params: dict[str, str] = {
-            "view": "FULL",
-            "pageSize": str(min(limit, 1000)),
-            "orderBy": "sendTime asc",
-        }
-        if since:
-            params["filter"] = f'sendTime > "{since}"'
-
-        all_messages: list[dict] = []
-        page_token: str | None = None
-
-        while len(all_messages) < limit:
-            if page_token:
-                params["pageToken"] = page_token
-            resp = session.get(url, params=params, timeout=30)
-            resp.raise_for_status()
-            body = resp.json()
-
-            batch = body.get("hl7V2Messages", [])
-            all_messages.extend(batch)
-
-            page_token = body.get("nextPageToken")
-            if not page_token:
-                break
-
-        return all_messages[:limit]
-
-
-    def decode_hl7(msg: dict) -> str:
-        """Base64-decode the ``data`` field to raw HL7 pipe-delimited text."""
-        raw = msg.get("data", "")
-        if not raw:
-            return ""
-        return base64.b64decode(raw).decode("utf-8", errors="replace")
-
-
-    def _parse_field(fields: dict, idx: int, value: str) -> None:
-        """Parse a single HL7 field value (handling repeats and components) into *fields*."""
-        if not value:
-            return
-        repeats = value.split("~")
-        has_repeats = len(repeats) > 1
-        for r, repeat in enumerate(repeats):
-            components = repeat.split("^")
-            if len(components) == 1:
-                key = f"{idx}[{r}]" if has_repeats else str(idx)
-                fields[key] = components[0]
-            else:
-                for j, comp in enumerate(components, 1):
-                    if comp:
-                        prefix = f"{idx}[{r}]" if has_repeats else str(idx)
-                        fields[f"{prefix}.{j}"] = comp
-
-
-    def parse_segment(line: str) -> dict:
-        """Parse a raw HL7 pipe-delimited segment into ``{segmentId, fields}``
-        with fields sorted by field number."""
-        seg_type = line[:3]
-        fields: dict[str, str] = {"0": seg_type}
-
-        if seg_type == "MSH":
-            fields["1"] = line[3]
-            rest = line[4:]
-            parts = rest.split("|")
-            fields["2"] = parts[0]
-            for i, part in enumerate(parts[1:], 3):
-                _parse_field(fields, i, part)
-        else:
-            rest = line[4:] if len(line) > 3 and line[3] == "|" else line[3:]
-            parts = rest.split("|")
-            for i, part in enumerate(parts, 1):
-                _parse_field(fields, i, part)
-
-        return {"segmentId": seg_type, "raw": line, "fields": sort_fields(fields)}
-
-
-    def print_message(idx: int, msg: dict, *, raw: bool = False) -> None:
-        """Pretty-print a single HL7 API message."""
-        print(f"\n{'=' * 60}")
-        print(f"  Message {idx}")
-        print(f"{'=' * 60}")
-        print(f"  Resource name : {msg.get('name', 'N/A')}")
-        print(f"  Send time     : {msg.get('sendTime', 'N/A')}")
-        print(f"  Create time   : {msg.get('createTime', 'N/A')}")
-        print(f"  Message type  : {msg.get('messageType', 'N/A')}")
-        print(f"  Patient IDs   : {msg.get('patientIds', [])}")
-        print(f"  Labels        : {msg.get('labels', {})}")
-        print()
-
-        if raw:
-            print(f"  Raw data (base64): {msg.get('data', '')[:120]}...")
-        else:
-            hl7_text = decode_hl7(msg)
-            if hl7_text:
-                print("  Decoded HL7 segments:")
-                for line in hl7_text.replace("\r\n", "\r").replace("\n", "\r").split("\r"):
-                    line = line.strip()
-                    if line:
-                        seg_id = line[:3]
-                        print(f"\n    [{seg_id}] {line}")
-                        parsed = parse_segment(line)
-                        for key, val in parsed["fields"].items():
-                            print(f"      {seg_id}-{key:12s} = {val}")
-            else:
-                print("  (no data)")
-
-
-    def main() -> None:
-        parser = argparse.ArgumentParser(
-            description="Standalone reader for GCP Healthcare API HL7 v2 messages",
-        )
-        parser.add_argument("--config", help="Path to a JSON config file (dev_config_gcp.json format)")
-        parser.add_argument("--project-id", help="GCP project ID")
-        parser.add_argument("--location", help="GCP region (e.g. us-central1)")
-        parser.add_argument("--dataset-id", help="Healthcare API dataset ID")
-        parser.add_argument("--hl7v2-store-id", help="HL7v2 store name")
-        parser.add_argument("--service-account-json", help="Path to SA key file or inline JSON")
-        parser.add_argument("--limit", type=int, default=10, help="Max messages to fetch (default 10)")
-        parser.add_argument("--since", help="Only fetch messages after this timestamp (RFC3339)")
-        parser.add_argument("--raw", action="store_true", help="Print raw base64 instead of decoded HL7")
-        parser.add_argument("--json-out", action="store_true", help="Print full API response as JSON")
-        parser.add_argument(
-            "--parsed-json", action="store_true",
-            help="Print parsed segments as JSON with fields sorted by field number",
-        )
-
-        args = parser.parse_args()
-
-        cfg: dict[str, str] = {}
-        if args.config:
-            cfg = json.loads(Path(args.config).read_text())
-
-        project_id = args.project_id or cfg.get("project_id")
-        location = args.location or cfg.get("location")
-        dataset_id = args.dataset_id or cfg.get("dataset_id")
-        hl7v2_store_id = args.hl7v2_store_id or cfg.get("hl7v2_store_id")
-        sa_json = args.service_account_json or cfg.get("service_account_json")
-
-        missing = []
-        if not project_id:
-            missing.append("project-id")
-        if not location:
-            missing.append("location")
-        if not dataset_id:
-            missing.append("dataset-id")
-        if not hl7v2_store_id:
-            missing.append("hl7v2-store-id")
-        if not sa_json:
-            missing.append("service-account-json")
-        if missing:
-            print(f"Error: missing required parameters: {', '.join(missing)}", file=sys.stderr)
-            print("Provide them via --config or individual flags.", file=sys.stderr)
-            sys.exit(1)
-
-        sa_info = _load_service_account(sa_json)
-
-        print("Authenticating with GCP...")
-        session = _authenticate(sa_info)
-        print("Authenticated successfully.\n")
-
-        url = _build_url(project_id, location, dataset_id, hl7v2_store_id)
-        print(f"API endpoint: {url}")
-        print(f"Fetching up to {args.limit} messages...")
-        if args.since:
-            print(f"Filtering: sendTime > \"{args.since}\"")
-
-        messages = fetch_messages(session, url, limit=args.limit, since=args.since)
-        print(f"\nReceived {len(messages)} message(s).")
-
-        if args.json_out:
-            print(json.dumps(messages, indent=2))
-            return
-
-        if args.parsed_json:
-            for i, msg in enumerate(messages, 1):
-                hl7_text = decode_hl7(msg)
-                if not hl7_text:
-                    continue
-                segments = []
-                for line in hl7_text.replace("\r\n", "\r").replace("\n", "\r").split("\r"):
-                    line = line.strip()
-                    if line:
-                        segments.append(parse_segment(line))
-                output = {
-                    "message": i,
-                    "resourceName": msg.get("name", "N/A"),
-                    "sendTime": msg.get("sendTime", "N/A"),
-                    "createTime": msg.get("createTime", "N/A"),
-                    "messageType": msg.get("messageType", "N/A"),
-                    "patientIds": msg.get("patientIds", []),
-                    "labels": msg.get("labels", {}),
-                    "segments": segments,
-                }
-                print(json.dumps(output, indent=2))
-            return
-
-        for i, msg in enumerate(messages, 1):
-            print_message(i, msg, raw=args.raw)
-
-        if not messages:
-            print("\nNo messages found. Check your parameters or try removing the --since filter.")
-
-
-    if __name__ == "__main__":
-        main()
+            Args:
+                namespace: The namespace path. An empty list ``[]`` selects
+                    root-level tables (those that live outside any namespace).
+            Returns:
+                A list of table names. The full ``(namespace, table_name)``
+                row exposed on ``_community_tables`` is reconstructed by the
+                framework from the namespace the caller already supplied, so
+                the connector does not need to echo it back.
+            """
 
 
     ########################################################
@@ -969,7 +762,8 @@ def register_lakeflow_source(spark):
         def get_rep_sub_component(
             self, field_n: int, rep_n: int, comp_n: int, sub_n: int, default: str = ""
         ) -> str:
-            """Return sub-component *sub_n* of component *comp_n* from repetition *rep_n* of field *field_n*.
+            """Return sub-component *sub_n* of component *comp_n* from repetition
+            *rep_n* of field *field_n*.
 
             All indices are 1-based.
             """
@@ -1074,6 +868,2219 @@ def register_lakeflow_source(spark):
 
 
     ########################################################
+    # src/databricks/labs/community_connector/sources/hl7_v2/hl7_v2_composites.py
+    ########################################################
+
+    def _v(s: str) -> str | None:
+        """Return *s* if non-empty, else None."""
+        return s if s else None
+
+
+    def _i(s: str) -> int | None:
+        """Parse *s* as int; return None on failure."""
+        if not s:
+            return None
+        try:
+            return int(s.strip())
+        except ValueError:
+            return None
+
+
+    _DTM_RE = re.compile(
+        r"^(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?(?:\.\d+)?([+-]\d{4})?$"
+    )
+
+
+    def _parse_dtm(s: str) -> str | None:
+        """Parse an HL7 DTM string to an ISO-8601 UTC string.
+
+        Handles partial precision (YYYY, YYYYMM, YYYYMMDD, YYYYMMDDHHMMSS)
+        and optional timezone offset (e.g. +0500, -0800).  If a timezone offset
+        is present the value is converted to UTC first.  Returns an ISO-8601
+        string (no timezone suffix) so the schema can use StringType and avoid
+        Arrow timestamp-timezone mismatches.
+        Returns None for empty or unparseable input.
+        """
+        if not s:
+            return None
+        cleaned = s.strip().strip("()")
+        m = _DTM_RE.match(cleaned)
+        if not m:
+            return None
+        y, mo, d, h, mi, sec, tz = m.groups()
+        try:
+            dt = datetime(
+                int(y),
+                int(mo or 1),
+                int(d or 1),
+                int(h or 0),
+                int(mi or 0),
+                int(sec or 0),
+            )
+            if tz:
+                sign = 1 if tz[0] == "+" else -1
+                offset = timedelta(hours=int(tz[1:3]), minutes=int(tz[3:5]))
+                dt = dt.replace(tzinfo=timezone(sign * offset))
+                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+            return dt.isoformat()
+        except ValueError:
+            return None
+
+
+    # ---------------------------------------------------------------------------
+    # Composite-type helpers — extract all components with consistent naming
+    # ---------------------------------------------------------------------------
+
+
+    def _xpn_fields(
+        seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = True
+    ) -> dict:
+        """XPN (Extended Person Name) — 14 active components."""
+        def gc(comp):
+            if repeating:
+                return _v(seg.get_rep_component(field_n, 1, comp))
+            return _v(seg.get_component(field_n, comp))
+
+        return {
+            f"{prefix}_family_name": gc(1),
+            f"{prefix}_given_name": gc(2),
+            f"{prefix}_middle_name": gc(3),
+            f"{prefix}_suffix": gc(4),
+            f"{prefix}_prefix": gc(5),
+            f"{prefix}_degree": gc(6),
+            f"{prefix}_name_type_code": gc(7),
+            f"{prefix}_name_representation_code": gc(8),
+            f"{prefix}_name_context": gc(9),
+            f"{prefix}_name_assembly_order": gc(11),
+            f"{prefix}_name_effective_date": gc(12),
+            f"{prefix}_name_expiration_date": gc(13),
+            f"{prefix}_professional_suffix": gc(14),
+            f"{prefix}_called_by": gc(15),
+        }
+
+
+    def _xpn_array_fields(
+        seg: HL7Segment, field_n: int, column_name: str
+    ) -> dict:
+        """XPN (Extended Person Name) — all repetitions as a list of dicts."""
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        reps = raw.split(seg._enc.rep_sep)
+        result = []
+        for rep in reps:
+            if not rep:
+                continue
+            parts = rep.split(seg._enc.comp_sep)
+            def gc(i, _p=parts):
+                return _v(_p[i - 1]) if len(_p) >= i else None
+            result.append({
+                "family_name": gc(1),
+                "given_name": gc(2),
+                "middle_name": gc(3),
+                "suffix": gc(4),
+                "prefix": gc(5),
+                "degree": gc(6),
+                "name_type_code": gc(7),
+                "name_representation_code": gc(8),
+                "name_context": gc(9),
+                "name_assembly_order": gc(11),
+                "name_effective_date": gc(12),
+                "name_expiration_date": gc(13),
+                "professional_suffix": gc(14),
+                "called_by": gc(15),
+            })
+        return {column_name: result if result else None}
+
+
+    def _xcn_fields(
+        seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = True
+    ) -> dict:
+        """XCN (Extended Composite ID Number and Name for Persons) — 21 active components."""
+        def gc(comp):
+            if repeating:
+                return _v(seg.get_rep_component(field_n, 1, comp))
+            return _v(seg.get_component(field_n, comp))
+
+        def gsc(comp, sub):
+            if repeating:
+                return _v(seg.get_rep_sub_component(field_n, 1, comp, sub))
+            return _v(seg.get_sub_component(field_n, comp, sub))
+
+        return {
+            f"{prefix}_id": gc(1),
+            f"{prefix}_family_name": gc(2),
+            f"{prefix}_given_name": gc(3),
+            f"{prefix}_middle_name": gc(4),
+            f"{prefix}_suffix": gc(5),
+            f"{prefix}_prefix": gc(6),
+            f"{prefix}_degree": gc(7),
+            f"{prefix}_source_table": gc(8),
+            f"{prefix}_assigning_authority": gsc(9, 1),
+            f"{prefix}_assigning_authority_universal_id": gsc(9, 2),
+            f"{prefix}_assigning_authority_universal_id_type": gsc(9, 3),
+            f"{prefix}_name_type_code": gc(10),
+            f"{prefix}_check_digit": gc(11),
+            f"{prefix}_check_digit_scheme": gc(12),
+            f"{prefix}_identifier_type_code": gc(13),
+            f"{prefix}_assigning_facility": gsc(14, 1),
+            f"{prefix}_assigning_facility_universal_id": gsc(14, 2),
+            f"{prefix}_assigning_facility_universal_id_type": gsc(14, 3),
+            f"{prefix}_name_representation_code": gc(15),
+            f"{prefix}_name_assembly_order": gc(18),
+            f"{prefix}_effective_date": gc(19),
+            f"{prefix}_expiration_date": gc(20),
+            f"{prefix}_professional_suffix": gc(21),
+        }
+
+
+    def _cwe_fields(
+        seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = False
+    ) -> dict:
+        """CWE (Coded With Exceptions) — 9 active components (10-22 are OID/value-set metadata, rarely populated)."""
+        def gc(comp):
+            if repeating:
+                return _v(seg.get_rep_component(field_n, 1, comp))
+            return _v(seg.get_component(field_n, comp))
+
+        return {
+            f"{prefix}": gc(1),
+            f"{prefix}_text": gc(2),
+            f"{prefix}_coding_system": gc(3),
+            f"{prefix}_alt_code": gc(4),
+            f"{prefix}_alt_text": gc(5),
+            f"{prefix}_alt_coding_system": gc(6),
+            f"{prefix}_coding_system_version": gc(7),
+            f"{prefix}_alt_coding_system_version": gc(8),
+            f"{prefix}_original_text": gc(9),
+        }
+
+
+    def _hd_fields(
+        seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = False
+    ) -> dict:
+        """HD (Hierarchic Designator) — 3 components."""
+        def gc(comp):
+            if repeating:
+                return _v(seg.get_rep_component(field_n, 1, comp))
+            return _v(seg.get_component(field_n, comp))
+
+        return {
+            f"{prefix}": gc(1),
+            f"{prefix}_universal_id": gc(2),
+            f"{prefix}_universal_id_type": gc(3),
+        }
+
+
+    def _ei_fields(
+        seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = False
+    ) -> dict:
+        """EI (Entity Identifier) — 4 components."""
+        def gc(comp):
+            if repeating:
+                return _v(seg.get_rep_component(field_n, 1, comp))
+            return _v(seg.get_component(field_n, comp))
+
+        return {
+            f"{prefix}": gc(1),
+            f"{prefix}_namespace_id": gc(2),
+            f"{prefix}_universal_id": gc(3),
+            f"{prefix}_universal_id_type": gc(4),
+        }
+
+
+    def _cp_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+        """CP (Composite Price) — 6 components, with MO sub-components on CP.1.
+
+        Components: Price (MO), Price Type (ID, table 0205), From Value (NM),
+        To Value (NM), Range Units (CWE — code only), Range Type (ID, table 0298).
+        MO has 2 sub-components: 1=quantity, 2=ISO 4217 denomination code.
+        """
+        def gc(comp):
+            return _v(seg.get_component(field_n, comp))
+
+        def gsc(comp, sub):
+            return _v(seg.get_sub_component(field_n, comp, sub))
+
+        return {
+            f"{prefix}":                      gsc(1, 1) or gc(1),
+            f"{prefix}_currency":             gsc(1, 2),
+            f"{prefix}_price_type":           gc(2),
+            f"{prefix}_from_value":           gc(3),
+            f"{prefix}_to_value":             gc(4),
+            f"{prefix}_range_units":          gsc(5, 1) or gc(5),
+            f"{prefix}_range_units_text":     gsc(5, 2),
+            f"{prefix}_range_units_coding_system": gsc(5, 3),
+            f"{prefix}_range_type":           gc(6),
+        }
+
+
+    def _pt_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+        """PT (Processing Type) — 2 ID components: Processing ID, Processing Mode."""
+        return {
+            f"{prefix}": _v(seg.get_component(field_n, 1)),
+            f"{prefix}_mode": _v(seg.get_component(field_n, 2)),
+        }
+
+
+    def _vid_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+        """VID (Version Identifier) — 3 components: ID + CWE (Internationalization) + CWE (International Version)."""
+        def gc(comp):
+            return _v(seg.get_component(field_n, comp))
+
+        def gsc(comp, sub):
+            return _v(seg.get_sub_component(field_n, comp, sub))
+
+        return {
+            f"{prefix}": gc(1),
+            f"{prefix}_internationalization": gsc(2, 1) or gc(2),
+            f"{prefix}_internationalization_text": gsc(2, 2),
+            f"{prefix}_internationalization_coding_system": gsc(2, 3),
+            f"{prefix}_international_version": gsc(3, 1) or gc(3),
+            f"{prefix}_international_version_text": gsc(3, 2),
+            f"{prefix}_international_version_coding_system": gsc(3, 3),
+        }
+
+
+    def _aui_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+        """AUI (Authorization Information) — 3 components: ST (number), DT (date), ST (source)."""
+        return {
+            f"{prefix}": _v(seg.get_component(field_n, 1)),
+            f"{prefix}_date": _parse_dtm(seg.get_component(field_n, 2)),
+            f"{prefix}_source": _v(seg.get_component(field_n, 3)),
+        }
+
+
+    def _sps_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+        """SPS (Specimen Source) — 7 components. Withdrawn in v2.7; used for backward compatibility with v2.3–v2.6."""
+        def gc(comp):
+            return _v(seg.get_component(field_n, comp))
+
+        def gsc(comp, sub):
+            return _v(seg.get_sub_component(field_n, comp, sub))
+
+        return {
+            f"{prefix}":                            gsc(1, 1) or gc(1),  # SPS.1.1 (CWE.1 source code)
+            f"{prefix}_text":                       gsc(1, 2),           # SPS.1.2 (CWE.2 source text)
+            f"{prefix}_additives":                  gsc(2, 1) or gc(2),  # SPS.2.1 (CWE.1 additives)
+            f"{prefix}_collection_method":          gc(3),               # SPS.3 (TX)
+            f"{prefix}_body_site":                  gsc(4, 1) or gc(4),  # SPS.4.1 (CWE.1 body site)
+            f"{prefix}_site_modifier":              gsc(5, 1) or gc(5),  # SPS.5.1 (CWE.1 site modifier)
+            f"{prefix}_collection_method_modifier": gsc(6, 1) or gc(6),  # SPS.6.1 (CWE.1 method mod)
+            f"{prefix}_role":                       gsc(7, 1) or gc(7),  # SPS.7.1 (CWE.1 specimen role)
+        }
+
+
+    def _dln_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+        """DLN (Driver's License Number) — 3 components: license number (ST) + issuing state (IS) + expiration date (DT)."""
+        def gc(comp):
+            return _v(seg.get_component(field_n, comp))
+
+        return {
+            f"{prefix}_number":          gc(1),
+            f"{prefix}_issuing_state":   gc(2),
+            f"{prefix}_expiration_date": _parse_dtm(gc(3)),
+        }
+
+
+    def _dld_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+        """DLD (Discharge Location and Date) — 2 components: location code (CWE.1) + effective date (DTM)."""
+        def gc(comp):
+            return _v(seg.get_component(field_n, comp))
+
+        def gsc(comp, sub):
+            return _v(seg.get_sub_component(field_n, comp, sub))
+
+        return {
+            f"{prefix}":               gsc(1, 1) or gc(1),
+            f"{prefix}_effective_date": _parse_dtm(gc(2)),
+        }
+
+
+    def _fc_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+        """FC (Financial Class) — 2 components: CWE (class code) + DTM (effective date). Single-rep variant."""
+        def gsc(comp, sub):
+            return _v(seg.get_sub_component(field_n, comp, sub))
+
+        def gc(comp):
+            return _v(seg.get_component(field_n, comp))
+
+        return {
+            f"{prefix}": gsc(1, 1) or gc(1),
+            f"{prefix}_text": gsc(1, 2),
+            f"{prefix}_coding_system": gsc(1, 3),
+            f"{prefix}_alt_code": gsc(1, 4),
+            f"{prefix}_alt_text": gsc(1, 5),
+            f"{prefix}_alt_coding_system": gsc(1, 6),
+            f"{prefix}_coding_system_version": gsc(1, 7),
+            f"{prefix}_alt_coding_system_version": gsc(1, 8),
+            f"{prefix}_original_text": gsc(1, 9),
+            f"{prefix}_effective_date": _parse_dtm(gc(2)),
+        }
+
+
+    def _fc_array_fields(seg: HL7Segment, field_n: int, column_name: str) -> dict:
+        """FC (Financial Class) — repeating: ARRAY<STRUCT<code, text, ..., effective_date>>."""
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        reps = raw.split(seg._enc.rep_sep)
+        result = []
+        for rep in reps:
+            if not rep:
+                continue
+            parts = rep.split(seg._enc.comp_sep)
+
+            def gc(i, _p=parts):
+                return _v(_p[i - 1]) if len(_p) >= i else None
+
+            def gsc(i, sub, _p=parts):
+                if len(_p) < i or not _p[i - 1]:
+                    return None
+                subs = _p[i - 1].split(seg._enc.sub_comp_sep)
+                return _v(subs[sub - 1]) if len(subs) >= sub else None
+
+            result.append({
+                "code": gsc(1, 1) or gc(1),
+                "text": gsc(1, 2),
+                "coding_system": gsc(1, 3),
+                "alt_code": gsc(1, 4),
+                "alt_text": gsc(1, 5),
+                "alt_coding_system": gsc(1, 6),
+                "coding_system_version": gsc(1, 7),
+                "alt_coding_system_version": gsc(1, 8),
+                "original_text": gsc(1, 9),
+                "effective_date": _parse_dtm(gc(2)),
+            })
+        return {column_name: result if result else None}
+
+
+    def _tq_array_fields(seg: HL7Segment, field_n: int, column_name: str) -> dict:
+        """TQ (Timing Quantity) — repeating:
+        ARRAY<STRUCT<quantity, interval_repeat_pattern, ..., total_occurrences>>.
+        Deprecated in v2.5; supported here for older (v2.3/v2.4) messages."""
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        reps = raw.split(seg._enc.rep_sep)
+        result = []
+        for rep in reps:
+            if not rep:
+                continue
+            parts = rep.split(seg._enc.comp_sep)
+
+            def gc(i, _p=parts):
+                return _v(_p[i - 1]) if len(_p) >= i else None
+
+            def gsc(i, sub, _p=parts):
+                if len(_p) < i or not _p[i - 1]:
+                    return None
+                subs = _p[i - 1].split(seg._enc.sub_comp_sep)
+                return _v(subs[sub - 1]) if len(subs) >= sub else None
+
+            result.append({
+                "quantity":                gsc(1, 1) or gc(1),  # TQ.1.1 (CQ quantity)
+                "quantity_units":          gsc(1, 2),            # TQ.1.2 (CQ units, CWE.1)
+                "interval_repeat_pattern": gsc(2, 1),            # TQ.2.1 (RI repeat pattern)
+                "interval_explicit_time":  gsc(2, 2),            # TQ.2.2 (RI explicit time)
+                "duration":                gc(3),                 # TQ.3 (ST)
+                "start_datetime":          _parse_dtm(gc(4)),    # TQ.4 (TS)
+                "end_datetime":            _parse_dtm(gc(5)),    # TQ.5 (TS)
+                "priority":                gc(6),                 # TQ.6 (ID)
+                "condition":               gc(7),                 # TQ.7 (ST)
+                "text":                    gc(8),                 # TQ.8 (TX)
+                "conjunction":             gc(9),                 # TQ.9 (ID)
+                "order_sequencing":        gc(10),                # TQ.10 (OSD, raw)
+                "occurrence_duration":     gsc(11, 1) or gc(11), # TQ.11.1 (CE/CWE code)
+                "total_occurrences":       gc(12),                # TQ.12 (NM)
+            })
+        return {column_name: result if result else None}
+
+
+    def _jcc_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+        """JCC (Job Code/Class) — 3 components: CWE (job code) + CWE (job class) + TX (description)."""
+        def gsc(comp, sub):
+            return _v(seg.get_sub_component(field_n, comp, sub))
+
+        def gc(comp):
+            return _v(seg.get_component(field_n, comp))
+
+        return {
+            f"{prefix}": gsc(1, 1) or gc(1),
+            f"{prefix}_text": gsc(1, 2),
+            f"{prefix}_coding_system": gsc(1, 3),
+            f"{prefix}_class": gsc(2, 1) or gc(2),
+            f"{prefix}_class_text": gsc(2, 2),
+            f"{prefix}_class_coding_system": gsc(2, 3),
+            f"{prefix}_description": gc(3),
+        }
+
+
+    def _moc_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+        """MOC (Money and Code) — MOC.1: MO (Monetary Amount) + MOC.2: CWE (Charge Code)."""
+        def gsc(comp, sub):
+            return _v(seg.get_sub_component(field_n, comp, sub))
+
+        def gc(comp):
+            return _v(seg.get_component(field_n, comp))
+
+        return {
+            f"{prefix}_monetary_amount":           gsc(1, 1) or gc(1),  # MOC.1.1 (MO.1 quantity, NM)
+            f"{prefix}_monetary_amount_currency":  gsc(1, 2),            # MOC.1.2 (MO.2 denom, ID)
+            f"{prefix}_charge_code":               gsc(2, 1) or gc(2),  # MOC.2.1 (CWE.1 code)
+            f"{prefix}_charge_code_text":          gsc(2, 2),            # MOC.2.2 (CWE.2 text)
+            f"{prefix}_charge_code_coding_system": gsc(2, 3),            # MOC.2.3 (CWE.3 coding system)
+        }
+
+
+    def _prl_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+        """PRL (Parent Result Link) — 3 components: CWE (parent observation id) + ST (sub-id) + TX (descriptor)."""
+        def gsc(comp, sub):
+            return _v(seg.get_sub_component(field_n, comp, sub))
+
+        def gc(comp):
+            return _v(seg.get_component(field_n, comp))
+
+        return {
+            f"{prefix}": gsc(1, 1) or gc(1),
+            f"{prefix}_text": gsc(1, 2),
+            f"{prefix}_coding_system": gsc(1, 3),
+            f"{prefix}_sub_id": gc(2),
+            f"{prefix}_descriptor": gc(3),
+        }
+
+
+    def _ndl_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+        """NDL (Name with Date and Location) — 11 components: CNN (.1 sub-decomposed) + 2 DTM + 8 IS/HD."""
+        def gsc(comp, sub):
+            return _v(seg.get_sub_component(field_n, comp, sub))
+
+        def gc(comp):
+            return _v(seg.get_component(field_n, comp))
+
+        return {
+            f"{prefix}": gsc(1, 1),
+            f"{prefix}_family_name": gsc(1, 2),
+            f"{prefix}_given_name": gsc(1, 3),
+            f"{prefix}_middle_name": gsc(1, 4),
+            f"{prefix}_suffix": gsc(1, 5),
+            f"{prefix}_prefix": gsc(1, 6),
+            f"{prefix}_degree": gsc(1, 7),
+            f"{prefix}_start_datetime": _parse_dtm(gc(2)),
+            f"{prefix}_end_datetime": _parse_dtm(gc(3)),
+            f"{prefix}_point_of_care": gc(4),
+            f"{prefix}_room": gc(5),
+            f"{prefix}_bed": gc(6),
+            f"{prefix}_facility": gsc(7, 1) or gc(7),
+            f"{prefix}_location_status": gc(8),
+            f"{prefix}_patient_location_type": gc(9),
+            f"{prefix}_building": gc(10),
+            f"{prefix}_floor": gc(11),
+        }
+
+
+    def _ndl_array_fields(seg: HL7Segment, field_n: int, column_name: str) -> dict:
+        """NDL — repeating: ARRAY<STRUCT> with all components."""
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        reps = raw.split(seg._enc.rep_sep)
+        result = []
+        for rep in reps:
+            if not rep:
+                continue
+            parts = rep.split(seg._enc.comp_sep)
+
+            def gc(i, _p=parts):
+                return _v(_p[i - 1]) if len(_p) >= i else None
+
+            def gsc(i, sub, _p=parts):
+                if len(_p) < i or not _p[i - 1]:
+                    return None
+                subs = _p[i - 1].split(seg._enc.sub_comp_sep)
+                return _v(subs[sub - 1]) if len(subs) >= sub else None
+
+            result.append({
+                "id": gsc(1, 1),
+                "family_name": gsc(1, 2),
+                "given_name": gsc(1, 3),
+                "middle_name": gsc(1, 4),
+                "suffix": gsc(1, 5),
+                "prefix": gsc(1, 6),
+                "degree": gsc(1, 7),
+                "start_datetime": _parse_dtm(gc(2)),
+                "end_datetime": _parse_dtm(gc(3)),
+                "point_of_care": gc(4),
+                "room": gc(5),
+                "bed": gc(6),
+                "facility": gsc(7, 1) or gc(7),
+                "location_status": gc(8),
+                "patient_location_type": gc(9),
+                "building": gc(10),
+                "floor": gc(11),
+            })
+        return {column_name: result if result else None}
+
+
+    def _pl_array_fields(seg: HL7Segment, field_n: int, column_name: str) -> dict:
+        """PL (Person Location) — repeating: ARRAY<STRUCT> with all 11 components flattened."""
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        reps = raw.split(seg._enc.rep_sep)
+        result = []
+        for rep in reps:
+            if not rep:
+                continue
+            parts = rep.split(seg._enc.comp_sep)
+
+            def gc(i, _p=parts):
+                return _v(_p[i - 1]) if len(_p) >= i else None
+
+            def gsc(i, sub, _p=parts):
+                if len(_p) < i or not _p[i - 1]:
+                    return None
+                subs = _p[i - 1].split(seg._enc.sub_comp_sep)
+                return _v(subs[sub - 1]) if len(subs) >= sub else None
+
+            result.append({
+                "point_of_care": gsc(1, 1) or gc(1),
+                "room": gsc(2, 1) or gc(2),
+                "bed": gsc(3, 1) or gc(3),
+                "facility": gsc(4, 1) or gc(4),
+                "status": gc(5),
+                "type": gc(6),
+                "building": gsc(7, 1) or gc(7),
+                "floor": gsc(8, 1) or gc(8),
+                "description": gc(9),
+                "comprehensive_id": gsc(10, 1) or gc(10),
+                "assigning_authority": gsc(11, 1) or gc(11),
+            })
+        return {column_name: result if result else None}
+
+
+    def _cq_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+        """CQ (Composite Quantity with Units) — 2 components.
+
+        CQ.1 = Quantity (NM) — stored as ``{prefix}`` (raw string; downstream casts to NUMERIC).
+        CQ.2 = Units (CWE) — code only at CQ.2.1, stored as ``{prefix}_units``.
+        """
+        def gc(comp):
+            return _v(seg.get_component(field_n, comp))
+
+        def gsc(comp, sub):
+            return _v(seg.get_sub_component(field_n, comp, sub))
+
+        return {
+            f"{prefix}": gc(1),
+            f"{prefix}_units": gsc(2, 1) or gc(2),
+        }
+
+
+    def _pl_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+        """PL (Person Location) — 11 components.
+
+        Each HD sub-component (point_of_care, room, bed, facility, building, floor,
+        assigning_authority) is captured as its HD.1 namespace ID, matching the
+        precedent set by PV1.3 / NK1.3 single-component composite flattening.
+        """
+        def gc(comp):
+            return _v(seg.get_component(field_n, comp))
+
+        def gsc(comp, sub):
+            return _v(seg.get_sub_component(field_n, comp, sub))
+
+        return {
+            f"{prefix}_point_of_care": gsc(1, 1) or gc(1),
+            f"{prefix}_room": gsc(2, 1) or gc(2),
+            f"{prefix}_bed": gsc(3, 1) or gc(3),
+            f"{prefix}_facility": gsc(4, 1) or gc(4),
+            f"{prefix}_status": gc(5),
+            f"{prefix}_type": gc(6),
+            f"{prefix}_building": gsc(7, 1) or gc(7),
+            f"{prefix}_floor": gsc(8, 1) or gc(8),
+            f"{prefix}_description": gc(9),
+            f"{prefix}_comprehensive_id": gsc(10, 1) or gc(10),
+            f"{prefix}_assigning_authority": gsc(11, 1) or gc(11),
+        }
+
+
+    def _cwe_array_fields(
+        seg: HL7Segment, field_n: int, column_name: str
+    ) -> dict:
+        """CWE (Coded With Exceptions) — all repetitions as a list of dicts."""
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        reps = raw.split(seg._enc.rep_sep)
+        result = []
+        for rep in reps:
+            if not rep:
+                continue
+            parts = rep.split(seg._enc.comp_sep)
+            def gc(i, _p=parts):
+                return _v(_p[i - 1]) if len(_p) >= i else None
+            result.append({
+                "code": gc(1),
+                "text": gc(2),
+                "coding_system": gc(3),
+                "alt_code": gc(4),
+                "alt_text": gc(5),
+                "alt_coding_system": gc(6),
+                "coding_system_version": gc(7),
+                "alt_coding_system_version": gc(8),
+                "original_text": gc(9),
+            })
+        return {column_name: result if result else None}
+
+
+    def _s_array_fields(
+        seg: HL7Segment, field_n: int, column_name: str
+    ) -> dict:
+        """Simple repeatable ST/IS field — all repetitions as a list of raw strings (component separators preserved)."""
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        reps = [_v(r) for r in raw.split(seg._enc.rep_sep) if r]
+        return {column_name: reps if reps else None}
+
+
+    def _id_array_fields(
+        seg: HL7Segment, field_n: int, column_name: str
+    ) -> dict:
+        """ID (Coded Value) repeatable field — first component of each repetition only.
+        Strips spurious ^ within a repetition (e.g. 'A^S' → 'A') since ID is a scalar type."""
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        result = []
+        for rep in raw.split(seg._enc.rep_sep):
+            if not rep:
+                continue
+            val = _v(rep.split(seg._enc.comp_sep)[0])
+            if val:
+                result.append(val)
+        return {column_name: result if result else None}
+
+
+    def _dtm_array_fields(
+        seg: HL7Segment, field_n: int, column_name: str
+    ) -> dict:
+        """DTM/DT repeatable field — each repetition parsed to ISO-8601 string."""
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        result = []
+        for rep in raw.split(seg._enc.rep_sep):
+            if not rep:
+                continue
+            val = _parse_dtm(_v(rep))
+            if val is not None:
+                result.append(val)
+        return {column_name: result if result else None}
+
+
+    def _ei_array_fields(
+        seg: HL7Segment, field_n: int, column_name: str
+    ) -> dict:
+        """EI (Entity Identifier) — all repetitions as a list of dicts."""
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        reps = raw.split(seg._enc.rep_sep)
+        result = []
+        for rep in reps:
+            if not rep:
+                continue
+            parts = rep.split(seg._enc.comp_sep)
+            result.append({
+                "entity_identifier": _v(parts[0]) if len(parts) > 0 else None,
+                "namespace_id": _v(parts[1]) if len(parts) > 1 else None,
+                "universal_id": _v(parts[2]) if len(parts) > 2 else None,
+                "universal_id_type": _v(parts[3]) if len(parts) > 3 else None,
+            })
+        return {column_name: result if result else None}
+
+
+    def _xtn_array_fields(
+        seg: HL7Segment, field_n: int, column_name: str
+    ) -> dict:
+        """XTN (Extended Telecommunication Number) — all repetitions as a list of dicts.
+
+        Walks every ~-separated repetition and decomposes its 18 components.
+        Sub-components of components 15/16/17 are flattened to their .1 value
+        (matching the flat ``_xtn_fields`` helper), since downstream callers
+        have not historically needed the deeper structure.
+        """
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        reps = raw.split(seg._enc.rep_sep)
+        result = []
+        for rep in reps:
+            if not rep:
+                continue
+            parts = rep.split(seg._enc.comp_sep)
+            def gc(i, _p=parts):
+                return _v(_p[i - 1]) if len(_p) >= i else None
+            def gsc(i, sub, _p=parts):
+                if len(_p) < i or not _p[i - 1]:
+                    return None
+                subs = _p[i - 1].split(seg._enc.sub_comp_sep)
+                return _v(subs[sub - 1]) if len(subs) >= sub else None
+            result.append({
+                "number": gc(1),
+                "use_code": gc(2),
+                "equipment_type": gc(3),
+                "communication_address": gc(4),
+                "country_code": gc(5),
+                "area_code": gc(6),
+                "local_number": gc(7),
+                "extension": gc(8),
+                "any_text": gc(9),
+                "extension_prefix": gc(10),
+                "speed_dial_code": gc(11),
+                "unformatted_number": gc(12),
+                "effective_start_date": gc(13),
+                "expiration_date": gc(14),
+                "expiration_reason": gsc(15, 1),
+                "protection_code": gsc(16, 1),
+                "shared_telecom_id": gsc(17, 1),
+                "preference_order": gc(18),
+            })
+        return {column_name: result if result else None}
+
+
+    def _xcn_array_fields(
+        seg: HL7Segment, field_n: int, column_name: str
+    ) -> dict:
+        """XCN (Extended Composite ID Number and Name) — all repetitions as a list of dicts."""
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        reps = raw.split(seg._enc.rep_sep)
+        result = []
+        for rep in reps:
+            if not rep:
+                continue
+            parts = rep.split(seg._enc.comp_sep)
+            def gc(i, _p=parts):
+                return _v(_p[i - 1]) if len(_p) >= i else None
+            def gsc(i, sub, _p=parts):
+                if len(_p) < i or not _p[i - 1]:
+                    return None
+                subs = _p[i - 1].split(seg._enc.sub_comp_sep)
+                return _v(subs[sub - 1]) if len(subs) >= sub else None
+            result.append({
+                "id": gc(1),
+                "family_name": gc(2),
+                "given_name": gc(3),
+                "middle_name": gc(4),
+                "suffix": gc(5),
+                "prefix": gc(6),
+                "degree": gc(7),
+                "source_table": gc(8),
+                "assigning_authority": gsc(9, 1),
+                "assigning_authority_universal_id": gsc(9, 2),
+                "assigning_authority_universal_id_type": gsc(9, 3),
+                "name_type_code": gc(10),
+                "check_digit": gc(11),
+                "check_digit_scheme": gc(12),
+                "identifier_type_code": gc(13),
+                "assigning_facility": gsc(14, 1),
+                "assigning_facility_universal_id": gsc(14, 2),
+                "assigning_facility_universal_id_type": gsc(14, 3),
+                "name_representation_code": gc(15),
+                "name_assembly_order": gc(18),
+                "effective_date": gc(19),
+                "expiration_date": gc(20),
+                "professional_suffix": gc(21),
+            })
+        return {column_name: result if result else None}
+
+
+    def _xon_array_fields(
+        seg: HL7Segment, field_n: int, column_name: str
+    ) -> dict:
+        """XON (Extended Composite Name and Number for Organizations) — all repetitions as a list of dicts."""
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        reps = raw.split(seg._enc.rep_sep)
+        result = []
+        for rep in reps:
+            if not rep:
+                continue
+            parts = rep.split(seg._enc.comp_sep)
+            def gc(i, _p=parts):
+                return _v(_p[i - 1]) if len(_p) >= i else None
+            def gsc(i, sub, _p=parts):
+                if len(_p) < i or not _p[i - 1]:
+                    return None
+                subs = _p[i - 1].split(seg._enc.sub_comp_sep)
+                return _v(subs[sub - 1]) if len(subs) >= sub else None
+            result.append({
+                "name": gc(1),
+                "type_code": gc(2),
+                "id": gc(3),
+                "check_digit": gc(4),
+                "check_digit_scheme": gc(5),
+                "assigning_authority": gsc(6, 1),
+                "assigning_authority_universal_id": gsc(6, 2),
+                "assigning_authority_universal_id_type": gsc(6, 3),
+                "id_type_code": gc(7),
+                "assigning_facility": gsc(8, 1),
+                "assigning_facility_universal_id": gsc(8, 2),
+                "assigning_facility_universal_id_type": gsc(8, 3),
+                "name_rep_code": gc(9),
+                "identifier": gc(10),
+            })
+        return {column_name: result if result else None}
+
+
+    def _cx_array_fields(
+        seg: HL7Segment, field_n: int, column_name: str
+    ) -> dict:
+        """CX (Extended Composite ID with Check Digit) — all repetitions as a list of dicts."""
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        reps = raw.split(seg._enc.rep_sep)
+        result = []
+        for rep in reps:
+            if not rep:
+                continue
+            parts = rep.split(seg._enc.comp_sep)
+            def gc(i, _p=parts):
+                return _v(_p[i - 1]) if len(_p) >= i else None
+            def gsc(i, sub, _p=parts):
+                if len(_p) < i or not _p[i - 1]:
+                    return None
+                subs = _p[i - 1].split(seg._enc.sub_comp_sep)
+                return _v(subs[sub - 1]) if len(subs) >= sub else None
+            result.append({
+                "id": gc(1),
+                "check_digit": gc(2),
+                "check_digit_scheme": gc(3),
+                "assigning_authority": gsc(4, 1),
+                "assigning_authority_universal_id": gsc(4, 2),
+                "assigning_authority_universal_id_type": gsc(4, 3),
+                "type_code": gc(5),
+                "assigning_facility": gsc(6, 1),
+                "assigning_facility_universal_id": gsc(6, 2),
+                "assigning_facility_universal_id_type": gsc(6, 3),
+                "effective_date": gc(7),
+                "expiration_date": gc(8),
+                "assigning_jurisdiction": gc(9),
+                "assigning_agency": gc(10),
+                "security_check": gc(11),
+                "security_check_scheme": gc(12),
+            })
+        return {column_name: result if result else None}
+
+
+    def _xad_array_fields(
+        seg: HL7Segment, field_n: int, column_name: str
+    ) -> dict:
+        """XAD (Extended Address) — all repetitions as a list of dicts."""
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        reps = raw.split(seg._enc.rep_sep)
+        result = []
+        for rep in reps:
+            if not rep:
+                continue
+            parts = rep.split(seg._enc.comp_sep)
+            def gc(i, _p=parts):
+                return _v(_p[i - 1]) if len(_p) >= i else None
+            def gsc(i, sub, _p=parts):
+                if len(_p) < i or not _p[i - 1]:
+                    return None
+                subs = _p[i - 1].split(seg._enc.sub_comp_sep)
+                return _v(subs[sub - 1]) if len(subs) >= sub else None
+            result.append({
+                "street": gc(1),
+                "other_designation": gc(2),
+                "city": gc(3),
+                "state": gc(4),
+                "zip": gc(5),
+                "country": gc(6),
+                "type": gc(7),
+                "other_geographic": gc(8),
+                "county_parish_code": gsc(9, 1),
+                "county_parish_text": gsc(9, 2),
+                "county_parish_coding_system": gsc(9, 3),
+                "census_tract": gsc(10, 1),
+                "census_tract_text": gsc(10, 2),
+                "census_tract_coding_system": gsc(10, 3),
+                "representation_code": gc(11),
+                "effective_date": gc(13),
+                "expiration_date": gc(14),
+                "expiration_reason": gsc(15, 1),
+                "expiration_reason_text": gsc(15, 2),
+                "expiration_reason_coding_system": gsc(15, 3),
+                "temporary_indicator": gc(16),
+                "bad_address_indicator": gc(17),
+                "usage": gc(18),
+                "addressee": gc(19),
+                "comment": gc(20),
+                "preference_order": gc(21),
+                "protection_code": gsc(22, 1),
+                "protection_code_text": gsc(22, 2),
+                "protection_code_coding_system": gsc(22, 3),
+                "identifier": gsc(23, 1),
+            })
+        return {column_name: result if result else None}
+
+
+    def _eip_array_fields(
+        seg: HL7Segment, field_n: int, column_name: str
+    ) -> dict:
+        """EIP (Entity Identifier Pair) — all repetitions as a list of
+        {placer_assigned_identifier, filler_assigned_identifier} dicts.
+
+        Each EIP has two components (EIP.1 = Placer Assigned Identifier,
+        EIP.2 = Filler Assigned Identifier),
+        each further decomposable into 4 sub-components via the `&` separator.
+        """
+        raw = seg.get_field(field_n)
+        if not raw:
+            return {column_name: None}
+        reps = raw.split(seg._enc.rep_sep)
+        result = []
+        for rep in reps:
+            if not rep:
+                continue
+            parts = rep.split(seg._enc.comp_sep)
+
+            def _ei_from(comp_value: str | None) -> dict | None:
+                if not comp_value:
+                    return None
+                subs = comp_value.split(seg._enc.sub_comp_sep)
+                return {
+                    "entity_identifier": _v(subs[0]) if len(subs) > 0 else None,
+                    "namespace_id": _v(subs[1]) if len(subs) > 1 else None,
+                    "universal_id": _v(subs[2]) if len(subs) > 2 else None,
+                    "universal_id_type": _v(subs[3]) if len(subs) > 3 else None,
+                }
+
+            result.append({
+                "placer_assigned_identifier": _ei_from(parts[0] if len(parts) > 0 else None),
+                "filler_assigned_identifier": _ei_from(parts[1] if len(parts) > 1 else None),
+            })
+        return {column_name: result if result else None}
+
+
+    def _eip_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+        """EIP (Entity Identifier Pair) — single instance: placer EI + filler EI, 8 flat columns."""
+        def gc(comp):
+            return _v(seg.get_component(field_n, comp))
+
+        def gsc(comp, sub):
+            return _v(seg.get_sub_component(field_n, comp, sub))
+
+        return {
+            f"{prefix}_placer_assigned_identifier":                      gsc(1, 1) or gc(1),
+            f"{prefix}_placer_assigned_identifier_namespace_id":         gsc(1, 2),
+            f"{prefix}_placer_assigned_identifier_universal_id":         gsc(1, 3),
+            f"{prefix}_placer_assigned_identifier_universal_id_type":    gsc(1, 4),
+            f"{prefix}_filler_assigned_identifier":                      gsc(2, 1) or gc(2),
+            f"{prefix}_filler_assigned_identifier_namespace_id":         gsc(2, 2),
+            f"{prefix}_filler_assigned_identifier_universal_id":         gsc(2, 3),
+            f"{prefix}_filler_assigned_identifier_universal_id_type":    gsc(2, 4),
+        }
+
+
+    def _mo_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+        """MO (Money) — 2 components: quantity (NM) + ISO 4217 denomination (ID)."""
+        def gc(comp):
+            return _v(seg.get_component(field_n, comp))
+
+        return {
+            f"{prefix}":          gc(1),
+            f"{prefix}_currency": gc(2),
+        }
+
+
+    def _og_fields(seg: HL7Segment, field_n: int, prefix: str) -> dict:
+        """OG (Observation Grouper, v2.8.2+) — 4 components.
+
+        OG.1 = Original Sub-Identifier (ST) — backward-compatible with old OBX-4 ST value.
+        OG.2 = Group (NM), OG.3 = Sequence (NM), OG.4 = Identifier (ST).
+        """
+        def gc(comp):
+            return _v(seg.get_component(field_n, comp))
+
+        return {
+            f"{prefix}":            gc(1),
+            f"{prefix}_group":      gc(2),
+            f"{prefix}_sequence":   gc(3),
+            f"{prefix}_identifier": gc(4),
+        }
+
+
+    def _xon_fields(
+        seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = True
+    ) -> dict:
+        """XON (Extended Composite Name and Number for Organizations) — 10 components."""
+        def gc(comp):
+            if repeating:
+                return _v(seg.get_rep_component(field_n, 1, comp))
+            return _v(seg.get_component(field_n, comp))
+
+        def gsc(comp, sub):
+            if repeating:
+                return _v(seg.get_rep_sub_component(field_n, 1, comp, sub))
+            return _v(seg.get_sub_component(field_n, comp, sub))
+
+        return {
+            f"{prefix}": gc(1),
+            f"{prefix}_type_code": gc(2),
+            f"{prefix}_id": gc(3),
+            f"{prefix}_check_digit": gc(4),
+            f"{prefix}_check_digit_scheme": gc(5),
+            f"{prefix}_assigning_authority": gsc(6, 1),
+            f"{prefix}_assigning_authority_universal_id": gsc(6, 2),
+            f"{prefix}_assigning_authority_universal_id_type": gsc(6, 3),
+            f"{prefix}_id_type_code": gc(7),
+            f"{prefix}_assigning_facility": gsc(8, 1),
+            f"{prefix}_assigning_facility_universal_id": gsc(8, 2),
+            f"{prefix}_assigning_facility_universal_id_type": gsc(8, 3),
+            f"{prefix}_name_rep_code": gc(9),
+            f"{prefix}_identifier": gc(10),
+        }
+
+
+    def _cx_fields(
+        seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = True
+    ) -> dict:
+        """CX (Extended Composite ID with Check Digit) — 12 components + HD sub-components."""
+        def gc(comp):
+            if repeating:
+                return _v(seg.get_rep_component(field_n, 1, comp))
+            return _v(seg.get_component(field_n, comp))
+
+        def gsc(comp, sub):
+            if repeating:
+                return _v(seg.get_rep_sub_component(field_n, 1, comp, sub))
+            return _v(seg.get_sub_component(field_n, comp, sub))
+
+        return {
+            f"{prefix}": gc(1),
+            f"{prefix}_check_digit": gc(2),
+            f"{prefix}_check_digit_scheme": gc(3),
+            f"{prefix}_assigning_authority": gsc(4, 1),
+            f"{prefix}_assigning_authority_universal_id": gsc(4, 2),
+            f"{prefix}_assigning_authority_universal_id_type": gsc(4, 3),
+            f"{prefix}_type_code": gc(5),
+            f"{prefix}_assigning_facility": gsc(6, 1),
+            f"{prefix}_assigning_facility_universal_id": gsc(6, 2),
+            f"{prefix}_assigning_facility_universal_id_type": gsc(6, 3),
+            f"{prefix}_effective_date": gc(7),
+            f"{prefix}_expiration_date": gc(8),
+            f"{prefix}_assigning_jurisdiction": gc(9),
+            f"{prefix}_assigning_agency": gc(10),
+            f"{prefix}_security_check": gc(11),
+            f"{prefix}_security_check_scheme": gc(12),
+        }
+
+
+    def _xtn_fields(
+        seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = True
+    ) -> dict:
+        """XTN (Extended Telecommunication Number) — 18 components."""
+        def gc(comp):
+            if repeating:
+                return _v(seg.get_rep_component(field_n, 1, comp))
+            return _v(seg.get_component(field_n, comp))
+
+        def gsc(comp, sub):
+            if repeating:
+                return _v(seg.get_rep_sub_component(field_n, 1, comp, sub))
+            return _v(seg.get_sub_component(field_n, comp, sub))
+
+        return {
+            f"{prefix}_number": gc(1),
+            f"{prefix}_use_code": gc(2),
+            f"{prefix}_equipment_type": gc(3),
+            f"{prefix}_communication_address": gc(4),
+            f"{prefix}_country_code": gc(5),
+            f"{prefix}_area_code": gc(6),
+            f"{prefix}_local_number": gc(7),
+            f"{prefix}_extension": gc(8),
+            f"{prefix}_any_text": gc(9),
+            f"{prefix}_extension_prefix": gc(10),
+            f"{prefix}_speed_dial_code": gc(11),
+            f"{prefix}_unformatted_number": gc(12),
+            f"{prefix}_effective_start_date": gc(13),
+            f"{prefix}_expiration_date": gc(14),
+            f"{prefix}_expiration_reason": gsc(15, 1),
+            f"{prefix}_protection_code": gsc(16, 1),
+            f"{prefix}_shared_telecom_id": gsc(17, 1),
+            f"{prefix}_preference_order": gc(18),
+        }
+
+
+    def _xad_fields(
+        seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = True
+    ) -> dict:
+        """XAD (Extended Address) — 23 components (12 is deprecated/skipped)."""
+        def gc(comp):
+            if repeating:
+                return _v(seg.get_rep_component(field_n, 1, comp))
+            return _v(seg.get_component(field_n, comp))
+
+        def gsc(comp, sub):
+            if repeating:
+                return _v(seg.get_rep_sub_component(field_n, 1, comp, sub))
+            return _v(seg.get_sub_component(field_n, comp, sub))
+
+        return {
+            f"{prefix}_street": gc(1),
+            f"{prefix}_other_designation": gc(2),
+            f"{prefix}_city": gc(3),
+            f"{prefix}_state": gc(4),
+            f"{prefix}_zip": gc(5),
+            f"{prefix}_country": gc(6),
+            f"{prefix}_type": gc(7),
+            f"{prefix}_other_geographic": gc(8),
+            f"{prefix}_county_parish_code": gsc(9, 1),
+            f"{prefix}_county_parish_text": gsc(9, 2),
+            f"{prefix}_county_parish_coding_system": gsc(9, 3),
+            f"{prefix}_census_tract": gsc(10, 1),
+            f"{prefix}_census_tract_text": gsc(10, 2),
+            f"{prefix}_census_tract_coding_system": gsc(10, 3),
+            f"{prefix}_representation_code": gc(11),
+            f"{prefix}_effective_date": gc(13),
+            f"{prefix}_expiration_date": gc(14),
+            f"{prefix}_expiration_reason": gsc(15, 1),
+            f"{prefix}_expiration_reason_text": gsc(15, 2),
+            f"{prefix}_expiration_reason_coding_system": gsc(15, 3),
+            f"{prefix}_temporary_indicator": gc(16),
+            f"{prefix}_bad_address_indicator": gc(17),
+            f"{prefix}_usage": gc(18),
+            f"{prefix}_addressee": gc(19),
+            f"{prefix}_comment": gc(20),
+            f"{prefix}_preference_order": gc(21),
+            f"{prefix}_protection_code": gsc(22, 1),
+            f"{prefix}_protection_code_text": gsc(22, 2),
+            f"{prefix}_protection_code_coding_system": gsc(22, 3),
+            f"{prefix}_identifier": gsc(23, 1),
+        }
+
+
+    ########################################################
+    # src/databricks/labs/community_connector/sources/hl7_v2/hl7_v2_extractors.py
+    ########################################################
+
+    _SINGLE_SEGMENT_TABLES = frozenset(
+        {"msh", "evn", "pid", "pd1", "pv1", "pv2", "mrg", "sch", "txa"}
+    )
+
+    # HL7 batch-envelope segment types — skipped by ``_split_messages`` since
+    # they wrap (but are not part of) the individual messages in a batch.
+    _BATCH_ENVELOPE_SEGMENTS = frozenset({"FHS", "BHS", "BTS", "FTS"})
+
+
+    # ---------------------------------------------------------------------------
+    # Metadata builder (from MSH segment, added to every row)
+    # ---------------------------------------------------------------------------
+
+
+    def _metadata(msh: HL7Segment | None, source_file: str, send_time: str, create_time: str) -> dict:
+        if msh is None:
+            return {
+                "message_id": None,
+                "message_timestamp": None,
+                "hl7_version": None,
+                "source_file": source_file,
+                "send_time": send_time,
+                "create_time": create_time,
+            }
+        return {
+            "message_id": _v(msh.get_field(10)),
+            "message_timestamp": _v(msh.get_field(7)),
+            "hl7_version": _v(msh.get_field(12)),
+            "source_file": source_file,
+            "send_time": send_time,
+            "create_time": create_time,
+        }
+
+
+
+
+    # ---------------------------------------------------------------------------
+    # Per-segment field extractors
+    # ---------------------------------------------------------------------------
+
+
+    def _extract_msh(seg: HL7Segment) -> dict:
+        return {
+            "field_separator": _v(seg.get_field(1)),
+            "encoding_characters": _v(seg.get_field(2)),
+            "sending_application": _v(seg.get_component(3, 1)),
+            "sending_application_universal_id": _v(seg.get_component(3, 2)),
+            "sending_application_universal_id_type": _v(seg.get_component(3, 3)),
+            "sending_facility": _v(seg.get_component(4, 1)),
+            "sending_facility_universal_id": _v(seg.get_component(4, 2)),
+            "sending_facility_universal_id_type": _v(seg.get_component(4, 3)),
+            "receiving_application": _v(seg.get_component(5, 1)),
+            "receiving_application_universal_id": _v(seg.get_component(5, 2)),
+            "receiving_application_universal_id_type": _v(seg.get_component(5, 3)),
+            "receiving_facility": _v(seg.get_component(6, 1)),
+            "receiving_facility_universal_id": _v(seg.get_component(6, 2)),
+            "receiving_facility_universal_id_type": _v(seg.get_component(6, 3)),
+            "message_datetime": _parse_dtm(seg.get_field(7)),
+            "security": _v(seg.get_field(8)),
+            "message_code": _v(seg.get_component(9, 1)),
+            "trigger_event": _v(seg.get_component(9, 2)),
+            "message_structure": _v(seg.get_component(9, 3)),
+            "message_control_id": _v(seg.get_field(10)),
+            **_pt_fields(seg, 11, "processing_id"),
+            **_vid_fields(seg, 12, "version_id"),
+            "sequence_number": _i(seg.get_field(13)),
+            "continuation_pointer": _v(seg.get_field(14)),
+            "accept_acknowledgment_type": _v(seg.get_field(15)),
+            "application_acknowledgment_type": _v(seg.get_field(16)),
+            "country_code": _v(seg.get_field(17)),
+            **_id_array_fields(seg, 18, "character_set"),
+            **_cwe_fields(seg, 19, "principal_language", repeating=False),
+            "alt_character_set_handling": _v(seg.get_field(20)),
+            **_ei_array_fields(seg, 21, "message_profile_identifiers"),
+            **_xon_fields(seg, 22, "sending_responsible_org", repeating=False),
+            **_xon_fields(seg, 23, "receiving_responsible_org", repeating=False),
+            **_hd_fields(seg, 24, "sending_network_address", repeating=False),
+            **_hd_fields(seg, 25, "receiving_network_address", repeating=False),
+            **_cwe_fields(seg, 26, "security_classification_tag", repeating=False),
+            **_cwe_array_fields(seg, 27, "security_handling_instructions"),
+            **_cwe_array_fields(seg, 28, "special_access_restriction"),
+        }
+
+
+    def _extract_pid(seg: HL7Segment) -> dict:
+        return {
+            "set_id": _i(seg.get_field(1)),
+            **_cx_fields(seg, 2, "patient_external_id", repeating=False),
+            **_cx_array_fields(seg, 3, "patient_id"),
+            **_cx_fields(seg, 4, "alternate_patient_id", repeating=False),
+            **_xpn_array_fields(seg, 5, "patient_names"),
+            **_xpn_array_fields(seg, 6, "mothers_maiden_names"),
+            "date_of_birth": _parse_dtm(seg.get_field(7)),
+            **_cwe_fields(seg, 8, "administrative_sex", repeating=False),
+            "patient_alias": _v(seg.get_first_repetition(9)),
+            **_cwe_array_fields(seg, 10, "race"),
+            **_xad_array_fields(seg, 11, "address"),
+            "county_code": _v(seg.get_field(12)),
+            **_xtn_array_fields(seg, 13, "home_phone"),
+            **_xtn_array_fields(seg, 14, "business_phone"),
+            **_cwe_fields(seg, 15, "primary_language", repeating=False),
+            **_cwe_fields(seg, 16, "marital_status", repeating=False),
+            **_cwe_fields(seg, 17, "religion", repeating=False),
+            **_cx_fields(seg, 18, "patient_account_number", repeating=False),
+            "ssn": _v(seg.get_field(19)),
+            **_dln_fields(seg, 20, "drivers_license"),
+            **_cx_array_fields(seg, 21, "mothers_identifier"),
+            **_cwe_array_fields(seg, 22, "ethnic_group"),
+            "birth_place": _v(seg.get_field(23)),
+            "multiple_birth_indicator": _v(seg.get_field(24)),
+            "birth_order": _i(seg.get_field(25)),
+            **_cwe_array_fields(seg, 26, "citizenship"),
+            **_cwe_fields(seg, 27, "veterans_military_status", repeating=False),
+            **_cwe_fields(seg, 28, "nationality", repeating=False),
+            "patient_death_datetime": _parse_dtm(seg.get_field(29)),
+            "patient_death_indicator": _v(seg.get_field(30)),
+            "identity_unknown_indicator": _v(seg.get_field(31)),
+            **_cwe_array_fields(seg, 32, "identity_reliability_code"),
+            "last_update_datetime": _parse_dtm(seg.get_field(33)),
+            **_hd_fields(seg, 34, "last_update_facility", repeating=False),
+            **_cwe_fields(seg, 35, "species_code", repeating=False),
+            **_cwe_fields(seg, 36, "breed_code", repeating=False),
+            "strain": _v(seg.get_field(37)),
+            **_cwe_fields(seg, 38, "production_class_code", repeating=False),
+            **_cwe_array_fields(seg, 39, "tribal_citizenship"),
+            **_xtn_array_fields(seg, 40, "patient_telecom"),
+        }
+
+
+    def _extract_pv1(seg: HL7Segment) -> dict:
+        return {
+            "set_id": _i(seg.get_field(1)),
+            **_cwe_fields(seg, 2, "patient_class", repeating=False),
+            **_pl_fields(seg, 3, "assigned_patient_location"),
+            **_cwe_fields(seg, 4, "admission_type", repeating=False),
+            **_cx_fields(seg, 5, "preadmit_number", repeating=False),
+            **_pl_fields(seg, 6, "prior_patient_location"),
+            **_xcn_array_fields(seg, 7, "attending_doctor"),
+            **_xcn_array_fields(seg, 8, "referring_doctor"),
+            **_xcn_array_fields(seg, 9, "consulting_doctor"),
+            **_cwe_fields(seg, 10, "hospital_service", repeating=False),
+            **_pl_fields(seg, 11, "temporary_location"),
+            **_cwe_fields(seg, 12, "preadmit_test_indicator", repeating=False),
+            **_cwe_fields(seg, 13, "readmission_indicator", repeating=False),
+            **_cwe_fields(seg, 14, "admit_source", repeating=False),
+            **_cwe_array_fields(seg, 15, "ambulatory_status"),
+            **_cwe_fields(seg, 16, "vip_indicator", repeating=False),
+            **_xcn_array_fields(seg, 17, "admitting_doctor"),
+            **_cwe_fields(seg, 18, "patient_type", repeating=False),
+            **_cx_fields(seg, 19, "visit_number", repeating=False),
+            **_fc_array_fields(seg, 20, "financial_class"),
+            **_cwe_fields(seg, 21, "charge_price_indicator", repeating=False),
+            **_cwe_fields(seg, 22, "courtesy_code", repeating=False),
+            **_cwe_fields(seg, 23, "credit_rating", repeating=False),
+            **_cwe_array_fields(seg, 24, "contract_code"),
+            **_dtm_array_fields(seg, 25, "contract_effective_date"),
+            **_s_array_fields(seg, 26, "contract_amount"),
+            **_s_array_fields(seg, 27, "contract_period"),
+            **_cwe_fields(seg, 28, "interest_code", repeating=False),
+            **_cwe_fields(seg, 29, "transfer_to_bad_debt_code", repeating=False),
+            "transfer_to_bad_debt_date": _parse_dtm(seg.get_field(30)),
+            **_cwe_fields(seg, 31, "bad_debt_agency_code", repeating=False),
+            "bad_debt_transfer_amount": _v(seg.get_field(32)),
+            "bad_debt_recovery_amount": _v(seg.get_field(33)),
+            **_cwe_fields(seg, 34, "delete_account_indicator", repeating=False),
+            "delete_account_date": _parse_dtm(seg.get_field(35)),
+            **_cwe_fields(seg, 36, "discharge_disposition", repeating=False),
+            **_dld_fields(seg, 37, "discharged_to_location"),
+            **_cwe_fields(seg, 38, "diet_type", repeating=False),
+            **_cwe_fields(seg, 39, "servicing_facility", repeating=False),
+            **_cwe_fields(seg, 40, "bed_status", repeating=False),
+            **_cwe_fields(seg, 41, "account_status", repeating=False),
+            **_pl_fields(seg, 42, "pending_location"),
+            **_pl_fields(seg, 43, "prior_temporary_location"),
+            "admit_datetime": _parse_dtm(seg.get_first_repetition(44)),
+            "discharge_datetime": _parse_dtm(seg.get_first_repetition(45)),
+            "current_patient_balance": _v(seg.get_field(46)),
+            "total_charges": _v(seg.get_field(47)),
+            "total_adjustments": _v(seg.get_field(48)),
+            "total_payments": _v(seg.get_field(49)),
+            **_cx_array_fields(seg, 50, "alternate_visit_id"),
+            **_cwe_fields(seg, 51, "visit_indicator", repeating=False),
+            **_xcn_array_fields(seg, 52, "other_healthcare_provider"),
+            "service_episode_description": _v(seg.get_field(53)),
+            **_cx_fields(seg, 54, "service_episode_identifier", repeating=False),
+        }
+
+
+    def _extract_obr(seg: HL7Segment) -> dict:
+        return {
+            "set_id": _i(seg.get_field(1)) or 1,
+            **_ei_fields(seg, 2, "placer_order_number", repeating=False),
+            **_ei_fields(seg, 3, "filler_order_number", repeating=False),
+            **_cwe_fields(seg, 4, "service", repeating=False),
+            "priority": _v(seg.get_field(5)),
+            "requested_datetime": _parse_dtm(seg.get_field(6)),
+            "observation_datetime": _parse_dtm(seg.get_field(7)),
+            "observation_end_datetime": _parse_dtm(seg.get_field(8)),
+            **_cq_fields(seg, 9, "collection_volume"),
+            **_xcn_array_fields(seg, 10, "collector"),
+            "specimen_action_code": _v(seg.get_field(11)),
+            **_cwe_fields(seg, 12, "danger_code", repeating=False),
+            **_cwe_array_fields(seg, 13, "relevant_clinical_information"),
+            "specimen_received_datetime": _parse_dtm(seg.get_field(14)),
+            **_sps_fields(seg, 15, "specimen_source"),
+            **_xcn_array_fields(seg, 16, "ordering_provider"),
+            **_xtn_array_fields(seg, 17, "order_callback_phone"),
+            "placer_field_1": _v(seg.get_field(18)),
+            "placer_field_2": _v(seg.get_field(19)),
+            "filler_field_1": _v(seg.get_field(20)),
+            "filler_field_2": _v(seg.get_field(21)),
+            "results_rpt_status_chng_datetime": _parse_dtm(seg.get_field(22)),
+            **_moc_fields(seg, 23, "charge_to_practice"),
+            "diagnostic_service_section": _v(seg.get_field(24)),
+            "result_status": _v(seg.get_field(25)),
+            **_prl_fields(seg, 26, "parent_result"),
+            **_tq_array_fields(seg, 27, "quantity_timing"),
+            **_xcn_array_fields(seg, 28, "result_copies_to"),
+            **_eip_fields(seg, 29, "parent_results_observation_identifier"),
+            "transportation_mode": _v(seg.get_field(30)),
+            **_cwe_array_fields(seg, 31, "reason_for_study"),
+            **_ndl_fields(seg, 32, "principal_result_interpreter"),
+            **_ndl_array_fields(seg, 33, "assistant_result_interpreter"),
+            **_ndl_array_fields(seg, 34, "technician"),
+            **_ndl_array_fields(seg, 35, "transcriptionist"),
+            "scheduled_datetime": _parse_dtm(seg.get_field(36)),
+            "number_of_sample_containers": _i(seg.get_field(37)),
+            **_cwe_array_fields(seg, 38, "transport_logistics"),
+            **_cwe_array_fields(seg, 39, "collectors_comment"),
+            **_cwe_fields(seg, 40, "transport_arrangement_responsibility", repeating=False),
+            "transport_arranged": _v(seg.get_field(41)),
+            "escort_required": _v(seg.get_field(42)),
+            **_cwe_array_fields(seg, 43, "planned_patient_transport_comment"),
+            **_cwe_fields(seg, 44, "procedure_code", repeating=False),
+            **_cwe_array_fields(seg, 45, "procedure_code_modifier"),
+            **_cwe_array_fields(seg, 46, "placer_supplemental_service_info"),
+            **_cwe_array_fields(seg, 47, "filler_supplemental_service_info"),
+            **_cwe_fields(seg, 48, "medically_necessary_dup_proc_reason", repeating=False),
+            **_cwe_fields(seg, 49, "result_handling", repeating=False),
+            **_cwe_fields(seg, 50, "parent_universal_service_id", repeating=False),
+            **_ei_fields(seg, 51, "observation_group", repeating=False),
+            **_ei_fields(seg, 52, "parent_observation_group", repeating=False),
+            **_cx_array_fields(seg, 53, "alternate_placer_order"),
+            **_eip_array_fields(seg, 54, "parent_order"),
+            "action_code": _v(seg.get_field(55)),
+        }
+
+
+    def _extract_obx(seg: HL7Segment) -> dict:
+        return {
+            "set_id": _i(seg.get_field(1)) or 1,
+            "value_type": _v(seg.get_field(2)),
+            **_cwe_fields(seg, 3, "observation_id", repeating=False),
+            **_og_fields(seg, 4, "observation_sub_id"),
+            **_s_array_fields(seg, 5, "observation_value"),
+            **_cwe_fields(seg, 6, "units", repeating=False),
+            "references_range": _v(seg.get_field(7)),
+            **_cwe_array_fields(seg, 8, "interpretation_codes"),
+            "probability": _v(seg.get_field(9)),
+            **_id_array_fields(seg, 10, "nature_of_abnormal_test"),
+            "observation_result_status": _v(seg.get_field(11)),
+            "effective_date_of_ref_range": _parse_dtm(seg.get_field(12)),
+            "user_defined_access_checks": _v(seg.get_field(13)),
+            "datetime_of_observation": _parse_dtm(seg.get_field(14)),
+            **_cwe_fields(seg, 15, "producers_id", repeating=False),
+            **_xcn_array_fields(seg, 16, "responsible_observer"),
+            **_cwe_array_fields(seg, 17, "observation_method"),
+            **_ei_array_fields(seg, 18, "equipment_instance_identifier"),
+            "datetime_of_analysis": _parse_dtm(seg.get_field(19)),
+            **_cwe_array_fields(seg, 20, "observation_site"),
+            **_ei_fields(seg, 21, "observation_instance_identifier", repeating=False),
+            **_cwe_fields(seg, 22, "mood_code", repeating=False),
+            **_xon_fields(seg, 23, "performing_organization", repeating=False),
+            **_xad_fields(seg, 24, "performing_org_address", repeating=False),
+            **_xcn_fields(seg, 25, "performing_org_medical_director"),
+            "patient_results_release_category": _v(seg.get_field(26)),
+            **_cwe_fields(seg, 27, "root_cause", repeating=False),
+            **_cwe_array_fields(seg, 28, "local_process_control"),
+            "observation_type": _v(seg.get_field(29)),
+            "observation_sub_type": _v(seg.get_field(30)),
+            "action_code": _v(seg.get_field(31)),
+            **_cwe_array_fields(seg, 32, "observation_value_absent_reason"),
+            **_eip_array_fields(seg, 33, "observation_related_specimen"),
+        }
+
+
+    def _extract_al1(seg: HL7Segment) -> dict:
+        return {
+            "set_id": _i(seg.get_field(1)) or 1,
+            **_cwe_fields(seg, 2, "allergen_type_code", repeating=False),
+            **_cwe_fields(seg, 3, "allergen_code", repeating=False),
+            **_cwe_fields(seg, 4, "allergy_severity_code", repeating=False),
+            # AL1-5 is spec-typed as ST 0..* but real EHRs routinely send CWE-shape
+            # (e.g. "HIV^Hives^HL70129~RSH^Rash^HL70129"). Modeling as a repeating
+            # CWE-shape struct handles both: pure ST values land in element 0's `code`
+            # with the rest NULL; CWE-shape values populate all components; every
+            # ~-separated repetition is preserved.
+            **_cwe_array_fields(seg, 5, "allergy_reaction"),
+            "identification_date": _parse_dtm(seg.get_field(6)),
+        }
+
+
+    def _extract_dg1(seg: HL7Segment) -> dict:
+        return {
+            "set_id": _i(seg.get_field(1)) or 1,
+            "diagnosis_coding_method": _v(seg.get_field(2)),
+            **_cwe_fields(seg, 3, "diagnosis_code", repeating=False),
+            "diagnosis_description": _v(seg.get_field(4)),
+            "diagnosis_datetime": _parse_dtm(seg.get_field(5)),
+            **_cwe_fields(seg, 6, "diagnosis_type", repeating=False),
+            **_cwe_fields(seg, 7, "major_diagnostic_category", repeating=False),
+            **_cwe_fields(seg, 8, "diagnostic_related_group", repeating=False),
+            "drg_approval_indicator": _v(seg.get_field(9)),
+            **_cwe_fields(seg, 10, "drg_grouper_review_code", repeating=False),
+            **_cwe_fields(seg, 11, "outlier_type", repeating=False),
+            "outlier_days": _i(seg.get_field(12)),
+            **_cp_fields(seg, 13, "outlier_cost"),
+            "grouper_version_and_type": _v(seg.get_field(14)),
+            "diagnosis_priority": _i(seg.get_field(15)),
+            **_xcn_array_fields(seg, 16, "diagnosing_clinician"),
+            **_cwe_fields(seg, 17, "diagnosis_classification", repeating=False),
+            "confidential_indicator": _v(seg.get_field(18)),
+            "attestation_datetime": _parse_dtm(seg.get_field(19)),
+            **_ei_fields(seg, 20, "diagnosis_identifier", repeating=False),
+            "diagnosis_action_code": _v(seg.get_field(21)),
+            **_ei_fields(seg, 22, "parent_diagnosis", repeating=False),
+            **_cwe_fields(seg, 23, "drg_ccl_value_code", repeating=False),
+            "drg_grouping_usage": _v(seg.get_field(24)),
+            **_cwe_fields(seg, 25, "drg_diagnosis_determination_status", repeating=False),
+            **_cwe_fields(seg, 26, "present_on_admission_indicator", repeating=False),
+        }
+
+
+    def _extract_nk1(seg: HL7Segment) -> dict:
+        return {
+            "set_id": _i(seg.get_field(1)) or 1,
+            **_xpn_array_fields(seg, 2, "names"),
+            **_cwe_fields(seg, 3, "relationship", repeating=False),
+            **_xad_array_fields(seg, 4, "address"),
+            **_xtn_array_fields(seg, 5, "phone_number"),
+            **_xtn_array_fields(seg, 6, "business_phone"),
+            **_cwe_fields(seg, 7, "contact_role", repeating=False),
+            "start_date": _parse_dtm(seg.get_field(8)),
+            "end_date": _parse_dtm(seg.get_field(9)),
+            "job_title": _v(seg.get_field(10)),
+            **_jcc_fields(seg, 11, "job_code"),
+            **_cx_fields(seg, 12, "employee_number", repeating=False),
+            **_xon_array_fields(seg, 13, "organization_name"),
+            **_cwe_fields(seg, 14, "marital_status", repeating=False),
+            **_cwe_fields(seg, 15, "administrative_sex", repeating=False),
+            "date_of_birth": _parse_dtm(seg.get_field(16)),
+            **_cwe_array_fields(seg, 17, "living_dependency"),
+            **_cwe_array_fields(seg, 18, "ambulatory_status"),
+            **_cwe_array_fields(seg, 19, "citizenship"),
+            **_cwe_fields(seg, 20, "primary_language", repeating=False),
+            **_cwe_fields(seg, 21, "living_arrangement", repeating=False),
+            **_cwe_fields(seg, 22, "publicity_code", repeating=False),
+            "protection_indicator": _v(seg.get_field(23)),
+            **_cwe_fields(seg, 24, "student_indicator", repeating=False),
+            **_cwe_fields(seg, 25, "religion", repeating=False),
+            **_xpn_array_fields(seg, 26, "mothers_maiden_names"),
+            **_cwe_fields(seg, 27, "nationality", repeating=False),
+            **_cwe_array_fields(seg, 28, "ethnic_group"),
+            **_cwe_array_fields(seg, 29, "contact_reason"),
+            **_xpn_array_fields(seg, 30, "contact_persons"),
+            **_xtn_array_fields(seg, 31, "contact_person_telephone"),
+            **_xad_array_fields(seg, 32, "contact_persons_address"),
+            **_cx_array_fields(seg, 33, "associated_party_identifiers"),
+            **_cwe_fields(seg, 34, "job_status", repeating=False),
+            **_cwe_array_fields(seg, 35, "race"),
+            **_cwe_fields(seg, 36, "handicap", repeating=False),
+            "contact_ssn": _v(seg.get_field(37)),
+            "birth_place": _v(seg.get_field(38)),
+            **_cwe_fields(seg, 39, "vip_indicator", repeating=False),
+            **_xtn_fields(seg, 40, "telecommunication_info"),
+            **_xtn_fields(seg, 41, "contact_telecommunication_info"),
+        }
+
+
+    def _extract_evn(seg: HL7Segment) -> dict:
+        return {
+            "event_type_code": _v(seg.get_field(1)),
+            "recorded_datetime": _parse_dtm(seg.get_field(2)),
+            "date_time_planned_event": _parse_dtm(seg.get_field(3)),
+            **_cwe_fields(seg, 4, "event_reason", repeating=False),
+            **_xcn_array_fields(seg, 5, "operator"),
+            "event_occurred": _parse_dtm(seg.get_field(6)),
+            **_hd_fields(seg, 7, "event_facility", repeating=False),
+        }
+
+
+    def _extract_pd1(seg: HL7Segment) -> dict:
+        return {
+            **_cwe_array_fields(seg, 1, "living_dependency"),
+            **_cwe_fields(seg, 2, "living_arrangement", repeating=False),
+            **_xon_array_fields(seg, 3, "patient_primary_facility"),
+            **_xcn_fields(seg, 4, "patient_primary_care_provider"),
+            **_cwe_fields(seg, 5, "student_indicator", repeating=False),
+            **_cwe_fields(seg, 6, "handicap", repeating=False),
+            **_cwe_fields(seg, 7, "living_will_code", repeating=False),
+            **_cwe_fields(seg, 8, "organ_donor_code", repeating=False),
+            "separate_bill": _v(seg.get_field(9)),
+            **_cx_array_fields(seg, 10, "duplicate_patient"),
+            **_cwe_fields(seg, 11, "publicity_code", repeating=False),
+            "protection_indicator": _v(seg.get_field(12)),
+            "protection_indicator_effective_date": _parse_dtm(seg.get_field(13)),
+            **_xon_array_fields(seg, 14, "place_of_worship"),
+            **_cwe_array_fields(seg, 15, "advance_directive_code"),
+            **_cwe_fields(seg, 16, "immunization_registry_status", repeating=False),
+            "immunization_registry_status_effective_date": _parse_dtm(seg.get_field(17)),
+            "publicity_code_effective_date": _parse_dtm(seg.get_field(18)),
+            **_cwe_fields(seg, 19, "military_branch", repeating=False),
+            **_cwe_fields(seg, 20, "military_rank_grade", repeating=False),
+            **_cwe_fields(seg, 21, "military_status", repeating=False),
+            "advance_directive_last_verified_date": _parse_dtm(seg.get_field(22)),
+            "retirement_date": _parse_dtm(seg.get_field(23)),
+        }
+
+
+    def _extract_pv2(seg: HL7Segment) -> dict:
+        return {
+            **_pl_fields(seg, 1, "prior_pending_location"),
+            **_cwe_fields(seg, 2, "accommodation_code", repeating=False),
+            **_cwe_fields(seg, 3, "admit_reason", repeating=False),
+            **_cwe_fields(seg, 4, "transfer_reason", repeating=False),
+            **_s_array_fields(seg, 5, "patient_valuables"),
+            "patient_valuables_location": _v(seg.get_field(6)),
+            **_cwe_array_fields(seg, 7, "visit_user_code"),
+            "expected_admit_datetime": _parse_dtm(seg.get_field(8)),
+            "expected_discharge_datetime": _parse_dtm(seg.get_field(9)),
+            "estimated_length_of_inpatient_stay": _i(seg.get_field(10)),
+            "actual_length_of_inpatient_stay": _i(seg.get_field(11)),
+            "visit_description": _v(seg.get_field(12)),
+            **_xcn_array_fields(seg, 13, "referral_source"),
+            "previous_service_date": _parse_dtm(seg.get_field(14)),
+            "employment_illness_related_indicator": _v(seg.get_field(15)),
+            **_cwe_fields(seg, 16, "purge_status_code", repeating=False),
+            "purge_status_date": _parse_dtm(seg.get_field(17)),
+            **_cwe_fields(seg, 18, "special_program_code", repeating=False),
+            "retention_indicator": _v(seg.get_field(19)),
+            "expected_number_of_insurance_plans": _i(seg.get_field(20)),
+            **_cwe_fields(seg, 21, "visit_publicity_code", repeating=False),
+            "visit_protection_indicator": _v(seg.get_field(22)),
+            **_xon_array_fields(seg, 23, "clinic_organization"),
+            **_cwe_fields(seg, 24, "patient_status_code", repeating=False),
+            **_cwe_fields(seg, 25, "visit_priority_code", repeating=False),
+            "previous_treatment_date": _parse_dtm(seg.get_field(26)),
+            **_cwe_fields(seg, 27, "expected_discharge_disposition", repeating=False),
+            "signature_on_file_date": _parse_dtm(seg.get_field(28)),
+            "first_similar_illness_date": _parse_dtm(seg.get_field(29)),
+            **_cwe_fields(seg, 30, "patient_charge_adjustment_code", repeating=False),
+            **_cwe_fields(seg, 31, "recurring_service_code", repeating=False),
+            "billing_media_code": _v(seg.get_field(32)),
+            "expected_surgery_datetime": _parse_dtm(seg.get_field(33)),
+            "military_partnership_code": _v(seg.get_field(34)),
+            "military_non_availability_code": _v(seg.get_field(35)),
+            "newborn_baby_indicator": _v(seg.get_field(36)),
+            "baby_detained_indicator": _v(seg.get_field(37)),
+            **_cwe_fields(seg, 38, "mode_of_arrival_code", repeating=False),
+            **_cwe_array_fields(seg, 39, "recreational_drug_use_code"),
+            **_cwe_fields(seg, 40, "admission_level_of_care_code", repeating=False),
+            **_cwe_array_fields(seg, 41, "precaution_code"),
+            **_cwe_fields(seg, 42, "patient_condition_code", repeating=False),
+            **_cwe_fields(seg, 43, "living_will_code", repeating=False),
+            **_cwe_fields(seg, 44, "organ_donor_code", repeating=False),
+            **_cwe_array_fields(seg, 45, "advance_directive_code"),
+            "patient_status_effective_date": _parse_dtm(seg.get_field(46)),
+            "expected_loa_return_datetime": _parse_dtm(seg.get_field(47)),
+            "expected_preadmission_testing_datetime": _parse_dtm(seg.get_field(48)),
+            **_cwe_array_fields(seg, 49, "notify_clergy_code"),
+            "advance_directive_last_verified_date": _parse_dtm(seg.get_field(50)),
+        }
+
+
+    def _extract_mrg(seg: HL7Segment) -> dict:
+        return {
+            **_cx_array_fields(seg, 1, "prior_patient_id"),
+            **_cx_array_fields(seg, 2, "prior_alternate_patient_id"),
+            **_cx_fields(seg, 3, "prior_patient_account_number", repeating=False),
+            **_cx_fields(seg, 4, "prior_patient_id_external", repeating=False),
+            **_cx_fields(seg, 5, "prior_visit_number", repeating=False),
+            **_cx_fields(seg, 6, "prior_alternate_visit_id", repeating=False),
+            **_xpn_array_fields(seg, 7, "prior_patient_names"),
+        }
+
+
+    def _extract_iam(seg: HL7Segment) -> dict:
+        return {
+            "set_id": _i(seg.get_field(1)) or 1,
+            **_cwe_fields(seg, 2, "allergen_type_code", repeating=False),
+            **_cwe_fields(seg, 3, "allergen_code", repeating=False),
+            **_cwe_fields(seg, 4, "allergy_severity_code", repeating=False),
+            # Same lenient ST 0..* -> CWE-shape array as AL1-5.
+            **_cwe_array_fields(seg, 5, "allergy_reaction"),
+            **_cwe_fields(seg, 6, "allergy_action_code", repeating=False),
+            **_ei_fields(seg, 7, "allergy_unique_identifier", repeating=False),
+            "action_reason": _v(seg.get_field(8)),
+            **_cwe_fields(seg, 9, "sensitivity_to_causative_agent_code", repeating=False),
+            **_cwe_fields(seg, 10, "allergen_group_code", repeating=False),
+            "onset_date": _parse_dtm(seg.get_field(11)),
+            "onset_date_text": _v(seg.get_field(12)),
+            "reported_datetime": _parse_dtm(seg.get_field(13)),
+            **_xcn_fields(seg, 14, "reported_by", repeating=False),
+            **_cwe_fields(seg, 15, "relationship_to_patient_code", repeating=False),
+            **_cwe_fields(seg, 16, "alert_device_code", repeating=False),
+            **_cwe_fields(seg, 17, "allergy_clinical_status_code", repeating=False),
+            **_xcn_fields(seg, 18, "statused_by_person", repeating=False),
+            **_xon_fields(seg, 19, "statused_by_organization", repeating=False),
+            "statused_at_datetime": _parse_dtm(seg.get_field(20)),
+            **_xcn_fields(seg, 21, "inactivated_by_person", repeating=False),
+            "inactivated_datetime": _parse_dtm(seg.get_field(22)),
+            **_xcn_fields(seg, 23, "initially_recorded_by_person", repeating=False),
+            "initially_recorded_datetime": _parse_dtm(seg.get_field(24)),
+            **_xcn_fields(seg, 25, "modified_by_person", repeating=False),
+            "modified_datetime": _parse_dtm(seg.get_field(26)),
+            **_cwe_fields(seg, 27, "clinician_identified_allergen_code", repeating=False),
+            **_xon_fields(seg, 28, "initially_recorded_by_organization", repeating=False),
+            **_xon_fields(seg, 29, "modified_by_organization", repeating=False),
+            **_xon_fields(seg, 30, "inactivated_by_organization", repeating=False),
+        }
+
+
+    def _extract_pr1(seg: HL7Segment) -> dict:
+        return {
+            "set_id": _i(seg.get_field(1)) or 1,
+            "procedure_coding_method": _v(seg.get_field(2)),
+            **_cwe_fields(seg, 3, "procedure_code", repeating=False),
+            "procedure_description": _v(seg.get_field(4)),
+            "procedure_datetime": _parse_dtm(seg.get_field(5)),
+            **_cwe_fields(seg, 6, "procedure_functional_type", repeating=False),
+            "procedure_minutes": _i(seg.get_field(7)),
+            **_xcn_array_fields(seg, 8, "anesthesiologist"),
+            **_cwe_fields(seg, 9, "anesthesia_code", repeating=False),
+            "anesthesia_minutes": _i(seg.get_field(10)),
+            **_xcn_array_fields(seg, 11, "surgeon"),
+            **_xcn_array_fields(seg, 12, "procedure_practitioner"),
+            **_cwe_fields(seg, 13, "consent_code", repeating=False),
+            "procedure_priority": _v(seg.get_field(14)),
+            **_cwe_fields(seg, 15, "associated_diagnosis_code", repeating=False),
+            **_cwe_array_fields(seg, 16, "procedure_code_modifier"),
+            **_cwe_fields(seg, 17, "procedure_drg_type", repeating=False),
+            **_cwe_array_fields(seg, 18, "tissue_type_code"),
+            **_ei_fields(seg, 19, "procedure_identifier", repeating=False),
+            "procedure_action_code": _v(seg.get_field(20)),
+            **_cwe_fields(seg, 21, "drg_procedure_determination_status", repeating=False),
+            **_cwe_fields(seg, 22, "drg_procedure_relevance", repeating=False),
+            **_pl_array_fields(seg, 23, "treating_organizational_unit"),
+            "respiratory_within_surgery": _v(seg.get_field(24)),
+            **_ei_fields(seg, 25, "parent_procedure_id", repeating=False),
+        }
+
+
+    def _extract_orc(seg: HL7Segment) -> dict:
+        return {
+            "order_control": _v(seg.get_field(1)),
+            **_ei_fields(seg, 2, "placer_order_number", repeating=False),
+            **_ei_fields(seg, 3, "filler_order_number", repeating=False),
+            **_ei_fields(seg, 4, "placer_group_number", repeating=False),
+            "order_status": _v(seg.get_field(5)),
+            "response_flag": _v(seg.get_field(6)),
+            **_tq_array_fields(seg, 7, "quantity_timing"),
+            **_eip_array_fields(seg, 8, "parent_order"),
+            "datetime_of_transaction": _parse_dtm(seg.get_field(9)),
+            **_xcn_array_fields(seg, 10, "entered_by"),
+            **_xcn_array_fields(seg, 11, "verified_by"),
+            **_xcn_array_fields(seg, 12, "ordering_provider"),
+            **_pl_fields(seg, 13, "enterers_location"),
+            **_xtn_array_fields(seg, 14, "call_back_phone"),
+            "order_effective_datetime": _parse_dtm(seg.get_field(15)),
+            **_cwe_fields(seg, 16, "order_control_code_reason", repeating=False),
+            **_cwe_fields(seg, 17, "entering_organization", repeating=False),
+            **_cwe_fields(seg, 18, "entering_device", repeating=False),
+            **_xcn_array_fields(seg, 19, "action_by"),
+            **_cwe_fields(seg, 20, "advanced_beneficiary_notice_code", repeating=False),
+            **_xon_array_fields(seg, 21, "ordering_facility_name"),
+            **_xad_array_fields(seg, 22, "ordering_facility_address"),
+            **_xtn_array_fields(seg, 23, "ordering_facility_phone"),
+            **_xad_array_fields(seg, 24, "ordering_provider_address"),
+            **_cwe_fields(seg, 25, "order_status_modifier", repeating=False),
+            **_cwe_fields(seg, 26, "abn_override_reason", repeating=False),
+            "fillers_expected_availability_datetime": _parse_dtm(seg.get_field(27)),
+            **_cwe_fields(seg, 28, "confidentiality_code", repeating=False),
+            **_cwe_fields(seg, 29, "order_type", repeating=False),
+            **_cwe_fields(seg, 30, "enterer_authorization_mode", repeating=False),
+            **_cwe_fields(seg, 31, "parent_universal_service_id", repeating=False),
+            "advanced_beneficiary_notice_date": _parse_dtm(seg.get_field(32)),
+            **_cx_array_fields(seg, 33, "alternate_placer_order_number"),
+            **_cwe_array_fields(seg, 34, "order_workflow_profile"),
+            "action_code": _v(seg.get_field(35)),
+            "order_status_date_range_start": _parse_dtm(seg.get_component(36, 1)),
+            "order_status_date_range_end": _parse_dtm(seg.get_component(36, 2)),
+            "order_creation_datetime": _parse_dtm(seg.get_field(37)),
+            **_ei_fields(seg, 38, "filler_order_group_number", repeating=False),
+        }
+
+
+    def _extract_nte(seg: HL7Segment) -> dict:
+        return {
+            "set_id": _i(seg.get_field(1)) or 1,
+            "source_of_comment": _v(seg.get_field(2)),
+            **_s_array_fields(seg, 3, "comment"),
+            **_cwe_fields(seg, 4, "comment_type", repeating=False),
+            **_xcn_fields(seg, 5, "entered_by", repeating=False),
+            "entered_datetime": _parse_dtm(seg.get_field(6)),
+            "effective_start_date": _parse_dtm(seg.get_field(7)),
+            "expiration_date": _parse_dtm(seg.get_field(8)),
+            **_cwe_array_fields(seg, 9, "coded_comment"),
+        }
+
+
+    def _extract_spm(seg: HL7Segment) -> dict:
+        return {
+            "set_id": _i(seg.get_field(1)) or 1,
+            **_eip_fields(seg, 2, "specimen_id"),
+            **_eip_array_fields(seg, 3, "specimen_parent_ids"),
+            **_cwe_fields(seg, 4, "specimen_type", repeating=False),
+            **_cwe_array_fields(seg, 5, "specimen_type_modifier"),
+            **_cwe_array_fields(seg, 6, "specimen_additives"),
+            **_cwe_fields(seg, 7, "specimen_collection_method", repeating=False),
+            **_cwe_fields(seg, 8, "specimen_source_site", repeating=False),
+            **_cwe_array_fields(seg, 9, "specimen_source_site_modifier"),
+            **_cwe_fields(seg, 10, "specimen_collection_site", repeating=False),
+            **_cwe_array_fields(seg, 11, "specimen_role"),
+            **_cq_fields(seg, 12, "specimen_collection_amount"),
+            "grouped_specimen_count": _i(seg.get_field(13)),
+            **_s_array_fields(seg, 14, "specimen_description"),
+            **_cwe_array_fields(seg, 15, "specimen_handling_code"),
+            **_cwe_array_fields(seg, 16, "specimen_risk_code"),
+            "specimen_collection_datetime_start": _parse_dtm(seg.get_component(17, 1)),
+            "specimen_collection_datetime_end": _parse_dtm(seg.get_component(17, 2)),
+            "specimen_received_datetime": _parse_dtm(seg.get_field(18)),
+            "specimen_expiration_datetime": _parse_dtm(seg.get_field(19)),
+            "specimen_availability": _v(seg.get_field(20)),
+            **_cwe_array_fields(seg, 21, "specimen_reject_reason"),
+            **_cwe_fields(seg, 22, "specimen_quality", repeating=False),
+            **_cwe_fields(seg, 23, "specimen_appropriateness", repeating=False),
+            **_cwe_array_fields(seg, 24, "specimen_condition"),
+            **_cq_fields(seg, 25, "specimen_current_quantity"),
+            "number_of_specimen_containers": _i(seg.get_field(26)),
+            **_cwe_fields(seg, 27, "container_type", repeating=False),
+            **_cwe_fields(seg, 28, "container_condition", repeating=False),
+            **_cwe_fields(seg, 29, "specimen_child_role", repeating=False),
+            **_cx_array_fields(seg, 30, "accession_id"),
+            **_cx_array_fields(seg, 31, "other_specimen_id"),
+            **_ei_fields(seg, 32, "shipment_id", repeating=False),
+            "culture_start_datetime": _parse_dtm(seg.get_field(33)),
+            "culture_final_datetime": _parse_dtm(seg.get_field(34)),
+            "action_code": _v(seg.get_field(35)),
+        }
+
+
+    def _extract_in1(seg: HL7Segment) -> dict:
+        return {
+            "set_id": _i(seg.get_field(1)) or 1,
+            **_cwe_fields(seg, 2, "insurance_plan", repeating=False),
+            **_cx_array_fields(seg, 3, "insurance_company"),
+            **_xon_array_fields(seg, 4, "insurance_company_name"),
+            **_xad_array_fields(seg, 5, "insurance_company_address"),
+            **_xpn_array_fields(seg, 6, "insurance_co_contacts"),
+            **_xtn_array_fields(seg, 7, "insurance_co_phone_number"),
+            "group_number": _v(seg.get_field(8)),
+            **_xon_array_fields(seg, 9, "group_name"),
+            **_cx_array_fields(seg, 10, "insureds_group_emp"),
+            **_xon_array_fields(seg, 11, "insureds_group_emp_name"),
+            "plan_effective_date": _parse_dtm(seg.get_field(12)),
+            "plan_expiration_date": _parse_dtm(seg.get_field(13)),
+            **_aui_fields(seg, 14, "authorization_information"),
+            **_cwe_fields(seg, 15, "plan_type", repeating=False),
+            **_xpn_array_fields(seg, 16, "insured_names"),
+            **_cwe_fields(seg, 17, "insureds_relationship_to_patient", repeating=False),
+            "insureds_date_of_birth": _parse_dtm(seg.get_field(18)),
+            **_xad_array_fields(seg, 19, "insureds_address"),
+            **_cwe_fields(seg, 20, "assignment_of_benefits", repeating=False),
+            **_cwe_fields(seg, 21, "coordination_of_benefits", repeating=False),
+            "coord_of_ben_priority": _v(seg.get_field(22)),
+            "notice_of_admission_flag": _v(seg.get_field(23)),
+            "notice_of_admission_date": _parse_dtm(seg.get_field(24)),
+            "report_of_eligibility_flag": _v(seg.get_field(25)),
+            "report_of_eligibility_date": _parse_dtm(seg.get_field(26)),
+            **_cwe_fields(seg, 27, "release_information_code", repeating=False),
+            "pre_admit_cert": _v(seg.get_field(28)),
+            "verification_datetime": _parse_dtm(seg.get_field(29)),
+            **_xcn_array_fields(seg, 30, "verification_by"),
+            **_cwe_fields(seg, 31, "type_of_agreement_code", repeating=False),
+            **_cwe_fields(seg, 32, "billing_status", repeating=False),
+            "lifetime_reserve_days": _i(seg.get_field(33)),
+            "delay_before_lr_day": _i(seg.get_field(34)),
+            **_cwe_fields(seg, 35, "company_plan_code", repeating=False),
+            "policy_number": _v(seg.get_field(36)),
+            **_cp_fields(seg, 37, "policy_deductible"),
+            **_cp_fields(seg, 38, "policy_limit_amount"),
+            "policy_limit_days": _i(seg.get_field(39)),
+            **_cp_fields(seg, 40, "room_rate_semi_private"),
+            **_cp_fields(seg, 41, "room_rate_private"),
+            **_cwe_fields(seg, 42, "insureds_employment_status", repeating=False),
+            **_cwe_fields(seg, 43, "insureds_administrative_sex", repeating=False),
+            **_xad_array_fields(seg, 44, "insureds_employers_address"),
+            "verification_status": _v(seg.get_field(45)),
+            **_cwe_fields(seg, 46, "prior_insurance_plan_id", repeating=False),
+            **_cwe_fields(seg, 47, "coverage_type", repeating=False),
+            **_cwe_fields(seg, 48, "handicap", repeating=False),
+            **_cx_array_fields(seg, 49, "insureds_id_number"),
+            **_cwe_fields(seg, 50, "signature_code", repeating=False),
+            "signature_code_date": _parse_dtm(seg.get_field(51)),
+            "insureds_birth_place": _v(seg.get_field(52)),
+            **_cwe_fields(seg, 53, "vip_indicator", repeating=False),
+            **_cwe_array_fields(seg, 54, "external_health_plan_identifiers"),
+            "insurance_action_code": _v(seg.get_field(55)),
+        }
+
+
+    def _extract_gt1(seg: HL7Segment) -> dict:
+        return {
+            "set_id": _i(seg.get_field(1)) or 1,
+            **_cx_array_fields(seg, 2, "guarantor_number"),
+            **_xpn_array_fields(seg, 3, "guarantor_names"),
+            **_xpn_array_fields(seg, 4, "guarantor_spouse_names"),
+            **_xad_array_fields(seg, 5, "guarantor_address"),
+            **_xtn_array_fields(seg, 6, "guarantor_ph_num_home"),
+            **_xtn_array_fields(seg, 7, "guarantor_ph_num_business"),
+            "guarantor_date_of_birth": _parse_dtm(seg.get_field(8)),
+            **_cwe_fields(seg, 9, "guarantor_administrative_sex", repeating=False),
+            **_cwe_fields(seg, 10, "guarantor_type", repeating=False),
+            **_cwe_fields(seg, 11, "guarantor_relationship", repeating=False),
+            "guarantor_ssn": _v(seg.get_field(12)),
+            "guarantor_date_begin": _parse_dtm(seg.get_field(13)),
+            "guarantor_date_end": _parse_dtm(seg.get_field(14)),
+            "guarantor_priority": _i(seg.get_field(15)),
+            **_xpn_array_fields(seg, 16, "guarantor_employer_names"),
+            **_xad_array_fields(seg, 17, "guarantor_employer_address"),
+            **_xtn_array_fields(seg, 18, "guarantor_employer_phone_number"),
+            **_cx_array_fields(seg, 19, "guarantor_employee_id_number"),
+            **_cwe_fields(seg, 20, "guarantor_employment_status", repeating=False),
+            **_xon_array_fields(seg, 21, "guarantor_organization_name"),
+            "guarantor_billing_hold_flag": _v(seg.get_field(22)),
+            **_cwe_fields(seg, 23, "guarantor_credit_rating_code", repeating=False),
+            "guarantor_death_date_and_time": _parse_dtm(seg.get_field(24)),
+            "guarantor_death_flag": _v(seg.get_field(25)),
+            **_cwe_fields(seg, 26, "guarantor_charge_adjustment_code", repeating=False),
+            **_cp_fields(seg, 27, "guarantor_household_annual_income"),
+            "guarantor_household_size": _i(seg.get_field(28)),
+            **_cx_array_fields(seg, 29, "guarantor_employer_id_number"),
+            **_cwe_fields(seg, 30, "guarantor_marital_status_code", repeating=False),
+            "guarantor_hire_effective_date": _parse_dtm(seg.get_field(31)),
+            "employment_stop_date": _parse_dtm(seg.get_field(32)),
+            **_cwe_fields(seg, 33, "living_dependency", repeating=False),
+            **_cwe_array_fields(seg, 34, "ambulatory_status"),
+            **_cwe_array_fields(seg, 35, "citizenship"),
+            **_cwe_fields(seg, 36, "primary_language", repeating=False),
+            **_cwe_fields(seg, 37, "living_arrangement", repeating=False),
+            **_cwe_fields(seg, 38, "publicity_code", repeating=False),
+            "protection_indicator": _v(seg.get_field(39)),
+            **_cwe_fields(seg, 40, "student_indicator", repeating=False),
+            **_cwe_fields(seg, 41, "religion", repeating=False),
+            **_xpn_array_fields(seg, 42, "mothers_maiden_names"),
+            **_cwe_fields(seg, 43, "nationality", repeating=False),
+            **_cwe_array_fields(seg, 44, "ethnic_group"),
+            **_xpn_array_fields(seg, 45, "contact_persons"),
+            **_xtn_array_fields(seg, 46, "contact_persons_telephone_number"),
+            **_cwe_fields(seg, 47, "contact_reason", repeating=False),
+            **_cwe_fields(seg, 48, "contact_relationship", repeating=False),
+            "job_title": _v(seg.get_field(49)),
+            **_jcc_fields(seg, 50, "job_code_class"),
+            **_xon_array_fields(seg, 51, "guarantor_employers_org_name"),
+            **_cwe_fields(seg, 52, "handicap", repeating=False),
+            **_cwe_fields(seg, 53, "job_status", repeating=False),
+            **_fc_fields(seg, 54, "guarantor_financial_class"),
+            **_cwe_array_fields(seg, 55, "guarantor_race"),
+            "guarantor_birth_place": _v(seg.get_field(56)),
+            **_cwe_fields(seg, 57, "vip_indicator", repeating=False),
+        }
+
+
+    def _extract_ft1(seg: HL7Segment) -> dict:
+        return {
+            "set_id": _i(seg.get_field(1)) or 1,
+            **_cx_fields(seg, 2, "transaction_id", repeating=False),
+            "transaction_batch_id": _v(seg.get_field(3)),
+            "transaction_date_start": _parse_dtm(seg.get_component(4, 1)),
+            "transaction_date_end": _parse_dtm(seg.get_component(4, 2)),
+            "transaction_posting_date": _parse_dtm(seg.get_field(5)),
+            **_cwe_fields(seg, 6, "transaction_type", repeating=False),
+            **_cwe_fields(seg, 7, "transaction_code", repeating=False),
+            "transaction_description": _v(seg.get_field(8)),
+            "transaction_description_alt": _v(seg.get_field(9)),
+            "transaction_quantity": _i(seg.get_field(10)),
+            **_cp_fields(seg, 11, "transaction_amount_extended"),
+            **_cp_fields(seg, 12, "transaction_amount_unit"),
+            **_cwe_fields(seg, 13, "department_code", repeating=False),
+            **_cwe_fields(seg, 14, "insurance_plan_id", repeating=False),
+            **_cp_fields(seg, 15, "insurance_amount"),
+            **_pl_fields(seg, 16, "assigned_patient_location"),
+            **_cwe_fields(seg, 17, "fee_schedule", repeating=False),
+            **_cwe_fields(seg, 18, "patient_type", repeating=False),
+            **_cwe_array_fields(seg, 19, "diagnosis_code"),
+            **_xcn_array_fields(seg, 20, "performed_by"),
+            **_xcn_array_fields(seg, 21, "ordered_by"),
+            **_cp_fields(seg, 22, "unit_cost"),
+            **_ei_fields(seg, 23, "filler_order_number", repeating=False),
+            **_xcn_array_fields(seg, 24, "entered_by"),
+            **_cwe_fields(seg, 25, "procedure_code", repeating=False),
+            **_cwe_array_fields(seg, 26, "procedure_code_modifier"),
+            **_cwe_fields(seg, 27, "advanced_beneficiary_notice_code", repeating=False),
+            **_cwe_fields(seg, 28, "medically_necessary_dup_proc_reason", repeating=False),
+            **_cwe_fields(seg, 29, "ndc_code", repeating=False),
+            **_cx_fields(seg, 30, "payment_reference_id", repeating=False),
+            **_s_array_fields(seg, 31, "transaction_reference_key"),
+            **_xon_array_fields(seg, 32, "performing_facility"),
+            **_xon_fields(seg, 33, "ordering_facility"),
+            **_cwe_fields(seg, 34, "item_number", repeating=False),
+            "model_number": _v(seg.get_field(35)),
+            **_cwe_array_fields(seg, 36, "special_processing_code"),
+            **_cwe_fields(seg, 37, "clinic_code", repeating=False),
+            **_cx_fields(seg, 38, "referral_number", repeating=False),
+            **_cx_fields(seg, 39, "authorization_number", repeating=False),
+            **_cwe_fields(seg, 40, "service_provider_taxonomy_code", repeating=False),
+            **_cwe_fields(seg, 41, "revenue_code", repeating=False),
+            "prescription_number": _v(seg.get_field(42)),
+            **_cq_fields(seg, 43, "ndc_qty_and_uom"),
+            **_cwe_fields(  # dme_certificate_of_medical_necessity_transmission_code
+                seg, 44, "dme_certificate_of_medical_necessity_transmission_code", repeating=False),
+            **_cwe_fields(seg, 45, "dme_certification_type_code", repeating=False),
+            "dme_duration_value": _v(seg.get_field(46)),
+            "dme_certification_revision_date": _v(seg.get_field(47)),
+            "dme_initial_certification_date": _v(seg.get_field(48)),
+            "dme_last_certification_date": _v(seg.get_field(49)),
+            "dme_length_of_medical_necessity_days": _v(seg.get_field(50)),
+            **_mo_fields(seg, 51, "dme_rental_price"),
+            **_mo_fields(seg, 52, "dme_purchase_price"),
+            **_cwe_fields(seg, 53, "dme_frequency_code", repeating=False),
+            "dme_certification_condition_indicator": _v(seg.get_field(54)),
+            **_cwe_array_fields(seg, 55, "dme_condition_indicator_code"),
+            **_cwe_fields(seg, 56, "service_reason_code", repeating=False),
+        }
+
+
+    def _extract_rxa(seg: HL7Segment) -> dict:
+        return {
+            "set_id": _i(seg.get_field(1)) or 1,
+            "administration_sub_id_counter": _i(seg.get_field(2)),
+            "datetime_start_of_administration": _parse_dtm(seg.get_field(3)),
+            "datetime_end_of_administration": _parse_dtm(seg.get_field(4)),
+            **_cwe_fields(seg, 5, "administered_code", repeating=False),
+            "administered_amount": _v(seg.get_field(6)),
+            **_cwe_fields(seg, 7, "administered_units", repeating=False),
+            **_cwe_fields(seg, 8, "administered_dosage_form", repeating=False),
+            **_cwe_array_fields(seg, 9, "administration_notes"),
+            **_xcn_array_fields(seg, 10, "administering_provider"),
+            "administered_at_location": _v(seg.get_field(11)),
+            "administered_per_time_unit": _v(seg.get_field(12)),
+            "administered_strength": _v(seg.get_field(13)),
+            **_cwe_fields(seg, 14, "administered_strength_units", repeating=False),
+            **_s_array_fields(seg, 15, "substance_lot_number"),
+            **_dtm_array_fields(seg, 16, "substance_expiration_date"),
+            **_cwe_array_fields(seg, 17, "substance_manufacturer_name"),
+            **_cwe_array_fields(seg, 18, "substance_treatment_refusal_reason"),
+            **_cwe_array_fields(seg, 19, "indication"),
+            "completion_status": _v(seg.get_field(20)),
+            "action_code_rxa": _v(seg.get_field(21)),
+            "system_entry_datetime": _parse_dtm(seg.get_field(22)),
+            "administered_drug_strength_volume": _v(seg.get_field(23)),
+            **_cwe_fields(seg, 24, "administered_drug_strength_volume_units", repeating=False),
+            **_cwe_fields(seg, 25, "administered_barcode_identifier", repeating=False),
+            "pharmacy_order_type": _v(seg.get_field(26)),
+            **_pl_fields(seg, 27, "administer_at"),
+            **_xad_fields(seg, 28, "administered_at_address", repeating=False),
+            **_ei_array_fields(seg, 29, "administered_tag_identifier"),
+        }
+
+
+    def _extract_sch(seg: HL7Segment) -> dict:
+        return {
+            **_ei_fields(seg, 1, "placer_appointment_id", repeating=False),
+            **_ei_fields(seg, 2, "filler_appointment_id", repeating=False),
+            "occurrence_number": _i(seg.get_field(3)),
+            **_ei_fields(seg, 4, "placer_group_number", repeating=False),
+            **_cwe_fields(seg, 5, "schedule_id", repeating=False),
+            **_cwe_fields(seg, 6, "event_reason", repeating=False),
+            **_cwe_fields(seg, 7, "appointment_reason", repeating=False),
+            **_cwe_fields(seg, 8, "appointment_type", repeating=False),
+            "appointment_duration": _i(seg.get_field(9)),
+            **_cwe_fields(seg, 10, "appointment_duration_units", repeating=False),
+            "appointment_timing_quantity": _v(seg.get_first_repetition(11)),
+            **_xcn_array_fields(seg, 12, "placer_contact_person"),
+            **_xtn_fields(seg, 13, "placer_contact_phone", repeating=False),
+            **_xad_array_fields(seg, 14, "placer_contact_address"),
+            **_pl_fields(seg, 15, "placer_contact_location"),
+            **_xcn_array_fields(seg, 16, "filler_contact_person"),
+            **_xtn_fields(seg, 17, "filler_contact_phone", repeating=False),
+            **_xad_array_fields(seg, 18, "filler_contact_address"),
+            **_pl_fields(seg, 19, "filler_contact_location"),
+            **_xcn_array_fields(seg, 20, "entered_by_person"),
+            **_xtn_array_fields(seg, 21, "entered_by_phone_number"),
+            **_pl_fields(seg, 22, "entered_by_location"),
+            **_ei_fields(seg, 23, "parent_placer_appointment_id", repeating=False),
+            **_ei_fields(seg, 24, "parent_filler_appointment_id", repeating=False),
+            **_cwe_fields(seg, 25, "filler_status_code", repeating=False),
+            **_ei_array_fields(seg, 26, "placer_order_number"),
+            **_ei_array_fields(seg, 27, "filler_order_number"),
+            **_eip_fields(seg, 28, "alternate_placer_order_group_number"),
+        }
+
+
+    def _extract_txa(seg: HL7Segment) -> dict:
+        return {
+            "set_id": _i(seg.get_field(1)) or 1,
+            **_cwe_fields(seg, 2, "document_type", repeating=False),
+            "document_content_presentation": _v(seg.get_field(3)),
+            "activity_datetime": _parse_dtm(seg.get_field(4)),
+            **_xcn_array_fields(seg, 5, "primary_activity_provider"),
+            "origination_datetime": _parse_dtm(seg.get_field(6)),
+            "transcription_datetime": _parse_dtm(seg.get_field(7)),
+            **_dtm_array_fields(seg, 8, "edit_datetime"),
+            **_xcn_array_fields(seg, 9, "originator"),
+            **_xcn_array_fields(seg, 10, "assigned_document_authenticator"),
+            **_xcn_array_fields(seg, 11, "transcriptionist"),
+            **_ei_fields(seg, 12, "unique_document_number", repeating=False),
+            **_ei_fields(seg, 13, "parent_document_number", repeating=False),
+            **_ei_array_fields(seg, 14, "placer_order_number"),
+            **_ei_fields(seg, 15, "filler_order_number", repeating=False),
+            "unique_document_file_name": _v(seg.get_field(16)),
+            "document_completion_status": _v(seg.get_field(17)),
+            "document_confidentiality_status": _v(seg.get_field(18)),
+            "document_availability_status": _v(seg.get_field(19)),
+            "document_storage_status": _v(seg.get_field(20)),
+            "document_change_reason": _v(seg.get_field(21)),
+            **_xcn_array_fields(seg, 22, "authentication_person_time_stamp"),
+            **_xcn_array_fields(seg, 23, "distributed_copies"),
+            **_cwe_array_fields(seg, 24, "folder_assignment"),
+            **_s_array_fields(seg, 25, "document_title"),
+            "agreed_due_datetime": _parse_dtm(seg.get_field(26)),
+            **_hd_fields(seg, 27, "creating_facility", repeating=False),
+            **_cwe_fields(seg, 28, "creating_specialty", repeating=False),
+        }
+
+
+    def _extract_generic(seg: HL7Segment) -> dict:
+        """Fallback extractor for Z-segments and unknown segment types."""
+        return {"segment_type": seg.segment_type} | {
+            f"field_{i}": _v(seg.get_field(i)) for i in range(1, 26)
+        }
+
+
+    _EXTRACTORS = {
+        "msh": _extract_msh,
+        "evn": _extract_evn,
+        "pid": _extract_pid,
+        "pd1": _extract_pd1,
+        "pv1": _extract_pv1,
+        "pv2": _extract_pv2,
+        "nk1": _extract_nk1,
+        "mrg": _extract_mrg,
+        "al1": _extract_al1,
+        "iam": _extract_iam,
+        "dg1": _extract_dg1,
+        "pr1": _extract_pr1,
+        "orc": _extract_orc,
+        "obr": _extract_obr,
+        "obx": _extract_obx,
+        "nte": _extract_nte,
+        "spm": _extract_spm,
+        "in1": _extract_in1,
+        "gt1": _extract_gt1,
+        "ft1": _extract_ft1,
+        "rxa": _extract_rxa,
+        "sch": _extract_sch,
+        "txa": _extract_txa,
+    }
+
+
+    # ---------------------------------------------------------------------------
+    # Multi-message splitter
+    # ---------------------------------------------------------------------------
+
+
+    def _split_messages(text: str) -> list[str]:
+        """Split an HL7 batch into individual message strings.
+
+        Each message starts with an MSH line.  FHS/BHS/BTS/FTS batch-envelope
+        segments are skipped.
+        """
+        normalised = text.strip().replace("\r\n", "\r").replace("\n", "\r")
+        lines = normalised.split("\r")
+
+        messages: list[str] = []
+        current: list[str] = []
+
+        for line in lines:
+            if not line.strip():
+                continue
+            seg_type = line[:3].upper()
+            if seg_type in _BATCH_ENVELOPE_SEGMENTS:
+                continue
+            if seg_type == "MSH":
+                if current:
+                    messages.append("\r".join(current))
+                current = [line]
+            else:
+                current.append(line)
+
+        if current:
+            messages.append("\r".join(current))
+
+        return messages
+
+
+    ########################################################
     # src/databricks/labs/community_connector/sources/hl7_v2/hl7_v2_schemas.py
     ########################################################
 
@@ -1088,7 +3095,7 @@ def register_lakeflow_source(spark):
         return StructField(name, StringType(), nullable=True)
 
 
-    def _i(name: str, comment: str = "") -> StructField:
+    def _int_field(name: str, comment: str = "") -> StructField:
         """Nullable LongType field (see ``_s`` for metadata rationale)."""
         return StructField(name, LongType(), nullable=True)
 
@@ -1110,7 +3117,7 @@ def register_lakeflow_source(spark):
         return StructField(name, StringType(), nullable=False)
 
 
-    def _pk_i(name: str, comment: str = "") -> StructField:
+    def _pk_int_field(name: str, comment: str = "") -> StructField:
         """NOT NULL LongType field used as (part of) a composite primary key."""
         return StructField(name, LongType(), nullable=False)
 
@@ -1166,6 +3173,210 @@ def register_lakeflow_source(spark):
     ])
 
 
+    _XTN_STRUCT = StructType([
+        StructField("number", StringType(), nullable=True),
+        StructField("use_code", StringType(), nullable=True),
+        StructField("equipment_type", StringType(), nullable=True),
+        StructField("communication_address", StringType(), nullable=True),
+        StructField("country_code", StringType(), nullable=True),
+        StructField("area_code", StringType(), nullable=True),
+        StructField("local_number", StringType(), nullable=True),
+        StructField("extension", StringType(), nullable=True),
+        StructField("any_text", StringType(), nullable=True),
+        StructField("extension_prefix", StringType(), nullable=True),
+        StructField("speed_dial_code", StringType(), nullable=True),
+        StructField("unformatted_number", StringType(), nullable=True),
+        StructField("effective_start_date", StringType(), nullable=True),
+        StructField("expiration_date", StringType(), nullable=True),
+        StructField("expiration_reason", StringType(), nullable=True),
+        StructField("protection_code", StringType(), nullable=True),
+        StructField("shared_telecom_id", StringType(), nullable=True),
+        StructField("preference_order", StringType(), nullable=True),
+    ])
+
+
+    _XCN_STRUCT = StructType([
+        StructField("id", StringType(), nullable=True),
+        StructField("family_name", StringType(), nullable=True),
+        StructField("given_name", StringType(), nullable=True),
+        StructField("middle_name", StringType(), nullable=True),
+        StructField("suffix", StringType(), nullable=True),
+        StructField("prefix", StringType(), nullable=True),
+        StructField("degree", StringType(), nullable=True),
+        StructField("source_table", StringType(), nullable=True),
+        StructField("assigning_authority", StringType(), nullable=True),
+        StructField("assigning_authority_universal_id", StringType(), nullable=True),
+        StructField("assigning_authority_universal_id_type", StringType(), nullable=True),
+        StructField("name_type_code", StringType(), nullable=True),
+        StructField("check_digit", StringType(), nullable=True),
+        StructField("check_digit_scheme", StringType(), nullable=True),
+        StructField("identifier_type_code", StringType(), nullable=True),
+        StructField("assigning_facility", StringType(), nullable=True),
+        StructField("assigning_facility_universal_id", StringType(), nullable=True),
+        StructField("assigning_facility_universal_id_type", StringType(), nullable=True),
+        StructField("name_representation_code", StringType(), nullable=True),
+        StructField("name_assembly_order", StringType(), nullable=True),
+        StructField("effective_date", StringType(), nullable=True),
+        StructField("expiration_date", StringType(), nullable=True),
+        StructField("professional_suffix", StringType(), nullable=True),
+    ])
+
+
+    _XON_STRUCT = StructType([
+        StructField("name", StringType(), nullable=True),
+        StructField("type_code", StringType(), nullable=True),
+        StructField("id", StringType(), nullable=True),
+        StructField("check_digit", StringType(), nullable=True),
+        StructField("check_digit_scheme", StringType(), nullable=True),
+        StructField("assigning_authority", StringType(), nullable=True),
+        StructField("assigning_authority_universal_id", StringType(), nullable=True),
+        StructField("assigning_authority_universal_id_type", StringType(), nullable=True),
+        StructField("id_type_code", StringType(), nullable=True),
+        StructField("assigning_facility", StringType(), nullable=True),
+        StructField("assigning_facility_universal_id", StringType(), nullable=True),
+        StructField("assigning_facility_universal_id_type", StringType(), nullable=True),
+        StructField("name_rep_code", StringType(), nullable=True),
+        StructField("identifier", StringType(), nullable=True),
+    ])
+
+
+    _CX_STRUCT = StructType([
+        StructField("id", StringType(), nullable=True),
+        StructField("check_digit", StringType(), nullable=True),
+        StructField("check_digit_scheme", StringType(), nullable=True),
+        StructField("assigning_authority", StringType(), nullable=True),
+        StructField("assigning_authority_universal_id", StringType(), nullable=True),
+        StructField("assigning_authority_universal_id_type", StringType(), nullable=True),
+        StructField("type_code", StringType(), nullable=True),
+        StructField("assigning_facility", StringType(), nullable=True),
+        StructField("assigning_facility_universal_id", StringType(), nullable=True),
+        StructField("assigning_facility_universal_id_type", StringType(), nullable=True),
+        StructField("effective_date", StringType(), nullable=True),
+        StructField("expiration_date", StringType(), nullable=True),
+        StructField("assigning_jurisdiction", StringType(), nullable=True),
+        StructField("assigning_agency", StringType(), nullable=True),
+        StructField("security_check", StringType(), nullable=True),
+        StructField("security_check_scheme", StringType(), nullable=True),
+    ])
+
+
+    _XAD_STRUCT = StructType([
+        StructField("street", StringType(), nullable=True),
+        StructField("other_designation", StringType(), nullable=True),
+        StructField("city", StringType(), nullable=True),
+        StructField("state", StringType(), nullable=True),
+        StructField("zip", StringType(), nullable=True),
+        StructField("country", StringType(), nullable=True),
+        StructField("type", StringType(), nullable=True),
+        StructField("other_geographic", StringType(), nullable=True),
+        StructField("county_parish_code", StringType(), nullable=True),
+        StructField("county_parish_text", StringType(), nullable=True),
+        StructField("county_parish_coding_system", StringType(), nullable=True),
+        StructField("census_tract", StringType(), nullable=True),
+        StructField("census_tract_text", StringType(), nullable=True),
+        StructField("census_tract_coding_system", StringType(), nullable=True),
+        StructField("representation_code", StringType(), nullable=True),
+        StructField("effective_date", StringType(), nullable=True),
+        StructField("expiration_date", StringType(), nullable=True),
+        StructField("expiration_reason", StringType(), nullable=True),
+        StructField("expiration_reason_text", StringType(), nullable=True),
+        StructField("expiration_reason_coding_system", StringType(), nullable=True),
+        StructField("temporary_indicator", StringType(), nullable=True),
+        StructField("bad_address_indicator", StringType(), nullable=True),
+        StructField("usage", StringType(), nullable=True),
+        StructField("addressee", StringType(), nullable=True),
+        StructField("comment", StringType(), nullable=True),
+        StructField("preference_order", StringType(), nullable=True),
+        StructField("protection_code", StringType(), nullable=True),
+        StructField("protection_code_text", StringType(), nullable=True),
+        StructField("protection_code_coding_system", StringType(), nullable=True),
+        StructField("identifier", StringType(), nullable=True),
+    ])
+
+
+    # EIP (Entity Identifier Pair) — parent and child EI separated by `&`. Used for
+    # OBX-33 observation-related specimen ID and ORC-8 parent order. Modeled as a
+    # nested struct so consumers can address each EI's 4 components individually.
+    _EI_INNER_STRUCT = StructType([
+        StructField("entity_identifier", StringType(), nullable=True),
+        StructField("namespace_id", StringType(), nullable=True),
+        StructField("universal_id", StringType(), nullable=True),
+        StructField("universal_id_type", StringType(), nullable=True),
+    ])
+    _EIP_STRUCT = StructType([
+        StructField("placer_assigned_identifier", _EI_INNER_STRUCT, nullable=True),
+        StructField("filler_assigned_identifier", _EI_INNER_STRUCT, nullable=True),
+    ])
+
+
+    _PL_STRUCT = StructType([
+        StructField("point_of_care", StringType(), nullable=True),
+        StructField("room", StringType(), nullable=True),
+        StructField("bed", StringType(), nullable=True),
+        StructField("facility", StringType(), nullable=True),
+        StructField("status", StringType(), nullable=True),
+        StructField("type", StringType(), nullable=True),
+        StructField("building", StringType(), nullable=True),
+        StructField("floor", StringType(), nullable=True),
+        StructField("description", StringType(), nullable=True),
+        StructField("comprehensive_id", StringType(), nullable=True),
+        StructField("assigning_authority", StringType(), nullable=True),
+    ])
+
+
+    _FC_STRUCT = StructType([
+        StructField("code", StringType(), nullable=True),
+        StructField("text", StringType(), nullable=True),
+        StructField("coding_system", StringType(), nullable=True),
+        StructField("alt_code", StringType(), nullable=True),
+        StructField("alt_text", StringType(), nullable=True),
+        StructField("alt_coding_system", StringType(), nullable=True),
+        StructField("coding_system_version", StringType(), nullable=True),
+        StructField("alt_coding_system_version", StringType(), nullable=True),
+        StructField("original_text", StringType(), nullable=True),
+        StructField("effective_date", StringType(), nullable=True),
+    ])
+
+
+    _TQ_STRUCT = StructType([
+        StructField("quantity",                StringType(), nullable=True),  # TQ.1.1 (CQ quantity value, NM)
+        StructField("quantity_units",          StringType(), nullable=True),  # TQ.1.2 (CQ units, CWE.1)
+        StructField("interval_repeat_pattern", StringType(), nullable=True),  # TQ.2.1 (RI repeat pattern)
+        StructField("interval_explicit_time",  StringType(), nullable=True),  # TQ.2.2 (RI explicit time)
+        StructField("duration",                StringType(), nullable=True),  # TQ.3 (ST)
+        StructField("start_datetime",          StringType(), nullable=True),  # TQ.4 (TS, ISO-8601)
+        StructField("end_datetime",            StringType(), nullable=True),  # TQ.5 (TS, ISO-8601)
+        StructField("priority",                StringType(), nullable=True),  # TQ.6 (ID)
+        StructField("condition",               StringType(), nullable=True),  # TQ.7 (ST)
+        StructField("text",                    StringType(), nullable=True),  # TQ.8 (TX)
+        StructField("conjunction",             StringType(), nullable=True),  # TQ.9 (ID)
+        StructField("order_sequencing",        StringType(), nullable=True),  # TQ.10 (OSD, raw)
+        StructField("occurrence_duration",     StringType(), nullable=True),  # TQ.11.1 (CE/CWE.1)
+        StructField("total_occurrences",       StringType(), nullable=True),  # TQ.12 (NM)
+    ])
+
+
+    _NDL_STRUCT = StructType([
+        StructField("id", StringType(), nullable=True),
+        StructField("family_name", StringType(), nullable=True),
+        StructField("given_name", StringType(), nullable=True),
+        StructField("middle_name", StringType(), nullable=True),
+        StructField("suffix", StringType(), nullable=True),
+        StructField("prefix", StringType(), nullable=True),
+        StructField("degree", StringType(), nullable=True),
+        StructField("start_datetime", StringType(), nullable=True),
+        StructField("end_datetime", StringType(), nullable=True),
+        StructField("point_of_care", StringType(), nullable=True),
+        StructField("room", StringType(), nullable=True),
+        StructField("bed", StringType(), nullable=True),
+        StructField("facility", StringType(), nullable=True),
+        StructField("location_status", StringType(), nullable=True),
+        StructField("patient_location_type", StringType(), nullable=True),
+        StructField("building", StringType(), nullable=True),
+        StructField("floor", StringType(), nullable=True),
+    ])
+
+
     def _xpn_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
         """XPN (Extended Person Name) — repeating field as ArrayType(StructType([...]))."""
         return [StructField(column_name, ArrayType(_XPN_STRUCT, containsNull=True), nullable=True)]
@@ -1174,6 +3385,41 @@ def register_lakeflow_source(spark):
     def _cwe_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
         """CWE (Coded With Exceptions) — repeating field as ArrayType(StructType([...]))."""
         return [StructField(column_name, ArrayType(_CWE_STRUCT, containsNull=True), nullable=True)]
+
+
+    def _xtn_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+        """XTN (Extended Telecommunication Number) — repeating field as ArrayType(StructType([...]))."""
+        return [StructField(column_name, ArrayType(_XTN_STRUCT, containsNull=True), nullable=True)]
+
+
+    def _xcn_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+        """XCN (Extended Composite ID Number and Name) — repeating field as ArrayType(StructType([...]))."""
+        return [StructField(column_name, ArrayType(_XCN_STRUCT, containsNull=True), nullable=True)]
+
+
+    def _xon_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+        """XON (Extended Composite Name and Number for Organizations) — repeating field as ArrayType(StructType([...]))."""
+        return [StructField(column_name, ArrayType(_XON_STRUCT, containsNull=True), nullable=True)]
+
+
+    def _cx_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+        """CX (Extended Composite ID with Check Digit) — repeating field as ArrayType(StructType([...]))."""
+        return [StructField(column_name, ArrayType(_CX_STRUCT, containsNull=True), nullable=True)]
+
+
+    def _xad_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+        """XAD (Extended Address) — repeating field as ArrayType(StructType([...]))."""
+        return [StructField(column_name, ArrayType(_XAD_STRUCT, containsNull=True), nullable=True)]
+
+
+    def _eip_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+        """EIP (Entity Identifier Pair) — repeating field as ArrayType(StructType<placer_assigned_identifier: EI, filler_assigned_identifier: EI>)."""
+        return [StructField(column_name, ArrayType(_EIP_STRUCT, containsNull=True), nullable=True)]
+
+
+    def _tq_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+        """TQ (Timing Quantity) — repeating field as ArrayType(StructType([...])). Deprecated in v2.5."""
+        return [StructField(column_name, ArrayType(_TQ_STRUCT, containsNull=True), nullable=True)]
 
 
     def _s_array(name: str, comment: str = "") -> StructField:
@@ -1241,6 +3487,247 @@ def register_lakeflow_source(spark):
             _s(f"{prefix}_namespace_id",       f"{label} namespace ID ({field_ref}.2)"),
             _s(f"{prefix}_universal_id",       f"{label} universal ID ({field_ref}.3)"),
             _s(f"{prefix}_universal_id_type",  f"{label} universal ID type ({field_ref}.4)"),
+        ]
+
+
+    def _cp_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+        """CP (Composite Price) — 6 component fields + MO currency sub-component.
+
+        Components: Price (MO; MO.1 quantity stored as ``{prefix}`` and MO.2 ISO
+        4217 denomination stored as ``{prefix}_currency``), Price Type (CP.2,
+        table 0205), From Value (CP.3, NM), To Value (CP.4, NM), Range Units
+        (CP.5, CWE code only), Range Type (CP.6, table 0298).
+        """
+        return [
+            _s(f"{prefix}",             f"{label} price quantity ({field_ref}.1.1, MO)"),
+            _s(f"{prefix}_currency",    f"{label} price ISO 4217 currency code ({field_ref}.1.2, MO)"),
+            _s(f"{prefix}_price_type",  f"{label} price type ({field_ref}.2, ID, Table 0205)"),
+            _s(f"{prefix}_from_value",  f"{label} range from value ({field_ref}.3, NM)"),
+            _s(f"{prefix}_to_value",    f"{label} range to value ({field_ref}.4, NM)"),
+            _s(f"{prefix}_range_units",               f"{label} range units code ({field_ref}.5.1, CWE.1)"),
+            _s(f"{prefix}_range_units_text",          f"{label} range units text ({field_ref}.5.2, CWE.2)"),
+            _s(f"{prefix}_range_units_coding_system", f"{label} range units coding system ({field_ref}.5.3, CWE.3)"),
+            _s(f"{prefix}_range_type",                f"{label} range type ({field_ref}.6, ID, Table 0298)"),
+        ]
+
+
+    def _pt_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+        """PT (Processing Type) — 2 ID components."""
+        return [
+            _s(f"{prefix}",      f"{label} processing ID ({field_ref}.1, ID; Table 0103)"),
+            _s(f"{prefix}_mode", f"{label} processing mode ({field_ref}.2, ID; Table 0207)"),
+        ]
+
+
+    def _vid_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+        """VID (Version Identifier) — ID + 2 CWE components."""
+        return [
+            _s(f"{prefix}",                                          f"{label} version ID ({field_ref}.1, ID)"),
+            _s(f"{prefix}_internationalization",                     f"{label} internationalization code ({field_ref}.2.1, CWE)"),
+            _s(f"{prefix}_internationalization_text",                f"{label} internationalization text ({field_ref}.2.2, CWE)"),
+            _s(f"{prefix}_internationalization_coding_system",       f"{label} internationalization coding system ({field_ref}.2.3, CWE)"),
+            _s(f"{prefix}_international_version",                    f"{label} international version ID ({field_ref}.3.1, CWE)"),
+            _s(f"{prefix}_international_version_text",               f"{label} international version text ({field_ref}.3.2, CWE)"),
+            _s(f"{prefix}_international_version_coding_system",      f"{label} international version coding system ({field_ref}.3.3, CWE)"),
+        ]
+
+
+    def _sps_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+        """SPS (Specimen Source) — 7 components. Withdrawn in v2.7; used for backward compatibility with v2.3–v2.6."""
+        return [
+            _s(f"{prefix}",                              f"{label} source name/code ({field_ref}.1.1, CWE.1)"),
+            _s(f"{prefix}_text",                         f"{label} source name text ({field_ref}.1.2, CWE.2)"),
+            _s(f"{prefix}_additives",                    f"{label} additives code ({field_ref}.2.1, CWE.1)"),
+            _s(f"{prefix}_collection_method",            f"{label} collection method ({field_ref}.3, TX)"),
+            _s(f"{prefix}_body_site",                    f"{label} body site code ({field_ref}.4.1, CWE.1)"),
+            _s(f"{prefix}_site_modifier",                f"{label} site modifier code ({field_ref}.5.1, CWE.1)"),
+            _s(f"{prefix}_collection_method_modifier",   f"{label} collection method modifier ({field_ref}.6.1, CWE.1)"),
+            _s(f"{prefix}_role",                         f"{label} specimen role ({field_ref}.7.1, CWE.1)"),
+        ]
+
+
+    def _aui_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+        """AUI (Authorization Information) — ST + DT + ST."""
+        return [
+            _s(f"{prefix}",        f"{label} authorization number ({field_ref}.1, ST)"),
+            _ts(f"{prefix}_date",  f"{label} authorization effective date ({field_ref}.2, DT)"),
+            _s(f"{prefix}_source", f"{label} authorization source ({field_ref}.3, ST)"),
+        ]
+
+
+    def _dln_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+        """DLN (Driver's License Number) — 3 components: license number (ST) + issuing state (IS) + expiration date (DT)."""
+        return [
+            _s(f"{prefix}_number",          f"{label} license number ({field_ref}.1, ST)"),
+            _s(f"{prefix}_issuing_state",   f"{label} issuing state, province, country ({field_ref}.2, IS, Table 0333)"),
+            _ts(f"{prefix}_expiration_date", f"{label} expiration date ({field_ref}.3, DT)"),
+        ]
+
+
+    def _dld_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+        """DLD (Discharge Location and Date) — 2 components: location code (CWE.1) + effective date (DTM)."""
+        return [
+            _s(f"{prefix}",               f"{label} location code ({field_ref}.1, CWE.1)"),
+            _ts(f"{prefix}_effective_date", f"{label} effective date ({field_ref}.2, DTM)"),
+        ]
+
+
+    def _fc_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+        """FC (Financial Class) single-rep — CWE + DTM."""
+        return [
+            _s(f"{prefix}",                          f"{label} class code ({field_ref}.1.1, CWE)"),
+            _s(f"{prefix}_text",                     f"{label} class text ({field_ref}.1.2, CWE)"),
+            _s(f"{prefix}_coding_system",            f"{label} class coding system ({field_ref}.1.3, CWE)"),
+            _s(f"{prefix}_alt_code",                 f"{label} class alt code ({field_ref}.1.4, CWE)"),
+            _s(f"{prefix}_alt_text",                 f"{label} class alt text ({field_ref}.1.5, CWE)"),
+            _s(f"{prefix}_alt_coding_system",        f"{label} class alt coding system ({field_ref}.1.6, CWE)"),
+            _s(f"{prefix}_coding_system_version",    f"{label} class coding system version ({field_ref}.1.7, CWE)"),
+            _s(f"{prefix}_alt_coding_system_version", f"{label} class alt coding system version ({field_ref}.1.8, CWE)"),
+            _s(f"{prefix}_original_text",            f"{label} class original text ({field_ref}.1.9, CWE)"),
+            _ts(f"{prefix}_effective_date",          f"{label} effective date ({field_ref}.2, DTM)"),
+        ]
+
+
+    def _fc_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+        """FC (Financial Class) repeating field as ArrayType(StructType([...]))."""
+        return [StructField(column_name, ArrayType(_FC_STRUCT, containsNull=True), nullable=True)]
+
+
+    def _jcc_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+        """JCC (Job Code/Class) — CWE + CWE + TX."""
+        return [
+            _s(f"{prefix}",                       f"{label} job code ({field_ref}.1.1, CWE)"),
+            _s(f"{prefix}_text",                  f"{label} job code text ({field_ref}.1.2, CWE)"),
+            _s(f"{prefix}_coding_system",         f"{label} job code coding system ({field_ref}.1.3, CWE)"),
+            _s(f"{prefix}_class",                 f"{label} job class ({field_ref}.2.1, CWE)"),
+            _s(f"{prefix}_class_text",            f"{label} job class text ({field_ref}.2.2, CWE)"),
+            _s(f"{prefix}_class_coding_system",   f"{label} job class coding system ({field_ref}.2.3, CWE)"),
+            _s(f"{prefix}_description",           f"{label} job description ({field_ref}.3, TX)"),
+        ]
+
+
+    def _moc_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+        """MOC (Money and Code) — MOC.1: MO (Monetary Amount) + MOC.2: CWE (Charge Code)."""
+        return [
+            _s(f"{prefix}_monetary_amount",           f"{label} monetary quantity ({field_ref}.1.1, MO.1, NM)"),
+            _s(f"{prefix}_monetary_amount_currency",  f"{label} ISO 4217 denomination ({field_ref}.1.2, MO.2, ID)"),
+            _s(f"{prefix}_charge_code",               f"{label} charge code ({field_ref}.2.1, CWE.1)"),
+            _s(f"{prefix}_charge_code_text",          f"{label} charge code text ({field_ref}.2.2, CWE.2)"),
+            _s(f"{prefix}_charge_code_coding_system", f"{label} charge code coding system ({field_ref}.2.3, CWE.3)"),
+        ]
+
+
+    def _prl_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+        """PRL (Parent Result Link) — CWE + ST + TX."""
+        return [
+            _s(f"{prefix}",                f"{label} parent observation ID ({field_ref}.1.1, CWE)"),
+            _s(f"{prefix}_text",           f"{label} parent observation text ({field_ref}.1.2, CWE)"),
+            _s(f"{prefix}_coding_system",  f"{label} parent observation coding system ({field_ref}.1.3, CWE)"),
+            _s(f"{prefix}_sub_id",         f"{label} parent observation sub-ID ({field_ref}.2, ST)"),
+            _s(f"{prefix}_descriptor",     f"{label} parent observation descriptor ({field_ref}.3, TX)"),
+        ]
+
+
+    def _ndl_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+        """NDL (Name with Date and Location) single-rep — 11 components."""
+        return [
+            _s(f"{prefix}",                      f"{label} ID ({field_ref}.1.1, CNN)"),
+            _s(f"{prefix}_family_name",          f"{label} family name ({field_ref}.1.2, CNN)"),
+            _s(f"{prefix}_given_name",           f"{label} given name ({field_ref}.1.3, CNN)"),
+            _s(f"{prefix}_middle_name",          f"{label} middle name ({field_ref}.1.4, CNN)"),
+            _s(f"{prefix}_suffix",               f"{label} suffix ({field_ref}.1.5, CNN)"),
+            _s(f"{prefix}_prefix",               f"{label} prefix ({field_ref}.1.6, CNN)"),
+            _s(f"{prefix}_degree",               f"{label} degree ({field_ref}.1.7, CNN)"),
+            _ts(f"{prefix}_start_datetime",      f"{label} start date/time ({field_ref}.2, DTM)"),
+            _ts(f"{prefix}_end_datetime",        f"{label} end date/time ({field_ref}.3, DTM)"),
+            _s(f"{prefix}_point_of_care",        f"{label} point of care ({field_ref}.4, IS)"),
+            _s(f"{prefix}_room",                 f"{label} room ({field_ref}.5, IS)"),
+            _s(f"{prefix}_bed",                  f"{label} bed ({field_ref}.6, IS)"),
+            _s(f"{prefix}_facility",             f"{label} facility ({field_ref}.7.1, HD)"),
+            _s(f"{prefix}_location_status",      f"{label} location status ({field_ref}.8, IS)"),
+            _s(f"{prefix}_patient_location_type", f"{label} patient location type ({field_ref}.9, IS)"),
+            _s(f"{prefix}_building",             f"{label} building ({field_ref}.10, IS)"),
+            _s(f"{prefix}_floor",                f"{label} floor ({field_ref}.11, IS)"),
+        ]
+
+
+    def _ndl_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+        """NDL repeating field as ArrayType(StructType([...]))."""
+        return [StructField(column_name, ArrayType(_NDL_STRUCT, containsNull=True), nullable=True)]
+
+
+    def _pl_array_schema(column_name: str, label: str, field_ref: str) -> list[StructField]:
+        """PL (Person Location) repeating field as ArrayType(StructType([...]))."""
+        return [StructField(column_name, ArrayType(_PL_STRUCT, containsNull=True), nullable=True)]
+
+
+    def _cq_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+        """CQ (Composite Quantity with Units) — 2 component fields.
+
+        CQ.1 = Quantity (NM) — stored as ``{prefix}``.
+        CQ.2 = Units (CWE) — code only from CQ.2.1, stored as ``{prefix}_units``.
+        """
+        return [
+            _s(f"{prefix}",       f"{label} quantity ({field_ref}.1, NM)"),
+            _s(f"{prefix}_units", f"{label} units code ({field_ref}.2.1, CWE)"),
+        ]
+
+
+    def _pl_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+        """PL (Person Location) — 11 component fields.
+
+        Each HD-typed sub-component (point_of_care, room, bed, facility, building,
+        floor, assigning_authority) is captured as its HD.1 namespace ID, matching
+        PV1.3 / NK1.3 single-component composite flattening precedent.
+        """
+        return [
+            _s(f"{prefix}_point_of_care",       f"{label} point of care ({field_ref}.1.1, HD; Table 0302)"),
+            _s(f"{prefix}_room",                f"{label} room ({field_ref}.2.1, HD; Table 0303)"),
+            _s(f"{prefix}_bed",                 f"{label} bed ({field_ref}.3.1, HD; Table 0304)"),
+            _s(f"{prefix}_facility",            f"{label} facility ({field_ref}.4.1, HD)"),
+            _s(f"{prefix}_status",              f"{label} location status ({field_ref}.5, IS; Table 0306)"),
+            _s(f"{prefix}_type",                f"{label} person location type ({field_ref}.6, IS; Table 0305)"),
+            _s(f"{prefix}_building",            f"{label} building ({field_ref}.7.1, HD; Table 0307)"),
+            _s(f"{prefix}_floor",               f"{label} floor ({field_ref}.8.1, HD; Table 0308)"),
+            _s(f"{prefix}_description",         f"{label} location description ({field_ref}.9, ST)"),
+            _s(f"{prefix}_comprehensive_id",    f"{label} comprehensive location identifier ({field_ref}.10.1, EI)"),
+            _s(f"{prefix}_assigning_authority", f"{label} assigning authority for location ({field_ref}.11.1, HD; Table 0363)"),
+        ]
+
+
+    def _eip_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+        """EIP (Entity Identifier Pair) — single instance: 8 flat fields for placer and filler EI."""
+        return [
+            _s(f"{prefix}_placer_assigned_identifier",                   f"{label} placer assigned identifier ({field_ref}.1.1, EIP.1)"),
+            _s(f"{prefix}_placer_assigned_identifier_namespace_id",       f"{label} placer assigned identifier namespace ID ({field_ref}.1.2)"),
+            _s(f"{prefix}_placer_assigned_identifier_universal_id",       f"{label} placer assigned identifier universal ID ({field_ref}.1.3)"),
+            _s(f"{prefix}_placer_assigned_identifier_universal_id_type",  f"{label} placer assigned identifier universal ID type ({field_ref}.1.4)"),
+            _s(f"{prefix}_filler_assigned_identifier",                    f"{label} filler assigned identifier ({field_ref}.2.1, EIP.2)"),
+            _s(f"{prefix}_filler_assigned_identifier_namespace_id",       f"{label} filler assigned identifier namespace ID ({field_ref}.2.2)"),
+            _s(f"{prefix}_filler_assigned_identifier_universal_id",       f"{label} filler assigned identifier universal ID ({field_ref}.2.3)"),
+            _s(f"{prefix}_filler_assigned_identifier_universal_id_type",  f"{label} filler assigned identifier universal ID type ({field_ref}.2.4)"),
+        ]
+
+
+    def _mo_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+        """MO (Money) — 2 component fields: quantity (NM) + ISO 4217 denomination (ID)."""
+        return [
+            _s(f"{prefix}",          f"{label} monetary quantity ({field_ref}.1, NM)"),
+            _s(f"{prefix}_currency", f"{label} ISO 4217 currency code ({field_ref}.2, ID)"),
+        ]
+
+
+    def _og_schema(prefix: str, label: str, field_ref: str) -> list[StructField]:
+        """OG (Observation Grouper, v2.8.2+) — 4 component fields.
+
+        OG.1 = Original Sub-Identifier (ST) — backward-compatible with the legacy OBX-4 ST value.
+        OG.2 = Group (NM), OG.3 = Sequence (NM), OG.4 = Identifier (ST).
+        """
+        return [
+            _s(f"{prefix}",            f"{label} original sub-identifier ({field_ref}.1, ST)"),
+            _s(f"{prefix}_group",      f"{label} group ({field_ref}.2, NM)"),
+            _s(f"{prefix}_sequence",   f"{label} sequence ({field_ref}.3, NM)"),
+            _s(f"{prefix}_identifier", f"{label} identifier ({field_ref}.4, ST)"),
         ]
 
 
@@ -1515,9 +4002,11 @@ def register_lakeflow_source(spark):
             _s("trigger_event",                    "Trigger event, second component of message type (MSH-9.2), e.g. A01, A08, R01"),
             _s("message_structure",                "Message structure, third component of message type (MSH-9.3), e.g. ADT_A01, ORU_R01"),
             _s("message_control_id",               "Unique message control ID assigned by the sending application (MSH-10); same as message_id"),
-            _s("processing_id",                    "Processing mode (MSH-11): P=Production, T=Training, D=Debugging"),
-            _s("version_id",                       "HL7 version used for this message (MSH-12), e.g. 2.3, 2.5.1; same as hl7_version"),
-            _i("sequence_number",                  "Optional sequence number for application-level message ordering (MSH-13)"),
+        ]
+        + _pt_schema("processing_id", "Processing ID (PT)", "MSH-11")
+        + _vid_schema("version_id", "Version identifier (VID)", "MSH-12")
+        + [
+            _int_field("sequence_number",                  "Optional sequence number for application-level message ordering (MSH-13)"),
             _s("continuation_pointer",             "Pointer used to continue a fragmented message (MSH-14); rarely populated"),
             _s("accept_acknowledgment_type",       "Conditions requiring an accept (transport-level) acknowledgment (MSH-15): AL, NE, SU, ER"),
             _s("application_acknowledgment_type",  "Conditions requiring an application-level acknowledgment (MSH-16): AL, NE, SU, ER"),
@@ -1545,46 +4034,46 @@ def register_lakeflow_source(spark):
     PID_SCHEMA = StructType(
         _METADATA_FIELDS
         + [
-            _i("set_id",                        "Sequence number when multiple PID segments appear in a message (PID-1)"),
-            _s("patient_external_id",           "External patient ID from a prior system (PID-2, deprecated in v2.7)"),
-            *_cx_schema("patient_id", "Patient identifier", "PID-3"),
-            _s("alternate_patient_id",          "Alternate patient identifier from a prior system (PID-4, deprecated in v2.7)"),
+            _int_field("set_id",                        "Sequence number when multiple PID segments appear in a message (PID-1)"),
+            *_cx_schema("patient_external_id", "External patient ID from a prior system (CX, PID-2, deprecated in v2.7)", "PID-2"),
+            *_cx_array_schema("patient_id", "Patient identifier list (CX, repeatable per spec)", "PID-3"),
+            *_cx_schema("alternate_patient_id", "Alternate patient identifier (CX, PID-4, deprecated in v2.7)", "PID-4"),
             *_xpn_array_schema("patient_names", "Patient names", "PID-5"),
             *_xpn_array_schema("mothers_maiden_names", "Mother's maiden names", "PID-6"),
             _ts("date_of_birth",                "Date of birth parsed to timestamp (PID-7)"),
             *_cwe_schema("administrative_sex", "Administrative sex", "PID-8"),
             _s("patient_alias",                 "Alias name(s) for the patient (PID-9, deprecated in v2.7)"),
-            *_cwe_schema("race", "Race", "PID-10"),
-            *_xad_schema("address", "Patient address", "PID-11"),
+            *_cwe_array_schema("race", "Race (CWE, repeatable per spec)", "PID-10"),
+            *_xad_array_schema("address", "Patient address (XAD, repeatable per spec)", "PID-11"),
             _s("county_code",                   "County or parish code (PID-12, deprecated in v2.6)"),
-            *_xtn_schema("home_phone", "Home phone", "PID-13"),
-            *_xtn_schema("business_phone", "Business phone", "PID-14"),
+            *_xtn_array_schema("home_phone", "Home phone (XTN, repeatable per spec)", "PID-13"),
+            *_xtn_array_schema("business_phone", "Business phone (XTN, repeatable per spec)", "PID-14"),
             *_cwe_schema("primary_language", "Primary language", "PID-15"),
             *_cwe_schema("marital_status", "Marital status", "PID-16"),
             *_cwe_schema("religion", "Religion", "PID-17"),
-            *_cx_schema("patient_account", "Patient account", "PID-18"),
+            *_cx_schema("patient_account_number", "Patient account number", "PID-18"),
             _s("ssn",                           "Social Security Number (PID-19, deprecated in v2.7)"),
-            _s("drivers_license",               "Driver's license number and issuing state (PID-20, deprecated in v2.7)"),
-            *_cx_schema("mothers_identifier", "Mother's identifier", "PID-21"),
-            *_cwe_schema("ethnic_group", "Ethnic group", "PID-22"),
+            *_dln_schema("drivers_license", "Driver's license", "PID-20"),
+            *_cx_array_schema("mothers_identifier", "Mother's identifier (CX, repeatable per spec)", "PID-21"),
+            *_cwe_array_schema("ethnic_group", "Ethnic group (CWE, repeatable per spec)", "PID-22"),
             _s("birth_place",                   "Birthplace as free text (PID-23)"),
             _s("multiple_birth_indicator",      "Whether the patient is one of a multiple birth: Y or N (PID-24)"),
-            _i("birth_order",                   "Birth sequence number for multiple-birth patients, e.g. 1, 2, 3 (PID-25)"),
-            *_cwe_schema("citizenship", "Citizenship", "PID-26"),
+            _int_field("birth_order",                   "Birth sequence number for multiple-birth patients, e.g. 1, 2, 3 (PID-25)"),
+            *_cwe_array_schema("citizenship", "Citizenship (CWE, repeatable per spec)", "PID-26"),
             *_cwe_schema("veterans_military_status", "Veterans military status", "PID-27"),
             *_cwe_schema("nationality", "Nationality", "PID-28"),
             _ts("patient_death_datetime",       "Date/time of patient death parsed to timestamp (PID-29)"),
             _s("patient_death_indicator",       "Death indicator: Y=deceased, N=alive (PID-30)"),
             _s("identity_unknown_indicator",    "Whether the patient's identity is unknown: Y or N (PID-31, v2.5+)"),
-            *_cwe_schema("identity_reliability_code", "Identity reliability", "PID-32"),
+            *_cwe_array_schema("identity_reliability_code", "Identity reliability (CWE, repeatable per spec)", "PID-32"),
             _ts("last_update_datetime",         "Date/time the patient record was last updated (PID-33, v2.5+)"),
             *_hd_schema("last_update_facility", "Last update facility", "PID-34"),
             *_cwe_schema("species_code", "Species/taxonomic classification", "PID-35"),
             *_cwe_schema("breed_code", "Breed", "PID-36"),
             _s("strain",                        "Strain description for veterinary use (PID-37, v2.5+)"),
             *_cwe_schema("production_class_code", "Production class", "PID-38"),
-            *_cwe_schema("tribal_citizenship", "Tribal citizenship", "PID-39"),
-            *_xtn_schema("patient_telecom", "Patient telecommunication", "PID-40"),
+            *_cwe_array_schema("tribal_citizenship", "Tribal citizenship (CWE, repeatable per spec)", "PID-39"),
+            *_xtn_array_schema("patient_telecom", "Patient telecommunication (XTN, repeatable per spec)", "PID-40"),
         ]
     )
 
@@ -1595,71 +4084,59 @@ def register_lakeflow_source(spark):
     PV1_SCHEMA = StructType(
         _METADATA_FIELDS
         + [
-            _i("set_id",                       "Sequence number when multiple PV1 segments appear (PV1-1)"),
+            _int_field("set_id",                       "Sequence number when multiple PV1 segments appear (PV1-1)"),
         ]
         + _cwe_schema("patient_class", "Patient class (CWE)", "PV1-2")
-        + [
-            _s("assigned_patient_location",    "Full assigned bed location composite (PV1-3), raw; use location_* fields"),
-            _s("location_point_of_care",       "Unit or nursing station, e.g. ICU, MED (PV1-3.1)"),
-            _s("location_room",                "Room number within the unit (PV1-3.2)"),
-            _s("location_bed",                 "Bed identifier within the room (PV1-3.3)"),
-            _s("location_facility",            "Facility where the patient is located (PV1-3.4)"),
-            _s("location_status",              "Bed status, e.g. C=Closed, H=Housekeeping, O=Occupied (PV1-3.5)"),
-            _s("location_type",                "Person location type, e.g. N=Nursing Unit, C=Clinic (PV1-3.9)"),
-        ]
+        + _pl_schema("assigned_patient_location", "Assigned patient location (PL)", "PV1-3")
         + _cwe_schema("admission_type", "Admission type (CWE)", "PV1-4")
         + _cx_schema("preadmit_number", "Pre-admission number", "PV1-5")
-        + [
-            _s("prior_patient_location",       "Prior bed location before transfer (PV1-6), raw composite"),
-        ]
-        + _xcn_schema("attending_doctor", "Attending physician", "PV1-7")
-        + _xcn_schema("referring_doctor", "Referring physician", "PV1-8")
-        + _xcn_schema("consulting_doctor", "Consulting physician", "PV1-9")
+        + _pl_schema("prior_patient_location", "Prior patient location (PL)", "PV1-6")
+        + _xcn_array_schema("attending_doctor", "Attending physician (XCN, repeatable per spec)", "PV1-7")
+        + _xcn_array_schema("referring_doctor", "Referring physician (XCN, repeatable per spec)", "PV1-8")
+        + _xcn_array_schema("consulting_doctor", "Consulting physician (XCN, repeatable per spec)", "PV1-9")
         + _cwe_schema("hospital_service", "Hospital service (CWE)", "PV1-10")
-        + [
-            _s("temporary_location",           "Temporary bed/location during a transfer (PV1-11)"),
-            _s("preadmit_test_indicator",      "Whether pre-admission testing was performed: Y or N (PV1-12)"),
-            _s("readmission_indicator",        "Whether this is a readmission: R=Readmission (PV1-13)"),
-        ]
+        + _pl_schema("temporary_location", "Temporary location (PL)", "PV1-11")
+        + _cwe_schema("preadmit_test_indicator", "Pre-admit test indicator (CWE; e.g. Y/N)", "PV1-12")
+        + _cwe_schema("readmission_indicator", "Re-admission indicator (CWE; e.g. R=Readmission)", "PV1-13")
         + _cwe_schema("admit_source", "Admit source (CWE)", "PV1-14")
         + _cwe_array_schema("ambulatory_status", "Ambulatory status (CWE, repeatable)", "PV1-15")
         + _cwe_schema("vip_indicator", "VIP indicator (CWE)", "PV1-16")
-        + _xcn_schema("admitting_doctor", "Admitting physician", "PV1-17")
+        + _xcn_array_schema("admitting_doctor", "Admitting physician (XCN, repeatable per spec)", "PV1-17")
         + _cwe_schema("patient_type", "Patient type (CWE)", "PV1-18")
         + _cx_schema("visit_number", "Visit/encounter number", "PV1-19")
-        + [
-            _s("financial_class",              "Financial class or payer category (PV1-20.1)"),
-        ]
+        + _fc_array_schema("financial_class", "Financial class (FC, repeatable per spec)", "PV1-20")
         + _cwe_schema("charge_price_indicator", "Charge price indicator (CWE)", "PV1-21")
         + _cwe_schema("courtesy_code", "Courtesy code (CWE)", "PV1-22")
         + _cwe_schema("credit_rating", "Credit rating (CWE)", "PV1-23")
+        + _cwe_array_schema("contract_code", "Contract code (CWE, repeatable per spec)", "PV1-24")
         + [
-            _s("contract_code",                "Contract type code(s) (PV1-24)"),
-            _s("contract_effective_date",      "Effective date of the contract (PV1-25)"),
-            _s("contract_amount",              "Amount owed under the contract (PV1-26)"),
-            _s("contract_period",              "Duration of the contract in days (PV1-27)"),
-            _s("interest_code",                "Interest rate code for overdue accounts (PV1-28)"),
-            _s("transfer_to_bad_debt_code",    "Code indicating transfer to bad debt (PV1-29)"),
-            _s("transfer_to_bad_debt_date",    "Date the account was transferred to bad debt (PV1-30)"),
-            _s("bad_debt_agency_code",         "Agency handling bad debt collection (PV1-31)"),
+            _s_array("contract_effective_date", "Effective dates of the contract (PV1-25, DT, repeatable per spec)"),
+            _s_array("contract_amount",         "Amounts owed under the contract (PV1-26, NM, repeatable per spec)"),
+            _s_array("contract_period",         "Durations of the contract in days (PV1-27, NM, repeatable per spec)"),
+        ]
+        + _cwe_schema("interest_code", "Interest code (CWE)", "PV1-28")
+        + _cwe_schema("transfer_to_bad_debt_code", "Transfer-to-bad-debt code (CWE)", "PV1-29")
+        + [
+            _ts("transfer_to_bad_debt_date",   "Date the account was transferred to bad debt (PV1-30, DT)"),
+        ]
+        + _cwe_schema("bad_debt_agency_code", "Bad-debt agency code (CWE)", "PV1-31")
+        + [
             _s("bad_debt_transfer_amount",     "Amount transferred to bad debt (PV1-32)"),
             _s("bad_debt_recovery_amount",     "Amount recovered from bad debt (PV1-33)"),
-            _s("delete_account_indicator",     "Whether the account has been marked for deletion (PV1-34)"),
-            _s("delete_account_date",          "Date the account was deleted (PV1-35)"),
+        ]
+        + _cwe_schema("delete_account_indicator", "Delete-account indicator (CWE)", "PV1-34")
+        + [
+            _ts("delete_account_date",         "Date the account was deleted (PV1-35, DT)"),
         ]
         + _cwe_schema("discharge_disposition", "Discharge disposition (CWE)", "PV1-36")
-        + [
-            _s("discharged_to_location",       "Location to which the patient was discharged (PV1-37.1)"),
-        ]
+        + _dld_schema("discharged_to_location", "Discharged to location (DLD)", "PV1-37")
         + _cwe_schema("diet_type", "Diet type", "PV1-38")
         + _cwe_schema("servicing_facility", "Servicing facility (CWE)", "PV1-39")
-        + [
-            _s("bed_status",                   "Current bed status (PV1-40, deprecated in v2.6)"),
-        ]
+        + _cwe_schema("bed_status", "Bed status (CWE, deprecated in v2.6)", "PV1-40")
         + _cwe_schema("account_status", "Account status (CWE)", "PV1-41")
+        + _pl_schema("pending_location", "Pending location (PL)", "PV1-42")
+        + _pl_schema("prior_temporary_location", "Prior temporary location (PL)", "PV1-43")
         + [
-            _s("pending_location",             "Bed reserved for a pending admission or transfer (PV1-42)"),
-            _s("prior_temporary_location",     "Prior temporary location before the current transfer (PV1-43)"),
             _ts("admit_datetime",              "Date/time of admission parsed to timestamp (PV1-44)"),
             _ts("discharge_datetime",          "Date/time of discharge parsed to timestamp (PV1-45)"),
             _s("current_patient_balance",      "Current outstanding patient balance (PV1-46)"),
@@ -1667,13 +4144,13 @@ def register_lakeflow_source(spark):
             _s("total_adjustments",            "Total adjustments applied to the visit charges (PV1-48)"),
             _s("total_payments",               "Total payments received for the visit (PV1-49)"),
         ]
-        + _cx_schema("alternate_visit_id", "Alternate visit ID", "PV1-50")
+        + _cx_array_schema("alternate_visit_id", "Alternate visit ID (CX, repeatable per spec)", "PV1-50")
         + _cwe_schema("visit_indicator", "Visit indicator (CWE)", "PV1-51")
-        + _xcn_schema("other_healthcare_provider", "Other healthcare provider", "PV1-52")
+        + _xcn_array_schema("other_healthcare_provider", "Other healthcare provider (XCN, repeatable per spec, deprecated v2.7)", "PV1-52")
         + [
             _s("service_episode_description",   "Free-text description of the service episode (PV1-53, v2.8+)"),
         ]
-        + _ei_schema("service_episode_identifier", "Service episode identifier", "PV1-54")
+        + _cx_schema("service_episode_identifier", "Service episode identifier (CX, v2.9+)", "PV1-54")
     )
 
     # ---------------------------------------------------------------------------
@@ -1683,7 +4160,7 @@ def register_lakeflow_source(spark):
     OBR_SCHEMA = StructType(
         _METADATA_FIELDS
         + [
-            _pk_i("set_id",                           "Sequence number of this OBR within the message; part of composite primary key (OBR-1)"),
+            _pk_int_field("set_id",                           "Sequence number of this OBR within the message; part of composite primary key (OBR-1)"),
         ]
         + _ei_schema("placer_order_number", "Placer order number (EI)", "OBR-2")
         + _ei_schema("filler_order_number", "Filler order number (EI)", "OBR-3")
@@ -1693,68 +4170,69 @@ def register_lakeflow_source(spark):
             _ts("requested_datetime",                 "Requested date/time for the observation, parsed to timestamp (OBR-6, deprecated in v2.7)"),
             _ts("observation_datetime",               "Date/time specimen was collected or observation started, parsed to timestamp (OBR-7)"),
             _ts("observation_end_datetime",           "Date/time observation ended or specimen collection completed, parsed to timestamp (OBR-8)"),
-            _s("collection_volume",                   "Volume of specimen collected (OBR-9.1)"),
-            _s("collection_volume_units",             "Units for the specimen volume (OBR-9.2)"),
         ]
-        + _xcn_schema("collector", "Specimen collector", "OBR-10")
+        + _cq_schema("collection_volume", "Volume of specimen collected (CQ)", "OBR-9")
+        + _xcn_array_schema("collector", "Specimen collector (XCN, repeatable per spec)", "OBR-10")
         + [
             _s("specimen_action_code",                "Action to take on the specimen (OBR-11): A=Add, G=Generated, L=Lab, O=Obtained"),
         ]
         + _cwe_schema("danger_code", "Danger code (CWE)", "OBR-12")
+        + _cwe_array_schema("relevant_clinical_information", "Relevant clinical information (CWE, repeatable per spec)", "OBR-13")
         + [
-            _s("relevant_clinical_information",       "Clinical information relevant to the order, e.g. patient condition (OBR-13)"),
             _ts("specimen_received_datetime",         "Date/time the specimen was received by the lab, parsed to timestamp (OBR-14)"),
-            _s("specimen_source",                     "Specimen source and collection method (OBR-15, deprecated in v2.7)"),
         ]
-        + _xcn_schema("ordering_provider", "Ordering physician", "OBR-16")
-        + _xtn_schema("order_callback_phone", "Order callback phone (XTN)", "OBR-17")
+        + _sps_schema("specimen_source", "Specimen source (SPS, withdrawn in v2.7; backward-compatible)", "OBR-15")
+        + _xcn_array_schema("ordering_provider", "Ordering physician (XCN, repeatable; withdrawn v2.9 — backward-compatible)", "OBR-16")
+        + _xtn_array_schema("order_callback_phone", "Order callback phone (XTN, repeatable per spec)", "OBR-17")
         + [
             _s("placer_field_1",                      "Placer-defined field 1 for local use (OBR-18)"),
             _s("placer_field_2",                      "Placer-defined field 2 for local use (OBR-19)"),
             _s("filler_field_1",                      "Filler-defined field 1 for local use (OBR-20)"),
             _s("filler_field_2",                      "Filler-defined field 2 for local use (OBR-21)"),
             _ts("results_rpt_status_chng_datetime",   "Date/time the result status last changed, parsed to timestamp (OBR-22)"),
-            _s("charge_to_practice",                  "Charge information for billing purposes (OBR-23)"),
+        ]
+        + _moc_schema("charge_to_practice", "Charge to practice (MOC)", "OBR-23")
+        + [
             _s("diagnostic_service_section",          "Diagnostic service section ID code (OBR-24)"),
             _s("result_status",                       "Overall result status (OBR-25): F=Final, P=Preliminary, C=Corrected, X=Canceled"),
-            _s("parent_result",                       "Reference to the parent result for reflex tests (OBR-26)"),
-            _s("quantity_timing",                     "Quantity and timing of the order (OBR-27, deprecated in v2.7)"),
         ]
-        + _xcn_schema("result_copies_to", "Result copy-to provider", "OBR-28")
+        + _prl_schema("parent_result", "Parent result link (PRL)", "OBR-26")
+        + _tq_array_schema("quantity_timing", "Quantity/timing of the order (TQ, repeatable, deprecated in v2.5)", "OBR-27")
+        + _xcn_array_schema("result_copies_to", "Result copy-to provider (XCN, repeatable per spec)", "OBR-28")
+        + _eip_schema("parent_results_observation_identifier", "Parent results observation identifier — links child result to parent observation (EIP, [0..1])", "OBR-29")
         + [
-            _s("parent_placer_order_number",          "Placer order number of the parent order for reflex tests (OBR-29.1)"),
             _s("transportation_mode",                  "Specimen transportation mode code (OBR-30)"),
         ]
         + _cwe_array_schema("reason_for_study", "Reason for study (CWE, repeatable)", "OBR-31")
+        + _ndl_schema("principal_result_interpreter",  "Principal result interpreter (NDL)", "OBR-32")
+        + _ndl_array_schema("assistant_result_interpreter", "Assistant result interpreter (NDL, repeatable per spec)", "OBR-33")
+        + _ndl_array_schema("technician",              "Technician (NDL, repeatable per spec)", "OBR-34")
+        + _ndl_array_schema("transcriptionist",        "Transcriptionist (NDL, repeatable per spec)", "OBR-35")
         + [
-            _s("principal_result_interpreter",        "Provider who interpreted the result (OBR-32.1)"),
-            _s("assistant_result_interpreter",        "Assistant provider who helped interpret the result (OBR-33.1)"),
-            _s("technician",                          "Technician who performed the test (OBR-34.1)"),
-            _s("transcriptionist",                    "Person who transcribed the result (OBR-35.1)"),
             _ts("scheduled_datetime",                 "Scheduled date/time for the observation, parsed to timestamp (OBR-36)"),
-            _i("number_of_sample_containers",         "Number of specimen containers required (OBR-37)"),
+            _int_field("number_of_sample_containers",         "Number of specimen containers required (OBR-37)"),
         ]
-        + _cwe_schema("transport_logistics", "Transport logistics (CWE, first repetition)", "OBR-38")
-        + _cwe_schema("collectors_comment", "Collector comment (CWE, first repetition)", "OBR-39")
+        + _cwe_array_schema("transport_logistics", "Transport logistics (CWE, repeatable per spec)", "OBR-38")
+        + _cwe_array_schema("collectors_comment", "Collector comment (CWE, repeatable per spec)", "OBR-39")
         + _cwe_schema("transport_arrangement_responsibility", "Transport arrangement responsibility (CWE)", "OBR-40")
         + [
             _s("transport_arranged",                   "Transport arranged indicator code (OBR-41)"),
             _s("escort_required",                      "Escort required indicator code (OBR-42)"),
         ]
-        + _cwe_schema("planned_patient_transport_comment", "Planned patient transport comment (CWE, first repetition)", "OBR-43")
-        + _cwe_schema("procedure_code", "Procedure code (CWE)", "OBR-44")
-        + _cwe_schema("procedure_code_modifier", "Procedure code modifier (CWE, first repetition)", "OBR-45")
-        + _cwe_schema("placer_supplemental_service_info", "Placer supplemental service info (CWE, first repetition)", "OBR-46")
-        + _cwe_schema("filler_supplemental_service_info", "Filler supplemental service info (CWE, first repetition)", "OBR-47")
+        + _cwe_array_schema("planned_patient_transport_comment", "Planned patient transport comment (CWE, repeatable per spec)", "OBR-43")
+        + _cwe_schema("procedure_code", "Procedure code (CNE; CWE-compatible struct)", "OBR-44")
+        + _cwe_array_schema("procedure_code_modifier", "Procedure code modifier (CNE, repeatable per spec; uses CWE-shape struct since CNE and CWE share components)", "OBR-45")
+        + _cwe_array_schema("placer_supplemental_service_info", "Placer supplemental service info (CWE, repeatable per spec)", "OBR-46")
+        + _cwe_array_schema("filler_supplemental_service_info", "Filler supplemental service info (CWE, repeatable per spec)", "OBR-47")
         + _cwe_schema("medically_necessary_dup_proc_reason", "Medically necessary duplicate procedure reason (CWE)", "OBR-48")
         + _cwe_schema("result_handling", "Result handling (CWE)", "OBR-49")
         + _cwe_schema("parent_universal_service_id", "Parent universal service ID (CWE)", "OBR-50")
         + _ei_schema("observation_group", "Observation group (EI)", "OBR-51")
         + _ei_schema("parent_observation_group", "Parent observation group (EI)", "OBR-52")
-        + _cx_schema("alternate_placer_order", "Alternate placer order (CX)", "OBR-53")
+        + _cx_array_schema("alternate_placer_order", "Alternate placer order (CX, repeatable per spec)", "OBR-53")
+        + _eip_array_schema("parent_order", "Parent order identifier (EIP, repeatable per spec, v2.9+)", "OBR-54")
         + [
-            _s("parent_order",                        "Parent order identifier (OBR-54.1, v2.9+)"),
-            _s("obr_action_code",                     "Action code (OBR-55, v2.9+)"),
+            _s("action_code",                     "Action code (OBR-55, v2.9+)"),
         ]
     )
 
@@ -1765,13 +4243,13 @@ def register_lakeflow_source(spark):
     OBX_SCHEMA = StructType(
         _METADATA_FIELDS
         + [
-            _pk_i("set_id",                       "Sequence number of this OBX within the message; part of composite primary key (OBX-1)"),
+            _pk_int_field("set_id",                       "Sequence number of this OBX within the message; part of composite primary key (OBX-1)"),
             _s("value_type",                      "Data type of the observation value (OBX-2): NM=Numeric, ST=String, CWE=Coded, TX=Text, TS=Timestamp"),
         ]
         + _cwe_schema("observation_id", "Observation identifier (CWE)", "OBX-3")
+        + _og_schema("observation_sub_id", "Observation sub-ID (OG, v2.8.2+; OG.1 is backward-compatible with legacy ST sub-ID)", "OBX-4")
         + [
-            _s("observation_sub_id",              "Sub-identifier to group related OBX rows, e.g. for waveform or panel data (OBX-4)"),
-            _s("observation_value",               "The result value (OBX-5); data type is Varies — check value_type (OBX-2) to interpret"),
+            _s_array("observation_value",          "The result value(s) (OBX-5, Varies [0..*]); each repetition is a raw string — check value_type (OBX-2) to interpret"),
         ]
         + _cwe_schema("units", "Units of measure (CWE)", "OBX-6")
         + [
@@ -1787,13 +4265,13 @@ def register_lakeflow_source(spark):
             _ts("datetime_of_observation",        "Date/time this specific observation was made, parsed to timestamp (OBX-14)"),
         ]
         + _cwe_schema("producers_id", "Producer ID (CWE)", "OBX-15")
-        + _xcn_schema("responsible_observer", "Responsible observer", "OBX-16")
-        + _cwe_schema("observation_method", "Observation method (CWE, first repetition)", "OBX-17")
-        + _ei_schema("equipment_instance_identifier", "Equipment instance (EI, first repetition)", "OBX-18")
+        + _xcn_array_schema("responsible_observer", "Responsible observer (XCN, repeatable per spec)", "OBX-16")
+        + _cwe_array_schema("observation_method", "Observation method (CWE, repeatable per spec)", "OBX-17")
+        + _ei_array_schema("equipment_instance_identifier", "Equipment instance (EI, repeatable per spec)", "OBX-18")
         + [
             _ts("datetime_of_analysis",           "Date/time the specimen was analyzed on the instrument, parsed to timestamp (OBX-19, v2.5+)"),
         ]
-        + _cwe_schema("observation_site", "Observation site (CWE, first repetition)", "OBX-20")
+        + _cwe_array_schema("observation_site", "Observation site (CWE, repeatable per spec)", "OBX-20")
         + _ei_schema("observation_instance_identifier", "Observation instance (EI)", "OBX-21")
         + _cwe_schema("mood_code", "Mood code (CWE)", "OBX-22")
         + _xon_schema("performing_organization", "Performing organization (XON)", "OBX-23")
@@ -1803,16 +4281,14 @@ def register_lakeflow_source(spark):
             _s("patient_results_release_category","Category controlling release of results to the patient (OBX-26, v2.8+)"),
         ]
         + _cwe_schema("root_cause", "Root cause (CWE)", "OBX-27")
-        + _cwe_schema("local_process_control", "Local process control (CWE, first repetition)", "OBX-28")
+        + _cwe_array_schema("local_process_control", "Local process control (CWE, repeatable per spec)", "OBX-28")
         + [
             _s("observation_type",                "Observation type (OBX-29, v2.8.2+)"),
             _s("observation_sub_type",            "Observation sub-type (OBX-30, v2.8.2+)"),
-            _s("obx_action_code",                 "Action code (OBX-31, v2.9+)"),
+            _s("action_code",                 "Action code (OBX-31, v2.9+)"),
         ]
-        + _cwe_schema("observation_value_absent_reason", "Observation value absent reason (CWE)", "OBX-32")
-        + [
-            _s("observation_related_specimen",    "Related specimen identifier (OBX-33, type EIP — raw value)"),
-        ]
+        + _cwe_array_schema("observation_value_absent_reason", "Observation value absent reason (CWE, repeatable per spec)", "OBX-32")
+        + _eip_array_schema("observation_related_specimen", "Observation-related specimen identifier (EIP, repeatable per spec)", "OBX-33")
     )
 
     # ---------------------------------------------------------------------------
@@ -1822,12 +4298,21 @@ def register_lakeflow_source(spark):
     AL1_SCHEMA = StructType(
         _METADATA_FIELDS
         + [
-            _pk_i("set_id",               "Sequence number of this allergy within the message; part of composite primary key (AL1-1)"),
+            _pk_int_field("set_id",               "Sequence number of this allergy within the message; part of composite primary key (AL1-1)"),
         ]
         + _cwe_schema("allergen_type_code", "Allergen type", "AL1-2")
         + _cwe_schema("allergen_code", "Allergen (CWE)", "AL1-3")
         + _cwe_schema("allergy_severity_code", "Allergy severity", "AL1-4")
-        + _cwe_schema("allergy_reaction", "Allergy reaction CWE (AL1-5 first repetition)", "AL1-5")
+        + _cwe_array_schema(
+            "allergy_reaction",
+            # AL1-5 is spec-typed as ST 0..* in HL7 v2.9, but in practice EHRs routinely emit
+            # CWE-shaped values here (e.g. "HIV^Hives^HL70129~RSH^Rash^HL70129"). We model
+            # this leniently: when senders send plain ST the value lands in element 0's `code`
+            # subfield with the rest NULL; when senders send CWE-shape, all 9 components are
+            # populated; in either case every ~-separated repetition is preserved.
+            "Allergy reaction (spec ST 0..*; modeled as repeating CWE-shape struct for lenient parsing)",
+            "AL1-5",
+        )
         + [
             _ts("identification_date",    "Date the allergy was first identified or recorded, parsed to timestamp (AL1-6, deprecated in v2.6)"),
         ]
@@ -1840,31 +4325,33 @@ def register_lakeflow_source(spark):
     DG1_SCHEMA = StructType(
         _METADATA_FIELDS
         + [
-            _pk_i("set_id",                            "Sequence number of this diagnosis within the message; part of composite primary key (DG1-1)"),
+            _pk_int_field("set_id",                            "Sequence number of this diagnosis within the message; part of composite primary key (DG1-1)"),
             _s("diagnosis_coding_method",              "Diagnosis coding method (DG1-2, deprecated in v2.7); use diagnosis_coding_system"),
         ]
         + _cwe_schema("diagnosis_code", "Diagnosis (CWE)", "DG1-3")
         + [
             _s("diagnosis_description",                "Free-text diagnosis description (DG1-4, deprecated in v2.7)"),
             _ts("diagnosis_datetime",                  "Date/time the diagnosis was established, parsed to timestamp (DG1-5)"),
-            _s("diagnosis_type",                       "Diagnosis type (DG1-6): A=Admitting, W=Working, F=Final"),
         ]
+        + _cwe_schema("diagnosis_type", "Diagnosis type (CWE; e.g. A=Admitting, W=Working, F=Final)", "DG1-6")
         + _cwe_schema("major_diagnostic_category", "Major diagnostic category (MDC)", "DG1-7")
         + _cwe_schema("diagnostic_related_group", "Diagnostic related group (DRG)", "DG1-8")
         + [
             _s("drg_approval_indicator",               "Whether the DRG assignment was approved: Y or N (DG1-9)"),
-            _s("drg_grouper_review_code",              "Review code returned by the DRG grouper (DG1-10)"),
         ]
+        + _cwe_schema("drg_grouper_review_code", "DRG grouper review code (CWE)", "DG1-10")
         + _cwe_schema("outlier_type", "Outlier type", "DG1-11")
         + [
-            _i("outlier_days",                         "Number of outlier days beyond the DRG length-of-stay threshold (DG1-12)"),
-            _s("outlier_cost",                         "Outlier cost amount beyond the DRG cost threshold (DG1-13)"),
-            _s("grouper_version_and_type",             "Version and type of the DRG grouper software (DG1-14)"),
-            _i("diagnosis_priority",                   "Priority rank of this diagnosis; 1=principal diagnosis (DG1-15)"),
+            _int_field("outlier_days",                         "Number of outlier days beyond the DRG length-of-stay threshold (DG1-12)"),
         ]
-        + _xcn_schema("diagnosing_clinician", "Diagnosing clinician", "DG1-16")
+        + _cp_schema("outlier_cost", "Outlier cost amount beyond the DRG cost threshold (CP, deprecated)", "DG1-13")
         + [
-            _s("diagnosis_classification",             "Classification of the diagnosis: C=Chronic, A=Acute (DG1-17)"),
+            _s("grouper_version_and_type",             "Version and type of the DRG grouper software (DG1-14)"),
+            _int_field("diagnosis_priority",                   "Priority rank of this diagnosis; 1=principal diagnosis (DG1-15)"),
+        ]
+        + _xcn_array_schema("diagnosing_clinician", "Diagnosing clinician (XCN, repeatable per spec)", "DG1-16")
+        + _cwe_schema("diagnosis_classification", "Diagnosis classification (CWE; e.g. C=Chronic, A=Acute)", "DG1-17")
+        + [
             _s("confidential_indicator",               "Whether the diagnosis is confidential and access-restricted: Y or N (DG1-18)"),
             _ts("attestation_datetime",                "Date/time the diagnosis was attested by the physician, parsed to timestamp (DG1-19)"),
         ]
@@ -1876,9 +4363,9 @@ def register_lakeflow_source(spark):
         + _cwe_schema("drg_ccl_value_code", "DRG complication/comorbidity level (CWE)", "DG1-23")
         + [
             _s("drg_grouping_usage",                   "Whether this diagnosis was used in DRG grouping: Y or N (DG1-24, v2.7+)"),
-            _s("drg_diagnosis_determination_status",   "Status of this diagnosis in the DRG determination process (DG1-25, v2.7+)"),
-            _s("present_on_admission_indicator",       "Whether diagnosis was present on admission: Y=Yes, N=No, U=Unknown, W=Clinically undetermined (DG1-26, v2.7+)"),
         ]
+        + _cwe_schema("drg_diagnosis_determination_status", "DRG diagnosis determination status (CWE, v2.7+)", "DG1-25")
+        + _cwe_schema("present_on_admission_indicator", "Present-on-admission indicator (CWE, v2.7+; e.g. Y=Yes, N=No, U=Unknown, W=Clinically undetermined)", "DG1-26")
     )
 
     # ---------------------------------------------------------------------------
@@ -1888,62 +4375,59 @@ def register_lakeflow_source(spark):
     NK1_SCHEMA = StructType(
         _METADATA_FIELDS
         + [
-            _pk_i("set_id",                  "Sequence number of this next-of-kin record within the message; part of composite primary key (NK1-1)"),
-            *_xpn_array_schema("nk_names", "Next of kin names", "NK1-2"),
-            _s("relationship",               "Relationship to patient composite (NK1-3), raw; use relationship_code_* CWE fields"),
+            _pk_int_field("set_id",                  "Sequence number of this next-of-kin record within the message; part of composite primary key (NK1-1)"),
+            *_xpn_array_schema("names", "Next of kin names", "NK1-2"),
         ]
-        + _cwe_schema("relationship_code", "Relationship to patient", "NK1-3")
-        + _xad_schema("address", "Next of kin address", "NK1-4")
-        + _xtn_schema("phone_number", "Next of kin home or primary phone", "NK1-5")
-        + _xtn_schema("business_phone", "Next of kin business phone", "NK1-6")
+        + _cwe_schema("relationship", "Relationship to patient (CWE)", "NK1-3")
+        + _xad_array_schema("address", "Next of kin address (XAD, repeatable per spec)", "NK1-4")
+        + _xtn_array_schema("phone_number", "Next of kin home or primary phone (XTN, repeatable per spec)", "NK1-5")
+        + _xtn_array_schema("business_phone", "Next of kin business phone (XTN, repeatable per spec)", "NK1-6")
         + _cwe_schema("contact_role", "Contact role", "NK1-7")
         + [
             _ts("start_date",                "Date this contact relationship became effective, parsed to timestamp (NK1-8)"),
             _ts("end_date",                  "Date this contact relationship ended, parsed to timestamp (NK1-9)"),
             _s("job_title",                  "Next of kin job title or occupation (NK1-10)"),
-            _s("job_code",                   "Occupation code for the next of kin (NK1-11.1)"),
         ]
+        + _jcc_schema("job_code", "Next of kin job code/class (JCC)", "NK1-11")
         + _cx_schema("employee_number", "Employee number", "NK1-12")
-        + _xon_schema("organization_name", "Employer organization", "NK1-13")
+        + _xon_array_schema("organization_name", "Employer organization (XON, repeatable per spec)", "NK1-13")
         + _cwe_schema("marital_status", "Marital status", "NK1-14")
         + _cwe_schema("administrative_sex", "Administrative sex", "NK1-15")
         + [
             _ts("date_of_birth",             "Date of birth of the next of kin, parsed to timestamp (NK1-16)"),
         ]
-        + _cwe_schema("living_dependency", "Living dependency", "NK1-17")
-        + _cwe_schema("ambulatory_status", "Ambulatory status", "NK1-18")
-        + _cwe_schema("citizenship", "Citizenship", "NK1-19")
+        + _cwe_array_schema("living_dependency", "Living dependency (CWE, repeatable per spec)", "NK1-17")
+        + _cwe_array_schema("ambulatory_status", "Ambulatory status (CWE, repeatable per spec)", "NK1-18")
+        + _cwe_array_schema("citizenship", "Citizenship (CWE, repeatable per spec)", "NK1-19")
         + _cwe_schema("primary_language", "Primary language", "NK1-20")
         + _cwe_schema("living_arrangement", "Living arrangement (CWE)", "NK1-21")
         + _cwe_schema("publicity_code", "Publicity / consent to contact", "NK1-22")
         + [
             _s("protection_indicator",       "Whether to restrict sharing of this contact's information: Y or N (NK1-23)"),
-            _s("student_indicator",          "Student status of the next of kin: F=Full-time, P=Part-time (NK1-24)"),
         ]
+        + _cwe_schema("student_indicator", "Student indicator (CWE; e.g. F=Full-time, P=Part-time)", "NK1-24")
         + _cwe_schema("religion", "Religion", "NK1-25")
         + [
             *_xpn_array_schema("mothers_maiden_names", "NK1 mother's maiden names", "NK1-26"),
         ]
         + _cwe_schema("nationality", "Nationality", "NK1-27")
-        + _cwe_schema("ethnic_group", "Ethnic group", "NK1-28")
-        + _cwe_schema("contact_reason", "Contact reason", "NK1-29")
+        + _cwe_array_schema("ethnic_group", "Ethnic group (CWE, repeatable per spec)", "NK1-28")
+        + _cwe_array_schema("contact_reason", "Contact reason (CWE, repeatable per spec)", "NK1-29")
         + [
             *_xpn_array_schema("contact_persons", "Contact persons", "NK1-30"),
         ]
-        + _xtn_schema("contact_person_telephone", "Contact person telephone", "NK1-31")
-        + _xad_schema("contact_persons_address", "Contact person address", "NK1-32")
-        + _cx_schema("associated_party_identifiers", "Associated party identifier", "NK1-33")
+        + _xtn_array_schema("contact_person_telephone", "Contact person telephone (XTN, repeatable per spec)", "NK1-31")
+        + _xad_array_schema("contact_persons_address", "Contact person address (XAD, repeatable per spec)", "NK1-32")
+        + _cx_array_schema("associated_party_identifiers", "Associated party identifier (CX, repeatable per spec)", "NK1-33")
+        + _cwe_schema("job_status", "Job status (CWE)", "NK1-34")
+        + _cwe_array_schema("race", "Race (CWE, repeatable per spec)", "NK1-35")
+        + _cwe_schema("handicap", "Handicap (CWE)", "NK1-36")
         + [
-            _s("job_status",                 "Employment status of the next of kin (NK1-34)"),
-        ]
-        + _cwe_schema("race", "Race", "NK1-35")
-        + [
-            _s("handicap",                   "Handicap code indicating a physical or mental disability (NK1-36)"),
             _s("contact_ssn",                "Social Security Number of the contact person (NK1-37, deprecated in v2.7)"),
-            _s("nk_birth_place",             "Birth place of the next of kin (NK1-38, v2.6+)"),
-            _s("vip_indicator",              "VIP flag for the next of kin (NK1-39, v2.6+)"),
+            _s("birth_place",                "Birth place of the next of kin (NK1-38, v2.6+)"),
         ]
-        + _xtn_schema("nk_telecommunication_info", "Next of kin telecommunication", "NK1-40")
+        + _cwe_schema("vip_indicator", "VIP indicator (CWE)", "NK1-39")
+        + _xtn_schema("telecommunication_info", "Next of kin telecommunication (XTN)", "NK1-40")
         + _xtn_schema("contact_telecommunication_info", "Contact person telecommunication", "NK1-41")
     )
 
@@ -1960,7 +4444,7 @@ def register_lakeflow_source(spark):
         ]
         + _cwe_schema("event_reason", "Event reason", "EVN-4")
         + [
-            *_xcn_schema("operator", "Operator", "EVN-5"),
+            *_xcn_array_schema("operator", "Operator (XCN, repeatable per spec)", "EVN-5"),
             _ts("event_occurred",          "Actual date/time the event occurred, parsed to timestamp (EVN-6)"),
         ]
         + _hd_schema("event_facility", "Event facility", "EVN-7")
@@ -1974,7 +4458,7 @@ def register_lakeflow_source(spark):
         _METADATA_FIELDS
         + _cwe_array_schema("living_dependency", "Living dependency (CWE, repeatable)", "PD1-1")
         + _cwe_schema("living_arrangement", "Living arrangement (CWE)", "PD1-2")
-        + _xon_schema("patient_primary_facility", "Primary care facility", "PD1-3")
+        + _xon_array_schema("patient_primary_facility", "Primary care facility (XON, repeatable per spec)", "PD1-3")
         + _xcn_schema("patient_primary_care_provider", "Primary care provider", "PD1-4")
         + _cwe_schema("student_indicator", "Student indicator (CWE)", "PD1-5")
         + _cwe_schema("handicap", "Handicap (CWE)", "PD1-6")
@@ -1983,25 +4467,25 @@ def register_lakeflow_source(spark):
         + [
             _s("separate_bill",                            "Separate billing flag Y/N (PD1-9)"),
         ]
-        + _cx_schema("duplicate_patient", "Duplicate patient", "PD1-10")
+        + _cx_array_schema("duplicate_patient", "Duplicate patient (CX, repeatable per spec)", "PD1-10")
         + _cwe_schema("publicity_code", "Publicity code", "PD1-11")
         + [
             _s("protection_indicator",                     "Protection indicator Y/N (PD1-12); if Y, patient info is restricted"),
-            _s("protection_indicator_effective_date",      "Date the protection indicator became effective (PD1-13)"),
+            _ts("protection_indicator_effective_date",     "Date the protection indicator became effective (PD1-13, DT)"),
         ]
-        + _xon_schema("place_of_worship", "Place of worship", "PD1-14")
-        + _cwe_schema("advance_directive_code", "Advance directive", "PD1-15")
+        + _xon_array_schema("place_of_worship", "Place of worship (XON, repeatable per spec)", "PD1-14")
+        + _cwe_array_schema("advance_directive_code", "Advance directive (CWE, repeatable per spec)", "PD1-15")
         + _cwe_schema("immunization_registry_status", "Immunization registry status (CWE)", "PD1-16")
         + [
-            _s("immunization_registry_status_effective_date", "Immunization registry status effective date (PD1-17)"),
-            _s("publicity_code_effective_date",            "Publicity code effective date (PD1-18)"),
+            _ts("immunization_registry_status_effective_date", "Immunization registry status effective date (PD1-17, DT)"),
+            _ts("publicity_code_effective_date",           "Publicity code effective date (PD1-18, DT)"),
         ]
         + _cwe_schema("military_branch", "Military branch (CWE)", "PD1-19")
         + _cwe_schema("military_rank_grade", "Military rank/grade (CWE)", "PD1-20")
         + _cwe_schema("military_status", "Military status (CWE)", "PD1-21")
         + [
-            _s("advance_directive_last_verified_date",     "Date advance directive was last verified (PD1-22, v2.8+)"),
-            _s("retirement_date",                          "Date the patient retired (PD1-23, v2.9+)"),
+            _ts("advance_directive_last_verified_date",    "Date advance directive was last verified (PD1-22, DT, v2.8+)"),
+            _ts("retirement_date",                         "Date the patient retired (PD1-23, DT, v2.9+)"),
         ]
     )
 
@@ -2011,48 +4495,50 @@ def register_lakeflow_source(spark):
 
     PV2_SCHEMA = StructType(
         _METADATA_FIELDS
-        + [
-            _s("prior_pending_location",                   "Prior pending transfer location (PV2-1)"),
-        ]
+        + _pl_schema("prior_pending_location", "Prior pending transfer location (PL)", "PV2-1")
         + _cwe_schema("accommodation_code", "Accommodation code", "PV2-2")
         + _cwe_schema("admit_reason", "Admit reason", "PV2-3")
         + _cwe_schema("transfer_reason", "Transfer reason", "PV2-4")
         + [
-            _s("patient_valuables",                        "Patient's valuable items description (PV2-5)"),
+            _s_array("patient_valuables",                  "Patient's valuable items descriptions (ST, repeatable per spec, PV2-5)"),
             _s("patient_valuables_location",               "Location of patient's valuables (PV2-6)"),
         ]
         + _cwe_array_schema("visit_user_code", "Visit user code (CWE, repeatable)", "PV2-7")
         + [
             _ts("expected_admit_datetime",                 "Expected admission date/time (PV2-8)"),
             _ts("expected_discharge_datetime",             "Expected discharge date/time (PV2-9)"),
-            _i("estimated_length_of_inpatient_stay",       "Estimated length of inpatient stay in days (PV2-10)"),
-            _i("actual_length_of_inpatient_stay",          "Actual length of inpatient stay in days (PV2-11)"),
+            _int_field("estimated_length_of_inpatient_stay",       "Estimated length of inpatient stay in days (PV2-10)"),
+            _int_field("actual_length_of_inpatient_stay",          "Actual length of inpatient stay in days (PV2-11)"),
             _s("visit_description",                        "Free-text visit description (PV2-12)"),
         ]
-        + _xcn_schema("referral_source", "Referral source", "PV2-13")
+        + _xcn_array_schema("referral_source", "Referral source (XCN, repeatable per spec)", "PV2-13")
         + [
-            _s("previous_service_date",                    "Date of previous service (PV2-14)"),
+            _ts("previous_service_date",                   "Date of previous service (PV2-14, DT)"),
             _s("employment_illness_related_indicator",     "Employment illness related Y/N (PV2-15)"),
-            _s("purge_status_code",                        "Purge status code (PV2-16)"),
-            _s("purge_status_date",                        "Purge status date (PV2-17)"),
+        ]
+        + _cwe_schema("purge_status_code", "Purge status code (CWE)", "PV2-16")
+        + [
+            _ts("purge_status_date",                       "Purge status date (PV2-17, DT)"),
         ]
         + _cwe_schema("special_program_code", "Special program code (CWE)", "PV2-18")
         + [
             _s("retention_indicator",                      "Retention indicator Y/N (PV2-19)"),
-            _i("expected_number_of_insurance_plans",       "Expected number of insurance plans (PV2-20)"),
+            _int_field("expected_number_of_insurance_plans",       "Expected number of insurance plans (PV2-20)"),
         ]
         + _cwe_schema("visit_publicity_code", "Visit publicity code (CWE)", "PV2-21")
         + [
             _s("visit_protection_indicator",               "Visit protection indicator ID code (PV2-22)"),
         ]
-        + _xon_schema("clinic_organization", "Clinic organization", "PV2-23")
+        + _xon_array_schema("clinic_organization", "Clinic organization (XON, repeatable per spec)", "PV2-23")
         + _cwe_schema("patient_status_code", "Patient status code (CWE)", "PV2-24")
         + _cwe_schema("visit_priority_code", "Visit priority code (CWE)", "PV2-25")
         + [
-            _s("previous_treatment_date",                  "Previous treatment date (PV2-26)"),
-            _s("expected_discharge_disposition",            "Expected discharge disposition (PV2-27)"),
-            _s("signature_on_file_date",                   "Signature on file date (PV2-28)"),
-            _s("first_similar_illness_date",               "Date of first similar illness (PV2-29)"),
+            _ts("previous_treatment_date",                 "Previous treatment date (PV2-26, DT)"),
+        ]
+        + _cwe_schema("expected_discharge_disposition", "Expected discharge disposition (CWE)", "PV2-27")
+        + [
+            _ts("signature_on_file_date",                  "Signature on file date (PV2-28, DT)"),
+            _ts("first_similar_illness_date",              "Date of first similar illness (PV2-29, DT)"),
         ]
         + _cwe_schema("patient_charge_adjustment_code", "Patient charge adjustment code", "PV2-30")
         + _cwe_schema("recurring_service_code", "Recurring service code (CWE)", "PV2-31")
@@ -2065,21 +4551,21 @@ def register_lakeflow_source(spark):
             _s("baby_detained_indicator",                  "Baby detained indicator Y/N (PV2-37)"),
         ]
         + _cwe_schema("mode_of_arrival_code", "Mode of arrival code", "PV2-38")
-        + _cwe_schema("recreational_drug_use_code", "Recreational drug use code", "PV2-39")
+        + _cwe_array_schema("recreational_drug_use_code", "Recreational drug use code (CWE, repeatable per spec)", "PV2-39")
         + _cwe_schema("admission_level_of_care_code", "Admission level of care code", "PV2-40")
-        + _cwe_schema("precaution_code", "Precaution code", "PV2-41")
+        + _cwe_array_schema("precaution_code", "Precaution code (CWE, repeatable per spec)", "PV2-41")
         + _cwe_schema("patient_condition_code", "Patient condition code", "PV2-42")
-        + _cwe_schema("living_will_code_pv2", "Living will code (CWE)", "PV2-43")
-        + _cwe_schema("organ_donor_code_pv2", "Organ donor code (CWE)", "PV2-44")
-        + _cwe_schema("advance_directive_code_pv2", "Advance directive", "PV2-45")
+        + _cwe_schema("living_will_code", "Living will code (CWE)", "PV2-43")
+        + _cwe_schema("organ_donor_code", "Organ donor code (CWE)", "PV2-44")
+        + _cwe_array_schema("advance_directive_code", "Advance directive (CWE, repeatable per spec)", "PV2-45")
         + [
-            _s("patient_status_effective_date",            "Patient status effective date (PV2-46)"),
+            _ts("patient_status_effective_date",           "Patient status effective date (PV2-46, DT)"),
             _ts("expected_loa_return_datetime",            "Expected leave of absence return date/time (PV2-47)"),
             _ts("expected_preadmission_testing_datetime",  "Expected pre-admission testing date/time (PV2-48)"),
         ]
         + _cwe_array_schema("notify_clergy_code", "Notify clergy code (CWE, repeatable)", "PV2-49")
         + [
-            _s("advance_directive_last_verified_date_pv2", "Date advance directive was last verified (PV2-50, v2.9+)"),
+            _ts("advance_directive_last_verified_date",    "Date advance directive was last verified (PV2-50, DT, v2.9+)"),
         ]
     )
 
@@ -2089,14 +4575,12 @@ def register_lakeflow_source(spark):
 
     MRG_SCHEMA = StructType(
         _METADATA_FIELDS
-        + _cx_schema("prior_patient_id", "Prior patient identifier (MRG-1 CX)", "MRG-1")
-        + [
-            _s("prior_alternate_patient_id",      "Prior alternate patient ID (MRG-2, deprecated)"),
-        ]
+        + _cx_array_schema("prior_patient_id", "Prior patient identifier list (CX, repeatable per spec)", "MRG-1")
+        + _cx_array_schema("prior_alternate_patient_id", "Prior alternate patient ID list (CX, repeatable per spec)", "MRG-2")
         + _cx_schema("prior_patient_account_number", "Prior patient account number", "MRG-3")
-        + _cx_schema("prior_patient_id_mrg4", "Prior patient ID (MRG-4)", "MRG-4")
+        + _cx_schema("prior_patient_id_external", "Prior patient ID — external (MRG-4, backward-compat v2.3)", "MRG-4")
         + _cx_schema("prior_visit_number", "Prior visit number", "MRG-5")
-        + _cx_schema("prior_alternate_visit_id", "Prior alternate visit ID", "MRG-6")
+        + _cx_schema("prior_alternate_visit_id", "Prior alternate visit ID (CX)", "MRG-6")
         + [
             *_xpn_array_schema("prior_patient_names", "Prior patient names", "MRG-7"),
         ]
@@ -2109,12 +4593,17 @@ def register_lakeflow_source(spark):
     IAM_SCHEMA = StructType(
         _METADATA_FIELDS
         + [
-            _pk_i("set_id",                          "Sequence number for this IAM segment within the message (IAM-1)"),
+            _pk_int_field("set_id",                          "Sequence number for this IAM segment within the message (IAM-1)"),
         ]
         + _cwe_schema("allergen_type_code", "Allergen type", "IAM-2")
         + _cwe_schema("allergen_code", "Allergen (CWE)", "IAM-3")
         + _cwe_schema("allergy_severity_code", "Allergy severity", "IAM-4")
-        + _cwe_schema("allergy_reaction", "Allergy reaction CWE", "IAM-5")
+        + _cwe_array_schema(
+            "allergy_reaction",
+            # Same lenient ST 0..* -> CWE-shape struct modeling as AL1-5.
+            "Allergy reaction (spec ST 0..*; modeled as repeating CWE-shape struct for lenient parsing)",
+            "IAM-5",
+        )
         + _cwe_schema("allergy_action_code", "Allergy action code", "IAM-6")
         + _ei_schema("allergy_unique_identifier", "Unique allergy identifier", "IAM-7")
         + [
@@ -2123,11 +4612,11 @@ def register_lakeflow_source(spark):
         + _cwe_schema("sensitivity_to_causative_agent_code", "Sensitivity to causative agent", "IAM-9")
         + _cwe_schema("allergen_group_code", "Allergen group", "IAM-10")
         + [
-            _s("onset_date",                          "Allergy onset date (IAM-11)"),
+            _ts("onset_date",                         "Allergy onset date (IAM-11, DT)"),
             _s("onset_date_text",                     "Free-text onset date description (IAM-12)"),
             _ts("reported_datetime",                  "When the allergy was reported (IAM-13)"),
         ]
-        + _xcn_schema("reported_by", "Reported by", "IAM-14")
+        + _xcn_schema("reported_by", "Reported by (spec XPN; modeled as XCN for legacy senders that ship ID in comp 1)", "IAM-14")
         + _cwe_schema("relationship_to_patient_code", "Relationship to patient", "IAM-15")
         + _cwe_schema("alert_device_code", "Alert device code", "IAM-16")
         + _cwe_schema("allergy_clinical_status_code", "Allergy clinical status", "IAM-17")
@@ -2148,7 +4637,7 @@ def register_lakeflow_source(spark):
         + [
             _ts("modified_datetime",                  "Date/time the record was last modified (IAM-26, v2.6+)"),
         ]
-        + _cwe_schema("clinician_identified_code", "Clinician-identified allergen", "IAM-27")
+        + _cwe_schema("clinician_identified_allergen_code", "Clinician-identified allergen code (CWE)", "IAM-27")
         + _xon_schema("initially_recorded_by_organization", "Organization that initially recorded the reaction", "IAM-28")
         + _xon_schema("modified_by_organization", "Organization that last modified the record", "IAM-29")
         + _xon_schema("inactivated_by_organization", "Organization that inactivated the record", "IAM-30")
@@ -2161,41 +4650,41 @@ def register_lakeflow_source(spark):
     PR1_SCHEMA = StructType(
         _METADATA_FIELDS
         + [
-            _pk_i("set_id",                    "Sequence number for this PR1 segment within the message (PR1-1)"),
+            _pk_int_field("set_id",                    "Sequence number for this PR1 segment within the message (PR1-1)"),
             _s("procedure_coding_method",      "Procedure coding method (PR1-2, deprecated)"),
         ]
         + _cwe_schema("procedure_code", "Procedure (CWE)", "PR1-3")
         + [
             _s("procedure_description",        "Procedure description (PR1-4, deprecated)"),
             _ts("procedure_datetime",          "When the procedure was performed (PR1-5)"),
-            _s("procedure_functional_type",    "Functional type (PR1-6): A=Anesthesia, P=Procedure, I=Invasion"),
-            _i("procedure_minutes",            "Duration of the procedure in minutes (PR1-7)"),
         ]
-        + _xcn_schema("anesthesiologist", "Anesthesiologist", "PR1-8")
+        + _cwe_schema("procedure_functional_type", "Procedure functional type (CWE; e.g. A=Anesthesia, P=Procedure, I=Invasion)", "PR1-6")
         + [
-            _s("anesthesia_code",              "Anesthesia code (PR1-9)"),
-            _i("anesthesia_minutes",           "Anesthesia duration in minutes (PR1-10)"),
+            _int_field("procedure_minutes",            "Duration of the procedure in minutes (PR1-7)"),
         ]
-        + _xcn_schema("surgeon", "Surgeon", "PR1-11")
-        + _xcn_schema("procedure_practitioner", "Procedure practitioner", "PR1-12")
+        + _xcn_array_schema("anesthesiologist", "Anesthesiologist (XCN, repeatable, deprecated v2.3)", "PR1-8")
+        + _cwe_schema("anesthesia_code", "Anesthesia code (CWE)", "PR1-9")
+        + [
+            _int_field("anesthesia_minutes",           "Anesthesia duration in minutes (PR1-10)"),
+        ]
+        + _xcn_array_schema("surgeon", "Surgeon (XCN, repeatable, deprecated v2.3)", "PR1-11")
+        + _xcn_array_schema("procedure_practitioner", "Procedure practitioner (XCN, repeatable, deprecated v2.3)", "PR1-12")
         + _cwe_schema("consent_code", "Consent", "PR1-13")
         + [
             _s("procedure_priority",           "Procedure priority (PR1-14)"),
         ]
         + _cwe_schema("associated_diagnosis_code", "Associated diagnosis", "PR1-15")
-        + _cwe_schema("procedure_code_modifier", "Procedure code modifier", "PR1-16")
-        + [
-            _s("procedure_drg_type",           "DRG type (PR1-17)"),
-        ]
-        + _cwe_schema("tissue_type_code", "Tissue type", "PR1-18")
+        + _cwe_array_schema("procedure_code_modifier", "Procedure code modifier (CNE, repeatable per spec; CWE-shape struct since CNE shares components)", "PR1-16")
+        + _cwe_schema("procedure_drg_type", "Procedure DRG type (CWE)", "PR1-17")
+        + _cwe_array_schema("tissue_type_code", "Tissue type (CWE, repeatable per spec)", "PR1-18")
         + _ei_schema("procedure_identifier", "Procedure identifier (EI)", "PR1-19")
         + [
             _s("procedure_action_code",        "Action code (PR1-20): A=Add, D=Delete, U=Update"),
         ]
         + _cwe_schema("drg_procedure_determination_status", "DRG procedure determination status", "PR1-21")
         + _cwe_schema("drg_procedure_relevance", "DRG procedure relevance", "PR1-22")
+        + _pl_array_schema("treating_organizational_unit",  "Treating organizational unit (PL, repeatable per spec)", "PR1-23")
         + [
-            _s("treating_organizational_unit",  "Treating organizational unit (PR1-23, v2.6+)"),
             _s("respiratory_within_surgery",    "Respiratory within surgery indicator (PR1-24, v2.7+)"),
         ]
         + _ei_schema("parent_procedure_id", "Parent procedure (EI)", "PR1-25")
@@ -2208,7 +4697,7 @@ def register_lakeflow_source(spark):
     ORC_SCHEMA = StructType(
         _METADATA_FIELDS
         + [
-            _pk_i("set_id",                               "Synthetic sequence number for multiple ORC segments per message"),
+            _pk_int_field("set_id",                               "Synthetic sequence number for multiple ORC segments per message"),
             _s("order_control",                            "Order control code (ORC-1): NW=New, CA=Cancel, DC=Discontinue, XO=Change, SC=Status"),
         ]
         + _ei_schema("placer_order_number", "Placer order number (EI)", "ORC-2")
@@ -2217,29 +4706,29 @@ def register_lakeflow_source(spark):
         + [
             _s("order_status",                             "Order status (ORC-5): IP=In Process, CM=Completed, SC=Scheduled, CA=Cancelled"),
             _s("response_flag",                            "Response flag (ORC-6): E=Report exceptions, R=Same as initiation, D=Deferred, N=Notification"),
-            _s("quantity_timing",                          "Quantity/timing (ORC-7, deprecated)"),
-            _s("parent_order",                             "Parent order reference (ORC-8)"),
+        ]
+        + _tq_array_schema("quantity_timing", "Quantity/timing (TQ, repeatable, deprecated in v2.5)", "ORC-7")
+        + _eip_array_schema("parent_order", "Parent order reference (EIP, repeatable per spec)", "ORC-8")
+        + [
             _ts("datetime_of_transaction",                 "Transaction date/time (ORC-9)"),
         ]
-        + _xcn_schema("entered_by", "Person who entered the order", "ORC-10")
-        + _xcn_schema("verified_by", "Person who verified the order", "ORC-11")
-        + _xcn_schema("ordering_provider", "Ordering provider", "ORC-12")
-        + [
-            _s("enterers_location",                        "Location where order was entered (ORC-13)"),
-        ]
-        + _xtn_schema("call_back_phone", "Callback phone (XTN)", "ORC-14")
+        + _xcn_array_schema("entered_by", "Person who entered the order (XCN, repeatable per spec)", "ORC-10")
+        + _xcn_array_schema("verified_by", "Person who verified the order (XCN, repeatable per spec)", "ORC-11")
+        + _xcn_array_schema("ordering_provider", "Ordering provider (XCN, repeatable per spec)", "ORC-12")
+        + _pl_schema("enterers_location", "Location where order was entered (PL)", "ORC-13")
+        + _xtn_array_schema("call_back_phone", "Callback phone (XTN, repeatable per spec)", "ORC-14")
         + [
             _ts("order_effective_datetime",                "Order effective date/time (ORC-15)"),
         ]
         + _cwe_schema("order_control_code_reason", "Order control code reason", "ORC-16")
         + _cwe_schema("entering_organization", "Entering organization", "ORC-17")
         + _cwe_schema("entering_device", "Entering device", "ORC-18")
-        + _xcn_schema("action_by", "Person who actioned the order", "ORC-19")
+        + _xcn_array_schema("action_by", "Person who actioned the order (XCN, repeatable per spec)", "ORC-19")
         + _cwe_schema("advanced_beneficiary_notice_code", "Advanced beneficiary notice (ABN) code", "ORC-20")
-        + _xon_schema("ordering_facility_name", "Ordering facility name (XON)", "ORC-21")
-        + _xad_schema("ordering_facility_address", "Ordering facility address (XAD)", "ORC-22")
-        + _xtn_schema("ordering_facility_phone", "Ordering facility phone (XTN)", "ORC-23")
-        + _xad_schema("ordering_provider_address", "Ordering provider address (XAD)", "ORC-24")
+        + _xon_array_schema("ordering_facility_name", "Ordering facility name (XON, repeatable per spec)", "ORC-21")
+        + _xad_array_schema("ordering_facility_address", "Ordering facility address (XAD, repeatable per spec)", "ORC-22")
+        + _xtn_array_schema("ordering_facility_phone", "Ordering facility phone (XTN, repeatable per spec)", "ORC-23")
+        + _xad_array_schema("ordering_provider_address", "Ordering provider address (XAD, repeatable per spec)", "ORC-24")
         + _cwe_schema("order_status_modifier", "Order status modifier", "ORC-25")
         + _cwe_schema("abn_override_reason", "ABN override reason", "ORC-26")
         + [
@@ -2250,13 +4739,14 @@ def register_lakeflow_source(spark):
         + _cwe_schema("enterer_authorization_mode", "Enterer authorization mode", "ORC-30")
         + _cwe_schema("parent_universal_service_id", "Parent universal service identifier", "ORC-31")
         + [
-            _s("advanced_beneficiary_notice_date",          "Advanced beneficiary notice date (ORC-32, v2.6+)"),
+            _ts("advanced_beneficiary_notice_date",         "Advanced beneficiary notice date (ORC-32, DT, v2.6+)"),
         ]
-        + _cx_schema("alternate_placer_order_number", "Alternate placer order number (CX)", "ORC-33")
-        + _ei_schema("order_workflow_profile", "Order workflow profile (EI)", "ORC-34")
+        + _cx_array_schema("alternate_placer_order_number", "Alternate placer order number (CX, repeatable per spec)", "ORC-33")
+        + _cwe_array_schema("order_workflow_profile", "Order workflow profile (CWE, repeatable per spec, v2.9+)", "ORC-34")
         + [
-            _s("orc_action_code",                           "Action code (ORC-35, v2.9+)"),
-            _s("order_status_date_range",                   "Order status date range (ORC-36, v2.9+)"),
+            _s("action_code",                           "Action code (ORC-35, v2.9+)"),
+            _ts("order_status_date_range_start",            "Order status date range start (ORC-36.1, DR, v2.9+)"),
+            _ts("order_status_date_range_end",              "Order status date range end (ORC-36.2, DR, v2.9+)"),
             _ts("order_creation_datetime",                  "Order creation date/time (ORC-37, v2.9+)"),
         ]
         + _ei_schema("filler_order_group_number", "Filler order group number (EI)", "ORC-38")
@@ -2269,9 +4759,9 @@ def register_lakeflow_source(spark):
     NTE_SCHEMA = StructType(
         _METADATA_FIELDS
         + [
-            _pk_i("set_id",            "Sequence number for this NTE segment within the message (NTE-1)"),
+            _pk_int_field("set_id",            "Sequence number for this NTE segment within the message (NTE-1)"),
             _s("source_of_comment",    "Source of comment (NTE-2): L=Ancillary/Filler, P=Orderer/Placer, O=Other"),
-            _s("comment",              "Free-text comment/note content (NTE-3); may contain formatted text"),
+            _s_array("comment",        "Free-text comment/note content (NTE-3, FT, repeatable per spec) — ARRAY<STRING>"),
         ]
         + _cwe_schema("comment_type", "Comment type", "NTE-4")
         + _xcn_schema("entered_by", "Person who entered the note", "NTE-5")
@@ -2280,7 +4770,7 @@ def register_lakeflow_source(spark):
             _ts("effective_start_date","Effective start date of the note (NTE-7, v2.6+)"),
             _ts("expiration_date",     "Expiration date of the note (NTE-8, v2.6+)"),
         ]
-        + _cwe_schema("coded_comment", "Coded comment", "NTE-9")
+        + _cwe_array_schema("coded_comment", "Coded comment (CWE, repeatable per spec)", "NTE-9")
     )
 
     # ---------------------------------------------------------------------------
@@ -2290,51 +4780,52 @@ def register_lakeflow_source(spark):
     SPM_SCHEMA = StructType(
         _METADATA_FIELDS
         + [
-            _pk_i("set_id",                      "Sequence number for this SPM segment within the message (SPM-1)"),
+            _pk_int_field("set_id",                      "Sequence number for this SPM segment within the message (SPM-1)"),
         ]
-        + _ei_schema("specimen_id", "Specimen identifier (EI)", "SPM-2")
-        + [
-            _s("specimen_parent_ids",             "Parent specimen identifiers (SPM-3.1)"),
-        ]
+        + _eip_schema("specimen_id", "Specimen identifier (EIP, single instance per spec [0..1], SPM-2)", "SPM-2")
+        + _eip_array_schema("specimen_parent_ids", "Parent specimen identifiers (EIP, repeatable per spec)", "SPM-3")
         + _cwe_schema("specimen_type", "Specimen type", "SPM-4")
-        + _cwe_schema("specimen_type_modifier", "Specimen type modifier", "SPM-5")
-        + _cwe_schema("specimen_additives", "Specimen additives/preservatives", "SPM-6")
+        + _cwe_array_schema("specimen_type_modifier", "Specimen type modifier (CWE, repeatable per spec)", "SPM-5")
+        + _cwe_array_schema("specimen_additives", "Specimen additives/preservatives (CWE, repeatable per spec)", "SPM-6")
         + _cwe_schema("specimen_collection_method", "Collection method", "SPM-7")
         + _cwe_schema("specimen_source_site", "Source body site", "SPM-8")
-        + _cwe_schema("specimen_source_site_modifier", "Source site modifier", "SPM-9")
+        + _cwe_array_schema("specimen_source_site_modifier", "Source site modifier (CWE, repeatable per spec)", "SPM-9")
         + _cwe_schema("specimen_collection_site", "Collection site", "SPM-10")
-        + _cwe_schema("specimen_role", "Specimen role", "SPM-11")
+        + _cwe_array_schema("specimen_role", "Specimen role (CWE, repeatable per spec)", "SPM-11")
+        + _cq_schema("specimen_collection_amount", "Collection amount with units (CQ)", "SPM-12")
         + [
-            _s("specimen_collection_amount",      "Collection amount with units (SPM-12.1)"),
-            _i("grouped_specimen_count",          "Number of grouped specimens (SPM-13)"),
-            _s("specimen_description",            "Free-text specimen description (SPM-14)"),
+            _int_field("grouped_specimen_count",          "Number of grouped specimens (SPM-13)"),
         ]
-        + _cwe_schema("specimen_handling_code", "Handling instructions code", "SPM-15")
-        + _cwe_schema("specimen_risk_code", "Risk code", "SPM-16")
         + [
-            _s("specimen_collection_datetime",    "Specimen collection date/time range start (SPM-17.1)"),
+            _s_array("specimen_description",      "Free-text specimen description (SPM-14, ST, repeatable per spec) — ARRAY<STRING>"),
+        ]
+        + _cwe_array_schema("specimen_handling_code", "Handling instructions code (CWE, repeatable per spec)", "SPM-15")
+        + _cwe_array_schema("specimen_risk_code", "Risk code (CWE, repeatable per spec)", "SPM-16")
+        + [
+            _ts("specimen_collection_datetime_start",  "Specimen collection date/time range start (SPM-17.1, DR)"),
+            _ts("specimen_collection_datetime_end",    "Specimen collection date/time range end (SPM-17.2, DR)"),
             _ts("specimen_received_datetime",     "When specimen was received (SPM-18)"),
             _ts("specimen_expiration_datetime",   "Specimen expiration date/time (SPM-19)"),
             _s("specimen_availability",           "Specimen availability Y/N (SPM-20)"),
         ]
-        + _cwe_schema("specimen_reject_reason", "Reject reason", "SPM-21")
+        + _cwe_array_schema("specimen_reject_reason", "Reject reason (CWE, repeatable per spec)", "SPM-21")
         + _cwe_schema("specimen_quality", "Quality assessment", "SPM-22")
         + _cwe_schema("specimen_appropriateness", "Appropriateness assessment", "SPM-23")
-        + _cwe_schema("specimen_condition", "Specimen condition", "SPM-24")
+        + _cwe_array_schema("specimen_condition", "Specimen condition (CWE, repeatable per spec)", "SPM-24")
+        + _cq_schema("specimen_current_quantity", "Current specimen quantity (CQ)", "SPM-25")
         + [
-            _s("specimen_current_quantity",       "Current specimen quantity (SPM-25.1)"),
-            _i("number_of_specimen_containers",   "Number of specimen containers (SPM-26)"),
+            _int_field("number_of_specimen_containers",   "Number of specimen containers (SPM-26)"),
         ]
         + _cwe_schema("container_type", "Container type", "SPM-27")
         + _cwe_schema("container_condition", "Container condition", "SPM-28")
         + _cwe_schema("specimen_child_role", "Specimen child role", "SPM-29")
-        + _cx_schema("accession_id", "Accession identifier (CX)", "SPM-30")
-        + _cx_schema("other_specimen_id", "Other specimen identifier (CX)", "SPM-31")
+        + _cx_array_schema("accession_id", "Accession identifier (CX, repeatable per spec)", "SPM-30")
+        + _cx_array_schema("other_specimen_id", "Other specimen identifier (CX, repeatable per spec)", "SPM-31")
         + _ei_schema("shipment_id", "Shipment identifier (EI)", "SPM-32")
         + [
             _ts("culture_start_datetime",         "Culture start date/time (SPM-33, v2.9+)"),
             _ts("culture_final_datetime",         "Culture final date/time (SPM-34, v2.9+)"),
-            _s("spm_action_code",                 "Action code (SPM-35, v2.9+)"),
+            _s("action_code",                 "Action code (SPM-35, v2.9+)"),
         ]
     )
 
@@ -2345,76 +4836,86 @@ def register_lakeflow_source(spark):
     IN1_SCHEMA = StructType(
         _METADATA_FIELDS
         + [
-            _pk_i("set_id",                       "Sequence number for this IN1 segment within the message (IN1-1)"),
+            _pk_int_field("set_id",                       "Sequence number for this IN1 segment within the message (IN1-1)"),
         ]
         + _cwe_schema("insurance_plan", "Insurance plan", "IN1-2")
-        + _xon_schema("insurance_company", "Insurance company", "IN1-3")
-        + _xon_schema("insurance_company_name", "Insurance company name (XON)", "IN1-4")
-        + _xad_schema("insurance_company_address", "Insurance company address", "IN1-5")
+        + _cx_array_schema("insurance_company", "Insurance company ID (CX, repeatable per spec, v2.9+)", "IN1-3")
+        + _xon_array_schema("insurance_company_name", "Insurance company name (XON, repeatable per spec)", "IN1-4")
+        + _xad_array_schema("insurance_company_address", "Insurance company address (XAD, repeatable per spec)", "IN1-5")
         + [
             *_xpn_array_schema("insurance_co_contacts", "Insurance contacts", "IN1-6"),
         ]
-        + _xtn_schema("insurance_co_phone_number", "Insurance company phone", "IN1-7")
+        + _xtn_array_schema("insurance_co_phone_number", "Insurance company phone (XTN, repeatable per spec)", "IN1-7")
         + [
             _s("group_number",                     "Insurance group/policy group number (IN1-8)"),
         ]
-        + _xon_schema("group_name", "Insurance group name", "IN1-9")
-        + _xon_schema("insureds_group_emp", "Insured's group employer", "IN1-10")
-        + _xon_schema("insureds_group_emp_name", "Insured's group employer name", "IN1-11")
+        + _xon_array_schema("group_name", "Insurance group name (XON, repeatable per spec)", "IN1-9")
+        + _cx_array_schema("insureds_group_emp", "Insured's group employer ID (CX, repeatable per spec, v2.9+)", "IN1-10")
+        + _xon_array_schema("insureds_group_emp_name", "Insured's group employer name (XON, repeatable per spec)", "IN1-11")
         + [
-            _s("plan_effective_date",              "Plan effective date (IN1-12)"),
-            _s("plan_expiration_date",             "Plan expiration date (IN1-13)"),
-            _s("authorization_information",        "Authorization information (IN1-14.1)"),
-            _s("plan_type",                        "Plan type (IN1-15)"),
+            _ts("plan_effective_date",             "Plan effective date (IN1-12, DT)"),
+            _ts("plan_expiration_date",            "Plan expiration date (IN1-13, DT)"),
+        ]
+        + _aui_schema("authorization_information", "Authorization information (AUI)", "IN1-14")
+        + _cwe_schema("plan_type", "Plan type (CWE)", "IN1-15")
+        + [
             *_xpn_array_schema("insured_names", "Insured person names", "IN1-16"),
         ]
         + _cwe_schema("insureds_relationship_to_patient", "Insured's relationship to patient", "IN1-17")
         + [
             _ts("insureds_date_of_birth",          "Insured's date of birth (IN1-18)"),
         ]
-        + _xad_schema("insureds_address", "Insured's address", "IN1-19")
+        + _xad_array_schema("insureds_address", "Insured's address (XAD, repeatable per spec)", "IN1-19")
+        + _cwe_schema("assignment_of_benefits", "Assignment of benefits (CWE)", "IN1-20")
+        + _cwe_schema("coordination_of_benefits", "Coordination of benefits (CWE)", "IN1-21")
         + [
-            _s("assignment_of_benefits",           "Assignment of benefits (IN1-20)"),
-            _s("coordination_of_benefits",         "Coordination of benefits (IN1-21)"),
             _s("coord_of_ben_priority",            "COB priority (IN1-22)"),
             _s("notice_of_admission_flag",         "Notice of admission flag Y/N (IN1-23)"),
-            _s("notice_of_admission_date",         "Admission notice date (IN1-24)"),
+            _ts("notice_of_admission_date",        "Admission notice date (IN1-24, DT)"),
             _s("report_of_eligibility_flag",       "Eligibility report flag Y/N (IN1-25)"),
-            _s("report_of_eligibility_date",       "Eligibility report date (IN1-26)"),
-            _s("release_information_code",         "Release info code (IN1-27)"),
+            _ts("report_of_eligibility_date",      "Eligibility report date (IN1-26, DT)"),
+        ]
+        + _cwe_schema("release_information_code", "Release information code (CWE)", "IN1-27")
+        + [
             _s("pre_admit_cert",                   "Pre-admission certification number (IN1-28)"),
             _ts("verification_datetime",           "Verification date/time (IN1-29)"),
         ]
-        + _xcn_schema("verification_by", "Verified by", "IN1-30")
+        + _xcn_array_schema("verification_by", "Verified by (XCN, repeatable per spec)", "IN1-30")
+        + _cwe_schema("type_of_agreement_code", "Type-of-agreement code (CWE)", "IN1-31")
+        + _cwe_schema("billing_status", "Billing status (CWE)", "IN1-32")
         + [
-            _s("type_of_agreement_code",           "Agreement type (IN1-31)"),
-            _s("billing_status",                   "Billing status (IN1-32)"),
-            _i("lifetime_reserve_days",            "Lifetime reserve days (IN1-33)"),
-            _i("delay_before_lr_day",              "Delay before lifetime reserve day (IN1-34)"),
-            _s("company_plan_code",                "Company plan code (IN1-35)"),
-            _s("policy_number",                    "Policy number (IN1-36)"),
-            _s("policy_deductible",                "Policy deductible amount (IN1-37.1)"),
-            _s("policy_limit_amount",              "Policy limit amount (IN1-38.1)"),
-            _i("policy_limit_days",                "Policy limit in days (IN1-39)"),
-            _s("room_rate_semi_private",           "Semi-private room rate (IN1-40.1, deprecated)"),
-            _s("room_rate_private",                "Private room rate (IN1-41.1, deprecated)"),
+            _int_field("lifetime_reserve_days",            "Lifetime reserve days (IN1-33)"),
+            _int_field("delay_before_lr_day",              "Delay before lifetime reserve day (IN1-34)"),
         ]
+        + _cwe_schema("company_plan_code", "Company plan code (CWE)", "IN1-35")
+        + [
+            _s("policy_number",                    "Policy number (IN1-36)"),
+        ]
+        + _cp_schema("policy_deductible", "Policy deductible amount (CP)", "IN1-37")
+        + _cp_schema("policy_limit_amount", "Policy limit amount (CP, withdrawn v2.8; retained for backward compatibility)", "IN1-38")
+        + [
+            _int_field("policy_limit_days",                "Policy limit in days (IN1-39)"),
+        ]
+        + _cp_schema("room_rate_semi_private", "Semi-private room rate (CP, withdrawn v2.8; retained for backward compatibility)", "IN1-40")
+        + _cp_schema("room_rate_private", "Private room rate (CP, withdrawn v2.8; retained for backward compatibility)", "IN1-41")
         + _cwe_schema("insureds_employment_status", "Insured's employment status", "IN1-42")
         + _cwe_schema("insureds_administrative_sex", "Insured's administrative sex", "IN1-43")
-        + _xad_schema("insureds_employers_address", "Insured's employer address", "IN1-44")
+        + _xad_array_schema("insureds_employers_address", "Insured's employer address (XAD, repeatable per spec)", "IN1-44")
         + [
             _s("verification_status",              "Verification status (IN1-45)"),
-            _s("prior_insurance_plan_id",          "Prior insurance plan ID (IN1-46)"),
-            _s("coverage_type",                    "Coverage type (IN1-47)"),
-            _s("handicap",                         "Handicap code (IN1-48)"),
         ]
-        + _cx_schema("insureds_id_number", "Insured's ID (CX)", "IN1-49")
+        + _cwe_schema("prior_insurance_plan_id", "Prior insurance plan ID (CWE)", "IN1-46")
+        + _cwe_schema("coverage_type", "Coverage type (CWE)", "IN1-47")
+        + _cwe_schema("handicap", "Handicap (CWE)", "IN1-48")
+        + _cx_array_schema("insureds_id_number", "Insured's ID (CX, repeatable per spec)", "IN1-49")
+        + _cwe_schema("signature_code", "Signature code (CWE)", "IN1-50")
         + [
-            _s("signature_code",                   "Signature code (IN1-50)"),
-            _s("signature_code_date",              "Signature code date (IN1-51)"),
+            _ts("signature_code_date",             "Signature code date (IN1-51, DT)"),
             _s("insureds_birth_place",             "Insured's birth place (IN1-52)"),
-            _s("vip_indicator",                    "VIP indicator (IN1-53)"),
-            _s("external_health_plan_identifiers", "External health plan identifiers (IN1-54.1, v2.8+)"),
+        ]
+        + _cwe_schema("vip_indicator", "VIP indicator (CWE)", "IN1-53")
+        + _cwe_array_schema("external_health_plan_identifiers", "External health plan identifiers (CWE, repeatable per spec, v2.8+)", "IN1-54")
+        + [
             _s("insurance_action_code",            "Insurance action code (IN1-55, v2.9+)"),
         ]
     )
@@ -2426,38 +4927,34 @@ def register_lakeflow_source(spark):
     GT1_SCHEMA = StructType(
         _METADATA_FIELDS
         + [
-            _pk_i("set_id",                           "Sequence number for this GT1 segment within the message (GT1-1)"),
+            _pk_int_field("set_id",                           "Sequence number for this GT1 segment within the message (GT1-1)"),
         ]
-        + _cx_schema("guarantor_number", "Guarantor number (CX)", "GT1-2")
+        + _cx_array_schema("guarantor_number", "Guarantor number (CX, repeatable per spec)", "GT1-2")
         + [
             *_xpn_array_schema("guarantor_names", "Guarantor names", "GT1-3"),
             *_xpn_array_schema("guarantor_spouse_names", "Guarantor spouse names", "GT1-4"),
         ]
-        + _xad_schema("guarantor_address", "Guarantor address", "GT1-5")
-        + _xtn_schema("guarantor_ph_num_home", "Guarantor home phone", "GT1-6")
-        + _xtn_schema("guarantor_ph_num_business", "Guarantor business phone", "GT1-7")
+        + _xad_array_schema("guarantor_address", "Guarantor address (XAD, repeatable per spec)", "GT1-5")
+        + _xtn_array_schema("guarantor_ph_num_home", "Guarantor home phone (XTN, repeatable per spec)", "GT1-6")
+        + _xtn_array_schema("guarantor_ph_num_business", "Guarantor business phone (XTN, repeatable per spec)", "GT1-7")
         + [
             _ts("guarantor_date_of_birth",             "Guarantor date of birth (GT1-8)"),
         ]
         + _cwe_schema("guarantor_administrative_sex", "Guarantor administrative sex", "GT1-9")
-        + [
-            _s("guarantor_type",                       "Guarantor type (GT1-10)"),
-        ]
+        + _cwe_schema("guarantor_type", "Guarantor type (CWE)", "GT1-10")
         + _cwe_schema("guarantor_relationship", "Guarantor relationship to patient", "GT1-11")
         + [
             _s("guarantor_ssn",                        "Guarantor social security number (GT1-12)"),
-            _s("guarantor_date_begin",                 "Guarantor start date (GT1-13)"),
-            _s("guarantor_date_end",                   "Guarantor end date (GT1-14)"),
-            _i("guarantor_priority",                   "Guarantor priority (GT1-15)"),
+            _ts("guarantor_date_begin",                "Guarantor start date (GT1-13, DT)"),
+            _ts("guarantor_date_end",                  "Guarantor end date (GT1-14, DT)"),
+            _int_field("guarantor_priority",                   "Guarantor priority (GT1-15)"),
             *_xpn_array_schema("guarantor_employer_names", "Guarantor employer names", "GT1-16"),
         ]
-        + _xad_schema("guarantor_employer_address", "Guarantor employer address", "GT1-17")
-        + _xtn_schema("guarantor_employer_phone_number", "Guarantor employer phone", "GT1-18")
-        + _cx_schema("guarantor_employee_id_number", "Guarantor employee ID (CX)", "GT1-19")
-        + [
-            _s("guarantor_employment_status",          "Guarantor employment status (GT1-20)"),
-        ]
-        + _xon_schema("guarantor_organization_name", "Guarantor organization name", "GT1-21")
+        + _xad_array_schema("guarantor_employer_address", "Guarantor employer address (XAD, repeatable per spec)", "GT1-17")
+        + _xtn_array_schema("guarantor_employer_phone_number", "Guarantor employer phone (XTN, repeatable per spec)", "GT1-18")
+        + _cx_array_schema("guarantor_employee_id_number", "Guarantor employee ID (CX, repeatable per spec)", "GT1-19")
+        + _cwe_schema("guarantor_employment_status", "Guarantor employment status (CWE)", "GT1-20")
+        + _xon_array_schema("guarantor_organization_name", "Guarantor organization name (XON, repeatable per spec)", "GT1-21")
         + [
             _s("guarantor_billing_hold_flag",          "Billing hold flag Y/N (GT1-22)"),
         ]
@@ -2467,55 +4964,51 @@ def register_lakeflow_source(spark):
             _s("guarantor_death_flag",                 "Guarantor death flag Y/N (GT1-25)"),
         ]
         + _cwe_schema("guarantor_charge_adjustment_code", "Guarantor charge adjustment", "GT1-26")
+        + _cp_schema("guarantor_household_annual_income", "Guarantor household annual income (CP)", "GT1-27")
         + [
-            _s("guarantor_household_annual_income",    "Household annual income (GT1-27.1)"),
-            _i("guarantor_household_size",             "Household size (GT1-28)"),
+            _int_field("guarantor_household_size",             "Household size (GT1-28)"),
         ]
-        + _cx_schema("guarantor_employer_id_number", "Guarantor employer ID (CX)", "GT1-29")
+        + _cx_array_schema("guarantor_employer_id_number", "Guarantor employer ID (CX, repeatable per spec)", "GT1-29")
         + _cwe_schema("guarantor_marital_status_code", "Guarantor marital status", "GT1-30")
         + [
-            _s("guarantor_hire_effective_date",        "Guarantor hire date (GT1-31)"),
-            _s("employment_stop_date",                 "Employment stop date (GT1-32)"),
-            _s("living_dependency",                    "Living dependency (GT1-33)"),
-            _s("ambulatory_status",                    "Ambulatory status (GT1-34)"),
+            _ts("guarantor_hire_effective_date",       "Guarantor hire date (GT1-31, DT)"),
+            _ts("employment_stop_date",                "Employment stop date (GT1-32, DT)"),
         ]
-        + _cwe_schema("citizenship", "Citizenship", "GT1-35")
+        + _cwe_schema("living_dependency", "Living dependency (CWE)", "GT1-33")
+        + _cwe_array_schema("ambulatory_status", "Ambulatory status (CWE, repeatable per spec)", "GT1-34")
+        + _cwe_array_schema("citizenship", "Citizenship (CWE, repeatable per spec)", "GT1-35")
         + _cwe_schema("primary_language", "Primary language", "GT1-36")
-        + [
-            _s("living_arrangement",                   "Living arrangement (GT1-37)"),
-        ]
+        + _cwe_schema("living_arrangement", "Living arrangement (CWE)", "GT1-37")
         + _cwe_schema("publicity_code", "Publicity code", "GT1-38")
         + [
             _s("protection_indicator",                 "Protection indicator Y/N (GT1-39)"),
-            _s("student_indicator",                    "Student status (GT1-40)"),
         ]
+        + _cwe_schema("student_indicator", "Student indicator (CWE)", "GT1-40")
         + _cwe_schema("religion", "Religion", "GT1-41")
         + [
-            *_xpn_array_schema("gt1_mothers_maiden_names", "GT1 mother's maiden names", "GT1-42"),
+            *_xpn_array_schema("mothers_maiden_names", "GT1 mother's maiden names", "GT1-42"),
         ]
         + _cwe_schema("nationality", "Nationality", "GT1-43")
-        + _cwe_schema("ethnic_group", "Ethnic group", "GT1-44")
+        + _cwe_array_schema("ethnic_group", "Ethnic group (CWE, repeatable per spec)", "GT1-44")
         + [
-            *_xpn_array_schema("gt1_contact_persons", "GT1 contact persons", "GT1-45"),
+            *_xpn_array_schema("contact_persons", "GT1 contact persons", "GT1-45"),
         ]
-        + _xtn_schema("contact_persons_telephone_number", "Contact person phone", "GT1-46")
+        + _xtn_array_schema("contact_persons_telephone_number", "Contact person phone (XTN, repeatable per spec)", "GT1-46")
         + _cwe_schema("contact_reason", "Contact reason", "GT1-47")
+        + _cwe_schema("contact_relationship", "Contact relationship (CWE)", "GT1-48")
         + [
-            _s("contact_relationship",                 "Contact relationship (GT1-48)"),
             _s("job_title",                            "Job title (GT1-49)"),
         ]
-        + _cwe_schema("job_code_class", "Job code/class", "GT1-50")
-        + _xon_schema("guarantor_employers_org_name", "Guarantor employer organization name", "GT1-51")
-        + [
-            _s("handicap",                             "Handicap code (GT1-52)"),
-            _s("job_status",                           "Job status (GT1-53)"),
-            _s("guarantor_financial_class",            "Financial class (GT1-54.1)"),
-        ]
-        + _cwe_schema("guarantor_race", "Guarantor race", "GT1-55")
+        + _jcc_schema("job_code_class", "Job code/class (JCC)", "GT1-50")
+        + _xon_array_schema("guarantor_employers_org_name", "Guarantor employer organization name (XON, repeatable per spec)", "GT1-51")
+        + _cwe_schema("handicap", "Handicap (CWE)", "GT1-52")
+        + _cwe_schema("job_status", "Job status (CWE)", "GT1-53")
+        + _fc_schema("guarantor_financial_class", "Guarantor financial class (FC)", "GT1-54")
+        + _cwe_array_schema("guarantor_race", "Guarantor race (CWE, repeatable per spec)", "GT1-55")
         + [
             _s("guarantor_birth_place",                "Guarantor birth place (GT1-56)"),
-            _s("vip_indicator",                        "VIP indicator (GT1-57)"),
         ]
+        + _cwe_schema("vip_indicator", "VIP indicator (CWE)", "GT1-57")
     )
 
     # ---------------------------------------------------------------------------
@@ -2525,71 +5018,78 @@ def register_lakeflow_source(spark):
     FT1_SCHEMA = StructType(
         _METADATA_FIELDS
         + [
-            _pk_i("set_id",                              "Sequence number for this FT1 segment within the message (FT1-1)"),
-            _s("transaction_id",                          "Unique transaction identifier (FT1-2)"),
-            _s("transaction_batch_id",                    "Batch identifier (FT1-3)"),
-            _s("transaction_date",                        "Transaction date/time range start (FT1-4.1)"),
-            _ts("transaction_posting_date",               "Posting date/time (FT1-5)"),
-            _s("transaction_type",                        "Transaction type (FT1-6): CG=Charge, CR=Credit, PA=Payment, AJ=Adjustment"),
+            _pk_int_field("set_id",                              "Sequence number for this FT1 segment within the message (FT1-1)"),
         ]
+        + _cx_schema("transaction_id", "Transaction identifier (CX, v2.9+)", "FT1-2")
+        + [
+            _s("transaction_batch_id",                    "Batch identifier (FT1-3)"),
+            _ts("transaction_date_start",                 "Transaction date/time range start (FT1-4.1, DR)"),
+            _ts("transaction_date_end",                   "Transaction date/time range end (FT1-4.2, DR)"),
+            _ts("transaction_posting_date",               "Posting date/time (FT1-5)"),
+        ]
+        + _cwe_schema("transaction_type", "Transaction type (CWE; e.g. CG=Charge, CR=Credit, PA=Payment, AJ=Adjustment)", "FT1-6")
         + _cwe_schema("transaction_code", "Transaction / charge code", "FT1-7")
         + [
             _s("transaction_description",                 "Transaction description (FT1-8, deprecated)"),
             _s("transaction_description_alt",             "Alternate transaction description (FT1-9, deprecated)"),
-            _i("transaction_quantity",                    "Transaction quantity (FT1-10)"),
-            _s("transaction_amount_extended",             "Extended amount: quantity x unit price (FT1-11.1)"),
-            _s("transaction_amount_unit",                 "Unit price (FT1-12.1)"),
+            _int_field("transaction_quantity",                    "Transaction quantity (FT1-10)"),
         ]
+        + _cp_schema("transaction_amount_extended", "Extended amount: quantity x unit price (CP)", "FT1-11")
+        + _cp_schema("transaction_amount_unit", "Unit price (CP)", "FT1-12")
         + _cwe_schema("department_code", "Department", "FT1-13")
-        + [
-            _s("insurance_plan_id",                       "Insurance plan identifier (FT1-14.1)"),
-            _s("insurance_amount",                        "Insurance amount (FT1-15.1)"),
-            _s("assigned_patient_location",               "Patient location (FT1-16)"),
-            _s("fee_schedule",                            "Fee schedule (FT1-17)"),
-            _s("patient_type",                            "Patient type (FT1-18)"),
-        ]
-        + _cwe_schema("diagnosis_code", "Diagnosis", "FT1-19")
-        + _xcn_schema("performed_by", "Performed by", "FT1-20")
-        + _xcn_schema("ordered_by", "Ordered by", "FT1-21")
-        + [
-            _s("unit_cost",                               "Unit cost (FT1-22.1)"),
-        ]
+        + _cwe_schema("insurance_plan_id", "Insurance plan / health plan ID (CWE)", "FT1-14")
+        + _cp_schema("insurance_amount", "Insurance amount (CP)", "FT1-15")
+        + _pl_schema("assigned_patient_location", "Assigned patient location (PL)", "FT1-16")
+        + _cwe_schema("fee_schedule", "Fee schedule (CWE)", "FT1-17")
+        + _cwe_schema("patient_type", "Patient type (CWE)", "FT1-18")
+        + _cwe_array_schema("diagnosis_code", "Diagnosis (CWE, repeatable per spec)", "FT1-19")
+        + _xcn_array_schema("performed_by", "Performed by (XCN, repeatable per spec)", "FT1-20")
+        + _xcn_array_schema("ordered_by", "Ordered by (XCN, repeatable per spec)", "FT1-21")
+        + _cp_schema("unit_cost", "Unit cost (CP)", "FT1-22")
         + _ei_schema("filler_order_number", "Filler order number (EI)", "FT1-23")
-        + _xcn_schema("entered_by", "Entered by", "FT1-24")
-        + _cwe_schema("ft1_procedure_code", "Procedure code", "FT1-25")
-        + _cwe_schema("ft1_procedure_code_modifier", "Procedure code modifier", "FT1-26")
+        + _xcn_array_schema("entered_by", "Entered by (XCN, repeatable per spec)", "FT1-24")
+        + _cwe_schema("procedure_code", "Procedure code (CNE; CWE-compatible struct)", "FT1-25")
+        + _cwe_array_schema("procedure_code_modifier", "Procedure code modifier (CNE, repeatable per spec; CWE-compatible struct)", "FT1-26")
+        + _cwe_schema("advanced_beneficiary_notice_code", "Advanced beneficiary notice (ABN) code (CWE)", "FT1-27")
+        + _cwe_schema("medically_necessary_dup_proc_reason", "Medically-necessary duplicate procedure reason (CWE)", "FT1-28")
+        + _cwe_schema("ndc_code", "NDC code (CWE)", "FT1-29")
+        + _cx_schema("payment_reference_id", "Payment reference ID (CX)", "FT1-30")
         + [
-            _s("advanced_beneficiary_notice_code",        "ABN code (FT1-27.1)"),
-            _s("medically_necessary_dup_proc_reason",     "Duplicate procedure reason (FT1-28.1)"),
-            _s("ndc_code",                                "National Drug Code (FT1-29.1)"),
-            _s("payment_reference_id",                    "Payment reference (FT1-30.1)"),
-            _s("transaction_reference_key",               "Transaction reference key (FT1-31)"),
-            _s("performing_facility",                     "Performing facility (FT1-32.1, v2.6+)"),
-            _s("ordering_facility",                       "Ordering facility (FT1-33.1, v2.6+)"),
-            _s("item_number",                             "Item number (FT1-34.1, v2.6+)"),
+            _s_array("transaction_reference_key",         "Transaction reference key (FT1-31, SI; repeatable per spec — array of FT1-1 set-IDs linking payment to corresponding charges)"),
+        ]
+        + _xon_array_schema("performing_facility", "Performing facility (XON, repeatable per spec, v2.6+)", "FT1-32")
+        + _xon_schema("ordering_facility", "Ordering facility (XON, v2.6+)", "FT1-33")
+        + _cwe_schema("item_number", "Item number (CWE, v2.6+)", "FT1-34")
+        + [
             _s("model_number",                            "Model number (FT1-35, v2.6+)"),
-            _s("special_processing_code",                 "Special processing code (FT1-36.1, v2.6+)"),
-            _s("clinic_code",                             "Clinic code (FT1-37.1, v2.6+)"),
-            _s("referral_number",                         "Referral number (FT1-38.1, v2.6+)"),
-            _s("authorization_number",                    "Authorization number (FT1-39.1, v2.6+)"),
-            _s("service_provider_taxonomy_code",          "Service provider taxonomy code (FT1-40.1, v2.6+)"),
-            _s("revenue_code",                            "Revenue code (FT1-41.1, v2.6+)"),
+        ]
+        + _cwe_array_schema("special_processing_code", "Special processing code (CWE, repeatable per spec, v2.6+)", "FT1-36")
+        + _cwe_schema("clinic_code", "Clinic code (CWE, v2.6+)", "FT1-37")
+        + _cx_schema("referral_number", "Referral number (CX, v2.6+)", "FT1-38")
+        + _cx_schema("authorization_number", "Authorization number (CX, v2.6+)", "FT1-39")
+        + _cwe_schema("service_provider_taxonomy_code", "Service provider taxonomy code (CWE, v2.6+)", "FT1-40")
+        + _cwe_schema("revenue_code", "Revenue code (CWE, v2.6+)", "FT1-41")
+        + [
             _s("prescription_number",                     "Prescription number (FT1-42, v2.6+)"),
-            _s("ndc_qty_and_uom",                         "NDC quantity and unit of measure (FT1-43, v2.6+)"),
-            _s("dme_certificate_of_medical_necessity_transmission_code", "DME certificate of medical necessity transmission code (FT1-44.1, v2.9+)"),
-            _s("dme_certification_type_code",             "DME certification type code (FT1-45.1, v2.9+)"),
+        ]
+        + _cq_schema("ndc_qty_and_uom", "NDC quantity and unit of measure (CQ, v2.6+)", "FT1-43")
+        + _cwe_schema("dme_certificate_of_medical_necessity_transmission_code", "DME certificate of medical necessity transmission code (CWE, v2.9+)", "FT1-44")
+        + _cwe_schema("dme_certification_type_code", "DME certification type code (CWE, v2.9+)", "FT1-45")
+        + [
             _s("dme_duration_value",                      "DME duration value (FT1-46, v2.9+)"),
             _s("dme_certification_revision_date",         "DME certification revision date (FT1-47, v2.9+)"),
             _s("dme_initial_certification_date",          "DME initial certification date (FT1-48, v2.9+)"),
             _s("dme_last_certification_date",             "DME last certification date (FT1-49, v2.9+)"),
             _s("dme_length_of_medical_necessity_days",    "DME length of medical necessity in days (FT1-50, v2.9+)"),
-            _s("dme_rental_price",                        "DME rental price (FT1-51, v2.9+)"),
-            _s("dme_purchase_price",                      "DME purchase price (FT1-52, v2.9+)"),
-            _s("dme_frequency_code",                      "DME frequency code (FT1-53.1, v2.9+)"),
-            _s("dme_certification_condition_indicator",   "DME certification condition indicator (FT1-54, v2.9+)"),
-            _s("dme_condition_indicator_code",            "DME condition indicator code (FT1-55.1, v2.9+)"),
-            _s("service_reason_code",                     "Service reason code (FT1-56.1, v2.9+)"),
         ]
+        + _mo_schema("dme_rental_price", "DME rental price (MO, v2.9+)", "FT1-51")
+        + _mo_schema("dme_purchase_price", "DME purchase price (MO, v2.9+)", "FT1-52")
+        + _cwe_schema("dme_frequency_code", "DME frequency code (CWE, v2.9+)", "FT1-53")
+        + [
+            _s("dme_certification_condition_indicator",   "DME certification condition indicator (FT1-54, v2.9+)"),
+        ]
+        + _cwe_array_schema("dme_condition_indicator_code", "DME condition indicator code (CWE, repeatable per spec, v2.9+)", "FT1-55")
+        + _cwe_schema("service_reason_code", "Service reason code (CWE, v2.9+)", "FT1-56")
     )
 
     # ---------------------------------------------------------------------------
@@ -2599,8 +5099,8 @@ def register_lakeflow_source(spark):
     RXA_SCHEMA = StructType(
         _METADATA_FIELDS
         + [
-            _pk_i("set_id",                                "Give sub-ID counter (RXA-1)"),
-            _i("administration_sub_id_counter",            "Administration sub-ID counter (RXA-2)"),
+            _pk_int_field("set_id",                                "Give sub-ID counter (RXA-1)"),
+            _int_field("administration_sub_id_counter",            "Administration sub-ID counter (RXA-2)"),
             _ts("datetime_start_of_administration",        "Administration start date/time (RXA-3)"),
             _ts("datetime_end_of_administration",          "Administration end date/time (RXA-4)"),
         ]
@@ -2610,31 +5110,35 @@ def register_lakeflow_source(spark):
         ]
         + _cwe_schema("administered_units", "Units of measure", "RXA-7")
         + _cwe_schema("administered_dosage_form", "Dosage form", "RXA-8")
-        + _cwe_schema("administration_notes", "Administration notes", "RXA-9")
-        + _xcn_schema("administering_provider", "Provider who administered", "RXA-10")
+        + _cwe_array_schema("administration_notes", "Administration notes (CWE, repeatable per spec)", "RXA-9")
+        + _xcn_array_schema("administering_provider", "Provider who administered (XCN, repeatable per spec)", "RXA-10")
         + [
             _s("administered_at_location",                 "Administration location (RXA-11)"),
             _s("administered_per_time_unit",               "Rate time unit (RXA-12)"),
             _s("administered_strength",                    "Strength administered (RXA-13)"),
-            _s("administered_strength_units",              "Strength units (RXA-14.1)"),
-            _s("substance_lot_number",                     "Lot number (RXA-15)"),
-            _ts("substance_expiration_date",               "Substance expiration date (RXA-16)"),
         ]
-        + _cwe_schema("substance_manufacturer_name", "Substance manufacturer", "RXA-17")
-        + _cwe_schema("substance_treatment_refusal_reason", "Treatment/refusal reason", "RXA-18")
-        + _cwe_schema("indication", "Indication for administration", "RXA-19")
+        + _cwe_schema("administered_strength_units", "Administered strength units (CWE)", "RXA-14")
+        + [
+            _s_array("substance_lot_number",               "Lot numbers (RXA-15, ST repeatable per spec)"),
+            _s_array("substance_expiration_date",          "Substance expiration dates (RXA-16, DTM repeatable per spec)"),
+        ]
+        + _cwe_array_schema("substance_manufacturer_name", "Substance manufacturer (CWE, repeatable per spec)", "RXA-17")
+        + _cwe_array_schema("substance_treatment_refusal_reason", "Treatment/refusal reason (CWE, repeatable per spec)", "RXA-18")
+        + _cwe_array_schema("indication", "Indication for administration (CWE, repeatable per spec)", "RXA-19")
         + [
             _s("completion_status",                        "Completion status (RXA-20): CP=Complete, RE=Refused, NA=Not Administered, PA=Partial"),
-            _s("action_code_rxa",                          "Action code (RXA-21)"),
+            _s("action_code_rxa",                      "Action Code – RXA (RXA-21); vaccine record action, ID Table 0206"),
             _ts("system_entry_datetime",                   "System entry date/time (RXA-22)"),
             _s("administered_drug_strength_volume",        "Drug strength volume (RXA-23)"),
-            _s("administered_drug_strength_volume_units",  "Drug strength volume units (RXA-24.1)"),
-            _s("administered_barcode_identifier",          "Barcode identifier (RXA-25.1)"),
-            _s("pharmacy_order_type",                      "Pharmacy order type (RXA-26)"),
-            _s("administer_at",                            "Administration location (RXA-27, v2.6+)"),
-            _s("administered_at_address",                  "Administered-at address (RXA-28, v2.6+)"),
-            _s("administered_tag_identifier",              "Administered tag identifier (RXA-29.1, v2.9+)"),
         ]
+        + _cwe_schema("administered_drug_strength_volume_units", "Drug strength volume units (CWE)", "RXA-24")
+        + _cwe_schema("administered_barcode_identifier", "Administered barcode identifier (CWE)", "RXA-25")
+        + [
+            _s("pharmacy_order_type",                      "Pharmacy order type (RXA-26)"),
+        ]
+        + _pl_schema("administer_at", "Administration location (PL, v2.6+)", "RXA-27")
+        + _xad_schema("administered_at_address", "Administered-at address (XAD, v2.6+)", "RXA-28")
+        + _ei_array_schema("administered_tag_identifier", "Administered tag identifier (EI, repeatable per spec, v2.9+)", "RXA-29")
     )
 
     # ---------------------------------------------------------------------------
@@ -2646,7 +5150,7 @@ def register_lakeflow_source(spark):
         + _ei_schema("placer_appointment_id", "Placer appointment ID (EI)", "SCH-1")
         + _ei_schema("filler_appointment_id", "Filler appointment ID (EI)", "SCH-2")
         + [
-            _i("occurrence_number",            "Occurrence number (SCH-3)"),
+            _int_field("occurrence_number",            "Occurrence number (SCH-3)"),
         ]
         + _ei_schema("placer_group_number", "Placer group number (EI)", "SCH-4")
         + _cwe_schema("schedule_id", "Schedule identifier", "SCH-5")
@@ -2654,35 +5158,29 @@ def register_lakeflow_source(spark):
         + _cwe_schema("appointment_reason", "Reason for appointment", "SCH-7")
         + _cwe_schema("appointment_type", "Appointment type", "SCH-8")
         + [
-            _i("appointment_duration",         "Appointment duration in minutes (SCH-9, deprecated)"),
+            _int_field("appointment_duration",         "Appointment duration in minutes (SCH-9, deprecated)"),
         ]
         + _cwe_schema("appointment_duration_units", "Duration units", "SCH-10")
         + [
             _s("appointment_timing_quantity",  "Appointment timing quantity (SCH-11, deprecated)"),
         ]
-        + _xcn_schema("placer_contact_person", "Placer contact person", "SCH-12")
-        + _xtn_schema("placer_contact_phone_number", "Placer contact phone", "SCH-13")
-        + _xad_schema("placer_contact_address", "Placer contact address", "SCH-14")
-        + [
-            _s("placer_contact_location",      "Placer contact location (SCH-15)"),
-        ]
-        + _xcn_schema("filler_contact_person", "Filler contact person", "SCH-16")
-        + _xtn_schema("filler_contact_phone_number", "Filler contact phone", "SCH-17")
-        + _xad_schema("filler_contact_address", "Filler contact address", "SCH-18")
-        + [
-            _s("filler_contact_location",      "Filler contact location (SCH-19)"),
-        ]
-        + _xcn_schema("entered_by_person", "Person who entered the schedule", "SCH-20")
-        + _xtn_schema("entered_by_phone_number", "Entered by phone", "SCH-21")
-        + [
-            _s("entered_by_location",          "Entered by location (SCH-22)"),
-        ]
+        + _xcn_array_schema("placer_contact_person", "Placer contact person (XCN, repeatable per spec)", "SCH-12")
+        + _xtn_schema("placer_contact_phone", "Placer contact phone", "SCH-13")
+        + _xad_array_schema("placer_contact_address", "Placer contact address (XAD, repeatable per spec)", "SCH-14")
+        + _pl_schema("placer_contact_location", "Placer contact location (PL)", "SCH-15")
+        + _xcn_array_schema("filler_contact_person", "Filler contact person (XCN, repeatable per spec)", "SCH-16")
+        + _xtn_schema("filler_contact_phone", "Filler contact phone", "SCH-17")
+        + _xad_array_schema("filler_contact_address", "Filler contact address (XAD, repeatable per spec)", "SCH-18")
+        + _pl_schema("filler_contact_location", "Filler contact location (PL)", "SCH-19")
+        + _xcn_array_schema("entered_by_person", "Person who entered the schedule (XCN, repeatable per spec)", "SCH-20")
+        + _xtn_array_schema("entered_by_phone_number", "Entered by phone (XTN, repeatable per spec)", "SCH-21")
+        + _pl_schema("entered_by_location", "Entered by location (PL)", "SCH-22")
         + _ei_schema("parent_placer_appointment_id", "Parent placer appointment ID (EI)", "SCH-23")
         + _ei_schema("parent_filler_appointment_id", "Parent filler appointment ID (EI)", "SCH-24")
         + _cwe_schema("filler_status_code", "Filler status code", "SCH-25")
-        + _ei_schema("sch_placer_order_number", "Placer order number (EI)", "SCH-26")
-        + _ei_schema("sch_filler_order_number", "Filler order number (EI)", "SCH-27")
-        + _ei_schema("alternate_placer_order_group_number", "Alternate placer order group number (EI)", "SCH-28")
+        + _ei_array_schema("placer_order_number", "Placer order number (EI, repeatable per spec)", "SCH-26")
+        + _ei_array_schema("filler_order_number", "Filler order number (EI, repeatable per spec)", "SCH-27")
+        + _eip_schema("alternate_placer_order_group_number", "Alternate placer order group number (EIP, [0..1], v2.9+)", "SCH-28")
     )
 
     # ---------------------------------------------------------------------------
@@ -2692,23 +5190,25 @@ def register_lakeflow_source(spark):
     TXA_SCHEMA = StructType(
         _METADATA_FIELDS
         + [
-            _i("set_id",                              "Sequence number (TXA-1)"),
-            _s("document_type",                        "Document type (TXA-2): DS=Discharge Summary, HP=History and Physical, OP=Operative Note"),
+            _int_field("set_id",                              "Sequence number (TXA-1)"),
+        ]
+        + _cwe_schema("document_type", "Document type (CWE; e.g. DS=Discharge Summary, HP=History and Physical, OP=Operative Note)", "TXA-2")
+        + [
             _s("document_content_presentation",        "Content presentation type (TXA-3)"),
             _ts("activity_datetime",                   "Activity date/time (TXA-4)"),
         ]
-        + _xcn_schema("primary_activity_provider", "Primary activity provider", "TXA-5")
+        + _xcn_array_schema("primary_activity_provider", "Primary activity provider (XCN, repeatable per spec)", "TXA-5")
         + [
             _ts("origination_datetime",                "Origination date/time (TXA-6)"),
             _ts("transcription_datetime",              "Transcription date/time (TXA-7)"),
-            _ts("edit_datetime",                       "Edit date/time (TXA-8)"),
+            _s_array("edit_datetime",                  "Edit date/times (TXA-8, DTM repeatable per spec)"),
         ]
-        + _xcn_schema("originator", "Document originator", "TXA-9")
-        + _xcn_schema("assigned_document_authenticator", "Assigned document authenticator", "TXA-10")
-        + _xcn_schema("transcriptionist", "Transcriptionist", "TXA-11")
+        + _xcn_array_schema("originator", "Document originator (XCN, repeatable per spec)", "TXA-9")
+        + _xcn_array_schema("assigned_document_authenticator", "Assigned document authenticator (XCN, repeatable per spec)", "TXA-10")
+        + _xcn_array_schema("transcriptionist", "Transcriptionist (XCN, repeatable per spec)", "TXA-11")
         + _ei_schema("unique_document_number", "Unique document number (EI)", "TXA-12")
         + _ei_schema("parent_document_number", "Parent document number (EI)", "TXA-13")
-        + _ei_schema("placer_order_number", "Placer order number (EI)", "TXA-14")
+        + _ei_array_schema("placer_order_number", "Placer order number (EI, repeatable per spec)", "TXA-14")
         + _ei_schema("filler_order_number", "Filler order number (EI)", "TXA-15")
         + [
             _s("unique_document_file_name",            "Document file name (TXA-16)"),
@@ -2717,12 +5217,12 @@ def register_lakeflow_source(spark):
             _s("document_availability_status",         "Availability status (TXA-19)"),
             _s("document_storage_status",              "Storage status (TXA-20)"),
             _s("document_change_reason",               "Reason for document change (TXA-21)"),
-            _s("authentication_person_time_stamp",     "Authenticator with timestamp (TXA-22)"),
         ]
-        + _xcn_schema("distributed_copies", "Distributed copy recipient", "TXA-23")
-        + _cwe_schema("folder_assignment", "Folder assignment", "TXA-24")
+        + _xcn_array_schema("authentication_person_time_stamp", "Authentication person with timestamp (PPN→XCN approximation, repeatable per spec, TXA-22)", "TXA-22")
+        + _xcn_array_schema("distributed_copies", "Distributed copy recipient (XCN, repeatable per spec)", "TXA-23")
+        + _cwe_array_schema("folder_assignment", "Folder assignment (CWE, repeatable per spec)", "TXA-24")
         + [
-            _s("document_title",                       "Document title (TXA-25, v2.6+)"),
+            _s_array("document_title",                 "Document titles (TXA-25, ST repeatable per spec, v2.6+)"),
             _ts("agreed_due_datetime",                 "Agreed due date/time (TXA-26, v2.8+)"),
         ]
         + _hd_schema("creating_facility", "Creating facility", "TXA-27")
@@ -2798,1420 +5298,44 @@ def register_lakeflow_source(spark):
     # src/databricks/labs/community_connector/sources/hl7_v2/hl7_v2.py
     ########################################################
 
+    __all__ = [
+        "HL7V2LakeflowConnect",
+        "_EXTRACTORS",
+        "_SINGLE_SEGMENT_TABLES",
+        "_extract_al1",
+        "_extract_dg1",
+        "_extract_evn",
+        "_extract_ft1",
+        "_extract_generic",
+        "_extract_gt1",
+        "_extract_iam",
+        "_extract_in1",
+        "_extract_msh",
+        "_extract_mrg",
+        "_extract_nk1",
+        "_extract_nte",
+        "_extract_obr",
+        "_extract_obx",
+        "_extract_orc",
+        "_extract_pd1",
+        "_extract_pid",
+        "_extract_pr1",
+        "_extract_pv1",
+        "_extract_pv2",
+        "_extract_rxa",
+        "_extract_sch",
+        "_extract_spm",
+        "_extract_txa",
+        "_split_messages",
+    ]
+
+
     _DEFAULT_WINDOW_SECONDS = 86_400
     _RETRIABLE_STATUS_CODES = (429, 500, 503)
     _MAX_RETRIES = 3
     _INITIAL_BACKOFF = 1
     _REQUEST_TIMEOUT = 30
     _MAX_PAGE_SIZE = 1000
-
-    _SINGLE_SEGMENT_TABLES = frozenset(
-        {"msh", "evn", "pid", "pd1", "pv1", "pv2", "mrg", "sch", "txa"}
-    )
-
-
-    # ---------------------------------------------------------------------------
-    # Null-safe helpers
-    # ---------------------------------------------------------------------------
-
-
-    def _v(s: str) -> str | None:
-        """Return *s* if non-empty, else None."""
-        return s if s else None
-
-
-    def _i(s: str) -> int | None:
-        """Parse *s* as int; return None on failure."""
-        if not s:
-            return None
-        try:
-            return int(s.strip())
-        except ValueError:
-            return None
-
-
-    _DTM_RE = re.compile(
-        r"^(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?(?:\.\d+)?([+-]\d{4})?$"
-    )
-
-
-    def _parse_dtm(s: str) -> str | None:
-        """Parse an HL7 DTM string to an ISO-8601 UTC string.
-
-        Handles partial precision (YYYY, YYYYMM, YYYYMMDD, YYYYMMDDHHMMSS)
-        and optional timezone offset (e.g. +0500, -0800).  If a timezone offset
-        is present the value is converted to UTC first.  Returns an ISO-8601
-        string (no timezone suffix) so the schema can use StringType and avoid
-        Arrow timestamp-timezone mismatches.
-        Returns None for empty or unparseable input.
-        """
-        if not s:
-            return None
-        cleaned = s.strip().strip("()")
-        m = _DTM_RE.match(cleaned)
-        if not m:
-            return None
-        y, mo, d, h, mi, sec, tz = m.groups()
-        try:
-            dt = datetime(
-                int(y),
-                int(mo or 1),
-                int(d or 1),
-                int(h or 0),
-                int(mi or 0),
-                int(sec or 0),
-            )
-            if tz:
-                sign = 1 if tz[0] == "+" else -1
-                offset = timedelta(hours=int(tz[1:3]), minutes=int(tz[3:5]))
-                dt = dt.replace(tzinfo=timezone(sign * offset))
-                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-            return dt.isoformat()
-        except ValueError:
-            return None
-
-
-    # ---------------------------------------------------------------------------
-    # Composite-type helpers — extract all components with consistent naming
-    # ---------------------------------------------------------------------------
-
-
-    def _xpn_fields(
-        seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = True
-    ) -> dict:
-        """XPN (Extended Person Name) — 14 active components."""
-        if repeating:
-            gc = lambda comp: _v(seg.get_rep_component(field_n, 1, comp))
-        else:
-            gc = lambda comp: _v(seg.get_component(field_n, comp))
-
-        return {
-            f"{prefix}_family_name": gc(1),
-            f"{prefix}_given_name": gc(2),
-            f"{prefix}_middle_name": gc(3),
-            f"{prefix}_suffix": gc(4),
-            f"{prefix}_prefix": gc(5),
-            f"{prefix}_degree": gc(6),
-            f"{prefix}_name_type_code": gc(7),
-            f"{prefix}_name_representation_code": gc(8),
-            f"{prefix}_name_context": gc(9),
-            f"{prefix}_name_assembly_order": gc(11),
-            f"{prefix}_name_effective_date": gc(12),
-            f"{prefix}_name_expiration_date": gc(13),
-            f"{prefix}_professional_suffix": gc(14),
-            f"{prefix}_called_by": gc(15),
-        }
-
-
-    def _xpn_array_fields(
-        seg: HL7Segment, field_n: int, column_name: str
-    ) -> dict:
-        """XPN (Extended Person Name) — all repetitions as a list of dicts."""
-        raw = seg.get_field(field_n)
-        if not raw:
-            return {column_name: None}
-        reps = raw.split(seg._enc.rep_sep)
-        result = []
-        for rep in reps:
-            if not rep:
-                continue
-            parts = rep.split(seg._enc.comp_sep)
-            gc = lambda i: _v(parts[i - 1]) if len(parts) >= i else None
-            result.append({
-                "family_name": gc(1),
-                "given_name": gc(2),
-                "middle_name": gc(3),
-                "suffix": gc(4),
-                "prefix": gc(5),
-                "degree": gc(6),
-                "name_type_code": gc(7),
-                "name_representation_code": gc(8),
-                "name_context": gc(9),
-                "name_assembly_order": gc(11),
-                "name_effective_date": gc(12),
-                "name_expiration_date": gc(13),
-                "professional_suffix": gc(14),
-                "called_by": gc(15),
-            })
-        return {column_name: result if result else None}
-
-
-    def _xcn_fields(
-        seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = True
-    ) -> dict:
-        """XCN (Extended Composite ID Number and Name for Persons) — 21 active components."""
-        if repeating:
-            gc = lambda comp: _v(seg.get_rep_component(field_n, 1, comp))
-            gsc = lambda comp, sub: _v(seg.get_rep_sub_component(field_n, 1, comp, sub))
-        else:
-            gc = lambda comp: _v(seg.get_component(field_n, comp))
-            gsc = lambda comp, sub: _v(seg.get_sub_component(field_n, comp, sub))
-        return {
-            f"{prefix}_id": gc(1),
-            f"{prefix}_family_name": gc(2),
-            f"{prefix}_given_name": gc(3),
-            f"{prefix}_middle_name": gc(4),
-            f"{prefix}_suffix": gc(5),
-            f"{prefix}_prefix": gc(6),
-            f"{prefix}_degree": gc(7),
-            f"{prefix}_source_table": gc(8),
-            f"{prefix}_assigning_authority": gsc(9, 1),
-            f"{prefix}_assigning_authority_universal_id": gsc(9, 2),
-            f"{prefix}_assigning_authority_universal_id_type": gsc(9, 3),
-            f"{prefix}_name_type_code": gc(10),
-            f"{prefix}_check_digit": gc(11),
-            f"{prefix}_check_digit_scheme": gc(12),
-            f"{prefix}_identifier_type_code": gc(13),
-            f"{prefix}_assigning_facility": gsc(14, 1),
-            f"{prefix}_assigning_facility_universal_id": gsc(14, 2),
-            f"{prefix}_assigning_facility_universal_id_type": gsc(14, 3),
-            f"{prefix}_name_representation_code": gc(15),
-            f"{prefix}_name_assembly_order": gc(18),
-            f"{prefix}_effective_date": gc(19),
-            f"{prefix}_expiration_date": gc(20),
-            f"{prefix}_professional_suffix": gc(21),
-        }
-
-
-    def _cwe_fields(
-        seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = False
-    ) -> dict:
-        """CWE (Coded With Exceptions) — 9 active components (10-22 are OID/value-set metadata, rarely populated)."""
-        if repeating:
-            gc = lambda comp: _v(seg.get_rep_component(field_n, 1, comp))
-        else:
-            gc = lambda comp: _v(seg.get_component(field_n, comp))
-        return {
-            f"{prefix}": gc(1),
-            f"{prefix}_text": gc(2),
-            f"{prefix}_coding_system": gc(3),
-            f"{prefix}_alt_code": gc(4),
-            f"{prefix}_alt_text": gc(5),
-            f"{prefix}_alt_coding_system": gc(6),
-            f"{prefix}_coding_system_version": gc(7),
-            f"{prefix}_alt_coding_system_version": gc(8),
-            f"{prefix}_original_text": gc(9),
-        }
-
-
-    def _hd_fields(
-        seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = False
-    ) -> dict:
-        """HD (Hierarchic Designator) — 3 components."""
-        if repeating:
-            gc = lambda comp: _v(seg.get_rep_component(field_n, 1, comp))
-        else:
-            gc = lambda comp: _v(seg.get_component(field_n, comp))
-        return {
-            f"{prefix}": gc(1),
-            f"{prefix}_universal_id": gc(2),
-            f"{prefix}_universal_id_type": gc(3),
-        }
-
-
-    def _ei_fields(
-        seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = False
-    ) -> dict:
-        """EI (Entity Identifier) — 4 components."""
-        if repeating:
-            gc = lambda comp: _v(seg.get_rep_component(field_n, 1, comp))
-        else:
-            gc = lambda comp: _v(seg.get_component(field_n, comp))
-        return {
-            f"{prefix}": gc(1),
-            f"{prefix}_namespace_id": gc(2),
-            f"{prefix}_universal_id": gc(3),
-            f"{prefix}_universal_id_type": gc(4),
-        }
-
-
-    def _cwe_array_fields(
-        seg: HL7Segment, field_n: int, column_name: str
-    ) -> dict:
-        """CWE (Coded With Exceptions) — all repetitions as a list of dicts."""
-        raw = seg.get_field(field_n)
-        if not raw:
-            return {column_name: None}
-        reps = raw.split(seg._enc.rep_sep)
-        result = []
-        for rep in reps:
-            if not rep:
-                continue
-            parts = rep.split(seg._enc.comp_sep)
-            gc = lambda i, _p=parts: _v(_p[i - 1]) if len(_p) >= i else None
-            result.append({
-                "code": gc(1),
-                "text": gc(2),
-                "coding_system": gc(3),
-                "alt_code": gc(4),
-                "alt_text": gc(5),
-                "alt_coding_system": gc(6),
-                "coding_system_version": gc(7),
-                "alt_coding_system_version": gc(8),
-                "original_text": gc(9),
-            })
-        return {column_name: result if result else None}
-
-
-    def _s_array_fields(
-        seg: HL7Segment, field_n: int, column_name: str
-    ) -> dict:
-        """Simple repeatable ID/IS field — all repetitions as a list of strings."""
-        raw = seg.get_field(field_n)
-        if not raw:
-            return {column_name: None}
-        reps = [_v(r) for r in raw.split(seg._enc.rep_sep) if r]
-        return {column_name: reps if reps else None}
-
-
-    def _ei_array_fields(
-        seg: HL7Segment, field_n: int, column_name: str
-    ) -> dict:
-        """EI (Entity Identifier) — all repetitions as a list of dicts."""
-        raw = seg.get_field(field_n)
-        if not raw:
-            return {column_name: None}
-        reps = raw.split(seg._enc.rep_sep)
-        result = []
-        for rep in reps:
-            if not rep:
-                continue
-            parts = rep.split(seg._enc.comp_sep)
-            result.append({
-                "entity_identifier": _v(parts[0]) if len(parts) > 0 else None,
-                "namespace_id": _v(parts[1]) if len(parts) > 1 else None,
-                "universal_id": _v(parts[2]) if len(parts) > 2 else None,
-                "universal_id_type": _v(parts[3]) if len(parts) > 3 else None,
-            })
-        return {column_name: result if result else None}
-
-
-    def _xon_fields(
-        seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = True
-    ) -> dict:
-        """XON (Extended Composite Name and Number for Organizations) — 10 components."""
-        if repeating:
-            gc = lambda comp: _v(seg.get_rep_component(field_n, 1, comp))
-            gsc = lambda comp, sub: _v(seg.get_rep_sub_component(field_n, 1, comp, sub))
-        else:
-            gc = lambda comp: _v(seg.get_component(field_n, comp))
-            gsc = lambda comp, sub: _v(seg.get_sub_component(field_n, comp, sub))
-        return {
-            f"{prefix}": gc(1),
-            f"{prefix}_type_code": gc(2),
-            f"{prefix}_id": gc(3),
-            f"{prefix}_check_digit": gc(4),
-            f"{prefix}_check_digit_scheme": gc(5),
-            f"{prefix}_assigning_authority": gsc(6, 1),
-            f"{prefix}_assigning_authority_universal_id": gsc(6, 2),
-            f"{prefix}_assigning_authority_universal_id_type": gsc(6, 3),
-            f"{prefix}_id_type_code": gc(7),
-            f"{prefix}_assigning_facility": gsc(8, 1),
-            f"{prefix}_assigning_facility_universal_id": gsc(8, 2),
-            f"{prefix}_assigning_facility_universal_id_type": gsc(8, 3),
-            f"{prefix}_name_rep_code": gc(9),
-            f"{prefix}_identifier": gc(10),
-        }
-
-
-    def _cx_fields(
-        seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = True
-    ) -> dict:
-        """CX (Extended Composite ID with Check Digit) — 12 components + HD sub-components."""
-        if repeating:
-            gc = lambda comp: _v(seg.get_rep_component(field_n, 1, comp))
-            gsc = lambda comp, sub: _v(seg.get_rep_sub_component(field_n, 1, comp, sub))
-        else:
-            gc = lambda comp: _v(seg.get_component(field_n, comp))
-            gsc = lambda comp, sub: _v(seg.get_sub_component(field_n, comp, sub))
-        return {
-            f"{prefix}": gc(1),
-            f"{prefix}_check_digit": gc(2),
-            f"{prefix}_check_digit_scheme": gc(3),
-            f"{prefix}_assigning_authority": gsc(4, 1),
-            f"{prefix}_assigning_authority_universal_id": gsc(4, 2),
-            f"{prefix}_assigning_authority_universal_id_type": gsc(4, 3),
-            f"{prefix}_type_code": gc(5),
-            f"{prefix}_assigning_facility": gsc(6, 1),
-            f"{prefix}_assigning_facility_universal_id": gsc(6, 2),
-            f"{prefix}_assigning_facility_universal_id_type": gsc(6, 3),
-            f"{prefix}_effective_date": gc(7),
-            f"{prefix}_expiration_date": gc(8),
-            f"{prefix}_assigning_jurisdiction": gc(9),
-            f"{prefix}_assigning_agency": gc(10),
-            f"{prefix}_security_check": gc(11),
-            f"{prefix}_security_check_scheme": gc(12),
-        }
-
-
-    def _xtn_fields(
-        seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = True
-    ) -> dict:
-        """XTN (Extended Telecommunication Number) — 18 components."""
-        if repeating:
-            gc = lambda comp: _v(seg.get_rep_component(field_n, 1, comp))
-            gsc = lambda comp, sub: _v(seg.get_rep_sub_component(field_n, 1, comp, sub))
-        else:
-            gc = lambda comp: _v(seg.get_component(field_n, comp))
-            gsc = lambda comp, sub: _v(seg.get_sub_component(field_n, comp, sub))
-        return {
-            f"{prefix}_number": gc(1),
-            f"{prefix}_use_code": gc(2),
-            f"{prefix}_equipment_type": gc(3),
-            f"{prefix}_communication_address": gc(4),
-            f"{prefix}_country_code": gc(5),
-            f"{prefix}_area_code": gc(6),
-            f"{prefix}_local_number": gc(7),
-            f"{prefix}_extension": gc(8),
-            f"{prefix}_any_text": gc(9),
-            f"{prefix}_extension_prefix": gc(10),
-            f"{prefix}_speed_dial_code": gc(11),
-            f"{prefix}_unformatted_number": gc(12),
-            f"{prefix}_effective_start_date": gc(13),
-            f"{prefix}_expiration_date": gc(14),
-            f"{prefix}_expiration_reason": gsc(15, 1),
-            f"{prefix}_protection_code": gsc(16, 1),
-            f"{prefix}_shared_telecom_id": gsc(17, 1),
-            f"{prefix}_preference_order": gc(18),
-        }
-
-
-    def _xad_fields(
-        seg: HL7Segment, field_n: int, prefix: str, *, repeating: bool = True
-    ) -> dict:
-        """XAD (Extended Address) — 23 components (12 is deprecated/skipped)."""
-        if repeating:
-            gc = lambda comp: _v(seg.get_rep_component(field_n, 1, comp))
-            gsc = lambda comp, sub: _v(seg.get_rep_sub_component(field_n, 1, comp, sub))
-        else:
-            gc = lambda comp: _v(seg.get_component(field_n, comp))
-            gsc = lambda comp, sub: _v(seg.get_sub_component(field_n, comp, sub))
-        return {
-            f"{prefix}_street": gc(1),
-            f"{prefix}_other_designation": gc(2),
-            f"{prefix}_city": gc(3),
-            f"{prefix}_state": gc(4),
-            f"{prefix}_zip": gc(5),
-            f"{prefix}_country": gc(6),
-            f"{prefix}_type": gc(7),
-            f"{prefix}_other_geographic": gc(8),
-            f"{prefix}_county_parish_code": gsc(9, 1),
-            f"{prefix}_county_parish_text": gsc(9, 2),
-            f"{prefix}_county_parish_coding_system": gsc(9, 3),
-            f"{prefix}_census_tract": gsc(10, 1),
-            f"{prefix}_census_tract_text": gsc(10, 2),
-            f"{prefix}_census_tract_coding_system": gsc(10, 3),
-            f"{prefix}_representation_code": gc(11),
-            f"{prefix}_effective_date": gc(13),
-            f"{prefix}_expiration_date": gc(14),
-            f"{prefix}_expiration_reason": gsc(15, 1),
-            f"{prefix}_expiration_reason_text": gsc(15, 2),
-            f"{prefix}_expiration_reason_coding_system": gsc(15, 3),
-            f"{prefix}_temporary_indicator": gc(16),
-            f"{prefix}_bad_address_indicator": gc(17),
-            f"{prefix}_usage": gc(18),
-            f"{prefix}_addressee": gc(19),
-            f"{prefix}_comment": gc(20),
-            f"{prefix}_preference_order": gc(21),
-            f"{prefix}_protection_code": gsc(22, 1),
-            f"{prefix}_protection_code_text": gsc(22, 2),
-            f"{prefix}_protection_code_coding_system": gsc(22, 3),
-            f"{prefix}_identifier": gsc(23, 1),
-        }
-
-
-    # ---------------------------------------------------------------------------
-    # Metadata builder (from MSH segment, added to every row)
-    # ---------------------------------------------------------------------------
-
-
-    def _metadata(msh: HL7Segment | None, source_file: str, send_time: str, create_time: str) -> dict:
-        if msh is None:
-            return {
-                "message_id": None,
-                "message_timestamp": None,
-                "hl7_version": None,
-                "source_file": source_file,
-                "send_time": send_time,
-                "create_time": create_time,
-            }
-        return {
-            "message_id": _v(msh.get_field(10)),
-            "message_timestamp": _v(msh.get_field(7)),
-            "hl7_version": _v(msh.get_field(12)),
-            "source_file": source_file,
-            "send_time": send_time,
-            "create_time": create_time,
-        }
-
-
-    # ---------------------------------------------------------------------------
-    # Per-segment field extractors
-    # ---------------------------------------------------------------------------
-
-
-    def _extract_msh(seg: HL7Segment) -> dict:
-        return {
-            "field_separator": _v(seg.get_field(1)),
-            "encoding_characters": _v(seg.get_field(2)),
-            "sending_application": _v(seg.get_component(3, 1)),
-            "sending_application_universal_id": _v(seg.get_component(3, 2)),
-            "sending_application_universal_id_type": _v(seg.get_component(3, 3)),
-            "sending_facility": _v(seg.get_component(4, 1)),
-            "sending_facility_universal_id": _v(seg.get_component(4, 2)),
-            "sending_facility_universal_id_type": _v(seg.get_component(4, 3)),
-            "receiving_application": _v(seg.get_component(5, 1)),
-            "receiving_application_universal_id": _v(seg.get_component(5, 2)),
-            "receiving_application_universal_id_type": _v(seg.get_component(5, 3)),
-            "receiving_facility": _v(seg.get_component(6, 1)),
-            "receiving_facility_universal_id": _v(seg.get_component(6, 2)),
-            "receiving_facility_universal_id_type": _v(seg.get_component(6, 3)),
-            "message_datetime": _parse_dtm(seg.get_field(7)),
-            "security": _v(seg.get_field(8)),
-            "message_code": _v(seg.get_component(9, 1)),
-            "trigger_event": _v(seg.get_component(9, 2)),
-            "message_structure": _v(seg.get_component(9, 3)),
-            "message_control_id": _v(seg.get_field(10)),
-            "processing_id": _v(seg.get_component(11, 1)),
-            "version_id": _v(seg.get_field(12)),
-            "sequence_number": _i(seg.get_field(13)),
-            "continuation_pointer": _v(seg.get_field(14)),
-            "accept_acknowledgment_type": _v(seg.get_field(15)),
-            "application_acknowledgment_type": _v(seg.get_field(16)),
-            "country_code": _v(seg.get_field(17)),
-            **_s_array_fields(seg, 18, "character_set"),
-            **_cwe_fields(seg, 19, "principal_language", repeating=False),
-            "alt_character_set_handling": _v(seg.get_field(20)),
-            **_ei_array_fields(seg, 21, "message_profile_identifiers"),
-            **_xon_fields(seg, 22, "sending_responsible_org", repeating=False),
-            **_xon_fields(seg, 23, "receiving_responsible_org", repeating=False),
-            **_hd_fields(seg, 24, "sending_network_address", repeating=False),
-            **_hd_fields(seg, 25, "receiving_network_address", repeating=False),
-            **_cwe_fields(seg, 26, "security_classification_tag", repeating=False),
-            **_cwe_array_fields(seg, 27, "security_handling_instructions"),
-            **_cwe_array_fields(seg, 28, "special_access_restriction"),
-        }
-
-
-    def _extract_pid(seg: HL7Segment) -> dict:
-        return {
-            "set_id": _i(seg.get_field(1)),
-            "patient_external_id": _v(seg.get_field(2)),
-            **_cx_fields(seg, 3, "patient_id"),
-            "alternate_patient_id": _v(seg.get_first_repetition(4)),
-            **_xpn_array_fields(seg, 5, "patient_names"),
-            **_xpn_array_fields(seg, 6, "mothers_maiden_names"),
-            "date_of_birth": _parse_dtm(seg.get_field(7)),
-            **_cwe_fields(seg, 8, "administrative_sex", repeating=False),
-            "patient_alias": _v(seg.get_first_repetition(9)),
-            **_cwe_fields(seg, 10, "race", repeating=True),
-            **_xad_fields(seg, 11, "address"),
-            "county_code": _v(seg.get_field(12)),
-            **_xtn_fields(seg, 13, "home_phone"),
-            **_xtn_fields(seg, 14, "business_phone"),
-            **_cwe_fields(seg, 15, "primary_language", repeating=False),
-            **_cwe_fields(seg, 16, "marital_status", repeating=False),
-            **_cwe_fields(seg, 17, "religion", repeating=False),
-            **_cx_fields(seg, 18, "patient_account", repeating=False),
-            "ssn": _v(seg.get_field(19)),
-            "drivers_license": _v(seg.get_field(20)),
-            **_cx_fields(seg, 21, "mothers_identifier"),
-            **_cwe_fields(seg, 22, "ethnic_group", repeating=True),
-            "birth_place": _v(seg.get_field(23)),
-            "multiple_birth_indicator": _v(seg.get_field(24)),
-            "birth_order": _i(seg.get_field(25)),
-            **_cwe_fields(seg, 26, "citizenship", repeating=True),
-            **_cwe_fields(seg, 27, "veterans_military_status", repeating=False),
-            **_cwe_fields(seg, 28, "nationality", repeating=False),
-            "patient_death_datetime": _parse_dtm(seg.get_field(29)),
-            "patient_death_indicator": _v(seg.get_field(30)),
-            "identity_unknown_indicator": _v(seg.get_field(31)),
-            **_cwe_fields(seg, 32, "identity_reliability_code", repeating=True),
-            "last_update_datetime": _parse_dtm(seg.get_field(33)),
-            **_hd_fields(seg, 34, "last_update_facility", repeating=False),
-            **_cwe_fields(seg, 35, "species_code", repeating=False),
-            **_cwe_fields(seg, 36, "breed_code", repeating=False),
-            "strain": _v(seg.get_field(37)),
-            **_cwe_fields(seg, 38, "production_class_code", repeating=False),
-            **_cwe_fields(seg, 39, "tribal_citizenship", repeating=False),
-            **_xtn_fields(seg, 40, "patient_telecom"),
-        }
-
-
-    def _extract_pv1(seg: HL7Segment) -> dict:
-        return {
-            "set_id": _i(seg.get_field(1)),
-            **_cwe_fields(seg, 2, "patient_class", repeating=False),
-            "assigned_patient_location": _v(seg.get_field(3)),
-            "location_point_of_care": _v(seg.get_component(3, 1)),
-            "location_room": _v(seg.get_component(3, 2)),
-            "location_bed": _v(seg.get_component(3, 3)),
-            "location_facility": _v(seg.get_component(3, 4)),
-            "location_status": _v(seg.get_component(3, 5)),
-            "location_type": _v(seg.get_component(3, 9)),
-            **_cwe_fields(seg, 4, "admission_type", repeating=False),
-            **_cx_fields(seg, 5, "preadmit_number", repeating=False),
-            "prior_patient_location": _v(seg.get_field(6)),
-            **_xcn_fields(seg, 7, "attending_doctor"),
-            **_xcn_fields(seg, 8, "referring_doctor"),
-            **_xcn_fields(seg, 9, "consulting_doctor"),
-            **_cwe_fields(seg, 10, "hospital_service", repeating=False),
-            "temporary_location": _v(seg.get_field(11)),
-            "preadmit_test_indicator": _v(seg.get_field(12)),
-            "readmission_indicator": _v(seg.get_field(13)),
-            **_cwe_fields(seg, 14, "admit_source", repeating=False),
-            **_cwe_array_fields(seg, 15, "ambulatory_status"),
-            **_cwe_fields(seg, 16, "vip_indicator", repeating=False),
-            **_xcn_fields(seg, 17, "admitting_doctor"),
-            **_cwe_fields(seg, 18, "patient_type", repeating=False),
-            **_cx_fields(seg, 19, "visit_number", repeating=False),
-            "financial_class": _v(seg.get_rep_component(20, 1, 1)),
-            **_cwe_fields(seg, 21, "charge_price_indicator", repeating=False),
-            **_cwe_fields(seg, 22, "courtesy_code", repeating=False),
-            **_cwe_fields(seg, 23, "credit_rating", repeating=False),
-            "contract_code": _v(seg.get_first_repetition(24)),
-            "contract_effective_date": _v(seg.get_first_repetition(25)),
-            "contract_amount": _v(seg.get_first_repetition(26)),
-            "contract_period": _v(seg.get_first_repetition(27)),
-            "interest_code": _v(seg.get_field(28)),
-            "transfer_to_bad_debt_code": _v(seg.get_field(29)),
-            "transfer_to_bad_debt_date": _v(seg.get_field(30)),
-            "bad_debt_agency_code": _v(seg.get_field(31)),
-            "bad_debt_transfer_amount": _v(seg.get_field(32)),
-            "bad_debt_recovery_amount": _v(seg.get_field(33)),
-            "delete_account_indicator": _v(seg.get_field(34)),
-            "delete_account_date": _v(seg.get_field(35)),
-            **_cwe_fields(seg, 36, "discharge_disposition", repeating=False),
-            "discharged_to_location": _v(seg.get_component(37, 1)),
-            **_cwe_fields(seg, 38, "diet_type", repeating=False),
-            **_cwe_fields(seg, 39, "servicing_facility", repeating=False),
-            "bed_status": _v(seg.get_field(40)),
-            **_cwe_fields(seg, 41, "account_status", repeating=False),
-            "pending_location": _v(seg.get_field(42)),
-            "prior_temporary_location": _v(seg.get_field(43)),
-            "admit_datetime": _parse_dtm(seg.get_first_repetition(44)),
-            "discharge_datetime": _parse_dtm(seg.get_first_repetition(45)),
-            "current_patient_balance": _v(seg.get_field(46)),
-            "total_charges": _v(seg.get_field(47)),
-            "total_adjustments": _v(seg.get_field(48)),
-            "total_payments": _v(seg.get_field(49)),
-            **_cx_fields(seg, 50, "alternate_visit_id", repeating=False),
-            **_cwe_fields(seg, 51, "visit_indicator", repeating=False),
-            **_xcn_fields(seg, 52, "other_healthcare_provider"),
-            "service_episode_description": _v(seg.get_field(53)),
-            **_ei_fields(seg, 54, "service_episode_identifier", repeating=False),
-        }
-
-
-    def _extract_obr(seg: HL7Segment) -> dict:
-        return {
-            "set_id": _i(seg.get_field(1)) or 1,
-            **_ei_fields(seg, 2, "placer_order_number", repeating=False),
-            **_ei_fields(seg, 3, "filler_order_number", repeating=False),
-            **_cwe_fields(seg, 4, "service", repeating=False),
-            "priority": _v(seg.get_field(5)),
-            "requested_datetime": _parse_dtm(seg.get_field(6)),
-            "observation_datetime": _parse_dtm(seg.get_field(7)),
-            "observation_end_datetime": _parse_dtm(seg.get_field(8)),
-            "collection_volume": _v(seg.get_component(9, 1)),
-            "collection_volume_units": _v(seg.get_component(9, 2)),
-            **_xcn_fields(seg, 10, "collector"),
-            "specimen_action_code": _v(seg.get_field(11)),
-            **_cwe_fields(seg, 12, "danger_code", repeating=False),
-            "relevant_clinical_information": _v(seg.get_field(13)),
-            "specimen_received_datetime": _parse_dtm(seg.get_field(14)),
-            "specimen_source": _v(seg.get_field(15)),
-            **_xcn_fields(seg, 16, "ordering_provider"),
-            **_xtn_fields(seg, 17, "order_callback_phone", repeating=True),
-            "placer_field_1": _v(seg.get_field(18)),
-            "placer_field_2": _v(seg.get_field(19)),
-            "filler_field_1": _v(seg.get_field(20)),
-            "filler_field_2": _v(seg.get_field(21)),
-            "results_rpt_status_chng_datetime": _parse_dtm(seg.get_field(22)),
-            "charge_to_practice": _v(seg.get_field(23)),
-            "diagnostic_service_section": _v(seg.get_field(24)),
-            "result_status": _v(seg.get_field(25)),
-            "parent_result": _v(seg.get_field(26)),
-            "quantity_timing": _v(seg.get_first_repetition(27)),
-            **_xcn_fields(seg, 28, "result_copies_to"),
-            "parent_placer_order_number": _v(seg.get_component(29, 1)),
-            "transportation_mode": _v(seg.get_field(30)),
-            **_cwe_array_fields(seg, 31, "reason_for_study"),
-            "principal_result_interpreter": _v(seg.get_component(32, 1)),
-            "assistant_result_interpreter": _v(seg.get_rep_component(33, 1, 1)),
-            "technician": _v(seg.get_rep_component(34, 1, 1)),
-            "transcriptionist": _v(seg.get_rep_component(35, 1, 1)),
-            "scheduled_datetime": _parse_dtm(seg.get_field(36)),
-            "number_of_sample_containers": _i(seg.get_field(37)),
-            **_cwe_fields(seg, 38, "transport_logistics", repeating=True),
-            **_cwe_fields(seg, 39, "collectors_comment", repeating=True),
-            **_cwe_fields(seg, 40, "transport_arrangement_responsibility", repeating=False),
-            "transport_arranged": _v(seg.get_field(41)),
-            "escort_required": _v(seg.get_field(42)),
-            **_cwe_fields(seg, 43, "planned_patient_transport_comment", repeating=True),
-            **_cwe_fields(seg, 44, "procedure_code", repeating=False),
-            **_cwe_fields(seg, 45, "procedure_code_modifier", repeating=True),
-            **_cwe_fields(seg, 46, "placer_supplemental_service_info", repeating=True),
-            **_cwe_fields(seg, 47, "filler_supplemental_service_info", repeating=True),
-            **_cwe_fields(seg, 48, "medically_necessary_dup_proc_reason", repeating=False),
-            **_cwe_fields(seg, 49, "result_handling", repeating=False),
-            **_cwe_fields(seg, 50, "parent_universal_service_id", repeating=False),
-            **_ei_fields(seg, 51, "observation_group", repeating=False),
-            **_ei_fields(seg, 52, "parent_observation_group", repeating=False),
-            **_cx_fields(seg, 53, "alternate_placer_order", repeating=False),
-            "parent_order": _v(seg.get_component(54, 1)),
-            "obr_action_code": _v(seg.get_field(55)),
-        }
-
-
-    def _extract_obx(seg: HL7Segment) -> dict:
-        return {
-            "set_id": _i(seg.get_field(1)) or 1,
-            "value_type": _v(seg.get_field(2)),
-            **_cwe_fields(seg, 3, "observation_id", repeating=False),
-            "observation_sub_id": _v(seg.get_field(4)),
-            "observation_value": _v(seg.get_first_repetition(5)),
-            **_cwe_fields(seg, 6, "units", repeating=False),
-            "references_range": _v(seg.get_field(7)),
-            **_cwe_array_fields(seg, 8, "interpretation_codes"),
-            "probability": _v(seg.get_field(9)),
-            **_s_array_fields(seg, 10, "nature_of_abnormal_test"),
-            "observation_result_status": _v(seg.get_field(11)),
-            "effective_date_of_ref_range": _parse_dtm(seg.get_field(12)),
-            "user_defined_access_checks": _v(seg.get_field(13)),
-            "datetime_of_observation": _parse_dtm(seg.get_field(14)),
-            **_cwe_fields(seg, 15, "producers_id", repeating=False),
-            **_xcn_fields(seg, 16, "responsible_observer"),
-            **_cwe_fields(seg, 17, "observation_method", repeating=True),
-            **_ei_fields(seg, 18, "equipment_instance_identifier", repeating=True),
-            "datetime_of_analysis": _parse_dtm(seg.get_field(19)),
-            **_cwe_fields(seg, 20, "observation_site", repeating=True),
-            **_ei_fields(seg, 21, "observation_instance_identifier", repeating=False),
-            **_cwe_fields(seg, 22, "mood_code", repeating=False),
-            **_xon_fields(seg, 23, "performing_organization", repeating=False),
-            **_xad_fields(seg, 24, "performing_org_address", repeating=False),
-            **_xcn_fields(seg, 25, "performing_org_medical_director"),
-            "patient_results_release_category": _v(seg.get_field(26)),
-            **_cwe_fields(seg, 27, "root_cause", repeating=False),
-            **_cwe_fields(seg, 28, "local_process_control", repeating=True),
-            "observation_type": _v(seg.get_field(29)),
-            "observation_sub_type": _v(seg.get_field(30)),
-            "obx_action_code": _v(seg.get_field(31)),
-            **_cwe_fields(seg, 32, "observation_value_absent_reason", repeating=False),
-            "observation_related_specimen": _v(seg.get_field(33)),
-        }
-
-
-    def _extract_al1(seg: HL7Segment) -> dict:
-        return {
-            "set_id": _i(seg.get_field(1)) or 1,
-            **_cwe_fields(seg, 2, "allergen_type_code", repeating=False),
-            **_cwe_fields(seg, 3, "allergen_code", repeating=False),
-            **_cwe_fields(seg, 4, "allergy_severity_code", repeating=False),
-            **_cwe_fields(seg, 5, "allergy_reaction", repeating=True),
-            "identification_date": _parse_dtm(seg.get_field(6)),
-        }
-
-
-    def _extract_dg1(seg: HL7Segment) -> dict:
-        return {
-            "set_id": _i(seg.get_field(1)) or 1,
-            "diagnosis_coding_method": _v(seg.get_field(2)),
-            **_cwe_fields(seg, 3, "diagnosis_code", repeating=False),
-            "diagnosis_description": _v(seg.get_field(4)),
-            "diagnosis_datetime": _parse_dtm(seg.get_field(5)),
-            "diagnosis_type": _v(seg.get_field(6)),
-            **_cwe_fields(seg, 7, "major_diagnostic_category", repeating=False),
-            **_cwe_fields(seg, 8, "diagnostic_related_group", repeating=False),
-            "drg_approval_indicator": _v(seg.get_field(9)),
-            "drg_grouper_review_code": _v(seg.get_field(10)),
-            **_cwe_fields(seg, 11, "outlier_type", repeating=False),
-            "outlier_days": _i(seg.get_field(12)),
-            "outlier_cost": _v(seg.get_field(13)),
-            "grouper_version_and_type": _v(seg.get_field(14)),
-            "diagnosis_priority": _i(seg.get_field(15)),
-            **_xcn_fields(seg, 16, "diagnosing_clinician"),
-            "diagnosis_classification": _v(seg.get_field(17)),
-            "confidential_indicator": _v(seg.get_field(18)),
-            "attestation_datetime": _parse_dtm(seg.get_field(19)),
-            **_ei_fields(seg, 20, "diagnosis_identifier", repeating=False),
-            "diagnosis_action_code": _v(seg.get_field(21)),
-            **_ei_fields(seg, 22, "parent_diagnosis", repeating=False),
-            **_cwe_fields(seg, 23, "drg_ccl_value_code", repeating=False),
-            "drg_grouping_usage": _v(seg.get_field(24)),
-            "drg_diagnosis_determination_status": _v(seg.get_field(25)),
-            "present_on_admission_indicator": _v(seg.get_field(26)),
-        }
-
-
-    def _extract_nk1(seg: HL7Segment) -> dict:
-        return {
-            "set_id": _i(seg.get_field(1)) or 1,
-            **_xpn_array_fields(seg, 2, "nk_names"),
-            "relationship": _v(seg.get_field(3)),
-            **_cwe_fields(seg, 3, "relationship_code", repeating=False),
-            **_xad_fields(seg, 4, "address"),
-            **_xtn_fields(seg, 5, "phone_number"),
-            **_xtn_fields(seg, 6, "business_phone"),
-            **_cwe_fields(seg, 7, "contact_role", repeating=False),
-            "start_date": _parse_dtm(seg.get_field(8)),
-            "end_date": _parse_dtm(seg.get_field(9)),
-            "job_title": _v(seg.get_field(10)),
-            "job_code": _v(seg.get_component(11, 1)),
-            **_cx_fields(seg, 12, "employee_number", repeating=False),
-            **_xon_fields(seg, 13, "organization_name"),
-            **_cwe_fields(seg, 14, "marital_status", repeating=False),
-            **_cwe_fields(seg, 15, "administrative_sex", repeating=False),
-            "date_of_birth": _parse_dtm(seg.get_field(16)),
-            **_cwe_fields(seg, 17, "living_dependency", repeating=True),
-            **_cwe_fields(seg, 18, "ambulatory_status", repeating=True),
-            **_cwe_fields(seg, 19, "citizenship", repeating=True),
-            **_cwe_fields(seg, 20, "primary_language", repeating=False),
-            **_cwe_fields(seg, 21, "living_arrangement", repeating=False),
-            **_cwe_fields(seg, 22, "publicity_code", repeating=False),
-            "protection_indicator": _v(seg.get_field(23)),
-            "student_indicator": _v(seg.get_field(24)),
-            **_cwe_fields(seg, 25, "religion", repeating=False),
-            **_xpn_array_fields(seg, 26, "mothers_maiden_names"),
-            **_cwe_fields(seg, 27, "nationality", repeating=False),
-            **_cwe_fields(seg, 28, "ethnic_group", repeating=True),
-            **_cwe_fields(seg, 29, "contact_reason", repeating=True),
-            **_xpn_array_fields(seg, 30, "contact_persons"),
-            **_xtn_fields(seg, 31, "contact_person_telephone"),
-            **_xad_fields(seg, 32, "contact_persons_address"),
-            **_cx_fields(seg, 33, "associated_party_identifiers"),
-            "job_status": _v(seg.get_field(34)),
-            **_cwe_fields(seg, 35, "race", repeating=True),
-            "handicap": _v(seg.get_field(36)),
-            "contact_ssn": _v(seg.get_field(37)),
-            "nk_birth_place": _v(seg.get_field(38)),
-            "vip_indicator": _v(seg.get_field(39)),
-            **_xtn_fields(seg, 40, "nk_telecommunication_info"),
-            **_xtn_fields(seg, 41, "contact_telecommunication_info"),
-        }
-
-
-    def _extract_evn(seg: HL7Segment) -> dict:
-        return {
-            "event_type_code": _v(seg.get_field(1)),
-            "recorded_datetime": _parse_dtm(seg.get_field(2)),
-            "date_time_planned_event": _parse_dtm(seg.get_field(3)),
-            **_cwe_fields(seg, 4, "event_reason", repeating=False),
-            **_xcn_fields(seg, 5, "operator"),
-            "event_occurred": _parse_dtm(seg.get_field(6)),
-            **_hd_fields(seg, 7, "event_facility", repeating=False),
-        }
-
-
-    def _extract_pd1(seg: HL7Segment) -> dict:
-        return {
-            **_cwe_array_fields(seg, 1, "living_dependency"),
-            **_cwe_fields(seg, 2, "living_arrangement", repeating=False),
-            **_xon_fields(seg, 3, "patient_primary_facility"),
-            **_xcn_fields(seg, 4, "patient_primary_care_provider"),
-            **_cwe_fields(seg, 5, "student_indicator", repeating=False),
-            **_cwe_fields(seg, 6, "handicap", repeating=False),
-            **_cwe_fields(seg, 7, "living_will_code", repeating=False),
-            **_cwe_fields(seg, 8, "organ_donor_code", repeating=False),
-            "separate_bill": _v(seg.get_field(9)),
-            **_cx_fields(seg, 10, "duplicate_patient"),
-            **_cwe_fields(seg, 11, "publicity_code", repeating=False),
-            "protection_indicator": _v(seg.get_field(12)),
-            "protection_indicator_effective_date": _v(seg.get_field(13)),
-            **_xon_fields(seg, 14, "place_of_worship"),
-            **_cwe_fields(seg, 15, "advance_directive_code", repeating=True),
-            **_cwe_fields(seg, 16, "immunization_registry_status", repeating=False),
-            "immunization_registry_status_effective_date": _v(seg.get_field(17)),
-            "publicity_code_effective_date": _v(seg.get_field(18)),
-            **_cwe_fields(seg, 19, "military_branch", repeating=False),
-            **_cwe_fields(seg, 20, "military_rank_grade", repeating=False),
-            **_cwe_fields(seg, 21, "military_status", repeating=False),
-            "advance_directive_last_verified_date": _v(seg.get_field(22)),
-            "retirement_date": _v(seg.get_field(23)),
-        }
-
-
-    def _extract_pv2(seg: HL7Segment) -> dict:
-        return {
-            "prior_pending_location": _v(seg.get_field(1)),
-            **_cwe_fields(seg, 2, "accommodation_code", repeating=False),
-            **_cwe_fields(seg, 3, "admit_reason", repeating=False),
-            **_cwe_fields(seg, 4, "transfer_reason", repeating=False),
-            "patient_valuables": _v(seg.get_first_repetition(5)),
-            "patient_valuables_location": _v(seg.get_field(6)),
-            **_cwe_array_fields(seg, 7, "visit_user_code"),
-            "expected_admit_datetime": _parse_dtm(seg.get_field(8)),
-            "expected_discharge_datetime": _parse_dtm(seg.get_field(9)),
-            "estimated_length_of_inpatient_stay": _i(seg.get_field(10)),
-            "actual_length_of_inpatient_stay": _i(seg.get_field(11)),
-            "visit_description": _v(seg.get_field(12)),
-            **_xcn_fields(seg, 13, "referral_source"),
-            "previous_service_date": _v(seg.get_field(14)),
-            "employment_illness_related_indicator": _v(seg.get_field(15)),
-            "purge_status_code": _v(seg.get_field(16)),
-            "purge_status_date": _v(seg.get_field(17)),
-            **_cwe_fields(seg, 18, "special_program_code", repeating=False),
-            "retention_indicator": _v(seg.get_field(19)),
-            "expected_number_of_insurance_plans": _i(seg.get_field(20)),
-            **_cwe_fields(seg, 21, "visit_publicity_code", repeating=False),
-            "visit_protection_indicator": _v(seg.get_field(22)),
-            **_xon_fields(seg, 23, "clinic_organization"),
-            **_cwe_fields(seg, 24, "patient_status_code", repeating=False),
-            **_cwe_fields(seg, 25, "visit_priority_code", repeating=False),
-            "previous_treatment_date": _v(seg.get_field(26)),
-            "expected_discharge_disposition": _v(seg.get_field(27)),
-            "signature_on_file_date": _v(seg.get_field(28)),
-            "first_similar_illness_date": _v(seg.get_field(29)),
-            **_cwe_fields(seg, 30, "patient_charge_adjustment_code", repeating=False),
-            **_cwe_fields(seg, 31, "recurring_service_code", repeating=False),
-            "billing_media_code": _v(seg.get_field(32)),
-            "expected_surgery_datetime": _parse_dtm(seg.get_field(33)),
-            "military_partnership_code": _v(seg.get_field(34)),
-            "military_non_availability_code": _v(seg.get_field(35)),
-            "newborn_baby_indicator": _v(seg.get_field(36)),
-            "baby_detained_indicator": _v(seg.get_field(37)),
-            **_cwe_fields(seg, 38, "mode_of_arrival_code", repeating=False),
-            **_cwe_fields(seg, 39, "recreational_drug_use_code", repeating=True),
-            **_cwe_fields(seg, 40, "admission_level_of_care_code", repeating=False),
-            **_cwe_fields(seg, 41, "precaution_code", repeating=True),
-            **_cwe_fields(seg, 42, "patient_condition_code", repeating=False),
-            **_cwe_fields(seg, 43, "living_will_code_pv2", repeating=False),
-            **_cwe_fields(seg, 44, "organ_donor_code_pv2", repeating=False),
-            **_cwe_fields(seg, 45, "advance_directive_code_pv2", repeating=True),
-            "patient_status_effective_date": _v(seg.get_field(46)),
-            "expected_loa_return_datetime": _parse_dtm(seg.get_field(47)),
-            "expected_preadmission_testing_datetime": _parse_dtm(seg.get_field(48)),
-            **_cwe_array_fields(seg, 49, "notify_clergy_code"),
-            "advance_directive_last_verified_date_pv2": _v(seg.get_field(50)),
-        }
-
-
-    def _extract_mrg(seg: HL7Segment) -> dict:
-        return {
-            **_cx_fields(seg, 1, "prior_patient_id", repeating=False),
-            "prior_alternate_patient_id": _v(seg.get_first_repetition(2)),
-            **_cx_fields(seg, 3, "prior_patient_account_number", repeating=False),
-            **_cx_fields(seg, 4, "prior_patient_id_mrg4", repeating=False),
-            **_cx_fields(seg, 5, "prior_visit_number", repeating=False),
-            **_cx_fields(seg, 6, "prior_alternate_visit_id", repeating=False),
-            **_xpn_array_fields(seg, 7, "prior_patient_names"),
-        }
-
-
-    def _extract_iam(seg: HL7Segment) -> dict:
-        return {
-            "set_id": _i(seg.get_field(1)) or 1,
-            **_cwe_fields(seg, 2, "allergen_type_code", repeating=False),
-            **_cwe_fields(seg, 3, "allergen_code", repeating=False),
-            **_cwe_fields(seg, 4, "allergy_severity_code", repeating=False),
-            **_cwe_fields(seg, 5, "allergy_reaction", repeating=True),
-            **_cwe_fields(seg, 6, "allergy_action_code", repeating=False),
-            **_ei_fields(seg, 7, "allergy_unique_identifier", repeating=False),
-            "action_reason": _v(seg.get_field(8)),
-            **_cwe_fields(seg, 9, "sensitivity_to_causative_agent_code", repeating=False),
-            **_cwe_fields(seg, 10, "allergen_group_code", repeating=False),
-            "onset_date": _v(seg.get_field(11)),
-            "onset_date_text": _v(seg.get_field(12)),
-            "reported_datetime": _parse_dtm(seg.get_field(13)),
-            **_xcn_fields(seg, 14, "reported_by"),
-            **_cwe_fields(seg, 15, "relationship_to_patient_code", repeating=False),
-            **_cwe_fields(seg, 16, "alert_device_code", repeating=False),
-            **_cwe_fields(seg, 17, "allergy_clinical_status_code", repeating=False),
-            **_xcn_fields(seg, 18, "statused_by_person", repeating=False),
-            **_xon_fields(seg, 19, "statused_by_organization", repeating=False),
-            "statused_at_datetime": _parse_dtm(seg.get_field(20)),
-            **_xcn_fields(seg, 21, "inactivated_by_person", repeating=False),
-            "inactivated_datetime": _parse_dtm(seg.get_field(22)),
-            **_xcn_fields(seg, 23, "initially_recorded_by_person", repeating=False),
-            "initially_recorded_datetime": _parse_dtm(seg.get_field(24)),
-            **_xcn_fields(seg, 25, "modified_by_person", repeating=False),
-            "modified_datetime": _parse_dtm(seg.get_field(26)),
-            **_cwe_fields(seg, 27, "clinician_identified_code", repeating=False),
-            **_xon_fields(seg, 28, "initially_recorded_by_organization", repeating=False),
-            **_xon_fields(seg, 29, "modified_by_organization", repeating=False),
-            **_xon_fields(seg, 30, "inactivated_by_organization", repeating=False),
-        }
-
-
-    def _extract_pr1(seg: HL7Segment) -> dict:
-        return {
-            "set_id": _i(seg.get_field(1)) or 1,
-            "procedure_coding_method": _v(seg.get_field(2)),
-            **_cwe_fields(seg, 3, "procedure_code", repeating=False),
-            "procedure_description": _v(seg.get_field(4)),
-            "procedure_datetime": _parse_dtm(seg.get_field(5)),
-            "procedure_functional_type": _v(seg.get_field(6)),
-            "procedure_minutes": _i(seg.get_field(7)),
-            **_xcn_fields(seg, 8, "anesthesiologist"),
-            "anesthesia_code": _v(seg.get_field(9)),
-            "anesthesia_minutes": _i(seg.get_field(10)),
-            **_xcn_fields(seg, 11, "surgeon"),
-            **_xcn_fields(seg, 12, "procedure_practitioner"),
-            **_cwe_fields(seg, 13, "consent_code", repeating=False),
-            "procedure_priority": _v(seg.get_field(14)),
-            **_cwe_fields(seg, 15, "associated_diagnosis_code", repeating=False),
-            **_cwe_fields(seg, 16, "procedure_code_modifier", repeating=True),
-            "procedure_drg_type": _v(seg.get_field(17)),
-            **_cwe_fields(seg, 18, "tissue_type_code", repeating=True),
-            **_ei_fields(seg, 19, "procedure_identifier", repeating=False),
-            "procedure_action_code": _v(seg.get_field(20)),
-            **_cwe_fields(seg, 21, "drg_procedure_determination_status", repeating=False),
-            **_cwe_fields(seg, 22, "drg_procedure_relevance", repeating=False),
-            "treating_organizational_unit": _v(seg.get_field(23)),
-            "respiratory_within_surgery": _v(seg.get_field(24)),
-            **_ei_fields(seg, 25, "parent_procedure_id", repeating=False),
-        }
-
-
-    def _extract_orc(seg: HL7Segment) -> dict:
-        return {
-            "order_control": _v(seg.get_field(1)),
-            **_ei_fields(seg, 2, "placer_order_number", repeating=False),
-            **_ei_fields(seg, 3, "filler_order_number", repeating=False),
-            **_ei_fields(seg, 4, "placer_group_number", repeating=False),
-            "order_status": _v(seg.get_field(5)),
-            "response_flag": _v(seg.get_field(6)),
-            "quantity_timing": _v(seg.get_first_repetition(7)),
-            "parent_order": _v(seg.get_field(8)),
-            "datetime_of_transaction": _parse_dtm(seg.get_field(9)),
-            **_xcn_fields(seg, 10, "entered_by"),
-            **_xcn_fields(seg, 11, "verified_by"),
-            **_xcn_fields(seg, 12, "ordering_provider"),
-            "enterers_location": _v(seg.get_field(13)),
-            **_xtn_fields(seg, 14, "call_back_phone", repeating=True),
-            "order_effective_datetime": _parse_dtm(seg.get_field(15)),
-            **_cwe_fields(seg, 16, "order_control_code_reason", repeating=False),
-            **_cwe_fields(seg, 17, "entering_organization", repeating=False),
-            **_cwe_fields(seg, 18, "entering_device", repeating=False),
-            **_xcn_fields(seg, 19, "action_by"),
-            **_cwe_fields(seg, 20, "advanced_beneficiary_notice_code", repeating=False),
-            **_xon_fields(seg, 21, "ordering_facility_name"),
-            **_xad_fields(seg, 22, "ordering_facility_address"),
-            **_xtn_fields(seg, 23, "ordering_facility_phone"),
-            **_xad_fields(seg, 24, "ordering_provider_address"),
-            **_cwe_fields(seg, 25, "order_status_modifier", repeating=False),
-            **_cwe_fields(seg, 26, "abn_override_reason", repeating=False),
-            "fillers_expected_availability_datetime": _parse_dtm(seg.get_field(27)),
-            **_cwe_fields(seg, 28, "confidentiality_code", repeating=False),
-            **_cwe_fields(seg, 29, "order_type", repeating=False),
-            **_cwe_fields(seg, 30, "enterer_authorization_mode", repeating=False),
-            **_cwe_fields(seg, 31, "parent_universal_service_id", repeating=False),
-            "advanced_beneficiary_notice_date": _v(seg.get_field(32)),
-            **_cx_fields(seg, 33, "alternate_placer_order_number", repeating=False),
-            **_ei_fields(seg, 34, "order_workflow_profile", repeating=False),
-            "orc_action_code": _v(seg.get_field(35)),
-            "order_status_date_range": _v(seg.get_field(36)),
-            "order_creation_datetime": _parse_dtm(seg.get_field(37)),
-            **_ei_fields(seg, 38, "filler_order_group_number", repeating=False),
-        }
-
-
-    def _extract_nte(seg: HL7Segment) -> dict:
-        return {
-            "set_id": _i(seg.get_field(1)) or 1,
-            "source_of_comment": _v(seg.get_field(2)),
-            "comment": _v(seg.get_first_repetition(3)),
-            **_cwe_fields(seg, 4, "comment_type", repeating=False),
-            **_xcn_fields(seg, 5, "entered_by", repeating=False),
-            "entered_datetime": _parse_dtm(seg.get_field(6)),
-            "effective_start_date": _parse_dtm(seg.get_field(7)),
-            "expiration_date": _parse_dtm(seg.get_field(8)),
-            **_cwe_fields(seg, 9, "coded_comment", repeating=False),
-        }
-
-
-    def _extract_spm(seg: HL7Segment) -> dict:
-        return {
-            "set_id": _i(seg.get_field(1)) or 1,
-            **_ei_fields(seg, 2, "specimen_id", repeating=False),
-            "specimen_parent_ids": _v(seg.get_rep_component(3, 1, 1)),
-            **_cwe_fields(seg, 4, "specimen_type", repeating=False),
-            **_cwe_fields(seg, 5, "specimen_type_modifier", repeating=True),
-            **_cwe_fields(seg, 6, "specimen_additives", repeating=True),
-            **_cwe_fields(seg, 7, "specimen_collection_method", repeating=False),
-            **_cwe_fields(seg, 8, "specimen_source_site", repeating=False),
-            **_cwe_fields(seg, 9, "specimen_source_site_modifier", repeating=True),
-            **_cwe_fields(seg, 10, "specimen_collection_site", repeating=False),
-            **_cwe_fields(seg, 11, "specimen_role", repeating=True),
-            "specimen_collection_amount": _v(seg.get_component(12, 1)),
-            "grouped_specimen_count": _i(seg.get_field(13)),
-            "specimen_description": _v(seg.get_first_repetition(14)),
-            **_cwe_fields(seg, 15, "specimen_handling_code", repeating=True),
-            **_cwe_fields(seg, 16, "specimen_risk_code", repeating=True),
-            "specimen_collection_datetime": _v(seg.get_component(17, 1)),
-            "specimen_received_datetime": _parse_dtm(seg.get_field(18)),
-            "specimen_expiration_datetime": _parse_dtm(seg.get_field(19)),
-            "specimen_availability": _v(seg.get_field(20)),
-            **_cwe_fields(seg, 21, "specimen_reject_reason", repeating=True),
-            **_cwe_fields(seg, 22, "specimen_quality", repeating=False),
-            **_cwe_fields(seg, 23, "specimen_appropriateness", repeating=False),
-            **_cwe_fields(seg, 24, "specimen_condition", repeating=True),
-            "specimen_current_quantity": _v(seg.get_component(25, 1)),
-            "number_of_specimen_containers": _i(seg.get_field(26)),
-            **_cwe_fields(seg, 27, "container_type", repeating=False),
-            **_cwe_fields(seg, 28, "container_condition", repeating=False),
-            **_cwe_fields(seg, 29, "specimen_child_role", repeating=False),
-            **_cx_fields(seg, 30, "accession_id", repeating=False),
-            **_cx_fields(seg, 31, "other_specimen_id", repeating=False),
-            **_ei_fields(seg, 32, "shipment_id", repeating=False),
-            "culture_start_datetime": _parse_dtm(seg.get_field(33)),
-            "culture_final_datetime": _parse_dtm(seg.get_field(34)),
-            "spm_action_code": _v(seg.get_field(35)),
-        }
-
-
-    def _extract_in1(seg: HL7Segment) -> dict:
-        return {
-            "set_id": _i(seg.get_field(1)) or 1,
-            **_cwe_fields(seg, 2, "insurance_plan", repeating=False),
-            **_xon_fields(seg, 3, "insurance_company"),
-            **_xon_fields(seg, 4, "insurance_company_name"),
-            **_xad_fields(seg, 5, "insurance_company_address"),
-            **_xpn_array_fields(seg, 6, "insurance_co_contacts"),
-            **_xtn_fields(seg, 7, "insurance_co_phone_number"),
-            "group_number": _v(seg.get_field(8)),
-            **_xon_fields(seg, 9, "group_name"),
-            **_xon_fields(seg, 10, "insureds_group_emp"),
-            **_xon_fields(seg, 11, "insureds_group_emp_name"),
-            "plan_effective_date": _v(seg.get_field(12)),
-            "plan_expiration_date": _v(seg.get_field(13)),
-            "authorization_information": _v(seg.get_component(14, 1)),
-            "plan_type": _v(seg.get_field(15)),
-            **_xpn_array_fields(seg, 16, "insured_names"),
-            **_cwe_fields(seg, 17, "insureds_relationship_to_patient", repeating=False),
-            "insureds_date_of_birth": _parse_dtm(seg.get_field(18)),
-            **_xad_fields(seg, 19, "insureds_address"),
-            "assignment_of_benefits": _v(seg.get_field(20)),
-            "coordination_of_benefits": _v(seg.get_field(21)),
-            "coord_of_ben_priority": _v(seg.get_field(22)),
-            "notice_of_admission_flag": _v(seg.get_field(23)),
-            "notice_of_admission_date": _v(seg.get_field(24)),
-            "report_of_eligibility_flag": _v(seg.get_field(25)),
-            "report_of_eligibility_date": _v(seg.get_field(26)),
-            "release_information_code": _v(seg.get_field(27)),
-            "pre_admit_cert": _v(seg.get_field(28)),
-            "verification_datetime": _parse_dtm(seg.get_field(29)),
-            **_xcn_fields(seg, 30, "verification_by"),
-            "type_of_agreement_code": _v(seg.get_field(31)),
-            "billing_status": _v(seg.get_field(32)),
-            "lifetime_reserve_days": _i(seg.get_field(33)),
-            "delay_before_lr_day": _i(seg.get_field(34)),
-            "company_plan_code": _v(seg.get_field(35)),
-            "policy_number": _v(seg.get_field(36)),
-            "policy_deductible": _v(seg.get_component(37, 1)),
-            "policy_limit_amount": _v(seg.get_component(38, 1)),
-            "policy_limit_days": _i(seg.get_field(39)),
-            "room_rate_semi_private": _v(seg.get_component(40, 1)),
-            "room_rate_private": _v(seg.get_component(41, 1)),
-            **_cwe_fields(seg, 42, "insureds_employment_status", repeating=False),
-            **_cwe_fields(seg, 43, "insureds_administrative_sex", repeating=False),
-            **_xad_fields(seg, 44, "insureds_employers_address"),
-            "verification_status": _v(seg.get_field(45)),
-            "prior_insurance_plan_id": _v(seg.get_field(46)),
-            "coverage_type": _v(seg.get_field(47)),
-            "handicap": _v(seg.get_field(48)),
-            **_cx_fields(seg, 49, "insureds_id_number"),
-            "signature_code": _v(seg.get_field(50)),
-            "signature_code_date": _v(seg.get_field(51)),
-            "insureds_birth_place": _v(seg.get_field(52)),
-            "vip_indicator": _v(seg.get_field(53)),
-            "external_health_plan_identifiers": _v(seg.get_component(54, 1)),
-            "insurance_action_code": _v(seg.get_field(55)),
-        }
-
-
-    def _extract_gt1(seg: HL7Segment) -> dict:
-        return {
-            "set_id": _i(seg.get_field(1)) or 1,
-            **_cx_fields(seg, 2, "guarantor_number"),
-            **_xpn_array_fields(seg, 3, "guarantor_names"),
-            **_xpn_array_fields(seg, 4, "guarantor_spouse_names"),
-            **_xad_fields(seg, 5, "guarantor_address"),
-            **_xtn_fields(seg, 6, "guarantor_ph_num_home"),
-            **_xtn_fields(seg, 7, "guarantor_ph_num_business"),
-            "guarantor_date_of_birth": _parse_dtm(seg.get_field(8)),
-            **_cwe_fields(seg, 9, "guarantor_administrative_sex", repeating=False),
-            "guarantor_type": _v(seg.get_field(10)),
-            **_cwe_fields(seg, 11, "guarantor_relationship", repeating=False),
-            "guarantor_ssn": _v(seg.get_field(12)),
-            "guarantor_date_begin": _v(seg.get_field(13)),
-            "guarantor_date_end": _v(seg.get_field(14)),
-            "guarantor_priority": _i(seg.get_field(15)),
-            **_xpn_array_fields(seg, 16, "guarantor_employer_names"),
-            **_xad_fields(seg, 17, "guarantor_employer_address"),
-            **_xtn_fields(seg, 18, "guarantor_employer_phone_number"),
-            **_cx_fields(seg, 19, "guarantor_employee_id_number"),
-            "guarantor_employment_status": _v(seg.get_field(20)),
-            **_xon_fields(seg, 21, "guarantor_organization_name"),
-            "guarantor_billing_hold_flag": _v(seg.get_field(22)),
-            **_cwe_fields(seg, 23, "guarantor_credit_rating_code", repeating=False),
-            "guarantor_death_date_and_time": _parse_dtm(seg.get_field(24)),
-            "guarantor_death_flag": _v(seg.get_field(25)),
-            **_cwe_fields(seg, 26, "guarantor_charge_adjustment_code", repeating=False),
-            "guarantor_household_annual_income": _v(seg.get_component(27, 1)),
-            "guarantor_household_size": _i(seg.get_field(28)),
-            **_cx_fields(seg, 29, "guarantor_employer_id_number"),
-            **_cwe_fields(seg, 30, "guarantor_marital_status_code", repeating=False),
-            "guarantor_hire_effective_date": _v(seg.get_field(31)),
-            "employment_stop_date": _v(seg.get_field(32)),
-            "living_dependency": _v(seg.get_field(33)),
-            "ambulatory_status": _v(seg.get_first_repetition(34)),
-            **_cwe_fields(seg, 35, "citizenship", repeating=True),
-            **_cwe_fields(seg, 36, "primary_language", repeating=False),
-            "living_arrangement": _v(seg.get_field(37)),
-            **_cwe_fields(seg, 38, "publicity_code", repeating=False),
-            "protection_indicator": _v(seg.get_field(39)),
-            "student_indicator": _v(seg.get_field(40)),
-            **_cwe_fields(seg, 41, "religion", repeating=False),
-            **_xpn_array_fields(seg, 42, "gt1_mothers_maiden_names"),
-            **_cwe_fields(seg, 43, "nationality", repeating=False),
-            **_cwe_fields(seg, 44, "ethnic_group", repeating=True),
-            **_xpn_array_fields(seg, 45, "gt1_contact_persons"),
-            **_xtn_fields(seg, 46, "contact_persons_telephone_number"),
-            **_cwe_fields(seg, 47, "contact_reason", repeating=False),
-            "contact_relationship": _v(seg.get_field(48)),
-            "job_title": _v(seg.get_field(49)),
-            **_cwe_fields(seg, 50, "job_code_class", repeating=False),
-            **_xon_fields(seg, 51, "guarantor_employers_org_name"),
-            "handicap": _v(seg.get_field(52)),
-            "job_status": _v(seg.get_field(53)),
-            "guarantor_financial_class": _v(seg.get_component(54, 1)),
-            **_cwe_fields(seg, 55, "guarantor_race", repeating=True),
-            "guarantor_birth_place": _v(seg.get_field(56)),
-            "vip_indicator": _v(seg.get_field(57)),
-        }
-
-
-    def _extract_ft1(seg: HL7Segment) -> dict:
-        return {
-            "set_id": _i(seg.get_field(1)) or 1,
-            "transaction_id": _v(seg.get_field(2)),
-            "transaction_batch_id": _v(seg.get_field(3)),
-            "transaction_date": _v(seg.get_component(4, 1)),
-            "transaction_posting_date": _parse_dtm(seg.get_field(5)),
-            "transaction_type": _v(seg.get_field(6)),
-            **_cwe_fields(seg, 7, "transaction_code", repeating=False),
-            "transaction_description": _v(seg.get_field(8)),
-            "transaction_description_alt": _v(seg.get_field(9)),
-            "transaction_quantity": _i(seg.get_field(10)),
-            "transaction_amount_extended": _v(seg.get_component(11, 1)),
-            "transaction_amount_unit": _v(seg.get_component(12, 1)),
-            **_cwe_fields(seg, 13, "department_code", repeating=False),
-            "insurance_plan_id": _v(seg.get_component(14, 1)),
-            "insurance_amount": _v(seg.get_component(15, 1)),
-            "assigned_patient_location": _v(seg.get_field(16)),
-            "fee_schedule": _v(seg.get_field(17)),
-            "patient_type": _v(seg.get_field(18)),
-            **_cwe_fields(seg, 19, "diagnosis_code", repeating=True),
-            **_xcn_fields(seg, 20, "performed_by"),
-            **_xcn_fields(seg, 21, "ordered_by"),
-            "unit_cost": _v(seg.get_component(22, 1)),
-            **_ei_fields(seg, 23, "filler_order_number", repeating=False),
-            **_xcn_fields(seg, 24, "entered_by"),
-            **_cwe_fields(seg, 25, "ft1_procedure_code", repeating=False),
-            **_cwe_fields(seg, 26, "ft1_procedure_code_modifier", repeating=True),
-            "advanced_beneficiary_notice_code": _v(seg.get_component(27, 1)),
-            "medically_necessary_dup_proc_reason": _v(seg.get_component(28, 1)),
-            "ndc_code": _v(seg.get_component(29, 1)),
-            "payment_reference_id": _v(seg.get_component(30, 1)),
-            "transaction_reference_key": _v(seg.get_first_repetition(31)),
-            "performing_facility": _v(seg.get_component(32, 1)),
-            "ordering_facility": _v(seg.get_component(33, 1)),
-            "item_number": _v(seg.get_component(34, 1)),
-            "model_number": _v(seg.get_field(35)),
-            "special_processing_code": _v(seg.get_component(36, 1)),
-            "clinic_code": _v(seg.get_component(37, 1)),
-            "referral_number": _v(seg.get_component(38, 1)),
-            "authorization_number": _v(seg.get_component(39, 1)),
-            "service_provider_taxonomy_code": _v(seg.get_component(40, 1)),
-            "revenue_code": _v(seg.get_component(41, 1)),
-            "prescription_number": _v(seg.get_field(42)),
-            "ndc_qty_and_uom": _v(seg.get_field(43)),
-            "dme_certificate_of_medical_necessity_transmission_code": _v(seg.get_component(44, 1)),
-            "dme_certification_type_code": _v(seg.get_component(45, 1)),
-            "dme_duration_value": _v(seg.get_field(46)),
-            "dme_certification_revision_date": _v(seg.get_field(47)),
-            "dme_initial_certification_date": _v(seg.get_field(48)),
-            "dme_last_certification_date": _v(seg.get_field(49)),
-            "dme_length_of_medical_necessity_days": _v(seg.get_field(50)),
-            "dme_rental_price": _v(seg.get_field(51)),
-            "dme_purchase_price": _v(seg.get_field(52)),
-            "dme_frequency_code": _v(seg.get_component(53, 1)),
-            "dme_certification_condition_indicator": _v(seg.get_field(54)),
-            "dme_condition_indicator_code": _v(seg.get_component(55, 1)),
-            "service_reason_code": _v(seg.get_component(56, 1)),
-        }
-
-
-    def _extract_rxa(seg: HL7Segment) -> dict:
-        return {
-            "set_id": _i(seg.get_field(1)) or 1,
-            "administration_sub_id_counter": _i(seg.get_field(2)),
-            "datetime_start_of_administration": _parse_dtm(seg.get_field(3)),
-            "datetime_end_of_administration": _parse_dtm(seg.get_field(4)),
-            **_cwe_fields(seg, 5, "administered_code", repeating=False),
-            "administered_amount": _v(seg.get_field(6)),
-            **_cwe_fields(seg, 7, "administered_units", repeating=False),
-            **_cwe_fields(seg, 8, "administered_dosage_form", repeating=False),
-            **_cwe_fields(seg, 9, "administration_notes", repeating=True),
-            **_xcn_fields(seg, 10, "administering_provider"),
-            "administered_at_location": _v(seg.get_field(11)),
-            "administered_per_time_unit": _v(seg.get_field(12)),
-            "administered_strength": _v(seg.get_field(13)),
-            "administered_strength_units": _v(seg.get_component(14, 1)),
-            "substance_lot_number": _v(seg.get_first_repetition(15)),
-            "substance_expiration_date": _parse_dtm(seg.get_first_repetition(16)),
-            **_cwe_fields(seg, 17, "substance_manufacturer_name", repeating=True),
-            **_cwe_fields(seg, 18, "substance_treatment_refusal_reason", repeating=True),
-            **_cwe_fields(seg, 19, "indication", repeating=True),
-            "completion_status": _v(seg.get_field(20)),
-            "action_code_rxa": _v(seg.get_field(21)),
-            "system_entry_datetime": _parse_dtm(seg.get_field(22)),
-            "administered_drug_strength_volume": _v(seg.get_field(23)),
-            "administered_drug_strength_volume_units": _v(seg.get_component(24, 1)),
-            "administered_barcode_identifier": _v(seg.get_component(25, 1)),
-            "pharmacy_order_type": _v(seg.get_field(26)),
-            "administer_at": _v(seg.get_field(27)),
-            "administered_at_address": _v(seg.get_field(28)),
-            "administered_tag_identifier": _v(seg.get_component(29, 1)),
-        }
-
-
-    def _extract_sch(seg: HL7Segment) -> dict:
-        return {
-            **_ei_fields(seg, 1, "placer_appointment_id", repeating=False),
-            **_ei_fields(seg, 2, "filler_appointment_id", repeating=False),
-            "occurrence_number": _i(seg.get_field(3)),
-            **_ei_fields(seg, 4, "placer_group_number", repeating=False),
-            **_cwe_fields(seg, 5, "schedule_id", repeating=False),
-            **_cwe_fields(seg, 6, "event_reason", repeating=False),
-            **_cwe_fields(seg, 7, "appointment_reason", repeating=False),
-            **_cwe_fields(seg, 8, "appointment_type", repeating=False),
-            "appointment_duration": _i(seg.get_field(9)),
-            **_cwe_fields(seg, 10, "appointment_duration_units", repeating=False),
-            "appointment_timing_quantity": _v(seg.get_first_repetition(11)),
-            **_xcn_fields(seg, 12, "placer_contact_person"),
-            **_xtn_fields(seg, 13, "placer_contact_phone_number", repeating=False),
-            **_xad_fields(seg, 14, "placer_contact_address"),
-            "placer_contact_location": _v(seg.get_field(15)),
-            **_xcn_fields(seg, 16, "filler_contact_person"),
-            **_xtn_fields(seg, 17, "filler_contact_phone_number", repeating=False),
-            **_xad_fields(seg, 18, "filler_contact_address"),
-            "filler_contact_location": _v(seg.get_field(19)),
-            **_xcn_fields(seg, 20, "entered_by_person"),
-            **_xtn_fields(seg, 21, "entered_by_phone_number", repeating=False),
-            "entered_by_location": _v(seg.get_field(22)),
-            **_ei_fields(seg, 23, "parent_placer_appointment_id", repeating=False),
-            **_ei_fields(seg, 24, "parent_filler_appointment_id", repeating=False),
-            **_cwe_fields(seg, 25, "filler_status_code", repeating=False),
-            **_ei_fields(seg, 26, "sch_placer_order_number", repeating=True),
-            **_ei_fields(seg, 27, "sch_filler_order_number", repeating=True),
-            **_ei_fields(seg, 28, "alternate_placer_order_group_number", repeating=False),
-        }
-
-
-    def _extract_txa(seg: HL7Segment) -> dict:
-        return {
-            "set_id": _i(seg.get_field(1)) or 1,
-            "document_type": _v(seg.get_field(2)),
-            "document_content_presentation": _v(seg.get_field(3)),
-            "activity_datetime": _parse_dtm(seg.get_field(4)),
-            **_xcn_fields(seg, 5, "primary_activity_provider"),
-            "origination_datetime": _parse_dtm(seg.get_field(6)),
-            "transcription_datetime": _parse_dtm(seg.get_field(7)),
-            "edit_datetime": _parse_dtm(seg.get_first_repetition(8)),
-            **_xcn_fields(seg, 9, "originator"),
-            **_xcn_fields(seg, 10, "assigned_document_authenticator"),
-            **_xcn_fields(seg, 11, "transcriptionist"),
-            **_ei_fields(seg, 12, "unique_document_number", repeating=False),
-            **_ei_fields(seg, 13, "parent_document_number", repeating=False),
-            **_ei_fields(seg, 14, "placer_order_number", repeating=True),
-            **_ei_fields(seg, 15, "filler_order_number", repeating=False),
-            "unique_document_file_name": _v(seg.get_field(16)),
-            "document_completion_status": _v(seg.get_field(17)),
-            "document_confidentiality_status": _v(seg.get_field(18)),
-            "document_availability_status": _v(seg.get_field(19)),
-            "document_storage_status": _v(seg.get_field(20)),
-            "document_change_reason": _v(seg.get_field(21)),
-            "authentication_person_time_stamp": _v(seg.get_first_repetition(22)),
-            **_xcn_fields(seg, 23, "distributed_copies"),
-            **_cwe_fields(seg, 24, "folder_assignment", repeating=False),
-            "document_title": _v(seg.get_field(25)),
-            "agreed_due_datetime": _parse_dtm(seg.get_field(26)),
-            **_hd_fields(seg, 27, "creating_facility", repeating=False),
-            **_cwe_fields(seg, 28, "creating_specialty", repeating=False),
-        }
-
-
-    def _extract_generic(seg: HL7Segment) -> dict:
-        """Fallback extractor for Z-segments and unknown segment types."""
-        return {"segment_type": seg.segment_type} | {
-            f"field_{i}": _v(seg.get_field(i)) for i in range(1, 26)
-        }
-
-
-    _EXTRACTORS = {
-        "msh": _extract_msh,
-        "evn": _extract_evn,
-        "pid": _extract_pid,
-        "pd1": _extract_pd1,
-        "pv1": _extract_pv1,
-        "pv2": _extract_pv2,
-        "nk1": _extract_nk1,
-        "mrg": _extract_mrg,
-        "al1": _extract_al1,
-        "iam": _extract_iam,
-        "dg1": _extract_dg1,
-        "pr1": _extract_pr1,
-        "orc": _extract_orc,
-        "obr": _extract_obr,
-        "obx": _extract_obx,
-        "nte": _extract_nte,
-        "spm": _extract_spm,
-        "in1": _extract_in1,
-        "gt1": _extract_gt1,
-        "ft1": _extract_ft1,
-        "rxa": _extract_rxa,
-        "sch": _extract_sch,
-        "txa": _extract_txa,
-    }
-
-
-    # ---------------------------------------------------------------------------
-    # Multi-message splitter
-    # ---------------------------------------------------------------------------
-
-
-    def _split_messages(text: str) -> list[str]:
-        """Split an HL7 batch into individual message strings.
-
-        Each message starts with an MSH line.  FHS/BHS/BTS/FTS batch-envelope
-        segments are skipped.
-        """
-        normalised = text.strip().replace("\r\n", "\r").replace("\n", "\r")
-        lines = normalised.split("\r")
-
-        messages: list[str] = []
-        current: list[str] = []
-        _ENVELOPE = {"FHS", "BHS", "BTS", "FTS"}
-
-        for line in lines:
-            if not line.strip():
-                continue
-            seg_type = line[:3].upper()
-            if seg_type in _ENVELOPE:
-                continue
-            if seg_type == "MSH":
-                if current:
-                    messages.append("\r".join(current))
-                current = [line]
-            else:
-                current.append(line)
-
-        if current:
-            messages.append("\r".join(current))
-
-        return messages
 
 
     # ---------------------------------------------------------------------------
@@ -4255,7 +5379,13 @@ def register_lakeflow_source(spark):
                 ``window_seconds`` is large or messages are dense.
         """
 
-        _GCP_REQUIRED_KEYS = ("project_id", "location", "dataset_id", "hl7v2_store_id", "service_account_json")
+        _GCP_REQUIRED_KEYS = (
+            "project_id",
+            "location",
+            "dataset_id",
+            "hl7v2_store_id",
+            "service_account_json",
+        )
 
         def __init__(self, options: dict[str, str]) -> None:
             super().__init__(options)
@@ -4274,10 +5404,6 @@ def register_lakeflow_source(spark):
                 )
 
         def _init_gcp(self, options: dict[str, str]) -> None:
-            import requests
-            from google.auth.transport import requests as google_auth_requests
-            from google.oauth2 import service_account as google_sa
-
             for key in self._GCP_REQUIRED_KEYS:
                 if key not in options:
                     raise ValueError(f"'{key}' is required in connector options for source_type 'gcp'.")
@@ -4299,12 +5425,19 @@ def register_lakeflow_source(spark):
             self._session = requests.Session()
             self._creds.refresh(self._google_request)
 
-        _DELTA_REQUIRED_KEYS = ("delta_table_name", "databricks_host", "databricks_token", "sql_warehouse_id")
+        _DELTA_REQUIRED_KEYS = (
+            "delta_table_name",
+            "databricks_host",
+            "databricks_token",
+            "sql_warehouse_id",
+        )
 
         def _init_delta(self, options: dict[str, str]) -> None:
             for key in self._DELTA_REQUIRED_KEYS:
                 if key not in options:
-                    raise ValueError(f"'{key}' is required in connector options for source_type 'delta'.")
+                    raise ValueError(
+                        f"'{key}' is required in connector options for source_type 'delta'."
+                    )
             self._delta_table = options["delta_table_name"]
             self._dbx_host = options["databricks_host"]
             self._dbx_token = options["databricks_token"]
@@ -4438,7 +5571,6 @@ def register_lakeflow_source(spark):
                 "ingestion_type": "append",
                 "cursor_field": "create_time",
                 "primary_keys": pks,
-                "description": TABLE_DESCRIPTIONS.get(segment_type, ""),
             }
 
         def read_table(
@@ -4588,7 +5720,6 @@ def register_lakeflow_source(spark):
             return messages
 
         def _create_workspace_client(self):
-            from databricks.sdk import WorkspaceClient
             return WorkspaceClient(host=self._dbx_host, token=self._dbx_token)
 
         def _execute_delta_sql(self, stmt: str) -> list[list[str]]:
@@ -4794,9 +5925,10 @@ def register_lakeflow_source(spark):
                             records.append(meta | _extract_msh(msh) | {"raw_segment": msh.raw_line})
                     else:
                         extractor = _EXTRACTORS.get(segment_type.lower(), _extract_generic)
+                        is_multi_segment = segment_type.lower() not in _SINGLE_SEGMENT_TABLES
                         for idx, seg in enumerate(msg.get_segments(segment_type), start=1):
                             row = meta | extractor(seg) | {"raw_segment": seg.raw_line}
-                            if segment_type.lower() not in _SINGLE_SEGMENT_TABLES and "set_id" not in row:
+                            if is_multi_segment and "set_id" not in row:
                                 row["set_id"] = idx
                             records.append(row)
 
@@ -4809,11 +5941,58 @@ def register_lakeflow_source(spark):
 
     LakeflowConnectImpl = HL7V2LakeflowConnect
     # Constant option or column names
-    METADATA_TABLE = "_lakeflow_metadata"
+    METADATA_TABLE = "_community_table_metadata"
+    NAMESPACES_TABLE = "_community_namespaces"
+    TABLES_TABLE = "_community_tables"
+    VIRTUAL_TABLES = (METADATA_TABLE, NAMESPACES_TABLE, TABLES_TABLE)
     TABLE_NAME = "tableName"
     TABLE_NAME_LIST = "tableNameList"
     TABLE_CONFIGS = "tableConfigs"
     IS_DELETE_FLOW = "isDeleteFlow"
+    NAMESPACE_PREFIX = "namespacePrefix"
+    NAMESPACE = "namespace"
+
+
+    def _decode_list_of_str_option(option_name: str, value: str | None) -> list[str] | None:
+        """Decode and validate a JSON-encoded ``list[str]`` Spark option.
+
+        Returns ``None`` if the option is absent; otherwise the parsed list.
+        Raises ``ValueError`` with the offending value if the JSON is malformed
+        or the decoded value is not a list of strings.
+        """
+        if value is None:
+            return None
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded list[str]; "
+                f"got non-JSON value: {value!r}"
+            ) from e
+        if not isinstance(decoded, list) or not all(isinstance(s, str) for s in decoded):
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded list[str]; "
+                f"got: {decoded!r}"
+            )
+        return decoded
+
+
+    def _decode_dict_option(option_name: str, value: str | None) -> dict:
+        """Decode and validate a JSON-encoded ``dict`` Spark option."""
+        if value is None:
+            return {}
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded dict; "
+                f"got non-JSON value: {value!r}"
+            ) from e
+        if not isinstance(decoded, dict):
+            raise ValueError(
+                f"option '{option_name}' must be a JSON-encoded dict; got: {decoded!r}"
+            )
+        return decoded
 
 
     # PySpark's DataSource API requires camelCase method names and inherits
@@ -4945,7 +6124,7 @@ def register_lakeflow_source(spark):
             self._supports_partition = isinstance(lakeflow_connect, SupportsPartition)
 
         def partitions(self):
-            if self._supports_partition and self.table_name != METADATA_TABLE:
+            if self._supports_partition and self.table_name not in VIRTUAL_TABLES:
                 try:
                     partition_descs = self.lakeflow_connect.get_partitions(
                         self.table_name, self.options
@@ -4958,6 +6137,10 @@ def register_lakeflow_source(spark):
         def read(self, partition):
             if self.table_name == METADATA_TABLE:
                 records = self._read_table_metadata()
+            elif self.table_name == NAMESPACES_TABLE:
+                records = self._read_namespaces()
+            elif self.table_name == TABLES_TABLE:
+                records = self._read_tables()
             elif self._supports_partition and partition.value is not None:
                 partition_desc = json.loads(partition.value)
                 records = self.lakeflow_connect.read_partition(
@@ -4968,16 +6151,65 @@ def register_lakeflow_source(spark):
             return map(lambda x: parse_value(x, self.schema), records)
 
         def _read_table_metadata(self):
-            table_name_list = self.options.get(TABLE_NAME_LIST, "")
-            table_names = [o.strip() for o in table_name_list.split(",") if o.strip()]
+            table_names = _decode_list_of_str_option(
+                TABLE_NAME_LIST, self.options.get(TABLE_NAME_LIST)
+            ) or []
+            table_configs = _decode_dict_option(
+                TABLE_CONFIGS, self.options.get(TABLE_CONFIGS)
+            )
             all_records = []
-            table_configs = json.loads(self.options.get(TABLE_CONFIGS, "{}"))
+            # Preserve caller-supplied table order — caller controls it.
             for table in table_names:
                 metadata = self.lakeflow_connect.read_table_metadata(
                     table, table_configs.get(table, {})
                 )
                 all_records.append({TABLE_NAME: table, **metadata})
             return all_records
+
+        def _read_namespaces(self):
+            # Connectors without SupportsNamespaces are flat — no rows.
+            if not isinstance(self.lakeflow_connect, SupportsNamespaces):
+                return []
+            prefix = _decode_list_of_str_option(
+                NAMESPACE_PREFIX, self.options.get(NAMESPACE_PREFIX)
+            )
+            namespaces = self.lakeflow_connect.list_namespaces(prefix)
+            # Sort framework-side for deterministic output regardless of
+            # connector iteration order.
+            return [{"namespace": ns} for ns in sorted(namespaces)]
+
+        def _read_tables(self):
+            namespace_supplied = NAMESPACE in self.options
+            if isinstance(self.lakeflow_connect, SupportsNamespaces):
+                if not namespace_supplied:
+                    raise ValueError(
+                        f"option '{NAMESPACE}' is required when reading "
+                        f"'{TABLES_TABLE}' against a connector that implements "
+                        f"SupportsNamespaces. Pass a JSON-encoded list[str] "
+                        f"(use '[]' for root-level tables; walk the tree via "
+                        f"'{NAMESPACES_TABLE}' to enumerate every namespace)."
+                    )
+                namespace = _decode_list_of_str_option(
+                    NAMESPACE, self.options[NAMESPACE]
+                )
+                tables = self.lakeflow_connect.list_tables_in_namespace(namespace)
+                return [
+                    {"namespace": namespace, "table_name": tn}
+                    for tn in sorted(tables)
+                ]
+            # Flat connector path. Reject a stray `namespace` option — the
+            # caller probably mistook this connector for namespace-aware and
+            # silently ignoring the option would mask the bug.
+            if namespace_supplied:
+                raise ValueError(
+                    f"option '{NAMESPACE}' was supplied but the connector does "
+                    f"not implement SupportsNamespaces. Either omit the option "
+                    f"or use a namespace-aware connector."
+                )
+            return [
+                {"namespace": [], "table_name": tn}
+                for tn in sorted(self.lakeflow_connect.list_tables())
+            ]
 
 
     class LakeflowSource(DataSource):
@@ -4987,6 +6219,17 @@ def register_lakeflow_source(spark):
 
         def __init__(self, options):
             self.options = options
+            table = options.get(TABLE_NAME)
+            # Catch typos against the framework's reserved virtual-table namespace
+            # early — falling through to the connector with an unknown
+            # `_community_*` name yields a confusing per-connector error.
+            if table and table.startswith("_community_") and table not in VIRTUAL_TABLES:
+                raise ValueError(
+                    f"unknown framework virtual table '{table}'. Valid framework "
+                    f"virtual tables are: {', '.join(VIRTUAL_TABLES)}. "
+                    f"For a regular source table, use a name that does not start "
+                    f"with '_community_'."
+                )
             # TEMPORARY: LakeflowConnectImpl is replaced with the actual implementation
             # class during merge. See the placeholder comment at the top of this file.
             self.lakeflow_connect = LakeflowConnectImpl(options)  # pylint: disable=abstract-class-instantiated
@@ -5006,8 +6249,20 @@ def register_lakeflow_source(spark):
                         StructField("ingestion_type", StringType(), True),
                     ]
                 )
-            else:
-                return self.lakeflow_connect.get_table_schema(table, self.options)
+            if table == NAMESPACES_TABLE:
+                return StructType(
+                    [
+                        StructField("namespace", ArrayType(StringType()), False),
+                    ]
+                )
+            if table == TABLES_TABLE:
+                return StructType(
+                    [
+                        StructField("namespace", ArrayType(StringType()), False),
+                        StructField("table_name", StringType(), False),
+                    ]
+                )
+            return self.lakeflow_connect.get_table_schema(table, self.options)
 
         def reader(self, schema: StructType):
             return LakeflowBatchReader(self.options, schema, self.lakeflow_connect)

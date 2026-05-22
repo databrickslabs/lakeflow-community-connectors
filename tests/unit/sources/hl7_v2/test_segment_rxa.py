@@ -5,7 +5,7 @@ lot number, manufacturer, completion status, timestamps.
 """
 from __future__ import annotations
 
-from tests.unit.sources.hl7_v2._helpers import extract_segment, load_sample, parse_first
+from tests.unit.sources.hl7_v2.hl7_v2_test_utils import extract_segment, load_sample, parse_first
 
 from databricks.labs.community_connector.sources.hl7_v2.hl7_v2 import _extract_rxa
 from databricks.labs.community_connector.sources.hl7_v2.hl7_v2_parser import (
@@ -21,8 +21,10 @@ class TestRXAExtraction:
         assert row["administered_code_text"] == "Influenza, seasonal, injectable"
         assert row["administered_amount"] == "0.5"
         assert row["administered_units"] == "mL"
-        assert row["substance_lot_number"] == "LT12345"
-        assert row["substance_manufacturer_name"] == "MFR001"
+        # RXA-15 is now ArrayType<STRING> (0..* per spec, v2.9+)
+        assert row["substance_lot_number"][0] == "LT12345"
+        # RXA-17 substance_manufacturer_name is ArrayType<CWE> (0..* per spec).
+        assert row["substance_manufacturer_name"][0]["code"] == "MFR001"
         assert row["completion_status"] == "CP"
         assert row["datetime_start_of_administration"] is not None
         assert row["datetime_end_of_administration"] is not None

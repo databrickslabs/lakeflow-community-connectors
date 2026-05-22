@@ -5,7 +5,7 @@ to patient. Multiple GT1 segments can appear per message.
 """
 from __future__ import annotations
 
-from tests.unit.sources.hl7_v2._helpers import extract_segment, load_sample, parse_first, segments_of_type
+from tests.unit.sources.hl7_v2.hl7_v2_test_utils import extract_segment, load_sample, parse_first, segments_of_type
 
 from databricks.labs.community_connector.sources.hl7_v2.hl7_v2 import _extract_gt1
 from databricks.labs.community_connector.sources.hl7_v2.hl7_v2_parser import (
@@ -60,3 +60,37 @@ class TestGT1MissingFields:
         row = _extract_gt1(msg.get_segment("GT1"))
         assert row["guarantor_names"][0]["family_name"] == "Jones"
         assert row["guarantor_names"][0]["given_name"] == "Robert"
+
+
+class TestGT1NewComposites:
+    """GT1-13/14/31/32 (DT), GT1-50 JCC, GT1-54 FC."""
+
+    def test_gt1_jcc_fc_and_dates(self):
+        fields = {
+            1: "1",
+            3: "Jones^Robert",
+            13: "20240101",
+            14: "20241231",
+            31: "20200315",
+            32: "20240601",
+            50: "ENG&Engineer&L^MGMT&Management&L^Senior Eng",
+            54: "PPO&Preferred Provider&L^20240101",
+        }
+        seg_fields = [fields.get(i, "") for i in range(1, 55)]
+        msg = parse_message(
+            "MSH|^~\\&|A|B|C|D|20240101||ADT^A01|1|P|2.5\r"
+            "GT1|" + "|".join(seg_fields)
+        )
+        row = _extract_gt1(msg.get_segment("GT1"))
+        assert row["guarantor_date_begin"] is not None
+        assert row["guarantor_date_end"] is not None
+        assert row["guarantor_hire_effective_date"] is not None
+        assert row["employment_stop_date"] is not None
+        assert row["job_code_class"] == "ENG"
+        assert row["job_code_class_text"] == "Engineer"
+        assert row["job_code_class_class"] == "MGMT"
+        assert row["job_code_class_class_text"] == "Management"
+        assert row["job_code_class_description"] == "Senior Eng"
+        assert row["guarantor_financial_class"] == "PPO"
+        assert row["guarantor_financial_class_text"] == "Preferred Provider"
+        assert row["guarantor_financial_class_effective_date"] is not None
