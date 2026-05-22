@@ -1,62 +1,83 @@
 # Gmail Community Connector Spec
-# This file defines the specification for the connector including
-# connection parameters and allowlist options.
 #
-# This connector provides 100% Gmail API coverage with 10 tables:
-# - messages, threads, labels, drafts (core email data)
-# - profile (user info)
-# - settings, filters, forwarding_addresses, send_as, delegates (configuration)
+# This connector is designed for the Unity Catalog COMMUNITY connection
+# with one of the U2M OAuth flows (single-user or per-end-user). The
+# connection layer owns the OAuth dance (authorization code + PKCE,
+# token exchange, per-user refresh in u2m_per_user mode) and injects a
+# valid bearer ``access_token`` into the connector's options at query
+# time. The connector treats the token as opaque.
+#
+# Required oauth_scope on the connection (request both at consent time):
+#   - https://www.googleapis.com/auth/gmail.readonly
+#   - https://www.googleapis.com/auth/drive.readonly
+#
+# The Drive scope is required by the download_attachment agent operation
+# to fetch Drive-hosted attachments — Gmail rewrites attachments over
+# 25 MB or shared-via-Drive as Drive links rather than inlining them.
+# Without drive.readonly, download_attachment surfaces permission_denied
+# on those links.
+#
+# Recommended connection creation (via the community-connector CLI):
+#
+#   community-connector create-connection \
+#     --name gmail_connector \
+#     --source-name gmail \
+#     --auth-type u2m \
+#     --options '{
+#       "client_id": "<oauth-client-id>.apps.googleusercontent.com",
+#       "client_secret": "<oauth-client-secret>",
+#       "authorization_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
+#       "token_endpoint": "https://oauth2.googleapis.com/token",
+#       "oauth_scope": "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.readonly"
+#     }'
+#
+# Provides 100% Gmail API coverage across 10 tables plus a Gmail-specific
+# ingestion-agent operation set (preview_table override, search_messages,
+# get_message, list_attachments, download_attachment).
 
-# ============================================================================
-# Connection Parameters
-# These are provided when creating the Unity Catalog connection.
-# ============================================================================
 display_name: Gmail
 connection:
   parameters:
-    - name: client_id
+    - name: access_token
       type: string
       required: true
       secret: true
       description: >
-        OAuth 2.0 client ID from Google Cloud Console.
-        Create this in APIs & Services → Credentials → OAuth 2.0 Client IDs.
-
-    - name: client_secret
-      type: string
-      required: true
-      secret: true
-      description: >
-        OAuth 2.0 client secret from Google Cloud Console.
-        Obtained alongside the client_id when creating OAuth credentials.
-
-    - name: refresh_token
-      type: string
-      required: true
-      secret: true
-      description: >
-        Long-lived OAuth 2.0 refresh token obtained via the OAuth consent flow.
-        Use Google OAuth Playground or implement OAuth flow to obtain this token.
-        Required scope: https://www.googleapis.com/auth/gmail.readonly
+        OAuth 2.0 bearer access token for Gmail + Drive APIs. Supplied
+        automatically by the Unity Catalog COMMUNITY connection's u2m or
+        u2m_per_user OAuth flow — do not set this manually unless you
+        know the upstream connection has already exchanged the user's
+        authorization grant for a token.
 
     - name: user_id
       type: string
       required: false
       description: >
-        The user's email address or 'me' for the authenticated user.
-        Defaults to 'me' if not specified. For service accounts with
-        domain-wide delegation, specify the user email to impersonate.
+        Gmail user identifier the connector reads against. Defaults to
+        'me' (the user the access_token was issued to). Service-account
+        workflows with domain-wide delegation can specify a target user
+        email here.
+
+  # OAuth defaults: standard RFC 6749 fields that are fixed for Google's
+  # identity provider. The community-connector CLI auto-fills these when
+  # --auth-type is m2m / u2m / u2m_per_user, so the user only needs to
+  # supply client_id and client_secret (their app registration). Override
+  # any of these via --options if needed (e.g. a narrower oauth_scope).
+  oauth:
+    authorization_endpoint: https://accounts.google.com/o/oauth2/v2/auth
+    token_endpoint: https://oauth2.googleapis.com/token
+    oauth_scope: https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.readonly
 
 # ============================================================================
 # External Options Allowlist
-# These table-specific options must be included in the externalOptionsAllowList
-# parameter of the UC connection to allow them to be passed through.
-# Use a comma-separated string of option names.
+# Table-specific and agent-operation options that the UC connection passes
+# through to the connector at query time. Combined for read-side
+# table_configuration options + agent-operation parameters.
 # ============================================================================
-external_options_allowlist: "q,labelIds,maxResults,includeSpamTrash,format,max_records_per_batch"
+external_options_allowlist: "q,labelIds,maxResults,includeSpamTrash,format,max_records_per_batch,after_date,before_date,newer_than,subject,from_address,to_address,label,has_attachment,is_unread,query,message_id,attachment_id,drive_file_id,volume_path,export_mime_type"
 
 # ============================================================================
-# Supported Tables (10 tables - 100% Gmail API coverage)
+# Supported Tables (10 — 100% Gmail API coverage)
 # ============================================================================
 # Core Email Data:
 #   - messages:              Email messages (CDC with historyId cursor)
@@ -75,23 +96,31 @@ external_options_allowlist: "q,labelIds,maxResults,includeSpamTrash,format,max_r
 #   - delegates:             Delegated access users (snapshot)
 
 # ============================================================================
-# Table Options Documentation
+# Ingestion-Agent Operations (dispatched via operation=<name> on the format)
+# ============================================================================
+# Built-in (framework):
+#   - list_objects
+#   - get_object_metadata
+#   - validate_connection
+#   - list_operations
+#
+# Gmail-specific:
+#   - preview_table (override): typed filters compose into Gmail q syntax
+#     for messages/threads (after_date, before_date, newer_than, subject,
+#     from_address, to_address, label, has_attachment, is_unread, query).
+#   - search_messages: lightweight header-only triage (format=metadata).
+#   - get_message: single-message fetch with decoded body_text/html and
+#     Drive file IDs extracted from the body.
+#   - list_attachments: gmail-native and Drive-hosted attachments per
+#     message.
+#   - download_attachment: write attachment bytes to a /Volumes/ path
+#     using attachment_id (Gmail) or drive_file_id (Drive).
+
+# ============================================================================
+# Table Configuration Options
 # ============================================================================
 # q:               Gmail search query (same syntax as Gmail web UI)
-#                  Example: "newer_than:7d", "from:user@example.com"
-#
 # labelIds:        Filter by label ID (e.g., INBOX, SENT, DRAFT, SPAM, TRASH)
-#                  For user labels, use the label ID (e.g., Label_1)
-#
 # maxResults:      Maximum items per page (default: 100, max: 500)
-#
-# includeSpamTrash: Include messages from SPAM and TRASH folders
-#                   Values: "true" or "false" (default: "false")
-#
-# format:          Message format to retrieve
-#                  Values: "full" (default), "metadata", "minimal", "raw"
-#                  - full: Returns full email content including body
-#                  - metadata: Returns only headers, no body
-#                  - minimal: Returns only id and threadId
-#                  - raw: Returns full email in RFC 2822 format (base64)
-
+# includeSpamTrash: Include messages from SPAM and TRASH folders ("true"/"false")
+# format:          Message format — "full" (default), "metadata", "minimal", "raw"
