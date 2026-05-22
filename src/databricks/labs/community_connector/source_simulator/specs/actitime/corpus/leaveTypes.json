@@ -1,0 +1,41 @@
+[
+  {
+    "id": 2,
+    "name": "Time Off",
+    "balance": "PTO",
+    "archived": false
+  },
+  {
+    "id": 3,
+    "name": "Vacation",
+    "balance": "PTO",
+    "archived": false
+  },
+  {
+    "id": 1,
+    "name": "Sick Leave",
+    "balance": "Sick",
+    "archived": false
+  },
+  {
+    "id": 9,
+    "name": "Family Leave",
+    "balance": "None",
+    "archived": false
+  },
+  {
+    "id": 10,
+    "name": "Unpaid Leave",
+    "balance": "None",
+    "archived": false
+  },
+  {
+    "id": 99001,
+    "name": "Synthetic — column coverage augmentation",
+    "description": "Synthetic leave type added to satisfy the simulator column-coverage invariant; not from any live tenant capture.",
+    "balance": "None",
+    "archived": false,
+    "paidLeave": true,
+    "autoAccrual": false
+  }
+]

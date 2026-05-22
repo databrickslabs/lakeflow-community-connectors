@@ -1,0 +1,136 @@
+[
+  {
+    "id": 80,
+    "name": "Product documentation",
+    "description": null,
+    "created": 1770163200000,
+    "status": "open",
+    "workflowStatusId": 4,
+    "typeOfWorkId": 2,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?taskId=80",
+    "projectName": "Spaceship building",
+    "customerName": "Big Bang Company",
+    "workflowStatusName": "In Progress",
+    "typeOfWorkName": "non-billable",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": true
+    },
+    "deadline": null,
+    "estimatedTime": null,
+    "customerId": 6,
+    "projectId": 13
+  },
+  {
+    "id": 81,
+    "name": "Prototype 1 deployment",
+    "description": null,
+    "created": 1770163200000,
+    "status": "open",
+    "workflowStatusId": 5,
+    "typeOfWorkId": 1,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?taskId=81",
+    "projectName": "Spaceship building",
+    "customerName": "Big Bang Company",
+    "workflowStatusName": "Review",
+    "typeOfWorkName": "engineering",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": true
+    },
+    "deadline": "2026-05-21",
+    "estimatedTime": 7800,
+    "customerId": 6,
+    "projectId": 13
+  },
+  {
+    "id": 82,
+    "name": "Prototype 2 deployment",
+    "description": null,
+    "created": 1770163200000,
+    "status": "open",
+    "workflowStatusId": 4,
+    "typeOfWorkId": 1,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?taskId=82",
+    "projectName": "Spaceship building",
+    "customerName": "Big Bang Company",
+    "workflowStatusName": "In Progress",
+    "typeOfWorkName": "engineering",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": true
+    },
+    "deadline": null,
+    "estimatedTime": null,
+    "customerId": 6,
+    "projectId": 13
+  },
+  {
+    "id": 83,
+    "name": "Assembly",
+    "description": null,
+    "created": 1770163200000,
+    "status": "completed",
+    "workflowStatusId": 6,
+    "typeOfWorkId": 12,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?taskId=83",
+    "projectName": "Spaceship building",
+    "customerName": "Big Bang Company",
+    "workflowStatusName": "Won't do",
+    "typeOfWorkName": "manufacturing",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": true
+    },
+    "deadline": null,
+    "estimatedTime": null,
+    "customerId": 6,
+    "projectId": 13
+  },
+  {
+    "id": 84,
+    "name": "Black hole protection",
+    "description": null,
+    "created": 1770163200000,
+    "status": "open",
+    "workflowStatusId": 3,
+    "typeOfWorkId": 13,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?taskId=84",
+    "projectName": "Spaceship building",
+    "customerName": "Big Bang Company",
+    "workflowStatusName": "Planning",
+    "typeOfWorkName": "repair: complex",
+    "allowedActions": {
+      "canModify": true,
+      "canDelete": true
+    },
+    "deadline": "2026-06-04",
+    "estimatedTime": 24000,
+    "customerId": 6,
+    "projectId": 13
+  },
+  {
+    "id": 99001,
+    "name": "Synthetic — column coverage augmentation",
+    "description": "Synthetic task added to satisfy the simulator column-coverage invariant; not from any live tenant capture.",
+    "created": 1770163200000,
+    "status": "completed",
+    "workflowStatusId": 2,
+    "typeOfWorkId": 1,
+    "url": "https://online.actitime.com/mystartup/tasks/tasklist.do?taskId=99001",
+    "projectName": "Spaceship building",
+    "customerName": "Big Bang Company",
+    "workflowStatusName": "Done",
+    "typeOfWorkName": "engineering",
+    "allowedActions": {
+      "canModify": false,
+      "canDelete": false,
+      "canComplete": true
+    },
+    "deadline": null,
+    "estimatedTime": null,
+    "customerId": 6,
+    "projectId": 13,
+    "archived": true
+  }
+]

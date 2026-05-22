@@ -48,7 +48,7 @@ spark.read.format("lakeflow_connect")
 # API to list tables in one namespace
 # Schema:
 #   namespace ARRAY<STRING>,
-#   table_name STRING
+#   tableName STRING
 # For connectors that implement SupportsNamespaces, the `namespace` option is required.
 # Use "[]" for root-level tables. Walk the tree via _community_namespaces to find namespaces.
 # Flat connectors (no SupportsNamespaces) ignore the option and return every table with an empty namespace.
