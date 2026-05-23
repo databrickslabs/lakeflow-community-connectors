@@ -220,7 +220,7 @@ Create a Databricks Job to run on a schedule for automated incremental syncs.
 Palantir Foundry Ontology
     |
     | POST /objectSets/loadObjects?snapshot=true
-    | (consistent pagination, 10K/page, server-side filtering for CDC)
+    | (consistent pagination, up to 10K/page, server-side filtering for CDC)
     v
 PalantirLakeflowConnect (palantir.py)
     |
@@ -238,10 +238,9 @@ Databricks Delta Table (Unity Catalog)
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/api/v2/ontologies/{ontology}/objectTypes` | GET | List available tables |
-| `/api/v2/ontologies/{ontology}/objectTypes/{type}` | GET | Get schema and primary key |
+| `/api/v2/ontologies/{ontology}/objectTypes` | GET | List object types; the connector indexes the response by `apiName` to serve both `list_tables()` and per-type schema discovery — no per-type GET call is made |
 | `/api/v2/ontologies/{ontology}/objectSets/loadObjects?snapshot=true` | POST | Fetch data with consistent pagination |
-| `/api/v2/ontologies/{ontology}/objects/{type}/search` | POST | Get max cursor value (orderBy desc, limit 1) |
+| `/api/v2/ontologies/{ontology}/objects/{type}/search` | POST | Peek max cursor value for the early-exit short-circuit (orderBy desc, pageSize=1) |
 
 ## Best Practices
 
@@ -268,7 +267,7 @@ Databricks Delta Table (Unity Catalog)
 
 ### 5. Scalability Guidelines
 - **< 10M records**: Current approach works well
-- **10M - 100M**: Use page_size=10000, consider server-side filtering
+- **10M - 100M**: Use `page_size=10000` to minimise API round-trips; CDC mode already uses server-side `where: gt` filtering on every incremental run
 - **100M+**: Consider the Foundry Dataset API for bulk export
 
 ## Troubleshooting

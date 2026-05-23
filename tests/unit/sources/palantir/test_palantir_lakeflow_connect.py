@@ -40,9 +40,12 @@ class TestPalantirConnector(LakeflowConnectTests):
           ``object_types_list.json`` declares.
 
         Custom tests (``test_search_endpoint_coverage``,
-        ``test_where_clause_built_for_incremental_call``) still call
-        ``connector.list_tables()`` directly when they need to scan
-        the full ontology.
+        ``test_where_clause_built_for_incremental_call``) pin
+        ``table = "FlightsFinal"`` explicitly and only assert
+        ``list_tables()`` contains it — they don't iterate other
+        object types. In live mode the ontology has many ``Example*``
+        types whose response shapes drift from the FlightsFinal
+        corpus; pinning keeps the validator clean.
         """
         return ["FlightsFinal"]
 

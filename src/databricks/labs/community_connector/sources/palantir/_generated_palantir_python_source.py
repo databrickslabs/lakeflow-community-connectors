@@ -1143,10 +1143,10 @@ def register_lakeflow_source(spark):
                 cursor_value = record.get(cursor_field)
                 if cursor_value is None:
                     continue
-                # _init_time cap: defer records past wall-clock start to
+                # _init_dt cap: defer records past wall-clock start to
                 # the next trigger run so this microbatch terminates.
                 # Records are sorted ASC by cursor, so the first
-                # past-init_time record marks the end of this slice.
+                # past-init record marks the end of this slice.
                 cursor_dt = self._to_utc_datetime(cursor_value)
                 if (
                     cursor_dt is not None

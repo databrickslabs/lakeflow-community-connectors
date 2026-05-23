@@ -49,7 +49,7 @@ pipeline_spec = {
                 "source_table": "FlightsFinal",
                 "destination_catalog": "users",
                 "destination_schema": "zuhaib_mohd",
-                "destination_table": "example_flight",
+                "destination_table": "flights_final",
                 "table_configuration": {
                     "scd_type": "SCD_TYPE_2",
                     "cursor_field": "arrivalTimestamp",

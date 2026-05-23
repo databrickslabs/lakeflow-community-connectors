@@ -32,10 +32,9 @@ For this connector, Palantir ontology object types are treated as **tables**. Th
 
 | API Endpoint | Purpose | Connector Method |
 |---|---|---|
-| `GET /api/v2/ontologies/{ontology}/objectTypes` | List all object types in an ontology | `list_tables()` |
-| `GET /api/v2/ontologies/{ontology}/objectTypes/{objectType}` | Get object type definition (schema, primary key) | `get_table_schema()`, `read_table_metadata()` |
+| `GET /api/v2/ontologies/{ontology}/objectTypes` | List all object types — the response includes each type's full property definition, which the connector indexes by `apiName` and reuses for both `list_tables()` and per-type schema discovery (no per-type GET call is made) | `list_tables()`, `get_table_schema()`, `read_table_metadata()` |
 | `POST /api/v2/ontologies/{ontology}/objectSets/loadObjects` | Load object instances with snapshot-consistent pagination | `read_table()` → `_fetch_page()` |
-| `POST /api/v2/ontologies/{ontology}/objects/{objectType}/search` | Peek dataset max cursor for the incremental early-exit short-circuit (orderBy desc, limit 1) | `_get_max_cursor_value()` |
+| `POST /api/v2/ontologies/{ontology}/objects/{objectType}/search` | Peek dataset max cursor for the incremental early-exit short-circuit (orderBy desc, pageSize=1) | `_get_max_cursor_value()` |
 
 **Connector scope**:
 - All object types in the configured ontology are available as tables.
@@ -166,109 +165,7 @@ curl -X GET \
 - Result is cached in `_object_types_cache` for the lifetime of the connector instance.
 
 
-### 3. Get Object Type Definition
-
-**Endpoint**: `GET /api/v2/ontologies/{ontologyApiName}/objectTypes/{objectTypeApiName}`
-
-**Used by**: `get_table_schema()`, `read_table_metadata()`
-
-**Purpose**: Retrieve the full definition of a single object type, including properties and primary key. Used to dynamically build the Spark schema.
-
-**Path parameters**:
-
-| Parameter | Type | Description |
-|---|---|---|
-| `ontologyApiName` | string | API name of the target ontology |
-| `objectTypeApiName` | string | API name of the object type |
-
-**Example request**:
-
-```bash
-curl -X GET \
-  -H "Authorization: Bearer <TOKEN>" \
-  -H "Content-Type: application/json" \
-  "https://yourcompany.palantirfoundry.com/api/v2/ontologies/ontology-282f1207-a9f0-408c-8820-741db4f051b1/objectTypes/FlightsFinal"
-```
-
-**Example response**:
-
-```json
-{
-  "apiName": "FlightsFinal",
-  "displayName": "Example Flight",
-  "description": "Represents commercial passenger flights in the US",
-  "pluralDisplayName": "Example Flights",
-  "primaryKey": "flightId",
-  "properties": {
-    "flightId": {
-      "dataType": { "type": "string" },
-      "description": "Unique flight identifier"
-    },
-    "flightNumber": {
-      "dataType": { "type": "string" },
-      "description": "Flight number"
-    },
-    "airlineId": {
-      "dataType": { "type": "string" },
-      "description": "Airline carrier code"
-    },
-    "departureTimestamp": {
-      "dataType": { "type": "timestamp" },
-      "description": "Scheduled departure time"
-    },
-    "arrivalTimestamp": {
-      "dataType": { "type": "timestamp" },
-      "description": "Scheduled arrival time"
-    },
-    "airTime": {
-      "dataType": { "type": "integer" },
-      "description": "Air time in minutes"
-    },
-    "depDelay": {
-      "dataType": { "type": "double" },
-      "description": "Departure delay in minutes"
-    },
-    "originAirport": {
-      "dataType": { "type": "string" },
-      "description": "Origin airport code"
-    },
-    "destinationAirport": {
-      "dataType": { "type": "string" },
-      "description": "Destination airport code"
-    },
-    "originLocation": {
-      "dataType": { "type": "geopoint" },
-      "description": "Origin airport coordinates"
-    },
-    "tags": {
-      "dataType": {
-        "type": "array",
-        "itemType": { "type": "string" }
-      },
-      "description": "Flight tags"
-    }
-  },
-  "rid": "ri.ontology.main.object-type.abc123",
-  "status": "ACTIVE"
-}
-```
-
-**Property definition schema**:
-
-Each property in the `properties` map has:
-
-| Field | Type | Description |
-|---|---|---|
-| `dataType` | object | Type definition (see Data Types section below) |
-| `description` | string | Property description |
-
-**Connector behavior**:
-- Reads `primaryKey` to determine primary key field(s) for metadata.
-- Iterates `properties` to build a Spark `StructType` schema, mapping each property's `dataType` to a Spark type.
-- Schema and metadata results are cached in `_schema_cache` and `_metadata_cache`.
-
-
-### 4. Load Object Set (Fetch Data)
+### 3. Load Object Set (Fetch Data)
 
 **Endpoint**: `POST /api/v2/ontologies/{ontologyApiName}/objectSets/loadObjects?snapshot=true`
 
@@ -375,12 +272,11 @@ curl -X POST \
 - Uses a generator to yield records page by page, keeping only one page (~10K records) in memory at a time. Avoids OOM on large datasets.
 - In snapshot mode: base objectSet, pages through all objects.
 - In CDC mode: filtered objectSet with `where: gt` on cursor field. On incremental runs, the API only returns records newer than the checkpoint — no full scan needed.
-- Retries transient errors (429, 503, network timeouts) with exponential backoff up to 5 attempts.
-- 0.1-second delay between page fetches for rate-limit safety.
+- Retries transient errors (429, 503, `ConnectionError`, `Timeout`) with exponential backoff up to 5 attempts. Non-transient 4xx/5xx propagate immediately so misconfiguration (e.g. 401 expired token, 404 wrong ontology) surfaces without burning retry budget.
 - `pageSize` is capped at 10,000.
 
 
-### 5. Search Objects (Max Cursor Lookup)
+### 4. Search Objects (Max Cursor Lookup)
 
 **Endpoint**: `POST /api/v2/ontologies/{ontologyApiName}/objects/{objectTypeApiName}/search`
 
@@ -563,7 +459,7 @@ All Palantir API errors follow a consistent JSON structure:
 | Individual users | 5,000 requests/min | 30 simultaneous |
 | Service users | No request limit | 800 simultaneous |
 
-The connector retries 429/503 errors with exponential backoff (up to 5 attempts: 1s, 2s, 4s, 8s, 16s) and adds a 0.1-second delay between page fetches. For production use with large datasets, consider using a service user token for higher concurrency limits.
+The connector retries 429/503 errors and `ConnectionError`/`Timeout` with exponential backoff (up to 5 attempts: 1s, 2s, 4s, 8s, 16s). Non-transient 4xx/5xx (e.g. 401, 404) propagate on the first attempt. For production use with large datasets, consider using a service user token for higher concurrency limits.
 
 
 ## **References**
