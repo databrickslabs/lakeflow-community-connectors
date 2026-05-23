@@ -6,6 +6,14 @@ name: Verify Dependency Locks
 
 # Triggers: see pull_request_target rationale in .github/workflows/pylint.yml.
 on:
+  pull_request_target:
+    paths:
+      - 'pyproject.toml'
+      - 'tools/community_connector/pyproject.toml'
+      - 'src/databricks/labs/community_connector/sources/**/pyproject.toml'
+      - 'requirements/**'
+      - 'tools/scripts/regenerate-locks.sh'
+      - '.github/workflows/verify-locks.yml'
   push:
     branches: [master]
     paths:
@@ -14,25 +22,6 @@ on:
       - 'src/databricks/labs/community_connector/sources/**/pyproject.toml'
       - 'requirements/**'
       - 'tools/scripts/regenerate-locks.sh'
-  pull_request:
-    branches: [master]
-    paths:
-      - 'pyproject.toml'
-      - 'tools/community_connector/pyproject.toml'
-      - 'src/databricks/labs/community_connector/sources/**/pyproject.toml'
-      - 'requirements/**'
-      - 'tools/scripts/regenerate-locks.sh'
-      - '.github/workflows/verify-locks.yml'
-  pull_request_target:
-    branches: [master]
-    types: [labeled]
-    paths:
-      - 'pyproject.toml'
-      - 'tools/community_connector/pyproject.toml'
-      - 'src/databricks/labs/community_connector/sources/**/pyproject.toml'
-      - 'requirements/**'
-      - 'tools/scripts/regenerate-locks.sh'
-      - '.github/workflows/verify-locks.yml'
 
 permissions:
   contents: read
@@ -40,11 +29,9 @@ permissions:
 
 jobs:
   verify:
-    # Gate fork PRs behind the `safe-to-test` label. See trigger model in pylint.yml.
-    if: >-
-      github.event_name == 'push' ||
-      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name == 'pull_request_target' && github.event.label.name == 'safe-to-test' && github.event.pull_request.head.repo.full_name != github.repository)
+    # Fork PRs only run CI when a maintainer adds the `safe-to-test` label.
+    # See CONTRIBUTING.md for the rationale (H1 #3730634 pwn-request gate).
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository || contains(github.event.pull_request.labels.*.name, 'safe-to-test')
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest
