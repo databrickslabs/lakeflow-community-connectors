@@ -1,0 +1,107 @@
+name: Required CI Gate
+
+# Single aggregated check that branch protection on master should
+# require. It pins down a stricter contract than listing each CI
+# workflow individually:
+#
+#   * **Cannot be silently skipped.** A workflow's job-level `if:`
+#     evaluating false reports the check as "skipped", which GitHub's
+#     branch protection counts as success. That can let a PR through
+#     without actual CI coverage. The gate below explicitly checks the
+#     *conclusion* of each required workflow and only passes when each
+#     one is literally "success" — "skipped", "missing", "cancelled",
+#     and "failure" all fail the gate.
+#
+#   * **Cannot be path-filtered away.** Each upstream workflow has its
+#     own `paths:` filter, so a docs-only PR may not fire any of them.
+#     This gate has no `paths:` filter — it always fires for every PR.
+#     If you want a docs-only PR to merge, either expand a workflow's
+#     paths or remove this gate from the required-checks list.
+#
+# Branch-protection setup: in repo Settings → Branches → master rule,
+# add "Required CI Gate / gate" to the required status checks. Do NOT
+# also list the individual workflows there — let this gate be the
+# single source of truth.
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review]
+  # Re-evaluate the gate after each upstream required workflow finishes.
+  # Without this the initial PR-open run would fail (others haven't
+  # completed yet) and the gate would never re-run on its own.
+  workflow_run:
+    workflows:
+      - Tests
+      - Generate Merged Source File
+      - Connector Self-Review
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read   # needed to query other workflow runs via the API
+
+# Only the most recent gate evaluation per head SHA is meaningful;
+# cancel older in-flight runs when a newer one starts.
+concurrency:
+  group: required-ci-gate-${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    steps:
+      - name: Aggregate required workflow conclusions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          # pull_request: PR head SHA. workflow_run: SHA the upstream
+          # workflow executed against (which is the PR head for fork
+          # `pull_request` events too, via the merge-commit indirection
+          # GitHub provides for `workflow_run`).
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          REQUIRED=(
+            "Tests"
+            "Generate Merged Source File"
+            "Connector Self-Review"
+          )
+
+          echo "Checking required workflows for HEAD ${HEAD_SHA}:"
+          echo
+
+          FAILED=()
+          for wf in "${REQUIRED[@]}"; do
+            # Take the most recent run for this workflow on this SHA.
+            # `// "missing"` falls back when the workflow never fired.
+            CONCLUSION=$(gh api \
+              "repos/${REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=50" \
+              --jq "[.workflow_runs[] | select(.name == \"$wf\")] | sort_by(.created_at) | reverse | .[0].conclusion // \"missing\"")
+
+            printf '  %-32s %s\n' "$wf" "$CONCLUSION"
+
+            if [ "$CONCLUSION" != "success" ]; then
+              FAILED+=("${wf} (${CONCLUSION})")
+            fi
+          done
+
+          echo
+
+          if [ ${#FAILED[@]} -gt 0 ]; then
+            echo "::error title=Required CI Gate failed::One or more required workflows did not succeed on ${HEAD_SHA}:"
+            for f in "${FAILED[@]}"; do
+              echo "  - $f"
+            done
+            echo
+            echo "Next steps:"
+            echo "  * 'missing' — the workflow never fired. Check its paths/types filters or trigger it manually."
+            echo "  * 'skipped' — a job-level if: evaluated false. Re-run the workflow or change the gating condition."
+            echo "  * 'failure' / 'cancelled' — fix the underlying problem, push, and the gate will re-evaluate."
+            exit 1
+          fi
+
+          echo "All required workflows succeeded for ${HEAD_SHA}."
