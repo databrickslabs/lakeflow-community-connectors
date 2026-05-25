@@ -7,13 +7,13 @@ The Lakeflow HL7 v2 Connector parses HL7 v2 pipe-delimited messages and loads ea
 | Mode | `source_type` value | Description |
 |---|---|---|
 | **GCP Healthcare API** | `gcp` (default) | Fetches HL7 v2 messages from a Google Cloud Healthcare API HL7v2 store via REST |
-| **Delta Table** | `delta` | Reads pre-loaded HL7 v2 messages from a Bronze Delta table in Databricks |
+| **Unity Catalog Volume** | `volume` | Reads HL7 v2 files directly from a UC Volume path FUSE-mounted on the executor |
 
 ## Prerequisites
 
 **GCP Mode** — A GCP project with the Cloud Healthcare API enabled, an HL7v2 store containing messages, and a service account key with `healthcare.hl7V2Messages.list` and `healthcare.hl7V2Messages.get` permissions.
 
-**Delta Mode** — A Delta table in Unity Catalog containing raw HL7 v2 messages (see [Delta Table Schema](#delta-table-schema) below).
+**Volume Mode** — A Unity Catalog Volume containing HL7 v2 message files (one HL7 wire payload per file, or HL7 batch files with multiple `MSH|...` segments). Files are read by Spark executors (which have Unity Catalog Volume FUSE access), so no other credentials are required — the executor identity simply needs `READ VOLUME` on the configured Volume. This is the same pattern used by the `dicomweb` connector for writing DICOM files; see its README for prior art.
 
 ## Connection Parameters
 
@@ -30,45 +30,31 @@ The `source_type` parameter determines which credentials are required. Defaults 
 | `hl7v2_store_id` | Yes | HL7v2 store name | `ehr_messages` |
 | `service_account_json` | Yes | Full JSON content of a GCP service account key file | `{"type": "service_account", ...}` |
 
-### Delta Mode
+### Volume Mode
 
 | Parameter | Required | Description | Example |
 |---|---|---|---|
-| `source_type` | Yes | Must be `delta` | `delta` |
-| `delta_table_name` | Yes | Fully-qualified Delta table name | `my_catalog.bronze.hl7_raw` |
-| `databricks_host` | Yes | Databricks workspace URL | `https://my-workspace.cloud.databricks.com` |
-| `databricks_token` | Yes | Personal access token or service principal token | `dapi...` |
-| `sql_warehouse_id` | Yes | SQL warehouse ID for querying the table | `01370556fad60fda` |
-| `delta_query_mode` | No | `preload` (default) loads the table into memory at init. `per_window` queries per micro-batch — use for large tables. | `per_window` |
+| `source_type` | Yes | Must be `volume` | `volume` |
+| `volume_path` | Yes | Absolute UC Volume path containing HL7 files | `/Volumes/catalog/schema/hl7_inbound/` |
+| `file_glob` | No | Shell-style glob applied to filenames (default `*`) | `*.hl7` |
+| `recursive` | No | `true`/`false`; descend into subdirectories of `volume_path` (default `false`) | `true` |
 
-> **Why are Databricks credentials needed?** The Spark Python Data Source API runs connector code in a subprocess without SparkSession. The connector queries the Delta table via the SQL Statement Execution REST API, which requires explicit credentials.
+> **No SDK, no PAT, no HTTP.** Files are read by Spark executors (which have Unity Catalog Volume FUSE access) using plain Python `os.scandir` + `open()`. The only access control is UC: the executor identity needs `READ VOLUME` on the configured Volume. There is no `databricks_host`, no `databricks_token`, and no SQL warehouse involved. The same FUSE pattern is used by the `dicomweb` connector for writing DICOM files (with `WRITE FILES` on the Volume) — this connector is the read-side equivalent.
 
-### Delta Table Schema
+### File Layout
 
-Your Bronze Delta table must have these columns:
+Each file under `volume_path` is treated as one HL7 v2 payload. Both shapes are supported transparently:
 
-| Column | Type | Required | Description |
-|---|---|---|---|
-| `data` | STRING | Yes | Raw HL7 v2 message text (pipe-delimited, e.g., `MSH\|^~\\&\|...`) |
-| `createTime` | STRING or TIMESTAMP | Yes | Timestamp used as the incremental cursor (e.g., `2024-01-15T10:30:00Z`) |
-| `name` | STRING | No | Source identifier for traceability (stored in `source_file` column) |
+- **One message per file** — e.g. an MLLP-decoded ADT, ORU, or DFT message landed as `ADT_A04_2024-01-15T12_30_00.hl7`. This is the most common deployment.
+- **HL7 batch file** — one file containing multiple concatenated messages separated by `MSH|` segment boundaries (per HL7 batch protocol). The connector's `_split_messages` helper detects the boundary and yields each message individually, so cursor advancement is per-batch-file, not per-message.
 
-**Example: Creating the Bronze table from Volume files**
+File contents must be UTF-8 (or ASCII; the connector decodes with `errors="replace"`, so isolated non-UTF-8 bytes don't fail the read). Files that are empty or whose first segment isn't `MSH|` are skipped silently.
 
-```sql
-CREATE TABLE my_catalog.my_schema.hl7_raw AS
-SELECT
-  value                            AS data,
-  _metadata.file_modification_time AS createTime,
-  _metadata.file_name              AS name
-FROM read_files(
-  '/Volumes/my_catalog/my_schema/hl7_volume/',
-  format => 'text',
-  wholeText => true
-);
-```
+### Incremental Cursor
 
-> **Important:** `wholeText => true` is required. Without it, `read_files` splits each line into a separate row. HL7 messages are multi-line (one line per segment), so the entire file must be read as a single row for the connector to parse all segments.
+The cursor for volume mode is each file's **last-modified time** (`mtime`), formatted as RFC 3339 (`yyyy-MM-ddTHH:mm:ssZ`). Each micro-batch advances a sliding window `(since, since + window_seconds]` over file mtimes. The end-of-stream guard caps the right side of the window at the connector's init timestamp, so files written after the pipeline started won't be read until the next trigger fires.
+
+> **Important:** Don't overwrite files in `volume_path` in place — the connector treats `mtime` as monotonically advancing. If a file's mtime moves backward (e.g. a re-upload with a preserved older timestamp), the connector will skip it. Either write new files with new names or let new uploads carry the natural current `mtime`.
 
 ## Table-Level Options
 
@@ -159,9 +145,9 @@ Every table includes these columns for traceability and cross-table joins:
 | `message_id` | Unique message control ID from MSH-10 — primary join key across all tables |
 | `message_timestamp` | Message date/time from MSH-7 (e.g., `20240115120000`) |
 | `hl7_version` | HL7 version from MSH-12 (e.g., `2.5.1`) |
-| `source_file` | Source identifier — GCP API resource name or Delta `name` column value |
-| `send_time` | Original HL7 message send time from the API in RFC 3339 format |
-| `create_time` | GCP `createTime` (when the message was ingested); used as the incremental cursor |
+| `source_file` | Source identifier — GCP API resource name (`projects/.../messages/<id>`) or, in volume mode, the absolute file path on the UC Volume |
+| `send_time` | Original HL7 message send time. In GCP mode this is the API-reported `sendTime`; in volume mode it falls back to the file's mtime, since the wire-level send time is already preserved in `message_timestamp` (MSH-7) |
+| `create_time` | When the message became available to the connector. GCP mode: API `createTime`; volume mode: file mtime. Used as the incremental cursor in both modes. |
 | `raw_segment` | Original unparsed HL7 segment text |
 
 ### Incremental Ingestion
@@ -364,11 +350,12 @@ Non-repeating composite fields (single occurrence) remain flattened into separat
 - **No data** — Check that `location`, `dataset_id`, and `hl7v2_store_id` are correct in the GCP Console.
 - **Quota limits** — Check the [GCP quota console](https://console.cloud.google.com/iam-admin/quotas).
 
-**Delta mode:**
-- **Table not found** — Verify `delta_table_name` is fully-qualified (e.g., `catalog.schema.table`) with `SELECT` permissions.
-- **No data** — Confirm `createTime` values exist and `data` starts with `MSH|`.
-- **Parse errors** — Ensure `data` is raw pipe-delimited text, not base64. Decode if needed: `UPDATE t SET data = cast(unbase64(data) as STRING)`.
-- **Out of memory** — Set `delta_query_mode` to `per_window` in the connection for large tables.
+**Volume mode:**
+- **Volume path not found** — Verify `volume_path` is an absolute UC path starting with `/Volumes/`, the Volume exists, and the Spark executor identity (not just the workspace user who authored the pipeline) has `READ VOLUME` on it. A missing FUSE mount or missing grant surfaces as "file not found" rather than an explicit permission error.
+- **No data picked up** — Confirm files actually exist under `volume_path` (`ls /Volumes/cat/sch/vol/path/`) and their mtimes are in the past. The cursor uses strict `>` on mtime, so a file with mtime exactly equal to `start_timestamp` is excluded by design. If you set `file_glob`, double-check that filenames match (e.g. `*.hl7` won't match `message_1.txt`).
+- **Subdirectories ignored** — Set `recursive` to `true` in the connection to walk subdirectories of `volume_path`.
+- **Parse errors** — Files must be raw HL7 pipe-delimited text starting with `MSH|`. Base64-encoded payloads aren't auto-decoded in volume mode; decode upstream before landing the file.
+- **Files re-ingested unexpectedly** — Check whether something is re-uploading files with a current mtime; the connector treats every advancing mtime as a new event window. Use new filenames for re-uploads if you want them ignored.
 
 ### Debugging tools
 
@@ -392,7 +379,7 @@ It's intentionally not part of the connector runtime (excluded from the bundled 
 
 This section walks through creating HL7 v2 ingestion pipelines via the Databricks UI using the **Custom Connector** flow. Until the HL7 v2 connector is published to the main Lakeflow Community Connectors repository, you point the UI to a fork that hosts the source.
 
-Both GCP and Delta modes use the same source code and Git repo — the only difference is which connection (and credentials) the pipeline uses.
+Both GCP and Volume modes use the same source code and Git repo — the only difference is which connection (and credentials) the pipeline uses.
 
 ### Creating Pipeline #1: GCP Mode
 
@@ -495,7 +482,7 @@ ingest(spark, pipeline_spec)
 2. Click **Start** to kick off the first ingestion run.
 3. After the first run, you'll see a visual DAG showing each segment table.
 
-### Creating Pipeline #2: Delta Mode
+### Creating Pipeline #2: Volume Mode
 
 #### Step 1 — Add the Custom Connector (if not already added)
 
@@ -506,35 +493,40 @@ If you already added the custom connector during the GCP setup, it persists — 
 
 If you haven't added it yet, follow Step 1 from the GCP section above (same source name and Git repo URL).
 
-#### Step 2 — Create the Delta Connection
+#### Step 2 — Prepare the UC Volume
+
+1. In Catalog Explorer, create (or pick) a Volume under the catalog/schema where HL7 files will land — e.g. `/Volumes/catalog/schema/hl7_inbound`.
+2. Land your HL7 files in that Volume. Most teams point an SFTP/MLLP gateway, file-share sync, or a one-off `databricks fs cp` at this path. One file per HL7 message is recommended; batch files (multiple `MSH|...` blocks in one file) are also supported.
+3. Grant the Spark executor identity (the pipeline's run-as service principal or user) `READ VOLUME` on this Volume. File reads happen on executors, so it's the executor identity — not the workspace user who authored the pipeline — that needs the grant. This mirrors the permission model used by the `dicomweb` connector for `WRITE FILES`.
+
+#### Step 3 — Create the Volume Connection
 
 1. Under "Connection to the source", click **Create connection**.
-2. Name it, e.g. `hl7_v2_delta_connection`.
-3. Fill in the parameters (see [Delta Mode](#delta-mode) above for where to find each value):
+2. Name it, e.g. `hl7_v2_volume_connection`.
+3. Fill in the parameters (see [Volume Mode](#volume-mode) above for details):
 
 | Parameter | Value to enter |
 |---|---|
-| `source_type` | `delta` (**required** — this switches the connector to Delta mode) |
-| `delta_table_name` | Fully-qualified 3-level name (e.g. `my_catalog.bronze.hl7_raw`) |
-| `databricks_host` | Your workspace URL (e.g. `https://my-workspace.cloud.databricks.com`) |
-| `databricks_token` | A Databricks personal access token (starts with `dapi...`) |
-| `sql_warehouse_id` | SQL warehouse ID (e.g. `01370556fad60fda`) |
+| `source_type` | `volume` (**required** — this switches the connector to Volume mode) |
+| `volume_path` | Absolute UC Volume path (e.g. `/Volumes/catalog/schema/hl7_inbound/`) |
+| `file_glob` | *(optional)* Filename glob, e.g. `*.hl7` |
+| `recursive` | *(optional)* `true` to descend into subdirectories; defaults to `false` |
 
 > If the UI shows only generic key-value pairs, also add `externalOptionsAllowList` = `segment_type,window_seconds,start_timestamp,max_records_per_batch`.
 
 4. Click **Next** to create the connection.
 
-#### Step 3 — Configure Ingestion Setup
+#### Step 4 — Configure Ingestion Setup
 
-1. **Pipeline name**: e.g. `hl7_v2_delta_pipeline`.
+1. **Pipeline name**: e.g. `hl7_v2_volume_pipeline`.
 2. **Event log location**:
    - **Catalog**: Select your catalog.
-   - **Schema**: e.g. `hl7_delta`.
+   - **Schema**: e.g. `hl7_volume`.
 3. **Root path**: Workspace path for pipeline assets.
-   - Example: `/Users/your.email@company.com/hl7_v2_delta_pipeline`
+   - Example: `/Users/your.email@company.com/hl7_v2_volume_pipeline`
 4. Click **Create**.
 
-#### Step 4 — Configure Pipeline Source Code
+#### Step 5 — Configure Pipeline Source Code
 
 1. Click **Open in Editor**.
 2. Replace the auto-generated code with:
@@ -544,7 +536,7 @@ from databricks.labs.community_connector.pipeline import ingest
 from databricks.labs.community_connector import register
 
 source_name = "hl7_v2"
-connection_name = "hl7_v2_delta_connection"
+connection_name = "hl7_v2_volume_connection"
 
 spark.conf.set("spark.databricks.unityCatalog.connectionDfOptionInjection.enabled", "true")
 register(spark, source_name)
@@ -565,13 +557,13 @@ ingest(spark, pipeline_spec)
 
 3. Save your changes.
 
-#### Step 5 — Run the Pipeline
+#### Step 6 — Run the Pipeline
 
 Click **Start** on the pipeline page.
 
 ### Key Points
 
-- **Both pipelines use the same Custom Connector** (same Git repo and source name `hl7_v2`). The connection credentials determine GCP vs Delta mode.
+- **Both pipelines use the same Custom Connector** (same Git repo and source name `hl7_v2`). The connection parameters determine GCP vs Volume mode.
 - **The Custom Connector only needs to be added once** — after that, `hl7_v2` stays in your Community connectors list for future pipelines.
 - **The `ingest.py` replacement is critical** — the auto-generated skeleton won't work without your pipeline spec.
 

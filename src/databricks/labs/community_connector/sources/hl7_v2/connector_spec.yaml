@@ -7,8 +7,8 @@
 #
 # Supported source modes (selected via the auth_methods entry that matches
 # the connection's parameter set):
-#   gcp   - Google Cloud Healthcare API HL7v2 store
-#   delta - Bronze Delta table containing pre-loaded HL7 messages
+#   gcp    - Google Cloud Healthcare API HL7v2 store
+#   volume - HL7 files on a Unity Catalog Volume (FUSE-mounted at runtime)
 #
 # Supported tables (segment types):
 #   msh  - Message Header              evn  - Event Type
@@ -72,52 +72,39 @@ connection:
           description: >
             Full JSON content of a GCP service account key file.
 
-    - name: delta
+    - name: volume
       description: >
-        Reads pre-loaded HL7 v2 messages from a Bronze Delta table in Unity
-        Catalog via the Databricks SQL Statement Execution API. The table
-        must have columns ``data`` (raw HL7 pipe-delimited text starting
-        with ``MSH|``), ``createTime`` (STRING or TIMESTAMP in RFC 3339 —
-        used as the incremental cursor), and optionally ``name`` (source
-        identifier surfaced as ``source_file`` in the output tables).
+        Reads HL7 v2 files directly from a Unity Catalog Volume path that
+        Spark executors have FUSE access to at runtime (e.g.
+        /Volumes/catalog/schema/hl7_inbound/). Files are read with plain
+        filesystem I/O (os.scandir + open) — no SDK, no HTTP, no credentials
+        beyond the pipeline's own identity. Each file's last-modified time
+        drives the incremental cursor. Permissions follow UC READ VOLUME
+        grants on the configured Volume. This is the read-side counterpart
+        of the dicomweb connector's WRITE FILES pattern; see the dicomweb
+        README for prior art.
       parameters:
-        - name: delta_table_name
+        - name: volume_path
           type: string
           required: true
           description: >
-            Fully-qualified Delta table name (catalog.schema.table)
-            containing raw HL7 v2 messages.
+            Absolute UC Volume path containing HL7 v2 files,
+            e.g. /Volumes/catalog/schema/hl7_inbound/. The Spark executor
+            identity must have READ VOLUME on this Volume.
 
-        - name: databricks_host
-          type: string
-          required: true
-          description: >
-            Databricks workspace URL
-            (e.g. https://my-workspace.cloud.databricks.com).
-
-        - name: databricks_token
-          type: string
-          required: true
-          secret: true
-          description: >
-            Databricks personal access token (PAT) or service principal
-            token.
-
-        - name: sql_warehouse_id
-          type: string
-          required: true
-          description: >
-            ID of a Databricks SQL warehouse to execute queries against the
-            Delta table.
-
-        - name: delta_query_mode
+        - name: file_glob
           type: string
           required: false
           description: >
-            Controls how the Delta table is read. "preload" (default) loads
-            the entire table into memory at init — fast for small tables.
-            "per_window" issues a live SQL query per micro-batch window —
-            scales to arbitrarily large tables with no memory overhead.
+            Optional shell-style glob applied to file names within the
+            Volume (default "*"). Example: "*.hl7".
+
+        - name: recursive
+          type: string
+          required: false
+          description: >
+            Optional "true"/"false" flag controlling whether subdirectories
+            of volume_path are walked (default "false").
 
   # ---------------------------------------------------------------------------
   # Shared parameters (apply to both source modes)
@@ -127,7 +114,7 @@ connection:
       type: string
       required: false
       description: >
-        Explicit source mode override: "gcp" or "delta". Optional —
+        Explicit source mode override: "gcp" or "volume". Optional —
         the connector also infers the mode from which credentials are
         supplied. Defaults to "gcp" when omitted.
 

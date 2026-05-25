@@ -5,10 +5,10 @@
 # role-based ``params:`` map. A custom handler parses the filter and applies
 # pagination + ordering manually.
 #
-# Delta mode hits the Databricks SQL Statement Execution API with three
-# statement shapes (preload, per-window, peek-oldest). The submit endpoint
-# returns inline SUCCEEDED results so the SDK doesn't poll. The poll
-# endpoint is declared for safety but should never fire for these queries.
+# Volume mode reads HL7 files directly from a UC Volume FUSE mount on the
+# executor — it makes no HTTP calls, so there are no endpoints to stub
+# for it. The volume test pre-populates a temp directory with sample HL7
+# files; the simulator below is installed but never fires for volume tests.
 
 endpoints:
   # ------------------------------------------------------------------
@@ -34,30 +34,3 @@ endpoints:
     synthesize_future_records:
       cursor_field: createTime
       count: 3
-
-  # ------------------------------------------------------------------
-  # Databricks workspace config discovery.
-  # The databricks-sdk hits this on first use to learn the workspace's
-  # OIDC endpoint, account id, cloud provider, etc.  The connector
-  # never reads the body, but the call must succeed or the SDK errors
-  # before any SQL statement is submitted.
-  # ------------------------------------------------------------------
-  - path: "/.well-known/databricks-config"
-    method: GET
-    handler: databricks.labs.community_connector.source_simulator.specs.hl7_v2.handlers.databricks_config:serve_workspace_config
-
-  # ------------------------------------------------------------------
-  # Databricks SQL Statement Execution API — Delta mode.
-  # The submit handler returns inline SUCCEEDED results so the SDK
-  # doesn't poll.  The poll endpoint is declared for safety but should
-  # never fire for our short-running preload / per-window queries.
-  # ------------------------------------------------------------------
-  - path: "/api/2.0/sql/statements"
-    method: POST
-    corpus: messages
-    handler: databricks.labs.community_connector.source_simulator.specs.hl7_v2.handlers.delta_sql:submit_statement
-
-  - path: "/api/2.0/sql/statements/{statement_id}"
-    method: GET
-    corpus: messages
-    handler: databricks.labs.community_connector.source_simulator.specs.hl7_v2.handlers.delta_sql:poll_statement

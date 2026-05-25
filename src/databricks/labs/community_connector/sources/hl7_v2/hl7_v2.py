@@ -4,25 +4,34 @@ Supported source modes (configured via ``source_type`` connection option):
 
 * ``gcp`` (default) — fetches messages from a Google Cloud Healthcare API
   HL7v2 store via REST.
-* ``delta`` — reads pre-loaded messages from a Bronze Delta table.  The table
-  must contain columns ``data`` (raw HL7 pipe-delimited text), ``createTime``
-  (RFC3339 string), and optionally ``name`` (source identifier).
+* ``volume`` — reads HL7 v2 files directly from a Unity Catalog Volume path
+  (e.g. ``/Volumes/catalog/schema/hl7_inbound/``).  Spark executors have
+  Unity Catalog Volume FUSE access at runtime, so the connector uses plain
+  filesystem I/O (``os.scandir`` + ``open()``) — no SDK, no HTTP, no auth
+  options.  Permissions follow UC ``READ VOLUME`` grants on the configured
+  Volume.  This mirrors the pattern used by the ``dicomweb`` connector for
+  writing DICOM files to a Volume (which uses the same FUSE access with
+  ``WRITE FILES``); this connector is the read-side equivalent.
 
 Each HL7 segment type becomes its own table (msh, pid, pv1, obr, obx, …).
 
 Schemas follow the HL7 v2.9 specification (the latest version, which is a
 superset of all prior versions).
 
-Incremental cursor: ``createTime`` (RFC3339 timestamp).
-The connector uses a sliding time-window strategy to bound each micro-batch.
+Incremental cursor: ``createTime`` (RFC3339 timestamp).  For GCP mode this
+is the API-reported ``createTime``; for ``volume`` mode this is the file's
+last-modified time, formatted as RFC3339.  The connector uses a sliding
+time-window strategy to bound each micro-batch.
 """
 
 from __future__ import annotations
 
 import base64
 import json
+import os
 import time
 from datetime import datetime, timedelta, timezone
+from fnmatch import fnmatch
 from typing import Iterator
 
 import requests
@@ -30,7 +39,6 @@ from google.auth.transport import requests as google_auth_requests
 from google.oauth2 import service_account as google_sa
 from pyspark.sql.types import StructType
 
-from databricks.sdk import WorkspaceClient
 from databricks.labs.community_connector.interface import LakeflowConnect
 from databricks.labs.community_connector.sources.hl7_v2.hl7_v2_extractors import (
     _EXTRACTORS,
@@ -127,8 +135,9 @@ class HL7V2LakeflowConnect(LakeflowConnect):
     Supports two source modes controlled by the ``source_type`` option:
 
     * ``gcp`` (default) — fetches from a Google Cloud Healthcare API HL7v2 store.
-    * ``delta`` — reads from a Bronze Delta table containing pre-loaded HL7
-      messages with columns ``data`` (raw text), ``createTime``, and optionally ``name``.
+    * ``volume`` — reads HL7 v2 files directly from a Unity Catalog Volume
+      path FUSE-mounted on the executor.  No SDK, no HTTP, no auth options;
+      permissions follow UC ``READ VOLUME`` grants on the configured Volume.
 
     Each HL7 segment type is a separate table.  Incremental loading is driven
     by ``createTime`` using a sliding time-window.
@@ -136,12 +145,13 @@ class HL7V2LakeflowConnect(LakeflowConnect):
     GCP mode connection options:
         project_id, location, dataset_id, hl7v2_store_id, service_account_json
 
-    Delta mode connection options:
-        delta_table_name (fully-qualified catalog.schema.table)
-        delta_query_mode (str): ``"preload"`` (default) loads the entire table
-            into memory at init — fast for small tables.  ``"per_window"``
-            issues a live SQL query per micro-batch window — scales to
-            arbitrarily large tables with no memory overhead.
+    Volume mode connection options:
+        volume_path (str): Absolute UC Volume path containing HL7 files,
+            e.g. ``/Volumes/cat/sch/vol/hl7_inbound/``.
+        file_glob (str): Optional shell-style glob applied to file names
+            (default ``"*"``).  Example: ``"*.hl7"``.
+        recursive (str): Optional ``"true"``/``"false"`` flag for descending
+            into subdirectories (default ``"false"``).
 
     Table options (both modes):
         segment_type (str): Override segment type for custom/Z-segments.
@@ -171,14 +181,14 @@ class HL7V2LakeflowConnect(LakeflowConnect):
         self._init_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         self._oldest_create_time: str | None = None
 
-        if self._source_type == "delta":
-            self._init_delta(options)
+        if self._source_type == "volume":
+            self._init_volume(options)
         elif self._source_type == "gcp":
             self._init_gcp(options)
         else:
             raise ValueError(
                 f"Unsupported source_type '{self._source_type}'. "
-                "Must be 'gcp' or 'delta'."
+                "Must be 'gcp' or 'volume'."
             )
 
     def _init_gcp(self, options: dict[str, str]) -> None:
@@ -203,39 +213,42 @@ class HL7V2LakeflowConnect(LakeflowConnect):
         self._session = requests.Session()
         self._creds.refresh(self._google_request)
 
-    _DELTA_REQUIRED_KEYS = (
-        "delta_table_name",
-        "databricks_host",
-        "databricks_token",
-        "sql_warehouse_id",
-    )
+    _VOLUME_REQUIRED_KEYS = ("volume_path",)
 
-    def _init_delta(self, options: dict[str, str]) -> None:
-        for key in self._DELTA_REQUIRED_KEYS:
+    @staticmethod
+    def _parse_bool(value: str | bool | None, default: bool = False) -> bool:
+        """Parse a UC connection option that arrives as ``"true"``/``"false"``."""
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return default
+        return str(value).strip().lower() in ("1", "true", "yes", "y", "on")
+
+    def _init_volume(self, options: dict[str, str]) -> None:
+        for key in self._VOLUME_REQUIRED_KEYS:
             if key not in options:
                 raise ValueError(
-                    f"'{key}' is required in connector options for source_type 'delta'."
+                    f"'{key}' is required in connector options for source_type 'volume'."
                 )
-        self._delta_table = options["delta_table_name"]
-        self._dbx_host = options["databricks_host"]
-        self._dbx_token = options["databricks_token"]
-        self._sql_warehouse_id = options["sql_warehouse_id"]
-        self._delta_query_mode = options.get("delta_query_mode", "preload").lower()
 
-        if self._delta_query_mode == "per_window":
-            self._delta_cache = None
-            self._delta_preload_error = None
-            self._ws_client = self._create_workspace_client()
-        elif self._delta_query_mode == "preload":
-            self._ws_client = None
-            self._delta_cache: list[dict] | None = None
-            self._delta_preload_error: str | None = None
-            self._preload_delta()
-        else:
+        volume_path = options["volume_path"].strip()
+        if not volume_path:
             raise ValueError(
-                f"Unsupported delta_query_mode '{self._delta_query_mode}'. "
-                "Must be 'preload' (default) or 'per_window'."
+                "'volume_path' must be a non-empty absolute UC Volume path, "
+                "e.g. '/Volumes/cat/sch/vol/hl7_inbound/'."
             )
+        # Allow either ``/Volumes/...`` (production) or any absolute path
+        # (tests substitute a temp directory). Reject relative paths
+        # explicitly — they almost always indicate a misconfiguration.
+        if not os.path.isabs(volume_path):
+            raise ValueError(
+                f"'volume_path' must be an absolute path; got {volume_path!r}. "
+                "Use a path like '/Volumes/cat/sch/vol/hl7_inbound/'."
+            )
+
+        self._volume_path = volume_path
+        self._volume_file_glob = options.get("file_glob", "*") or "*"
+        self._volume_recursive = self._parse_bool(options.get("recursive"), default=False)
 
     @staticmethod
     def _parse_service_account_json(raw: str | dict) -> dict:
@@ -361,7 +374,7 @@ class HL7V2LakeflowConnect(LakeflowConnect):
         for the requested segment type.  The cursor advances to the window
         end regardless of whether data was found, ensuring forward progress.
 
-        Works identically for both GCP and Delta source modes — only the
+        Works identically for both GCP and Volume source modes — only the
         fetch method differs.
         """
         self._validate_table(table_name, table_options)
@@ -394,13 +407,13 @@ class HL7V2LakeflowConnect(LakeflowConnect):
             self._init_ts,
         )
 
-        if self._source_type == "delta":
-            api_messages = self._fetch_messages_from_delta(since, window_end)
+        if self._source_type == "volume":
+            api_messages = self._fetch_messages_from_volume(since, window_end)
         else:
             api_messages = self._fetch_messages_in_window(since, window_end)
 
         records = self._parse_api_messages(
-            api_messages, segment_type, decode_base64=(self._source_type != "delta")
+            api_messages, segment_type, decode_base64=(self._source_type != "volume")
         )
 
         # Admission control: cap rows yielded per batch.  Cuts only at
@@ -408,7 +421,7 @@ class HL7V2LakeflowConnect(LakeflowConnect):
         # the requested segment repeats — e.g. several OBX per ORU), so
         # rows from the same source message stay together.  The cursor
         # rewinds to the createTime of the last fully-consumed message;
-        # the next batch resumes from there because the GCP / Delta
+        # the next batch resumes from there because the GCP / volume
         # filter is strict ``createTime > since``.
         if max_records is not None and len(records) > max_records:
             cut = max_records
@@ -452,8 +465,8 @@ class HL7V2LakeflowConnect(LakeflowConnect):
         if self._oldest_create_time is not None:
             return self._oldest_create_time
 
-        if self._source_type == "delta":
-            self._oldest_create_time = self._peek_oldest_create_time_delta()
+        if self._source_type == "volume":
+            self._oldest_create_time = self._peek_oldest_create_time_volume()
             return self._oldest_create_time
 
         body = self._api_get({
@@ -497,174 +510,119 @@ class HL7V2LakeflowConnect(LakeflowConnect):
 
         return messages
 
-    def _create_workspace_client(self):
-        return WorkspaceClient(host=self._dbx_host, token=self._dbx_token)
+    @staticmethod
+    def _mtime_to_rfc3339(mtime: float) -> str:
+        """Convert a POSIX mtime (seconds, float) to an RFC3339 UTC string.
 
-    def _execute_delta_sql(self, stmt: str) -> list[list[str]]:
-        """Execute a SQL statement against the Delta table via the Statement Execution API.
-
-        Returns the raw ``data_array`` (list of rows, each row a list of strings).
+        Truncated to whole seconds to match the GCP createTime cursor format
+        (``yyyy-MM-ddTHH:mm:ssZ``) the rest of the connector assumes.
         """
-        w = self._ws_client or self._create_workspace_client()
-        result = w.statement_execution.execute_statement(
-            warehouse_id=self._sql_warehouse_id,
-            statement=stmt,
-            wait_timeout="50s",
+        return datetime.fromtimestamp(int(mtime), tz=timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
         )
-        while result.status and result.status.state.value in ("PENDING", "RUNNING"):
-            time.sleep(1)
-            result = w.statement_execution.get_statement(result.statement_id)
 
-        state = getattr(getattr(result, "status", None), "state", None)
-        if state and state.value not in ("SUCCEEDED",):
-            error_msg = getattr(getattr(result, "status", None), "error", None)
-            raise RuntimeError(
-                f"Delta SQL statement ended in state '{state.value}'. "
-                f"Error: {error_msg}. Statement: {stmt[:200]}"
-            )
-        if result.result is None:
-            raise RuntimeError(
-                f"Delta SQL statement returned no result object. "
-                f"State: {state}. Statement: {stmt[:200]}"
-            )
-        return result.result.data_array or []
+    def _iter_volume_files(self) -> Iterator[os.DirEntry]:
+        """Yield ``DirEntry`` for every file under ``self._volume_path``.
 
-    def _preload_delta(self) -> None:
-        """Pre-load Delta table data via the Databricks SQL Statement Execution API.
+        Honors ``self._volume_recursive`` and ``self._volume_file_glob``.  We
+        use ``os.scandir`` (and recurse explicitly when asked) so listing
+        scales without materializing the full directory in memory — important
+        on busy HL7 inbound volumes.
 
-        SparkSession is unavailable in both ``DataSource.__init__`` and the
-        streaming reader subprocess, so we use the Databricks SDK with explicit
-        credentials (``databricks_host``, ``databricks_token``) provided as
-        connection parameters — the same pattern used by the GCP mode with
-        ``service_account_json``.
+        This relies on the Spark executor having Unity Catalog Volume FUSE
+        access at ``/Volumes/...`` — the same runtime affordance the
+        ``dicomweb`` connector uses to write DICOM files via plain
+        ``open(..., "wb")``.  See
+        ``sources/dicomweb/dicomweb.py::_attach_dicom_file`` for the write-
+        side precedent.
         """
-        try:
-            stmt = (
-                f"SELECT data, "
-                f"date_format(createTime, \"yyyy-MM-dd'T'HH:mm:ss'Z'\") AS createTime, "
-                f"name "
-                f"FROM {self._delta_table} "
-                f"ORDER BY createTime"
-            )
-            data_array = self._execute_delta_sql(stmt)
-            rows = []
-            for row in data_array:
-                rows.append({
-                    "data": row[0] or "",
-                    "createTime": row[1] or "",
-                    "name": row[2] if len(row) > 2 else "",
-                })
-            self._delta_cache = rows
-            print(
-                f"[HL7v2 Delta] Preloaded {len(rows)} message(s) from "
-                f"{self._delta_table}"
-            )
-        except Exception as exc:
-            self._delta_cache = None
-            self._delta_preload_error = f"{type(exc).__name__}: {exc}"
-            print(
-                f"[HL7v2 Delta] ERROR — _preload_delta failed for "
-                f"table={self._delta_table}, "
-                f"host={self._dbx_host}, "
-                f"warehouse={self._sql_warehouse_id}: "
-                f"{self._delta_preload_error}"
-            )
-            raise RuntimeError(
-                f"Failed to preload Delta table '{self._delta_table}'. "
-                f"Verify that 'databricks_host', 'databricks_token', and "
-                f"'sql_warehouse_id' in the connection are valid and the token "
-                f"has not expired. Error: {self._delta_preload_error}"
-            ) from exc
+        glob = self._volume_file_glob
 
-    def _fetch_messages_from_delta(self, since: str, until: str) -> list[dict]:
-        """Fetch messages with createTime in (since, until].
+        def _walk(path: str) -> Iterator[os.DirEntry]:
+            try:
+                it = os.scandir(path)
+            except FileNotFoundError:
+                print(
+                    f"[HL7v2 volume] volume_path not found: {path!r}. "
+                    "Verify the path exists and the pipeline has READ VOLUME on it."
+                )
+                return
+            with it as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            if self._volume_recursive:
+                                yield from _walk(entry.path)
+                            continue
+                        if entry.is_file(follow_symlinks=False) and fnmatch(entry.name, glob):
+                            yield entry
+                    except OSError:
+                        # Skip entries that disappear or become unreadable
+                        # mid-scan — common when files are written into the
+                        # volume concurrently with the connector running.
+                        continue
 
-        In ``preload`` mode, filters the in-memory cache.
-        In ``per_window`` mode, issues a live SQL query scoped to the window.
+        yield from _walk(self._volume_path)
+
+    def _fetch_messages_from_volume(self, since: str, until: str) -> list[dict]:
+        """Fetch HL7 messages whose file mtime falls in ``(since, until]``.
 
         Returns a list of dicts with the same shape as the GCP API response
-        (keys: ``data``, ``createTime``, ``name``) so that ``_parse_api_messages``
-        works unchanged.
+        (``data``, ``createTime``, ``name``) so ``_parse_api_messages`` works
+        unchanged.  ``data`` carries the raw HL7 text (not base64); see the
+        ``decode_base64`` flag at the call site.
         """
-        if self._delta_query_mode == "per_window":
-            return self._fetch_messages_from_delta_live(since, until)
+        messages: list[dict] = []
+        for entry in self._iter_volume_files():
+            try:
+                stat = entry.stat()
+            except OSError:
+                continue
+            mtime_iso = self._mtime_to_rfc3339(stat.st_mtime)
+            if not (since < mtime_iso <= until):
+                continue
+            try:
+                with open(entry.path, "r", encoding="utf-8", errors="replace") as f:
+                    raw = f.read()
+            except OSError as exc:
+                print(f"[HL7v2 volume] Skipping unreadable file {entry.path!r}: {exc}")
+                continue
+            if not raw:
+                continue
+            messages.append({
+                "data": raw,
+                "createTime": mtime_iso,
+                # The HL7 wire-level sendTime lives inside MSH-7 (extracted
+                # downstream into ``message_timestamp``); for files on a
+                # Volume we use the mtime as the surrogate ``send_time`` so
+                # the metadata column is populated rather than empty.
+                "sendTime": mtime_iso,
+                "name": entry.path,
+            })
+        # Sort deterministically so per-batch ordering matches GCP mode
+        # (which sorts by sendTime asc); ties are broken by path for
+        # stability under same-second mtimes.
+        messages.sort(key=lambda m: (m["createTime"], m["name"]))
+        return messages
 
-        if self._delta_cache is None:
-            raise RuntimeError(
-                f"Delta cache was not populated. "
-                f"Preload error: {self._delta_preload_error}. "
-                f"Table: {self._delta_table}"
-            )
+    def _peek_oldest_create_time_volume(self) -> str | None:
+        """Return the earliest file mtime in the volume as an RFC3339 string.
 
-        return [
-            row for row in self._delta_cache
-            if since < str(row.get("createTime", "")) <= until
-        ]
-
-    def _fetch_messages_from_delta_live(self, since: str, until: str) -> list[dict]:
-        """Issue a live SQL query for messages in (since, until]."""
-        stmt = (
-            f"SELECT data, "
-            f"date_format(createTime, \"yyyy-MM-dd'T'HH:mm:ss'Z'\") AS createTime, "
-            f"name "
-            f"FROM {self._delta_table} "
-            f"WHERE date_format(createTime, \"yyyy-MM-dd'T'HH:mm:ss'Z'\") > '{since}' "
-            f"  AND date_format(createTime, \"yyyy-MM-dd'T'HH:mm:ss'Z'\") <= '{until}' "
-            f"ORDER BY createTime"
-        )
-        data_array = self._execute_delta_sql(stmt)
-        return [
-            {
-                "data": row[0] or "",
-                "createTime": row[1] or "",
-                "name": row[2] if len(row) > 2 else "",
-            }
-            for row in data_array
-        ]
-
-    def _peek_oldest_create_time_delta(self) -> str | None:
-        """Return the earliest createTime from the Delta table.
-
-        In ``preload`` mode, reads from the in-memory cache.
-        In ``per_window`` mode, issues a ``SELECT MIN(createTime)`` query.
+        Returns the cursor *one second before* the oldest file so the
+        strict-greater-than filter (``createTime > since``) still includes it,
+        matching the GCP peek semantics.
         """
-        if self._delta_query_mode == "per_window":
-            return self._peek_oldest_create_time_delta_live()
-
-        if self._delta_cache is None:
-            print(
-                f"[HL7v2 Delta] _peek_oldest_create_time_delta: cache is None. "
-                f"Preload error: {self._delta_preload_error}"
-            )
+        oldest: float | None = None
+        for entry in self._iter_volume_files():
+            try:
+                mtime = entry.stat().st_mtime
+            except OSError:
+                continue
+            if oldest is None or mtime < oldest:
+                oldest = mtime
+        if oldest is None:
             return None
-        if len(self._delta_cache) == 0:
-            print(
-                f"[HL7v2 Delta] _peek_oldest_create_time_delta: cache is empty "
-                f"(0 rows returned from {self._delta_table})"
-            )
-            return None
-
-        first_ts = str(self._delta_cache[0].get("createTime", ""))
-        if not first_ts:
-            return None
-
-        dt = datetime.fromisoformat(first_ts.replace("Z", "+00:00"))
-        dt -= timedelta(seconds=1)
-        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    def _peek_oldest_create_time_delta_live(self) -> str | None:
-        """Discover the earliest createTime via a live SQL query."""
-        stmt = (
-            f"SELECT date_format(MIN(createTime), \"yyyy-MM-dd'T'HH:mm:ss'Z'\") "
-            f"FROM {self._delta_table}"
-        )
-        data_array = self._execute_delta_sql(stmt)
-        if not data_array or not data_array[0] or not data_array[0][0]:
-            return None
-
-        first_ts = data_array[0][0]
-        dt = datetime.fromisoformat(first_ts.replace("Z", "+00:00"))
-        dt -= timedelta(seconds=1)
+        dt = datetime.fromtimestamp(int(oldest), tz=timezone.utc) - timedelta(seconds=1)
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def _parse_api_messages(
@@ -674,7 +632,7 @@ class HL7V2LakeflowConnect(LakeflowConnect):
 
         Args:
             decode_base64: When True (GCP mode), the ``data`` field is
-                base64-decoded.  When False (Delta mode), ``data`` is
+                base64-decoded.  When False (volume mode), ``data`` is
                 treated as raw HL7 text.
         """
         records: list[dict] = []
