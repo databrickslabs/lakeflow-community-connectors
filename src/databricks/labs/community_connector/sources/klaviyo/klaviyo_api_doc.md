@@ -318,6 +318,7 @@ sort=updated
 | `attributes.email` | string (nullable) | |
 | `attributes.phone_number` | string (nullable) | E.164 format |
 | `attributes.external_id` | string (nullable) | Caller-supplied ID |
+| `attributes.anonymous_id` | string (nullable) | Klaviyo-issued anonymous identifier; live-verified on revision `2024-10-15` and present in our schemas. Not listed in the public OpenAPI spec at time of writing. |
 | `attributes.first_name` | string (nullable) | |
 | `attributes.last_name` | string (nullable) | |
 | `attributes.organization` | string (nullable) | |
@@ -574,12 +575,11 @@ GET https://a.klaviyo.com/api/campaigns/{campaign_id}   (single record)
 | `page[cursor]` | No | string | — | — | From `links.next` |
 | `page[size]` | No | integer | 100 | 100 | Max 100 per page |
 
-**IMPORTANT:** The `filter` parameter is **required** and must include a channel specifier:
+**IMPORTANT:** The `filter` parameter is **required** and must include a channel specifier. On revision `2024-10-15` the filter accepts only two channel values (verified live):
 - `equals(messages.channel,'email')`
 - `equals(messages.channel,'sms')`
-- `equals(messages.channel,'mobile_push')`
 
-A connector syncing all campaigns must make **3 separate requests** (one per channel) and union the results, or make one request per channel type needed.
+Klaviyo's general docs also describe `mobile_push` as a campaign channel, but supplying `equals(messages.channel,'mobile_push')` on this revision returns `HTTP 400 'channel' must be one of: email, sms (got mobile_push)`. The connector's `CAMPAIGN_CHANNELS` tuple (see `klaviyo_schemas.py`) reflects the live-accepted set. A connector syncing all campaigns must make **one paginated request per accepted channel** and union the results — two requests on revision `2024-10-15`.
 
 #### Filter Fields & Operators
 
@@ -621,16 +621,23 @@ sort=updated_at
           "ignore_unsubscribes": false
         },
         "tracking_options": {
-          "is_add_utm": true,
-          "utm_params": [
-            { "name": "utm_campaign", "value": "spring_sale" }
+          "add_tracking_params": true,
+          "custom_tracking_params": [
+            { "type": "dynamic", "name": "utm_campaign", "value": "spring_sale" },
+            { "type": "static", "value": "newsletter" }
           ],
           "is_tracking_clicks": true,
           "is_tracking_opens": true
         },
         "send_strategy": {
           "method": "static",
-          "datetime": "2024-03-20T09:00:00+00:00"
+          "options_static": {
+            "datetime": "2024-03-20T09:00:00+00:00",
+            "is_local": false,
+            "send_past_recipients_immediately": false
+          },
+          "options_throttled": null,
+          "options_sto": null
         },
         "created_at": "2024-03-01T10:00:00+00:00",
         "scheduled_at": "2024-03-20T09:00:00+00:00",
@@ -660,11 +667,17 @@ sort=updated_at
 | `attributes.audiences.excluded` | string[] | List/segment IDs |
 | `attributes.send_options.use_smart_sending` | boolean (nullable) | |
 | `attributes.send_options.ignore_unsubscribes` | boolean (nullable) | |
-| `attributes.tracking_options.is_add_utm` | boolean (nullable) | |
+| `attributes.tracking_options.add_tracking_params` | boolean (nullable) | Verified live on revision `2024-10-15`. Older docs name this `is_add_utm`. |
+| `attributes.tracking_options.custom_tracking_params` | array of objects (nullable) | One entry per tracking param. Each has `type` (`"static"` or `"dynamic"`), `value`, and `name` (only present on dynamic entries). Older docs name this `utm_params`. |
 | `attributes.tracking_options.is_tracking_clicks` | boolean (nullable) | |
 | `attributes.tracking_options.is_tracking_opens` | boolean (nullable) | |
-| `attributes.send_strategy.method` | enum (nullable) | `immediate`, `static`, `throttled`, `smart_send_time` |
-| `attributes.send_strategy.datetime` | datetime (nullable) | |
+| `attributes.send_strategy.method` | enum (nullable) | `static`, `throttled`, `smart_send_time` — discriminates which `options_*` sub-object below is populated. |
+| `attributes.send_strategy.options_static.datetime` | datetime (nullable) | Populated when `method = static`. Other `options_*` fields are `null` in this case. |
+| `attributes.send_strategy.options_static.is_local` | boolean (nullable) | |
+| `attributes.send_strategy.options_static.send_past_recipients_immediately` | boolean (nullable) | |
+| `attributes.send_strategy.options_throttled.datetime` | datetime (nullable) | Populated when `method = throttled`. |
+| `attributes.send_strategy.options_throttled.throttle_percentage` | integer (nullable) | |
+| `attributes.send_strategy.options_sto.date` | string (nullable) | Populated when `method = smart_send_time`. |
 | `attributes.created_at` | datetime | ISO 8601 |
 | `attributes.scheduled_at` | datetime (nullable) | ISO 8601 |
 | `attributes.updated_at` | datetime | ISO 8601; **cursor field** |
@@ -679,7 +692,7 @@ sort=updated_at
 - **Sort:** `sort=updated_at`
 - **Filter:** `equals(messages.channel,'email'),greater-or-equal(updated_at,<last_cursor>)` — run once per channel type and union results
 - **Primary key:** `id`
-- **Quirk:** Must make separate paginated requests per channel (email, sms, mobile_push). Store channel as an additional column or handle in the connector.
+- **Quirk:** Must make separate paginated requests per channel — on revision `2024-10-15` the accepted values are `email` and `sms` only. Store channel as an additional column or handle in the connector.
 
 #### Rate Limits
 
