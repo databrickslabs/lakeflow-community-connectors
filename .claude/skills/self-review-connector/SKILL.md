@@ -78,7 +78,7 @@ report actionable.
 
 ---
 
-### Section A — Connector implementation (11 checks)
+### Section A — Connector implementation (12 checks)
 
 Source under audit:
 `src/databricks/labs/community_connector/sources/{{source_name}}/{{source_name}}.py`
@@ -96,6 +96,7 @@ Source under audit:
 | A9 | MINOR | `get_table_schema` does not flatten nested fields | spot-check schemas for `StructType` returns |
 | A10 | MAJOR | Imports clean — no imports outside `sources/{{source_name}}/`, `interface/`, `libs/`, `requests`, `pyspark`, std-lib | `grep -nE "^(from\\|import) " ...` |
 | A11 | MAJOR | Pylint clean on connector source — same gate as `.github/workflows/pylint.yml` and the `tools/scripts/precommit_pylint.sh` PreToolUse hook | see "Running pylint" below |
+| A12 | MAJOR | Connector does **not** implement the experimental ingestion-agent surface (still in design). | `grep -nE "SupportsIngestionAgent\|AgentOperation\|agent_operations\(\)" src/.../sources/{{source_name}}/` — must be empty |
 
 #### Running pylint (A11)
 
@@ -283,6 +284,7 @@ Run at: 2026-05-06T15:32:00Z
 - ✅ A8–A10
 - ❌ A11. Pylint: 1 finding — `source.py:142: R0912 too-many-branches
        (21/20)`. Same gate as CI; fix before merge.
+- ✅ A12. No ingestion-agent surface implemented (experimental)
 
 ## B. Testing & simulator validation — 22 / 26
 - ✅ B1–B7

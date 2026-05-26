@@ -7,6 +7,9 @@ name: Verify Dependency Locks
 # Triggers: see pull_request_target rationale in .github/workflows/pylint.yml.
 on:
   pull_request_target:
+    # Default types (opened, synchronize, reopened) plus `labeled` so a
+    # maintainer's `safe-to-test` add fires CI on the exact labeled SHA.
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - 'pyproject.toml'
       - 'tools/community_connector/pyproject.toml'
@@ -29,6 +32,12 @@ permissions:
 
 jobs:
   verify:
+    # Fork PRs only run CI when a maintainer adds the `safe-to-test` label.
+    # Checking `event.action == 'labeled' && event.label.name == 'safe-to-test'`
+    # (not `contains(labels, ...)`) is intentional: a synchronize after
+    # labeling does NOT auto-run on the new commit — the label gates the
+    # exact SHA the maintainer reviewed. See CONTRIBUTING.md.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository || (github.event.action == 'labeled' && github.event.label.name == 'safe-to-test')
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest

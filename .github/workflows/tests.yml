@@ -6,6 +6,9 @@ on:
     branches: [master]
   pull_request_target:
     branches: [master]
+    # Default types (opened, synchronize, reopened) plus `labeled` so a
+    # maintainer's `safe-to-test` add fires CI on the exact labeled SHA.
+    types: [opened, synchronize, reopened, labeled]
 
 permissions:
   contents: read
@@ -14,6 +17,13 @@ permissions:
 jobs:
   # Detect which paths changed
   changes:
+    # Fork PRs only run CI when a maintainer adds the `safe-to-test` label.
+    # Checking `event.action == 'labeled' && event.label.name == 'safe-to-test'`
+    # (not `contains(labels, ...)`) is intentional: it means a `synchronize`
+    # event after labeling does NOT auto-run on the new commit — the label
+    # gates the exact SHA the maintainer reviewed, not whatever gets pushed
+    # afterward. See CONTRIBUTING.md (H1 #3730634 pwn-request gate).
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository || (github.event.action == 'labeled' && github.event.label.name == 'safe-to-test')
     runs-on:
       group: databrickslabs-protected-runner-group
       labels: linux-ubuntu-latest
