@@ -1,0 +1,131 @@
+name: Required CI Gate
+
+# Single aggregated check that branch protection on master should
+# require. It checks the conclusion of each required workflow on the
+# PR's head SHA:
+#
+#   * **No run record exists** → workflow's own trigger filters
+#     (paths / branches / event types) excluded this PR. The workflow
+#     legitimately wasn't going to fire. Treated as **not applicable
+#     → OK**. (This is what makes the gate practical for docs-only or
+#     workflow-only PRs.)
+#
+#   * **Run record exists, conclusion = success** → OK.
+#
+#   * **Run record exists, status != completed** (in_progress, queued)
+#     → FAIL. `workflow_run` will re-fire the gate after the upstream
+#     workflow completes; the gate will re-evaluate then.
+#
+#   * **Run record exists, conclusion != success** (skipped, failure,
+#     cancelled, timed_out, etc.) → FAIL. This is the loophole the
+#     gate exists to close: GitHub treats a job-level skip as success
+#     for branch-protection purposes, but the gate doesn't.
+#
+# Branch-protection setup: in repo Settings → Branches → master rule,
+# add "Required CI Gate / gate" to the required status checks. Do NOT
+# also list the individual workflows — the gate is the single source
+# of truth.
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review]
+  # Re-evaluate the gate after each upstream required workflow finishes.
+  # Without this the initial PR-open gate run would never re-fire on
+  # its own when upstream workflows complete.
+  workflow_run:
+    workflows:
+      - Tests
+      - Generate Merged Source File
+      - Connector Self-Review
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read   # needed to query other workflow runs via the API
+
+# Only the most recent gate evaluation per head SHA is meaningful;
+# cancel older in-flight runs when a newer one starts.
+concurrency:
+  group: required-ci-gate-${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on:
+      group: databrickslabs-protected-runner-group
+      labels: linux-ubuntu-latest
+    steps:
+      - name: Aggregate required workflow conclusions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          # pull_request: PR head SHA. workflow_run: SHA the upstream
+          # workflow executed against.
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          REQUIRED=(
+            "Tests"
+            "Generate Merged Source File"
+            "Connector Self-Review"
+          )
+
+          echo "Checking required workflows for HEAD ${HEAD_SHA}:"
+          echo
+
+          FAILED=()
+          for wf in "${REQUIRED[@]}"; do
+            RUNS=$(gh api \
+              "repos/${REPO}/actions/runs?head_sha=${HEAD_SHA}&per_page=50" \
+              --jq "[.workflow_runs[] | select(.name == \"$wf\")]")
+            COUNT=$(echo "$RUNS" | jq 'length')
+
+            if [ "$COUNT" = "0" ]; then
+              # No run record at all. The workflow's own trigger filters
+              # (paths / event types / branches) excluded this PR — it
+              # legitimately wasn't going to fire. Treat as not-applicable.
+              printf '  %-32s %s\n' "$wf" "not-applicable (no run record)"
+              continue
+            fi
+
+            LATEST=$(echo "$RUNS" | jq -c 'sort_by(.created_at) | reverse | .[0]')
+            STATUS=$(echo "$LATEST" | jq -r '.status')
+            CONCLUSION=$(echo "$LATEST" | jq -r '.conclusion // "null"')
+
+            if [ "$CONCLUSION" = "success" ]; then
+              printf '  %-32s %s\n' "$wf" "success"
+            elif [ "$STATUS" != "completed" ]; then
+              # Workflow is still queued / in_progress. Gate will re-fire
+              # via workflow_run when it completes.
+              printf '  %-32s %s\n' "$wf" "${STATUS} (waiting)"
+              FAILED+=("${wf} (${STATUS})")
+            else
+              # Completed but not success (skipped, failure, cancelled,
+              # timed_out, action_required, startup_failure, …).
+              printf '  %-32s %s\n' "$wf" "$CONCLUSION"
+              FAILED+=("${wf} (${CONCLUSION})")
+            fi
+          done
+
+          echo
+
+          if [ ${#FAILED[@]} -gt 0 ]; then
+            echo "::error title=Required CI Gate failed::One or more required workflows did not succeed for ${HEAD_SHA}:"
+            for f in "${FAILED[@]}"; do
+              echo "  - $f"
+            done
+            echo
+            echo "Next steps:"
+            echo "  * 'in_progress' / 'queued' — wait; gate re-fires via workflow_run when the workflow completes."
+            echo "  * 'skipped' — a job-level if: evaluated false. Re-run the workflow or change the gating condition."
+            echo "  * 'failure' / 'cancelled' / 'timed_out' — fix the underlying problem and push; gate re-evaluates."
+            echo
+            echo "Note: a workflow with no run record at all is treated as not-applicable"
+            echo "(its own trigger filters excluded this PR). To enforce it on every PR,"
+            echo "expand its trigger to match all paths."
+            exit 1
+          fi
+
+          echo "✅ All required workflows passed (or are not applicable to this PR)."
